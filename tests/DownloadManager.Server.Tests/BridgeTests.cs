@@ -18,6 +18,7 @@ internal sealed class FakeHostPipe : IAsyncDisposable
 {
     public const string Echo = "test.echo";
     public const string Close = "test.close";
+    public const string Garbage = "test.garbage";
 
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _accepting;
@@ -74,6 +75,12 @@ internal sealed class FakeHostPipe : IAsyncDisposable
             {
                 Requests.Enqueue(request.Type);
                 if (request.Type == Close) return;
+                if (request.Type == Garbage)
+                {
+                    await pipe.WriteAsync(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }, _stop.Token);
+                    await pipe.FlushAsync(_stop.Token);
+                    continue;
+                }
                 var reply = request.Type == MessageTypes.FoldersBrowse
                     ? IpcMessage.Create(MessageTypes.FoldersBrowseResult, new FolderBrowseResult { Ok = true, Roots = [@"C:\Downloads"] }, request.Id)
                     : IpcMessage.Create(Echo, new HostActionResult { Ok = true, Message = request.Type }, request.Id);
@@ -151,22 +158,25 @@ public sealed class BridgeTests : IAsyncDisposable
         return _bridge.Addresses.First(address => address.Scheme == "http");
     }
 
-    private static async Task<AuthClient> SignInAsync(Uri address)
+    /// <summary>The bridge's session cookie: named by its port (here 0, any free one).</summary>
+    private string Cookie => _bridge!.Auth.SessionCookie;
+
+    private async Task<AuthClient> SignInAsync(Uri address)
     {
-        var client = new AuthClient(address);
+        var client = new AuthClient(address, Cookie);
         using var response = await client.PostAsync("/api/auth/signin", new { password = AuthServer.Password });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(client.Session);
         return client;
     }
 
-    private static async Task<WsClient> ConnectAsync(Uri address, string? session, string query = "", string? bearer = null)
+    private async Task<WsClient> ConnectAsync(Uri address, string? session, string query = "", string? bearer = null)
     {
         var socket = new ClientWebSocket();
         if (session is not null)
         {
             socket.Options.Cookies = new CookieContainer();
-            socket.Options.Cookies.Add(address, new Cookie(ServerAuth.CookieName, session));
+            socket.Options.Cookies.Add(address, new Cookie(Cookie, session));
         }
 
         if (bearer is not null) socket.Options.SetRequestHeader("Authorization", "Bearer " + bearer);
@@ -202,16 +212,55 @@ public sealed class BridgeTests : IAsyncDisposable
         Assert.Equal(HostKinds.Windows, local.HostKind);
         Assert.Empty(local.Roots);
         Assert.All(local.Urls, url => Assert.True(url is "http://127.0.0.1:18080" or "http://[::1]:18080", url));
+        Assert.Equal("inbound_session_18080", local.SessionCookieName);
         var everywhere = BridgeApp.OptionsFor(Change(start => { start.LocalOnly = false; start.Hosts = ["mypc"]; }, 18080));
         Assert.Contains("http://0.0.0.0:18080", everywhere.Urls);
-        Assert.Equal(["mypc"], everywhere.AllowedHostNames);
+        // The names set in Options, and this PC's own.
+        Assert.Contains("mypc", everywhere.AllowedHostNames);
+        Assert.Contains(Environment.MachineName.ToLowerInvariant(), everywhere.AllowedHostNames);
+        Assert.Contains(Dns.GetHostName().ToLowerInvariant(), everywhere.AllowedHostNames);
+    }
+
+    [Fact]
+    public async Task ThisPcsOwnNameIsAcceptedAndARefusedNameIsSentToTheAppsOptions()
+    {
+        var address = await StartBridgeAsync();
+        using var user = await SignInAsync(address);
+        var own = Environment.MachineName.ToLowerInvariant();
+        var port = address.Port;
+
+        void As(HttpRequestMessage request, string name)
+        {
+            request.Headers.Host = $"{name}:{port}";
+            request.Headers.Add("Origin", $"http://{name}:{port}");
+        }
+
+        using (var byName = await user.SendAsync(HttpMethod.Post, "/api/ipc", IpcMessage.Create(MessageTypes.HostPing, new { }), request => As(request, own)))
+            Assert.Equal(HttpStatusCode.OK, byName.StatusCode);
+        using var other = await user.SendAsync(HttpMethod.Post, "/api/ipc", IpcMessage.Create(MessageTypes.HostPing, new { }),
+            request => As(request, "not-this-pc"));
+        Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+        Assert.Equal("This server isn't known by the name not-this-pc. Use its IP address, or add the name under Web UI in the app's Options on that PC.",
+            await other.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task TheSessionCookieIsNamedByTheBridgesPort()
+    {
+        var address = await StartBridgeAsync();
+        using var user = await SignInAsync(address);
+        Assert.StartsWith("inbound_session_0=", user.LastSetCookie);
+        // The server's own name isn't this bridge's cookie.
+        using var plain = new AuthClient(address) { Session = user.Session };
+        var (status, _) = await plain.IpcAsync(MessageTypes.HostPing, new { });
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
     }
 
     [Fact]
     public async Task ThereIsNoSetupPageAndTheStatusSaysWindows()
     {
         var address = await StartBridgeAsync();
-        using var anyone = new AuthClient(address);
+        using var anyone = new AuthClient(address, Cookie);
         using var status = await anyone.GetAsync("/api/auth/status");
         var body = await anyone.JsonAsync(status);
         Assert.Equal(HostKinds.Windows, body.GetProperty("hostKind").GetString());
@@ -281,7 +330,7 @@ public sealed class BridgeTests : IAsyncDisposable
         var address = await StartBridgeAsync();
         var (extension, _) = _bridge!.Auth.Pairing.Issue(TokenRoles.Extension, "Chrome");
         var (desktop, _) = _bridge.Auth.Pairing.Issue(TokenRoles.RemoteClient, "Desk PC");
-        using var app = new AuthClient(address);
+        using var app = new AuthClient(address, Cookie);
 
         var (refused, refusal) = await app.IpcAsync(MessageTypes.SettingsGet, new { }, extension);
         Assert.Equal(HttpStatusCode.Forbidden, refused);
@@ -305,7 +354,7 @@ public sealed class BridgeTests : IAsyncDisposable
         var address = await StartBridgeAsync();
         var ticket = Ticket();
 
-        using (var browser = new AuthClient(address))
+        using (var browser = new AuthClient(address, Cookie))
         using (var signedIn = await browser.GetAsync(ticket))
         {
             Assert.Equal(HttpStatusCode.Redirect, signedIn.StatusCode);
@@ -315,15 +364,13 @@ public sealed class BridgeTests : IAsyncDisposable
             Assert.Equal(HttpStatusCode.OK, status);
         }
 
-        // Each failure below makes this address wait (1 s, 2 s, ...), so the clock moves past each wait.
         async Task RefusedAsync(string path, Action<HttpRequestMessage>? change = null, HttpStatusCode expected = HttpStatusCode.Redirect)
         {
-            using var browser = new AuthClient(address);
+            using var browser = new AuthClient(address, Cookie);
             using var response = await browser.GetAsync(path, change);
             Assert.Equal(expected, response.StatusCode);
             if (expected == HttpStatusCode.Redirect) Assert.Equal(ServerAuth.SignInPath, response.Headers.Location?.OriginalString);
             Assert.Null(browser.Session);
-            _time.Advance(TimeSpan.FromMinutes(6));
         }
 
         await RefusedAsync(ticket);
@@ -338,13 +385,29 @@ public sealed class BridgeTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ATicketCountsAsASignInTryWhenItIsWrong()
+    public async Task WrongTicketsDontMakeThisPcsBrowsersWait()
     {
+        // Any web page can make a browser here ask for the ticket address (an image needs no Origin), and every such
+        // request comes from loopback; tickets can't be guessed, so wrong ones aren't counted as sign-in tries.
         var address = await StartBridgeAsync();
-        using var browser = new AuthClient(address);
-        using (var wrong = await browser.GetAsync(ServerAuth.TicketPath + "?t=wrong")) Assert.Equal(HttpStatusCode.Redirect, wrong.StatusCode);
-        using (var waiting = await browser.GetAsync(Ticket())) Assert.Equal(HttpStatusCode.TooManyRequests, waiting.StatusCode);
-        Assert.Null(browser.Session);
+        for (var i = 0; i < 20; i++)
+        {
+            using var page = new AuthClient(address, Cookie);
+            using var wrong = await page.GetAsync(ServerAuth.TicketPath + "?t=wrong" + i);
+            Assert.Equal(HttpStatusCode.Redirect, wrong.StatusCode);
+            Assert.Equal(ServerAuth.SignInPath, wrong.Headers.Location?.OriginalString);
+        }
+
+        Assert.Equal(0, _bridge!.Auth.Limiter.Failures(SignInLimiter.AddressOf(IPAddress.Loopback)));
+        using (var browser = new AuthClient(address, Cookie))
+        using (var signedIn = await browser.GetAsync(Ticket()))
+        {
+            Assert.Equal(HttpStatusCode.Redirect, signedIn.StatusCode);
+            Assert.NotNull(browser.Session);
+        }
+
+        using var user = await SignInAsync(address);
+        Assert.NotNull(user.Session);
     }
 
     [Fact]
@@ -359,6 +422,27 @@ public sealed class BridgeTests : IAsyncDisposable
         await using var socket = await ConnectAsync(address, user.Session);
         Assert.Null(await socket.ReadAsync(TimeSpan.FromSeconds(20)));
         Assert.Equal(WebSocketCloseStatus.InternalServerError, socket.Socket.CloseStatus);
+    }
+
+    [Fact]
+    public async Task AFrameTheBridgeCantReadIsAnAnswerNotAnError()
+    {
+        var address = await StartBridgeAsync();
+        using var user = await SignInAsync(address);
+        using var response = await user.SendAsync(HttpMethod.Post, "/api/ipc", IpcMessage.Create(FakeHostPipe.Garbage, new { }));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("The app on this PC isn't answering. Try again in a moment.", (await user.JsonAsync(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void AnAddressWindowsKeepsIsSaidWithItsExitCode()
+    {
+        var refused = BridgeApp.Describe(new IOException("bind", new SocketException((int)SocketError.AccessDenied)), 8080);
+        Assert.NotNull(refused);
+        Assert.Equal(WebBridgeExit.PortForbidden, refused.ExitCode);
+        Assert.Equal("Windows doesn't allow listening on port 8080. Choose another port.", refused.Message);
+        Assert.Equal(WebBridgeExit.PortInUse, BridgeApp.Describe(new SocketException((int)SocketError.AddressAlreadyInUse), 8080)!.ExitCode);
+        Assert.Null(BridgeApp.Describe(new InvalidOperationException("something else"), 8080));
     }
 
     [Fact]
@@ -385,7 +469,7 @@ public sealed class BridgeTests : IAsyncDisposable
         await using (var socket = await ConnectAsync(address, user.Session))
         {
             Assert.Equal(MessageTypes.ServerHello, (await socket.ReadAsync())!.Type);
-            using var other = new AuthClient(address) { Session = user.Session };
+            using var other = new AuthClient(address, Cookie) { Session = user.Session };
             using (await other.PostAsync("/api/auth/signout")) { }
             while (await socket.ReadAsync() is not null)
             {
@@ -444,6 +528,28 @@ public sealed class BridgeTests : IAsyncDisposable
         var bad = await BridgeApp.RunAsync(new StringReader("{ not json"), new StringWriter(), error = new StringWriter());
         Assert.Equal(WebBridgeExit.Refused, bad);
         Assert.NotEmpty(error.ToString().Trim());
+    }
+
+    [Fact]
+    public async Task AWebFrontThatEndsByItselfIsACrashWithAReason()
+    {
+        await SetPasswordAsync();
+        using var taken = new TcpListener(IPAddress.Loopback, 0);
+        taken.Start();
+        var port = ((IPEndPoint)taken.LocalEndpoint).Port;
+        taken.Stop();
+        var input = new BlockingInput(System.Text.Json.JsonSerializer.Serialize(Start(port: port), IpcJson.Options));
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var code = await BridgeApp.RunAsync(input, output, error, app =>
+        {
+            app.EndByItself();
+            return Task.CompletedTask;
+        }).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(WebBridgeExit.Crashed, code);
+        Assert.Contains(WebBridgeExit.ReadyLine, output.ToString());
+        Assert.Equal("The web UI stopped by itself. Details are in the web bridge's log.", error.ToString().Trim());
+        input.End();
     }
 
     /// <summary>Standard input as the Host gives it: the options line, then nothing until the Host closes it.</summary>

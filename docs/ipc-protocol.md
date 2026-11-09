@@ -117,19 +117,22 @@ or import. A damaged file counts as off.
 | --- | --- | --- |
 | `webui.get` | `{}` | `webui.status` |
 | `webui.set` | `{enabled?, port?, alsoReachableAs?}`; a field left out stays | `webui.status` |
-| `webui.setPassword` | `{password}` | `webui.status` |
+| `webui.setPassword` | `{password, keepPairedBrowsers?}` | `webui.status` |
 | `webui.recheck` | `{}` | `webui.status` |
 | `webui.openTicket` | `{}` | `webui.ticket` `{url?, error?}` |
 
 `webui.status` (and the broadcast `webui.changed`) carry `WebUiStatusDto`:
 
 - `enabled`, `port` (default 8080), `alsoReachableAs` (computer names a browser may use besides an IP address,
-  `localhost` and this PC's own name: at most 16, lower case, without `http://` or a port), `hasPassword`;
+  `localhost` and this PC's own names, its DNS host name and its NetBIOS name, which the bridge adds itself: at most
+  16, lower case, without `http://` or a port), `hasPassword`;
 - `state`: `off`, `starting`, `running` or `failed`, and `error` (plain words, for Options and the tray) when a
   request was refused or the bridge could not run;
-- `firewall`: `ready` (an enabled inbound allow rule named `ruleName` for `bridgePath`, TCP, covering the port, and
-  no enabled inbound block rule for that program), `missing`, or `unknown` (the rules could not be read; a process
-  below medium integrity is refused the read);
+- `firewall`: `ready` when, for at least one network profile in force now, there is an enabled inbound allow rule
+  named `ruleName` for `bridgePath`, TCP, covering the port, with remote addresses `LocalSubnet` only, covering that
+  profile, and no enabled inbound block rule for that program covering the port and that profile; `missing`
+  otherwise (a rule widened to other addresses, or one for Private while the network in force is Public, is not
+  ready); or `unknown` (the rules could not be read; a process below medium integrity is refused the read);
 - `localOnly`: the bridge listens on 127.0.0.1 (and ::1) only, which it does while `firewall` isn't `ready`;
   `addresses`: `http://<ip>:<port>/` for each of this PC's network addresses, empty while `localOnly` or not running;
 - `bridgePath` (the program the firewall rule names) and `ruleName` ("Inbound Download Manager web UI").
@@ -137,12 +140,19 @@ or import. A damaged file counts as off.
 Refusals come back as `webui.status` with `error` set and nothing changed: turning the box on without a password
 ("Set a password first. Other devices sign in with it."), a port outside 1024 to 65535, a name that isn't one, a
 password the sign-in rules refuse. `webui.set` saves first and then starts, restarts (a changed port or names) or
-stops the bridge; turning it off also ends every web session. `webui.setPassword` stops the bridge, ends the web
-sessions, writes the hash to `<data>/auth.json` (unpairing every paired app and removing `sessions.json`: every
-browser signs in again), and starts the bridge again if the box is ticked. `webui.recheck` reads the firewall rules
-again and restarts the bridge on every address once they are ready. `webui.openTicket` checks that the bridge it
-started is the program listening on the port (another program on it gets an `error`), and answers
-`http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in for a browser on this PC, valid 60 s.
+stops the bridge. Turning it off also ends every web session and every browser's sign-in (`sessions.json` is removed
+once the bridge has stopped), so a browser signs in again when it is turned on; paired apps stay paired, since their
+tokens were made with the password that is still in force. `webui.setPassword` with the password already in force
+changes nothing (no restart, nobody signed out or unpaired). Otherwise it stops the bridge, ends the web sessions,
+writes the hash to `<data>/auth.json` (unpairing every paired desktop app, and every browser extension unless
+`keepPairedBrowsers` is true, as on the web UI's own password change; removing `sessions.json`: every browser signs
+in again), and starts the bridge again if the box is ticked. `webui.recheck` reads the firewall rules again and, when
+the bridge is running on the wrong addresses (this PC only with the rule ready, or every address without it),
+restarts it on the right ones; open pages reconnect, still signed in. It starts nothing that isn't running: a bridge
+that is off, failed (a port in use, say) or waiting to restart after a crash is left as it is (the last reads the
+rule when it starts). `webui.openTicket` checks that the bridge it started is the program listening on the port, and
+answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in for a browser on this PC, valid
+60 s. When another program listens there, or nothing does (the bridge ended between two checks), `error` says which.
 
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
@@ -185,9 +195,11 @@ With the web UI ticked, the desktop Host starts `DownloadManager.Server.exe --br
 `web` folder) with no window, and gives it its options as one JSON line on standard input (`WebBridgeStartDto`: the
 Host's data folder, its hello pipe, the port, `localOnly`, the extra names, and a random 32-byte ticket key for this
 run). Nothing is on the command line. The bridge writes `ready` to standard output once it listens; closing its
-standard input stops it, so it never outlives the Host. Its exit code says why it ended: 0 stopped, 1 crashed,
-2 refused (bad options, no password), 3 the port is in use, 4 Windows doesn't allow the port; the last line of
-standard error is the reason, in plain words. The Host restarts a crashed bridge after 1, 2, 4... seconds (at most
+standard input stops it, so it never outlives the Host. All three streams are UTF-8 at both ends, whatever the
+console's code page (the data folder's path holds the Windows user's name). Its exit code says why it ended:
+0 stopped (its standard input closed), 1 crashed (also when its web front ended without being asked), 2 refused (bad
+options, no password), 3 the port is in use, 4 Windows doesn't allow the port; the last line of standard error is
+the reason, in plain words. The Host restarts a crashed bridge after 1, 2, 4... seconds (at most
 60), and gives up with a tray notice after 5 crashes that each ran less than 2 minutes; a refused or busy port is
 not retried.
 
@@ -197,17 +209,26 @@ It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent` and sign
   pipe (this Windows user's only, both ends checked), with `client.hello` `role: "web"` whatever the browser sent
   (`?hello=1` keeps its `snapshot` and `events`). Envelopes pass through unchanged, one per WebSocket message and
   one per pipe frame. The Host ending the connection (the web UI turned off, the password changed, an exit) closes
-  the socket with 1001. At most 32 browser connections hold a pipe at once. A Host that can't be reached is 503
-  `"The app on this PC isn't answering. Try again in a moment."`.
+  the socket with 1001. At most 32 browser connections hold a pipe at once. A Host that can't be reached, or that
+  sends something that isn't a frame, is 503 `"The app on this PC isn't answering. Try again in a moment."`; an
+  `/api/ipc` call it doesn't answer within 5 minutes is 504 with the same `{ok: false, error}` form.
 - Sign-in is always on, from `auth.json` and `sessions.json` in the Host's data folder. There is no
   `/api/auth/setup` and no setup code, and the bridge refuses to start without a stored password. Changing the
   password, pairing codes and paired apps work as on the server, behind sign-in. A paired extension keeps the
   extension's commands only; a paired desktop app (`remoteClient`) has a signed-in browser's rights.
+- The session cookie is named by the port, `inbound_session_<port>`, since ports are no cookie boundary: a browser
+  signed in to this PC's bridge and to another server on the same address keeps both. After a port change a
+  browser signs in again.
+- Names: besides IP addresses and `localhost`, the names set in Options (`alsoReachableAs`) and this PC's own DNS
+  host name and NetBIOS name. A refused name says to add it under Web UI in the app's Options.
 - `GET /api/auth/ticket?t=...` signs in a browser on this PC with the window's ticket ("Open in browser"): the
   ticket is a nonce, an expiry and an HMAC-SHA256 with the run's key; it works once, for 60 s, from a loopback
   address with no forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Original-For`), else 403. A good one sets the
-  session cookie and redirects to `/`; a wrong, used or expired one redirects to `/signin/` and counts as a wrong
-  sign-in from that address.
+  session cookie and redirects to `/`; a wrong, used or expired one redirects to `/signin/`. Wrong tickets are not
+  counted as wrong sign-ins: a ticket can't be guessed, and counting them would let any web page make this PC's
+  browsers wait (an image pointing at the address needs no Origin, and it comes from loopback like the owner's own
+  browser). The ticket travels in the query, so it can sit in the browser's history for its 60 s; it is single use,
+  and the bridge logs no request URLs.
 - Uploads go to `<data>/uploads`, which the Host reads through the same `upload:<id>` reference.
 - It listens with exclusive address use, on 127.0.0.1 and ::1 while the firewall rule is missing, and on every
   address once it is there. Its log is `<data>/logs/web-bridge-<date>.log`.

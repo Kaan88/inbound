@@ -16,10 +16,11 @@ public sealed class TcpListenerOwner : IListenerCheck
     private const int TcpTableOwnerPidListener = 3;
     private const int ErrorInsufficientBuffer = 122;
 
-    public bool IsListening(int processId, int port)
+    public ListenerOwner Owner(int processId, int port)
     {
         var owners = ListenersOn(port, [IPAddress.Loopback, IPAddress.Any]);
-        return owners.Count > 0 && owners.All(owner => owner == processId);
+        if (owners.Count == 0) return ListenerOwner.None;
+        return owners.All(owner => owner == processId) ? ListenerOwner.Ours : ListenerOwner.Other;
     }
 
     /// <summary>The processes listening on <paramref name="port"/> at one of these IPv4 addresses.</summary>

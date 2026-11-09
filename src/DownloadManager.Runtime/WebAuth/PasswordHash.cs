@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace DownloadManager.Server.Auth;
+namespace DownloadManager.Runtime.WebAuth;
 
 /// <summary>A saved password: PBKDF2 with SHA-256, a random salt and the iteration count it was made with.</summary>
 public sealed class PasswordRecord

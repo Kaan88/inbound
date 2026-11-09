@@ -21,6 +21,8 @@ public sealed class WebBridgeLauncher : IWebBridgeLauncher
     /// </summary>
     public const string TestBridgeVariable = "DOWNLOADMANAGER_BRIDGE";
 
+    private static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly Action<string> _warn;
 
     public WebBridgeLauncher(Action<string> warn, string? bridgePath = null)
@@ -55,6 +57,11 @@ public sealed class WebBridgeLauncher : IWebBridgeLauncher
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // UTF-8 both ways, as the bridge reads and writes them: the data folder's path holds the user's name, which
+            // the console's code page (the OEM one for a hidden console) can't always hold.
+            StandardInputEncoding = Utf8,
+            StandardOutputEncoding = Utf8,
+            StandardErrorEncoding = Utf8,
             // Not the program's folder, which it would hold open against an update (Program.LeaveProgramFolder).
             WorkingDirectory = Environment.CurrentDirectory,
         };

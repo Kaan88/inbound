@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="DownloadManager.Runtime.WebAuth" />
   </ItemGroup>
 
   <!-- Portable: nothing here builds the Host or the WinUI app, so this runs on Linux (D1b). -->

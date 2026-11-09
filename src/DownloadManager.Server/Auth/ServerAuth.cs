@@ -73,6 +73,9 @@ public sealed class ServerAuth
     public SignInLimiter Limiter { get; }
     public Pairing Pairing { get; }
     public bool PasswordFromEnvironment { get; }
+
+    /// <summary>This server's session cookie (<see cref="CookieName"/>, or the web bridge's per port, <see cref="ServerOptions.SessionCookieName"/>).</summary>
+    public string SessionCookie => _options.SessionCookieName;
     public bool SetupNeeded => Required && Store.Password is null;
 
     /// <summary>The code a browser from elsewhere needs on the setup page; null once a password is set.</summary>
@@ -80,7 +83,16 @@ public sealed class ServerAuth
 
     public static async Task<ServerAuth> CreateAsync(ServerOptions options, string dataFolder, ServerLog log, CancellationToken cancellationToken)
     {
-        var store = AuthStore.Open(dataFolder);
+        AuthStore store;
+        try
+        {
+            store = AuthStore.Open(dataFolder);
+        }
+        catch (AuthFileDamagedException ex)
+        {
+            throw new ServerStartException(ex.Message);
+        }
+
         if (options.Bridge)
         {
             // On Windows the password is set in the app on this PC, never by the first visitor, and sign-in is always on.
@@ -226,7 +238,7 @@ public sealed class ServerAuth
             return;
         }
 
-        var session = Sessions.Find(request.Cookies[CookieName]);
+        var session = Sessions.Find(request.Cookies[SessionCookie]);
         if (session is not null) context.Items[SessionItem] = session;
         if (!Required || session is not null || IsPublic(request.Path) ||
             (_options.Bridge && request.Path.Equals(TicketPath, StringComparison.OrdinalIgnoreCase)))
@@ -333,8 +345,12 @@ public sealed class ServerAuth
     /// <summary>
     /// The web bridge's "Open in browser" (D8): the Host made the ticket with this run's key (<see cref="WebUiTicket"/>),
     /// and it signs in the browser that brings it, once, within a minute, and only from this PC directly (loopback, no
-    /// forwarding headers). A ticket that fails counts as a wrong sign-in from that address. The browser then lands on
-    /// the web UI; a failed one on the sign-in page.
+    /// forwarding headers). The browser then lands on the web UI; a failed one on the sign-in page.
+    /// <para>
+    /// A wrong ticket is not counted in <see cref="Limiter"/>: a ticket is an HMAC under a random key made for each run,
+    /// so it can't be guessed, and counting would let any web page lock this PC's browsers out of signing in (an image
+    /// pointing at this address needs no Origin and carries no cookie, and every such request comes from loopback).
+    /// </para>
     /// </summary>
     private Task<IResult> TicketSignInAsync(HttpContext context)
     {
@@ -345,7 +361,6 @@ public sealed class ServerAuth
             return Task.FromResult(Error(StatusCodes.Status403Forbidden, "A sign-in ticket only works in a browser on this PC."));
 
         var from = AddressOf(context);
-        if (Limiter.Begin(from, out _) is { } wait) return Task.FromResult(TooSoon(context, wait));
         var now = _time.GetUtcNow();
         var checkedAgainst = Store.Password;
         var ticket = _options.TicketKey is { } key ? WebUiTicket.Check(key, context.Request.Query["t"].ToString(), now) : null;
@@ -365,7 +380,6 @@ public sealed class ServerAuth
             return Task.FromResult(Results.Redirect(SignInPath));
         }
 
-        Limiter.Succeeded(from);
         _log.Info("A browser on this PC was signed in from the app (Open in browser).");
         return Task.FromResult(Results.Redirect("/"));
     }
@@ -652,7 +666,7 @@ public sealed class ServerAuth
     {
         if (Sessions.TryCreate(() => ReferenceEquals(Store.Password, password)) is not { } created) return false;
         var (id, session) = created;
-        context.Response.Cookies.Append(CookieName, id, new CookieOptions
+        context.Response.Cookies.Append(SessionCookie, id, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,
@@ -664,8 +678,8 @@ public sealed class ServerAuth
         return true;
     }
 
-    private static void ExpireCookie(HttpContext context) =>
-        context.Response.Cookies.Delete(CookieName, new CookieOptions
+    private void ExpireCookie(HttpContext context) =>
+        context.Response.Cookies.Delete(SessionCookie, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,

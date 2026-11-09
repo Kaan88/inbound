@@ -70,13 +70,22 @@ The protocol is in `docs/ipc-protocol.md` ("The web UI's own settings" and "The 
   `WebUi`-linked files): `webui.json`, the five pipe commands and `webui.changed`, and `WebUiSupervisor`, which starts
   the bridge when the box is ticked (or at Host start when it was), restarts it on a port, names or password change,
   restarts it after a crash (1, 2, 4... s, at most 60; a tray notice after 5 short runs), stops it and ends the web
-  sessions when the box is cleared, and stops it before the Host exits. A port in use or not allowed sets `failed`
-  with the bridge's words and a tray notice, without retrying.
+  sessions and every browser's sign-in when the box is cleared (paired apps stay paired), and stops it before the
+  Host exits. A port in use or not allowed sets `failed` with the bridge's words and a tray notice, without retrying.
+  Setting the password in force again changes nothing; a new one unpairs the paired desktop apps, and the browser
+  extensions too unless the window asks to keep them (`keepPairedBrowsers`, as on the web UI's own change).
 - Firewall: the Host reads the rules through `HNetCfg.FwPolicy2` (no program started, the same in every Windows
-  language) instead of parsing `netsh` output. While the rule is missing or unreadable, the bridge listens on
-  127.0.0.1 and ::1 only; `webui.recheck` (the window calls it after adding the rule) restarts it on every address.
-  A process below medium integrity is refused the read (`unknown`): builds in this repository are, the installed app
-  is not.
+  language) instead of parsing `netsh` output. Ready means the window's rule as it makes it (allow, the bridge, TCP,
+  the port, `LocalSubnet` only) covering a network profile in force now (`CurrentProfileTypes`), with no block rule
+  for the program covering the port and that profile. While the rule is missing or unreadable, the bridge listens on
+  127.0.0.1 and ::1 only; `webui.recheck` (the window calls it after adding the rule) restarts a running bridge on
+  every address, and starts nothing that is off, failed or waiting to restart. A process below medium integrity is
+  refused the read (`unknown`): builds in this repository are, the installed app is not. Read-only evidence at
+  medium integrity (2026-11-09, a throwaway console build outside the repository, run from a normal shell): the
+  reader enumerated this PC's 708 inbound program rules, with `CurrentProfileTypes` 6 (Private and Public at once),
+  every property read and cast without an error, and a program with no rule came out `missing`. The `ready` path
+  against a real rule has not been seen: that needs a rule added, which these tests may not do; it is covered by the
+  rule-matching unit tests.
 - "Open in browser": `webui.openTicket` first checks in the TCP table that the listener on the port is the bridge
   the Host started (exclusive address use stops another account sharing the port), then makes a ticket with the
   run's random key.
@@ -94,7 +103,8 @@ threads that ended in between drop out, so these are lower bounds).
 | Web UI on, no browser | 31 ms | 91 | 47 ms | 743 (about 6 a second) |
 
 With the box off the Host has no bridge process, no listening port and no ASP.NET Core module loaded (it does not
-reference the ASP.NET Core framework at all; the sign-in file code is linked in as source). The bridge's switches
+reference the ASP.NET Core framework at all; the sign-in file code, `auth.json` and its password hash, is in
+`DownloadManager.Runtime/WebAuth`, which the server and the Host both reference: one copy, one owner). The bridge's switches
 are Kestrel's 1 s heartbeat and the runtime's own threads: small, but not nothing, which is one more reason the box
 is off by default.
 
@@ -137,6 +147,15 @@ browser, provider and container commands with roots) and routes web-role session
 "Other devices on my network" means any device that can reach the port, and also every other Windows account on
 this PC. The bridge binds with exclusive address use and the Host checks that it is the bridge it started before
 showing "Open in browser".
+
+Known limit, for the owner to decide (2026-11-09): ports are no cookie boundary. "Open in browser" signs the owner's
+browser in at `http://127.0.0.1:<port>`, so its session cookie (HttpOnly, SameSite=Strict, named
+`inbound_session_<port>`) is also sent to any other port on 127.0.0.1 once the owner has a page from that port open,
+for example one another Windows account on this PC listens on and gets the owner to visit. That account could then
+replay the cookie to the bridge. The per-port name stops two sign-ins on one address replacing each other, not this.
+Options: a short absolute lifetime for sessions signed in by a ticket, or a session bound to the address it was made
+for (which a replay with the right Host header still passes). Until decided it stays as it is: the attack needs a
+second account on this PC and the owner opening its page.
 
 ### 3. Firewall
 

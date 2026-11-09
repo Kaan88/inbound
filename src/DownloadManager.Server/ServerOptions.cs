@@ -98,6 +98,13 @@ public sealed record ServerOptions
     /// <summary>With <see cref="Bridge"/>: the key the Host signs this run's sign-in tickets with (<see cref="Contracts.WebUiTicket"/>).</summary>
     internal byte[]? TicketKey { get; init; }
 
+    /// <summary>
+    /// The session cookie's name. Ports are no cookie boundary, so the web bridge names its cookie by its port
+    /// (<c>inbound_session_8080</c>): a browser signed in to it and to another server on the same address at another
+    /// port (the planned host switcher) keeps both sign-ins. Not read from the environment.
+    /// </summary>
+    internal string SessionCookieName { get; init; } = Auth.ServerAuth.CookieName;
+
     /// <summary>Where downloads go until a client changes it: the first root.</summary>
     public string DefaultDownloadDirectory => Roots.Count > 0 ? Roots[0] : DefaultRoot;
 

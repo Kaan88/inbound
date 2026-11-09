@@ -10,9 +10,11 @@ namespace DownloadManager.Runtime.WebUi;
 /// The desktop Host's web UI (D8): the <c>webui.*</c> commands and the bridge process's life.
 /// <list type="bullet">
 /// <item>Started when the box is ticked, and when the Host starts with it ticked; stopped when it is cleared, which also
-/// ends every web session; started again when the port, the extra names or the password change.</item>
+/// ends every web session and every browser's sign-in (paired apps stay paired); started again when the port, the extra
+/// names or the password change.</item>
 /// <item>While the firewall rule is missing (or can't be read) the bridge listens on this PC only; <c>webui.recheck</c>
-/// reads the rule again and moves it to every address once it is there.</item>
+/// reads the rule again and moves it to every address once it is there. That is a restart of the bridge, so open pages
+/// reconnect, still signed in. A recheck starts nothing that isn't running (off, failed, or waiting to restart).</item>
 /// <item>A bridge that ends by itself is started again after 1, 2, 4 ... seconds (at most a minute), up to
 /// <see cref="MaxRestarts"/> times in a row; one that ran two minutes first starts the count again. A port in use, one
 /// Windows keeps, or a start the bridge refuses is not retried: it is the state's error and a tray notice.</item>
@@ -115,7 +117,8 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
             case WebUiMessageTypes.Set:
                 return Status(request, await SetAsync(request.GetPayload<WebUiSetRequest>(), cancellationToken).ConfigureAwait(false));
             case WebUiMessageTypes.SetPassword:
-                return Status(request, await SetPasswordAsync(request.GetPayload<WebUiPasswordRequest>().Password, cancellationToken).ConfigureAwait(false));
+                var password = request.GetPayload<WebUiPasswordRequest>();
+                return Status(request, await SetPasswordAsync(password.Password, password.KeepPairedBrowsers, cancellationToken).ConfigureAwait(false));
             case WebUiMessageTypes.Recheck:
                 return Status(request, await RecheckAsync(cancellationToken).ConfigureAwait(false));
             default:
@@ -172,6 +175,9 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         if (!_config.Enabled)
         {
             await StopLockedAsync().ConfigureAwait(false);
+            // Cleared: a browser signed in before must sign in again when it is ticked again (the bridge is stopped,
+            // so it can't write them back).
+            if (changed) EndSignIns();
             SetState(WebUiStates.Off, null);
         }
         else if (changed || _state is WebUiStates.Failed or WebUiStates.Off)
@@ -183,14 +189,28 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         return Announce();
     }, cancellationToken);
 
-    public Task<WebUiStatusDto> SetPasswordAsync(string? password, CancellationToken cancellationToken = default) => Locked(async () =>
+    /// <param name="keepPairedBrowsers">Leave the paired browser extensions paired (<see cref="WebUiPasswordRequest.KeepPairedBrowsers"/>).</param>
+    public Task<WebUiStatusDto> SetPasswordAsync(string? password, bool keepPairedBrowsers = false, CancellationToken cancellationToken = default) => Locked(async () =>
     {
         if (_platform.Passwords.Problem(password) is { } problem) return Refused(problem);
+        bool same;
+        try
+        {
+            same = await _platform.Passwords.IsCurrentAsync(password!, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            same = false;
+        }
+
+        // The password in force, saved again: nothing to end, nobody to unpair, no restart.
+        if (same) return Announce();
+
         // The bridge keeps the sign-in file in memory and would write the old password back: it stops first.
         await StopLockedAsync().ConfigureAwait(false);
         try
         {
-            await _platform.Passwords.SetAsync(password!, CancellationToken.None).ConfigureAwait(false);
+            await _platform.Passwords.SetAsync(password!, keepPairedBrowsers, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -199,7 +219,9 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
             return Refused("The password could not be saved, so nothing was changed. Check the space on the app's drive.");
         }
 
-        _log.Info("The web UI password was set in the app; browsers sign in again and paired apps pair again.");
+        _log.Info(keepPairedBrowsers
+            ? "The web UI password was set in the app; browsers sign in again, paired desktop apps pair again, paired browser extensions were kept."
+            : "The web UI password was set in the app; browsers sign in again and paired apps pair again.");
         _crashes = 0;
         if (_config.Enabled) await StartLockedAsync().ConfigureAwait(false);
         else SetState(WebUiStates.Off, null);
@@ -210,10 +232,13 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
     {
         CheckFirewall();
         var wantLocal = _firewall != WebUiFirewallStates.Ready;
-        if (_config.Enabled && (_run is null || _run.LocalOnly != wantLocal))
+        // Only a running bridge listening on the wrong addresses is restarted. One that failed (a port in use, say)
+        // isn't tried again by a recheck, which can't fix that; one waiting to restart reads the rule when it starts.
+        if (_config.Enabled && _run is { } run && run.LocalOnly != wantLocal)
         {
             _crashes = 0;
-            await StopLockedAsync().ConfigureAwait(false);
+            // Only the addresses change: the sign-ins stay, and the pages reconnect to the new bridge.
+            await StopLockedAsync(endSessions: false).ConfigureAwait(false);
             await StartLockedAsync().ConfigureAwait(false);
         }
 
@@ -226,22 +251,29 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
             return Task.FromResult(new WebUiTicketDto { Error = "The web UI isn't running." });
         // Exclusive use of the port keeps others off it, but only a check says the bridge started here is the one
         // answering: the ticket signs a browser in, so it goes to no other program.
-        bool ours;
+        ListenerOwner owner;
         try
         {
-            ours = _platform.Listener.IsListening(run.Process.ProcessId, run.Port);
+            owner = _platform.Listener.Owner(run.Process.ProcessId, run.Port);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _log.Warn($"Could not see which program listens on the web UI's port: {ex.GetType().Name}");
-            ours = false;
+            return Task.FromResult(new WebUiTicketDto { Error = "The app could not check the web UI's port, so it can't be opened from here. Details are in the app's log." });
         }
 
-        if (!ours)
-            return Task.FromResult(new WebUiTicketDto
-            {
-                Error = $"Another program answers on port {run.Port.ToString(CultureInfo.CurrentCulture)}, so the web UI can't be opened from here. Choose another port.",
-            });
+        var portText = run.Port.ToString(CultureInfo.CurrentCulture);
+        switch (owner)
+        {
+            case ListenerOwner.None:
+                return Task.FromResult(new WebUiTicketDto { Error = $"The web UI isn't answering on port {portText} right now. Try again in a moment." });
+            case ListenerOwner.Other:
+                return Task.FromResult(new WebUiTicketDto
+                {
+                    Error = $"Another program answers on port {portText}, so the web UI can't be opened from here. Choose another port.",
+                });
+        }
+
         var ticket = WebUiTicket.Create(run.Key, _time.GetUtcNow());
         return Task.FromResult(new WebUiTicketDto
         {
@@ -270,6 +302,20 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         var status = Status();
         status.Error = why;
         return status;
+    }
+
+    /// <summary>Every browser signs in again (the saved sessions go); the bridge is stopped.</summary>
+    private void EndSignIns()
+    {
+        try
+        {
+            _platform.Passwords.EndSignIns();
+            _log.Info("The web UI was turned off; every browser signs in again when it is turned on.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _log.Warn($"The web UI's saved sign-ins could not be removed: {ex.GetType().Name}");
+        }
     }
 
     private void CheckFirewall()
@@ -353,7 +399,11 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         Fail($"The web UI did not start within {StartTimeout.TotalSeconds.ToString("0", CultureInfo.CurrentCulture)} seconds. Details are in the app's log.");
     }
 
-    private async Task StopLockedAsync()
+    /// <param name="endSessions">
+    /// Also end the web-role pipe sessions still being answered (off, a new port or password). A restart for other
+    /// addresses only leaves that to the bridge's own pipes closing with it.
+    /// </param>
+    private async Task StopLockedAsync(bool endSessions = true)
     {
         CancelRestart();
         if (_run is { } run)
@@ -364,7 +414,7 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         }
 
         // The bridge's pipes close with it; this also ends any that are still being answered.
-        var closed = CloseWebSessions?.Invoke() ?? 0;
+        var closed = endSessions ? CloseWebSessions?.Invoke() ?? 0 : 0;
         if (closed > 0) _log.Info($"Ended {closed} web session(s).");
         if (_state != WebUiStates.Failed || !_config.Enabled) SetState(WebUiStates.Off, null);
     }

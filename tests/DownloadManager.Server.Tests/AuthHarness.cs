@@ -20,9 +20,12 @@ internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
 internal sealed class AuthClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly string _cookie;
 
-    public AuthClient(Uri baseAddress)
+    /// <param name="cookie">The session cookie's name (<see cref="ServerAuth.SessionCookie"/>); the server's by default.</param>
+    public AuthClient(Uri baseAddress, string? cookie = null)
     {
+        _cookie = cookie ?? ServerAuth.CookieName;
         _http = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false })
         {
             BaseAddress = baseAddress,
@@ -43,16 +46,16 @@ internal sealed class AuthClient : IDisposable
     {
         var request = new HttpRequestMessage(method, path);
         if (body is not null) request.Content = JsonContent.Create(body, body.GetType(), options: body is IpcMessage ? IpcJson.Options : null);
-        if (Session is not null) request.Headers.Add("Cookie", $"{ServerAuth.CookieName}={Session}");
+        if (Session is not null) request.Headers.Add("Cookie", $"{_cookie}={Session}");
         if (Origin is not null) request.Headers.Add("Origin", Origin);
         change?.Invoke(request);
         var response = await _http.SendAsync(request);
         if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
         {
-            foreach (var cookie in cookies.Where(c => c.StartsWith(ServerAuth.CookieName + "=", StringComparison.Ordinal)))
+            foreach (var cookie in cookies.Where(c => c.StartsWith(_cookie + "=", StringComparison.Ordinal)))
             {
                 LastSetCookie = cookie;
-                var value = cookie[(ServerAuth.CookieName.Length + 1)..].Split(';')[0];
+                var value = cookie[(_cookie.Length + 1)..].Split(';')[0];
                 Session = value.Length == 0 ? null : value;
             }
         }
