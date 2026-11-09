@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
+  archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteBatches, deleteCompletedText, deletePlan, mixedDeleteNote, describe as describeNote,
   graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
-  priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, startsAscending, statusBarText,
+  priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, hoverPoint, agoText, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
 } from '../src/lib/list';
 import { canRetry, targetOf } from '../src/lib/archives';
@@ -203,6 +203,17 @@ describe('deleting', () => {
     expect(many.deleteFile).toBe(true);
   });
 
+  it('UI.B19: a mixed selection always removes the unfinished ones\' partial data, whatever the box says', () => {
+    const jobs = [job('a', 'completed'), job('b', 'paused'), job('c', 'failed')];
+    expect(deletePlan(jobs).text).toBe(`Remove 3 downloads from the list? ${mixedDeleteNote}`);
+    expect(deletePlan(jobs).offerFiles).toBe(true);
+    expect(deleteBatches(jobs, false)).toEqual([{ ids: ['b', 'c'], deleteFile: true }, { ids: ['a'], deleteFile: false }]);
+    expect(deleteBatches(jobs, true)).toEqual([{ ids: ['a', 'b', 'c'], deleteFile: true }]);
+    // A finished file whose archive went after extraction keeps its (absent) file; an unfinished one still loses its data.
+    expect(deleteBatches([job('d', 'completed', { fileRemovedAfterExtraction: true }), job('e', 'queued')], false))
+      .toEqual([{ ids: ['e'], deleteFile: true }, { ids: ['d'], deleteFile: false }]);
+  });
+
   it('says there is nothing to delete when the archives went on purpose', () => {
     const plan = deletePlan([job('a', 'completed', { fileRemovedAfterExtraction: true })]);
     expect(plan.text).toContain('Its archive was removed after extraction, so no file is deleted.');
@@ -391,7 +402,7 @@ describe('file menu rules', () => {
     expect(planFileMenu(false, false, 2, 1).removeReason).toBeNull();
     expect(planFileMenu(false, false, 0, 0).fileReason).toBe('select a download first');
     expect(planFileMenu(true, false, 0, 0, true).openReason).toBe('archive removed after extraction');
-    expect(menuLabel('Properties', 'select a download first')).toBe('Properties (select a download first)');
+    expect(menuLabel('Properties', 'select a download first')).toBe('Properties');
     expect(menuLabel('Properties', null)).toBe('Properties');
   });
 });
@@ -500,21 +511,85 @@ describe('speed graph', () => {
     expect(history.peak()).toBe(5);
   });
 
-  it("starts from the server's own seconds without showing one twice", () => {
+  it("replaces its samples with the server's seconds, the last being the second under way", () => {
     const empty = new SpeedHistory(4);
-    // The last figure is the second still under way, so it is left for this page's own sample.
-    empty.seed([1, 2, 3, 4, 9]);
-    expect(empty.samples).toEqual([1, 2, 3, 4]);
+    empty.replace([1, 2, 3, 4, 9]);
+    expect(empty.samples).toEqual([2, 3, 4, 9]);
 
     const sampled = new SpeedHistory(5);
     sampled.add(7);
     sampled.add(8);
-    sampled.seed([1, 2, 3, 4, 5, 6]);
-    expect(sampled.samples).toEqual([1, 2, 3, 7, 8]);
+    sampled.replace([1, 2, 3, 4, 5, 6]);
+    expect(sampled.samples).toEqual([2, 3, 4, 5, 6]);
 
     const odd = new SpeedHistory(5);
-    odd.seed([-5, Number.NaN, 3, 0]);
-    expect(odd.samples).toEqual([0, 0, 3]);
+    odd.replace([-5, Number.NaN, 3, 0]);
+    expect(odd.samples).toEqual([0, 0, 3, 0]);
+    odd.replace([]);
+    expect(odd.samples).toEqual([0, 0, 3, 0]);
+  });
+
+  it('fills the time a hidden tab left, ending on the figure of the server when this page has a gap', () => {
+    const history = new SpeedHistory();
+    history.add(5, 100);
+    history.add(null, 101);
+    history.add(null, 102);
+    history.replace([1, 2, 3, 4]);
+    expect(history.samples).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps the newest local second only when the server has not finished it', () => {
+    // Server figures cover seconds 1000..1003; 1003 is under way.
+    const start = new Date(1000 * 1000).toISOString();
+    const fresh = new SpeedHistory();
+    fresh.add(7, 1003);
+    fresh.replace([1, 2, 3, 4], start);
+    expect(fresh.samples).toEqual([1, 2, 3, 7]);
+
+    const behind = new SpeedHistory();
+    behind.add(7, 1002);
+    behind.replace([1, 2, 3, 4], start);
+    expect(behind.samples).toEqual([1, 2, 3, 4]);
+
+    const ahead = new SpeedHistory();
+    ahead.add(7, 1004);
+    ahead.replace([1, 2, 3, 4], start);
+    expect(ahead.samples).toEqual([1, 2, 3, 7]);
+  });
+
+  it("keeps the server's whole hour and draws the newest ten minutes", () => {
+    const history = new SpeedHistory();
+    expect(history.limit).toBe(3600);
+    history.replace(Array.from({ length: 3601 }, (_, i) => i));
+    expect(history.samples).toHaveLength(3600);
+    expect(history.recent()).toHaveLength(600);
+    expect(history.recent()[599]).toBe(3600);
+    expect(history.peak()).toBe(3600);
+    history.add(1);
+    expect(history.samples).toHaveLength(3600);
+    expect(history.samples[0]).toBe(2);
+    const short = new SpeedHistory();
+    short.add(2);
+    expect(short.recent()).toEqual([2]);
+  });
+
+  it('finds the sample under the pointer, newest at the right edge', () => {
+    const step = 600 / 599;
+    const samples = [1, null, 3, 4];
+    // The line starts at 600 - 3 steps.
+    expect(hoverPoint(samples, 600)).toEqual({ index: 3, rate: 4, age: 0 });
+    expect(hoverPoint(samples, 600 - 2 * step)).toEqual({ index: 1, rate: null, age: 2 });
+    expect(hoverPoint(samples, 600 - 3 * step - 0.2)).toEqual({ index: 0, rate: 1, age: 3 });
+    expect(hoverPoint(samples, 100)).toBeNull();
+    expect(hoverPoint([], 300)).toBeNull();
+    expect(hoverPoint(samples, Number.NaN)).toBeNull();
+  });
+
+  it('words the age as the desktop graph does', () => {
+    expect(agoText(0)).toBe('now');
+    expect(agoText(30)).toBe('30 s ago');
+    expect(agoText(125)).toBe('2 min 05 s ago');
+    expect(agoText(3725)).toBe('1 h 02 min ago');
   });
 
   it('scales the top of the graph above the peak', () => {

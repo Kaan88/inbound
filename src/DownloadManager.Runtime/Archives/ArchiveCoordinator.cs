@@ -89,6 +89,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         _log = log;
         _options = options ?? new ArchiveCoordinatorOptions();
         _time = timeProvider ?? TimeProvider.System;
+        // UI.B19: deleting a download never takes the extraction folder away.
+        _service.ExtractionFolder = () => ExtractionFolder;
         _service.JobChanged += OnJobChanged;
         _service.PackageCompleted += OnPackageCompleted;
         _service.SettingsChanged += OnSettingsChanged;

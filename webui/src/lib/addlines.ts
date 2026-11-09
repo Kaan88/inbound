@@ -2,6 +2,7 @@
 // add dialogs"). A hoster, folder or magnet link only ever goes to the provider; a link nobody could classify
 // goes directly only when its own box is ticked.
 
+import { expandNumbered } from './batch';
 import type { ClassifyResult } from './types';
 
 export interface AddLine {
@@ -111,6 +112,15 @@ export function removeInputs(text: string, handled: Iterable<string>): string {
     for (const input of gone) {
       const escaped = input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       line = line.replace(new RegExp(`(^|\\s)${escaped}(?=$|\\s)`, 'g'), '$1');
+    }
+
+    // A numbered address goes once every address it stands for was handled.
+    if (line.includes('[')) {
+      const done = new Set(gone);
+      line = line.replace(/(^|\s)(\S*\[\S*)(?=$|\s)/g, (whole, space: string, word: string) => {
+        const expanded = expandNumbered(word);
+        return expanded?.ok && expanded.urls.every((url) => done.has(url)) ? space : whole;
+      });
     }
 
     // A line that held only handled links disappears; a blank line the user typed stays.

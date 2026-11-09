@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from '../lib/clipboard';
   import { untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Dialog from '../components/Dialog.svelte';
@@ -93,12 +94,8 @@
   async function copyFolder() {
     const first = members.find((m) => m.finalFilePath);
     if (!first) return;
-    try {
-      await navigator.clipboard.writeText(splitPath(first.finalFilePath).directory);
-      store.toast('The folder path was copied.');
-    } catch {
-      notice = 'The browser did not allow copying.';
-    }
+    if (await copyText(splitPath(first.finalFilePath).directory)) store.toast('The folder path was copied.');
+    else notice = 'The browser did not allow copying.';
   }
 
   const title = $derived(group ? group.name : 'Package removed');

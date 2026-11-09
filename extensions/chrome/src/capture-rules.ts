@@ -8,6 +8,8 @@ export type StartMode = "now" | "later";
 export type DestinationMode = "default" | "ask";
 /** Where a download goes: the desktop app on this PC, or the user's paired Inbound server (transport.ts). */
 export type DefaultTarget = "local" | "server";
+/** The extension pages' theme (EXT.R8): the browser's, or always light or dark. */
+export type ThemeChoice = "system" | "light" | "dark";
 
 export interface Settings {
   enabled: boolean;
@@ -24,6 +26,8 @@ export interface Settings {
   excludedExtensions: string[];
   excludedHosts: string[];
   notifications: boolean;
+  /** The extension pages' theme; mirrored to localStorage["inbound.theme"] for theme.js (see ui/theme.ts). */
+  theme: ThemeChoice;
   /** Which version of the default rules these settings were written against (see migrateSettings). */
   rulesVersion: number;
 }
@@ -65,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   excludedExtensions: [...DEFAULT_EXCLUDED_EXTENSIONS],
   excludedHosts: [],
   notifications: true,
+  theme: "system",
   rulesVersion: RULES_VERSION,
 };
 
@@ -87,6 +92,7 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...stored };
   if (settings.destinationMode !== "ask") settings.destinationMode = "default";
   if (settings.defaultTarget !== "server") settings.defaultTarget = "local";
+  if (settings.theme !== "light" && settings.theme !== "dark") settings.theme = "system";
   if ((stored.rulesVersion ?? 1) >= RULES_VERSION) {
     return { settings, changed: false };
   }
@@ -106,6 +112,28 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   }
   settings.rulesVersion = RULES_VERSION;
   return { settings, changed: true };
+}
+
+/** The settings a page may change, by name: a save sends only the ones its user changed (U-EX-6). */
+export const SETTING_KEYS: ReadonlyArray<keyof Settings> = [
+  "enabled", "autoIntercept", "startMode", "destinationMode", "defaultTarget", "interceptedExtensions",
+  "excludedExtensions", "excludedHosts", "notifications", "theme",
+];
+
+/**
+ * A page's changes laid over the settings stored now, never a whole copy of the page's older view: a second
+ * Options tab, the popup's This PC / Server switch or a save elsewhere since the page opened keeps what it set
+ * (U-EX-6). Unknown names are dropped.
+ */
+export function applySettingChanges(current: Settings, changes: unknown): Settings {
+  const next: Settings = { ...current };
+  if (!changes || typeof changes !== "object") return next;
+  for (const key of SETTING_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(changes, key)) {
+      (next as unknown as Record<string, unknown>)[key] = (changes as Record<string, unknown>)[key];
+    }
+  }
+  return migrateSettings(next).settings;
 }
 
 export function isHttpUrl(url: string | undefined | null): boolean {

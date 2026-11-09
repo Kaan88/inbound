@@ -310,7 +310,7 @@ public sealed partial class MainWindow
         // Another server reads a container by its own path, or by an upload where its hello offers that.
         if (RemoteDataRules.LocalFileProblem(_connection.IsRemote, "container", _connection.Target.Name, _remote.State.UploadsOffered) is { } problem)
         {
-            await ShowMessageAsync("Import JD Container", problem);
+            await ShowMessageAsync("Import Link Container", problem);
             return;
         }
 
@@ -322,14 +322,14 @@ public sealed partial class MainWindow
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
         {
-            await ShowMessageAsync("Import JD Container", "The file picker couldn't open.");
+            await ShowMessageAsync("Import Link Container", "The file picker couldn't open.");
             return;
         }
 
         // A file from a cloud or phone location has no path a program could read.
         if (string.IsNullOrWhiteSpace(path))
         {
-            await ShowMessageAsync("Import JD Container", ContainerFiles.NoPathWords);
+            await ShowMessageAsync("Import Link Container", ContainerFiles.NoPathWords);
             return;
         }
 
@@ -338,7 +338,7 @@ public sealed partial class MainWindow
         var answer = await dialog.ShowAsync(Content.XamlRoot, RootGrid.ActualTheme);
         if (answer.CouldNotOpen)
         {
-            ShowPassingStatus("Import JD Container couldn't open, because another dialog is open.");
+            ShowPassingStatus("Import Link Container couldn't open, because another dialog is open.");
             return;
         }
 
@@ -351,7 +351,7 @@ public sealed partial class MainWindow
         if (answer.Outcomes is not { } outcomes) return;
         if (outcomes.AddedCount > 0 && answer.Folder is { } folder) RememberFolder(folder);
         var problems = outcomes.Problems;
-        await ReportAddAsync("Import JD Container", 0, outcomes.NewCount, provider, problems.Count > 0 && outcomes.NewCount == 0 ? [outcomes.Summary(provider)] : [], problems);
+        await ReportAddAsync("Import Link Container", 0, outcomes.NewCount, provider, problems.Count > 0 && outcomes.NewCount == 0 ? [outcomes.Summary(provider)] : [], problems);
     }
 
     private async Task RunAddChoiceAsync(AddLinksChoice choice)

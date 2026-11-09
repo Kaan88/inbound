@@ -77,6 +77,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Before any window resolves the window brush; Resources is not ready in the constructor.
+        WindowLayout.UseSolidWindowsWithoutMica(Resources);
         // Files and programs opened from a window inherit the current directory; keep it out of
         // app\, or they hold that folder against updates for as long as they stay open.
         try
@@ -135,7 +137,7 @@ public partial class App : Application
         {
             _packageWindow = new PackageWindow(package, server);
             _packageWindow.Closed += (_, _) => Exit();
-            _packageWindow.Activate();
+            WindowPlacement.ActivateCascaded(_packageWindow);
             _ = Task.Run(() =>
             {
                 while (true)
@@ -151,7 +153,7 @@ public partial class App : Application
         {
             _downloadWindow = new DownloadWindow(id, commandLine.Contains("--manual"), server);
             _downloadWindow.Closed += (_, _) => Exit();
-            _downloadWindow.Activate();
+            WindowPlacement.ActivateCascaded(_downloadWindow);
             _ = Task.Run(() =>
             {
                 while (true)

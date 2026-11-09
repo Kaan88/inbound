@@ -182,6 +182,32 @@ internal static class RemoteRules
     /// <summary><c>remote.deleteRemote</c> takes a job, and refuses one whose item isn't known. An item with no job on the list can't be deleted from here.</summary>
     public static bool CanDeleteFromProvider(RemoteJobDto? job) => job is { ItemId.Length: > 0 };
 
+    /// <summary>
+    /// U-WL-11: a My provider row's quick actions, as the web UI's row menu has them (D2d): the window's buttons for
+    /// that row, plus copying the name. The provider's items carry no link, so the name is all there is to copy.
+    /// Delete needs a job that knows the item, as the window's button does. A null action is a separator.
+    /// </summary>
+    public static IReadOnlyList<RemoteItemMenuEntry> ItemMenu(bool canDownload, RemoteJobDto? job, string provider, bool acting, bool loading)
+    {
+        var active = job is not null && job.State != "failed";
+        var entries = new List<RemoteItemMenuEntry>
+        {
+            new("open", "Choose files and download…", false),
+            new("downloadAll", active ? "Download all its files" : "Download all", acting || !canDownload),
+            new(null, string.Empty, false),
+        };
+        if (job is not null && Actions(job).CheckNow) entries.Add(new("checkNow", "Check now", acting));
+        entries.Add(new("copyName", "Copy name", false));
+        entries.Add(new("refresh", "Refresh list", loading));
+        if (CanDeleteFromProvider(job))
+        {
+            entries.Add(new(null, string.Empty, false));
+            entries.Add(new("deleteFromProvider", $"Delete from {provider}…", acting));
+        }
+
+        return entries;
+    }
+
     /// <summary>TB.S1: accepted by the provider and waiting in its queue, with no item yet. Start now and removal from the queue take it.</summary>
     public static bool IsInProviderQueue(RemoteJobDto? job) => job is { State: "waiting", Stage: "queued" } && string.IsNullOrEmpty(job.ItemId);
 }
@@ -498,3 +524,6 @@ internal static partial class RemoteText
     public static string LinkPasswordHint(RemoteJobDto job)
         => $"'{JobName(job)}' needs the password its source site set for the link. This isn't an archive password. It is kept encrypted.";
 }
+
+/// <summary>One line of a My provider row's menu. A null <see cref="Action"/> is a separator.</summary>
+internal sealed record RemoteItemMenuEntry(string? Action, string Label, bool Disabled);

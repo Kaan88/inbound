@@ -4,8 +4,8 @@
   import { bytes, dateTime } from '../lib/format';
   import { newUuid } from '../lib/ids';
   import {
-    checkScheduleDraft, defaultMoveTarget, downloadsText, editScheduleDraft, isMember, newScheduleDraft, orderedQueues,
-    queueStartedText, retryConflict, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
+    canStartQueue, canStopQueue, checkScheduleDraft, defaultMoveTarget, downloadsText, editScheduleDraft, isMember, newScheduleDraft, orderedQueues,
+    queueStartedText, queueStateText, retryConflict, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
   } from '../lib/queues';
   import { store } from '../lib/store.svelte';
   import type { Queue, Schedule } from '../lib/types';
@@ -26,6 +26,7 @@
     }
     return map;
   });
+  const jobList = $derived(Object.values(store.model.jobs));
   const holding = $derived.by(() => {
     const map = new Map<number, number>();
     for (const job of Object.values(store.model.jobs)) if (isMember(job)) map.set(job.queueId, (map.get(job.queueId) ?? 0) + 1);
@@ -154,13 +155,14 @@
         <div class="flex flex-wrap items-center gap-2">
           <Icon name="queue" class="text-icon-info" />
           <h2 class="min-w-0 flex-1 text-[14px] font-semibold">{queue.name}{queue.id === defaultQueueId ? ' (default)' : ''}
-            <span class="ml-2 whitespace-nowrap text-[12px] font-normal {queue.isRunning ? 'tone-active' : 'tone-waiting'}">{queue.isRunning ? 'Running' : 'Stopped'}</span>
+            <span class="ml-2 whitespace-nowrap text-[12px] font-normal {queue.isRunning ? 'tone-active' : 'tone-waiting'}">{queueStateText(queue, jobList)}</span>
             <span class="ml-1 whitespace-nowrap text-[12px] font-normal text-muted">{counts.get(queue.id) ?? 0} unfinished</span></h2>
           <span class="ml-auto flex shrink-0 flex-wrap gap-2">
-            {#if queue.isRunning}
-              <button class="btn" onclick={() => runQueue(queue, 'stop')}><Icon name="stop" size={15} class="text-icon-pause" /> Stop</button>
-            {:else}
+            {#if canStartQueue(queue, jobList)}
               <button class="btn" onclick={() => runQueue(queue, 'start')}><Icon name="play" size={15} class="text-icon-start" /> Start now</button>
+            {/if}
+            {#if canStopQueue(queue)}
+              <button class="btn" onclick={() => runQueue(queue, 'stop')}><Icon name="stop" size={15} class="text-icon-pause" /> Stop</button>
             {/if}
             <button class="btn px-2" title="Move up" aria-label="Move up" disabled={position === 0} onclick={() => store.attempt('queue.action', { queueId: queue.id, action: 'moveUp' })}><Icon name="chevron-up" size={15} /></button>
             <button class="btn px-2" title="Move down" aria-label="Move down" disabled={position === queues.length - 1} onclick={() => store.attempt('queue.action', { queueId: queue.id, action: 'moveDown' })}><Icon name="chevron-down" size={15} /></button>

@@ -6,7 +6,7 @@
     xmlns:local="using:DownloadManager.Desktop.WinUI"
     Title="Inbound Download Manager">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource InboundSurfaceBrush}">
+    <Grid x:Name="RootGrid" Background="{ThemeResource InboundWindowBrush}">
         <Grid.Resources>
             <DataTemplate x:Key="QueueFileTemplate">
                 <Grid ColumnSpacing="12" Padding="0,3" ToolTipService.ToolTip="{Binding FileName}">
@@ -52,6 +52,10 @@
                 <MenuFlyoutItem Text="Export Download List…" AccessKey="E" Click="MenuExport_Click" />
                 <MenuFlyoutItem Text="Import Download List…" AccessKey="I" Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
+                <!-- UI.R26: filled from the saved servers each time it opens, like the switchers. -->
+                <MenuFlyoutSubItem x:Name="TasksServersItem" Text="Show Downloads Of" AccessKey="S" />
+                <MenuFlyoutItem Text="Web UI on This PC…" AccessKey="W" Click="MenuWebUi_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" AccessKey="X" Click="MenuExit_Click" />
             </MenuBarItem>
 
@@ -68,6 +72,7 @@
                 <MenuFlyoutItem x:Name="FileDeleteItem" Text="Delete…" AccessKey="E" KeyboardAcceleratorTextOverride="Delete" Click="MenuDelete_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Servers…" AccessKey="V" Click="MenuServers_Click" />
+                <MenuFlyoutItem Text="Web UI on This PC…" AccessKey="W" Click="MenuWebUi_Click" />
             </MenuBarItem>
 
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
@@ -138,6 +143,11 @@
                 <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
                 <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
             </Border.Resources>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
             <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="ToolbarPanel" Orientation="Horizontal" Padding="8,4" Spacing="0">
@@ -168,14 +178,6 @@
                         <StackPanel>
                             <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
                             <TextBlock Text="Stop All" Style="{StaticResource InboundToolLabelStyle}" />
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
-                            Visibility="Collapsed"
-                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
-                        <StackPanel>
-                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
-                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
@@ -227,12 +229,84 @@
                             <TextBlock Text="Stop Queue" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
+                    <!-- U-WL-6: last, so that showing it for a package moves no other button. -->
+                    <StackPanel x:Name="CancelPackageGroup" Orientation="Horizontal" Visibility="Collapsed">
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
+                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
+                <!-- UI.R26: which Host the window shows, at the right end of the toolbar so it stays in view however
+                     narrow the window is. One click lists This PC and the saved servers; Ctrl+Shift+O opens it. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Padding="0,4,8,4">
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <DropDownButton x:Name="ToolbarServerSwitcher" Style="{StaticResource InboundToolButtonStyle}"
+                                    AutomationProperties.Name="Show downloads of" AutomationProperties.AcceleratorKey="Ctrl+Shift+O"
+                                    ToolTipService.ToolTip="Showing the downloads of this PC. Select to show another server's.">
+                        <StackPanel>
+                            <FontIcon x:Name="ToolbarServerIcon" Glyph="&#xE7F4;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                            <TextBlock x:Name="ToolbarServerLabel" Text="This PC" MaxWidth="160" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                        <DropDownButton.Flyout>
+                            <MenuFlyout x:Name="ToolbarServerMenu" Placement="BottomEdgeAlignedRight" />
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="2">
+        <!-- UI.B18, U-WR-1, U-WR-3: while another server is shown, which one, whether it can be reached, and one click
+             back to this PC (Ctrl+0). Hidden for this PC. -->
+        <Border x:Name="ServerBannerBar" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Name="ServerBannerIcon" Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center"
+                          Foreground="{ThemeResource InboundIconInfoBrush}" />
+                <TextBlock x:Name="ServerBannerText" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
+                           AutomationProperties.Name="Server shown" AutomationProperties.LiveSetting="Polite" />
+                <Button x:Name="ServerBannerButton" Grid.Column="2" FontSize="12" Padding="10,2" Visibility="Collapsed"
+                        Click="ServerBannerAction_Click" />
+                <Button x:Name="ServerBannerBack" Grid.Column="3" FontSize="12" Padding="10,2" Content="Back to This PC"
+                        AutomationProperties.Name="Back to This PC" AutomationProperties.AcceleratorKey="Ctrl+0"
+                        ToolTipService.ToolTip="Show the downloads of this PC (Ctrl+0)" Click="ServerBannerBack_Click" />
+            </Grid>
+        </Border>
+
+        <!-- U-WL-8: while Find filters the list, what it shows and the way back to everything. -->
+        <Border x:Name="FindBar" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE71C;" FontSize="14" VerticalAlignment="Center" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                <TextBlock x:Name="FindBarText" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Find filter" AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Column="2" Content="Change…" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Change what Find looks for" Click="MenuFind_Click" />
+                <Button Grid.Column="3" Content="Show all" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Clear the Find filter and show all downloads" Click="FindBarClear_Click" />
+            </Grid>
         </Border>
 
         <!-- What extraction wants the user to know. It sits above the list and waits; nothing opens by itself. -->
-        <Border x:Name="ArchiveNoticeBar" Grid.Row="2" Visibility="Collapsed" Padding="10,4"
+        <Border x:Name="ArchiveNoticeBar" Visibility="Collapsed" Padding="10,4"
                 Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -247,6 +321,7 @@
                         AutomationProperties.Name="Dismiss this extraction notice" Click="ArchiveNoticeDismiss_Click" />
             </Grid>
         </Border>
+        </StackPanel>
 
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
@@ -506,6 +581,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <!-- Which Host the window shows: This PC or a saved server (design D9, section 5). -->
                 <DropDownButton x:Name="ServerSwitcher" Content="This PC" FontSize="11" Padding="6,0" MinHeight="0" Height="21"
@@ -522,6 +598,11 @@
                            AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
                 <TextBlock x:Name="ConnectionText" Grid.Column="2" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+                <!-- U-WL-9: a browser registration that is broken or missing can be put right from here. -->
+                <Button x:Name="RepairBrowserButton" Grid.Column="3" Content="Repair…" FontSize="11" Padding="8,0" MinHeight="0" Height="19"
+                        VerticalAlignment="Center" Visibility="Collapsed" Click="RepairBrowser_Click"
+                        AutomationProperties.Name="Repair browser integration"
+                        ToolTipService.ToolTip="Register Inbound with your browsers again, so the extension can reach it" />
             </Grid>
         </Border>
     </Grid>

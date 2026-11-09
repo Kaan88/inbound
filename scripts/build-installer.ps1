@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "0.6.3",
+    [string]$Version = "0.6.4",
     [string]$Iscc,
     # A Setup without the Firefox add-on, for local test builds. A release Setup carries it (EXT.S4).
     [switch]$NoFirefoxXpi

@@ -1,7 +1,10 @@
 // The folder window's and the batch window's "Save to" choice (EXT.R1): This PC or the paired server, and
 // for the server a folder list in place of the desktop app's folder dialog. Shared by handoff.ts and batch.ts.
 
+import { bytes as formatBytes } from "../../../webui/src/lib/format";
 import type { TargetId } from "./transport";
+import { icon } from "./ui/icon";
+import { fitPathText } from "./ui/path-field";
 
 /** One target as the background offers it (dm.getHandoff, dm.targets). */
 export interface OfferedTarget {
@@ -36,17 +39,24 @@ export function renderTargetChoice(field: HTMLElement, list: HTMLElement, target
     radio.addEventListener("change", () => { if (radio.checked) onChange(target); });
     radios.push(radio);
     const text = document.createElement("span");
-    text.textContent = target.label;
+    // EXT.R8: the server by its own name ("home-server"), its full address in the tooltip.
+    text.textContent = target.id === "server" && target.address ? hostName(target.address) : target.label;
     label.append(radio, text);
-    if (target.address) {
-      const address = document.createElement("span");
-      address.className = "muted small";
-      address.textContent = target.address.replace(/^https?:\/\//, "");
-      label.append(address);
+    if (target.address) label.title = target.address.replace(/^https?:\/\//, "");
+    if (target.id === "server" && target.error) {
+      // U-EX-11: a server that did not answer is shown as such, beside This PC chosen in its place.
+      text.textContent += " (not answering)";
+      label.classList.add("target-down");
+      label.title = `${label.title ? `${label.title}: ` : ""}not answering`;
     }
     list.append(label);
   }
   return selected;
+}
+
+/** A server address's host, the name the popup and the forms call it by. */
+export function hostName(address: string): string {
+  try { return new URL(address).hostname || address; } catch { return address.replace(/^https?:\/\//, ""); }
 }
 
 const targetRadios = new WeakMap<HTMLElement, HTMLInputElement[]>();
@@ -70,14 +80,6 @@ interface FolderListing {
   freeBytes?: number | null;
 }
 
-function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) { value /= 1024; index++; }
-  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
 /**
  * The server's folders, one level at a time (folders.browse through the background). Only folders under the
  * server's allowed roots are listed; the server checks every path again when the download is added.
@@ -91,19 +93,20 @@ export class ServerFolderBrowser {
   private current: FolderListing | null = null;
 
   constructor(private readonly container: HTMLElement, private readonly onPick: (path: string) => void,
-    private readonly showError: (message: string) => void) {
+    private readonly showError: (message: string) => void, private readonly onListed: () => void = () => undefined) {
     container.classList.add("folder-browser");
     const head = document.createElement("div");
     head.className = "folder-browser-head";
     this.upButton = document.createElement("button");
     this.upButton.type = "button";
-    this.upButton.textContent = "Up";
+    this.upButton.className = "btn";
+    this.upButton.textContent = "↑ Up";
     this.upButton.title = "The folder one up";
     this.upButton.addEventListener("click", () => void this.show(this.current?.parent ?? ""));
     this.pathText = document.createElement("span");
-    this.pathText.className = "folder-browser-path";
+    this.pathText.className = "folder-browser-path mono";
     this.freeText = document.createElement("span");
-    this.freeText.className = "muted small";
+    this.freeText.className = "hint";
     head.append(this.upButton, this.pathText, this.freeText);
 
     this.list = document.createElement("ul");
@@ -111,18 +114,20 @@ export class ServerFolderBrowser {
     this.list.setAttribute("aria-label", "Folders on the server");
 
     const actions = document.createElement("div");
-    actions.className = "row";
+    actions.className = "folder-browser-actions";
     this.useButton = document.createElement("button");
     this.useButton.type = "button";
-    this.useButton.className = "primary";
+    this.useButton.className = "btn-primary";
     this.useButton.textContent = "Use this folder";
     this.useButton.addEventListener("click", () => {
       if (!this.current?.path) return;
       this.onPick(this.current.path);
+      this.onListed();
       this.close();
     });
     const cancel = document.createElement("button");
     cancel.type = "button";
+    cancel.className = "btn";
     cancel.textContent = "Cancel";
     cancel.addEventListener("click", () => this.close());
     actions.append(this.useButton, cancel);
@@ -158,9 +163,10 @@ export class ServerFolderBrowser {
     }
 
     this.current = listing;
+    // U-EX-12: a folder list arrived, so an error about an earlier one (or a folder typed before) is stale.
+    this.onListed();
     const atRoots = !listing.path;
-    this.pathText.textContent = atRoots ? "Folders you can save to" : listing.path!;
-    this.pathText.title = this.pathText.textContent;
+    fitPathText(this.pathText, atRoots ? "Folders you can save to" : listing.path!);
     this.freeText.textContent = typeof listing.freeBytes === "number" ? `${formatBytes(listing.freeBytes)} free` : "";
     this.upButton.disabled = atRoots;
     this.useButton.disabled = atRoots;
@@ -172,7 +178,9 @@ export class ServerFolderBrowser {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "folder-entry";
-      button.textContent = entry.name;
+      const name = document.createElement("span");
+      name.textContent = entry.name;
+      button.append(icon("folder", 16), name);
       button.title = entry.path;
       button.addEventListener("click", () => void this.show(entry.path));
       item.append(button);
@@ -191,5 +199,44 @@ export class ServerFolderBrowser {
       this.list.append(more);
     }
     return true;
+  }
+}
+
+/** The free space of a folder on the server, as its folder list reports it (folders.browse); null when unknown. */
+export async function serverFreeSpace(path: string): Promise<number | null> {
+  if (!path.trim()) return null;
+  try {
+    const listing = await chrome.runtime.sendMessage({ type: "dm.browseServerFolders", path: path.trim() }) as FolderListing;
+    return listing?.ok && typeof listing.freeBytes === "number" ? listing.freeBytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * EXT.B7: a line under Save in with the free space of the folder there, measured by the server for the server.
+ * This PC has no such request through the native host, so for This PC the line stays empty rather than show
+ * anything of the wrong machine.
+ */
+export class FreeSpaceLine {
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private asked = 0;
+
+  constructor(private readonly element: HTMLElement) {}
+
+  update(target: TargetId, path: string): void {
+    clearTimeout(this.timer);
+    const mine = ++this.asked;
+    if (target !== "server" || !path.trim()) {
+      this.element.textContent = "";
+      return;
+    }
+    this.timer = setTimeout(() => {
+      void serverFreeSpace(path).then((free) => {
+        if (mine !== this.asked) return;
+        this.element.textContent = typeof free === "number" ? `${formatBytes(free)} free on the server` : "";
+      });
+    }, 250);
+    (this.timer as { unref?: () => void }).unref?.();
   }
 }

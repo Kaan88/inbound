@@ -1,40 +1,9 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const Module = require('node:module');
-const path = require('node:path');
 const test = require('node:test');
-const ts = require('typescript');
-
-const srcDir = path.join(__dirname, '..', 'src');
-
-// Compiles a src/*.ts file and its relative imports afresh, so each page test gets its own module state.
-function loadTs(file) {
-  const cache = new Map();
-  function load(source) {
-    if (cache.has(source)) return cache.get(source).exports;
-    const loaded = new Module(source, module);
-    loaded.filename = source;
-    loaded.paths = Module._nodeModulePaths(path.dirname(source));
-    cache.set(source, loaded);
-    const parentRequire = loaded.require.bind(loaded);
-    loaded.require = id => id.startsWith('./') ? load(path.join(path.dirname(source), `${id.slice(2)}.ts`)) : parentRequire(id);
-    loaded._compile(ts.transpileModule(fs.readFileSync(source, 'utf8'), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-    }).outputText, source);
-    return loaded.exports;
-  }
-  return load(path.join(srcDir, file));
-}
+const { deferred, installPage, loadTs, tick } = require('./page-harness.cjs');
 
 const { FormGate } = loadTs('form-gate.ts');
 
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
-}
-
-const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test('EXT.B2 gate: a pick holds Send and Browse, and its end releases both', async () => {
   const draws = [];
@@ -72,72 +41,6 @@ test('EXT.B2 gate: a failed pick releases Send', async () => {
   assert.equal(gate.canSend, true);
   assert.equal(gate.canPick, true);
 });
-
-// A fake page: elements by id, listeners, and clicks that do nothing on a disabled button, as in a browser.
-function fakeElement(id) {
-  const listeners = new Map();
-  const classes = new Set();
-  const element = {
-    id, value: '', disabled: false, checked: false, indeterminate: false, textContent: '', title: '', className: '', type: '',
-    children: [], placeholder: '', attributes: {},
-    // A select's first option ("Pick a favorite folder..."), which the folder window keeps when it lists favorites.
-    options: [{ value: '', textContent: '' }],
-    setAttribute: (name, value) => { element.attributes[name] = String(value); },
-    getAttribute: name => element.attributes[name] ?? null,
-    removeAttribute: name => { delete element.attributes[name]; },
-    classList: {
-      add: name => classes.add(name),
-      remove: name => classes.delete(name),
-      toggle: (name, force) => ((force ?? !classes.has(name)) ? classes.add(name) : classes.delete(name)),
-      contains: name => classes.has(name),
-    },
-    addEventListener: (type, listener) => listeners.set(type, [...(listeners.get(type) ?? []), listener]),
-    append: (...nodes) => element.children.push(...nodes),
-    replaceChildren: (...nodes) => { element.children = nodes; },
-    dispatch: (type, event = {}) => Promise.all((listeners.get(type) ?? []).map(listener => listener({ target: element, ...event }))),
-    click: () => (element.disabled ? Promise.resolve('ignored') : element.dispatch('click')),
-  };
-  return element;
-}
-
-function installPage(search, handlers) {
-  const elements = new Map();
-  const documentListeners = new Map();
-  const sent = [];
-  const saved = {};
-  for (const name of ['chrome', 'document', 'location', 'window', 'screen', 'outerHeight', 'innerHeight']) saved[name] = global[name];
-  global.location = { search };
-  global.window = { close: () => { page.closed = true; } };
-  global.document = {
-    getElementById: id => { if (!elements.has(id)) elements.set(id, fakeElement(id)); return elements.get(id); },
-    createElement: tag => fakeElement(tag),
-    addEventListener: (type, listener) => documentListeners.set(type, [...(documentListeners.get(type) ?? []), listener]),
-    documentElement: { scrollHeight: 400 },
-  };
-  global.chrome = {
-    runtime: {
-      sendMessage: async message => {
-        sent.push(message.type);
-        const handler = handlers[message.type];
-        if (!handler) throw new Error(`unexpected message ${message.type}`);
-        return handler(message);
-      },
-      connect: () => ({ postMessage() {}, onDisconnect: { addListener() {} } }),
-    },
-    // fitWindowToContent leaves a normal (non-popup) window alone.
-    windows: { getCurrent: async () => ({ type: 'normal' }), update: async () => undefined },
-  };
-  const page = {
-    closed: false,
-    sent,
-    el: id => global.document.getElementById(id),
-    key: event => Promise.all((documentListeners.get('keydown') ?? []).map(listener => listener(event))),
-    domReady: () => Promise.all((documentListeners.get('DOMContentLoaded') ?? []).map(listener => listener())),
-    // The window stub stays: a success schedules window.close() after the test has ended.
-    restore: () => Object.assign(global, saved, { window: { close() {} } }),
-  };
-  return page;
-}
 
 async function openFolderWindow(handlers = {}) {
   const page = installPage('?id=h1', {
@@ -438,31 +341,40 @@ test('Download All: a folder typed before the late target list arrives is kept, 
   }
 });
 
-test('EXT.B2 Download All: a target list that arrives during a This PC pick does not switch to the server under it', async () => {
+test('EXT.B7 Download All: Browse and Download wait for the target list, so in server mode Browse never opens this PC\'s dialog', async () => {
   const targets = deferred();
-  const pick = deferred();
   let confirmed;
+  const browsed = [];
   const page = await openBatchWindow({
     'dm.targets': () => targets.promise,
-    'dm.pickFolder': () => pick.promise,
+    'dm.pickFolder': async () => assert.fail('the desktop app\'s dialog must not open in server mode'),
+    'dm.browseServerFolders': async message => { browsed.push(message.path); return { ok: true, path: message.path || null, folders: [], roots: ['/downloads'], freeBytes: 2 * 1024 ** 3 }; },
     'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
   });
   try {
-    const picking = page.el('browseDestination').click();
-    // The server is the default target, and its list arrives while the desktop app's dialog is open.
+    const browse = page.el('browseDestination'), confirm = page.el('confirm');
+    assert.equal(browse.disabled, true);
+    assert.equal(confirm.disabled, true);
+    // Even a click that reaches the handlers does nothing yet.
+    await browse.dispatch('click');
+    await confirm.dispatch('click');
+    assert.equal(confirmed, undefined);
+    assert.deepEqual(browsed, []);
+
+    // The server is the default target.
     targets.resolve({ ...BATCH_TARGETS, target: 'server' });
     await tick();
     await tick();
-    pick.resolve({ ok: true, path: 'E:\\Picked' });
-    await picking;
-    assert.equal(page.el('destination').value, 'E:\\Picked');
-    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
-    assert.equal(radios.length, 2, 'the choice is shown once the pick ends');
-    assert.ok(radios.every(radio => !radio.disabled));
-    assert.equal(radios.find(radio => radio.checked)?.value, 'local');
-    await page.el('confirm').click();
-    assert.equal(confirmed.target, 'local', 'a This PC folder is never sent to the server');
-    assert.equal(confirmed.destination, 'E:\\Picked');
+    assert.equal(browse.disabled, false);
+    assert.equal(page.el('destination').value, '/downloads');
+    await browse.click();
+    await tick();
+    assert.equal(browsed[0], '/downloads', 'Browse lists the server\'s folders');
+    assert.equal(page.el('serverFolders').classList.contains('hidden'), false);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(page.el('freeSpace').textContent, '2.00 GB free on the server');
+    await confirm.click();
+    assert.equal(confirmed.target, 'server');
   } finally {
     page.restore();
   }

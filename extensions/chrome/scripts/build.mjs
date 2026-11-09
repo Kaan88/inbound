@@ -10,8 +10,12 @@ const target = targetIndex >= 0 ? process.argv[targetIndex + 1] : "chrome";
 if (target !== "chrome" && target !== "firefox") {
   throw new Error(`Unknown --target ${target}. Use chrome or firefox.`);
 }
-// Chrome and Edge share dist; Firefox gets its own folder, since its manifest differs.
-const dist = path.join(root, target === "firefox" ? "dist-firefox" : "dist");
+// Chrome and Edge share dist; Firefox gets its own folder, since its manifest differs. --outdir builds
+// elsewhere (the tests check a real build without touching dist).
+const outdirIndex = process.argv.indexOf("--outdir");
+const dist = outdirIndex >= 0
+  ? path.resolve(process.argv[outdirIndex + 1])
+  : path.join(root, target === "firefox" ? "dist-firefox" : "dist");
 
 // Firefox's add-on ID. The desktop app and the Firefox native-messaging manifest name the same one
 // (BrowserBridge.FirefoxExtensionId).
@@ -22,13 +26,26 @@ export const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 // writes it, and a release squash puts it on main, so it lists only XPIs already published.
 export const FIREFOX_UPDATE_URL = "https://raw.githubusercontent.com/Kaan88/inbound/main/extensions/firefox-updates.json";
 
+// The Firefox extension pages' CSP (see firefoxManifest): no upgrade-insecure-requests.
+export const FIREFOX_EXTENSION_PAGES_CSP = "script-src 'self'";
+
 const staticFiles = [
   "popup.html",
   "options.html",
   "handoff.html",
   "batch.html",
-  "styles.css",
+  "extension.css",
 ];
+
+// EXT.R8: one look for every frontend. The palette and the component kit are the web UI's files, and theme.js (the
+// theme before the first paint, from localStorage["inbound.theme"]) too; copied as they are, since MV3 allows no
+// inline script and the pages link them by name.
+const webui = path.resolve(root, "..", "..", "webui");
+export const SHARED_FILES = {
+  "tokens.css": path.join(webui, "src", "tokens.css"),
+  "ui-kit.css": path.join(webui, "src", "ui-kit.css"),
+  "theme.js": path.join(webui, "public", "theme.js"),
+};
 
 /**
  * The Firefox manifest from the Chrome one. Firefox runs an event page (background.scripts) where
@@ -43,6 +60,11 @@ export function firefoxManifest(chromeManifest) {
   // EXT.B5: Firefox asks where to save before downloads.onCreated, so there downloads are caught from their
   // response headers (blocking webRequest, which Firefox keeps in MV3). Chrome has onDeterminingFilename.
   manifest.permissions = [...new Set([...(manifest.permissions ?? []), "webRequest", "webRequestBlocking"])];
+  // EXT.B6: Firefox's default CSP for MV3 extension pages adds upgrade-insecure-requests, which turns the
+  // background's fetch to a paired server at http://<LAN address> into https:// (loopback is exempt), so pairing
+  // failed with a bare network error while Chrome and Edge, whose default has no upgrade, paired. This is that
+  // default without the upgrade; scripts stay limited to the extension's own files.
+  manifest.content_security_policy = { extension_pages: FIREFOX_EXTENSION_PAGES_CSP };
   manifest.browser_specific_settings = {
     gecko: {
       id: FIREFOX_EXTENSION_ID,
@@ -64,6 +86,9 @@ export function firefoxManifest(chromeManifest) {
 async function copyStatic() {
   for (const file of staticFiles) {
     await copyFile(path.join(root, file), path.join(dist, file));
+  }
+  for (const [name, source] of Object.entries(SHARED_FILES)) {
+    await copyFile(source, path.join(dist, name));
   }
   for (const size of [16, 32, 48, 128]) {
     await copyFile(path.join(root, "icons", `icon${size}.png`), path.join(dist, "icons", `icon${size}.png`));

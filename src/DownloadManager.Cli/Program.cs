@@ -1273,13 +1273,16 @@ internal static partial class Program
             }
             else
             {
-                Console.WriteLine($"{"ID",-4} {"STATE",-8} {"MAX",4} {"QUOTA",-18}  NAME");
+                // WAITING: the downloads only a "queue start" lets go, the window's "N waiting for Start" (U-WL-1). A
+                // running queue offers Start while that is above 0, a stopped one always.
+                Console.WriteLine($"{"ID",-4} {"STATE",-8} {"MAX",4} {"QUOTA",-18} {"WAITING",7}  NAME");
                 foreach (var queue in settings.Queues.OrderBy(q => q.Order))
                 {
                     var quota = queue.QuotaEnabled
                         ? $"{queue.QuotaBytesUsed / (1024 * 1024)}/{queue.QuotaBytes / (1024 * 1024)}MB/{queue.QuotaWindowHours}h"
                         : "-";
-                    Console.WriteLine($"{queue.Id,-4} {(queue.IsRunning ? "running" : "stopped"),-8} {queue.MaxConcurrentDownloads,4} {quota,-18}  {queue.Name}");
+                    var waiting = QueueCommands.WaitingForStart(queue, snapshot.Jobs);
+                    Console.WriteLine($"{queue.Id,-4} {(queue.IsRunning ? "running" : "stopped"),-8} {queue.MaxConcurrentDownloads,4} {quota,-18} {waiting,7}  {queue.Name}");
                 }
             }
 

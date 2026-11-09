@@ -21,6 +21,40 @@ public sealed partial class MainWindow
     // Which of the shown server's downloads may open a completion window here.
     private readonly RemoteCompletionGate _remoteCompletions = new();
 
+    // Downloads that just finished, waiting a moment so a package gets one window (U-WL-4, U-WR-16).
+    private readonly List<Guid> _finishedBurst = [];
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _burstTimer;
+
+    private void QueueCompletionWindow(Guid jobId)
+    {
+        _finishedBurst.Add(jobId);
+        if (_burstTimer is null)
+        {
+            _burstTimer = DispatcherQueue.CreateTimer();
+            _burstTimer.IsRepeating = false;
+            _burstTimer.Interval = CompletionBurst.Gather;
+            _burstTimer.Tick += (_, _) => OpenCompletionWindows();
+        }
+
+        // From the first finish, not the last: a steady stream still gets its windows.
+        if (!_burstTimer.IsRunning) _burstTimer.Start();
+    }
+
+    private void OpenCompletionWindows()
+    {
+        var finished = _finishedBurst.ToList();
+        _finishedBurst.Clear();
+        var plan = CompletionBurst.Plan(finished, id => PackageOf(id) is { } package
+            ? (package.Id, CompletionBurst.Settled(PackageMembers(package).Select(member => member.State).ToList()))
+            : null);
+        foreach (var window in plan)
+        {
+            if (_connection.IsRemote && !_remoteCompletions.MayOpenWindow(DateTimeOffset.UtcNow)) break;
+            if (window.IsPackage) OpenPackageWindow(window.Id);
+            else OpenDownloadWindow(window.Id);
+        }
+    }
+
     /// <summary>This PC's settings, whichever server is shown.</summary>
     private SettingsDto? LocalSettings => _connection.IsRemote ? _localSettings : _settings ?? _localSettings;
 
@@ -70,7 +104,11 @@ public sealed partial class MainWindow
 
     private void InitializeServers()
     {
-        ServerSwitcherMenu.Opening += (_, _) => FillServerMenu();
+        ServerSwitcherMenu.Opening += (_, _) => FillServerMenu(ServerSwitcherMenu.Items);
+        ToolbarServerMenu.Opening += (_, _) => FillServerMenu(ToolbarServerMenu.Items);
+        ToolbarServerMenu.Opened += (_, _) => FocusServerMenuOnOpen(ToolbarServerMenu);
+        ToolbarServerMenu.Closed += (_, _) => _serverMenuFromKeyboard = false;
+        UpdateServerSwitchers();
         AppWindow.Changed += (sender, args) =>
         {
             if (!args.DidVisibilityChange) return;
@@ -86,28 +124,200 @@ public sealed partial class MainWindow
         }
     }
 
-    private void FillServerMenu()
+    // The shown server's connection since it was shown: up at least once, and its last words when it went down.
+    private bool _shownEverConnected;
+    private string? _shownConnectionError;
+    private ServerBanner _banner = ServerBannerRules.For(ServerTarget.Local, false, false, false, false, null);
+
+    /// <summary>The connection to the shown Host went up or down: the bar above the list, the list and the counts follow.</summary>
+    private void NoteShownConnection(bool connected, string? error)
     {
-        ServerSwitcherMenu.Items.Clear();
-        var shown = _connection.Target;
-        ServerSwitcherMenu.Items.Add(ServerItem("This PC", shown.IsLocal, () => _ = ShowServerAsync(ServerTarget.Local)));
-        foreach (var server in _servers.Load())
+        if (connected)
         {
-            var id = server.Id;
-            ServerSwitcherMenu.Items.Add(ServerItem(server.Name, shown.Id == id, () => _ = ShowSavedServerAsync(id)));
+            _shownEverConnected = true;
+            _shownConnectionError = null;
+        }
+        else if (error is not null) _shownConnectionError = error;
+        UpdateServerBanner();
+    }
+
+    /// <summary>
+    /// The bar above the list (UI.B18, U-WR-1, U-WR-3): which server is shown, with Back to This PC always one click away;
+    /// while it can't be reached, why, what to do, and a dimmed list so rows from before don't look live.
+    /// </summary>
+    private void UpdateServerBanner()
+    {
+        var banner = ServerBannerRules.For(_connection.Target, _connection.IsConnected, _shownEverConnected,
+            _connection.PairingEnded, _connection.StoppedTrying, _shownConnectionError);
+        _banner = banner;
+        ServerBannerBar.Visibility = banner.Visible ? Visibility.Visible : Visibility.Collapsed;
+        if (ServerBannerText.Text != banner.Text)
+        {
+            ServerBannerText.Text = banner.Text;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ServerBannerText, banner.Text.Length == 0 ? "Server shown" : banner.Text);
         }
 
-        ServerSwitcherMenu.Items.Add(new MenuFlyoutSeparator());
+        ServerBannerIcon.Glyph = banner.IsProblem ? "" : "";
+        ServerBannerIcon.Foreground = InboundTheme.Brush(banner.IsProblem ? "InboundStatusFailedBrush" : "InboundIconInfoBrush", RootGrid);
+        ServerBannerButton.Visibility = banner.ActionText is null ? Visibility.Collapsed : Visibility.Visible;
+        ServerBannerButton.Content = banner.ActionText ?? string.Empty;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ServerBannerButton, banner.ActionText is null ? string.Empty : $"{banner.ActionText.TrimEnd('…')} {_connection.Target.Name}");
+        JobsList.Opacity = banner.Stale ? 0.5 : 1;
+        UpdateEmptyText();
+    }
+
+    private void ServerBannerBack_Click(object sender, RoutedEventArgs e) => _ = ShowServerAsync(ServerTarget.Local);
+
+    private void ServerBannerAction_Click(object sender, RoutedEventArgs e)
+    {
+        var target = _connection.Target;
+        switch (_banner.Action)
+        {
+            case ServerBannerAction.Retry:
+                // The saved pairing as it is now, in case it changed in another window.
+                var now = target.Id is { } id ? _servers.Target(id) ?? target : target;
+                _shownConnectionError = null;
+                _connection.Retarget(now);
+                ConnectionText.Text = $"Connecting to {now.Name}…";
+                UpdateServerBanner();
+                break;
+            case ServerBannerAction.PairAgain:
+            case ServerBannerAction.EditServer:
+                if (_servers.Load().FirstOrDefault(server => string.Equals(server.Id, target.Id, StringComparison.OrdinalIgnoreCase)) is { } saved)
+                    _ = PairServerAsync(saved);
+                else _ = ShowServersDialogAsync();
+                break;
+        }
+    }
+
+    private IReadOnlyList<ServerChoice> ServerChoices() => ServerSwitch.Choices(_servers.Load(), _connection.Target.Id);
+
+    /// <summary>The switchers' menus (toolbar, status bar, Tasks > Show Downloads Of): This PC, the saved servers, Servers….</summary>
+    private void FillServerMenu(IList<MenuFlyoutItemBase> items)
+    {
+        items.Clear();
+        foreach (var choice in ServerChoices())
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = choice.Name,
+                IsChecked = choice.IsCurrent,
+                KeyboardAcceleratorTextOverride = choice.ShortcutText ?? string.Empty,
+            };
+            var id = choice.Id;
+            item.PreviewKeyDown += (_, args) => SwitchKeysInMenu(items, args);
+            item.Click += (_, _) =>
+            {
+                // A ToggleMenuFlyoutItem unticks itself when the shown one is chosen again; it stays the shown one.
+                item.IsChecked = true;
+                _ = id is null ? ShowServerAsync(ServerTarget.Local) : ShowSavedServerAsync(id);
+            };
+            items.Add(item);
+        }
+
+        items.Add(new MenuFlyoutSeparator());
+        var add = new MenuFlyoutItem { Text = "Add a Server…" };
+        add.Click += (_, _) => _ = AddServerFromMenuAsync();
+        items.Add(add);
         var manage = new MenuFlyoutItem { Text = "Servers…" };
         manage.Click += (_, _) => _ = ShowServersDialogAsync();
-        ServerSwitcherMenu.Items.Add(manage);
+        items.Add(manage);
+    }
 
-        static MenuFlyoutItem ServerItem(string text, bool current, Action choose)
+    // Ctrl+Shift+O opened the menu: its first item takes the focus, so the arrow keys and Enter work straight away.
+    private bool _serverMenuFromKeyboard;
+
+    /// <summary>Ctrl+Shift+O: opens the toolbar switcher's menu, or closes it when it is open.</summary>
+    private void OpenServerMenuFromKeyboard()
+    {
+        if (ToolbarServerMenu.IsOpen)
         {
-            var item = new ToggleMenuFlyoutItem { Text = text, IsChecked = current };
-            item.Click += (_, _) => choose();
-            return item;
+            ToolbarServerMenu.Hide();
+            return;
         }
+
+        _serverMenuFromKeyboard = true;
+        ToolbarServerMenu.ShowAt(ToolbarServerSwitcher);
+    }
+
+    private void FocusServerMenuOnOpen(MenuFlyout menu)
+    {
+        if (!_serverMenuFromKeyboard) return;
+        _serverMenuFromKeyboard = false;
+        // The current one, or the first: where the arrow keys start from.
+        var items = menu.Items.OfType<MenuFlyoutItem>().ToList();
+        var start = items.OfType<ToggleMenuFlyoutItem>().FirstOrDefault(item => item.IsChecked) ?? items.FirstOrDefault();
+        start?.Focus(FocusState.Keyboard);
+    }
+
+    /// <summary>
+    /// Ctrl+0 to Ctrl+9 inside an open switcher menu. The window's own keys don't reach a menu, which is a popup of its own,
+    /// yet each item shows its key, so the menu handles them too.
+    /// </summary>
+    private void SwitchKeysInMenu(IList<MenuFlyoutItemBase> items, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs args)
+    {
+        var number = args.Key - Windows.System.VirtualKey.Number0;
+        if (number is < 0 or > ServerSwitch.MostNumbered) return;
+        var control = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+        if (!control.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+        args.Handled = true;
+        // Whichever of the three menus holds these items.
+        foreach (var menu in new[] { ToolbarServerMenu, ServerSwitcherMenu })
+            if (ReferenceEquals(menu.Items, items)) menu.Hide();
+        SwitchToNumber(number);
+    }
+
+    private async Task AddServerFromMenuAsync()
+    {
+        try
+        {
+            await PairServerAsync(null);
+        }
+        finally
+        {
+            UpdateServerSwitchers();
+        }
+    }
+
+    /// <summary>Ctrl+0 shows this PC; Ctrl+1 to Ctrl+9 the saved servers in their order.</summary>
+    private void SwitchToNumber(int number)
+    {
+        if (ServerSwitch.ForNumber(ServerChoices(), number) is not { } choice)
+        {
+            ShowPassingStatus($"There is no server {number}. Add one in File > Servers.");
+            return;
+        }
+
+        if (choice.IsCurrent)
+        {
+            ShowPassingStatus($"{choice.Name} is already shown.");
+            return;
+        }
+
+        _ = choice.Id is null ? ShowServerAsync(ServerTarget.Local) : ShowSavedServerAsync(choice.Id);
+    }
+
+    /// <summary>
+    /// Says everywhere which Host the window shows (UI.R26): the toolbar switcher's name and icon, the status-bar
+    /// switcher, the window title, and the Tasks menu's list. Called on every switch and whenever the list changes.
+    /// </summary>
+    private void UpdateServerSwitchers()
+    {
+        var target = _connection.Target;
+        var help = ServerSwitch.SwitcherHelp(target);
+        ToolbarServerLabel.Text = target.Name;
+        ToolbarServerIcon.Glyph = target.IsLocal ? "" : "";
+        var name = ServerNames.SwitcherName(target);
+        ToolTipService.SetToolTip(ToolbarServerSwitcher, help);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ToolbarServerSwitcher, name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ToolbarServerSwitcher, help);
+        ServerSwitcher.Content = target.Name;
+        ToolTipService.SetToolTip(ServerSwitcher, help);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ServerSwitcher, name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ServerSwitcher, help);
+        Title = ServerSwitch.TitleFor(target);
+        FillServerMenu(TasksServersItem.Items);
+        UpdateServerBanner();
     }
 
     private async Task ShowSavedServerAsync(string id)
@@ -135,6 +345,8 @@ public sealed partial class MainWindow
         _statisticsWindow?.Close();
 
         ShownServer.Target = target;
+        // What it said when it was paired, until its own hello and settings say more.
+        if (!target.IsLocal) ShownServer.Describe(_servers.Find(target.Id!)?.HostKind, null);
         if (target.IsLocal)
         {
             _connection = _local;
@@ -153,13 +365,15 @@ public sealed partial class MainWindow
         _jobsById.Clear();
         _packageRows.Clear();
         _remoteCompletions.Clear();
+        _finishedBurst.Clear();
         _groups = new();
         _status = target.IsLocal ? _localStatus : null;
         _settings = target.IsLocal ? _localSettings : null;
         _graphConnected = _connection.IsConnected;
         _graphSnapshotReady = false;
-        ServerSwitcher.Content = target.Name;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ServerSwitcher, $"Showing {target.Name}");
+        _shownEverConnected = _connection.IsConnected;
+        _shownConnectionError = null;
+        UpdateServerSwitchers();
         ConnectionText.Text = target.IsLocal ? "Connecting…" : $"Connecting to {target.Name}…";
         RebuildVisible();
         UpdateStatusText();
@@ -178,7 +392,10 @@ public sealed partial class MainWindow
         try
         {
             ApplyConnection(true, null);
-            ApplySnapshot(await _local.RefreshAsync());
+            var snapshot = await _local.RefreshAsync();
+            // Another switch while this PC's list was read: that one fills the window.
+            if (switchNumber != _switches || _connection != _local) return;
+            ApplySnapshot(snapshot);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
         {
@@ -219,6 +436,18 @@ public sealed partial class MainWindow
 
     private async Task ShowServersDialogAsync()
     {
+        try
+        {
+            await ShowServersDialogLoopAsync();
+        }
+        finally
+        {
+            UpdateServerSwitchers();
+        }
+    }
+
+    private async Task ShowServersDialogLoopAsync()
+    {
         while (true)
         {
             var servers = _servers.Load();
@@ -245,7 +474,7 @@ public sealed partial class MainWindow
             var panel = new StackPanel { Spacing = 10, MinWidth = 460 };
             panel.Children.Add(new TextBlock
             {
-                Text = "Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the button at the left of the status bar.",
+                Text = "Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the switcher at the right of the toolbar or the left of the status bar, Tasks > Show Downloads Of, or Ctrl+0 to Ctrl+9.",
                 TextWrapping = TextWrapping.Wrap,
             });
             panel.Children.Add(servers.Count == 0 ? new TextBlock { Text = "No servers yet.", Opacity = 0.72 } : list);
@@ -368,8 +597,9 @@ public sealed partial class MainWindow
         if (_servers.Target(existing.Id) is { } updated)
         {
             ShownServer.Target = updated;
-            ServerSwitcher.Content = updated.Name;
+            ShownServer.Describe(_servers.Find(existing.Id)?.HostKind ?? _connection.Hello?.HostKind, _settings?.DefaultDownloadDirectory);
             _connection.Retarget(updated);
+            UpdateServerSwitchers();
             await _remote.RetargetAsync(updated);
         }
     }
@@ -453,13 +683,100 @@ public sealed partial class MainWindow
 
     // ---- Options while a server is shown ------------------------------------------------------------------------------
 
-    private Task OpenOptionsAsync() => _connection.IsRemote ? ShowServerOptionsAsync() : ShowSettingsDialogAsync();
+    // Options is being read and built, before its window exists: a second request waits for that one rather than
+    // opening a second window (review of UI.R27). Web UI on This PC… meanwhile asks for its page when it is there.
+    private bool _optionsOpening;
+    private bool _webUiPageWanted;
+    private int _optionsRequests;
+
+    // The Web UI page's place in the Options window that is open, if it has one, for Web UI on This PC… to go to.
+    private int? _settingsWebUiPage;
+
+    private void MenuWebUi_Click(object sender, RoutedEventArgs e) => _ = OpenOptionsAsync(showWebUi: true);
+
+    /// <summary>
+    /// Options, or Web UI on This PC… (UI.R27): Options on its Web UI page, whichever server the window shows. While a
+    /// server is shown that page talks to this PC's Host directly, so turning the web UI on never needs a switch back,
+    /// and it opens even when the server can't be reached.
+    /// </summary>
+    private async Task OpenOptionsAsync(bool showWebUi = false)
+    {
+        if (_settingsWindow is not null)
+        {
+            if (showWebUi)
+            {
+                // Still being built: it goes to the page once the page is there.
+                if (_settingsWebUiPage is { } page) _settingsWindow.ShowPage(page);
+                else _webUiPageWanted = true;
+            }
+
+            _settingsWindow.Activate();
+            return;
+        }
+
+        if (_optionsOpening)
+        {
+            _webUiPageWanted |= showWebUi;
+            return;
+        }
+
+        _optionsOpening = true;
+        _webUiPageWanted = showWebUi;
+        var request = ++_optionsRequests;
+        try
+        {
+            if (_connection.IsRemote) await ShowServerOptionsAsync();
+            else await ShowSettingsDialogAsync();
+        }
+        finally
+        {
+            // Only this request's: a later one may be opening its own window by now.
+            if (request == _optionsRequests)
+            {
+                _optionsOpening = false;
+                _webUiPageWanted = false;
+            }
+        }
+    }
+
+    /// <summary>The Options window is there now: other requests activate it instead of opening another.</summary>
+    private void OptionsWindowCreated(SettingsWindow window)
+    {
+        _settingsWindow = window;
+        _optionsOpening = false;
+        window.Closed += (_, _) =>
+        {
+            if (_settingsWindow == window) _settingsWindow = null;
+            _settingsWebUiPage = null;
+        };
+    }
+
+    /// <summary>The Web UI page is built: Options goes to it if Web UI on This PC… asked for it meanwhile.</summary>
+    private bool WebUiPageReady(SettingsWindow window, int page)
+    {
+        _settingsWebUiPage = page;
+        if (!_webUiPageWanted) return false;
+        _webUiPageWanted = false;
+        window.ShowPage(page);
+        return true;
+    }
+
+    /// <summary>"All of This PC's options…": shows this PC, whose Options has every page, and opens it.</summary>
+    private async Task OpenThisPcOptionsAsync()
+    {
+        _settingsWindow?.Close();
+        await ShowServerAsync(ServerTarget.Local);
+        if (_connection.IsRemote) return;
+        if (_settings is null) await RefreshSettingsAsync();
+        await OpenOptionsAsync();
+    }
 
     /// <summary>
     /// Options while a server is shown (design D9, section 5): this PC's own choices (theme, start at sign-in, clipboard,
     /// browser, updates, what a finished download does here) are read from and saved to this PC's Host; the server's
     /// pages show only what its hello allows, and a save there never changes those choices on the server.
     /// </summary>
+    /// <summary>Opened through <see cref="OpenOptionsAsync"/>, which keeps it to one window.</summary>
     private async Task ShowServerOptionsAsync()
     {
         if (_settingsWindow is not null)
@@ -470,28 +787,35 @@ public sealed partial class MainWindow
 
         var server = _connection;
         var serverName = server.Target.Name;
-        SnapshotDto local, remote;
-        var reading = "This PC's Host";
+        var hostKind = server.Hello?.HostKind;
+        SnapshotDto local;
         try
         {
             local = await _local.RefreshAsync();
-            reading = serverName;
-            remote = await server.RefreshAsync();
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
         {
-            await ShowMessageAsync("Options", ex is InvalidOperationException
-                ? $"{reading} isn't connected yet."
-                : $"{reading}'s options couldn't be read: {(ex is RemoteServerException ? ex.Message : "the connection was lost.")}");
+            await ShowMessageAsync("Options", RemoteOptionsText.ThisPcUnreachable);
             return;
         }
 
-        var pages = RemoteSettingsRules.PagesFor(server.Hello?.Capabilities, server.Hello?.HostKind);
+        // U-WR-4, review of UI.R27: a server that can't be reached still leaves this PC's own pages, Web UI on this PC
+        // among them. Its own pages are left out and say why.
+        SettingsDto? theirs = null;
+        string? unreachable = null;
+        try
+        {
+            theirs = (await server.RefreshAsync()).Settings;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
+        {
+            unreachable = RemoteOptionsText.ServerUnreachable(serverName);
+        }
+
+        var pages = RemoteSettingsRules.PagesFor(server.Hello?.Capabilities, hostKind);
         var mine = local.Settings;
-        var theirs = remote.Settings;
         var window = new SettingsWindow { Title = $"Options — {serverName} — Inbound Download Manager" };
-        _settingsWindow = window;
-        window.Closed += (_, _) => _settingsWindow = null;
+        OptionsWindowCreated(window);
 
         // This PC.
         string[] themeValues = [ThemeChoices.System, ThemeChoices.Light, ThemeChoices.Dark];
@@ -503,7 +827,7 @@ public sealed partial class MainWindow
             SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, mine.Theme))),
         };
         var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = mine.LaunchAtStartup };
-        var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = mine.CloseWindowCompletely };
+        var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = mine.CloseWindowCompletely };
         var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };
         var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = mine.ClipboardMonitoring };
         var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = mine.ShowCompletionDialog };
@@ -512,8 +836,14 @@ public sealed partial class MainWindow
         var updateInterval = SettingsWindow.Number("Check every (hours)", mine.UpdateCheckIntervalHours, 1, 168);
         var sound = new CheckBox { Content = "Play a sound when a download on this PC finishes", IsChecked = mine.PlayCompletionSound };
         var soundEditor = new SoundOptionsEditor(mine.EventSoundFiles, window);
+        // The rest of this PC's options (folders, connection, proxy, its own provider account) are in its own Options.
+        var allThisPc = new Button { Content = "All of This PC's options…" };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(allThisPc, "Shows this PC's downloads and opens its Options");
+        allThisPc.Click += (_, _) => _ = OpenThisPcOptionsAsync();
         window.AddPage("This PC", "",
             SettingsWindow.Hint($"This PC's own choices. They are saved on this PC, whichever server the window shows, and never change {serverName}."),
+            allThisPc,
+            SettingsWindow.Hint("Shows this PC's downloads in the window and opens this PC's Options, with its folders, connection and the rest."),
             SettingsWindow.Section("Startup"), launch,
             SettingsWindow.Section("Window"), themeBox, closeCompletely,
             SettingsWindow.Section("Capturing downloads"), integration, clipboard,
@@ -527,43 +857,55 @@ public sealed partial class MainWindow
         // The server.
         var serverControls = new List<UIElement>
         {
-            SettingsWindow.Hint($"{serverName}'s own options, saved on {serverName}. Anything not shown here is changed in its web UI."),
+            SettingsWindow.Hint(unreachable ?? RemoteOptionsText.ServerPageHint(serverName, hostKind)),
         };
+        // U-WR-13: the rest is in the server's web UI, one click away.
+        if (server.Target.Address is { } webAddress)
+        {
+            var openWeb = new HyperlinkButton { Content = $"Open {serverName}'s web UI", NavigateUri = webAddress, Padding = new Thickness(0, 2, 0, 2) };
+            ToolTipService.SetToolTip(openWeb, webAddress.ToString());
+            serverControls.Add(openWeb);
+        }
+
         TextBox? directory = null;
         CheckBox? useCategoryFolders = null;
-        if (pages.Folders)
-        {
-            var (row, box) = window.FolderField("Default download folder", theirs.DefaultDownloadDirectory);
-            directory = box;
-            useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = theirs.UseCategoryFolders };
-            serverControls.Add(SettingsWindow.Section("Save to"));
-            serverControls.Add(row);
-            serverControls.Add(useCategoryFolders);
-        }
-
-        var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", theirs.MaxConcurrentDownloads, 1, 16);
-        var connections = SettingsWindow.Number("Connections per download", theirs.DefaultConnections, 1, 32);
-        var speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
-            theirs.GlobalSpeedLimitBytesPerSecond is > 0 ? theirs.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null, 1, 10_000_000, "Unlimited");
-        speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
-        serverControls.Add(SettingsWindow.Section("Connection"));
-        serverControls.Add(maxConcurrent);
-        serverControls.Add(connections);
-        serverControls.Add(speedLimit);
-        serverControls.Add(SettingsWindow.Hint("Leave the speed limit empty for unlimited."));
+        NumberBox? maxConcurrent = null, connections = null, speedLimit = null;
         CheckBox? autoResume = null;
-        if (pages.AutoResume)
-        {
-            autoResume = new CheckBox { Content = $"Resume unfinished downloads when {serverName} starts", IsChecked = theirs.AutoResumeUnfinishedOnStartup };
-            serverControls.Add(autoResume);
-        }
-
         TextBox? postDownload = null;
-        if (pages.ProgramSettings)
+        if (theirs is not null)
         {
-            postDownload = new TextBox { Header = $"Run this program on {serverName} after each download (optional)", Text = theirs.PostDownloadCommand ?? string.Empty };
-            serverControls.Add(SettingsWindow.Section("When a download finishes"));
-            serverControls.Add(postDownload);
+            if (pages.Folders)
+            {
+                var (row, box) = window.FolderField("Default download folder", theirs.DefaultDownloadDirectory);
+                directory = box;
+                useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = theirs.UseCategoryFolders };
+                serverControls.Add(SettingsWindow.Section("Save to"));
+                serverControls.Add(row);
+                serverControls.Add(useCategoryFolders);
+            }
+
+            maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", theirs.MaxConcurrentDownloads, 1, 16);
+            connections = SettingsWindow.Number("Connections per download", theirs.DefaultConnections, 1, 32);
+            speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
+                theirs.GlobalSpeedLimitBytesPerSecond is > 0 ? theirs.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null, 1, 10_000_000, "Unlimited");
+            speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
+            serverControls.Add(SettingsWindow.Section("Connection"));
+            serverControls.Add(maxConcurrent);
+            serverControls.Add(connections);
+            serverControls.Add(speedLimit);
+            serverControls.Add(SettingsWindow.Hint("Leave the speed limit empty for unlimited."));
+            if (pages.AutoResume)
+            {
+                autoResume = new CheckBox { Content = $"Resume unfinished downloads when {serverName} starts", IsChecked = theirs.AutoResumeUnfinishedOnStartup };
+                serverControls.Add(autoResume);
+            }
+
+            if (pages.ProgramSettings)
+            {
+                postDownload = new TextBox { Header = $"Run this program on {serverName} after each download (optional)", Text = theirs.PostDownloadCommand ?? string.Empty };
+                serverControls.Add(SettingsWindow.Section("When a download finishes"));
+                serverControls.Add(postDownload);
+            }
         }
 
         window.AddPage(serverName, "", serverControls.ToArray());
@@ -572,30 +914,45 @@ public sealed partial class MainWindow
 
         // The server's provider and extraction pages, through the provider client, which follows the shown server.
         var accountPages = new List<(ProviderAccountPage Page, int Index)>();
-        if (!_remote.State.IsReady) await _remote.WaitUntilReadyAsync(TimeSpan.FromSeconds(1.5));
-        if (_remote.State.RemoteSupported)
+        ExtractionOptionsPage? extraction = null;
+        var extractionPageIndex = nextPage;
+        if (theirs is not null)
         {
-            foreach (var account in _remote.State.Accounts.Where(account => account.Capabilities.Contains("account", StringComparer.OrdinalIgnoreCase)))
+            if (!_remote.State.IsReady) await _remote.WaitUntilReadyAsync(TimeSpan.FromSeconds(1.5));
+            if (_remote.State.RemoteSupported)
             {
-                var page = new ProviderAccountPage(_remote, account);
-                page.KeyBoxEmptied += window.ClearMessage;
-                window.AddPage(page.Title, "", page.Controls);
-                accountPages.Add((page, nextPage++));
+                foreach (var account in _remote.State.Accounts.Where(account => account.Capabilities.Contains("account", StringComparer.OrdinalIgnoreCase)))
+                {
+                    var page = new ProviderAccountPage(_remote, account, serverName, hostKind);
+                    page.KeyBoxEmptied += window.ClearMessage;
+                    window.AddPage(page.Title, "", page.Controls);
+                    accountPages.Add((page, nextPage++));
+                }
+            }
+
+            extractionPageIndex = nextPage;
+            if (_remote.State.ArchivesSupported)
+            {
+                extraction = new ExtractionOptionsPage(_remote, window);
+                window.AddPage("Extraction", "", extraction.Controls);
+                nextPage++;
             }
         }
 
-        ExtractionOptionsPage? extraction = null;
-        var extractionPageIndex = nextPage;
-        if (_remote.State.ArchivesSupported)
-        {
-            extraction = new ExtractionOptionsPage(_remote, window);
-            window.AddPage("Extraction", "", extraction.Controls);
-        }
+        // UI.R27: this PC's web UI, through a client of this PC's Host of its own (the window's follows the server, and
+        // a server never takes webui.* from a paired app). It lets other devices reach this PC, not the server.
+        var localClient = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        var webUi = new WebUiOptionsPage(localClient) { PageIndex = nextPage };
+        window.AddPage("Web UI on this PC", "",
+            [SettingsWindow.Hint($"This PC's own web UI: a browser on another device can control this PC's downloads through it. It doesn't change {serverName}; {serverName}'s web UI is set on {serverName}."),
+             .. webUi.Controls]);
 
         window.Closed += (_, _) =>
         {
             foreach (var (page, _) in accountPages) page.Close();
             extraction?.Close();
+            webUi.Close();
+            _ = localClient.DisposeAsync().AsTask();
         };
 
         static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
@@ -607,17 +964,36 @@ public sealed partial class MainWindow
             }
 
             if (extraction?.Validate() is { } extractionProblem) return (extractionProblem, extractionPageIndex);
+            if (webUi.Validate() is { } webUiProblem) return (webUiProblem, webUi.PageIndex);
             if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168) return ("Update interval must be 1-168 hours.", ThisPcPage);
             var sounds = new Dictionary<string, string>(mine.EventSoundFiles, StringComparer.OrdinalIgnoreCase);
             if (!soundEditor.TryApplyTo(sounds, out var soundError)) return (soundError ?? "Invalid sound choice.", SoundsPage);
-            if (WholeNumber(maxConcurrent) is not { } max || max is < 1 or > 16) return ("Maximum simultaneous downloads must be between 1 and 16.", ServerPage);
-            if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32) return ("Connections per download must be between 1 and 32.", ServerPage);
-            long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
-            if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ServerPage);
+            if (maxConcurrent is not null && connections is not null && speedLimit is not null)
+            {
+                if (WholeNumber(maxConcurrent) is not { } max || max is < 1 or > 16) return ("Maximum simultaneous downloads must be between 1 and 16.", ServerPage);
+                if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32) return ("Connections per download must be between 1 and 32.", ServerPage);
+                long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
+                if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ServerPage);
+                if (await SaveServerSideAsync(max, connectionsValue, limit) is { } serverProblem) return (serverProblem, ServerPage);
+            }
 
-            // The server first: if it doesn't take its settings, nothing is changed anywhere. Only its own fields; this
-            // PC's choices go back to it as it has them.
-            var serverAtSave = (await server.RefreshAsync()).Settings;
+            return await SaveThisPcSideAsync(checkInterval, sounds);
+        };
+
+        // The server first: if it doesn't take its settings, nothing is changed anywhere. Only its own fields; this
+        // PC's choices go back to it as it has them. Null once saved.
+        async Task<string?> SaveServerSideAsync(int max, int connectionsValue, long? limit)
+        {
+            SettingsDto serverAtSave;
+            try
+            {
+                serverAtSave = (await server.RefreshAsync()).Settings;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
+            {
+                return $"Can't reach {serverName} right now, so nothing was saved, on {serverName} or on this PC.";
+            }
+
             var edited = CloneSettings(serverAtSave);
             if (directory is not null) edited.DefaultDownloadDirectory = directory.Text.Trim();
             if (useCategoryFolders is not null) edited.UseCategoryFolders = useCategoryFolders.IsChecked == true;
@@ -627,15 +1003,29 @@ public sealed partial class MainWindow
             if (autoResume is not null) edited.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
             if (postDownload is not null) edited.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text) ? null : postDownload.Text.Trim();
             RemoteSettingsRules.KeepServerValues(edited, serverAtSave);
-            var serverResult = (await server.UpdateSettingsAsync(edited)).GetPayload<SettingsResult>();
-            if (!serverResult.Ok) return ($"{serverResult.Error ?? $"{serverName} didn't take the settings."} Nothing was saved, on {serverName} or on this PC.", ServerPage);
+            SettingsResult serverResult;
+            try
+            {
+                serverResult = (await server.UpdateSettingsAsync(edited)).GetPayload<SettingsResult>();
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
+            {
+                return $"The connection to {serverName} was lost while saving, so its options may not have been saved. Nothing was saved on this PC.";
+            }
+
+            if (!serverResult.Ok) return $"{serverResult.Error ?? $"{serverName} didn't take the settings."} Nothing was saved, on {serverName} or on this PC.";
             if (server == _connection)
             {
                 _settings = serverResult.Settings;
                 UpdateLimitButtons();
             }
 
-            // Then this PC: from its latest settings, so nothing changed elsewhere meanwhile is undone.
+            return null;
+        }
+
+        // Then this PC: from its latest settings, so nothing changed elsewhere meanwhile is undone.
+        async Task<(string?, int)> SaveThisPcSideAsync(int checkInterval, Dictionary<string, string> sounds)
+        {
             string? thisPcProblem = null;
             try
             {
@@ -671,12 +1061,19 @@ public sealed partial class MainWindow
             }
 
             if (thisPcProblem is not null)
-                return ($"{serverName}'s options were saved, but this PC's weren't: {thisPcProblem}", ThisPcPage);
+                return (theirs is null ? $"This PC's options weren't saved: {thisPcProblem}" : $"{serverName}'s options were saved, but this PC's weren't: {thisPcProblem}", ThisPcPage);
 
             var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
+            var webUiSaveProblem = await webUi.SaveAsync();
+            // Neither problem is dropped: both are said, and the window shows the page of the first.
+            if (webUiSaveProblem is not null && extractionSaveProblem is not null)
+                return ($"{extractionSaveProblem} {webUiSaveProblem}", extractionPageIndex);
+            if (webUiSaveProblem is not null) return (webUiSaveProblem, webUi.PageIndex);
             return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
-        };
+        }
 
+        // Unreachable: the server's page, which says so, unless Web UI on This PC… asked for its page.
+        if (!WebUiPageReady(window, webUi.PageIndex) && unreachable is not null) window.ShowPage(ServerPage);
         window.Activate();
         await window.WaitClosedAsync();
     }

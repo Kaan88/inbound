@@ -1,0 +1,65 @@
+{
+  "_comment": "Invented data for scripts/store-screens.mjs and the render tests: no real hosts, cookies or paths of anyone's. The same file names are used in the desktop capture.",
+  "server": { "address": "http://home-server:8080", "name": "Chrome on Windows", "pairedAt": 1794200000000, "connected": true, "lastError": "" },
+  "settings": {
+    "enabled": true, "autoIntercept": true, "startMode": "now", "destinationMode": "default", "defaultTarget": "local",
+    "interceptedExtensions": [], "excludedExtensions": ["htm", "html", "xhtml", "mht", "mhtml", "php", "asp", "aspx", "jsp", "js", "css", "json", "xml", "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "svg", "avif"],
+    "excludedHosts": [], "notifications": true, "theme": "system", "rulesVersion": 2
+  },
+  "jobs": [
+    {
+      "id": "6f1c2a10-0000-4000-8000-000000000001", "target": "local", "fileName": "linux-desktop-24.04-amd64.iso", "state": "downloading",
+      "receivedBytes": 3328599654, "totalBytes": 5368709120, "progress": 0.62, "bytesPerSecond": 19293798, "estimatedRemaining": "00:01:45",
+      "createdAt": "2026-11-09T09:58:00Z", "canPause": true, "canResume": false, "startMode": "startNow"
+    },
+    {
+      "id": "6f1c2a10-0000-4000-8000-000000000002", "target": "local", "fileName": "project-assets.part2.bin", "state": "paused",
+      "receivedBytes": 429496730, "totalBytes": 1073741824, "progress": 0.4, "createdAt": "2026-11-09T09:57:00Z",
+      "canPause": false, "canResume": true, "startMode": "startNow"
+    },
+    {
+      "id": "6f1c2a10-0000-4000-8000-000000000004", "target": "local", "fileName": "installer-2.4.1.exe", "state": "failed",
+      "receivedBytes": 0, "failure": { "message": "HTTP 403 Forbidden" }, "createdAt": "2026-11-09T09:55:00Z",
+      "canPause": false, "canResume": true, "startMode": "startNow"
+    },
+    {
+      "id": "6f1c2a10-0000-4000-8000-000000000003", "target": "server", "fileName": "project-assets.part1.bin", "state": "completed",
+      "receivedBytes": 1073741824, "totalBytes": 1073741824, "progress": 1, "createdAt": "2026-11-09T09:56:00Z",
+      "canPause": false, "canResume": false, "startMode": "startNow"
+    }
+  ],
+  "targets": [
+    { "id": "local", "label": "This PC", "chooser": "dialog", "defaultFolder": "D:\\Downloads\\Software",
+      "favorites": [{ "name": "Games", "path": "D:\\Games" }, { "name": "ISOs", "path": "E:\\ISOs" }] },
+    { "id": "server", "label": "Server", "chooser": "list", "address": "http://home-server:8080", "defaultFolder": "/downloads",
+      "favorites": [{ "name": "Movies", "path": "/downloads/movies" }] }
+  ],
+  "ask": [
+    { "id": "ask-1", "fileName": "project-assets.part1.bin", "url": "https://downloads.example.com/files/project-assets.part1.bin", "totalBytes": 1073741824 },
+    { "id": "ask-2", "fileName": "project-assets.part2.bin", "url": "https://downloads.example.com/files/project-assets.part2.bin", "totalBytes": 1073741824 }
+  ],
+  "handoff": {
+    "id": "ask-1", "url": "https://downloads.example.com/files/project-assets.part1.bin", "pageUrl": "https://downloads.example.com/",
+    "suggestedFileName": "project-assets.part1.bin"
+  },
+  "page": {
+    "pageUrl": "https://downloads.example.com/", "pageTitle": "Example downloads page",
+    "links": [
+      { "url": "https://downloads.example.com/files/project-assets.part1.bin", "text": "project-assets.part1.bin", "kind": "file", "extension": "bin", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/files/project-assets.part2.bin", "text": "project-assets.part2.bin", "kind": "file", "extension": "bin", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/files/linux-desktop-24.04-amd64.iso", "text": "linux-desktop-24.04-amd64.iso", "kind": "file", "extension": "iso", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/files/installer-2.4.1.exe", "text": "installer-2.4.1.exe", "kind": "file", "extension": "exe", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/release-notes.html", "text": "release-notes.html", "kind": "page", "extension": "html", "host": "downloads.example.com" },
+      { "url": "https://mirror.example.net/mirrors", "text": "Mirror list", "kind": "link", "extension": "", "host": "mirror.example.net" }
+    ]
+  },
+  "serverFolders": {
+    "": { "ok": true, "path": null, "parent": null, "roots": ["/downloads"], "folders": [], "freeBytes": null },
+    "/downloads": { "ok": true, "path": "/downloads", "parent": null, "roots": ["/downloads"], "freeBytes": 28883734528,
+      "folders": [{ "name": "movies", "path": "/downloads/movies" }, { "name": "music", "path": "/downloads/music" }, { "name": "software", "path": "/downloads/software" }] }
+  },
+  "leftInBrowser": [
+    { "fileName": "report-2026.pdf", "reason": "The site isn't one the extension may read, so its cookies can't be sent.", "at": 0 },
+    { "fileName": "photo.jpg", "reason": "Images are on the never-catch list.", "at": 0 }
+  ]
+}

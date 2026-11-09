@@ -3,7 +3,7 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
-import { bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { bytes, dateTime, duration, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
@@ -45,26 +45,15 @@ export function statusWords(job: Job): string {
   return stateWord(job.state);
 }
 
-/** The Time left column: "1h 5m", "3m 20s", "45s"; blank when there is no estimate. */
+/** The Time left column: "1h 5m", "3m 20s", "45s"; blank when there is no estimate (format.duration, the desktop's words). */
 export function timeLeft(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return '';
-  const total = Math.floor(seconds);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-  if (hours >= 1) return `${hours}h ${minutes}m`;
-  return minutes >= 1 ? `${minutes}m ${rest}s` : `${Math.max(1, rest)}s`;
+  return duration(seconds);
 }
 
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** The Last Try Date column, "Nov 09 14:03:22 2026" in the viewer's time zone. */
 export function lastTryText(value: string | number | Date | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000) return '';
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${months[date.getMonth()]} ${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${date.getFullYear()}`;
+  return dateTime(value);
 }
 
 /** The queue's number as the Q column shows it; empty when the download is not in a queue. */
@@ -221,7 +210,29 @@ export function planFileMenu(singleFile: boolean, packageRow: boolean, sideRows:
 }
 
 export function menuLabel(text: string, reason: string | null): string {
-  return reason === null ? text : `${text} (${reason})`;
+  // With nothing selected the greyed item says nothing more (owner, 2026-11-09).
+  return reason === null || reason === 'select a download first' ? text : `${text} (${reason})`;
+}
+
+export interface FileCommand { label: string; enabled: boolean; hidden: boolean }
+
+/**
+ * The desktop row menu's file commands the web menu lacked (U-WU-10): Move/Rename… for one finished file, Redownload and
+ * Refresh Download Address… for one file (not a provider's), Change Category… for any downloads. The reasons are the
+ * same words as the other entries.
+ */
+export function fileCommands(
+  single: Pick<Job, 'state' | 'url' | 'isRemote'> | null,
+  plan: FileMenuPlan,
+  files: number,
+): { move: FileCommand; redownload: FileCommand; refresh: FileCommand; category: FileCommand } {
+  const providers = !!single && (single.isRemote === true || single.url.toLowerCase().startsWith('remote://'));
+  return {
+    move: { label: menuLabel('Move/Rename…', plan.openReason), enabled: plan.openReason === null && single?.state === 'completed', hidden: false },
+    redownload: { label: menuLabel('Redownload', plan.fileReason), enabled: plan.fileReason === null, hidden: false },
+    refresh: { label: menuLabel('Refresh Download Address…', plan.fileReason), enabled: plan.fileReason === null && !providers, hidden: providers },
+    category: { label: 'Change Category…', enabled: files > 0, hidden: false },
+  };
 }
 
 /** Grouping takes two files or more, in two rows or more. */
@@ -247,14 +258,35 @@ export function nothingToDelete(count: number): string {
     : 'Their archives were removed after extraction, so no files are deleted.';
 }
 
+export const mixedDeleteNote = 'Unfinished downloads always lose their partial data; the box decides only the finished files.';
+
+/**
+ * UI.B19: what Delete sends as deleteFile for one download. An unfinished one has only partial data, which nothing can
+ * use once it is off the list, so it always goes, whatever the box says, as when it is deleted alone. The box
+ * ("Delete from disk") decides only a finished file.
+ */
+export function deleteFileFor(job: Job, deleteFinishedFiles: boolean): boolean {
+  return job.state !== 'completed' || deleteFinishedFiles;
+}
+
+/** The selection split by what {@link deleteFileFor} sends, as one remove each: data going first, then files kept. */
+export function deleteBatches(jobs: readonly Job[], deleteFinishedFiles: boolean): { ids: string[]; deleteFile: boolean }[] {
+  const withData = jobs.filter((job) => deleteFileFor(job, deleteFinishedFiles)).map((job) => job.id);
+  const keepFile = jobs.filter((job) => !deleteFileFor(job, deleteFinishedFiles)).map((job) => job.id);
+  return [{ ids: withData, deleteFile: true }, { ids: keepFile, deleteFile: false }].filter((batch) => batch.ids.length > 0);
+}
+
 /** The Delete dialog: its title and words, and whether a finished file is there to delete. */
 export function deletePlan(jobs: readonly Job[]): DeletePlan {
   const anyCompleted = jobs.some((job) => job.state === 'completed' && !job.fileRemovedAfterExtraction);
+  const anyUnfinished = jobs.some((job) => job.state !== 'completed');
   const noFilesLeft = jobs.length > 0 && jobs.every((job) => job.fileRemovedAfterExtraction);
   const question = jobs.length === 1 ? `Remove '${jobs[0].fileName}' from the list?` : `Remove ${jobs.length} downloads from the list?`;
   return {
     title: jobs.length === 1 ? 'Delete download?' : `Delete ${jobs.length} downloads?`,
-    text: noFilesLeft ? `${question} ${nothingToDelete(jobs.length)}` : anyCompleted ? question : `${question} Partial data is always removed.`,
+    text: noFilesLeft ? `${question} ${nothingToDelete(jobs.length)}`
+      : anyCompleted ? (anyUnfinished ? `${question} ${mixedDeleteNote}` : question)
+      : `${question} Partial data is always removed.`,
     offerFiles: anyCompleted,
     deleteFile: !anyCompleted && !noFilesLeft,
   };
@@ -569,7 +601,7 @@ export function countJobs(jobs: readonly Job[]): ListCounts {
 }
 
 export function statusBarText(counts: ListCounts, selected: number): string {
-  let text = `${counts.total} downloads · ${counts.active} active · ${counts.queued} queued`;
+  let text = `${counts.total} download${counts.total === 1 ? '' : 's'} · ${counts.active} active · ${counts.queued} queued`;
   if (counts.retrying > 0) text += ` · ${counts.retrying} retrying`;
   if (selected > 1) text += `  (${selected} selected)`;
   return text;
@@ -710,32 +742,81 @@ export function speedLimitLabel(bytesPerSecond: number): string {
 
 // ---- The speed graph ----
 
-/** The speed history: one sample a second, with gaps (null) while the server is not reachable. */
+/** What the graph draws: the newest ten minutes of the history, one sample a second. */
+export const speedGraphWindow = 600;
+
+/** The speed history: one sample a second, with gaps (null) while the server is not reachable. Keeps the Host's full hour. */
 export class SpeedHistory {
   samples: (number | null)[] = [];
-  constructor(readonly limit = 600) {}
+  /** The Unix second the newest sample was taken in. */
+  private newestSecond = 0;
+  constructor(readonly limit = 3600) {}
 
-  add(rate: number | null): void {
+  add(rate: number | null, second = Math.floor(Date.now() / 1000)): void {
     this.samples.push(rate === null ? null : Math.max(0, rate));
+    this.newestSecond = second;
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
   /**
-   * The server's own figures (speed.history, one a second, the last the second under way), put before what this page
-   * sampled since it opened. As many of the server's newest are left out as were sampled here, so no second shows twice.
+   * Takes the server's own figures (speed.history, one a second, the last the second under way) in place of what this page
+   * sampled, which may hold gaps from a hidden tab or a lost connection. `start` is the time of the first figure. The
+   * newest second this page sampled stays at the end for the second under way, but only when it is that second or later,
+   * so no second shows twice; otherwise, or when this page has a gap there, the server's own last figure ends the line.
    */
-  seed(serverSamples: readonly number[]): void {
-    const finished = serverSamples.slice(0, -1);
-    const older = finished.slice(0, Math.max(0, finished.length - this.samples.length));
-    this.samples = [...older.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0)), ...this.samples];
+  replace(serverSamples: readonly number[], start?: string): void {
+    const clean = serverSamples.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0));
+    if (clean.length === 0) return;
+    const finished = clean.slice(0, -1);
+    const tail = this.samples[this.samples.length - 1] ?? null;
+    const first = start === undefined ? Number.NaN : Date.parse(start) / 1000;
+    const underWay = Math.floor(first) + clean.length - 1;
+    const keepLocal = tail !== null && Number.isFinite(underWay) && this.newestSecond >= underWay;
+    this.samples = [...finished, keepLocal ? tail : clean[clean.length - 1]];
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
-  peak(): number {
+  /** The newest `count` samples, which is all the graph has room for. */
+  recent(count = speedGraphWindow): (number | null)[] {
+    return this.samples.length > count ? this.samples.slice(-count) : this.samples;
+  }
+
+  /** The highest rate among the newest `count` samples. */
+  peak(count = speedGraphWindow): number {
     let peak = 0;
-    for (const sample of this.samples) if (sample !== null && sample > peak) peak = sample;
+    for (const sample of this.recent(count)) if (sample !== null && sample > peak) peak = sample;
     return peak;
   }
+}
+
+/** What is under the pointer on the speed graph; rate is null for a gap. */
+export interface GraphHover {
+  index: number;
+  rate: number | null;
+  /** Seconds before the newest sample. */
+  age: number;
+}
+
+/**
+ * The sample nearest the pointer. x is in the graph's own units (0 to width); the newest sample is at the right edge and
+ * the line starts where the history does, as it is drawn. Null when the pointer is left of the first sample.
+ */
+export function hoverPoint(samples: readonly (number | null)[], x: number, width = 600, windowSize = speedGraphWindow): GraphHover | null {
+  if (samples.length === 0 || !Number.isFinite(x)) return null;
+  const step = width / (windowSize - 1);
+  const offset = width - (samples.length - 1) * step;
+  const index = Math.round((x - offset) / step);
+  if (index < 0 && (x - offset) / step < -0.5) return null;
+  const at = Math.min(samples.length - 1, Math.max(0, index));
+  return { index: at, rate: samples[at], age: samples.length - 1 - at };
+}
+
+/** How long before the newest sample, as the desktop graph says it. */
+export function agoText(seconds: number): string {
+  if (seconds < 1.5) return 'now';
+  if (seconds < 60) return `${Math.round(seconds)} s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${String(Math.floor(seconds % 60)).padStart(2, '0')} s ago`;
+  return `${Math.floor(seconds / 3600)} h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')} min ago`;
 }
 
 /**
@@ -748,6 +829,21 @@ export function speedSample(jobs: readonly Job[], connected: boolean, ready: boo
   for (const job of jobs) {
     if (!activeStates.includes(job.state)) continue;
     if (now - ms(job.updatedAt) > 10_000) continue;
+    const r = job.bytesPerSecond ?? 0;
+    if (Number.isFinite(r) && r > 0) sum += r;
+  }
+  return sum;
+}
+
+/**
+ * The total the status bar and the speed graph's label show (U-WU-14): the rates the rows show, added up, so the three
+ * places never disagree. Null while the server can't be reached.
+ */
+export function liveSpeed(jobs: readonly Job[], connected: boolean, ready: boolean): number | null {
+  if (!connected || !ready) return null;
+  let sum = 0;
+  for (const job of jobs) {
+    if (!activeStates.includes(job.state)) continue;
     const r = job.bytesPerSecond ?? 0;
     if (Number.isFinite(r) && r > 0) sum += r;
   }

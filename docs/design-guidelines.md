@@ -10,8 +10,10 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 | Token | Use | Dark | Light |
 |---|---|---|---|
-| `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar | `#202020` | `#F3F3F3` |
-| `InboundSurfaceBrush` | window/page background, download list, dialog bodies | `#181818` | `#FFFFFF` |
+| `InboundWindowBrush` | every window's root: transparent, so the Mica backdrop shows; solid where Mica isn't available | Transparent (fallback `#202020`) | Transparent (fallback `#F3F3F3`) |
+| `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar: a faint layer over Mica | `#08FFFFFF` | `#80FFFFFF` |
+| `InboundSurfaceBrush` | the download list and other lists, opaque for reading; popups drawn over a plot | `#181818` | `#FFFFFF` |
+| `InboundCardBrush` / `InboundCardStrokeBrush` | cards, tiles and framed lists on the frosted window, with a 1px edge, radius 8 | `#0DFFFFFF` / `#14FFFFFF` | `#B3FFFFFF` / `#13000000` |
 | `InboundDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
 | `InboundSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
 | `InboundProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
@@ -33,8 +35,16 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
   and with Windows, and use `InboundSurfaceBrush` for the background. Do not read
   the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
-  `Content`. It sets the app icon and a title bar matching `InboundChromeBrush`,
-  so a dark window never sits under a white caption.
+  `Content`. It sets the app icon, a Mica backdrop (`MicaBackdrop`, Windows 11) behind a transparent root
+  (`InboundWindowBrush`; a root with no background gets it), and a title bar in the solid color under Mica
+  (`#202020` / `#F3F3F3`), so the caption meets the frosted body. Where Mica isn't supported (Windows 10),
+  `App` makes `InboundWindowBrush` that same solid color before any window opens, so nothing is see-through.
+- The look is frosted: the window is Mica, chrome is a faint translucent layer, and cards and tiles are
+  translucent white (dark) or white (light) with a thin translucent edge. Only what is read closely stays
+  opaque: the download list and other lists (`InboundSurfaceBrush`). Buttons and text boxes keep the WinUI
+  defaults, which are already the matching translucent Fluent fills. No gradients drawn by the app, and
+  no Acrylic. Text keeps 4.5:1 or better: the secondary and status colors are checked on the opaque surface,
+  and Mica is at least as dark (dark) or as light (light) as the fallback color.
 
 ## 2. Status colors
 
@@ -63,7 +73,7 @@ the provider, Direct provider link, Ordinary link, Unsupported, Can't tell. A li
 only its host and its position in the list, never its address. A hoster link has no control that sends it
 anywhere but the provider. A link nobody could classify gets a retry, and a direct download only by a box
 ticked for that line. Whether something is cached is known only after it is added, so the approval to fetch
-what isn't cached comes in a second step, unticked, and closing that step loses nothing. Import JD Container
+what isn't cached comes in a second step, unticked, and closing that step loses nothing. Import Link Container
 follows the same rules with the same words. Its list is virtualized, because a container can hold 5000 links, so a
 link password is entered from the download list rather than from a row.
 
@@ -84,12 +94,26 @@ default window width. With one remote or archive row selected, the status bar sa
   `InboundTheme.Styled(new ProgressBar { ... })`.
 - In the list, the bar sits under the status text inside the 140px Status
   column. Show it only while a job is active or paused with progress above 0.
-- The progress dialog has one main bar, `SegmentMapBar` (14px, radius 2). It
+- The progress window (UI.R29, direction B) has a header (the file's icon on a tile, its name, where it
+  comes from, a state chip in the status color) and a `SelectorBar`: Overview, Connections (n), Options.
+  Overview puts a determinate 124px `ProgressRing` (blue running, amber paused, red failed, green with a check
+  when done) beside four tiles, then a card holding the main window's `DownloadSpeedGraph` for this job only
+  (1 minute by default, the same periods, scale, labels and hover), a thin
+  6px segment map and the address, folder and resume facts. A failure opens an `InfoBar` with the reason
+  first. Connections and Options start with a one-line summary (percent, bar, speed and time left).
+  Completed hides the tabs and makes Open the primary button. Delete stays a labelled button. Tiles and cards use `InboundCardBrush` with an
+  `InboundCardStrokeBrush` edge, radius 8.
+- That graph samples the job updates the window already receives and never asks the Host for anything.
+- `DownloadSpeedGraph` scrolls smoothly: between samples its line slides left at the speed time passes (one
+  composition animation of a transform, at most 2 s), and the next sample redraws from there. It stops while
+  the graph can't be seen and when Windows animations are off. The main window's graph does the same.
+- The Connections tab keeps `SegmentMapBar` (14px, radius 2). It
   draws every segment's completed bytes at its real offset, with a divider at
   each segment start. The plain indeterminate bar appears only
-  while the size is unknown. Don't add a second overall bar.
-- The segment table has the columns N. | Progress (6px bar) | Downloaded |
-  Speed | Info. Its values come from the live stream position
+  while the size is unknown.
+- The segment table has the columns N. | Range | Progress (6px bar) | Downloaded |
+  Speed | State. State is only what the Host reports: Receiving, Done, Paused or Waiting; per-connection
+  retries aren't reported, so the download's own retry count shows on the Overview instead. Its values come from the live stream position
   (`RangeStart - Start + ReceivedBytes`), merged with the saved checkpoint and
   kept at a high-water mark, so numbers never move backwards between
   refreshes. Per-segment speeds are smoothed (EMA 0.25) because raw per-stream rates sawtooth.
@@ -140,7 +164,10 @@ default window width. With one remote or archive row selected, the status bar sa
   a gray box.
 - Groups, separated by `InboundToolSeparatorStyle`: Add URL | Resume, Stop,
   Stop All | Delete, Delete Completed | Options, Scheduler | Start Queue,
-  Stop Queue.
+  Stop Queue. A button that only some selections have, such as Cancel Package,
+  goes in a group of its own at the end, so showing it moves no other button.
+- The main window can't be made smaller than 1000x560, where the whole toolbar fits; Cancel Package, when it shows,
+  can scroll the toolbar sideways, and the list scrolls sideways for its columns.
 - Icons are outline glyphs colored with the `InboundIcon*Brush` tokens: start
   green, pause/stop amber, delete red, add/scheduler blue, settings neutral.
   Stop (keeps partial data) uses the pause glyph; Stop All and Stop Queue use
@@ -201,10 +228,30 @@ The browser front end (`webui/`) follows the same rules with web tools:
   is kept per browser.
 - **Status colors and bars** are the desktop's: the state's color on the status text, a 6 px bar under it while a
   download is active or paused with progress, a moving bar when the size is unknown.
-- **Layout:** header, sidebar of views with counts, toolbar (icon over label; icons alone below 768 px, the words kept
-  for screen readers), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
-  lines per download on a phone. The sidebar becomes a drawer below 768 px; dialogs fill the screen on a phone.
+- **Layout:** header, sidebar of views with counts, toolbar (icon over label, smaller below 768 px; the bar never
+  scrolls sideways: the buttons that don't fit go into More, least needed first), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
+  lines per download on a phone. The sidebar becomes a drawer below 768 px, with its own close button; dialogs fill
+  the screen on a phone, and Back closes them. On a touch screen every target is at least 40 px each way.
 - **Icons:** our own outline glyphs on a 24-unit grid (`Icon.svelte`), colored with the icon tokens.
 - **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
   themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look
   at the pictures, as with the desktop captures above.
+
+## 9. The browser extension (EXT.R8)
+
+- **One look.** The extension's build copies the web UI's `webui/src/tokens.css` (the palette, equal to `App.xaml`),
+  `webui/src/ui-kit.css` (buttons, fields, notices, the 6 px bar, menus, dialogs, the segmented control) and
+  `webui/public/theme.js`. Its own `extensions/chrome/extension.css` holds layout only and names no colour.
+  `tests/tokens-parity.test.cjs` keeps the tokens equal to `App.xaml` and checks the contrast pairs.
+- **Shared code.** Words and numbers come from `webui/src/lib/format.ts` (time left as the desktop writes it, `1m 45s`),
+  glyphs from `webui/src/lib/icons.ts`, with file-kind glyphs grouped as the desktop list's.
+- **Popup anatomy** (380 wide, up to 600 tall, fixed px only): a 40 px header of icon buttons, notices only when there
+  is something to say, one list that alone scrolls with 56 px rows (name and size, status line, a reserved bar slot) and
+  at most two buttons each, group rows This PC / `<server> (server)` when a server is paired, and a 24 px status bar with
+  Send to, the counts and the connection. Rows are keyed and updated in place. Delete is a dialog over the list.
+- **Save forms.** The right-click window, the popup's ask view and Add links share `src/ui/save-form.ts`: Send to,
+  Destination folder with the target's favorites and Browse…, the server's folder panel. Start download and Download
+  later send this download only; Options > Default start picks the primary one.
+- **Options** is the desktop's Options window: pages on the left, OK / Cancel / Apply, only changed settings saved.
+- **Store images** are made by `extensions/chrome/scripts/store-screens.mjs` from the real pages (see
+  `docs/chrome-store/LISTING.md`), never by hand.

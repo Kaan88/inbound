@@ -3,8 +3,8 @@
     x:Class="DownloadManager.Desktop.WinUI.JobDetailsPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel Spacing="8">
-        <Grid ColumnSpacing="12" RowSpacing="4">
+    <StackPanel x:Name="Body" Spacing="8">
+        <Grid x:Name="Figures" ColumnSpacing="12" RowSpacing="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="130" />
                 <ColumnDefinition Width="*" />
@@ -19,7 +19,8 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock Text="Status" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="StatusValue" Grid.Column="1" Text="Connecting…" TextTrimming="CharacterEllipsis" />
+            <!-- U-WL-16: every value on the same right edge as the counters below. -->
+            <TextBlock x:Name="StatusValue" Grid.Column="1" Text="Connecting…" TextTrimming="CharacterEllipsis" Style="{StaticResource InboundCounterValueStyle}" />
             <TextBlock Grid.Row="1" Text="File size" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <!-- UI.R6: the live values share one right edge, a fixed distance in, so their units hold still as digits are added. -->
             <TextBlock x:Name="SizeValue" Grid.Row="1" Grid.Column="1" Text="Unknown" Style="{StaticResource InboundCounterValueStyle}" />
@@ -32,14 +33,13 @@
             <TextBlock Grid.Row="4" Text="Time left" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock x:Name="TimeLeftValue" Grid.Row="4" Grid.Column="1" Text="—" Style="{StaticResource InboundCounterValueStyle}" />
             <TextBlock Grid.Row="5" Text="Resume capability" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" />
+            <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" Style="{StaticResource InboundCounterValueStyle}" />
             <TextBlock x:Name="SavePathLabel" Grid.Row="6" Text="Save to" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock x:Name="SavePathValue" Grid.Row="6" Grid.Column="1" Visibility="Collapsed" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
         </Grid>
         <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="False" HorizontalContentAlignment="Stretch"
                   HorizontalAlignment="Stretch">
-            <StackPanel Spacing="7">
-                <StackPanel x:Name="Segments" Spacing="2" HorizontalAlignment="Stretch" />
+            <StackPanel x:Name="ExpanderBody" Spacing="7">
             </StackPanel>
         </Expander>
     </StackPanel>
