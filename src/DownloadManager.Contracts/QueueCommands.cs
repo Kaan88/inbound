@@ -1,13 +1,12 @@
-using DownloadManager.Contracts;
-
-namespace DownloadManager.Desktop.WinUI;
+namespace DownloadManager.Contracts;
 
 /// <summary>
 /// When a queue's Start and Stop are offered, and how its state reads, kept free of WinUI so they can be tested. A
 /// running queue still waits for Start before its "later" downloads, and before the ones its stop, a move or an exit
 /// paused, go (U-WL-1); the Host's queue start takes the same ones (U-WL-2). A download the user paused is not one.
+/// The window and the CLI use it; the web UI has the same rule in <c>webui/src/lib/queues.ts</c>.
 /// </summary>
-internal static class QueueCommands
+public static class QueueCommands
 {
     /// <summary>The downloads of this queue that only a Start lets go.</summary>
     public static int WaitingForStart(QueueDto queue, IEnumerable<JobDto> jobs)
