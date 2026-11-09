@@ -12,6 +12,13 @@
             <!-- Single Inbound palette: every window/control resolves colors from here so dark and light stay consistent. -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
+                    <!-- Selected list items: WinUI 3's subtle fills and primary text, per theme (Uno falls back to others). -->
+                    <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
+                    <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
+                    <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelectedPressed" ResourceKey="TextFillColorPrimaryBrush" />
                     <!-- Mica shows through the window itself (InboundWindowBrush). App.xaml.cs makes it solid where Mica isn't
                          available. Chrome is a faint layer over it; the surface under lists stays opaque for reading. -->
                     <SolidColorBrush x:Key="InboundWindowBrush" Color="Transparent" />
@@ -44,6 +51,13 @@
                     <AcrylicBrush x:Key="InboundDrawerBrush" TintColor="#202020" TintOpacity="0.7" TintLuminosityOpacity="0.85" FallbackColor="#202020" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
+                    <!-- Selected list items: WinUI 3's subtle fills and primary text, per theme (Uno falls back to others). -->
+                    <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
+                    <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
+                    <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                    <StaticResource x:Key="ListViewItemForegroundSelectedPressed" ResourceKey="TextFillColorPrimaryBrush" />
                     <!-- UI.B21: light Mica takes the wallpaper's hue strongly (a teal cast beside the white lists), so light
                          windows lay an 85% veil of Mica's own neutral grey over it: still frosted, but neutral like dark. -->
                     <SolidColorBrush x:Key="InboundWindowBrush" Color="#D9F3F3F3" />
@@ -74,14 +88,6 @@
                     <AcrylicBrush x:Key="InboundDrawerBrush" TintColor="#F3F3F3" TintOpacity="0.7" TintLuminosityOpacity="0.85" FallbackColor="#F3F3F3" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
-            <!-- Selected rows: WinUI 3's own subtle fills (with its accent pill), set by name because Uno falls back to the
-                 older accent-blue fill. -->
-            <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
-            <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
-            <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
-            <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
-            <StaticResource x:Key="ListViewItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
-            <StaticResource x:Key="ListViewItemForegroundSelectedPressed" ResourceKey="TextFillColorPrimaryBrush" />
 
             <!-- Inbound blue replaces the user's Windows accent so checkboxes, primary buttons and selections match the palette. -->
             <Color x:Key="SystemAccentColor">#1F6FC5</Color>
