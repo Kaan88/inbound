@@ -11,7 +11,7 @@ namespace DownloadManager.Server.Bridge;
 /// Host's hello pipe, whose <c>client.hello</c> always asks for the <see cref="ClientRoles.Web"/> role, whatever the
 /// browser sent. The Host decides what that role may do; the bridge only carries envelopes, one per WebSocket message
 /// and one per pipe frame, in order both ways. The pipe is this Windows user's only, and the client side checks that
-/// the Host's end belongs to this user too (<see cref="PipeOptions.CurrentUserOnly"/>).
+/// the Host's end belongs to this user too (<see cref="PipeOwner"/>).
 /// </summary>
 internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBackend
 {
@@ -201,10 +201,13 @@ internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBa
     private async Task<NamedPipeClientStream?> OpenAsync(ClientHelloDto wanted, CancellationToken cancellationToken)
     {
         var pipe = new NamedPipeClientStream(".", helloPipe, PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.WriteThrough | PipeOptions.CurrentUserOnly);
+            PipeOptions.Asynchronous | PipeOptions.WriteThrough);
         try
         {
             await pipe.ConnectAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+            // Not PipeOptions.CurrentUserOnly: that compares the owner with the token's default owner, which in an
+            // elevated bridge is the Administrators group, while the Host's pipes are always owned by the user itself.
+            if (OperatingSystem.IsWindows()) PipeOwner.Verify(pipe);
             var hello = new ClientHelloDto { Snapshot = wanted.Snapshot, Events = wanted.Events, Role = ClientRoles.Web };
             await IpcFraming.WriteAsync(pipe, IpcMessage.Create(MessageTypes.ClientHello, hello), cancellationToken).ConfigureAwait(false);
             return pipe;

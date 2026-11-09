@@ -38,14 +38,29 @@ public sealed class PipeOwnerTests
     }
 
     [Fact]
-    public async Task TheRealHostsPipesPassTheCheck()
+    public void TheHostServesOnlyAPipeOwnedByThisUserItself()
+    {
+        Assert.True(PipeOwner.IsHostsOwn(User, User));
+        // Another account that made the pipe first, and an elevated Host's default owner: neither is served.
+        Assert.False(PipeOwner.IsHostsOwn(OtherUser, User));
+        Assert.False(PipeOwner.IsHostsOwn(Administrators, User));
+        Assert.False(PipeOwner.IsHostsOwn(LocalSystem, User));
+        Assert.False(PipeOwner.IsHostsOwn(null, User));
+        Assert.False(PipeOwner.IsHostsOwn(User, null));
+    }
+
+    [Fact]
+    public async Task TheRealHostsPipesAreOwnedByThisUserItselfAndPassTheCheck()
     {
         await using var host = await SandboxHost.StartAsync(NoApi);
+        using var current = WindowsIdentity.GetCurrent();
         foreach (var name in new[] { host.PipeName, host.PipeName + "-hello" })
         {
             await using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
             await pipe.ConnectAsync(10_000);
             PipeOwner.Verify(pipe);
+            // The user, not the token's default owner: an elevated Host must still be reachable from a client that isn't.
+            Assert.Equal(current.User, (SecurityIdentifier?)pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)));
         }
     }
 
