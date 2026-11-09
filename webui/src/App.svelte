@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AddMenu, { type AddKind } from './components/AddMenu.svelte';
+  import HostSwitcher from './components/HostSwitcher.svelte';
   import Icon from './components/Icon.svelte';
   import SpeedGraph from './components/SpeedGraph.svelte';
   import { serializeList } from './lib/addflow';
@@ -136,6 +137,7 @@
       <span class="inline-block size-2 rounded-full {store.connection === 'open' ? 'bg-status-active' : store.connection === 'reconnecting' || store.connection === 'connecting' ? 'bg-status-waiting' : 'bg-status-failed'}"></span>
       {connectionText[store.connection]}
     </span>
+    <HostSwitcher />
     <button class="btn-icon" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
     {#if store.signInRequired}
       <button class="btn-icon" title="Sign out" aria-label="Sign out" onclick={() => store.signOut()}><Icon name="logout" size={18} /></button>
