@@ -360,6 +360,8 @@ internal sealed class PackageWindow : Window
     /// <summary>The same segment map and figures as a file's own window, for the selected file.</summary>
     private FrameworkElement BuildFileDetails()
     {
+        // UI.R35: the file's connections show as Progress Details' Connections tab shows them, with no expander.
+        _fileDetails.UseOpenTable();
         _fileDetails.Attach(_connection, _fileMap, _fileMoving, _root);
         _fileDetails.Problem += words => _notice.Text = words;
         ToolTipService.SetToolTip(_fileMap, "Start positions and download progress by connection");
