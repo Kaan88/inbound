@@ -26,6 +26,23 @@ internal static class WindowCascade
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(nint window, out Rect rect);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProp(nint window, string name, nint data);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint GetProp(nint window, string name);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint RemoveProp(nint window, string name);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(nint window);
+
+    // Marks the main window, so the app's other processes can find it among their windows (U-WL-4).
+    private const string MainWindowMark = "DownloadManager.MainWindow";
+
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect
     {
@@ -55,8 +72,70 @@ internal static class WindowCascade
         }
     }
 
-    /// <summary>The top-left corners of the visible top-level windows of this app's other processes (same program).</summary>
-    private static List<(int X, int Y)> OtherWindowCorners(nint own)
+    /// <summary>Marks <paramref name="window"/> as the main window for the app's progress, package and completion windows.</summary>
+    public static void MarkMain(Window window)
+    {
+        try
+        {
+            var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            SetProp(handle, MainWindowMark, 1);
+            window.Closed += (_, _) => RemoveProp(handle, MainWindowMark);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException)
+        {
+            // Placement is a convenience; never fail a window over it.
+        }
+    }
+
+    /// <summary>
+    /// Call once the window has its size and its remembered place, before <see cref="Apply"/>: a place on another screen
+    /// than the shown main window moves over the main window (<see cref="WindowCascadeRules.OntoMainScreen"/>). A hidden
+    /// or minimized main window moves nothing.
+    /// </summary>
+    public static void OntoMainScreen(Window window)
+    {
+        try
+        {
+            var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            if (MainWindowBounds(own) is not { } main) return;
+            var display = DisplayArea.GetFromRect(new RectInt32(main.X, main.Y, main.Width, main.Height), DisplayAreaFallback.Nearest);
+            if (display is null) return;
+            var appWindow = window.AppWindow;
+            var position = appWindow.Position;
+            var size = appWindow.Size;
+            var bounds = display.OuterBounds;
+            var work = display.WorkArea;
+            var (x, y) = WindowCascadeRules.OntoMainScreen(position.X, position.Y, size.Width, size.Height, main,
+                new ScreenRect(bounds.X, bounds.Y, bounds.Width, bounds.Height), new ScreenRect(work.X, work.Y, work.Width, work.Height));
+            if (x != position.X || y != position.Y) appWindow.Move(new PointInt32(x, y));
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Placement is a convenience; never fail a window over it.
+        }
+    }
+
+    /// <summary>The shown, not minimized, main window of this app's other processes, if there is one.</summary>
+    private static ScreenRect? MainWindowBounds(nint own)
+    {
+        var ids = OtherProcessIds();
+        if (ids.Count == 0) return null;
+        ScreenRect? found = null;
+        EnumWindows((handle, _) =>
+        {
+            if (handle != own && IsWindowVisible(handle) && !IsIconic(handle) && GetWindowThreadProcessId(handle, out var pid) != 0 &&
+                ids.Contains(pid) && GetProp(handle, MainWindowMark) != 0 && GetWindowRect(handle, out var rect) && rect.Right > rect.Left)
+            {
+                found = new ScreenRect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+                return false;
+            }
+
+            return true;
+        }, 0);
+        return found;
+    }
+
+    private static HashSet<uint> OtherProcessIds()
     {
         var current = Process.GetCurrentProcess();
         var ids = new HashSet<uint>();
@@ -68,6 +147,13 @@ internal static class WindowCascade
             }
         }
 
+        return ids;
+    }
+
+    /// <summary>The top-left corners of the visible top-level windows of this app's other processes (same program).</summary>
+    private static List<(int X, int Y)> OtherWindowCorners(nint own)
+    {
+        var ids = OtherProcessIds();
         var corners = new List<(int X, int Y)>();
         if (ids.Count == 0) return corners;
         EnumWindows((handle, _) =>

@@ -49,6 +49,8 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+        // The progress, package and completion windows open on this window's screen (U-WL-4).
+        WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
         // ones shown. The list shows _connection, which is this one unless another server is chosen (MainWindow.Servers).
         _local = new HostConnection();
@@ -422,7 +424,10 @@ public sealed partial class MainWindow : Window
         // (RemoteCompletionGate). This PC's Host opens its own.
         // A package opens one window, when its last file is done, as the Host does for the other sources; finishes
         // close together are gathered first (CompletionBurst), so one package never opens a window per file.
-        if (changeType == "completed" && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
+        // A package's last file can fail rather than finish: its package still gets its window, with the counts (U-WR-16).
+        // A lone failure opens none, and nor does a cancel, which the user chose.
+        var finishes = changeType == "completed" || (changeType == "failed" && PackageOf(job.Id) is not null);
+        if (finishes && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
                 (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true) &&
             (!_connection.IsRemote || _remoteCompletions.Finished(job.Id)))
         {
@@ -562,9 +567,10 @@ public sealed partial class MainWindow : Window
         var host = _status?.HostVersion;
         StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
-        // A server that can't be reached has no counts to give; "0 downloads" would say it has none (U-WR-1).
+        // A server that can't be reached has no counts to give; "0 downloads" would say it has none (U-WR-1). One still
+        // connecting says so, rather than "Not connected".
         if (_connection.IsRemote && !_banner.Connected)
-            StatusText.Text = _shownEverConnected ? $"Not connected to {_connection.Target.Name} · the list is out of date" : $"Not connected to {_connection.Target.Name}";
+            StatusText.Text = _banner.Status ?? $"Not connected to {_connection.Target.Name}";
         if (_graphConnected)
         {
             ConnectionText.Text = _connection.IsRemote
@@ -2897,13 +2903,21 @@ public sealed partial class MainWindow : Window
                 }
                 var metadata = await _connection.ReadFileMetadataAsync(request, cancellation.Token);
                 if (metadataClosed || generation != metadataGeneration) return;
-                if (!metadata.Ok && metadata.AddRefused)
+                // The Host answered: its refusal holds only while it still gives one, so a later answer without one turns
+                // Start and Download later back on.
+                var wasRefused = addRefusal is not null;
+                addRefusal = AddRules.RefusalAfter(addRefusal, answered: true, refused: !metadata.Ok && metadata.AddRefused, metadata.Error);
+                if (addRefusal is not null)
                 {
-                    addRefusal = metadata.Error ?? "This address can't be added.";
                     metadataText.Text = AddRules.RefusedText(addRefusal, _connection.Target);
                     metadataText.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
                     if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = false;
                     return;
+                }
+                if (wasRefused)
+                {
+                    metadataText.ClearValue(TextBlock.ForegroundProperty);
+                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = true;
                 }
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
@@ -3030,18 +3044,34 @@ public sealed partial class MainWindow : Window
         try
         {
             // U-WR-2: a Start the Host refuses shows its reason in this dialog, which opens again with all that was typed.
-            while (await AddFromFileInfoAsync() is { } problem)
+            // The dialog that just closed is still on its way out for a moment, or another dialog may be open on this
+            // window, and DialogGuard refuses to show it until that one is gone; so it is tried again, and never dropped
+            // while another dialog is the reason. Only a window that stops showing dialogs at all gives up, to the
+            // status bar.
+            string? lastProblem = null;
+            var failedShows = 0;
+            while (true)
             {
-                addProblem.Text = problem;
-                addProblem.Visibility = Visibility.Visible;
-                // The dialog that just closed is still on its way out for a moment, and DialogGuard would refuse to
-                // show it again until it is gone.
-                for (var wait = 0; wait < 40 && DialogGuard.IsOpen(dialog.XamlRoot); wait++) await Task.Delay(50);
-                if (DialogGuard.IsOpen(dialog.XamlRoot))
+                var (shown, problem) = await AddFromFileInfoAsync();
+                var step = AddRules.AfterShow(shown, problem, lastProblem, failedShows);
+                if (step == ReshowStep.Stop) break;
+                if (step == ReshowStep.GiveUp)
                 {
-                    ShowPassingStatus(problem);
+                    ShowPassingStatus(lastProblem!);
                     break;
                 }
+
+                if (step == ReshowStep.TryAgain)
+                {
+                    if (!DialogGuard.IsOpen(dialog.XamlRoot)) failedShows++;
+                    await Task.Delay(100);
+                    continue;
+                }
+
+                lastProblem = problem;
+                failedShows = 0;
+                addProblem.Text = problem;
+                addProblem.Visibility = Visibility.Visible;
             }
         }
         finally
@@ -3049,14 +3079,13 @@ public sealed partial class MainWindow : Window
             authenticationPassword.Password = string.Empty;
         }
 
-        // The reason it wasn't added, to show in the dialog, or null when it was added or the user stopped.
-        async Task<string?> AddFromFileInfoAsync()
+        // Whether the dialog was shown, and the reason it wasn't added, to show in it again; null when it was added or the user stopped.
+        async Task<(bool Shown, string? Problem)> AddFromFileInfoAsync()
         {
             var downloadChoice = await DialogGuard.ShowAsync(dialog);
-            if (downloadChoice is null or ContentDialogResult.None)
-            {
-                return null;
-            }
+            // Null: it couldn't be shown (another dialog was still open on this window).
+            if (downloadChoice is null) return (false, null);
+            if (downloadChoice == ContentDialogResult.None) return (true, null);
 
             var existing = FindExistingJob(url);
             if (existing is not null)
@@ -3076,16 +3105,21 @@ public sealed partial class MainWindow : Window
                     CloseButtonText = "Cancel",
                     DefaultButton = ContentDialogButton.Primary,
                 };
+                // The add dialog is still on its way out for a moment.
+                for (var wait = 0; wait < 40 && DialogGuard.IsOpen(dialog.XamlRoot); wait++) await Task.Delay(50);
                 var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
+                // The question couldn't be shown: what was typed comes back, with why, rather than being dropped.
+                if (duplicateResult is null)
+                    return (true, $"{existing.FileName} is already in the list for this URL. Choose Start again to decide whether to download it again.");
                 if (duplicateResult == ContentDialogResult.Secondary)
                 {
                     JobsList.SelectedItem = existing;
-                    return null;
+                    return (true, null);
                 }
 
                 if (duplicateResult != ContentDialogResult.Primary)
                 {
-                    return null;
+                    return (true, null);
                 }
             }
 
@@ -3118,13 +3152,13 @@ public sealed partial class MainWindow : Window
                 }
                 var reply = await _connection.AddAsync(request);
                 var add = reply.GetPayload<AddJobResponse>();
-                if (!add.Accepted) return AddRules.NotAddedText(add.Error, _connection.Target);
+                if (!add.Accepted) return (true, AddRules.NotAddedText(add.Error, _connection.Target));
                 await RefreshAsync();
-                return null;
+                return (true, null);
             }
             catch (Exception ex)
             {
-                return AddRules.NotAddedText(ex.Message, _connection.Target);
+                return (true, AddRules.NotAddedText(ex.Message, _connection.Target));
             }
         }
     }

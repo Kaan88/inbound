@@ -45,7 +45,7 @@ public sealed partial class MainWindow
         var finished = _finishedBurst.ToList();
         _finishedBurst.Clear();
         var plan = CompletionBurst.Plan(finished, id => PackageOf(id) is { } package
-            ? (package.Id, PackageMembers(package).All(member => member.State == "completed"))
+            ? (package.Id, CompletionBurst.Settled(PackageMembers(package).Select(member => member.State).ToList()))
             : null);
         foreach (var window in plan)
         {

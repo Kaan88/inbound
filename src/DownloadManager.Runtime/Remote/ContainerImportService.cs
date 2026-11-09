@@ -274,7 +274,7 @@ public sealed class ContainerImportService : IDisposable
             case RemoteInputKind.TorrentFile:
                 return ("unsupported", "A container can't name a file on this computer.", false);
             case RemoteInputKind.ProviderDirectLink:
-                return ("unsupported", "This is a direct download link that holds an account key, so it isn't used from a container. Add it yourself as a normal download if you trust this file.", false);
+                return ("unsupported", $"This is a direct download link that holds an account key, so it isn't used from a container. {NotDirect}", false);
             case RemoteInputKind.OrdinaryLink:
                 return ("unsupported", OrdinaryReason(taker), false);
             default:
