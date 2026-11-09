@@ -1,5 +1,11 @@
 ﻿# Progress — session handoff
 
+### D7 stage 1, step 5: browser integration on Linux (2026-11-09, `linux-host`)
+- `LinuxNativeMessaging`: at each start the Host writes `<data>/bin/inbound-native-host` (a launcher, mode 700, that runs the AppImage with `--native-host` or the native host beside the Host) and the native-messaging manifests for each browser whose folder exists (Chrome, Chromium, Edge, Brave, Vivaldi under `~/.config`; Firefox under `~/.mozilla`). A manifest of this name pointing at another existing program is left alone. Skipped for a sandbox data folder.
+- NativeHost: finds `inbound-host` on Linux and starts it with `setsid -f`, so it outlives the browser's bridge.
+- Fix: turning sign-in start off failed when `~/.config/autostart` didn't exist.
+- Checked in a fake home folder (HOME redirected, D-Bus off): manifests and launcher written; the native host started through the launcher as Chrome does, reached the Host over the socket and answered `jobs.query` with the snapshot. Not checked: a real browser with the extension; the AppImage `--native-host` entry (comes with the AppImage).
+
 ### D7 stage 1, step 4: secret key in the desktop keyring; tray comes back after a panel restart (2026-11-09, `linux-host`)
 - `AesGcmSecretProtector.OpenForDataFolder(ISecretKeyStore, …)`: the server's key-file checks (secrets sealed with another or a missing key refuse to start; the discard record) for a key kept elsewhere. The file overload is unchanged.
 - `SecretServiceKeyStore`: the key in the freedesktop Secret Service (KDE Wallet here), one item per data folder, read back after creating it. The Linux Host uses it when there is no key file yet and the session has a keyring; otherwise the key file, as before.

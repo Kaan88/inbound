@@ -167,6 +167,16 @@ internal static class Program
         var currentSettings = service.GetSettings();
         service.SettingsChanged += (_, _) => currentSettings = service.GetSettings();
         TryApplyStartup(currentSettings.LaunchAtStartup, log);
+        try
+        {
+            log.Info(LinuxNativeMessaging.Apply(paths.Root, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA")));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.Warn($"Browser registration failed: {ex.GetType().Name}");
+        }
+
         // As the Windows Host's tray balloons: the same notices on the same settings.
         using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
         {
