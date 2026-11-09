@@ -74,7 +74,7 @@
                         <TextBlock x:Name="CompletionPath" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                         <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
                                   Click="ShowCompletionForJob_Click" />
-                        <TextBlock Text="The global completion preference can be changed from the completion window."
+                        <TextBlock Text="For every download, this is in Options &gt; Downloads, under When a download finishes."
                                    TextWrapping="Wrap" FontSize="12"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
@@ -87,9 +87,9 @@
             <StackPanel Spacing="6">
                 <TextBlock x:Name="CompletedSize" />
                 <TextBlock x:Name="CompletedUrlHeader" Text="Address" FontWeight="SemiBold" Margin="0,6,0,0" />
-                <TextBox x:Name="CompletedUrl" IsReadOnly="True" />
+                <TextBox x:Name="CompletedUrl" IsReadOnly="True" AutomationProperties.Name="Address" />
                 <TextBlock Text="The file saved as" FontWeight="SemiBold" />
-                <TextBox x:Name="CompletedPath" IsReadOnly="True" />
+                <TextBox x:Name="CompletedPath" IsReadOnly="True" AutomationProperties.Name="The file saved as" />
             </StackPanel>
         </ScrollViewer>
 
@@ -101,11 +101,14 @@
         <ScrollViewer Grid.Row="4" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <StackPanel x:Name="ActionRow" Orientation="Horizontal" Spacing="8"
                     HorizontalAlignment="Right" VerticalAlignment="Center">
-            <Button x:Name="PauseButton" Content="Pause" Click="Pause_Click" />
+            <!-- U-WL-17: Delete first and set apart, so it is never next to the default Open. -->
+            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" Margin="0,0,16,0" ToolTipService.ToolTip="Remove this download and delete its file" />
+            <!-- U-WL-15: Stop, as the toolbar and the menus say it. The partial data is kept. -->
+            <Button x:Name="PauseButton" Content="Stop" Click="Pause_Click" ToolTipService.ToolTip="Stop this download (partial data is kept)" />
             <Button x:Name="ResumeButton" Content="Resume" Click="Resume_Click" />
             <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" ToolTipService.ToolTip="Remove this download and delete its file" />
-            <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" />
+            <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" Style="{StaticResource AccentButtonStyle}"
+                    AutomationProperties.AcceleratorKey="Enter" />
             <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Visibility="Collapsed" />
             <Button x:Name="FolderButton" Content="Open folder" Click="Folder_Click" Visibility="Collapsed" />
             <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" />

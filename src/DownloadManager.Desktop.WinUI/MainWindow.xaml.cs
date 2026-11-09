@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
     private bool _pendingSettingsOpen;
     private string _category = "all";
     private string _search = string.Empty;
+
+    /// <summary>U-WL-7: how small the window can be dragged: the whole toolbar fits, and the list scrolls sideways for its columns. Cancel Package, when it shows, can scroll.</summary>
+    private const int MinimumWindowWidth = 1000;
+    private const int MinimumWindowHeight = 560;
     private readonly PassingLine _passing;
     private string _sortKey = "added";
     private bool _sortAscending;
@@ -45,6 +49,8 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+        // The progress, package and completion windows open on this window's screen (U-WL-4).
+        WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
         // ones shown. The list shows _connection, which is this one unless another server is chosen (MainWindow.Servers).
         _local = new HostConnection();
@@ -94,8 +100,10 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
-            var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
+            // U-WL-7: set before the remembered size comes back, as SetMinimumSize asks.
+            WindowLayout.SetMinimumSize(this, MinimumWindowWidth, MinimumWindowHeight);
+            var width = Math.Clamp(_uiState.WindowWidth, MinimumWindowWidth, 8000);
+            var height = Math.Clamp(_uiState.WindowHeight, MinimumWindowHeight, 8000);
 
             // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
@@ -152,6 +160,19 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             () => ApplySort("size", ascending: false)));
+        // UI.R26: Ctrl+Shift+O opens the server switcher; Ctrl+0 shows this PC and Ctrl+1 to Ctrl+9 the saved servers.
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.O,
+            Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
+            OpenServerMenuFromKeyboard));
+        for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
+        {
+            var chosen = number;
+            RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+                Windows.System.VirtualKey.Number0 + number,
+                Windows.System.VirtualKeyModifiers.Control,
+                () => SwitchToNumber(chosen)));
+        }
 
         _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
         _sortAscending = _uiState.SortAscending;
@@ -403,17 +424,16 @@ public sealed partial class MainWindow : Window
         // Another server's completions are shown from these events, while this window is open (design D9, section 5):
         // whether to is this PC's setting alone, and only for a download seen unfinished here, a few a minute at most
         // (RemoteCompletionGate). This PC's Host opens its own.
-        if (changeType == "completed" && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
-                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true))
+        // A package opens one window, when its last file is done, as the Host does for the other sources; finishes
+        // close together are gathered first (CompletionBurst), so one package never opens a window per file.
+        // A package's last file can fail rather than finish: its package still gets its window, with the counts (U-WR-16).
+        // A lone failure opens none, and nor does a cancel, which the user chose.
+        var finishes = changeType == "completed" || (changeType == "failed" && PackageOf(job.Id) is not null);
+        if (finishes && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
+                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true) &&
+            (!_connection.IsRemote || _remoteCompletions.Finished(job.Id)))
         {
-            // A package opens one window, when its last file is done, as the Host does for the other sources.
-            var package = PackageOf(job.Id);
-            var due = package is null || PackageMembers(package).All(member => member.State == "completed");
-            if (due && (!_connection.IsRemote || _remoteCompletions.MayOpen(job.Id, DateTimeOffset.UtcNow)))
-            {
-                if (package is null) OpenDownloadWindow(job.Id);
-                else OpenPackageWindow(package.Id);
-            }
+            QueueCompletionWindow(job.Id);
         }
 
         if (changeType == "completed") NoteRemoteCompletion(job);
@@ -427,7 +447,8 @@ public sealed partial class MainWindow : Window
         ConnectionText.Text = target.IsLocal
             ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
             : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}";
-        if (connected) UpdateStatusText();
+        NoteShownConnection(connected, error);
+        UpdateStatusText();
 
         // The rows stay on the list while the Host is away, so it isn't empty.
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -481,7 +502,7 @@ public sealed partial class MainWindow : Window
         AddButton.IsEnabled = connected;
         PauseButton.IsEnabled = connected && rows.Any(row => row.CanPause);
         ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
-        CancelPackageButton.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
+        CancelPackageGroup.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
         CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
         var sideRows = rows.Count(row => row.IsSideRow);
         var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
@@ -503,7 +524,7 @@ public sealed partial class MainWindow : Window
         var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true, _connection.IsRemote,
             SelectedJob?.State == "completed");
         Apply(FileOpenItem, "Open", plan.LaunchReason);
-        Apply(FileOpenFolderItem, "Open Folder", plan.ShellReason);
+        Apply(FileOpenFolderItem, "Open Folder", OpenFolderReason(plan));
         Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
@@ -546,15 +567,22 @@ public sealed partial class MainWindow : Window
         var retrying = _jobsById.Values.Count(j => j.State == "retryWaiting");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
+        StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
+        // A server that can't be reached has no counts to give; "0 downloads" would say it has none (U-WR-1). One still
+        // connecting says so, rather than "Not connected".
+        if (_connection.IsRemote && !_banner.Connected)
+            StatusText.Text = _banner.Status ?? $"Not connected to {_connection.Target.Name}";
         if (_graphConnected)
         {
             ConnectionText.Text = _connection.IsRemote
                 ? $"Connected to {_connection.Target.Name}" + (host is null ? string.Empty : $" · {host}")
                 : "Host connected" + (host is null ? string.Empty : $" · {host}")
-                    + (_status?.BrowserIntegration is { Length: > 0 } integration ? $" · browser {integration}" : string.Empty);
+                    + (ShellWords.BrowserIntegration(_status?.BrowserIntegration) is { } integration ? $" · {integration}" : string.Empty);
         }
+        var repair = !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
+        RepairBrowserButton.Visibility = repair ? Visibility.Visible : Visibility.Collapsed;
+        if (ShellWords.FindCount(_search, _visibleJobs.Count(row => row.PackageId is null)) is { } shown) StatusText.Text += $" · {shown}";
         var selected = SelectedJobs.Count;
         if (selected > 1)
         {
@@ -691,7 +719,23 @@ public sealed partial class MainWindow : Window
 
         UpdateEmptyText();
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFindBar();
         UpdateButtons();
+    }
+
+    /// <summary>U-WL-8: a filtered list says so, with how many rows it shows, until the filter is cleared.</summary>
+    private void UpdateFindBar()
+    {
+        var words = ShellWords.FindFilter(_search, _visibleJobs.Count(row => row.PackageId is null));
+        FindBar.Visibility = words is null ? Visibility.Collapsed : Visibility.Visible;
+        if (words is not null && FindBarText.Text != words) FindBarText.Text = words;
+    }
+
+    private void FindBarClear_Click(object sender, RoutedEventArgs e)
+    {
+        _search = string.Empty;
+        RebuildVisible();
+        UpdateStatusText();
     }
 
     private ScrollViewer? _jobsScroller;
@@ -1057,7 +1101,7 @@ public sealed partial class MainWindow : Window
             CommandJob?.State == "completed");
         SayIfNoFile(_menuOpen, "Open", plan.LaunchReason);
         SayIfNoFile(_menuOpenWith, "Open With…", plan.LaunchReason);
-        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.ShellReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", OpenFolderReason(plan));
         SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
         if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
         SayIfNoFile(_menuRedownload, "Redownload", plan.FileReason);
@@ -1068,7 +1112,8 @@ public sealed partial class MainWindow : Window
         if (_menuUnqueue is not null) _menuUnqueue.IsEnabled = selection.Any(job => !string.IsNullOrEmpty(job.QueueText));
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
         if (_menuGroup is not null) _menuGroup.Visibility = Show(FileMenuRules.CanGroup(selection.Count, rows.Count(row => !row.IsSideRow)));
-        if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
+        // U-WL-14: a package row isn't in a package; only its files can be taken out of it.
+        if (_menuUngroup is not null) _menuUngroup.Visibility = Show(rows.Any(row => !row.IsPackage && row.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
         // A provider's file has no address of its own to edit or send again.
         var providerFile = selection.Any(job => job.IsProviderFile);
@@ -1132,6 +1177,33 @@ public sealed partial class MainWindow : Window
         {
             OpenContainingFolder(job);
         }
+        else if (SelectedPackage is { } package && PackageFolder(package) is { } folder && !SayIfOnAnotherServer())
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                _ = ShowMessageAsync("Could not open folder", ex.Message);
+            }
+        }
+    }
+
+    /// <summary>U-WL-14: a package's folder is the one all of its files are in, below which each may have its own.</summary>
+    private static string? PackageFolder(JobViewModel package)
+    {
+        var folder = ShellWords.CommonFolder(package.Children.Select(child =>
+            !string.IsNullOrWhiteSpace(child.FinalFilePath) ? Path.GetDirectoryName(child.FinalFilePath) : child.Destination));
+        return folder is not null && Directory.Exists(folder) ? folder : null;
+    }
+
+    /// <summary>Open Folder works for a package too, on the folder its files share.</summary>
+    private string? OpenFolderReason(FileMenuPlan plan)
+    {
+        if (SelectedJob is not null || SelectedPackage is not { } package) return plan.ShellReason;
+        if (!RemoteDataRules.MayUseFiles(_connection.IsRemote)) return RemoteDataRules.OnAnotherServer;
+        return PackageFolder(package) is null ? "its folder isn't there" : null;
     }
 
     private async void MenuAddToQueue_Click(object sender, RoutedEventArgs e)
@@ -2242,11 +2314,61 @@ public sealed partial class MainWindow : Window
         {
             _search = box.Text.Trim();
             RebuildVisible();
+            UpdateStatusText();
         }
         else if (result == ContentDialogResult.Secondary)
         {
             _search = string.Empty;
             RebuildVisible();
+            UpdateStatusText();
+        }
+    }
+
+    /// <summary>The secondary text color for an editable box's placeholder, in its own theme and when the theme changes.</summary>
+    /// <param name="theme">The window's theme, for before the box is in the tree.</param>
+    private static void DimPlaceholder(ComboBox box, ElementTheme theme)
+    {
+        // The editable box's inner text box draws the placeholder, and with no placeholder color of its own it takes
+        // the focused text color while it has the focus. So the color goes on that text box once it exists.
+        void Apply(ElementTheme current)
+        {
+            var brush = InboundTheme.Brush("InboundSecondaryTextBrush", current);
+            box.PlaceholderForeground = brush;
+            if (FindDescendant<TextBox>(box, "EditableText") is { } text) text.PlaceholderForeground = brush;
+        }
+
+        Apply(theme);
+        box.Loaded += (_, _) => Apply(box.ActualTheme);
+        box.GotFocus += (_, _) => Apply(box.ActualTheme);
+        box.ActualThemeChanged += (_, _) => Apply(box.ActualTheme);
+    }
+
+    private static T? FindDescendant<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && match.Name == name) return match;
+            if (FindDescendant<T>(child, name) is { } deeper) return deeper;
+        }
+
+        return null;
+    }
+
+    /// <summary>Turns every control inside a panel on or off, however deep the panels go.</summary>
+    private static void SetControlsEnabled(UIElement element, bool enabled)
+    {
+        switch (element)
+        {
+            case Control control:
+                control.IsEnabled = enabled;
+                break;
+            case Panel panel:
+                foreach (var child in panel.Children) SetControlsEnabled(child, enabled);
+                break;
+            case Border { Child: { } child }:
+                SetControlsEnabled(child, enabled);
+                break;
         }
     }
 
@@ -2293,6 +2415,19 @@ public sealed partial class MainWindow : Window
             {
                 label.Visibility = large ? Visibility.Visible : Visibility.Collapsed;
             }
+        }
+
+        // The server switcher keeps its name with small buttons too, beside the icon: which server is shown is what
+        // it is there to say (UI.R26).
+        ToolbarServerSwitcher.Height = large ? 58 : 32;
+        ToolbarServerSwitcher.Padding = large ? new Thickness(10, 2, 10, 2) : new Thickness(6, 2, 6, 2);
+        if (ToolbarServerSwitcher.Content is StackPanel server)
+        {
+            server.Orientation = large ? Orientation.Vertical : Orientation.Horizontal;
+            server.Spacing = large ? 0 : 6;
+            ToolbarServerIcon.FontSize = large ? 25 : 16;
+            ToolbarServerLabel.Margin = large ? new Thickness(0, 3, 0, 0) : new Thickness(0);
+            ToolbarServerLabel.VerticalAlignment = VerticalAlignment.Center;
         }
     }
 
@@ -2509,8 +2644,11 @@ public sealed partial class MainWindow : Window
     {
         await ShowMessageAsync("Inbound Download Manager",
             $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
-            "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
-            "and a Manifest V3 browser bridge.");
+            // U-WL-26: what it does for the person, not how it is built.
+            "Downloads files for you, in parts at once where the server allows, and picks up where it left off after a " +
+            "lost connection or a restart. Downloads keep going in the background while this window is closed, and the " +
+            "browser extension hands the browser's downloads to it.\n\n" +
+            "If something goes wrong, Help > Open Diagnostics Folder has the logs.");
     }
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -2549,6 +2687,8 @@ public sealed partial class MainWindow : Window
             IsEditable = true,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        // U-WL-21: an editable box draws its placeholder in the text color, so it read as a typed address.
+        DimPlaceholder(urlBox, RootGrid.ActualTheme);
         foreach (var recent in _settings.RecentUrls.Take(20))
         {
             urlBox.Items.Add(recent);
@@ -2585,7 +2725,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
-            Title = "Enter new address to download",
+            Title = ServerNames.ForWindow("Enter new address to download", _connection.Target),
             Content = addressPanel,
             PrimaryButtonText = "Next",
             CloseButtonText = "Cancel",
@@ -2617,6 +2757,12 @@ public sealed partial class MainWindow : Window
             url = checkedAddress.Input;
             addressResult = checkedAddress.Result;
             addressNote = checkedAddress.Result?.Note;
+            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
+            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
+            {
+                await ShowProviderAddAsync(AddFocus.Links, numbered);
+                return;
+            }
         }
         else
         {
@@ -2631,6 +2777,12 @@ public sealed partial class MainWindow : Window
             };
             if (await DialogGuard.ShowAsync(addressDialog) != ContentDialogResult.Primary) return;
             url = urlBox.Text.Trim();
+            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
+            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
+            {
+                await ShowAddLinksAsync(numbered);
+                return;
+            }
         }
 
         // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
@@ -2686,7 +2838,7 @@ public sealed partial class MainWindow : Window
         var destinationField = FolderChooser.Attach(destinationRow, destinationBox, () => knownSize, out var refreshSpace);
         var descriptionBox = new TextBox { Header = "Description (optional)" };
         var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
-        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (from file type)" });
+        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (file extension)" });
         foreach (var category in FileCategories.Names.Append("other"))
             categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(category[0]) + category[1..], Tag = category });
         foreach (var category in _settings.CustomCategories)
@@ -2800,6 +2952,9 @@ public sealed partial class MainWindow : Window
         metadataActions.Children.Add(metadataBusy);
         var metadataGeneration = 0;
         var metadataClosed = false;
+        // U-WR-2: the Host said it won't add this address for this PC (another device's rules), so Start would only fail.
+        string? addRefusal = null;
+        ContentDialog? addDialog = null;
         var nameEdited = false;
         var assigningServerName = false;
         CancellationTokenSource? metadataCancellation = null;
@@ -2826,6 +2981,22 @@ public sealed partial class MainWindow : Window
                 }
                 var metadata = await _connection.ReadFileMetadataAsync(request, cancellation.Token);
                 if (metadataClosed || generation != metadataGeneration) return;
+                // The Host answered: its refusal holds only while it still gives one, so a later answer without one turns
+                // Start and Download later back on.
+                var wasRefused = addRefusal is not null;
+                addRefusal = AddRules.RefusalAfter(addRefusal, answered: true, refused: !metadata.Ok && metadata.AddRefused, metadata.Error);
+                if (addRefusal is not null)
+                {
+                    metadataText.Text = AddRules.RefusedText(addRefusal, _connection.Target);
+                    metadataText.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
+                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = false;
+                    return;
+                }
+                if (wasRefused)
+                {
+                    metadataText.ClearValue(TextBlock.ForegroundProperty);
+                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = true;
+                }
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
                 knownSize = metadata.TotalBytes;
@@ -2876,6 +3047,15 @@ public sealed partial class MainWindow : Window
         useAuthentication.Unchecked += (_, _) => MetadataCredentialsChanged();
 
         var panel = new StackPanel { Spacing = 10 };
+        // Why the last Start didn't add it: shown here, with everything typed kept, rather than after the dialog closed.
+        var addProblem = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(addProblem, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Assertive);
+        panel.Children.Add(addProblem);
         panel.Children.Add(urlDisplay);
         if (!string.IsNullOrWhiteSpace(addressNote))
         {
@@ -2903,7 +3083,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
-            Title = "Download file info",
+            Title = ServerNames.ForWindow("Download file info", _connection.Target),
             Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
             SecondaryButtonText = "Download later",
@@ -2912,7 +3092,14 @@ public sealed partial class MainWindow : Window
         };
 
         fileInfoDialog = dialog;
-        dialog.Opened += async (_, _) => await PreviewMetadataAsync();
+        addDialog = dialog;
+        dialog.Opened += async (_, _) =>
+        {
+            // Shown again after a failed Start: the check runs again, and its answer counts again.
+            metadataClosed = false;
+            if (addRefusal is not null) dialog.IsPrimaryButtonEnabled = dialog.IsSecondaryButtonEnabled = false;
+            await PreviewMetadataAsync();
+        };
         dialog.Closing += (_, _) =>
         {
             metadataClosed = true;
@@ -2932,88 +3119,132 @@ public sealed partial class MainWindow : Window
         }
         dialog.PrimaryButtonClick += (_, args) => ValidateAuthentication(args);
         dialog.SecondaryButtonClick += (_, args) => ValidateAuthentication(args);
-        var downloadChoice = await DialogGuard.ShowAsync(dialog);
-        if (downloadChoice is null or ContentDialogResult.None)
-        {
-            return;
-        }
-
-        var existing = FindExistingJob(url);
-        if (existing is not null)
-        {
-            var duplicateDialog = new ContentDialog
-            {
-                XamlRoot = Content.XamlRoot,
-                RequestedTheme = RootGrid.ActualTheme,
-                Title = "Download already exists",
-                Content = new TextBlock
-                {
-                    Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "Download again",
-                SecondaryButtonText = "Select existing",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
-            if (duplicateResult == ContentDialogResult.Secondary)
-            {
-                JobsList.SelectedItem = existing;
-                return;
-            }
-
-            if (duplicateResult != ContentDialogResult.Primary)
-            {
-                return;
-            }
-        }
-
-        var request = new AddJobRequest
-        {
-            Url = url,
-            FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
-            CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
-            DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
-            StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
-            Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
-            RememberDestination = rememberFolder.IsChecked == true,
-            ConflictPolicy = conflictBox.SelectedIndex switch
-            {
-                1 => "overwrite",
-                2 => "fail",
-                _ => "rename",
-            },
-            Source = "api",
-            QueueId = _settings.Queues.OrderBy(q => q.Order)
-                .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
-        };
-
         try
         {
-            if (useAuthentication.IsChecked == true)
+            // U-WR-2: a Start the Host refuses shows its reason in this dialog, which opens again with all that was typed.
+            // The dialog that just closed is still on its way out for a moment, or another dialog may be open on this
+            // window, and DialogGuard refuses to show it until that one is gone; so it is tried again, and never dropped
+            // while another dialog is the reason. Only a window that stops showing dialogs at all gives up, to the
+            // status bar.
+            string? lastProblem = null;
+            var failedShows = 0;
+            while (true)
             {
-                request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
-                    System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
+                var (shown, problem) = await AddFromFileInfoAsync();
+                var step = AddRules.AfterShow(shown, problem, lastProblem, failedShows);
+                if (step == ReshowStep.Stop) break;
+                if (step == ReshowStep.GiveUp)
+                {
+                    ShowPassingStatus(lastProblem!);
+                    break;
+                }
+
+                if (step == ReshowStep.TryAgain)
+                {
+                    if (!DialogGuard.IsOpen(dialog.XamlRoot)) failedShows++;
+                    await Task.Delay(100);
+                    continue;
+                }
+
+                lastProblem = problem;
+                failedShows = 0;
+                addProblem.Text = problem;
+                addProblem.Visibility = Visibility.Visible;
             }
+        }
+        finally
+        {
             authenticationPassword.Password = string.Empty;
-            var reply = await _connection.AddAsync(request);
-            var add = reply.GetPayload<AddJobResponse>();
-            if (!add.Accepted)
+        }
+
+        // Whether the dialog was shown, and the reason it wasn't added, to show in it again; null when it was added or the user stopped.
+        async Task<(bool Shown, string? Problem)> AddFromFileInfoAsync()
+        {
+            var downloadChoice = await DialogGuard.ShowAsync(dialog);
+            // Null: it couldn't be shown (another dialog was still open on this window).
+            if (downloadChoice is null) return (false, null);
+            if (downloadChoice == ContentDialogResult.None) return (true, null);
+
+            var existing = FindExistingJob(url);
+            if (existing is not null)
             {
-                await ShowMessageAsync("Could not add download", add.Error ?? "The host rejected the request.");
-                return;
+                var duplicateDialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    RequestedTheme = RootGrid.ActualTheme,
+                    Title = "Download already exists",
+                    Content = new TextBlock
+                    {
+                        Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    PrimaryButtonText = "Download again",
+                    SecondaryButtonText = "Select existing",
+                    CloseButtonText = "Cancel",
+                    DefaultButton = ContentDialogButton.Primary,
+                };
+                // The add dialog is still on its way out for a moment.
+                for (var wait = 0; wait < 40 && DialogGuard.IsOpen(dialog.XamlRoot); wait++) await Task.Delay(50);
+                var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
+                // The question couldn't be shown: what was typed comes back, with why, rather than being dropped.
+                if (duplicateResult is null)
+                    return (true, $"{existing.FileName} is already in the list for this URL. Choose Start again to decide whether to download it again.");
+                if (duplicateResult == ContentDialogResult.Secondary)
+                {
+                    JobsList.SelectedItem = existing;
+                    return (true, null);
+                }
+
+                if (duplicateResult != ContentDialogResult.Primary)
+                {
+                    return (true, null);
+                }
             }
 
-            await RefreshAsync();
-        }
-        catch (Exception ex)
-        {
-            await ShowMessageAsync("Could not add download", ex.Message);
+            var request = new AddJobRequest
+            {
+                Url = url,
+                FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
+                CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
+                DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
+                StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
+                Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
+                RememberDestination = rememberFolder.IsChecked == true,
+                ConflictPolicy = conflictBox.SelectedIndex switch
+                {
+                    1 => "overwrite",
+                    2 => "fail",
+                    _ => "rename",
+                },
+                Source = "api",
+                QueueId = _settings.Queues.OrderBy(q => q.Order)
+                    .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
+            };
+
+            try
+            {
+                if (useAuthentication.IsChecked == true)
+                {
+                    request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
+                        System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
+                }
+                var reply = await _connection.AddAsync(request);
+                var add = reply.GetPayload<AddJobResponse>();
+                if (!add.Accepted) return (true, AddRules.NotAddedText(add.Error, _connection.Target));
+                await RefreshAsync();
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                return (true, AddRules.NotAddedText(ex.Message, _connection.Target));
+            }
         }
     }
 
-    private async void MenuAddBatch_Click(object sender, RoutedEventArgs e)
+    private async void MenuAddBatch_Click(object sender, RoutedEventArgs e) => await ShowAddLinksAsync(null);
+
+    /// <param name="links">Links to start from, in place of what the clipboard holds: Add URL's numbered address, expanded.</param>
+    private async Task ShowAddLinksAsync(IReadOnlyList<string>? links)
     {
         if (_settings is null)
         {
@@ -3022,7 +3253,7 @@ public sealed partial class MainWindow : Window
 
         if (await ProviderAddAppliesAsync())
         {
-            await ShowProviderAddAsync(AddFocus.Links);
+            await ShowProviderAddAsync(AddFocus.Links, links);
             return;
         }
 
@@ -3035,7 +3266,8 @@ public sealed partial class MainWindow : Window
             Height = 160,
         };
         ScrollViewer.SetVerticalScrollBarVisibility(pasteBox, ScrollBarVisibility.Auto);
-        try
+        if (links is { Count: > 0 }) pasteBox.Text = string.Join(Environment.NewLine, links);
+        else try
         {
             var clip = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
             if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
@@ -3084,6 +3316,7 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 10 };
         AddUnreadableKeyNotice(panel);
         panel.Children.Add(pasteBox);
+        panel.Children.Add(SettingsWindow.Hint(LinkExtractor.NumberedHint));
         var batchDestinationRow = new Grid { ColumnSpacing = 8 };
         batchDestinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         batchDestinationRow.Children.Add(destinationBox);
@@ -3124,9 +3357,11 @@ public sealed partial class MainWindow : Window
             var uri = new Uri(link);
             var name = Uri.UnescapeDataString(uri.Segments.LastOrDefault()?.Trim('/') ?? string.Empty);
             var listed = FindExistingJob(link) is not null;
+            var noPath = LinkExtractor.HasNoPath(link);
             var box = new CheckBox
             {
-                IsChecked = !(listed && skipDuplicates.IsChecked == true),
+                // U-WL-23: an address that names no file may have been cut short, so it waits to be ticked.
+                IsChecked = !(listed && skipDuplicates.IsChecked == true) && !noPath,
                 Content = new StackPanel
                 {
                     Children =
@@ -3134,7 +3369,8 @@ public sealed partial class MainWindow : Window
                         new TextBlock { Text = name.Length > 0 ? name : uri.Host, TextTrimming = TextTrimming.CharacterEllipsis },
                         new TextBlock
                         {
-                            Text = uri.Host + (listed ? " · already in the list" : string.Empty),
+                            Text = uri.Host + (listed ? " · already in the list" : string.Empty) + (noPath ? $" · {LinkExtractor.NoPathWords}" : string.Empty),
+                            TextWrapping = TextWrapping.Wrap,
                             FontSize = 12,
                             Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
                         },
@@ -3680,6 +3916,7 @@ public sealed partial class MainWindow : Window
             !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>This PC's Options. Opened through <see cref="OpenOptionsAsync"/>, which keeps it to one window.</summary>
     private async Task ShowSettingsDialogAsync()
     {
         if (_settingsWindow is not null)
@@ -3687,15 +3924,18 @@ public sealed partial class MainWindow : Window
             _settingsWindow.Activate();
             return;
         }
-        if (_settings is null) return;
+        if (_settings is null)
+        {
+            await ShowMessageAsync("Options", RemoteOptionsText.ThisPcUnreachable);
+            return;
+        }
 
         // UI.B6: from the Host's current settings; the window's copy can be stale (folders remembered by an add,
         // changes from the CLI), and Options would show and save the old values.
         await RefreshSettingsAsync();
         var settings = CloneSettings(_settings);
         var window = new SettingsWindow();
-        _settingsWindow = window;
-        window.Closed += (_, _) => _settingsWindow = null;
+        OptionsWindowCreated(window);
         try
         {
             // Which remote and extraction pages exist depends on what the Host said it can do.
@@ -3724,7 +3964,7 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
-            var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = settings.CloseWindowCompletely };
+            var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
             // UI.R23: the source of every window's theme. View > Dark Mode sets it too, so the box follows that.
@@ -3963,8 +4203,8 @@ public sealed partial class MainWindow : Window
             saveTo.AddRange(categoryRows);
             void ShowCategoryFoldersEnabled()
             {
-                foreach (var row in categoryRows.OfType<Control>()) row.IsEnabled = useCategoryFolders.IsChecked == true;
-                foreach (var row in categoryRows.OfType<Panel>()) foreach (var control in row.Children.OfType<Control>()) control.IsEnabled = useCategoryFolders.IsChecked == true;
+                // U-WL-19: every control in a row, Browse and the favourites button inside the folder field included.
+                foreach (var row in categoryRows) SetControlsEnabled(row, useCategoryFolders.IsChecked == true);
                 foreach (var box in categoryBoxes.Values) box.IsEnabled = useCategoryFolders.IsChecked == true;
             }
             useCategoryFolders.Checked += (_, _) => ShowCategoryFoldersEnabled();
@@ -4168,6 +4408,7 @@ public sealed partial class MainWindow : Window
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
+            WebUiPageReady(window, webUi.PageIndex);
             window.Activate();
             await window.WaitClosedAsync();
         }
