@@ -94,6 +94,51 @@ internal static class WindowLayout
         window.AppWindow.Move(new PointInt32(x, y));
     }
 
+    /// <summary>
+    /// Puts a window in the middle of <paramref name="owner"/>, a window of this process, kept on that window's screen.
+    /// Falls back to <see cref="CenterOnMainWindow"/> without one.
+    /// </summary>
+    public static void CenterOn(Window window, nint owner)
+    {
+        if (owner == 0 || !GetWindowRect(owner, out var rect))
+        {
+            CenterOnMainWindow(window);
+            return;
+        }
+
+        var size = window.AppWindow.Size;
+        var bounds = new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        var screen = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Primary).WorkArea;
+        var x = Math.Clamp(bounds.X + (bounds.Width - size.Width) / 2, screen.X, Math.Max(screen.X, screen.X + screen.Width - size.Width));
+        var y = Math.Clamp(bounds.Y + (bounds.Height - size.Height) / 2, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - size.Height));
+        window.AppWindow.Move(new PointInt32(x, y));
+    }
+
+    /// <summary>
+    /// Makes <paramref name="window"/> a modal window of <paramref name="owner"/>: owned, so it stays above it and
+    /// never falls behind, and the owner takes no input until it closes, when the owner gets it back and comes forward.
+    /// </summary>
+    public static void OwnModally(Window window, nint owner)
+    {
+        if (owner == 0) return;
+        var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        SetWindowLongPtr(own, GwlpHwndParent, owner);
+        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.IsMinimizable = false;
+            presenter.IsMaximizable = false;
+        }
+
+        EnableWindow(owner, false);
+        // Before the window goes, so Windows hands the focus to the owner rather than to some other app.
+        window.AppWindow.Closing += (_, _) => EnableWindow(owner, true);
+        window.Closed += (_, _) =>
+        {
+            EnableWindow(owner, true);
+            SetForegroundWindow(owner);
+        };
+    }
+
     /// <summary>The largest visible, not minimised top-level window of another process running this same program.</summary>
     private static RectInt32? MainWindowBounds(nint own)
     {
@@ -144,4 +189,15 @@ internal static class WindowLayout
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint hwnd);
+
+    private const int GwlpHwndParent = -8;
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern nint SetWindowLongPtr(nint hwnd, int index, nint value);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnableWindow(nint hwnd, bool enable);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hwnd);
 }

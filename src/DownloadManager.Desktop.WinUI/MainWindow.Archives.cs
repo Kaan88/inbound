@@ -589,7 +589,7 @@ public sealed partial class MainWindow
         row.Children.Add(browse);
         browse.Click += async (_, _) =>
         {
-            if (await ServerFolderWindow.PickAsync(target, folder.Text) is { } chosen) folder.Text = chosen;
+            if (await ServerFolderWindow.PickAsync(target, WinRT.Interop.WindowNative.GetWindowHandle(this), folder.Text) is { } chosen) folder.Text = chosen;
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 440 };
         panel.Children.Add(new TextBlock { Text = $"The archive is extracted on {target.Name}, from one of its folders.", TextWrapping = TextWrapping.Wrap });

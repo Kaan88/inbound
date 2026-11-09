@@ -1265,7 +1265,7 @@ public sealed partial class MainWindow : Window
         // Another server's path is split and joined with its own separator: a Linux server's paths use '/'.
         var remote = _connection.IsRemote;
         var nameBox = new TextBox { Header = "File name", Text = remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath) };
-        var folderBox = new TextBox { Text = (remote ? ServerPaths.Folder(job.FinalFilePath) : Path.GetDirectoryName(job.FinalFilePath)) ?? string.Empty };
+        var folderBox = new TextBox { Header = "Folder", Text = (remote ? ServerPaths.Folder(job.FinalFilePath) : Path.GetDirectoryName(job.FinalFilePath)) ?? string.Empty };
         var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
         browse.Click += async (_, _) =>
         {
@@ -1287,8 +1287,16 @@ public sealed partial class MainWindow : Window
         folderRow.Children.Add(browse);
         var panel = new StackPanel { Spacing = 10, MinWidth = 440 };
         panel.Children.Add(nameBox);
-        panel.Children.Add(new TextBlock { Text = "Folder" });
         panel.Children.Add(folderRow);
+        // A refusal shows here, and the dialog stays open with what was typed (U-WR-12).
+        var problem = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
+            Visibility = Visibility.Collapsed,
+        };
+        panel.Children.Add(problem);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -1306,50 +1314,82 @@ public sealed partial class MainWindow : Window
             var stem = Path.GetFileNameWithoutExtension(nameBox.Text);
             nameBox.Select(0, stem.Length > 0 ? stem.Length : nameBox.Text.Length);
         };
-        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary ||
-            string.IsNullOrWhiteSpace(nameBox.Text) || string.IsNullOrWhiteSpace(folderBox.Text))
+        var moved = false;
+        dialog.PrimaryButtonClick += async (_, args) =>
         {
-            return;
-        }
+            var deferral = args.GetDeferral();
+            try
+            {
+                var outcome = await MoveOrRenameAsync(job, nameBox.Text, folderBox.Text, remote);
+                if (outcome.Error is { } error)
+                {
+                    problem.Text = error;
+                    problem.Visibility = Visibility.Visible;
+                    args.Cancel = true;
+                }
+                else moved = outcome.Moved;
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        };
+        await DialogGuard.ShowAsync(dialog);
+        if (moved) await RefreshAsync();
+    }
 
-        var newName = nameBox.Text.Trim();
-        if (remote && newName.IndexOfAny(['/', '\\']) >= 0)
-        {
-            await ShowMessageAsync("Move/Rename", "Type the file name without a folder; choose the folder above it.");
-            return;
-        }
+    /// <summary>
+    /// Checks and sends one Move/Rename. Returns the problem in words, shown in the dialog, or null with whether
+    /// anything was sent (nothing is when the name and folder are unchanged).
+    /// </summary>
+    private async Task<(string? Error, bool Moved)> MoveOrRenameAsync(JobViewModel job, string typedName, string typedFolder, bool remote)
+    {
+        if (string.IsNullOrWhiteSpace(typedName)) return ("Type a file name.", false);
+        if (string.IsNullOrWhiteSpace(typedFolder)) return ("Choose a folder.", false);
+        var newName = typedName.Trim();
+        if (remote && newName.IndexOfAny(['/', '\\']) >= 0) return ("Type the file name without a folder; choose the folder above it.", false);
 
         // A server's folder by its own rules: /downloads on a Linux server, never this PC's D:\ ones. This PC's Host
         // checks its own as before.
-        if (remote && !ServerPaths.IsFull(folderBox.Text, ShownServer.PathStyle))
-        {
-            await ShowMessageAsync("Move/Rename", $"The folder has to be {ServerPaths.FullFolderWords(ShownServer.PathStyle)}.");
-            return;
-        }
+        if (remote && !ServerPaths.IsFull(typedFolder, ShownServer.PathStyle))
+            return ($"The folder has to be {ServerPaths.FullFolderWords(ShownServer.PathStyle)}.", false);
 
-        var target = remote ? ServerPaths.Join(folderBox.Text.Trim(), newName) : Path.Combine(folderBox.Text.Trim(), newName);
+        var target = remote ? ServerPaths.Join(typedFolder.Trim(), newName) : Path.Combine(typedFolder.Trim(), newName);
         if (string.Equals(target, job.FinalFilePath, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(remote ? ServerPaths.FileName(target) : Path.GetFileName(target),
                 remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
         {
-            return;
+            return (null, false);
         }
 
         try
         {
             var reply = await _connection.MoveJobAsync(job.Id, target);
             var result = reply.GetPayload<JobActionResponse>();
-            if (!result.Ok)
-            {
-                await ShowMessageAsync("Move/Rename", result.Error ?? "The host rejected the move.");
-                return;
-            }
-
-            await RefreshAsync();
+            if (result.Ok) return (null, true);
+            var error = result.Error ?? "The host rejected the move.";
+            // Another server's own folders, so one can be typed or chosen without leaving the dialog.
+            if (remote && MoveRefusal.IsOutsideRoots(error)) return (MoveRefusal.Text(error, await ServerRootsAsync(), _connection.Target.Name), false);
+            return (error, false);
         }
         catch (Exception ex)
         {
-            await ShowMessageAsync("Move/Rename", ex.Message);
+            return (ex.Message, false);
+        }
+    }
+
+    /// <summary>The folders the shown server may use, from its folder browser; null when it doesn't say.</summary>
+    private async Task<IReadOnlyList<string>?> ServerRootsAsync()
+    {
+        try
+        {
+            var reply = await ServerConnector.SendOnceAsync(_connection.Target,
+                IpcMessage.Create(MessageTypes.FoldersBrowse, new FolderBrowseRequest()), TimeSpan.FromSeconds(10));
+            return reply.Type == MessageTypes.FoldersBrowseResult ? reply.GetPayload<FolderBrowseResult>().Roots : null;
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return null;
         }
     }
 
