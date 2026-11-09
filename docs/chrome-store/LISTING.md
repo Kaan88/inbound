@@ -65,8 +65,9 @@ Images 1 to 4 and the promo tile are made by `extensions\chrome\scripts\store-sc
 `extensions\chrome`, from Bash or a normal terminal) from the real extension pages and invented data
 (`extensions\chrome\tests\fixtures\screens-data.json`); two runs give byte-identical files. Image 5 frames, in the same
 style, a capture of the desktop window: a test instance in dark mode with the fixtures' four downloads from a local file
-server (invented names and sizes; the .rar icons are this PC's own file-type icons), taken with `scripts\ui-capture.ps1`
-with the window's status bar cropped off, then `SCREENS_APP_CAPTURE=<that PNG> SCREENS_ONLY=screenshot-5 npm run screens`.
+server (invented names and sizes; the file types are .iso, .bin and .exe, which show only Windows' own icons, never a
+third-party app's), taken with `scripts\ui-capture.ps1` with the window's status bar and its 8 px invisible side
+borders cropped off, then `SCREENS_APP_CAPTURE=<that PNG> SCREENS_ONLY=screenshot-5 npm run screens`.
 
 **Small promo tile:** `images\promo-small-440x280.png`. The marquee image is optional and not included.
 
