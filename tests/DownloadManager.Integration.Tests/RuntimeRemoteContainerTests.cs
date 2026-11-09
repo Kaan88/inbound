@@ -229,7 +229,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("unsupported", plain.Kind);
         Assert.False(plain.CanAdd);
         Assert.Contains("TorBox won't take this", plain.Reason);
-        Assert.Contains("normal download", plain.Reason);
+        Assert.Contains(ContainerImportService.NotDirect, plain.Reason);
         Assert.Equal("example.invalid", plain.DisplayHost);
         Assert.Equal("plain.zip", plain.DisplayName);
         Assert.Equal(1, plain.PackageIndex);
@@ -502,7 +502,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("hosterLink", added.Outcomes[0].InputKind);
         Assert.True(added.Outcomes[1].Ok);
         Assert.False(added.Outcomes[2].Ok);
-        Assert.Contains("normal download", added.Outcomes[2].Error);
+        Assert.Contains(ContainerImportService.NotDirect, added.Outcomes[2].Error);
         Assert.False(added.Outcomes[3].Ok);
         Assert.Contains("no such entry", added.Outcomes[3].Error);
         Assert.Equal(2, rig.Remote.Jobs.List().Count);

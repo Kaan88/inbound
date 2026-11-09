@@ -120,7 +120,8 @@ public sealed partial class MainWindow
 
     private void UpdateEmptyText()
     {
-        EmptyText.Text = _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal)
+        EmptyText.Text = _banner.EmptyText is { } unreachable ? unreachable
+            : _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal)
             ? $"Nothing is waiting for {ProviderDisplayName(_category[RemoteWaitingTag.Length..])}.\nItems show here until their files start downloading."
             : _category == ArchiveSetsTag ? ArchiveSetsEmptyText
             : DefaultEmptyText;

@@ -357,7 +357,7 @@ public sealed partial class DownloadManagerService
     {
         if (!TryValidateUrl(request.Url, out var uri, out var error) || uri.Scheme is not ("http" or "https"))
             return new FileMetadataResult { Error = string.IsNullOrWhiteSpace(error) ? "File information is available for HTTP/HTTPS URLs." : error };
-        if (caller is not null && CallerScope.DescribeAddress(request.Url) is { } refused) return new FileMetadataResult { Error = refused };
+        if (caller is not null && CallerScope.DescribeAddress(request.Url) is { } refused) return new FileMetadataResult { Error = refused, AddRefused = true };
         if (!TryCopyHeaders(request.Headers, out var headers, out error)) return new FileMetadataResult { Error = error };
         if (_engine is not IFileMetadataReader reader) return new FileMetadataResult { Error = "This engine cannot preview file information." };
         if (!await _metadataGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))

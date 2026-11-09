@@ -26,7 +26,9 @@ internal sealed class ProviderAccountPage
     private ProviderAccountView _view;
     private bool _busy;
 
-    public ProviderAccountPage(RemoteClient client, RemoteAccountDto account)
+    /// <param name="serverName">The server whose account this is, while the window shows one (U-WR-6); null for this PC.</param>
+    /// <param name="hostKind">That server's kind (<see cref="HostKinds"/>), which says how it keeps the key.</param>
+    public ProviderAccountPage(RemoteClient client, RemoteAccountDto account, string? serverName = null, string? hostKind = null)
     {
         _client = client;
         _provider = account.Provider;
@@ -66,17 +68,21 @@ internal sealed class ProviderAccountPage
         buttons.Children.Add(_validate);
         buttons.Children.Add(_clear);
 
-        Controls =
+        var controls = new List<UIElement>();
+        if (serverName is not null)
+            controls.Add(SettingsWindow.Hint($"{_name} account of {serverName}. What is changed here changes it on {serverName}, not on this PC."));
+        controls.AddRange(
         [
             SettingsWindow.Section("API key"),
             _keyStatus.Text,
             _keyBox,
             buttons,
             _result.Text,
-            SettingsWindow.Hint("These buttons take effect straight away, whichever way this window is closed. The key is kept encrypted for your Windows account."),
+            SettingsWindow.Hint(RemoteOptionsText.ProviderKeyNote(serverName, hostKind)),
             SettingsWindow.Section("Account"),
             _details.Text,
-        ];
+        ]);
+        Controls = controls.ToArray();
 
         Render();
         _client.State.AccountChanged += OnAccountChanged;

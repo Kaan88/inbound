@@ -120,10 +120,15 @@ internal static partial class WebUiForm
         return all;
     }
 
+    /// <summary>The address a browser on this PC uses, while it runs: the bridge always listens on this PC's loopback.</summary>
+    public static string? ThisPcAddress(WebUiStatusDto status)
+        => status.State == WebUiStates.Running && status.Port is >= WebUiForm.MinPort and <= WebUiForm.MaxPort ? $"http://127.0.0.1:{status.Port}/" : null;
+
     public static (string Text, bool IsProblem) StateText(WebUiStatusDto status) => status.State switch
     {
         WebUiStates.Starting => ("Starting…", false),
-        WebUiStates.Running when status.LocalOnly => ("On, but only this PC can reach it until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.", false),
+        // U-WR-15: the address is shown before the firewall step, for this PC at least.
+        WebUiStates.Running when status.LocalOnly => ($"On, at {ThisPcAddress(status)} on this PC, but only this PC can reach it until Windows Firewall allows it (see Windows Firewall below). Other devices then use this PC's network address with port {status.Port}.", false),
         WebUiStates.Running => ("On. Other devices on your network can open it.", false),
         WebUiStates.Failed => ($"It couldn't start. {FailureWords(status.Error)}", true),
         _ => ("Off. Nothing is running and no port is open.", false),

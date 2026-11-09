@@ -156,7 +156,7 @@ public sealed partial class MainWindow : Window
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.O,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () => ToolbarServerMenu.ShowAt(ToolbarServerSwitcher)));
+            OpenServerMenuFromKeyboard));
         for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
         {
             var chosen = number;
@@ -414,17 +414,13 @@ public sealed partial class MainWindow : Window
         // Another server's completions are shown from these events, while this window is open (design D9, section 5):
         // whether to is this PC's setting alone, and only for a download seen unfinished here, a few a minute at most
         // (RemoteCompletionGate). This PC's Host opens its own.
+        // A package opens one window, when its last file is done, as the Host does for the other sources; finishes
+        // close together are gathered first (CompletionBurst), so one package never opens a window per file.
         if (changeType == "completed" && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
-                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true))
+                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true) &&
+            (!_connection.IsRemote || _remoteCompletions.Finished(job.Id)))
         {
-            // A package opens one window, when its last file is done, as the Host does for the other sources.
-            var package = PackageOf(job.Id);
-            var due = package is null || PackageMembers(package).All(member => member.State == "completed");
-            if (due && (!_connection.IsRemote || _remoteCompletions.MayOpen(job.Id, DateTimeOffset.UtcNow)))
-            {
-                if (package is null) OpenDownloadWindow(job.Id);
-                else OpenPackageWindow(package.Id);
-            }
+            QueueCompletionWindow(job.Id);
         }
 
         if (changeType == "completed") NoteRemoteCompletion(job);
@@ -438,7 +434,8 @@ public sealed partial class MainWindow : Window
         ConnectionText.Text = target.IsLocal
             ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
             : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}";
-        if (connected) UpdateStatusText();
+        NoteShownConnection(connected, error);
+        UpdateStatusText();
 
         // The rows stay on the list while the Host is away, so it isn't empty.
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -557,8 +554,11 @@ public sealed partial class MainWindow : Window
         var retrying = _jobsById.Values.Count(j => j.State == "retryWaiting");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
+        StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
+        // A server that can't be reached has no counts to give; "0 downloads" would say it has none (U-WR-1).
+        if (_connection.IsRemote && !_banner.Connected)
+            StatusText.Text = _shownEverConnected ? $"Not connected to {_connection.Target.Name} · the list is out of date" : $"Not connected to {_connection.Target.Name}";
         if (_graphConnected)
         {
             ConnectionText.Text = _connection.IsRemote
@@ -2533,7 +2533,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
-            Title = "Enter new address to download",
+            Title = ServerNames.ForWindow("Enter new address to download", _connection.Target),
             Content = addressPanel,
             PrimaryButtonText = "Next",
             CloseButtonText = "Cancel",
@@ -2748,6 +2748,9 @@ public sealed partial class MainWindow : Window
         metadataActions.Children.Add(metadataBusy);
         var metadataGeneration = 0;
         var metadataClosed = false;
+        // U-WR-2: the Host said it won't add this address for this PC (another device's rules), so Start would only fail.
+        string? addRefusal = null;
+        ContentDialog? addDialog = null;
         var nameEdited = false;
         var assigningServerName = false;
         CancellationTokenSource? metadataCancellation = null;
@@ -2774,6 +2777,14 @@ public sealed partial class MainWindow : Window
                 }
                 var metadata = await _connection.ReadFileMetadataAsync(request, cancellation.Token);
                 if (metadataClosed || generation != metadataGeneration) return;
+                if (!metadata.Ok && metadata.AddRefused)
+                {
+                    addRefusal = metadata.Error ?? "This address can't be added.";
+                    metadataText.Text = AddRules.RefusedText(addRefusal, _connection.Target);
+                    metadataText.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
+                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = false;
+                    return;
+                }
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
                 knownSize = metadata.TotalBytes;
@@ -2824,6 +2835,15 @@ public sealed partial class MainWindow : Window
         useAuthentication.Unchecked += (_, _) => MetadataCredentialsChanged();
 
         var panel = new StackPanel { Spacing = 10 };
+        // Why the last Start didn't add it: shown here, with everything typed kept, rather than after the dialog closed.
+        var addProblem = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(addProblem, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Assertive);
+        panel.Children.Add(addProblem);
         panel.Children.Add(urlDisplay);
         if (!string.IsNullOrWhiteSpace(addressNote))
         {
@@ -2851,7 +2871,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
-            Title = "Download file info",
+            Title = ServerNames.ForWindow("Download file info", _connection.Target),
             Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
             SecondaryButtonText = "Download later",
@@ -2860,7 +2880,14 @@ public sealed partial class MainWindow : Window
         };
 
         fileInfoDialog = dialog;
-        dialog.Opened += async (_, _) => await PreviewMetadataAsync();
+        addDialog = dialog;
+        dialog.Opened += async (_, _) =>
+        {
+            // Shown again after a failed Start: the check runs again, and its answer counts again.
+            metadataClosed = false;
+            if (addRefusal is not null) dialog.IsPrimaryButtonEnabled = dialog.IsSecondaryButtonEnabled = false;
+            await PreviewMetadataAsync();
+        };
         dialog.Closing += (_, _) =>
         {
             metadataClosed = true;
@@ -2880,84 +2907,97 @@ public sealed partial class MainWindow : Window
         }
         dialog.PrimaryButtonClick += (_, args) => ValidateAuthentication(args);
         dialog.SecondaryButtonClick += (_, args) => ValidateAuthentication(args);
-        var downloadChoice = await DialogGuard.ShowAsync(dialog);
-        if (downloadChoice is null or ContentDialogResult.None)
-        {
-            return;
-        }
-
-        var existing = FindExistingJob(url);
-        if (existing is not null)
-        {
-            var duplicateDialog = new ContentDialog
-            {
-                XamlRoot = Content.XamlRoot,
-                RequestedTheme = RootGrid.ActualTheme,
-                Title = "Download already exists",
-                Content = new TextBlock
-                {
-                    Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "Download again",
-                SecondaryButtonText = "Select existing",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
-            if (duplicateResult == ContentDialogResult.Secondary)
-            {
-                JobsList.SelectedItem = existing;
-                return;
-            }
-
-            if (duplicateResult != ContentDialogResult.Primary)
-            {
-                return;
-            }
-        }
-
-        var request = new AddJobRequest
-        {
-            Url = url,
-            FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
-            CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
-            DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
-            StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
-            Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
-            RememberDestination = rememberFolder.IsChecked == true,
-            ConflictPolicy = conflictBox.SelectedIndex switch
-            {
-                1 => "overwrite",
-                2 => "fail",
-                _ => "rename",
-            },
-            Source = "api",
-            QueueId = _settings.Queues.OrderBy(q => q.Order)
-                .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
-        };
-
         try
         {
-            if (useAuthentication.IsChecked == true)
+            // U-WR-2: a Start the Host refuses shows its reason in this dialog, which opens again with all that was typed.
+            while (await AddFromFileInfoAsync() is { } problem)
             {
-                request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
-                    System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
+                addProblem.Text = problem;
+                addProblem.Visibility = Visibility.Visible;
             }
+        }
+        finally
+        {
             authenticationPassword.Password = string.Empty;
-            var reply = await _connection.AddAsync(request);
-            var add = reply.GetPayload<AddJobResponse>();
-            if (!add.Accepted)
+        }
+
+        // The reason it wasn't added, to show in the dialog, or null when it was added or the user stopped.
+        async Task<string?> AddFromFileInfoAsync()
+        {
+            var downloadChoice = await DialogGuard.ShowAsync(dialog);
+            if (downloadChoice is null or ContentDialogResult.None)
             {
-                await ShowMessageAsync("Could not add download", add.Error ?? "The host rejected the request.");
-                return;
+                return null;
             }
 
-            await RefreshAsync();
-        }
-        catch (Exception ex)
-        {
-            await ShowMessageAsync("Could not add download", ex.Message);
+            var existing = FindExistingJob(url);
+            if (existing is not null)
+            {
+                var duplicateDialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    RequestedTheme = RootGrid.ActualTheme,
+                    Title = "Download already exists",
+                    Content = new TextBlock
+                    {
+                        Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    PrimaryButtonText = "Download again",
+                    SecondaryButtonText = "Select existing",
+                    CloseButtonText = "Cancel",
+                    DefaultButton = ContentDialogButton.Primary,
+                };
+                var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
+                if (duplicateResult == ContentDialogResult.Secondary)
+                {
+                    JobsList.SelectedItem = existing;
+                    return null;
+                }
+
+                if (duplicateResult != ContentDialogResult.Primary)
+                {
+                    return null;
+                }
+            }
+
+            var request = new AddJobRequest
+            {
+                Url = url,
+                FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
+                CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
+                DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
+                StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
+                Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
+                RememberDestination = rememberFolder.IsChecked == true,
+                ConflictPolicy = conflictBox.SelectedIndex switch
+                {
+                    1 => "overwrite",
+                    2 => "fail",
+                    _ => "rename",
+                },
+                Source = "api",
+                QueueId = _settings.Queues.OrderBy(q => q.Order)
+                    .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
+            };
+
+            try
+            {
+                if (useAuthentication.IsChecked == true)
+                {
+                    request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
+                        System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
+                }
+                var reply = await _connection.AddAsync(request);
+                var add = reply.GetPayload<AddJobResponse>();
+                if (!add.Accepted) return AddRules.NotAddedText(add.Error, _connection.Target);
+                await RefreshAsync();
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return AddRules.NotAddedText(ex.Message, _connection.Target);
+            }
         }
     }
 
@@ -3628,22 +3668,26 @@ public sealed partial class MainWindow : Window
             !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task ShowSettingsDialogAsync(bool showWebUi = false)
+    /// <summary>This PC's Options. Opened through <see cref="OpenOptionsAsync"/>, which keeps it to one window.</summary>
+    private async Task ShowSettingsDialogAsync()
     {
         if (_settingsWindow is not null)
         {
             _settingsWindow.Activate();
             return;
         }
-        if (_settings is null) return;
+        if (_settings is null)
+        {
+            await ShowMessageAsync("Options", RemoteOptionsText.ThisPcUnreachable);
+            return;
+        }
 
         // UI.B6: from the Host's current settings; the window's copy can be stale (folders remembered by an add,
         // changes from the CLI), and Options would show and save the old values.
         await RefreshSettingsAsync();
         var settings = CloneSettings(_settings);
         var window = new SettingsWindow();
-        _settingsWindow = window;
-        window.Closed += (_, _) => _settingsWindow = null;
+        OptionsWindowCreated(window);
         try
         {
             // Which remote and extraction pages exist depends on what the Host said it can do.
@@ -3965,8 +4009,6 @@ public sealed partial class MainWindow : Window
 
             var webUi = new WebUiOptionsPage(_remote) { PageIndex = nextPage + (extraction is null ? 0 : 1) };
             window.AddPage("Web UI", "\uE12B", webUi.Controls);
-            _settingsWebUiPage = webUi.PageIndex;
-            window.Closed += (_, _) => _settingsWebUiPage = null;
 
             window.Closed += (_, _) =>
             {
@@ -4118,7 +4160,7 @@ public sealed partial class MainWindow : Window
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
-            if (showWebUi) window.ShowPage(webUi.PageIndex);
+            WebUiPageReady(window, webUi.PageIndex);
             window.Activate();
             await window.WaitClosedAsync();
         }

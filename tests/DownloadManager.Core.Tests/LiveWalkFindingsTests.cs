@@ -72,7 +72,7 @@ public class LiveWalkFindingsTests
     public void No_window_lets_WinUI_float_a_shortcuts_name_over_it()
     {
         var folder = Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI");
-        var rootsWithShortcuts = new[] { ("MainWindow.xaml.cs", "RootGrid"), ("MyProviderWindow.cs", "_root"), ("PackageWindow.cs", "_root"), ("SettingsWindow.cs", "_root") };
+        var rootsWithShortcuts = new[] { ("MainWindow.xaml.cs", "RootGrid"), ("MyProviderWindow.cs", "_root"), ("PackageWindow.cs", "_root"), ("SettingsWindow.cs", "_root"), ("DownloadWindow.xaml.cs", "Root") };
         foreach (var (file, root) in rootsWithShortcuts)
         {
             var source = File.ReadAllText(Path.Combine(folder, file));

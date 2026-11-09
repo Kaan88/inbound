@@ -40,8 +40,19 @@ public sealed partial class DownloadWindow : Window
         WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        Title = "Download status — Inbound Download Manager";
+        Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
+        WindowCascade.Apply(this);
+        // U-WL-17: Enter opens the finished file, the window's default action.
+        var enter = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Enter };
+        enter.Invoked += (_, args) =>
+        {
+            if (_job?.State != "completed" || OpenButton.Visibility != Visibility.Visible) return;
+            args.Handled = true;
+            OpenPath(false);
+        };
+        Root.KeyboardAccelerators.Add(enter);
+        Root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
@@ -156,25 +167,31 @@ public sealed partial class DownloadWindow : Window
             DetailsTabs.Visibility = Visibility.Collapsed;
             CompletionSummary.Visibility = Visibility.Visible;
             WindowLayout.ResizeForDpi(this, 600, 480);
+            // The default action, ready for Enter or Space (U-WL-17).
+            if (OpenButton.Visibility == Visibility.Visible || RemoteDataRules.MayUseFiles(_connection.IsRemote))
+                DispatcherQueue.TryEnqueue(() => { if (OpenButton.Visibility == Visibility.Visible) OpenButton.Focus(FocusState.Programmatic); });
         }
 
         var percent = JobDetailsPanel.Percent(job);
         var displayName = string.IsNullOrWhiteSpace(job.FileName) ? "Download" : job.FileName;
         Heading.Text = complete ? "Download complete" : JobViewModel.ToDisplayState(job.State);
-        Title = complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}";
+        Title = ServerNames.ForWindow(complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}", _connection.Target);
         FileNameText.Text = displayName;
         // A file from a provider account has no address of its own: only a reference to the account's item.
         var hasAddress = JobAddress.HasAddress(job);
         UrlHeader.Visibility = UrlText.Visibility = CompletedUrlHeader.Visibility = CompletedUrl.Visibility = hasAddress ? Visibility.Visible : Visibility.Collapsed;
         UrlHeader.Text = CompletedUrlHeader.Text = JobAddress.Label(job);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(CompletedUrl, JobAddress.Label(job));
         UrlText.Text = JobAddress.Shown(job);
         CompletionPath.Text = job.FinalFilePath;
         CompletedUrl.Text = JobAddress.Shown(job);
         CompletedPath.Text = job.FinalFilePath;
         CompletedSize.Text = $"Downloaded {Bytes(job.ReceivedBytes)} ({job.ReceivedBytes:N0} bytes)";
         Details.Show(job);
+        // A finished file has no progress to show: the full bar only filled the middle (U-WL-17).
+        if (complete) SegmentMap.Visibility = OverallFooter.Visibility = Visibility.Collapsed;
         var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
-            : complete ? "The file has been saved. Choose an action below."
+            : complete ? ServerNames.Completed(_connection.Target)
             : job.State == "paused" ? "The download is paused. Resume it or close this window."
             : "Closing this window will not stop the download.";
         if (_connected) Notice.Text = job.Failure?.Message ?? completionText;

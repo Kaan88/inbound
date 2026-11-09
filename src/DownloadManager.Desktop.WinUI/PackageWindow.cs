@@ -81,7 +81,7 @@ internal sealed class PackageWindow : Window
         _connection = new HostConnection(target);
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
-        Title = "Package status — Inbound Download Manager";
+        Title = ServerNames.ForWindow("Package status — Inbound Download Manager", _connection.Target);
         WindowLayout.ResizeForDpi(this, 720, 820);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
@@ -190,6 +190,7 @@ internal sealed class PackageWindow : Window
         _root.KeyboardAccelerators.Add(Escape());
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
+        WindowCascade.Apply(this);
         Render();
         _connection.Start();
     }
@@ -486,7 +487,7 @@ internal sealed class PackageWindow : Window
         _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
         _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
         _close.Content = allDone ? "Close" : "Hide";
-        if (allDone) Title = "Package complete — Inbound Download Manager";
+        if (allDone) Title = ServerNames.ForWindow("Package complete — Inbound Download Manager", _connection.Target);
     }
 
     private Row CreateRow(Guid jobId)

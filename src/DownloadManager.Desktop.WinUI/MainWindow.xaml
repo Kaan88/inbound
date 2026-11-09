@@ -258,8 +258,32 @@
             </Grid>
         </Border>
 
+        <StackPanel Grid.Row="2">
+        <!-- UI.B18, U-WR-1, U-WR-3: while another server is shown, which one, whether it can be reached, and one click
+             back to this PC (Ctrl+0). Hidden for this PC. -->
+        <Border x:Name="ServerBannerBar" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Name="ServerBannerIcon" Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center"
+                          Foreground="{ThemeResource InboundIconInfoBrush}" />
+                <TextBlock x:Name="ServerBannerText" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
+                           AutomationProperties.Name="Server shown" AutomationProperties.LiveSetting="Polite" />
+                <Button x:Name="ServerBannerButton" Grid.Column="2" FontSize="12" Padding="10,2" Visibility="Collapsed"
+                        Click="ServerBannerAction_Click" />
+                <Button x:Name="ServerBannerBack" Grid.Column="3" FontSize="12" Padding="10,2" Content="Back to This PC"
+                        AutomationProperties.Name="Back to This PC" AutomationProperties.AcceleratorKey="Ctrl+0"
+                        ToolTipService.ToolTip="Show the downloads of this PC (Ctrl+0)" Click="ServerBannerBack_Click" />
+            </Grid>
+        </Border>
+
         <!-- What extraction wants the user to know. It sits above the list and waits; nothing opens by itself. -->
-        <Border x:Name="ArchiveNoticeBar" Grid.Row="2" Visibility="Collapsed" Padding="10,4"
+        <Border x:Name="ArchiveNoticeBar" Visibility="Collapsed" Padding="10,4"
                 Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -274,6 +298,7 @@
                         AutomationProperties.Name="Dismiss this extraction notice" Click="ArchiveNoticeDismiss_Click" />
             </Grid>
         </Border>
+        </StackPanel>
 
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>

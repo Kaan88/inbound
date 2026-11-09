@@ -199,7 +199,7 @@ internal sealed class MyProviderWindow : Window
         _status = new StatusLine($"My {_name} status");
 
         AppTheme.Track(_root);
-        Title = $"My {_name} — Inbound Download Manager";
+        Title = ServerNames.ForWindow($"My {_name} — Inbound Download Manager", ShownServer.Target);
         WindowLayout.SetMinimumSize(this, WindowMinimumWidth, WindowMinimumHeight);
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "my-provider");
