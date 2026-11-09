@@ -57,7 +57,7 @@ the Add URL and Add links dialogs, then does a few things end to end: enters an 
 extraction, stops and resumes, deletes without the file, uploads a `.torrent` file and chooses its files, saves a site
 login and a proxy password in one Options draft (Apply), checks that Cancel and Back ask before dropping a draft, pairs a
 browser token and checks what it may do, revokes it (after the question), and signs out. It also checks that Add URL's
-second step has the focus and Escape closes it, that Back closes a dialog and keeps the view, and that My TorBox's
+second step has the focus and Escape closes it, that Back closes a dialog and keeps the view (at phone width too, where a #fragment navigation leaves the dialog open), that a link from an unsaved host asks before going back to it, and that My TorBox's
 dialog keeps the focus after a failed download and on Shift+Tab. Besides overlapping toolbar buttons it fails when the
 toolbar's More is off the screen. It prints how many steps passed and failed, and any
 console error, page error, sideways scroll or overlapping toolbar buttons. `INBOUND_ONLY=<regex>` walks only the screens
