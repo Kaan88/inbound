@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -264,6 +265,34 @@ public static class PipeNames
     public static string MutexName() => $"Local\\DownloadManager.Host.{CurrentUserKey()}";
 }
 
+/// <summary>
+/// The client's half of "only this user's Host": the Host's pipe ACL lets only this user in, and this checks that the pipe
+/// a client opened is this user's, so another Windows account (or a program of it) that made a pipe of the same name
+/// first can't answer in the Host's place. It is <see cref="PipeOptions.CurrentUserOnly"/>'s check plus one case:
+/// that option compares the pipe's owner with the token's default owner only, which in an elevated process of an
+/// administrator is the Administrators group, so a client in an administrator terminal (the CLI, say) would be refused
+/// by its own user's Host. This user's own SID is accepted too.
+/// </summary>
+public static class PipeOwner
+{
+    /// <summary>Whether a pipe with this owner may be this user's Host.</summary>
+    /// <param name="user">This user's SID (<see cref="WindowsIdentity.User"/>).</param>
+    /// <param name="defaultOwner">The token's default owner (<see cref="WindowsIdentity.Owner"/>): the user, or the
+    /// Administrators group in an elevated process.</param>
+    public static bool IsTrusted(SecurityIdentifier? owner, SecurityIdentifier? user, SecurityIdentifier? defaultOwner)
+        => owner is not null && (owner == user || owner == defaultOwner);
+
+    /// <summary>Throws <see cref="UnauthorizedAccessException"/> unless the connected pipe's owner is <see cref="IsTrusted"/>.</summary>
+    [SupportedOSPlatform("windows")]
+    public static void Verify(NamedPipeClientStream pipe)
+    {
+        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        using var current = WindowsIdentity.GetCurrent();
+        if (!IsTrusted(owner, current.User, current.Owner))
+            throw new UnauthorizedAccessException("The app's pipe belongs to another user.");
+    }
+}
+
 public sealed class IpcClient : IIpcConnection
 {
     private readonly NamedPipeClientStream _pipe;
@@ -327,6 +356,7 @@ public sealed class IpcClient : IIpcConnection
         {
             await pipe.ConnectAsync((int)(timeout ?? TimeSpan.FromSeconds(5)).TotalMilliseconds, cancellationToken)
                 .ConfigureAwait(false);
+            if (OperatingSystem.IsWindows()) PipeOwner.Verify(pipe);
             return pipe;
         }
         catch

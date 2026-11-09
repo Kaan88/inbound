@@ -7,7 +7,11 @@ page gives the framing rules, the remote provider messages and the archive messa
 
 ## Connection and framing
 
-- A per-user named pipe, `\\.\pipe\DownloadManager-<hash>`. Only the current user and SYSTEM can open it.
+- A per-user named pipe, `\\.\pipe\DownloadManager-<hash>`. Only the current user and SYSTEM can open it. A client
+  (`IpcClient`, so the window, the CLI and the native host) checks after connecting that the pipe is owned by this
+  user (`PipeOwner`): another account that made a pipe of the same name first can't answer in the Host's place. It is
+  `PipeOptions.CurrentUserOnly`'s check, which compares the owner with the token's default owner only, plus this
+  user's own SID, so a client in an administrator terminal (default owner Administrators) still reaches its user's Host.
 - Each frame is a 4-byte little-endian length, then that many bytes of UTF-8 JSON. The limit is 8 MB per frame.
 - Each message has `v` (protocol version), `type`, `id`, and on replies `replyTo` with the id of the request, plus `payload`.
 - JSON uses camelCase names and leaves out null values. Unknown fields are ignored.
