@@ -82,7 +82,8 @@ internal static partial class ArchiveText
         if (done == sets.Count) return ("Extraction completed", RemoteRowTone.Done);
         if (sets.Any(set => set.State == "waiting" || IsWaitingForNamedParts(set))) return ("Waiting for extraction", RemoteRowTone.Waiting);
         if (done > 0) return ($"Extracted {done} of {sets.Count}", RemoteRowTone.Neutral);
-        if (sets.All(set => set.State == "downloaded")) return ("Downloaded", RemoteRowTone.Neutral);
+        // U-WL-20: "Downloaded" read as the download's state, in a column about extraction.
+        if (sets.All(set => set.State == "downloaded")) return ("Not extracted yet", RemoteRowTone.Neutral);
         return (string.Empty, RemoteRowTone.Neutral);
     }
 
@@ -99,8 +100,8 @@ internal static partial class ArchiveText
             case "downloaded":
                 var gaps = set.MissingVolumes.Concat(set.FailedVolumes).ToList();
                 return gaps.Count > 0
-                    ? ($"Downloaded, {Parts(gaps)} missing", RemoteRowTone.Waiting)
-                    : ("Downloaded", RemoteRowTone.Neutral);
+                    ? ($"Not extracted, {Parts(gaps)} missing", RemoteRowTone.Waiting)
+                    : ("Not extracted yet", RemoteRowTone.Neutral);
 
             case "waiting":
                 if (set.DownloadingVolumes.Count > 0) return ($"Waiting: {Parts(set.DownloadingVolumes)} {UnfinishedWord(set)}", RemoteRowTone.Waiting);

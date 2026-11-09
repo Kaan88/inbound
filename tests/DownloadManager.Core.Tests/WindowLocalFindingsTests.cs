@@ -223,6 +223,21 @@ public sealed class WindowLocalFindingsTests
         Assert.DoesNotContain("Automatic (from file type)", File.ReadAllText(WinUiFile("MainWindow.xaml.cs")));
     }
 
+    [Fact]
+    public void U_WL_25_saving_a_key_checks_it_in_the_same_press()
+    {
+        Assert.Equal("Key saved. TorBox accepted this key.", RemoteText.KeySavedAndChecked("TorBox accepted this key."));
+        Assert.StartsWith("Key saved, but", RemoteText.KeySavedButNotChecked("TorBox refused this key."));
+        var source = File.ReadAllText(WinUiFile("ProviderAccountPage.cs"));
+        var save = source[source.IndexOf("private async Task SaveAsync()", StringComparison.Ordinal)..source.IndexOf("private Task ValidateAsync()", StringComparison.Ordinal)];
+        Assert.Contains("_client.ValidateAsync(", save);
+        Assert.DoesNotContain("Select Validate", source);
+    }
+
+    [Fact]
+    public void U_WL_20_a_set_not_yet_extracted_says_so_in_the_extraction_column()
+        => Assert.DoesNotContain("(\"Downloaded\"", File.ReadAllText(WinUiFile(Path.Combine("Remote", "ArchiveRows.cs"))));
+
     internal static string WinUiFile(string name) => Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", name);
 
     internal static string RepoRoot()

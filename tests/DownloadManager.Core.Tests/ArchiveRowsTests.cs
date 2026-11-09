@@ -140,8 +140,8 @@ public sealed class ArchiveRowsTests
     public void The_other_states_have_their_words()
     {
         Assert.Equal("Extraction completed", ArchiveText.Set(Set("completed")).Text);
-        Assert.Equal("Downloaded", ArchiveText.Set(Set("downloaded")).Text);
-        Assert.Equal("Downloaded, part2 missing", ArchiveText.Set(Set("downloaded", change: s => s.MissingVolumes = ["a.part2.rar"])).Text);
+        Assert.Equal("Not extracted yet", ArchiveText.Set(Set("downloaded")).Text);
+        Assert.Equal("Not extracted, part2 missing", ArchiveText.Set(Set("downloaded", change: s => s.MissingVolumes = ["a.part2.rar"])).Text);
         Assert.Equal("Not downloaded yet", ArchiveText.Set(Set("downloading")).Text);
     }
 
