@@ -129,7 +129,7 @@ internal sealed class SettingsWindow : Window
     };
 
     /// <summary>Secondary explanatory text under a section.</summary>
-    public static TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.72, FontSize = 12 };
+    public static TextBlock Hint(string text) => InboundUi.Secondary(text);
 
     /// <summary>A folder text box with a Browse… button that opens the folder picker over this window.</summary>
     public (UIElement Row, TextBox Box) FolderField(string header, string? text, string? placeholder = null, bool inlineLabel = false, bool favorites = true)

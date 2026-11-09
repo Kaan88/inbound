@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.Storage.Pickers;
@@ -25,7 +25,7 @@ public sealed class JobCompletionEditor
     private readonly ComboBox _systemAction = new() { Header = "System action", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly CheckBox _force = new() { Content = "Force the system action" };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-    private readonly TextBlock _systemActionNote = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.72 };
+    private readonly TextBlock _systemActionNote = InboundUi.Secondary();
 
     public UIElement Content { get; }
 

@@ -307,7 +307,7 @@ export function passwordTitle(target: ArchivePasswordTarget): string {
 }
 
 export function passwordPrimary(target: ArchivePasswordTarget): string {
-  return target.needed ? 'Extract with This Password' : 'Save Password';
+  return target.needed ? 'Extract with this password' : 'Save password';
 }
 
 /** What the password dialog says about the archive it asks for. */

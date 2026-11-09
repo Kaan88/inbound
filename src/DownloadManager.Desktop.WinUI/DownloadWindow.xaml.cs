@@ -43,7 +43,7 @@ public sealed partial class DownloadWindow : Window
         WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = WindowLayout.AppIconPath;
         if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
-        Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
+        Title = ServerNames.ForWindow("Progress Details — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
         // U-WL-17: Enter opens the finished file, the window's default action.
         var enter = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Enter };
@@ -489,6 +489,7 @@ public sealed partial class DownloadWindow : Window
                 ? $"Remove {name} from the list? {JobNotes.NothingToDelete(1)}"
                 : $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
@@ -515,6 +516,7 @@ public sealed partial class DownloadWindow : Window
             Title = "Cancel download?",
             Content = "Cancel this transfer and delete its partial file?",
             PrimaryButtonText = "Cancel download",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = _job?.State is "paused" or "queued" or "failed" ? "Keep it" : "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };

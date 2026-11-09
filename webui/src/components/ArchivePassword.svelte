@@ -4,7 +4,7 @@
   import { store } from '../lib/store.svelte';
 
   // The archive password, for a set, a package or a download with no record yet. It stays on the server and is
-  // never shown again. Nothing is sent for an empty box except "Forget Saved Password", which clears it.
+  // never shown again. Nothing is sent for an empty box except "Forget saved password", which clears it.
   let { target, onclose }: { target: ArchivePasswordTarget; onclose: () => void } = $props();
 
   let password = $state('');
@@ -32,7 +32,7 @@
   </form>
   {#snippet footer()}
     <button class="btn" onclick={onclose}>Cancel</button>
-    {#if target.hasPassword}<button class="btn" disabled={busy} onclick={() => send(true)}>Forget Saved Password</button>{/if}
+    {#if target.hasPassword}<button class="btn" disabled={busy} onclick={() => send(true)}>Forget saved password</button>{/if}
     <button class="btn-primary" disabled={busy || !password} onclick={() => send(false)}>{passwordPrimary(target)}</button>
   {/snippet}
 </Dialog>

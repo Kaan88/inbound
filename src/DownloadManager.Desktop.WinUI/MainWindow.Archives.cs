@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
@@ -503,8 +503,8 @@ public sealed partial class MainWindow
             RequestedTheme = RootGrid.ActualTheme,
             Title = target.WasWrong ? "Wrong archive password" : "Archive password",
             Content = new StackPanel { Spacing = 10, MinWidth = 420, Children = { hint, box } },
-            PrimaryButtonText = target.Needed ? "Extract with This Password" : "Save Password",
-            SecondaryButtonText = target.HasPassword ? "Forget Saved Password" : string.Empty,
+            PrimaryButtonText = target.Needed ? "Extract with this password" : "Save password",
+            SecondaryButtonText = target.HasPassword ? "Forget saved password" : string.Empty,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
             IsPrimaryButtonEnabled = false,
