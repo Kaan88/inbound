@@ -37,9 +37,9 @@ internal static class WindowPlacement
         if (Load().TryGetValue(key, out var saved) && IsVisible(saved))
         {
             if (restoreSize && saved.Width >= 200 && saved.Height >= 150)
-                appWindow.MoveAndResize(new RectInt32(saved.X, saved.Y, saved.Width, saved.Height));
+                appWindow.MoveAndResize(new RectInt32 { X = saved.X, Y = saved.Y, Width = saved.Width, Height = saved.Height });
             else
-                appWindow.Move(new PointInt32(saved.X, saved.Y));
+                appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
             if (restoreSize && saved.Maximized && appWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         }
 
@@ -144,7 +144,7 @@ internal static class WindowPlacement
     /// <summary>True when the title-bar area is on a display that is connected now.</summary>
     private static bool IsVisible(Placement placement)
     {
-        var probe = new PointInt32(placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), placement.Y + 16);
+        var probe = new PointInt32 { X = placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), Y = placement.Y + 16 };
         var area = DisplayArea.GetFromPoint(probe, DisplayAreaFallback.None);
         if (area is null) return false;
         var work = area.WorkArea;

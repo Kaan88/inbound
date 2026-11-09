@@ -1,0 +1,64 @@
+<Project Sdk="Uno.Sdk/6.7.45">
+  <!-- D7 prototype: the WinUI window's own sources compiled by Uno Platform's Skia desktop head (Windows, Linux X11).
+       Every .cs/.xaml of src\DownloadManager.Desktop.WinUI is linked, not copied; Uno-only differences are #if HAS_UNO
+       in those files or shims in this folder. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-desktop</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UnoSingleProject>true</UnoSingleProject>
+    <RootNamespace>DownloadManager.Desktop.WinUI</RootNamespace>
+    <AssemblyName>DownloadManager.Desktop.Uno</AssemblyName>
+    <ApplicationTitle>Inbound Download Manager</ApplicationTitle>
+    <ApplicationId>local.inbound.desktop.uno</ApplicationId>
+    <UnoFeatures></UnoFeatures>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The WinUI sources use Windows-only APIs behind runtime checks or on Windows-only paths. -->
+    <NoWarn>$(NoWarn);CA1416;Uno0001</NoWarn>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+  </PropertyGroup>
+
+  <!-- Licences: only MIT/Apache-2.0 code is shipped. Hot Design and the MCP bridge are Uno's dev-time tools;
+       Uno.Sdk.Extras (EULA, no redistribution) and Uno.Settings.DevServer are build/dev tools added implicitly, and
+       taking over their references with no assets keeps them out. LibVLCSharp (LGPL-2.1, MediaPlayerElement on X11)
+       and CommonServiceLocator (MS-PL) come in through Uno's X11 and logging packages and are not shipped either. -->
+  <PropertyGroup>
+    <UnoDisableHotDesign>true</UnoDisableHotDesign>
+    <UnoDisableMCPSupport>true</UnoDisableMCPSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Uno.Sdk.Extras" Version="6.3.1" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Uno.Settings.DevServer" Version="1.13.32" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="LibVLCSharp" Version="3.9.7.1" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="CommonServiceLocator" Version="2.0.5" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <WinUiDir>..\DownloadManager.Desktop.WinUI\</WinUiDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(WinUiDir)**\*.cs" Exclude="$(WinUiDir)bin\**;$(WinUiDir)obj\**" Link="WinUI\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Page Include="$(WinUiDir)**\*.xaml" Exclude="$(WinUiDir)bin\**;$(WinUiDir)obj\**;$(WinUiDir)App.xaml" Link="WinUI\%(RecursiveDir)%(Filename)%(Extension)" />
+    <ApplicationDefinition Include="$(WinUiDir)App.xaml" Link="WinUI\App.xaml" />
+    <Compile Include="..\DownloadManager.Core\Providers\ProviderLinks.cs" Link="Providers\ProviderLinks.cs" />
+    <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
+    <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
+    <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
+  </ItemGroup>
+
+  <!-- Native AOT trial: the WinUI sources use reflection-based System.Text.Json everywhere (no source-generated
+       contexts), so an AOT build keeps reflection JSON on and roots the app's own and the Contracts assemblies. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <TrimmerRootAssembly Include="DownloadManager.Desktop.Uno" />
+    <TrimmerRootAssembly Include="DownloadManager.Contracts" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+  </ItemGroup>
+</Project>

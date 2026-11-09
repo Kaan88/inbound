@@ -56,6 +56,10 @@ public partial class App : Application
         _serverId = WindowInstance.ServerId(commandLine);
         // The same download's window for another server is another window, so the server's id is in its name.
         var name = WindowInstance.EventName(PipeNames.CurrentUserKey(), _updateMode, _jobId, _packageId, _serverId);
+#if HAS_UNO
+        // The prototype runs beside the WinUI window on the same instance; it must not take over its activation.
+        name += ".Uno";
+#endif
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name, out var createdNew);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
         _secondaryInstance = !createdNew;
