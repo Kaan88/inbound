@@ -12,7 +12,7 @@
 
 ### Owner's first look at 0.6.3 (2026-11-09)
 
-- Owner, 2026-11-09, with screenshots: the folder chooser for another server is drawn black (UI.B16); switching servers is not easy (UI.R26); "where is the enable webui?" (UI.R27); Linux folders refused in My TorBox while the window shows a server (UI.B17); the web UI's My TorBox download opens below the list out of sight and has no right-click actions (D2d); Firefox gets no answer from the server Edge pairs with (EXT.B6). Asked for a comprehensive UI usability test. The mini PC now runs the 0.6.3 server.
+- Owner, 2026-11-09, with screenshots: the folder chooser for another server is drawn black (UI.B16); switching servers is not easy (UI.R26); "where is the enable webui?" (UI.R27); Linux folders refused in My TorBox while the window shows a server (UI.B17); the web UI's My TorBox download opens below the list out of sight and has no right-click actions (D2d); Firefox gets no answer from the server Edge pairs with (EXT.B6). Asked for a comprehensive UI usability test. Then: "I also see no way to return to desktop from server host on winui" (UI.B18). The mini PC now runs the 0.6.3 server.
 
 ### 0.6.3 release (2026-11-09)
 
