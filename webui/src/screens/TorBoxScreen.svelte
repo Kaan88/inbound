@@ -159,7 +159,7 @@
       }
       const folder = freeDestination.trim();
       if (folder && !isFullPath(folder)) {
-        destinationHint = 'Enter a full folder path, such as D:\\Downloads or /srv/downloads, or leave this empty for the default folder.';
+        destinationHint = `Enter a full folder path, such as ${store.texts.destinationExample}, or leave this empty for the default folder.`;
         status = '';
         return;
       }

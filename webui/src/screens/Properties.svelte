@@ -3,7 +3,7 @@
   import Dialog from '../components/Dialog.svelte';
   import { bytes, dateTime, stateWord } from '../lib/format';
   import {
-    addressLabel, canForce, displaySource, hideAddresses, categoryChoices, categoryOf, completionFrom, hasOwnAddress, programModeOf, shownAddress, systemActions,
+    addressLabel, canForce, displaySource, hideAddresses, categoryChoices, categoryOf, completionFrom, completionForSession, hasOwnAddress, programModeOf, shownAddress, systemActions,
     type ProgramMode,
   } from '../lib/details';
   import { store } from '../lib/store.svelte';
@@ -17,8 +17,11 @@
   // The boxes start from the download as it is when the dialog opens.
   const first = untrack(() => job);
   const startCategory = categoryOf(first);
-  // The program path is a path on the server, and only the Windows app can run one (the server refuses it otherwise).
-  const programAllowed = store.has('tray');
+  // A program path is a path on the host, and only a session that may set programs can use one; opening the file and the
+  // system actions need completionActions. With neither name the dialog shows a note instead of the controls.
+  const programAllowed = $derived(store.features.programSettings);
+  const actionsAllowed = $derived(store.features.completionActions);
+  const completionShown = $derived(programAllowed || actionsAllowed);
   const finished = first.state === 'completed';
   const packageName = $derived(store.model.groups.find((group) => group.jobIds.includes(job.id))?.name);
   const providerName = $derived(store.model.accounts.find((a) => a.provider === job.remoteProvider)?.providerName ?? job.remoteProvider ?? '');
@@ -53,13 +56,13 @@
     error = '';
     const payload: Record<string, unknown> = { jobId: job.id, description };
     if (category !== startCategory) payload.categoryId = category;
-    if (!finished) {
+    if (!finished && completionShown) {
       const built = completionFrom(mode, programPath, openFile, systemAction, force, !!settings?.allowSystemCompletionActions);
       if (!built.ok) {
         error = built.error;
         return;
       }
-      payload.completionOptions = built.options;
+      payload.completionOptions = completionForSession(built.options, programAllowed, actionsAllowed);
     }
     busy = true;
     try {
@@ -94,6 +97,12 @@
       </select>
     </div>
 
+    {#if !completionShown}
+      <div>
+        <p class="label">When this download completes</p>
+        <p class="hint">{store.texts.completionNote}</p>
+      </div>
+    {:else}
     <fieldset class="grid gap-3" disabled={finished}>
       <legend class="label">When this download completes</legend>
       {#if programAllowed}
@@ -102,9 +111,10 @@
           <option value="none">No completion program</option>
           <option value="run">Run a program</option>
         </select>
-        <input class="field font-mono" aria-label="Program" bind:value={programPath} disabled={mode !== 'run' || finished} placeholder="Path of an .exe on the server" autocomplete="off" spellcheck="false" />
-        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={openFile} /> Open the downloaded file when complete</label>
+        <input class="field font-mono" aria-label="Program" bind:value={programPath} disabled={mode !== 'run' || finished} placeholder={store.texts.programPlaceholder} autocomplete="off" spellcheck="false" />
       {/if}
+      {#if actionsAllowed}
+        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={openFile} /> Open the downloaded file when complete</label>
       <div>
         <label class="label" for="prop-system">System action</label>
         <select id="prop-system" class="field" bind:value={systemAction}>
@@ -113,8 +123,10 @@
         <p class="hint mt-1">{settings?.allowSystemCompletionActions ? 'A system action runs only when no other downloads are unfinished.' : 'Enable system completion actions in Scheduler settings to use this option.'}</p>
       </div>
       <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={force} disabled={!canForce(systemAction) || finished} /> Force the system action</label>
+      {/if}
     </fieldset>
-    {#if finished}<p class="hint -mt-2">This download has finished, so what happens on completion can't change.</p>{/if}
+    {/if}
+    {#if finished && completionShown}<p class="hint -mt-2">This download has finished, so what happens on completion can't change.</p>{/if}
     {#if error}<p class="text-[12px] text-error" role="alert">{error}</p>{/if}
   </form>
   {#snippet footer()}

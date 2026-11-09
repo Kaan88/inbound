@@ -282,7 +282,7 @@
     const picks = chosen(lines);
     const folder = destination.trim();
     if (picks.some((line) => routeOf(line) === 'provider') && folder && !isFullPath(folder)) {
-      destinationError = 'The destination has to be a full path, such as /downloads or D:\\Downloads.';
+      destinationError = `The destination has to be a full path, such as ${store.texts.destinationExample}.`;
       return;
     }
 

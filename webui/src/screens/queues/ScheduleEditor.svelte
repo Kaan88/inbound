@@ -1,5 +1,6 @@
 <script lang="ts">
   import { DAY_NAMES, ALL_DAYS, tickedDays, toggleDay, type ScheduleDraft } from '../../lib/queues';
+  import { store } from '../../lib/store.svelte';
   import type { Queue } from '../../lib/types';
 
   // One schedule's form, in the desktop Scheduler's order: Queue, Schedule name, Enable schedule, Start/Stop time, Days,
@@ -64,8 +65,7 @@
 
   <div class="sm:col-span-2">
     <p class="label">When the queue finishes</p>
-    <label class="flex items-center gap-2 text-[13px] opacity-60"><input type="checkbox" disabled checked={false} /> Open a file, exit, or turn off the computer</label>
-    <p class="hint pl-7">Not available on the server: it has no desktop to open files on, and its life belongs to Docker or its service manager.</p>
+    <p class="hint">{store.texts.queueEndNote}</p>
   </div>
 
   <fieldset class="grid gap-2 sm:col-span-2">

@@ -100,9 +100,9 @@
   });
 </script>
 
-<Dialog title="Choose a folder on the server" {onclose} wide>
+<Dialog title={store.texts.folderPickerTitle} {onclose} wide>
   <form class="mb-3 flex gap-2" onsubmit={(event) => { event.preventDefault(); void browse(typed); }}>
-    <input class="field font-mono" bind:value={typed} placeholder="Type a path, such as /downloads/movies" aria-label="Folder path" spellcheck="false" autocomplete="off" />
+    <input class="field font-mono" bind:value={typed} placeholder={store.texts.folderPlaceholder} aria-label="Folder path" spellcheck="false" autocomplete="off" />
     <button class="btn shrink-0" type="submit" disabled={busy}>Check</button>
   </form>
   {#if error}
@@ -145,7 +145,7 @@
     <section class="min-w-0">
       <div class="mb-2 flex items-center gap-2">
         <button class="btn px-2" onclick={() => browse(listing?.parent ?? null)} disabled={busy || !listing?.path} title="Up one folder" aria-label="Up one folder"><Icon name="up" size={15} /></button>
-        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? 'The folders this server may use'}</div>
+        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? store.texts.folderListEmpty}</div>
         {#if listing?.path}
           <button class="btn px-2" onclick={toggleFavorite} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={isFavorite}>
             {isFavorite ? '★' : '☆'}
