@@ -24,6 +24,10 @@ export interface HostTexts {
   signInHint: string;
   noPasswordYet: string;
   setupCodeHint: string | null;
+  /** Before the version in the status bar and on the sign-in page. */
+  versionPrefix: string;
+  /** Options, General: the start-up resume box. */
+  resumeOnStart: string;
 }
 
 const server: HostTexts = {
@@ -41,6 +45,8 @@ const server: HostTexts = {
   signInHint: 'Enter the password of this server.',
   noPasswordYet: 'This server has no password yet. The one you set here is needed to use it from any browser.',
   setupCodeHint: "This browser isn't on the server's own computer, so the server asks for the code it wrote in its log (docker logs).",
+  versionPrefix: 'Server',
+  resumeOnStart: 'Resume unfinished downloads when the server starts',
 };
 
 const windows: HostTexts = {
@@ -58,6 +64,8 @@ const windows: HostTexts = {
   signInHint: 'Enter the password you set in the app on the PC, under Options, Web UI.',
   noPasswordYet: 'This PC has no web password yet. Set it in the app on the PC, under Options, Web UI.',
   setupCodeHint: null,
+  versionPrefix: 'Inbound on the PC',
+  resumeOnStart: 'Resume unfinished downloads when the app starts on the PC',
 };
 
 export function hostTexts(kind: string | null | undefined): HostTexts {

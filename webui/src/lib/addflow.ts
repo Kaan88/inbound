@@ -142,6 +142,28 @@ export function metadataText(info: FileInfo, serverName: string | null): string 
   return `${size} · ${info.contentType ?? 'Type unknown'}${serverName ? `\nServer name: ${serverName}` : ''}`;
 }
 
+/**
+ * What a failed file check says, in words (U-WU-16): .NET's "Response status code does not indicate success: 404 (Not
+ * Found)." becomes a sentence about the file. Anything else is passed on as it came.
+ */
+export function fileInfoProblem(message: string): string {
+  const text = message.trim();
+  const match = /status code does not indicate success:\s*(\d{3})/i.exec(text);
+  if (!match) return text;
+  const code = Number(match[1]);
+  const said: Record<number, string> = {
+    400: "The server didn't accept the request (400).",
+    401: 'The server wants a user name and password for this file (401). Add them under Authentication.',
+    403: "The server won't let this app have the file (403).",
+    404: "The server says this file doesn't exist (404).",
+    410: 'The server says this file is gone (410).',
+    429: 'The server says too many requests were made (429). Try again later.',
+  };
+  if (said[code]) return said[code];
+  if (code >= 500) return `The server had a problem answering (${code}).`;
+  return `The server answered ${code}.`;
+}
+
 // ---- Several links: the package and duplicates ----
 
 const archivePart = /^(.+?)(\.part\d+\.rar|\.r\d{2,3}|\.z\d{2}|\.rar|\.zip|\.\d{3})$/i;

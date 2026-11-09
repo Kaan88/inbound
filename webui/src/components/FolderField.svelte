@@ -40,6 +40,16 @@
 
   const line = $derived(measured ? spaceLine(space, neededBytes) : null);
 
+  let box: HTMLInputElement | undefined = $state();
+  function showEnd() {
+    if (box && document.activeElement !== box) box.scrollLeft = box.scrollWidth;
+  }
+  // A value set from outside (Browse…, a category's folder) shows its end too.
+  $effect(() => {
+    void value;
+    queueMicrotask(showEnd);
+  });
+
   async function check() {
     problem = '';
     if (!value.trim()) return;
@@ -55,7 +65,8 @@
 <div>
   <label class="label" for={id}>{label}</label>
   <div class="flex gap-2">
-    <input {id} class="field font-mono" bind:value onblur={check} {disabled} {placeholder} spellcheck="false" autocomplete="off" aria-invalid={problem ? 'true' : undefined} />
+    <!-- A long path shows its end, the folder that matters, when the box isn't being typed in; the tooltip has it all (U-WU-5). -->
+    <input {id} bind:this={box} class="field font-mono" bind:value onblur={() => { showEnd(); void check(); }} {disabled} {placeholder} title={value} spellcheck="false" autocomplete="off" aria-invalid={problem ? 'true' : undefined} />
     <button class="btn shrink-0" type="button" onclick={() => (picking = true)} {disabled}>Browse…</button>
   </div>
   {#if problem}<p class="mt-1 text-[12px] text-error" role="alert">{problem}</p>{:else if hint}<p class="hint mt-1">{hint}</p>{/if}

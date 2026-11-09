@@ -7,8 +7,8 @@
   import { serializeList } from './lib/addflow';
   import { opensAddUrl } from './lib/keys';
   import type { ClassifyResult } from './lib/types';
-  import { speed } from './lib/format';
-  import { countJobs, providerEntries, statusBarText } from './lib/list';
+  import { clockTime, speed } from './lib/format';
+  import { countJobs, liveSpeed, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
@@ -80,9 +80,19 @@
   $effect(() => {
     noticeBoard.update(Object.values(store.model.archives), noticeWatchingSince, store.model.settings?.notifyOnCompletion !== false);
   });
+  const connectionText: Record<string, string> = {
+    connecting: 'Connecting…', open: 'Connected', reconnecting: 'Reconnecting…', signedOut: 'Signed out',
+    incompatible: 'This page is older than the server. Reload it.', closed: 'Not connected',
+  };
   const count = $derived(counts(store.model));
   const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
-  const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
+  // The same figure the speed graph shows (U-WU-14); nothing while the server can't be reached (U-WU-3).
+  const totalSpeed = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
+  const offline = $derived(store.connection !== 'open' && store.connection !== 'connecting' && store.connection !== 'signedOut');
+  const offlineText = $derived(
+    store.connection === 'incompatible' ? connectionText.incompatible
+      : `Can't reach the server${store.lostAt ? ` since ${clockTime(store.lostAt)}` : ''}. ${store.connection === 'reconnecting' ? 'Trying again… What the list shows is from before.' : 'Reload the page to try again.'}`,
+  );
   const listCounts = $derived(countJobs(Object.values(store.model.jobs)));
   // A provider's page is marked by its account: `#/provider` alone stands for the first one that can browse.
   const current = $derived(
@@ -91,14 +101,10 @@
       : screen.kind,
   );
   const categories = $derived(categoryList(store.model.settings?.customCategories ?? []));
-  const statusText = $derived(screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
+  const statusText = $derived(offline && store.model.snapshots > 0 ? connectionText[store.connection] : screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
   // The Host answers archive.list, or has no extraction to show.
   const showExtractions = $derived(store.model.archivesAnswered);
 
-  const connectionText: Record<string, string> = {
-    connecting: 'Connecting…', open: 'Connected', reconnecting: 'Reconnecting…', signedOut: 'Signed out',
-    incompatible: 'This page is older than the server. Reload it.', closed: 'Not connected',
-  };
 
   const themes: { key: Theme; icon: string; label: string }[] = [
     { key: 'system', icon: 'monitor', label: 'Follow the system' },
@@ -110,7 +116,7 @@
 </script>
 
 {#snippet link(href: string, key: string, icon: string, label: string, n?: number, indent = 0)}
-  <a {href} class="flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style={indent ? `padding-left: ${12 + indent * 16}px` : undefined} aria-current={current === key ? 'page' : undefined}>
+  <a {href} class="touch-row flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style={indent ? `padding-left: ${12 + indent * 16}px` : undefined} aria-current={current === key ? 'page' : undefined}>
     <Icon name={icon} size={16} class="shrink-0 text-icon-neutral" />
     <span class="min-w-0 flex-1 truncate">{label}</span>
     {#if n}<span class="tabular text-[12px] text-muted">{n}</span>{/if}
@@ -124,7 +130,7 @@
     <button class="btn-icon md:hidden" aria-label="Menu" aria-expanded={drawer} onclick={() => (drawer = !drawer)}><Icon name="menu" size={18} /></button>
     <a href="#/all" class="flex items-center gap-2 font-semibold"><img src="/favicon.svg" alt="" width="22" height="22" /> <span class="hidden sm:inline">Inbound</span></a>
     {#if screen.kind === 'list'}
-      <label class="relative ml-2 min-w-0 max-w-sm flex-1">
+      <label class="relative min-w-0 max-w-sm flex-1 md:ml-2">
         <span class="sr-only">Search the list</span>
         <Icon name="search" size={15} class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
         <input id="list-search" class="field h-8 pl-7" type="search" placeholder="Search" title="Search (Ctrl+F). F3 goes to the next row." bind:value={search} />
@@ -132,26 +138,40 @@
     {:else}
       <span class="flex-1"></span>
     {/if}
-    <span class="flex-1"></span>
+    <span class="flex-1 {screen.kind === 'list' ? 'max-md:hidden' : ''}"></span>
     <span class="hidden items-center gap-1.5 text-[12px] text-muted sm:flex" role="status" aria-live="polite">
       <span class="inline-block size-2 rounded-full {store.connection === 'open' ? 'bg-status-active' : store.connection === 'reconnecting' || store.connection === 'connecting' ? 'bg-status-waiting' : 'bg-status-failed'}"></span>
       {connectionText[store.connection]}
     </span>
     <HostSwitcher />
-    <button class="btn-icon" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
+    <!-- On a phone the theme button is in the drawer, so the search box and the host's name have room. -->
+    <button class="btn-icon max-md:hidden" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
     {#if store.signInRequired}
       <button class="btn-icon" title="Sign out" aria-label="Sign out" onclick={() => store.signOut()}><Icon name="logout" size={18} /></button>
     {/if}
   </header>
 
-  {#if store.connection !== 'open' && store.connection !== 'connecting'}
-    <div class="border-b border-divider bg-highlight px-4 py-1.5 text-[12.5px] sm:hidden" role="status">{connectionText[store.connection]}</div>
+  {#if offline}
+    <!-- On every width, above the list (U-WU-3); the phone had it only. -->
+    <div class="flex items-center gap-2 border-b border-divider bg-highlight px-4 py-1.5 text-[12.5px]" role="alert">
+      <Icon name="alert" size={15} class="shrink-0 text-icon-danger" />
+      <span class="min-w-0 flex-1">{offlineText}</span>
+      {#if store.connection !== 'reconnecting'}<button class="btn h-7 py-0" onclick={() => location.reload()}>Reload</button>{/if}
+    </div>
   {/if}
 
   <div class="relative flex min-h-0 flex-1">
-    {#if drawer}<button class="fixed inset-0 z-20 bg-black/30 md:hidden" aria-label="Close the menu" onclick={() => (drawer = false)}></button>{/if}
+    {#if drawer}<button class="fixed inset-0 z-20 bg-black/50 md:hidden" aria-label="Close the menu" tabindex="-1" onclick={() => (drawer = false)}></button>{/if}
     <nav aria-label="Views" class="z-30 w-60 shrink-0 overflow-y-auto border-r border-divider bg-chrome p-2 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-xl max-md:transition-transform {drawer ? '' : 'max-md:-translate-x-full'}">
-      <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} />
+      <!-- The drawer covers the header on a phone, so it has its own close button (U-WU-22). -->
+      <div class="mb-2 flex items-center justify-between md:hidden">
+        <span class="px-1 text-[13px] font-semibold">Menu</span>
+        <span class="flex items-center gap-1">
+          <button class="btn-icon" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
+          <button class="btn-icon" aria-label="Close the menu" onclick={() => (drawer = false)}><Icon name="close" size={18} /></button>
+        </span>
+      </div>
+      <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} disabled={store.connection !== 'open'} />
       <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>
       {@render link(viewHash('all'), 'all', 'download', 'All Downloads', count.all)}
       {#each categories as category (category.key)}
@@ -197,9 +217,9 @@
 
   <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-divider bg-chrome px-3 text-[12px] text-muted">
     <span class="tabular min-w-0 truncate" title={statusText}>{statusText}</span>
-    <span class="tabular shrink-0">{speed(totalSpeed)}</span>
+    <span class="tabular shrink-0">{totalSpeed === null ? '' : speed(totalSpeed)}</span>
     <span class="flex-1"></span>
-    {#if store.model.hello}<span class="hidden sm:inline">Server {store.model.hello.hostVersion}</span>{/if}
+    {#if store.model.hello}<span class="hidden sm:inline">{store.texts.versionPrefix} {store.model.hello.hostVersion}</span>{/if}
   </footer>
 </div>
 
