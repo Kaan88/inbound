@@ -5,6 +5,19 @@ repository; releases are GitHub release assets there. Preparing assets
 is a local, reviewable step; `scripts/prepare-release.ps1` does not build the
 application, create a GitHub release, or upload files.
 
+## Tools needed to build
+
+Node and npm are needed for the browser extension and now also for the web UI: `scripts/publish.ps1` runs `npm ci` (when `webui\node_modules` is missing) and `npm run build` in `webui`, then publishes `DownloadManager.Server` (the web UI bridge the
+Host starts when Options > Web UI is on) into the same app folder with `wwwroot\index.html` and `wwwroot\signin\index.html`.
+It stops with an error when either page is missing. `scripts/package.ps1` and `scripts/build-installer.ps1` publish through it,
+so the zip and Setup carry the bridge; the installer copies the app folder recursively and needs no extra file entry.
+The bridge needs the ASP.NET Core runtime, which the other apps do not: a `-SelfContained` build (every release build)
+carries it, while a plain build needs the ASP.NET Core 10 runtime installed for the web UI to start (publishing the bridge
+self-contained into a framework-dependent folder would stop the other apps from starting, so the script does not). It adds about 29 MB to the install folder and about 9 MB to Setup (ASP.NET Core); unused
+framework assemblies are not trimmed yet, and the increase is accepted for now. Setup and the uninstall scripts also close a running
+`DownloadManager.Server.exe` of that install. Setup never adds or removes the firewall rule; `INSTALL.txt` tells how to remove
+"Inbound Download Manager web UI" after uninstalling.
+
 First have the Firefox add-on signed (EXT.S4). This writes the signed XPI and
 `extensions/firefox-updates.json`, which points Firefox at this release:
 

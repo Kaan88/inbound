@@ -3,7 +3,7 @@
   its files. Restart Manager cannot close the tray-only Host, so Setup runs this
   first. The Host is asked to exit through its own IPC shutdown (the same path
   as tray Exit, so checkpoints are flushed) and is never force-killed. The
-  window-only frontends and the stateless browser bridge are closed directly,
+  window-only frontends, the stateless browser bridge and the web UI bridge are closed directly,
   as the updater does. Exit code 0 means nothing from this install is running.
 #>
 param([Parameter(Mandatory)][string]$AppDir, [int]$TimeoutSeconds = 30)
@@ -42,12 +42,13 @@ try {
         }
     }
 
-    # The bridge can briefly outlive the Host and would keep its files locked.
+    # The browser bridge and the web UI bridge can briefly outlive the Host and would keep their files locked.
     Stop-Installed 'DownloadManager.NativeHost.exe'
+    Stop-Installed 'DownloadManager.Server.exe'
     Stop-Installed 'DownloadManager.Desktop.WinUI.exe'
     Start-Sleep -Milliseconds 300
 
-    $left = @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe', 'DownloadManager.NativeHost.exe' |
+    $left = @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe', 'DownloadManager.NativeHost.exe', 'DownloadManager.Server.exe' |
         Where-Object { @(Get-Installed $_).Count -gt 0 })
     if ($left.Count -gt 0) {
         [Console]::Error.WriteLine("Still running: $($left -join ', ')")
