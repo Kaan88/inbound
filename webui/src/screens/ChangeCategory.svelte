@@ -1,6 +1,7 @@
 <script lang="ts">
   import Dialog from '../components/Dialog.svelte';
-  import { categoryChoices } from '../lib/details';
+  import { untrack } from 'svelte';
+  import { categoryChoices, categoryOf } from '../lib/details';
   import { store } from '../lib/store.svelte';
   import type { Job } from '../lib/types';
 
@@ -8,7 +9,8 @@
   let { jobs, onclose }: { jobs: Job[]; onclose: () => void } = $props();
 
   const choices = $derived(categoryChoices(store.model.settings?.customCategories));
-  let chosen = $state('');
+  // One download starts on its own category; several on Automatic.
+  let chosen = $state(untrack(() => (jobs.length === 1 ? categoryOf(jobs[0]) : '')));
   let busy = $state(false);
 
   async function apply() {
