@@ -24,7 +24,8 @@ namespace DownloadManager.Server.Auth;
 /// <item>Only <c>/health</c>, the sign-in page's own files under <c>/signin/</c> and the sign-in calls answer without a
 /// session. A paired app uses a bearer token instead, on <see cref="IsTokenPath">its paths</see> only
 /// (<see cref="Pairing"/>): the browser extension on <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c>, a desktop
-/// app (<see cref="TokenRoles.RemoteClient"/>) on those and on <c>GET /api/ws</c>.</item>
+/// app (<see cref="TokenRoles.RemoteClient"/>) on those, on <c>GET /api/ws</c> and on the two uploads
+/// (<see cref="IsDesktopAppPath"/>).</item>
 /// </list>
 /// </summary>
 public sealed class ServerAuth
@@ -219,7 +220,7 @@ public sealed class ServerAuth
         // tokens counts: a browser behind a proxy sends that proxy's header there with its cookie, a Basic one for the
         // proxy's own password, or a Bearer one of its own (a sign-in proxy that passes its token on).
         if (IsTokenPath(request.Path) && request.Headers.Authorization.Count > 0 &&
-            (!request.Path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) || CarriesOurToken(request)))
+            (!IsDesktopAppPath(request.Path) || CarriesOurToken(request)))
         {
             if (BearerToken(context) is not { } token)
             {
@@ -227,8 +228,8 @@ public sealed class ServerAuth
                 return;
             }
 
-            // The extension's token keeps to POST /api/ipc and its own Unpair; the WebSocket is a desktop app's.
-            if (request.Path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) && token.Role != TokenRoles.RemoteClient)
+            // The extension's token keeps to POST /api/ipc and its own Unpair; the WebSocket and the uploads are a desktop app's.
+            if (IsDesktopAppPath(request.Path) && token.Role != TokenRoles.RemoteClient)
             {
                 await Refuse(context, StatusCodes.Status403Forbidden, "A paired browser extension can't open this.").ConfigureAwait(false);
                 return;
@@ -262,12 +263,25 @@ public sealed class ServerAuth
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
     };
 
-    /// <summary>The paths a paired app's bearer token is read on (the extension's role is kept off <c>/api/ws</c> above).</summary>
+    /// <summary>The paths a paired app's bearer token is read on (the extension's role is kept off <see cref="IsDesktopAppPath"/> above).</summary>
     internal static bool IsTokenPath(PathString path) =>
         path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals(PairSelfPath, StringComparison.OrdinalIgnoreCase) ||
-        path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase);
+        IsDesktopAppPath(path);
+
+    /// <summary>
+    /// The token paths of a desktop app's token (<see cref="TokenRoles.RemoteClient"/>) only: the WebSocket and the two
+    /// uploads (a window managing this server sends its .torrent and container files there). A browser reaches them with
+    /// its cookie as before. Here only one of our own tokens is read: a browser behind a proxy sends that proxy's
+    /// Authorization header with its cookie.
+    /// </summary>
+    internal static bool IsDesktopAppPath(PathString path) =>
+        path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) ||
+        path.Equals(TorrentUploadPath, StringComparison.OrdinalIgnoreCase) ||
+        path.Equals(ContainerUploadPath, StringComparison.OrdinalIgnoreCase);
 
     public const string WebSocketPath = "/api/ws";
+    public const string TorrentUploadPath = "/api/upload/torrent";
+    public const string ContainerUploadPath = "/api/upload/container";
 
     /// <summary>An <c>Authorization: Bearer ibt_...</c> header: one of this server's tokens, valid or not.</summary>
     private static bool CarriesOurToken(HttpRequest request)

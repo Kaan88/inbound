@@ -349,6 +349,37 @@ public sealed class BridgeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ADesktopAppsTokenUploadsIntoTheHostsUploadFolderAndAnExtensionsTokenDoesNot()
+    {
+        var address = await StartBridgeAsync();
+        var (extension, _) = _bridge!.Auth.Pairing.Issue(TokenRoles.Extension, "Chrome");
+        var (desktop, _) = _bridge.Auth.Pairing.Issue(TokenRoles.RemoteClient, "Desk PC");
+        using var app = new AuthClient(address, Cookie);
+        var uploads = Path.Combine(_data, TorrentUploads.FolderName);
+
+        Task<HttpResponseMessage> UploadAsync(string path, string token) => app.SendAsync(HttpMethod.Post, path, null, request =>
+        {
+            request.Content = new ByteArrayContent([1, 2, 3]);
+            request.Headers.Add(TorrentUploads.FileNameHeader, "links.ccf");
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        });
+
+        foreach (var path in new[] { ServerAuth.TorrentUploadPath, ServerAuth.ContainerUploadPath })
+        {
+            using var refused = await UploadAsync(path, extension);
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
+
+        Assert.Empty(Directory.Exists(uploads) ? Directory.GetFiles(uploads) : []);
+        using (var torrent = await UploadAsync(ServerAuth.TorrentUploadPath, desktop)) Assert.Equal(HttpStatusCode.OK, torrent.StatusCode);
+        using (var container = await UploadAsync(ServerAuth.ContainerUploadPath, desktop)) Assert.Equal(HttpStatusCode.OK, container.StatusCode);
+        Assert.Single(Directory.GetFiles(uploads, "*.torrent"));
+        Assert.Single(Directory.GetFiles(uploads, "*.ccf"));
+        // The uploads touch the Host's pipe not at all: the Host reads them later, by reference.
+        Assert.Empty(_host.Hellos);
+    }
+
+    [Fact]
     public async Task ATicketSignsInABrowserOnThisPcOnceWithinAMinute()
     {
         var address = await StartBridgeAsync();

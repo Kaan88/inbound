@@ -14,7 +14,8 @@ namespace DownloadManager.Server;
 /// the answer gives a reference to it (<c>upload:</c> and a random name), not its path, which would tell where the
 /// server keeps its state. <c>remote.classify</c> and <c>remote.add</c> take a torrent's reference, and
 /// <c>remote.container.preview</c> a container's (<see cref="RemoteJobCoordinator.ResolveReference"/>, <see cref="Resolve"/>).
-/// Nothing else reads that folder. Signed-in users only (the sign-in gate): a paired app's token isn't read here.
+/// Nothing else reads that folder. Signed-in browsers, and a paired desktop app's token (<c>remoteClient</c>); an
+/// extension's token isn't taken here (the sign-in gate, <see cref="Auth.ServerAuth.IsDesktopAppPath"/>).
 /// </summary>
 public sealed class TorrentUploads
 {
@@ -36,10 +37,10 @@ public sealed class TorrentUploads
 
     public void Map(WebApplication web)
     {
-        web.MapPost("/api/upload/torrent", context =>
+        web.MapPost(Auth.ServerAuth.TorrentUploadPath, context =>
             ReceiveAsync(context, UploadFolder.TorrentExtension, TorrentMetadata.MaxFileBytes, "This file is too large to be a .torrent file."));
 
-        web.MapPost("/api/upload/container", context =>
+        web.MapPost(Auth.ServerAuth.ContainerUploadPath, context =>
         {
             // The kind is the file's own extension: an .rsdf file is told apart by it. Only the name's extension is used.
             var extension = Path.GetExtension(DecodedName(context.Request.Headers[FileNameHeader].ToString())).ToLowerInvariant();
