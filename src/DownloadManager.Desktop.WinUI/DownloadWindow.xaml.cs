@@ -42,7 +42,6 @@ public sealed partial class DownloadWindow : Window
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
-        WindowCascade.Apply(this);
         // U-WL-17: Enter opens the finished file, the window's default action.
         var enter = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Enter };
         enter.Invoked += (_, args) =>
