@@ -273,6 +273,8 @@ public sealed partial class MainWindow : Window
         if (!_graphSnapshotReady) _ = LoadSpeedHistoryAsync();
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
+        // A server's path style, for every folder check and hint while it is shown.
+        if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
         if (!_connection.IsRemote)
         {
             _localSettings = snapshot.Settings;
@@ -1314,6 +1316,14 @@ public sealed partial class MainWindow : Window
         if (remote && newName.IndexOfAny(['/', '\\']) >= 0)
         {
             await ShowMessageAsync("Move/Rename", "Type the file name without a folder; choose the folder above it.");
+            return;
+        }
+
+        // A server's folder by its own rules: /downloads on a Linux server, never this PC's D:\ ones. This PC's Host
+        // checks its own as before.
+        if (remote && !ServerPaths.IsFull(folderBox.Text, ShownServer.PathStyle))
+        {
+            await ShowMessageAsync("Move/Rename", $"The folder has to be {ServerPaths.FullFolderWords(ShownServer.PathStyle)}.");
             return;
         }
 
