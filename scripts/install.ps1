@@ -131,6 +131,12 @@ Native host registration (Chrome and Edge share one manifest; Firefox has its ow
   HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager
   HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager
 
+Web UI (off by default):
+  Options > Web UI turns on a page you can open from a browser on this PC or on your home network.
+  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.
+  Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network
+  protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".
+
 The host lives in the notification area. Closing the main window hides it;
 downloads and browser handoff continue. Use the tray Exit action to stop it.
 "@

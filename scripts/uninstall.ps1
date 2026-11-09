@@ -16,7 +16,7 @@ $cli = Join-Path $appDir "DownloadManager.Cli.exe"
 if (Test-Path $cli) { & $cli host shutdown --no-start 2>$null | Out-Null; Start-Sleep -Seconds 2 }
 # Then only copies running from this install: a test instance or a build elsewhere is someone else's.
 $ownRoot = [IO.Path]::GetFullPath($installRoot).TrimEnd('\') + '\'
-Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI, DownloadManager.NativeHost -ErrorAction SilentlyContinue |
+Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI, DownloadManager.NativeHost, DownloadManager.Server -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path.StartsWith($ownRoot, [StringComparison]::OrdinalIgnoreCase) } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500

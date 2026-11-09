@@ -344,6 +344,11 @@ begin
     '  3. Click "Load unpacked" and select:' + #13#10 +
     '     ' + Root + '\extension' + #13#10 +
     '  4. Check that the extension ID is {#ExtensionId}' + #13#10 + #13#10 +
+    'Web UI (off by default):' + #13#10 +
+    '  Options > Web UI turns on a page you can open from a browser on this PC or on your home network.' + #13#10 +
+    '  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.' + #13#10 +
+    '  Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network' + #13#10 +
+    '  protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".' + #13#10 + #13#10 +
     'The app lives in the notification area (tray). Closing the main window hides it;' + #13#10 +
     'downloads continue. Use Exit in the tray menu to stop it.' + #13#10 + #13#10 +
     'Uninstall from Settings > Apps. Your download list and settings are kept in' + #13#10 +
