@@ -547,10 +547,16 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
-                    <TextBlock x:Name="EmptyText"
-                               Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                                TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    <!-- UI.R31: an empty view shows an outline glyph above its words; the glyph follows the words' visibility. -->
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" IsHitTestVisible="False">
+                        <FontIcon Glyph="&#xE896;" FontSize="32" HorizontalAlignment="Center"
+                                  Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                                  Visibility="{Binding Visibility, ElementName=EmptyText}" />
+                        <TextBlock x:Name="EmptyText"
+                                   Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    </StackPanel>
                     <Canvas x:Name="JobsRegionLayer" IsHitTestVisible="False" />
                 </Grid>
             </Grid>

@@ -112,8 +112,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
         BytesPerSecond = job.BytesPerSecond ?? 0;
         LastUpdated = job.UpdatedAt;
-        SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
-        SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
+        SizeText = TotalSize > 0 ? UiFormat.Bytes(TotalSize) : string.Empty;
+        SpeedText = BytesPerSecond > 0 ? $"{UiFormat.Bytes((long)BytesPerSecond)}/s" : string.Empty;
         Remaining = job.EstimatedRemaining;
         EtaText = DurationText.TimeLeft(job.EstimatedRemaining);
         DetailText = JobAddress.Detail(job);
@@ -149,8 +149,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         CompletionOptions = job.CompletionOptions;
         QueueName = job.QueueName ?? (job.QueueId == 0 ? "Main" : $"Queue {job.QueueId}");
         QueueText = job.IsQueued ? (job.QueueId + 1).ToString(CultureInfo.InvariantCulture) : string.Empty;
-        LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
-            .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        LastTryText = UiFormat.Moment(job.CompletedAt ?? job.UpdatedAt);
         RawDescription = job.Description ?? string.Empty;
         Description = JobNotes.Description(StatusNote, JobAddress.Own(job));
         ProgressVisibility = (job.State is "downloading" or "connecting" or "retryWaiting" or "verifying" or "paused") &&
@@ -221,8 +220,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
         StateText = $"{word} · {summary.CompletedCount}/{summary.MemberCount}";
         TotalSize = summary.TotalBytes ?? summary.ReceivedBytes;
         BytesPerSecond = summary.BytesPerSecond;
-        SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
-        SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
+        SizeText = TotalSize > 0 ? UiFormat.Bytes(TotalSize) : string.Empty;
+        SpeedText = BytesPerSecond > 0 ? $"{UiFormat.Bytes((long)BytesPerSecond)}/s" : string.Empty;
         Remaining = summary.EstimatedRemaining;
         EtaText = DurationText.TimeLeft(summary.EstimatedRemaining);
         ProgressPercent = summary.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
@@ -242,7 +241,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         LastUpdated = children.Count == 0 ? DateTimeOffset.MinValue : children.Max(child => child.LastUpdated);
         CreatedAt = children.Count == 0 ? DateTimeOffset.MinValue : children.Min(child => child.CreatedAt);
         LastTryText = children.Count == 0 ? string.Empty
-            : LastUpdated.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+            : UiFormat.Moment(LastUpdated);
         CategoryId = children.FirstOrDefault()?.CategoryId ?? "other";
         Destination = children.FirstOrDefault()?.Destination ?? string.Empty;
         StatusBrush = State switch
@@ -305,7 +304,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileGlyph = "";
         CreatedAt = job.CreatedAt;
         LastUpdated = job.UpdatedAt;
-        LastTryText = job.UpdatedAt.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        LastTryText = UiFormat.Moment(job.UpdatedAt);
         StatusBrush = ToneBrush(view.Tone);
         if (first) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NameStyle)));
     }
@@ -376,7 +375,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileGlyph = "";
         CreatedAt = set.CreatedAt;
         LastUpdated = set.UpdatedAt;
-        LastTryText = set.UpdatedAt.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        LastTryText = UiFormat.Moment(set.UpdatedAt);
         ShowArchive(view);
     }
 
@@ -457,20 +456,6 @@ public sealed class JobViewModel : INotifyPropertyChanged
             // An import, from the app or the CLI ("cliImport"), has always been shown as App.
             _ => "App",
         };
-
-    private static string FormatBytes(long bytes)
-    {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double value = bytes;
-        var index = 0;
-        while (value >= 1024 && index < units.Length - 1)
-        {
-            value /= 1024;
-            index++;
-        }
-
-        return index == 0 ? $"{bytes} {units[index]}" : $"{value:0.0} {units[index]}";
-    }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

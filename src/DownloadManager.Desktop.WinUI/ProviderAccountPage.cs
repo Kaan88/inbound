@@ -24,6 +24,9 @@ internal sealed class ProviderAccountPage
     private readonly StatusLine _details;
     private readonly StatusLine _result;
     private ProviderAccountView _view;
+    private RemoteAccountDto _account;
+    // UI.R31: the key's state is an InfoBar (error, success or information) rather than a plain sentence.
+    private readonly InfoBar _keyBar = new() { IsClosable = false, IsOpen = true };
     private bool _busy;
 
     /// <param name="serverName">The server whose account this is, while the window shows one (U-WR-6); null for this PC.</param>
@@ -34,7 +37,9 @@ internal sealed class ProviderAccountPage
         _provider = account.Provider;
         _name = string.IsNullOrWhiteSpace(account.ProviderName) ? account.Provider : account.ProviderName;
         _view = RemoteText.Account(account, DateTimeOffset.Now);
+        _account = account;
         Title = _view.PageTitle;
+        AutomationProperties.SetLiveSetting(_keyBar, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
 
         _keyStatus = new StatusLine($"{_name} API key status");
         _details = new StatusLine($"{_name} account details");
@@ -74,7 +79,7 @@ internal sealed class ProviderAccountPage
         controls.AddRange(
         [
             SettingsWindow.Section("API key"),
-            _keyStatus.Text,
+            _keyBar,
             _keyBox,
             buttons,
             _result.Text,
@@ -112,12 +117,20 @@ internal sealed class ProviderAccountPage
     {
         if (!string.Equals(account.Provider, _provider, StringComparison.OrdinalIgnoreCase)) return;
         _view = RemoteText.Account(account, DateTimeOffset.Now);
+        _account = account;
         Render();
     }
 
     private void Render()
     {
         _keyStatus.Show(_view.KeyStatus, _view.KeyStatusIsProblem);
+        var changed = _keyBar.Message != _view.KeyStatus;
+        _keyBar.Message = _view.KeyStatus;
+        _keyBar.Severity = _view.KeyStatusIsProblem ? InfoBarSeverity.Error
+            : _account.HasKey && _account.CheckedAt is not null ? InfoBarSeverity.Success
+            : InfoBarSeverity.Informational;
+        AutomationProperties.SetName(_keyBar, _keyStatus.AccessibleName);
+        if (changed) LiveRegion.Announce(_keyBar);
         _keyBox.Header = _view.KeyBoxHeader;
         _details.Show(_view.AccountDetails.Length > 0 ? _view.AccountDetails : "Nothing to show until a key is saved and validated.");
         UpdateButtons();

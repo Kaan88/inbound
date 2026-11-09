@@ -373,9 +373,7 @@ public sealed partial class JobDetailsPanel : UserControl
         ? Math.Clamp(job.ReceivedBytes * 100.0 / job.TotalBytes.Value, 0, 100)
         : job.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
 
-    internal static string Bytes(long bytes) => bytes >= 1024L * 1024 * 1024
-        ? $"{bytes / (1024.0 * 1024 * 1024):N2} GB" : bytes >= 1024L * 1024
-        ? $"{bytes / (1024.0 * 1024):N2} MB" : bytes >= 1024 ? $"{bytes / 1024.0:N1} KB" : $"{bytes:N0} B";
+    internal static string Bytes(long bytes) => UiFormat.Bytes(bytes);
 
     /// <summary>U-WL-15: the list's own words for time left, such as 12m 4s.</summary>
     private static string FormatDuration(TimeSpan duration)

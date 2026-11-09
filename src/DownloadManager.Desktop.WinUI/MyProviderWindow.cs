@@ -157,13 +157,14 @@ internal sealed class MyProviderWindow : Window
     private bool _sortAscending;
     private bool _reordering;
 
-    private readonly Grid _root = new() { Padding = new Thickness(14), RowSpacing = 8 };
+    private readonly Grid _root = new() { Padding = new Thickness(16, 14, 16, 14), RowSpacing = 10 };
     private readonly SelectorBar _tabs = new();
     private readonly ProgressRing _busy = new() { Width = 18, Height = 18, IsActive = false, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _refresh = new() { Content = "Refresh", MinWidth = 92 };
     private readonly Button _checkNow = new() { Content = "Check Now", MinWidth = 92 };
     private readonly Button _hosters = new() { Content = "Hosters", MinWidth = 92 };
-    private readonly Border _listFrame = new() { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(2) };
+    // UI.R31: the list is framed as a card, as Progress Details frames its lists.
+    private readonly Border _listFrame = new() { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8) };
     private readonly ListView _list = new()
     {
         SelectionMode = ListViewSelectionMode.Single,
@@ -172,8 +173,10 @@ internal sealed class MyProviderWindow : Window
 
     private readonly TextBlock _empty = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(16) };
     private readonly Button _loadMore = new() { Content = "Load more", HorizontalAlignment = HorizontalAlignment.Stretch, Visibility = Visibility.Collapsed };
-    private readonly TextBlock _detailTitle = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-    private readonly TextBlock _detailLine = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
+    // UI.R31: the selected item gets Progress Details' header: a glyph tile, the name, its details, a state chip.
+    private readonly ItemHeader _detailHeader = new("\uE753");
+    private TextBlock _detailTitle => _detailHeader.Title;
+    private TextBlock _detailLine => _detailHeader.Subline;
     private readonly StatusLine _detailStatus;
     private readonly StatusLine _problem;
     private readonly RemoteFileTreeView _tree = new();
@@ -181,7 +184,7 @@ internal sealed class MyProviderWindow : Window
     private readonly Button _browse = new() { Content = "Browse…", MinWidth = 92 };
     private readonly StatusLine _destinationHint;
     private readonly StatusLine _status;
-    private readonly Button _downloadSelected = new() { Content = "Download selected", MinWidth = 92, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+    private readonly Button _downloadSelected = InboundUi.IconButton("\uE896", "Download selected", accent: true);
     private readonly Button _downloadAll = new() { Content = "Download all", MinWidth = 92 };
     private readonly Button _delete = new() { MinWidth = 92, Visibility = Visibility.Collapsed };
     private readonly Button _close = new() { Content = "Close", MinWidth = 92 };
@@ -344,6 +347,7 @@ internal sealed class MyProviderWindow : Window
         _header.MinimumWidthChanged += width => listGrid.MinWidth = width;
         _header.ApplyToAll();
         _listFrame.Child = sideways;
+        _listFrame.Padding = new Thickness(1);
         AddAt(_root, _listFrame, row: 1);
 
         // The chosen item.
@@ -353,9 +357,10 @@ internal sealed class MyProviderWindow : Window
             detail.RowDefinitions.Add(new RowDefinition { Height = height });
         }
 
-        AddAt(detail, _detailTitle, row: 0);
-        AddAt(detail, _detailLine, row: 1);
-        AddAt(detail, _detailStatus.Text, row: 2);
+        AddAt(detail, _detailHeader.Element, row: 0);
+        _detailHeader.Element.Margin = new Thickness(0, 0, 0, 4);
+        // The chip says the status, and screen readers hear it change (its status line stays out of the window).
+        _detailHeader.Chip.Announce = true;
         AddAt(detail, _problem.Text, row: 3);
         AddAt(detail, _tree, row: 4);
         AutomationProperties.SetName(_tree, "Files of the selected item");
@@ -384,7 +389,6 @@ internal sealed class MyProviderWindow : Window
             _listFrame.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
             _listFrame.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
             _empty.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
-            _detailLine.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
         }
 
         _root.Loaded += (_, _) => ApplyColors();
@@ -394,7 +398,7 @@ internal sealed class MyProviderWindow : Window
     private FrameworkElement BuildListHeader()
     {
         var header = new Grid { Padding = new Thickness(6, 0, 6, 0), ColumnSpacing = 8 };
-        var chrome = new Border { Child = header, BorderThickness = new Thickness(0, 0, 0, 1) };
+        var chrome = new Border { Child = header, BorderThickness = new Thickness(0, 0, 0, 1), CornerRadius = new CornerRadius(7, 7, 0, 0) };
         void ApplyColors()
         {
             chrome.Background = InboundTheme.Brush("InboundChromeBrush", _root);
@@ -730,13 +734,15 @@ internal sealed class MyProviderWindow : Window
             _detailLoad?.Cancel();
             ParkChoice();
             _filesProblem = string.Empty;
-            _detailTitle.Text = "Select an item to see its files.";
+            // UI.R31: no header with nothing chosen; the files card says what to do, centred and quiet.
+            _detailHeader.Element.Visibility = Visibility.Collapsed;
+            _detailTitle.Text = string.Empty;
             ToolTipService.SetToolTip(_detailTitle, null);
             _detailLine.Text = string.Empty;
             ToolTipService.SetToolTip(_detailLine, null);
-            _detailStatus.Show(string.Empty);
+            _detailHeader.Chip.Set(string.Empty, "InboundStatusNeutralBrush");
             _problem.Show(string.Empty);
-            _tree.ShowMessage(string.Empty);
+            _tree.ShowMessage("Select an item to see its files.");
             UpdateActions();
             return;
         }
@@ -744,6 +750,8 @@ internal sealed class MyProviderWindow : Window
         var job = RemoteRules.JobFor(_client.State.Jobs, row.Item);
         var view = ViewOf(row.Item, job);
         row.Update(row.Item, view);
+        _detailHeader.Element.Visibility = Visibility.Visible;
+        _detailHeader.Chip.Set(view.Status, ToneKey(view.Tone));
         // This runs every few seconds, and setting a tooltip again would close one being read.
         if (_detailTitle.Text != view.Name)
         {
@@ -757,12 +765,20 @@ internal sealed class MyProviderWindow : Window
             ToolTipService.SetToolTip(_detailLine, view.Details);
         }
 
-        _detailStatus.Show(view.Status);
         _problem.Show(view.Problem.Length > 0 ? view.Problem : _filesProblem, isProblem: true);
         UpdateDestinationFor(job);
         UpdateActions();
         if (readFiles) _ = ReadFilesAsync(row);
     }
+
+    private static string ToneKey(RemoteRowTone tone) => tone switch
+    {
+        RemoteRowTone.Failed => "InboundStatusFailedBrush",
+        RemoteRowTone.Waiting => "InboundStatusWaitingBrush",
+        RemoteRowTone.Active => "InboundStatusActiveBrush",
+        RemoteRowTone.Done => "InboundStatusDoneBrush",
+        _ => "InboundStatusNeutralBrush",
+    };
 
     private RemoteItemView ViewOf(RemoteItemDto item, RemoteJobDto? job)
         => RemoteText.Item(item, _name, job, job is { State: "localStarted" } ? _context.LocalStatus(job) : null);

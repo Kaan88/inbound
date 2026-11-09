@@ -225,19 +225,7 @@ internal static partial class RemoteText
     /// <summary>Binary multiples with the same labels as the download list. An unknown size stays blank.</summary>
     public static string Bytes(long bytes)
     {
-        if (bytes <= 0) return string.Empty;
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double value = bytes;
-        var index = 0;
-        while (value >= 1024 && index < units.Length - 1)
-        {
-            value /= 1024;
-            index++;
-        }
-
-        return index == 0
-            ? $"{bytes} {units[index]}"
-            : string.Create(CultureInfo.CurrentCulture, $"{value:0.0} {units[index]}");
+        return bytes <= 0 ? string.Empty : UiFormat.Bytes(bytes);
     }
 
     public static string KindSingular(string? kind) => kind switch
