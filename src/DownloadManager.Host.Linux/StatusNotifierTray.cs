@@ -83,8 +83,35 @@ internal sealed class StatusNotifierTray : IAsyncDisposable
         connection.AddMethodHandlers([new Handler(ItemPath, HandleItem), new Handler(MenuPath, HandleMenu)]);
         var name = $"org.kde.StatusNotifierItem-{Environment.ProcessId}-1";
         await connection.RequestNameAsync(name, default).ConfigureAwait(false);
+        // When the panel restarts (plasmashell, or a GNOME extension reloaded) its new watcher knows no items: register again.
+        _watcherObserver = await connection.WatchSignalAsync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+            "NameOwnerChanged",
+            static (message, _) =>
+            {
+                var reader = message.GetBodyReader();
+                return (Name: reader.ReadString(), Old: reader.ReadString(), New: reader.ReadString());
+            },
+            (exception, change) =>
+            {
+                if (exception is null && change.Name == Watcher && change.New.Length > 0) _ = RegisterAgainAsync(connection, name);
+            }, null, false, ObserverFlags.None).ConfigureAwait(false);
         await connection.CallMethodAsync(BuildRegister(connection, name)).ConfigureAwait(false);
         _log("Tray icon registered.");
+    }
+
+    private IDisposable? _watcherObserver;
+
+    private async Task RegisterAgainAsync(DBusConnection connection, string name)
+    {
+        try
+        {
+            await connection.CallMethodAsync(BuildRegister(connection, name)).ConfigureAwait(false);
+            _log("Tray icon registered again (the panel restarted).");
+        }
+        catch (Exception ex) when (ex is DBusErrorReplyException or DBusConnectionException or InvalidOperationException)
+        {
+            _log($"The tray icon could not register again: {ex.GetType().Name}");
+        }
     }
 
     private static MessageBuffer BuildRegister(DBusConnection connection, string name)
@@ -484,6 +511,7 @@ internal sealed class StatusNotifierTray : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _tooltipTimer.DisposeAsync().ConfigureAwait(false);
+        _watcherObserver?.Dispose();
         Interlocked.Exchange(ref _connection, null)?.Dispose();
     }
 

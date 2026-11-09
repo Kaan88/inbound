@@ -1,5 +1,11 @@
 ﻿# Progress — session handoff
 
+### D7 stage 1, step 4: secret key in the desktop keyring; tray comes back after a panel restart (2026-11-09, `linux-host`)
+- `AesGcmSecretProtector.OpenForDataFolder(ISecretKeyStore, …)`: the server's key-file checks (secrets sealed with another or a missing key refuse to start; the discard record) for a key kept elsewhere. The file overload is unchanged.
+- `SecretServiceKeyStore`: the key in the freedesktop Secret Service (KDE Wallet here), one item per data folder, read back after creating it. The Linux Host uses it when there is no key file yet and the session has a keyring; otherwise the key file, as before.
+- Checked live: two Host runs on a sandbox data folder used one wallet item and wrote no key file. The test item ("Inbound Download Manager secret key (…/inbound-linux-test/data)") is still in the owner's wallet: deleting it was refused to the agent; the owner removes it in KWalletManager. Not checked: a locked wallet's prompt, and a run whose data folder already holds sealed secrets.
+- Tray: registers again when the watcher's owner changes (a panel restart). Not checked live (would restart the owner's panel).
+
 ### D7 stage 1, step 3: tray icon on Linux (2026-11-09, `linux-host`)
 - `StatusNotifierTray`: a StatusNotifierItem with a `com.canonical.dbusmenu` menu (Open Inbound, Options, Pause all, Resume all, Exit), registered with the session's watcher; a click opens the window; the tooltip follows the active count. Optional: without a watcher the Host runs without it, and the hello lists `tray` only when it registered.
 - Checked live on KDE Plasma (Wayland): the watcher lists the item; Title and ToolTip read back; GetLayout and GetGroupProperties return the menu; a "clicked" event on Exit stopped the Host cleanly.
