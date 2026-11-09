@@ -1060,6 +1060,7 @@ public sealed partial class DownloadManagerService
                 {
                     runtime.CancelRequested = true;
                     runtime.CancelledForRemoval = true;
+                    runtime.DeleteOnCancel = deleteFile;
                     runtime.Cts?.Cancel();
                 }
             }
@@ -1104,6 +1105,9 @@ public sealed partial class DownloadManagerService
 
             runtime.CancelRequested = true;
             runtime.CancelledForRemoval = true;
+            // What the runner does with the partial data as it stops: the same as for one that had already
+            // stopped, so keeping it doesn't depend on whether the transfer was still winding down (UI.B19).
+            runtime.DeleteOnCancel = deleteFile;
             runtime.Cts?.Cancel();
             runner = runtime.Runner;
         }
@@ -1177,6 +1181,9 @@ public sealed partial class DownloadManagerService
             lock (_sync) _jobs.Remove(id);
         }
         finally { _persistGate.Release(); }
+        // UI.B19. After it is off the list, so its own folder no longer counts as in use. With its data kept,
+        // the folder still holds that data and stays; it goes only once it is empty.
+        RemoveEmptyFoldersMadeFor(runtime.Job);
         JobChanged?.Invoke(this, new JobChangeEventArgs(Map(runtime.Job), "removed"));
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
