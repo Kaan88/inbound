@@ -29,16 +29,24 @@ internal static class MenuBarHover
 
     private static readonly HashSet<UIElement> Watched = [];
 
-    /// <summary>Hooks the open menu's popup tree, once per tree root.</summary>
+    /// <summary>
+    /// Hooks the open menu's popup: the full-window panel that takes the pointer, and the top of its tree. A Popup has no
+    /// visual parent, so the walk starts at its content.
+    /// </summary>
     private static void Watch(MenuBar bar)
     {
         if (bar.XamlRoot is null) return;
         foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(bar.XamlRoot))
         {
-            DependencyObject top = popup;
+            if (popup.Child is not DependencyObject child) continue;
+            var panel = VisualTreeHelper.GetParent(child);
+            DependencyObject top = child;
             for (var parent = VisualTreeHelper.GetParent(top); parent is not null; parent = VisualTreeHelper.GetParent(parent)) top = parent;
-            if (top is not UIElement root || !Watched.Add(root)) continue;
-            root.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler((_, e) => Moved(bar, e)), true);
+            foreach (var element in new[] { panel, top })
+            {
+                if (element is not UIElement target || !Watched.Add(target)) continue;
+                target.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler((_, e) => Moved(bar, e)), true);
+            }
         }
     }
 
@@ -74,8 +82,18 @@ internal static class MenuBarHover
 
         // Another popup (a context menu, a dialog) is not this bar's menu: leave it.
         if (!anyOpen) return;
-        target.Expand();
-        WatchSoon(bar);
+        // The closing menu goes away a moment later, and an expand before that is ignored: wait for its popup to go.
+        var timer = bar.DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(15);
+        var tries = 0;
+        timer.Tick += (_, _) =>
+        {
+            if (bar.XamlRoot is not null && VisualTreeHelper.GetOpenPopupsForXamlRoot(bar.XamlRoot).Count > 0 && ++tries < 30) return;
+            timer.Stop();
+            target.Expand();
+            WatchSoon(bar);
+        };
+        timer.Start();
     }
 
     private static IExpandCollapseProvider? Expander(MenuBarItem item) =>

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using DownloadManager.Contracts;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;
@@ -25,7 +25,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     };
 
     /// <summary>The window program's names, next to the Host or in its <c>desktop</c> folder.</summary>
-    private static readonly string[] UiNames = ["inbound", "DownloadManager.Desktop"];
+    private static readonly string[] UiNames = ["inbound", "DownloadManager.Desktop", "DownloadManager.Desktop.Uno"];
 
     private readonly CancellationTokenSource _exit = new();
     private int _folderPickerOpen;
@@ -83,7 +83,14 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     {
         var overridden = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UI");
         if (!string.IsNullOrWhiteSpace(overridden)) return File.Exists(overridden) ? Path.GetFullPath(overridden) : null;
-        var folders = new[] { AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "desktop") };
+        var folders = new[]
+        {
+            AppContext.BaseDirectory,
+            Path.Combine(AppContext.BaseDirectory, "desktop"),
+            // A build from the source tree (Host and window in their own bin folders).
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Debug", "net10.0-desktop"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Release", "net10.0-desktop"),
+        };
         return folders.SelectMany(folder => UiNames.Select(name => Path.Combine(folder, name)))
             .Select(Path.GetFullPath)
             .FirstOrDefault(File.Exists);
