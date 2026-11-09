@@ -98,13 +98,6 @@ internal static partial class LinkExtractor
     }
 
     /// <summary>
-    /// U-WL-12: a numbered address, such as <c>https://example.com/part[1-3].bin</c>, is the addresses it stands for,
-    /// as the CLI's add-batch makes them (<see cref="BatchUrlExpander"/>): number ranges keep leading zeros, letter
-    /// ranges, comma lists, and several groups multiply, up to its limit. Only brackets after the host count, and only
-    /// those holding a range or a list, so an IPv6 host or another bracket stays as typed. A pattern that can't be
-    /// expanded stays one address, as typed.
-    /// </summary>
-    /// <summary>
     /// U-WL-23: an address with nothing after its host names no file, and text such as "ftp://bad host" gives one
     /// when a space cut it short. It is listed unticked, so it is added only when the user says so.
     /// </summary>
@@ -115,20 +108,28 @@ internal static partial class LinkExtractor
 
     public const string NumberedHint = "A numbered address such as https://example.com/part[1-3].rar stands for each of its numbers, and [a-c] or [x,y] work too.";
 
+    /// <summary>
+    /// U-WL-12: a numbered address, such as <c>https://example.com/part[1-3].bin</c>, is the addresses it stands for,
+    /// as the CLI's add-batch makes them (<see cref="BatchUrlExpander"/>): number ranges keep leading zeros, letter
+    /// ranges, comma lists, and several groups multiply, up to its limit. Only brackets after the host count, and only
+    /// those that are plainly a range or a list (<see cref="IsNumberedGroup"/>), so an IPv6 host or a name such as
+    /// <c>x[final-v2].zip</c> or <c>x[2024-01].zip</c> stays as typed. A pattern that can't be expanded stays one
+    /// address, as typed.
+    /// </summary>
     public static IReadOnlyList<string> ExpandNumbered(string link)
     {
         var scheme = link.IndexOf("://", StringComparison.Ordinal);
         var path = scheme < 0 ? -1 : link.IndexOf('/', scheme + 3);
         if (path < 0) return [link];
         var rest = link[path..];
-        var groups = NumberedGroup().Matches(rest);
+        var groups = BracketGroup().Matches(rest).Where(group => IsNumberedGroup(group.Value[1..^1])).ToList();
         if (groups.Count == 0) return [link];
 
         // Brackets that aren't a range or a list are kept from the expander, which would refuse them.
         const char Open = (char)0xE000, Close = (char)0xE001;
         var guarded = new System.Text.StringBuilder(rest.Length);
         var index = 0;
-        foreach (Match group in groups)
+        foreach (var group in groups)
         {
             guarded.Append(rest.AsSpan(index, group.Index - index).ToString().Replace('[', Open).Replace(']', Close));
             guarded.Append(group.Value);
@@ -148,8 +149,38 @@ internal static partial class LinkExtractor
         }
     }
 
-    [GeneratedRegex(@"\[[^\[\]]*[-,][^\[\]]*\]", RegexOptions.CultureInvariant)]
-    private static partial Regex NumberedGroup();
+    /// <summary>
+    /// A bracket's text that is plainly a numbered group, by the CLI's own rules (<see cref="BatchUrlExpander"/>): a
+    /// number range such as <c>1-12</c> or <c>001-120</c>, a letter range such as <c>a-f</c>, or a comma list. A number
+    /// range with a leading zero has both ends the same width, so <c>2024-01</c> is a date rather than a range; neither
+    /// end has more than six digits, and it stands for fewer addresses than the CLI's limit. Anything else, such as
+    /// <c>final-v2</c>, is part of a name.
+    /// </summary>
+    public static bool IsNumberedGroup(string token)
+    {
+        if (token.Contains(','))
+            return token.Split(',').All(item => item.Trim().Length > 0 && !item.Contains('-') && !item.Trim().Any(char.IsWhiteSpace));
+        var range = NumberRange().Match(token);
+        if (range.Success)
+        {
+            var start = range.Groups[1].Value;
+            var end = range.Groups[2].Value;
+            var padded = (start.Length > 1 && start[0] == '0') || (end.Length > 1 && end[0] == '0');
+            if (padded && start.Length != end.Length) return false;
+            var count = Math.Abs(int.Parse(start, System.Globalization.CultureInfo.InvariantCulture)
+                                 - int.Parse(end, System.Globalization.CultureInfo.InvariantCulture)) + 1;
+            return count <= BatchUrlExpander.DefaultLimit;
+        }
+
+        return token.Length == 3 && token[1] == '-' && char.IsAsciiLetter(token[0]) && char.IsAsciiLetter(token[2])
+            && char.IsUpper(token[0]) == char.IsUpper(token[2]);
+    }
+
+    [GeneratedRegex(@"\[[^\[\]]*\]", RegexOptions.CultureInvariant)]
+    private static partial Regex BracketGroup();
+
+    [GeneratedRegex(@"^([0-9]{1,6})-([0-9]{1,6})$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberRange();
 
     public static bool IsMagnet(string input) => input.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
 

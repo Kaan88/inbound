@@ -111,6 +111,38 @@ public sealed class WindowLocalFindingsTests
     public void U_WL_12_a_numbered_address_stands_for_each_of_its_numbers(string link, string[] expected)
         => Assert.Equal(expected, LinkExtractor.ExpandNumbered(link));
 
+    [Theory]
+    [InlineData("http://h/x[final-v2]/p[1-2].zip", new[] { "http://h/x[final-v2]/p1.zip", "http://h/x[final-v2]/p2.zip" })]
+    [InlineData("http://h/2024/x[2024-01]/p[1-2].zip", new[] { "http://h/2024/x[2024-01]/p1.zip", "http://h/2024/x[2024-01]/p2.zip" })]
+    [InlineData("http://h/x[2024-01].zip", new[] { "http://h/x[2024-01].zip" })]
+    [InlineData("http://h/x[final-v2].zip", new[] { "http://h/x[final-v2].zip" })]
+    [InlineData("http://h/x[1-1000000].zip", new[] { "http://h/x[1-1000000].zip" })]
+    [InlineData("http://h/r[2024-2025].pdf", new[] { "http://h/r2024.pdf", "http://h/r2025.pdf" })]
+    [InlineData("http://h/f[a-c]", new[] { "http://h/fa", "http://h/fb", "http://h/fc" })]
+    public void U_WL_12_only_a_plain_range_or_list_is_expanded_and_names_with_brackets_stay(string link, string[] expected)
+        => Assert.Equal(expected, LinkExtractor.ExpandNumbered(link));
+
+    [Theory]
+    [InlineData("1-3", true)]
+    [InlineData("08-10", true)]
+    [InlineData("001-120", true)]
+    [InlineData("2024-2025", true)]
+    [InlineData("a-f", true)]
+    [InlineData("A-F", true)]
+    [InlineData("x,y", true)]
+    [InlineData("2024-01", false)]
+    [InlineData("01-2024", false)]
+    [InlineData("final-v2", false)]
+    [InlineData("a-F", false)]
+    [InlineData("1-1500", false)]
+    [InlineData("1234567-1234568", false)]
+    [InlineData("a-b-c", false)]
+    [InlineData("v1,final-v2", false)]
+    [InlineData("draft", false)]
+    public void U_WL_12_a_numbered_group_follows_the_cli_rules_with_a_sane_width(string token, bool numbered)
+        => Assert.Equal(numbered, LinkExtractor.IsNumberedGroup(token));
+
+
     [Fact]
     public void U_WL_12_pasted_text_expands_numbered_links_in_both_add_dialogs()
     {
