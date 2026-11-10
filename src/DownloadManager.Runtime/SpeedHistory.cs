@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 
 namespace DownloadManager.Runtime;
 
@@ -20,6 +20,19 @@ public sealed class SpeedHistory
     private const int HoldSeconds = 2;
 
     private readonly float[] _values = new float[Seconds];
+
+    /// <summary>
+    /// F-12: each running download's own figures, so Progress Details opened during a download shows what came before.
+    /// Kept only while it runs (about 42 KB each) and dropped when it stops.
+    /// </summary>
+    private readonly Dictionary<Guid, JobTrack> _jobs = new();
+
+    private sealed class JobTrack(long first)
+    {
+        public readonly float[] Values = new float[Seconds];
+        public readonly long[] At = new long[Seconds];
+        public readonly long First = first;
+    }
 
     /// <summary>Each running download's last figure and the second it came in.</summary>
     private readonly Dictionary<Guid, (double Rate, long Second)> _rates = new();
@@ -49,6 +62,9 @@ public sealed class SpeedHistory
         var rate = double.IsFinite(bytesPerSecond) && bytesPerSecond > 0 ? bytesPerSecond : 0;
         _rates[jobId] = (rate, second);
         _values[Slot(second)] = (float)TotalAt(second);
+        if (!_jobs.TryGetValue(jobId, out var track)) _jobs[jobId] = track = new JobTrack(second);
+        track.Values[Slot(second)] = (float)rate;
+        track.At[Slot(second)] = second;
     }
 
     /// <summary>
@@ -57,6 +73,7 @@ public sealed class SpeedHistory
     /// </summary>
     public void Stopped(Guid jobId, DateTimeOffset now)
     {
+        _jobs.Remove(jobId);
         if (!_rates.ContainsKey(jobId)) return;
         var second = Advance(now);
         _rates.Remove(jobId);
@@ -80,6 +97,29 @@ public sealed class SpeedHistory
         }
 
         return new SpeedHistoryDto { Start = DateTimeOffset.FromUnixTimeSeconds(first - _offset), IntervalSeconds = 1, BytesPerSecond = values };
+    }
+
+    /// <summary>
+    /// F-12: one running download's figures since it started running (at most the last hour), by the same hold rule
+    /// as the total: a second without a report carries the last figure for <see cref="HoldSeconds"/>, then counts 0.
+    /// Null when it isn't running.
+    /// </summary>
+    public SpeedHistoryDto? Read(Guid jobId, DateTimeOffset now)
+    {
+        if (!_jobs.TryGetValue(jobId, out var track)) return null;
+        var second = Advance(now);
+        if (second < 0) second = _openSecond;
+        var first = Math.Max(track.First, second - Seconds + 1);
+        var values = new List<long>((int)Math.Max(0, second - first + 1));
+        (double Rate, long Second) last = (0, long.MinValue);
+        for (var s = first; s <= second; s++)
+        {
+            var slot = Slot(s);
+            if (track.At[slot] == s) last = (track.Values[slot], s);
+            values.Add(last.Second != long.MinValue && s - last.Second <= HoldSeconds ? (long)Math.Round(last.Rate) : 0);
+        }
+
+        return new SpeedHistoryDto { JobId = jobId, Start = DateTimeOffset.FromUnixTimeSeconds(first - _offset), IntervalSeconds = 1, BytesPerSecond = values };
     }
 
     /// <summary>

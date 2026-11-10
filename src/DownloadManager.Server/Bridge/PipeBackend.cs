@@ -1,4 +1,4 @@
-using System.IO.Pipes;
+﻿using System.IO.Pipes;
 using System.Net.WebSockets;
 using System.Text.Json;
 using DownloadManager.Contracts;
@@ -35,7 +35,7 @@ internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBa
             return;
         }
 
-        NamedPipeClientStream? pipe = null;
+        Stream? pipe = null;
         try
         {
             var hello = new ClientHelloDto();
@@ -198,16 +198,50 @@ internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBa
     }
 
     /// <summary>The hello pipe with a web <c>client.hello</c> sent; null when the Host isn't there.</summary>
-    private async Task<NamedPipeClientStream?> OpenAsync(ClientHelloDto wanted, CancellationToken cancellationToken)
+    private async Task<Stream?> OpenAsync(ClientHelloDto wanted, CancellationToken cancellationToken)
     {
-        var pipe = new NamedPipeClientStream(".", helloPipe, PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.WriteThrough);
+        Stream pipe;
+        if (OperatingSystem.IsLinux())
+        {
+            // The Linux Host's hello socket; UnixSockets checks the folder and that the Host is this user.
+            try
+            {
+                pipe = await UnixSockets.ConnectAsync(helloPipe, ConnectTimeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
+            {
+                log.Warn($"The app's socket could not be opened: {ex.GetType().Name}");
+                return null;
+            }
+        }
+        else
+        {
+            var named = new NamedPipeClientStream(".", helloPipe, PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.WriteThrough);
+            try
+            {
+                await named.ConnectAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+                // Not PipeOptions.CurrentUserOnly: that compares the owner with the token's default owner, which in an
+                // elevated bridge is the Administrators group, while the Host's pipes are always owned by the user itself.
+                if (OperatingSystem.IsWindows()) PipeOwner.Verify(named);
+            }
+            catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException)
+            {
+                log.Warn($"The app's pipe could not be opened: {ex.GetType().Name}");
+                await named.DisposeAsync().ConfigureAwait(false);
+                return null;
+            }
+            catch
+            {
+                await named.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            pipe = named;
+        }
+
         try
         {
-            await pipe.ConnectAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
-            // Not PipeOptions.CurrentUserOnly: that compares the owner with the token's default owner, which in an
-            // elevated bridge is the Administrators group, while the Host's pipes are always owned by the user itself.
-            if (OperatingSystem.IsWindows()) PipeOwner.Verify(pipe);
             var hello = new ClientHelloDto { Snapshot = wanted.Snapshot, Events = wanted.Events, Role = ClientRoles.Web };
             await IpcFraming.WriteAsync(pipe, IpcMessage.Create(MessageTypes.ClientHello, hello), cancellationToken).ConfigureAwait(false);
             return pipe;

@@ -136,8 +136,8 @@
         <label class="label" for="remote-archive-password">Archive password {remote.hasArchivePassword ? '(one is saved)' : ''}</label>
         <input id="remote-archive-password" class="field" type="password" bind:value={archivePassword} autocomplete="off" />
       </div>
-      <button class="btn" type="submit" disabled={busy || !archivePassword}>Save Password</button>
-      {#if remote.hasArchivePassword}<button class="btn" type="button" disabled={busy} onclick={() => sendArchivePassword(true)}>Forget Saved Password</button>{/if}
+      <button class="btn" type="submit" disabled={busy || !archivePassword}>Save password</button>
+      {#if remote.hasArchivePassword}<button class="btn" type="button" disabled={busy} onclick={() => sendArchivePassword(true)}>Forget saved password</button>{/if}
     </form>
     <p class="hint mb-3">For the archives this download brings. It never leaves the server.</p>
   {/if}

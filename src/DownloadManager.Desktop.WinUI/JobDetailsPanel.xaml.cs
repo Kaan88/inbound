@@ -65,10 +65,16 @@ public sealed partial class JobDetailsPanel : UserControl
     /// The table alone, always open, without the figures above it: a window that shows the figures its own way
     /// (the progress window's Overview tab) and gives the table a tab of its own.
     /// </summary>
-    internal void UseTableOnly()
+    internal void UseTableOnly() => UseOpenTable(showFigures: false);
+
+    /// <summary>
+    /// The connections table always open under the figures, with no "Segment details" expander: the package window's
+    /// selected file, shown as Progress Details shows its connections.
+    /// </summary>
+    internal void UseOpenTable(bool showFigures = true)
     {
         if (Segments.Parent is not null) return;
-        Figures.Visibility = Visibility.Collapsed;
+        Figures.Visibility = showFigures ? Visibility.Visible : Visibility.Collapsed;
         SegmentDetails.Visibility = Visibility.Collapsed;
         Body.Children.Add(Segments);
     }

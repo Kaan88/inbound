@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -37,9 +37,22 @@ internal static class WindowPlacement
         if (Load().TryGetValue(key, out var saved) && IsVisible(saved))
         {
             if (restoreSize && saved.Width >= 200 && saved.Height >= 150)
-                appWindow.MoveAndResize(new RectInt32(saved.X, saved.Y, saved.Width, saved.Height));
+            {
+#if HAS_UNO
+                // Uno has no MoveAndResize, and before the window is shown it keeps only the first size it is given.
+                void Restore(object sender, WindowActivatedEventArgs args)
+                {
+                    window.Activated -= Restore;
+                    appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
+                    appWindow.Resize(new SizeInt32 { Width = saved.Width, Height = saved.Height });
+                }
+                window.Activated += Restore;
+#else
+                appWindow.MoveAndResize(new RectInt32 { X = saved.X, Y = saved.Y, Width = saved.Width, Height = saved.Height });
+#endif
+            }
             else
-                appWindow.Move(new PointInt32(saved.X, saved.Y));
+                appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
             if (restoreSize && saved.Maximized && appWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         }
 
@@ -144,7 +157,11 @@ internal static class WindowPlacement
     /// <summary>True when the title-bar area is on a display that is connected now.</summary>
     private static bool IsVisible(Placement placement)
     {
-        var probe = new PointInt32(placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), placement.Y + 16);
+#if HAS_UNO
+        // Uno has no DisplayArea lookups (they throw); the window manager keeps a window on a screen there.
+        return true;
+#endif
+        var probe = new PointInt32 { X = placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), Y = placement.Y + 16 };
         var area = DisplayArea.GetFromPoint(probe, DisplayAreaFallback.None);
         if (area is null) return false;
         var work = area.WorkArea;

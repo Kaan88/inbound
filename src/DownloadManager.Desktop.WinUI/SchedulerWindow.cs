@@ -18,7 +18,7 @@ public sealed class SchedulerWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly ListBox _queues = new() { SelectionMode = SelectionMode.Single };
     private readonly TextBlock _status = InboundUi.Secondary();
-    private readonly Button _start = new() { Content = "Start Now" };
+    private readonly Button _start = new() { Content = "Start now" };
     private readonly Button _stop = new() { Content = "Stop", IsEnabled = false };
     // UI.R31: Apply is the footer's accent button, as the primary action is in Progress Details.
     private readonly Button _apply = new() { Content = "Apply", MinWidth = 92, Style = InboundUi.Style("AccentButtonStyle") };
@@ -41,7 +41,7 @@ public sealed class SchedulerWindow : Window
     private readonly ComboBox _shutdownMode = new() { Header = "Computer action", ItemsSource = new[] { "Shut down", "Restart", "Log off" } };
     private readonly CheckBox _forceShutdown = new() { Content = "Force the selected computer action" };
     private readonly CheckBox _allowSystemActions = new() { Content = "Allow system completion actions (global opt-in)" };
-    private readonly TextBlock _scheduleHint = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
+    private readonly TextBlock _scheduleHint = InboundUi.Secondary();
     private readonly StackPanel _runOptionsHost = new() { Spacing = 8 };
     private readonly Button _newSchedule = new() { Content = "New schedule" };
     private readonly Button _removeSchedule = new() { Content = "Remove schedule", IsEnabled = false };
@@ -52,7 +52,7 @@ public sealed class SchedulerWindow : Window
     private readonly Button _detachFile = new() { Content = "Remove from queue", IsEnabled = false };
     private readonly ComboBox _moveTarget = new() { Header = "Move to queue", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _moveFile = new() { Content = "Move", IsEnabled = false };
-    private readonly TextBlock _fileHint = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
+    private readonly TextBlock _fileHint = InboundUi.Secondary();
 
     private readonly NumberBox _maxConcurrent = new() { Header = "Files at the same time", Minimum = 1, Maximum = 16, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 160 };
     private readonly CheckBox _quotaEnabled = new() { Content = "Enable download limit" };
@@ -114,8 +114,8 @@ public sealed class SchedulerWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_files, "Downloads in this queue");
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "scheduler");
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
 
         var root = new Grid { Margin = new Thickness(14), ColumnSpacing = 14, RowSpacing = 10 };
         AppTheme.Track(root);
@@ -878,6 +878,7 @@ public sealed class SchedulerWindow : Window
             Title = $"Delete {queue.Name}?",
             Content = panel,
             PrimaryButtonText = "Delete queue",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             RequestedTheme = ((FrameworkElement)Content).ActualTheme,

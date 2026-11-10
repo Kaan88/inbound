@@ -167,5 +167,5 @@
 </Dialog>
 
 {#if confirmCancel}
-  <AskDialog title="Cancel package?" text={cancelPackageText} confirm="Cancel Package" keep="Keep Downloading" onconfirm={() => { confirmCancel = false; void action('cancel'); }} onclose={() => (confirmCancel = false)} />
+  <AskDialog title="Cancel package?" text={cancelPackageText} confirm="Cancel package" keep="Keep downloading" onconfirm={() => { confirmCancel = false; void action('cancel'); }} onclose={() => (confirmCancel = false)} />
 {/if}

@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -42,7 +42,8 @@ internal static class FolderChooser
         Grid.SetColumn(favorites, row.ColumnDefinitions.Count - 1);
         row.Children.Add(favorites);
 
-        var space = new TextBlock { FontSize = 12, Opacity = 0.72, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var space = InboundUi.Secondary();
+        space.Visibility = Visibility.Collapsed;
         var menu = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
         favorites.Flyout = menu;
         menu.Opening += (_, _) => FillMenu(menu, box, favorites);
@@ -174,7 +175,9 @@ internal static class FolderChooser
         var save = new Button { Content = "Save", Style = (Style)Application.Current.Resources["AccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Right };
         var message = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, MaxWidth = 260 };
         var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = path, FontSize = 12, Opacity = 0.72, TextWrapping = TextWrapping.Wrap, MaxWidth = 260 });
+        var pathText = InboundUi.Secondary(path);
+        pathText.MaxWidth = 260;
+        panel.Children.Add(pathText);
         panel.Children.Add(name);
         panel.Children.Add(message);
         panel.Children.Add(save);

@@ -74,6 +74,13 @@ internal sealed class SettingsWindow : Window
         _nav.SelectionChanged += (_, _) =>
         {
             if (_nav.SelectedIndex >= 0 && _nav.SelectedIndex < _pages.Count) _page.Content = _pages[_nav.SelectedIndex];
+#if HAS_UNO
+            // Uno leaves the earlier page's item looking selected: set each item's own flag.
+            for (var at = 0; at < _nav.Items.Count; at++)
+            {
+                if (_nav.Items[at] is ListViewItem navItem && navItem.IsSelected != (at == _nav.SelectedIndex)) navItem.IsSelected = at == _nav.SelectedIndex;
+            }
+#endif
         };
         _ok.Click += async (_, _) => { if (await RunSaveAsync()) Close(); };
         _apply.Click += async (_, _) => await RunSaveAsync();
@@ -122,7 +129,7 @@ internal sealed class SettingsWindow : Window
     };
 
     /// <summary>Secondary explanatory text under a section.</summary>
-    public static TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.72, FontSize = 12 };
+    public static TextBlock Hint(string text) => InboundUi.Secondary(text);
 
     /// <summary>A folder text box with a Browse… button that opens the folder picker over this window.</summary>
     public (UIElement Row, TextBox Box) FolderField(string header, string? text, string? placeholder = null, bool inlineLabel = false, bool favorites = true)

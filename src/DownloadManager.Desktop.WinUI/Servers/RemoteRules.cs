@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -301,6 +301,7 @@ internal static class ServerPaths
         {
             HostKinds.Windows => PathStyle.Windows,
             HostKinds.Server => PathStyle.Linux,
+            HostKinds.Linux => PathStyle.Linux,
             _ => PathStyle.Either,
         };
     }
@@ -565,7 +566,7 @@ internal static class RemoteOptionsText
 
     /// <summary>Under a provider's API key: where the key is kept. Null server: this PC.</summary>
     public static string ProviderKeyNote(string? serverName, string? hostKind) => serverName is null
-        ? "These buttons take effect straight away, whichever way this window is closed. The key is kept encrypted for your Windows account."
+        ? "These buttons take effect straight away, whichever way this window is closed. The key is kept encrypted for your " + (OperatingSystem.IsWindows() ? "Windows account." : "user account.")
         : hostKind == HostKinds.Windows
             ? $"This is the account {serverName} uses, and the key is saved on {serverName}, encrypted for the Windows account Inbound runs under there. These buttons take effect straight away, whichever way this window is closed."
             : hostKind == HostKinds.Server

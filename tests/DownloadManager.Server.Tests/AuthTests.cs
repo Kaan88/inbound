@@ -28,6 +28,8 @@ public sealed class AuthTests
         Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/signin/")).StatusCode);
         // The theme script the sign-in page loads is public too (absent from the placeholder page, so 404 there).
         Assert.NotEqual(HttpStatusCode.Redirect, (await anonymous.GetAsync("/theme.js")).StatusCode);
+        Assert.NotEqual(HttpStatusCode.Redirect, (await anonymous.GetAsync("/manifest.webmanifest")).StatusCode);
+        Assert.NotEqual(HttpStatusCode.Redirect, (await anonymous.GetAsync("/icons/icon-192.png")).StatusCode);
         var page = await anonymous.GetAsync("/");
         Assert.Equal(HttpStatusCode.Redirect, page.StatusCode);
         Assert.Equal("/signin/", page.Headers.Location?.OriginalString);

@@ -5,8 +5,8 @@ namespace DownloadManager.Desktop.WinUI;
 internal sealed class UiState
 {
     /// <summary>In device-independent pixels until the window is first closed, and in real pixels after that.</summary>
-    public const int FirstWindowWidth = 1400;
-    public const int FirstWindowHeight = 760;
+    public const int FirstWindowWidth = 1640;
+    public const int FirstWindowHeight = 940;
 
     public int WindowWidth { get; set; } = FirstWindowWidth;
     public int WindowHeight { get; set; } = FirstWindowHeight;

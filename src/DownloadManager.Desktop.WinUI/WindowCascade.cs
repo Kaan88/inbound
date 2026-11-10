@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -64,7 +64,7 @@ internal static class WindowCascade
             var size = appWindow.Size;
             var (x, y) = WindowCascadeRules.Place(position.X, position.Y, taken, area.X, area.Y, area.Width, area.Height,
                 size.Width, size.Height, (int)Math.Round(WindowCascadeRules.Step * scale));
-            if (x != position.X || y != position.Y) appWindow.Move(new PointInt32(x, y));
+            if (x != position.X || y != position.Y) appWindow.Move(new PointInt32 { X = x, Y = y });
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -75,6 +75,8 @@ internal static class WindowCascade
     /// <summary>Marks <paramref name="window"/> as the main window for the app's progress, package and completion windows.</summary>
     public static void MarkMain(Window window)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows()) return;
         try
         {
             var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
@@ -98,7 +100,7 @@ internal static class WindowCascade
         {
             var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
             if (MainWindowBounds(own) is not { } main) return;
-            var display = DisplayArea.GetFromRect(new RectInt32(main.X, main.Y, main.Width, main.Height), DisplayAreaFallback.Nearest);
+            var display = DisplayArea.GetFromRect(new RectInt32 { X = main.X, Y = main.Y, Width = main.Width, Height = main.Height }, DisplayAreaFallback.Nearest);
             if (display is null) return;
             var appWindow = window.AppWindow;
             var position = appWindow.Position;
@@ -107,7 +109,7 @@ internal static class WindowCascade
             var work = display.WorkArea;
             var (x, y) = WindowCascadeRules.OntoMainScreen(position.X, position.Y, size.Width, size.Height, main,
                 new ScreenRect(bounds.X, bounds.Y, bounds.Width, bounds.Height), new ScreenRect(work.X, work.Y, work.Width, work.Height));
-            if (x != position.X || y != position.Y) appWindow.Move(new PointInt32(x, y));
+            if (x != position.X || y != position.Y) appWindow.Move(new PointInt32 { X = x, Y = y });
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -118,6 +120,8 @@ internal static class WindowCascade
     /// <summary>The shown, not minimized, main window of this app's other processes, if there is one.</summary>
     private static ScreenRect? MainWindowBounds(nint own)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows()) return null;
         var ids = OtherProcessIds();
         if (ids.Count == 0) return null;
         ScreenRect? found = null;
@@ -137,6 +141,8 @@ internal static class WindowCascade
 
     private static HashSet<uint> OtherProcessIds()
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows()) return [];
         var current = Process.GetCurrentProcess();
         var ids = new HashSet<uint>();
         foreach (var process in Process.GetProcessesByName(current.ProcessName))

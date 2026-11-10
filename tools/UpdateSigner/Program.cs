@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -13,9 +13,9 @@ if (args.Length == 2 && args[0] == "--generate-key")
     return 0;
 }
 
-if (args.Length is < 5 or > 6)
+if (args.Length is < 5 or > 7)
 {
-    Console.Error.WriteLine("usage: UpdateSigner <output-dir> <version> <installer-url> <package-file> <private-key-file> [channel]");
+    Console.Error.WriteLine("usage: UpdateSigner <output-dir> <version> <installer-url> <package-file> <private-key-file> [channel] [manifest-name]");
     Console.Error.WriteLine("       UpdateSigner --generate-key <new-private-key-file>");
     return 2;
 }
@@ -26,6 +26,13 @@ var installerUrl = args[2];
 var packagePath = args[3];
 var privateKeyPath = args[4];
 var channel = args.Length > 5 ? args[5] : "stable";
+// The AppImage's manifest is manifest-linux-x64.json, beside the Windows manifest.json in the same release.
+var manifestName = args.Length > 6 ? args[6] : "manifest.json";
+if (manifestName != Path.GetFileName(manifestName) || !manifestName.EndsWith(".json", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine("manifest-name must be a plain .json file name.");
+    return 2;
+}
 var bytes = await File.ReadAllBytesAsync(packagePath);
 var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 Directory.CreateDirectory(outputDir);
@@ -48,7 +55,7 @@ var manifest = new
     signature = Convert.ToBase64String(signature),
 };
 await File.WriteAllTextAsync(
-    Path.Combine(outputDir, "manifest.json"),
+    Path.Combine(outputDir, manifestName),
     JsonSerializer.Serialize(manifest, new JsonSerializerOptions
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

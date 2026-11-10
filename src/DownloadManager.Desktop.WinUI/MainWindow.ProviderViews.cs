@@ -28,6 +28,10 @@ public sealed partial class MainWindow
     private bool _providerFull;
     private bool _closingDrawer;
     private ProviderDownloadNotice? _providerNotice;
+    private DispatcherOneShot? _providerNoticeHide;
+
+    /// <summary>How long the "Added N files" notice stays before it closes by itself (UI.R33).</summary>
+    internal static readonly TimeSpan ProviderNoticeTime = TimeSpan.FromSeconds(3);
     private MenuFlyoutItem? _menuShowInProvider;
     private double _gripStartX;
     private double _gripStartWidth;
@@ -38,7 +42,14 @@ public sealed partial class MainWindow
     private void InitializeProviderViews()
     {
         ProviderDrawerButton.IsEnabled = true;
-        ProviderNoticeBar.Closed += (_, _) => _providerNotice = null;
+        ProviderNoticeBar.Closed += (_, _) => { _providerNotice = null; _providerNoticeHide?.Stop(); };
+        _providerNoticeHide = new DispatcherOneShot(DispatcherQueue, ProviderNoticeTime, () =>
+        {
+            // Focus on one of its buttons would be lost with it, so it goes to the list first.
+            if (ProviderNoticeBar.FocusState != FocusState.Unfocused || ProviderNoticeBack.FocusState != FocusState.Unfocused)
+                JobsList.Focus(FocusState.Programmatic);
+            ProviderNoticeBar.IsOpen = false;
+        });
         AppWindow.Changed += (sender, args) =>
         {
             // Hidden to the tray, nothing is read or ticks; shown again, the view it had reads again.
@@ -335,6 +346,7 @@ public sealed partial class MainWindow
         ProviderNoticeBack.Content = $"Back to My {name}";
         AutomationProperties.SetName(ProviderNoticeBack, $"Back to My {name}");
         ProviderNoticeBar.IsOpen = true;
+        _providerNoticeHide?.Restart();
         ShowPassingStatus(notice.Text + ".");
     }
 

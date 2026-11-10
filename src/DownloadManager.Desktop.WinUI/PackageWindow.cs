@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -51,6 +51,10 @@ internal sealed class PackageWindow : Window
     private readonly FontIcon _ringGlyph = new() { Glyph = "\uE73E", FontSize = 32, Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _ringCaption = new() { FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
     private readonly List<InfoTile> _tiles = [];
+    // UI.R34: Progress Details' speed card, for the whole package, sampled once a second by the same rule (UI.B20).
+    private readonly DownloadSpeedGraph _chart = new() { Heading = "Speed", PeriodSeconds = 60 };
+    private Border? _chartCard;
+    private readonly DispatcherTimer _chartTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     // With no Extraction tab, one tab would look odd: the files get a section heading instead.
     private readonly TextBlock _filesHeading = InboundUi.SectionTitle("Files");
     private readonly Grid _tabRow = new();
@@ -84,8 +88,8 @@ internal sealed class PackageWindow : Window
     private readonly Button _close = new() { Content = "Hide", MinWidth = 92 };
     private readonly StackPanel _archivePanel = new() { Spacing = 6, Visibility = Visibility.Collapsed };
     private readonly PasswordBox _archivePassword = new() { Header = "Archive password", PasswordRevealMode = PasswordRevealMode.Hidden };
-    private readonly Button _savePassword = new() { Content = "Save Password", MinWidth = 100, IsEnabled = false, VerticalAlignment = VerticalAlignment.Bottom };
-    private readonly Button _clearPassword = new() { Content = "Clear Password", MinWidth = 100, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Button _savePassword = new() { Content = "Save password", MinWidth = 100, IsEnabled = false, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Button _clearPassword = new() { Content = "Clear password", MinWidth = 100, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly StatusLine _passwordStatus = new("Archive password status");
     private readonly StatusLine _extractionStatus = new("Extraction");
 
@@ -98,22 +102,29 @@ internal sealed class PackageWindow : Window
         _connection = new HostConnection(target);
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
-        Title = ServerNames.ForWindow("Package status — Inbound Download Manager", _connection.Target);
+        Title = ServerNames.ForWindow("Package Progress — Inbound Download Manager", _connection.Target);
         // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
         WindowLayout.ResizeForDpi(this, 720, 680);
         WindowPlacement.Track(this, "package");
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
 
         // The chosen file's details are the longer of the two, and the list scrolls well in less room.
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
-            _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 110 : 0 });
+            _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 84 : 0 });
         _openFolder.Visibility = Visibility.Collapsed;
         _delete.Visibility = Visibility.Collapsed;
         _delete.Margin = new Thickness(0, 0, 16, 0);
         ToolTipService.SetToolTip(_delete, "Remove this package's files from the list and delete them");
         _root.Children.Add(_header.Element);
-        Add(BuildOverview(), 1);
+        var overview = new StackPanel { Spacing = 12 };
+        overview.Children.Add(BuildOverview());
+        _chartCard = InboundUi.Card(_chart, new Thickness(0));
+        _chartCard.Visibility = Visibility.Collapsed;
+        overview.Children.Add(_chartCard);
+        Add(overview, 1);
+        _chartTimer.Tick += (_, _) => SampleChart();
+        AppWindow.Changed += (_, change) => { if (change.DidPresenterChange || change.DidVisibilityChange) UpdateChartSeen(); };
         _tabs.Items.Add(_filesTab);
         _tabs.Items.Add(_extractionTab);
         _tabs.SelectionChanged += (_, _) => ShowTab();
@@ -186,6 +197,7 @@ internal sealed class PackageWindow : Window
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
             _ = ReadArchivesAsync();
+            _ = LoadSpeedHistoryAsync();
         });
         _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() =>
         {
@@ -213,6 +225,7 @@ internal sealed class PackageWindow : Window
         Closed += async (_, _) =>
         {
             _closed = true;
+            _chartTimer.Stop();
             _fileDetails.Stop();
             _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
@@ -279,6 +292,53 @@ internal sealed class PackageWindow : Window
         return row;
     }
 
+    /// <summary>The package's figure for the graph: every file's rate by the main window's rule, added up.</summary>
+    private void SampleChart()
+    {
+        if (_closed) return;
+        var now = DateTimeOffset.UtcNow;
+        var rates = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id])
+            .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now));
+        _chart.AddSample(now, SpeedSample.Total(_hostConnected, rates.ToList()));
+    }
+
+    /// <summary>
+    /// F-12: the files' figures from the Host, added up second by second, so the package's graph opened mid-download
+    /// shows what came before. Files the Host has none for (not running, or an older Host) add nothing.
+    /// </summary>
+    private async Task LoadSpeedHistoryAsync()
+    {
+        try
+        {
+            var totals = new SortedDictionary<long, long>();
+            foreach (var id in _members.ToList())
+            {
+                if (_jobs.GetValueOrDefault(id) is not { State: "downloading" or "connecting" or "verifying" or "retryWaiting" }) continue;
+                var reply = await _connection.GetSpeedHistoryAsync(id);
+                if (_closed) return;
+                if (reply.Type != MessageTypes.SpeedHistoryResult || reply.GetPayload<SpeedHistoryDto>() is not { } history || history.JobId != id) continue;
+                var start = history.Start.ToUnixTimeSeconds();
+                for (var i = 0; i < history.BytesPerSecond.Count; i++)
+                {
+                    var second = start + i * (long)history.IntervalSeconds;
+                    totals[second] = totals.GetValueOrDefault(second) + Math.Max(0, history.BytesPerSecond[i]);
+                }
+            }
+            if (totals.Count == 0) return;
+            var first = totals.Keys.First();
+            var values = new List<long>();
+            for (var second = first; second <= totals.Keys.Last(); second++) values.Add(totals.GetValueOrDefault(second));
+            _chart.LoadHistory(DateTimeOffset.FromUnixTimeSeconds(first), 1, values);
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"Package speed history not loaded: {ex.Message}");
+        }
+    }
+
+    private void UpdateChartSeen() => _chart.IsSeen = !_closed && AppWindow.IsVisible && _chartCard is { Visibility: Visibility.Visible }
+        && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+
     private void ShowTab()
     {
         var extraction = _tabs.SelectedItem == _extractionTab && _archivesApply;
@@ -300,6 +360,8 @@ internal sealed class PackageWindow : Window
     /// <summary>The same segment map and figures as a file's own window, for the selected file.</summary>
     private FrameworkElement BuildFileDetails()
     {
+        // UI.R35: the file's connections show as Progress Details' Connections tab shows them, with no expander.
+        _fileDetails.UseOpenTable();
         _fileDetails.Attach(_connection, _fileMap, _fileMoving, _root);
         _fileDetails.Problem += words => _notice.Text = words;
         ToolTipService.SetToolTip(_fileMap, "Start positions and download progress by connection");
@@ -362,7 +424,7 @@ internal sealed class PackageWindow : Window
 
     private void BuildArchivePanel()
     {
-        var hint = new TextBlock { Text = ArchiveText.PackagePasswordHint, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
+        var hint = InboundUi.Secondary(ArchiveText.PackagePasswordHint);
         AutomationProperties.SetName(hint, hint.Text);
         AutomationProperties.SetName(_archivePassword, "Archive password for this package. It isn't for the download.");
         AutomationProperties.SetName(_savePassword, "Save the archive password");
@@ -567,6 +629,12 @@ internal sealed class PackageWindow : Window
         var anyFailed = members.Any(job => job.State == "failed");
         if (_groupKnown) SetHeaderChip(members, allDone, anyFailed, speed);
         var percent = allDone ? 100 : allKnown ? Percent(received, total) : 0;
+        // The speed card shows while anything in the package can still move, as in Progress Details.
+        var moving = members.Any(job => job.State is not ("completed" or "failed" or "cancelled"));
+        _chartCard!.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
+        if (moving && !_chartTimer.IsEnabled) { SampleChart(); _chartTimer.Start(); }
+        else if (!moving) _chartTimer.Stop();
+        UpdateChartSeen();
         _ring.Value = percent;
         _ring.IsIndeterminate = !allKnown && !allDone && speed > 0;
         _ring.Foreground = InboundTheme.Brush(allDone ? "InboundStatusDoneBrush" : anyFailed ? "InboundStatusFailedBrush" : "InboundProgressFillBrush", _root);
@@ -613,7 +681,7 @@ internal sealed class PackageWindow : Window
         _cancel.Visibility = !settled || _cancel.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         _delete.Visibility = settled && members.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _close.Content = settled ? "Close" : "Hide";
-        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package status"} — Inbound Download Manager", _connection.Target);
+        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package Progress"} — Inbound Download Manager", _connection.Target);
         if (Title != title) Title = title;
     }
 
@@ -672,8 +740,9 @@ internal sealed class PackageWindow : Window
                        "Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Cancel Package",
-            CloseButtonText = "Keep Downloading",
+            PrimaryButtonText = "Cancel package",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
+            CloseButtonText = "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
@@ -711,6 +780,7 @@ internal sealed class PackageWindow : Window
             Title = "Delete package?",
             Content = body,
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };

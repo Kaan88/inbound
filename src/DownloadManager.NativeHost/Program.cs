@@ -164,20 +164,33 @@ internal static class Program
         var hostExe = HostLocator.FindHostExecutable();
         if (hostExe is null)
         {
-            log("Could not locate DownloadManager.Host.exe.");
+            log("Could not locate the Host program.");
             return null;
         }
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            if (OperatingSystem.IsLinux())
             {
-                FileName = hostExe,
-                Arguments = "--background",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            });
+                // In a session of its own: the browser ends this bridge (and may end its process group) when the port
+                // closes, and the Host must outlive it.
+                var start = new ProcessStartInfo("setsid") { UseShellExecute = false };
+                start.ArgumentList.Add("-f");
+                start.ArgumentList.Add(hostExe);
+                start.ArgumentList.Add("--background");
+                using var _ = Process.Start(start);
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = hostExe,
+                    Arguments = "--background",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                });
+            }
             log($"Started host '{hostExe}'.");
         }
         catch (Exception ex)
@@ -248,7 +261,15 @@ internal static class HostLocator
 {
     public static string? FindHostExecutable()
     {
-        var candidates = new List<string>
+        var candidates = OperatingSystem.IsLinux()
+            ? new List<string>
+            {
+                Path.Combine(AppContext.BaseDirectory, "inbound-host"),
+                Path.Combine(AppContext.BaseDirectory, "..", "inbound-host"),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Host.Linux", "bin", "Debug", "net10.0", "inbound-host"),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Host.Linux", "bin", "Release", "net10.0", "inbound-host"),
+            }
+            : new List<string>
         {
             Path.Combine(AppContext.BaseDirectory, "DownloadManager.Host.exe"),
             Path.Combine(AppContext.BaseDirectory, "..", "DownloadManager.Host.exe"),

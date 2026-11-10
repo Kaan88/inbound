@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
@@ -79,6 +79,9 @@ internal static class InboundUi
     }
 
     /// <summary>Delete as Progress Details has it: a labelled button with a red trash glyph.</summary>
+    /// <summary>For a dialog's destructive confirm button (Delete, Cancel download, Remove…): the danger label.</summary>
+    public static Style DangerDialogButton => Style("InboundDangerDialogButtonStyle")!;
+
     public static Button DeleteButton(string text = "Delete") => IconButton("", text, "InboundIconDangerBrush");
 
     /// <summary>The state brush for a job state, as the list colors its status text.</summary>

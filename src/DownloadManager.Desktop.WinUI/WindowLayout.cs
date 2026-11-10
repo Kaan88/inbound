@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Windows.Graphics;
@@ -7,6 +7,12 @@ namespace DownloadManager.Desktop.WinUI;
 
 internal static class WindowLayout
 {
+    /// <summary>The window icon: the .ico on Windows; on Linux the window manager takes it from the window itself, from a PNG.</summary>
+    public static string AppIconPath => Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "app.ico" : "app.png");
+
+    /// <summary>What SetIcon takes: Uno looks the file up in the app's own folder by name.</summary>
+    public static string IconArgument(string path) => OperatingSystem.IsWindows() ? path : Path.GetFileName(path);
+
     public static void ResizeForDpi(Window window, int width, int height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
 
     /// <summary>How small the user can drag the window, and how small a remembered size can come back. Set it before restoring one.</summary>
@@ -16,16 +22,33 @@ internal static class WindowLayout
         var size = ScaledToFit(window, width, height);
         presenter.PreferredMinimumWidth = size.Width;
         presenter.PreferredMinimumHeight = size.Height;
+#if HAS_UNO
+        // Uno's X11 head ignores the preferred minimum (the toolbar clipped under 1000 px, UI check F-10): a window made
+        // smaller than it grows back to it, as Windows would have stopped the drag there.
+        window.AppWindow.Changed += (sender, change) =>
+        {
+            if (!change.DidSizeChange || sender.Presenter is OverlappedPresenter { State: not OverlappedPresenterState.Restored }) return;
+            var now = sender.Size;
+            if (now.Width >= size.Width && now.Height >= size.Height) return;
+            sender.Resize(new SizeInt32 { Width = Math.Max(now.Width, size.Width), Height = Math.Max(now.Height, size.Height) });
+        };
+#endif
     }
 
     private static SizeInt32 ScaledToFit(Window window, int width, int height)
     {
+#if HAS_UNO
+        // Uno has no DisplayArea.GetFromWindowId and scales the window itself.
+        return new SizeInt32 { Width = width, Height = height };
+#endif
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96d;
         var area = DisplayArea.GetFromWindowId(window.AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        return new SizeInt32(
-            Math.Min((int)Math.Ceiling(width * scale), Math.Max(200, area.Width - 24)),
-            Math.Min((int)Math.Ceiling(height * scale), Math.Max(200, area.Height - 24)));
+        return new SizeInt32
+        {
+            Width = Math.Min((int)Math.Ceiling(width * scale), Math.Max(200, area.Width - 24)),
+            Height = Math.Min((int)Math.Ceiling(height * scale), Math.Max(200, area.Height - 24)),
+        };
     }
 
     /// <summary>
@@ -60,8 +83,8 @@ internal static class WindowLayout
 
     public static void ApplyChrome(Window window, FrameworkElement root)
     {
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) window.AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) window.AppWindow.SetIcon(WindowLayout.IconArgument(icon));
         UseBackdrop(window);
         if (root is Microsoft.UI.Xaml.Controls.Panel { Background: null } panel)
         {
@@ -111,13 +134,17 @@ internal static class WindowLayout
     /// </summary>
     public static void CenterOnMainWindow(Window window)
     {
+#if HAS_UNO
+        // Uno has no DisplayArea lookups (they throw); the window manager places a new window itself.
+        return;
+#endif
         var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var size = window.AppWindow.Size;
         var target = MainWindowBounds(own);
         if (target is null)
         {
             var area = DisplayArea.GetFromWindowId(window.AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-            target = new RectInt32(area.X, area.Y, area.Width, area.Height);
+            target = new RectInt32 { X = area.X, Y = area.Y, Width = area.Width, Height = area.Height };
         }
         var bounds = target.Value;
         var x = bounds.X + (bounds.Width - size.Width) / 2;
@@ -126,7 +153,7 @@ internal static class WindowLayout
         var screen = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Primary).WorkArea;
         x = Math.Clamp(x, screen.X, Math.Max(screen.X, screen.X + screen.Width - size.Width));
         y = Math.Clamp(y, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - size.Height));
-        window.AppWindow.Move(new PointInt32(x, y));
+        window.AppWindow.Move(new PointInt32 { X = x, Y = y });
     }
 
     /// <summary>
@@ -135,6 +162,13 @@ internal static class WindowLayout
     /// </summary>
     public static void CenterOn(Window window, nint owner)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows())
+        {
+            CenterOnMainWindow(window);
+            return;
+        }
+
         if (owner == 0 || !GetWindowRect(owner, out var rect))
         {
             CenterOnMainWindow(window);
@@ -142,11 +176,11 @@ internal static class WindowLayout
         }
 
         var size = window.AppWindow.Size;
-        var bounds = new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        var bounds = new RectInt32 { X = rect.Left, Y = rect.Top, Width = rect.Right - rect.Left, Height = rect.Bottom - rect.Top };
         var screen = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Primary).WorkArea;
         var x = Math.Clamp(bounds.X + (bounds.Width - size.Width) / 2, screen.X, Math.Max(screen.X, screen.X + screen.Width - size.Width));
         var y = Math.Clamp(bounds.Y + (bounds.Height - size.Height) / 2, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - size.Height));
-        window.AppWindow.Move(new PointInt32(x, y));
+        window.AppWindow.Move(new PointInt32 { X = x, Y = y });
     }
 
     /// <summary>
@@ -155,6 +189,8 @@ internal static class WindowLayout
     /// </summary>
     public static void OwnModally(Window window, nint owner)
     {
+        // A Win32 owner window; Windows only.
+        if (!OperatingSystem.IsWindows()) return;
         if (owner == 0) return;
         var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
         SetWindowLongPtr(own, GwlpHwndParent, owner);
@@ -177,6 +213,8 @@ internal static class WindowLayout
     /// <summary>The largest visible, not minimised top-level window of another process running this same program.</summary>
     private static RectInt32? MainWindowBounds(nint own)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows()) return null;
         var self = Environment.ProcessId;
         var exe = Environment.ProcessPath;
         RectInt32? best = null;
@@ -195,7 +233,7 @@ internal static class WindowLayout
                 return true;
             }
             if (!GetWindowRect(hwnd, out var rect)) return true;
-            var candidate = new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+            var candidate = new RectInt32 { X = rect.Left, Y = rect.Top, Width = rect.Right - rect.Left, Height = rect.Bottom - rect.Top };
             if (best is not { } current || candidate.Width * candidate.Height > current.Width * current.Height) best = candidate;
             return true;
         }, 0);

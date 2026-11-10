@@ -95,6 +95,48 @@ public sealed partial class MainWindow : Window
         StatusBrushes.UseTheme(RootGrid.ActualTheme);
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
+        MenuBarHover.Attach(MainMenuBar);
+#if HAS_UNO
+        // LightDismissOverlayMode="Off" leaves the list undimmed on Windows; Uno ignores it and dims. Its dismiss layer
+        // stays (a click beside the drawer still closes it), only unseen.
+        ProviderSplit.PaneOpening += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(() => ClearDismissLayer(ProviderSplit));
+            // On a reopen Uno draws the pane in place for a frame before its slide starts: hidden for two frames.
+            // The pane's contents are laid out at the drawer's width only after it opens (a first open builds them, and
+            // from the full view they reflow): hidden until then (a few frames at most), then faded in as it slides.
+            // On the first open the template's pane is built later than this, so it is looked for on each frame too.
+            ProviderSplit.ApplyTemplate();
+            var pane = FindNamed(ProviderSplit, "PaneRoot") as UIElement;
+            ProviderDrawerFrame.Opacity = 0;
+            if (pane is not null) pane.Opacity = 0;
+            var frames = 0;
+            long? fadeStart = null;
+            void Reveal(object? sender, object e)
+            {
+                frames++;
+                if (pane is null && FindNamed(ProviderSplit, "PaneRoot") is UIElement late)
+                {
+                    pane = late;
+                    pane.Opacity = 0;
+                }
+
+                if (fadeStart is null)
+                {
+                    var laidOut = ProviderDrawerHost.Children.FirstOrDefault() is FrameworkElement content &&
+                                  content.ActualWidth > 0 && Math.Abs(content.ActualWidth - ProviderDrawerHost.ActualWidth) < 2;
+                    if (frames < 3 || (!laidOut && frames < 20)) return;
+                    fadeStart = Environment.TickCount64;
+                }
+
+                var progress = Math.Min(1, (Environment.TickCount64 - fadeStart.Value) / 150d);
+                if (pane is not null) pane.Opacity = progress;
+                ProviderDrawerFrame.Opacity = progress;
+                if (progress >= 1) Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Reveal;
+            }
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += Reveal;
+        };
+#endif
         UiTrace.Write("MainWindow collections initialized");
 
         try
@@ -106,12 +148,12 @@ public sealed partial class MainWindow : Window
 
             // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
-            else AppWindow.Resize(new SizeInt32(width, height));
+            else AppWindow.Resize(new SizeInt32 { Width = width, Height = height });
             WindowPlacement.Track(this, "main");
-            var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
+            var icon = WindowLayout.AppIconPath;
             if (File.Exists(icon))
             {
-                AppWindow.SetIcon(icon);
+                AppWindow.SetIcon(WindowLayout.IconArgument(icon));
             }
 
             ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
@@ -232,9 +274,37 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         Activate();
-        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (OperatingSystem.IsWindows()) SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
         SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
     }
+
+#if HAS_UNO
+    private static DependencyObject? FindNamed(DependencyObject parent, string name)
+    {
+        for (var at = 0; at < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); at++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, at);
+            if (child is FrameworkElement element && element.Name == name) return child;
+            if (FindNamed(child, name) is { } found) return found;
+        }
+
+        return null;
+    }
+
+    private static void ClearDismissLayer(DependencyObject parent)
+    {
+        for (var at = 0; at < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); at++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, at);
+            if (child is FrameworkElement { Name: { } name } element && name.Contains("Dismiss", StringComparison.OrdinalIgnoreCase))
+            {
+                element.Opacity = 0;
+            }
+
+            ClearDismissLayer(child);
+        }
+    }
+#endif
 
     public void RequestSettingsPage()
     {
@@ -260,6 +330,10 @@ public sealed partial class MainWindow : Window
         {
             sender.Hide();
             Application.Current.Exit();
+#if HAS_UNO
+            // Uno's X11 head leaves the process running after Exit.
+            Environment.Exit(0);
+#endif
             return;
         }
         sender.Hide();
@@ -830,7 +904,7 @@ public sealed partial class MainWindow : Window
             if (child is T match) return match;
             if (FindChild<T>(child) is { } nested) return nested;
         }
-        return null;
+        return default;
     }
 
     private void FadeIn(IReadOnlyList<JobViewModel> rows)
@@ -908,8 +982,34 @@ public sealed partial class MainWindow : Window
         }
     }
 
+#if HAS_UNO
+    private bool _fixingCategoryHighlight;
+#endif
+
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+#if HAS_UNO
+        // Uno's ListBox leaves the earlier item looking selected: clear every other item's own flag.
+        if (_fixingCategoryHighlight) return;
+        if (CategoryList.SelectedItem is ListBoxItem chosen)
+        {
+            _fixingCategoryHighlight = true;
+            try
+            {
+                foreach (var other in CategoryList.Items.OfType<ListBoxItem>())
+                {
+                    if (!ReferenceEquals(other, chosen) && other.IsSelected) other.IsSelected = false;
+                }
+
+                if (!chosen.IsSelected) chosen.IsSelected = true;
+                if (!ReferenceEquals(CategoryList.SelectedItem, chosen)) CategoryList.SelectedItem = chosen;
+            }
+            finally
+            {
+                _fixingCategoryHighlight = false;
+            }
+        }
+#endif
         if (_refreshingCategories) return;
         if (CategoryList.SelectedItem is ListBoxItem { Tag: string tag })
         {
@@ -1249,8 +1349,9 @@ public sealed partial class MainWindow : Window
                        " Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Cancel Package",
-            CloseButtonText = "Keep Downloading",
+            PrimaryButtonText = "Cancel package",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
+            CloseButtonText = "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
@@ -2153,6 +2254,10 @@ public sealed partial class MainWindow : Window
         }
 
         Application.Current.Exit();
+#if HAS_UNO
+        // Uno's X11 head leaves the process running after Exit.
+        Environment.Exit(0);
+#endif
     }
 
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);
@@ -2210,6 +2315,7 @@ public sealed partial class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Remove from list",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
@@ -2422,7 +2528,10 @@ public sealed partial class MainWindow : Window
     private void SetToolbarScale(bool large)
     {
         _toolbarLarge = large;
-        foreach (var button in ToolbarPanel.Children.OfType<Button>())
+        // Some buttons sit in a panel of their own (My TorBox, shown only with an account), one level down.
+        var buttons = ToolbarPanel.Children.OfType<Button>()
+            .Concat(ToolbarPanel.Children.OfType<Panel>().SelectMany(panel => panel.Children.OfType<Button>()));
+        foreach (var button in buttons)
         {
             button.Width = large ? double.NaN : 34;
             button.MinWidth = large ? 72 : 34;
@@ -2990,7 +3099,7 @@ public sealed partial class MainWindow : Window
         authenticationPanel.Children.Add(useAuthentication);
         authenticationPanel.Children.Add(authenticationUser);
         authenticationPanel.Children.Add(authenticationPassword);
-        authenticationPanel.Children.Add(new TextBlock { Text = "HTTP Basic authentication. Credentials apply only to this download and are protected by Windows when saved.", TextWrapping = TextWrapping.Wrap });
+        authenticationPanel.Children.Add(new TextBlock { Text = $"HTTP Basic authentication. Credentials apply only to this download and are {PlatformText.ProtectedBy} when saved.", TextWrapping = TextWrapping.Wrap });
         var authenticationError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         authenticationPanel.Children.Add(authenticationError);
         var rememberFolder = new CheckBox { Content = "Remember this folder for manual downloads", IsChecked = true };
@@ -3765,6 +3874,7 @@ public sealed partial class MainWindow : Window
                 Title = "Delete queue?",
                 Content = deletePanel,
                 PrimaryButtonText = "Delete queue",
+                PrimaryButtonStyle = InboundUi.DangerDialogButton,
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
@@ -4031,7 +4141,7 @@ public sealed partial class MainWindow : Window
                 Height = 96,
                 PlaceholderText = "*.example.com=2",
             };
-            var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = settings.LaunchAtStartup };
+            var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = settings.BrowserIntegrationEnabled };
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
@@ -4048,7 +4158,7 @@ public sealed partial class MainWindow : Window
             {
                 Header = "Theme",
                 MinWidth = 200,
-                ItemsSource = new[] { "Same as Windows", "Light", "Dark" },
+                ItemsSource = new[] { PlatformText.FollowSystemTheme, "Light", "Dark" },
                 // The theme in use, not only the Host's: a Dark Mode click the Host has yet to save is kept in
                 // _uiState, and starting from the Host's value would let OK undo it.
                 SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, settings.Theme))),
@@ -4077,7 +4187,7 @@ public sealed partial class MainWindow : Window
             var proxyMode = new RadioButtons
             {
                 Header = "Connection",
-                ItemsSource = new[] { "No proxy", "Use the Windows proxy settings", "Use this proxy server:" },
+                ItemsSource = new[] { "No proxy", PlatformText.SystemProxy, "Use this proxy server:" },
                 SelectedIndex = settings.Proxy.Mode switch { "system" => 1, "manual" => 2, _ => 0 },
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyMode, "Proxy mode");
@@ -4178,7 +4288,7 @@ public sealed partial class MainWindow : Window
             ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
             addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
-            var loginHelp = SettingsWindow.Hint("Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
+            var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             var categoryRows = new List<UIElement>();
@@ -4856,6 +4966,7 @@ public sealed partial class MainWindow : Window
             Title = selection.Count == 1 ? "Delete download?" : $"Delete {selection.Count} downloads?",
             Content = panel,
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };

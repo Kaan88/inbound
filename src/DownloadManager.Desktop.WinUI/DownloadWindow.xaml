@@ -244,7 +244,7 @@
                     <StackPanel Spacing="10" Padding="0,0,12,4">
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Speed limit" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Speed limit" Style="{StaticResource InboundSectionTitleStyle}" />
                                 <!-- UI.R6: the rate holds a right edge of its own, so its units stay put as digits come and go. -->
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="Current transfer rate:" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
@@ -266,7 +266,7 @@
                         </Border>
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="8">
-                                <TextBlock Text="When it finishes" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="When it finishes" Style="{StaticResource InboundSectionTitleStyle}" />
                                 <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
                                           Click="ShowCompletionForJob_Click" />
                                 <TextBlock Text="For every download, this is in Options &gt; Downloads, under When a download finishes."
@@ -276,7 +276,7 @@
                         </Border>
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="8">
-                                <TextBlock Text="Save to" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Save to" Style="{StaticResource InboundSectionTitleStyle}" />
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -324,8 +324,14 @@
                         <TextBlock x:Name="ResumeLabel" Text="Resume" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-                <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="80" />
+                <!-- UI.R35: the package window's words and glyph; "Cancel" alone read as closing the window. -->
+                <Button x:Name="CancelButton" Click="Cancel_Click" AutomationProperties.Name="Cancel download">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE711;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                        <TextBlock Text="Cancel download" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="92" />
             </StackPanel>
         </Grid>
     </Grid>

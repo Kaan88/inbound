@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Read by Uno's desktop head only: on X11 the window icon (_NET_WM_ICON) comes from Logo, the title from DisplayName and
+     WM_CLASS from Identity Name, which the AppImage's .desktop file names as StartupWMClass. -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         IgnorableNamespaces="uap">
+  <Identity Name="DownloadManager.Desktop.Uno" Publisher="CN=Inbound" Version="1.0.0.0" />
+  <Properties>
+    <DisplayName>Inbound Download Manager</DisplayName>
+    <PublisherDisplayName>Inbound</PublisherDisplayName>
+    <Logo>app.png</Logo>
+  </Properties>
+</Package>

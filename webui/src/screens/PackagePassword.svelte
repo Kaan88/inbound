@@ -107,8 +107,8 @@
     <label class="label" for="package-password">Archive password</label>
     <div class="flex flex-wrap gap-2">
       <input id="package-password" class="field min-w-0 flex-1" type="password" bind:value={password} autocomplete="off" spellcheck="false" aria-label="Archive password for this package. It isn't for the download." />
-      <button class="btn shrink-0" type="submit" disabled={!password}>Save Password</button>
-      <button class="btn shrink-0" type="button" disabled={!canClear} onclick={clear}>Clear Password</button>
+      <button class="btn shrink-0" type="submit" disabled={!password}>Save password</button>
+      <button class="btn shrink-0" type="button" disabled={!canClear} onclick={clear}>Clear password</button>
     </div>
     <p class="hint">{packagePasswordHint}</p>
     {#if status}<p class="text-[12.5px] {problem ? 'text-error' : 'text-muted'}" role="status">{status}</p>{/if}

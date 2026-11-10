@@ -152,7 +152,7 @@ public sealed class ServerBannerTests
     [Fact]
     public void TheProviderKeyNoteSaysWhoseAccountAndWhereTheKeyIsKept()
     {
-        Assert.Contains("your Windows account", RemoteOptionsText.ProviderKeyNote(null, null));
+        Assert.Contains(OperatingSystem.IsWindows() ? "your Windows account" : "your user account", RemoteOptionsText.ProviderKeyNote(null, null));
         var server = RemoteOptionsText.ProviderKeyNote("NAS", HostKinds.Server);
         Assert.Contains("account NAS uses", server);
         Assert.Contains("saved on NAS", server);

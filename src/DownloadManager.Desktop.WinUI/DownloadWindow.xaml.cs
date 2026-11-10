@@ -41,9 +41,9 @@ public sealed partial class DownloadWindow : Window
         AppTheme.Track(Root);
         WindowLayout.ResizeForDpi(this, 640, 640);
         WindowPlacement.Track(this, "progress", restoreSize: false);
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
+        Title = ServerNames.ForWindow("Progress Details — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
         // U-WL-17: Enter opens the finished file, the window's default action.
         var enter = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Enter };
@@ -66,7 +66,11 @@ public sealed partial class DownloadWindow : Window
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;
             var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == _jobId);
             if (job is null) ShowRemoved();
-            else Update(job, completionSettingsRefreshed: true);
+            else
+            {
+                Update(job, completionSettingsRefreshed: true);
+                _ = LoadSpeedHistoryAsync();
+            }
         });
         _connection.JobChanged += (job, type) =>
         {
@@ -136,6 +140,27 @@ public sealed partial class DownloadWindow : Window
         if (_closed || _job is not { } job) return;
         var now = DateTimeOffset.UtcNow;
         Chart.AddSample(now, SpeedSample.Total(_connected, [SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now)]));
+    }
+
+    /// <summary>
+    /// F-12: on each connection, the Host's figures for this download since it started running, so a window opened
+    /// mid-download shows what came before instead of an empty graph. An older Host answers with the total only
+    /// (no <c>jobId</c>), which is not this download's, so it is left out.
+    /// </summary>
+    private async Task LoadSpeedHistoryAsync()
+    {
+        try
+        {
+            var reply = await _connection.GetSpeedHistoryAsync(_jobId);
+            if (_closed || reply.Type != MessageTypes.SpeedHistoryResult) return;
+            var history = reply.GetPayload<SpeedHistoryDto>();
+            if (history?.JobId != _jobId) return;
+            Chart.LoadHistory(history.Start, history.IntervalSeconds, history.BytesPerSecond);
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"Download speed history not loaded: {ex.Message}");
+        }
     }
 
     private void UpdateChartSeen() => Chart.IsSeen = !_closed && AppWindow.IsVisible && OverviewPage.Visibility == Visibility.Visible
@@ -489,6 +514,7 @@ public sealed partial class DownloadWindow : Window
                 ? $"Remove {name} from the list? {JobNotes.NothingToDelete(1)}"
                 : $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
@@ -515,6 +541,7 @@ public sealed partial class DownloadWindow : Window
             Title = "Cancel download?",
             Content = "Cancel this transfer and delete its partial file?",
             PrimaryButtonText = "Cancel download",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = _job?.State is "paused" or "queued" or "failed" ? "Keep it" : "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };

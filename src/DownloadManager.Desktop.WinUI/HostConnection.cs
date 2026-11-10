@@ -157,6 +157,10 @@ public sealed partial class HostConnection : IAsyncDisposable
     public Task<IpcMessage> GetSpeedHistoryAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SpeedHistoryGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 
+    /// <summary>F-12: one download's figures while it runs. An older Host answers with the total (no <c>jobId</c>).</summary>
+    public Task<IpcMessage> GetSpeedHistoryAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.SpeedHistoryGet, new SpeedHistoryRequest { JobId = jobId }, TimeSpan.FromSeconds(8), cancellationToken);
+
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
 
@@ -636,6 +640,12 @@ public static class HostLauncher
 
     public static void EnsureStarted()
     {
+        if (OperatingSystem.IsLinux())
+        {
+            EnsureStartedOnLinux();
+            return;
+        }
+
         // Use the same per-user/profile identity as IPC and the Host. A process
         // name can belong to another profile, while a duplicate scoped Host
         // can activate a frontend from an older build directory.
@@ -680,6 +690,61 @@ public static class HostLauncher
         catch (Exception)
         {
             // The connection loop will surface the failure.
+        }
+    }
+
+    /// <summary>
+    /// Linux: the Host is running when its socket answers (it holds a lock file, not a named mutex). It is started apart
+    /// from this process (setsid), so closing the window leaves it running, as on Windows.
+    /// </summary>
+    private static void EnsureStartedOnLinux()
+    {
+        if (HostPipeBusyException.PipeExists() && HostAnswers()) return;
+        if (DateTimeOffset.UtcNow - _lastStartAttempt < TimeSpan.FromSeconds(5)) return;
+        _lastStartAttempt = DateTimeOffset.UtcNow;
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var candidates = new List<string>
+        {
+            Path.Combine(AppContext.BaseDirectory, "inbound-host"),
+            // The AppImage keeps the window in desktop/ beside the Host.
+            Path.Combine(AppContext.BaseDirectory, "..", "inbound-host"),
+        };
+        for (var i = 0; i < 7 && directory is not null; i++, directory = directory.Parent)
+        {
+            candidates.Add(Path.Combine(directory.FullName, "DownloadManager.Host.Linux", "bin", "Debug", "net10.0", "inbound-host"));
+            candidates.Add(Path.Combine(directory.FullName, "DownloadManager.Host.Linux", "bin", "Release", "net10.0", "inbound-host"));
+        }
+
+        var fromEnv = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_HOST");
+        if (!string.IsNullOrWhiteSpace(fromEnv)) candidates.Insert(0, fromEnv);
+        var executable = candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
+        if (executable is null) return;
+        try
+        {
+            var start = new ProcessStartInfo("setsid") { UseShellExecute = false };
+            start.ArgumentList.Add("-f");
+            start.ArgumentList.Add(executable);
+            start.ArgumentList.Add("--background");
+            Process.Start(start)?.Dispose();
+        }
+        catch (Exception)
+        {
+            // The connection loop will surface the failure.
+        }
+    }
+
+    /// <summary>A socket file can outlive its Host; only an answer says one runs.</summary>
+    private static bool HostAnswers()
+    {
+        try
+        {
+            using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
+            socket.Connect(new System.Net.Sockets.UnixDomainSocketEndPoint(UnixSockets.PathFor(PipeNames.HostPipe())));
+            return true;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return false;
         }
     }
 

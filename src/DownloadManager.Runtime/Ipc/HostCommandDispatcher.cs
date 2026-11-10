@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
@@ -319,7 +319,9 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.SpeedHistoryGet:
-                    await Reply(client, message, MessageTypes.SpeedHistoryResult, _service.GetSpeedHistory()).ConfigureAwait(false);
+                    var historyFor = message.Payload is { ValueKind: System.Text.Json.JsonValueKind.Object } ? message.GetPayload<SpeedHistoryRequest>()?.JobId : null;
+                    await Reply(client, message, MessageTypes.SpeedHistoryResult,
+                        historyFor is { } historyJob ? _service.GetSpeedHistory(historyJob) : _service.GetSpeedHistory()).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobsSnapshot:

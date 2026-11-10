@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/src/">
     <Project Path="src/DownloadManager.Archives/DownloadManager.Archives.csproj" />
     <Project Path="src/DownloadManager.Cli/DownloadManager.Cli.csproj" />
@@ -10,6 +10,7 @@
     </Project>
     <Project Path="src/DownloadManager.Engine/DownloadManager.Engine.csproj" />
     <Project Path="src/DownloadManager.Host/DownloadManager.Host.csproj" />
+    <Project Path="src/DownloadManager.Host.Linux/DownloadManager.Host.Linux.csproj" />
     <Project Path="src/DownloadManager.NativeHost/DownloadManager.NativeHost.csproj" />
     <Project Path="src/DownloadManager.Persistence/DownloadManager.Persistence.csproj" />
     <Project Path="src/DownloadManager.Providers.TorBox/DownloadManager.Providers.TorBox.csproj" />

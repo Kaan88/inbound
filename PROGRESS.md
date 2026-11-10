@@ -1,4 +1,67 @@
-# Progress — session handoff
+﻿# Progress — session handoff
+
+### 0.6.6 release (2026-11-10)
+
+- Owner, 2026-11-10: "do the full test. bump version, upload new extensions. merge. publish. I'm hopeful this is a great stable release." and "if it won't delay the release, make the webui installable as pwa."
+- Contents since 0.6.5: the Linux desktop app and Host (`linux-host`), the AppImage that updates itself (D7.U), UI.R33-R35 look passes, F-12 (graphs opened mid-download show what came before), the package window with Progress Details' look and an open connections table, Mark of the Web on every finished download (REV.4), UTF-8 window titles on Linux, the extension popup's "Connected" only when the app answers, web sign-in saves that retry a briefly held file, and the web UI installable as an app (PWA).
+- Tests at release (Windows 11 VM, full suites): Core 1,282, Archives 387, Containers 187, TorBox 323 pass; Server 152 pass (5 of 6 runs after the save retry); Engine 161/162 (`ASegmentThatKeepsGettingBytesIsNotOutOfAttempts` flaky, 3/3 on rerun); Integration 1,482/1,485 with the three known failures (network-share folder, golden frames, 7-Zip kill matrix), which fail without tonight's changes too. Linux: Containers, Engine, TorBox pass; the Windows-only tests in Archives, Core, Integration and Server fail there as before. Web UI 373 and extension 243 pass.
+- Extension 0.6.1: Firefox add-on signed by Mozilla (`extensions/firefox-updates.json` at v0.6.6). Chrome Web Store upload refused: "You may not edit or publish an item that is in review" (the earlier version is still in review); the store zip is built and goes up once that review ends.
+- Live Windows check by the owner (RDP, test instance): Progress Details mid-download, footers, menus, confirms and light theme "all good"; the package window's "Segment details" expander replaced by the open table (fa17fe2). The graph steps once a second over RDP because the session has animations off (checked: SPI_GETCLIENTAREAANIMATION false); it slides with animations on.
+
+### D7.U: the AppImage updates itself (2026-11-10, `linux-host`)
+- `InstalledBuild.AppImage`, `DownloadManagerService.ManifestUrlFor`/`ReplaceAppImage`, `AppImageRestarter`, `UpdateInstallJournal.RecordSucceeded`; the Linux Host gets `HostUpdateMonitor` and `SupportsUpdater` when run from an AppImage. `UpdateSigner` takes a manifest name; `scripts/prepare-appimage-release.sh`.
+- Verified end to end on Linux with packed 0.6.5 and 0.6.6 AppImages over a loopback feed (see ROADMAP D7.U). Core.Tests 1,282 pass on Windows; new AppImage tests pass on Linux and Windows; solution builds with 0 errors on Windows.
+- Next release: run `scripts/prepare-appimage-release.sh` and upload `manifest-linux-x64.json` with the AppImage, or AppImage users see no update.
+
+### 0.6.5 owner requests UI.R33, UI.B22, UI.R34 (2026-11-10, `linux-host`)
+- UI.R33: My TorBox's "Added N files" notice closes itself after 3 s (`MainWindow.ProviderViews.cs`).
+- UI.B22: `DownloadSpeedGraph.Slide` resumes from the time since the newest sample instead of restarting at 0 on every redraw (size, theme, shown again). Probable cause of the stepping in Progress Details; not reproduced on screen.
+- UI.R34: `PackageWindow` gains Progress Details' speed card for the package (collapsed by default).
+- REV.4: `MarkOfTheWeb` now marks every completed network download (not loopback); Integration 1,470/1,474 on the VM, the failures pre-existing or flaky (see ROADMAP REV.4).
+- Uno build (Linux) and WinUI build (Windows VM over SSH) 0 errors. Not run in the app; no tests touched (UI-only).
+
+### D7 stage 2: the window on Linux and the AppImage layout (2026-11-09, `linux-host`, partial)
+- The WinUI window builds through Uno for Linux and runs on KDE Wayland (XWayland) against `inbound-host`; the owner saw it working. Single instance over a user-only Unix socket (`ActivationSignal`); the Win32 window calls are skipped on Linux; file icons are generic there for now.
+- `scripts/package-appimage.sh` builds a self-contained AppDir (Host, CLI, native host, web server; the window in `desktop/`). `AppRun` handles `--native-host`, `--cli` and `--host`; started with no argument it starts the Host, then the window. Checked from the AppDir with no .NET installed and a sandbox data folder: Host and window started, `--cli list` listed the downloads, `--native-host` answered `jobs.query` with `jobs.snapshot`.
+- Packed (2026-11-10): `Inbound-0.6.5-x86_64.AppImage`, 71 MB. Run from the packed file with a sandbox data folder: Host and window started from the AppImage mount, `--cli list` and `--native-host` `jobs.query` answered. The WinUI app and Windows Host build with 0 errors on Windows 11 (the owner's VM, over SSH).
+- Not done: the WinUI app run on Windows after the shared-file changes, a real browser through the AppImage's native host, and the AppImage on another distribution.
+
+### D7 stage 1, step 6: the web UI on the Linux Host (2026-11-09, `linux-host`)
+- The Windows Host's web UI (D8) on Linux: `WebUiSupervisor` with the shared `WebBridgeLauncher` (program name per OS), `WebUiPasswordFile` and `LocalNetworkAddresses`; `ProcListenerCheck` (`/proc/net/tcp[6]` and the bridge's `/proc/<pid>/fd`) in place of `GetExtendedTcpTable`; `LinuxFirewall` reports `ready` (no per-program rule exists on Linux to add).
+- The bridge (`DownloadManager.Server --bridge`) opens the Linux Host's hello socket through `UnixSockets` and reports host kind `linux`.
+- Checked live with a sandbox data folder: password set and web UI turned on over the socket, the bridge reached `running` on port 18780, the "Open in browser" ticket signed in, and `POST /api/ipc` `jobs.query` came back through bridge, socket and Host; turned off cleanly. Server and Windows Host still compile.
+
+### D7 stage 1, step 5: browser integration on Linux (2026-11-09, `linux-host`)
+- `LinuxNativeMessaging`: at each start the Host writes `<data>/bin/inbound-native-host` (a launcher, mode 700, that runs the AppImage with `--native-host` or the native host beside the Host) and the native-messaging manifests for each browser whose folder exists (Chrome, Chromium, Edge, Brave, Vivaldi under `~/.config`; Firefox under `~/.mozilla`). A manifest of this name pointing at another existing program is left alone. Skipped for a sandbox data folder.
+- NativeHost: finds `inbound-host` on Linux and starts it with `setsid -f`, so it outlives the browser's bridge.
+- Fix: turning sign-in start off failed when `~/.config/autostart` didn't exist.
+- Checked in a fake home folder (HOME redirected, D-Bus off): manifests and launcher written; the native host started through the launcher as Chrome does, reached the Host over the socket and answered `jobs.query` with the snapshot. Not checked: a real browser with the extension; the AppImage `--native-host` entry (comes with the AppImage).
+
+### D7 stage 1, step 4: secret key in the desktop keyring; tray comes back after a panel restart (2026-11-09, `linux-host`)
+- `AesGcmSecretProtector.OpenForDataFolder(ISecretKeyStore, …)`: the server's key-file checks (secrets sealed with another or a missing key refuse to start; the discard record) for a key kept elsewhere. The file overload is unchanged.
+- `SecretServiceKeyStore`: the key in the freedesktop Secret Service (KDE Wallet here), one item per data folder, read back after creating it. The Linux Host uses it when there is no key file yet and the session has a keyring; otherwise the key file, as before.
+- Checked live: two Host runs on a sandbox data folder used one wallet item and wrote no key file. The test item ("Inbound Download Manager secret key (…/inbound-linux-test/data)") is still in the owner's wallet: deleting it was refused to the agent; the owner removes it in KWalletManager. Not checked: a locked wallet's prompt, and a run whose data folder already holds sealed secrets.
+- Tray: registers again when the watcher's owner changes (a panel restart). Not checked live (would restart the owner's panel).
+
+### D7 stage 1, step 3: tray icon on Linux (2026-11-09, `linux-host`)
+- `StatusNotifierTray`: a StatusNotifierItem with a `com.canonical.dbusmenu` menu (Open Inbound, Options, Pause all, Resume all, Exit), registered with the session's watcher; a click opens the window; the tooltip follows the active count. Optional: without a watcher the Host runs without it, and the hello lists `tray` only when it registered.
+- Checked live on KDE Plasma (Wayland): the watcher lists the item; Title and ToolTip read back; GetLayout and GetGroupProperties return the menu; a "clicked" event on Exit stopped the Host cleanly.
+- Not yet: registering again when the panel restarts (plasmashell restart); the app's own icon (a themed icon is used until the AppImage installs one).
+
+### D7 stage 1, step 2: notifications, sleep prevention, sign-in start, completion actions (2026-11-09, `linux-host`)
+- D-Bus through `Tmds.DBus.Protocol` 0.95.2 (no native parts). `LinuxDesktop.cs` in `DownloadManager.Host.Linux`.
+- Notifications: `org.freedesktop.Notifications`, on the same settings as the Windows tray balloons (download and remote notices).
+- Sleep prevention: a logind `sleep` inhibitor in `block` mode, held while downloads run. Checked live: `systemd-inhibit --list` showed it during an 8 MB throttled download and not after; the completion notice was sent without error.
+- Sign-in start: an XDG autostart entry (`~/.config/autostart/inbound-host.desktop`) following the setting, pointing at the AppImage when run from one; skipped for a sandbox data folder, as on Windows. Not yet checked live.
+- Completion actions: open with `xdg-open`; exit; power off, restart (systemctl) or sign out (loginctl) after a 30 s notice. The post-download command reuses the Windows Host's hook. Not yet checked live (the power actions are not run in tests).
+
+### D7 stage 1, step 1: the Linux desktop Host (2026-11-09, branch `linux-host`)
+- Owner: "start in plan order", on their CachyOS KDE Wayland machine. Repo cloned to the Linux home folder (the Windows checkout untouched); .NET 10 SDK 10.0.403 in `~/.dotnet`.
+- `IpcConnectionHandler` (Runtime): the per-connection loop moved out of `HostPipeServer`, which now uses it; Windows Host still compiles (checked on Linux with `EnableWindowsTargeting`, not run).
+- Unix-socket transport: `UnixSockets` (Contracts) and `UnixSocketIpcServer` (Runtime). Both pipe names as sockets in `$XDG_RUNTIME_DIR/inbound` (0700, sockets 0600), owner of the folder checked (statx), peer user checked with `SO_PEERCRED` on both ends. `IpcClient` uses it on Linux, so the CLI, NativeHost and the window need no change.
+- `DownloadManager.Host.Linux` (`inbound-host`): the Windows Host's composition without WinForms; host kind `linux`; single instance by a flock on `host.lock` (a second start asks the running Host to open the window); folder dialog via kdialog/zenity; secrets sealed with the data folder's key file as on the server; SIGTERM/SIGINT stop it cleanly.
+- Tested on Linux with a sandbox data folder: CLI add/list over the socket, a second start, a 48 MB local download (byte-identical), clean stop with sockets removed. Core.Tests and Server.Tests: 28 and 1 failures on Linux, the same ones with and without this change (Windows path and shell tests).
+- Not yet: tray (SNI), notifications, sign-in start, sleep prevention, libsecret, completion actions, native-messaging manifests, the Uno window on Linux.
 
 ### Web UI in the Windows app, and remote management (2026-11-08, requested)
 
@@ -25,8 +88,13 @@
 - Browser runs on test instances only (test Host `extask`, test server on 127.0.0.1:19580, a local file server; downloads to test folders): Chrome for Testing 158 (server only: the Chromium native-host key was another track's, with its manifest gone, so This PC was "not found") and Firefox 159 (headed, BiDi, both targets; the installed app's Firefox key reached the test Host). Edge not run. The owner's exact EXT.B7 screen was not reproduced: the folder window already showed the server's folders.
 - Left: the owner's check in Edge and Firefox; a release of the extension.
 
+### Owner after 0.6.5 (2026-11-09)
+
+- Owner on the open checks: the web UI in the Windows app and managing the mini PC from the window (D8, D9) "Works great"; the VM checks and the light-mode walk "later"; the full test run before the next release "still the same". Small loose ends are to be done whenever they fit a piece of work. New: the "Added N files" bar should go after 3 seconds (UI.R33); Progress Details' graph fills in pieces (UI.B22); the package window should look more like Progress Details (UI.R34). Owner now works on Linux (CachyOS); the WinUI app cannot be built there.
+
 ### 0.6.5 release (2026-11-09)
 
+- **Released 2026-11-09** (tag `v0.6.5`, squashed to `main` as 96fbde0 without the local-only docs; binaries `0.6.5+96fbde0`). Checks: the live feed serves 0.6.5 and its signature verifies with the same key; Setup, the zip and the XPI on GitHub match SHA256SUMS; `extensions/firefox-updates.json` on `main` points at the XPI on v0.6.5; a scan of the package, release files, XPI and every tracked file found no secret; the Docker image workflow for the tag succeeded.
 - Owner, 2026-11-09: "make a new release." App 0.6.5 with UI.B20, UI.B21, UI.R31 and UI.R32 (My TorBox in the main window, the drawer option), and the fix for a crash when changing the theme. Only the desktop app changed since 0.6.4; the extension stays 0.6.0 and `extensions/firefox-updates.json` now points at the same signed XPI on v0.6.5. Tests at release: WinUI build and Core.Tests (1,276) per change, as the owner asked for speed; the other suites last ran on `integ` before 0.6.4.
 
 ### 0.6.4 release (2026-11-09)
