@@ -205,6 +205,9 @@ public sealed class ServerAuth
         path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/favicon.svg", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/theme.js", StringComparison.OrdinalIgnoreCase) ||
+        // The PWA manifest and its icons: a browser reads them to offer "Install" before anyone signs in.
+        path.Equals("/manifest.webmanifest", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWithSegments("/icons", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/signin", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWithSegments("/signin", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/api/auth/status", StringComparison.OrdinalIgnoreCase) ||

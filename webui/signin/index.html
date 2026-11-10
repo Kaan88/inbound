@@ -6,6 +6,11 @@
     <meta name="color-scheme" content="light dark" />
     <title>Inbound sign-in</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Installable as an app (PWA): the manifest and its icons are served before sign-in, as the favicon is. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)" />
     <script src="/theme.js"></script>
   </head>
   <body>
