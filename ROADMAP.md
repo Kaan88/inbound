@@ -1,5 +1,7 @@
 ﻿# Roadmap and executable work
 
+Avalonia prototype includes the main download list and a WinUI-style My TorBox catalog with account setup, file selection, and download submission. Linux build and isolated no-key Host smoke check passed. Authenticated transfers and the WinUI drawer remain open.
+
 
 Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
 

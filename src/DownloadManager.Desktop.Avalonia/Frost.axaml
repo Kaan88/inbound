@@ -1,0 +1,19 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui" x:Class="DownloadManager.AvaloniaUi.FrostTokens"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- UI.R30: merged into a window only when the platform gave it a backdrop (Mica on Windows 11, blur on KDE).
+         The chrome shows the backdrop itself; the list sits on a translucent layer so rows stay readable. -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="InboundChromeBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="InboundSurfaceBrush" Color="#4C1C1C1C" />
+            <SolidColorBrush x:Key="InboundDividerBrush" Color="#1FFFFFFF" />
+            <SolidColorBrush x:Key="InboundProgressTrackBrush" Color="#33FFFFFF" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="InboundChromeBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="InboundSurfaceBrush" Color="#B3FFFFFF" />
+            <SolidColorBrush x:Key="InboundDividerBrush" Color="#14000000" />
+            <SolidColorBrush x:Key="InboundProgressTrackBrush" Color="#1F000000" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

@@ -1,5 +1,7 @@
 ﻿# Progress — session handoff
 
+Avalonia prototype includes the main download list and a WinUI-style My TorBox catalog with account setup, file selection, and download submission. Linux build and isolated no-key Host smoke check passed. Authenticated transfers and the WinUI drawer remain open.
+
 ### Linux window fixes after 0.6.6 (2026-11-10, `linux-host`)
 
 - Owner: "cold start very briefly opens in light mode when dark mode is set"; "added servers are not saved, or saved but not visible on ui, webui records as saved"; "also remove some windows related settings like firewall setup."

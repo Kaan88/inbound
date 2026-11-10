@@ -1,0 +1,137 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:DownloadManager.AvaloniaUi">
+    <!-- The WinUI App.xaml styles, by the same names as classes. -->
+
+    <Style Selector="TextBlock">
+        <!-- UI.R6: tabular figures so live counters hold still. -->
+        <Setter Property="FontFeatures" Value="+tnum" />
+    </Style>
+
+    <Style Selector="TextBlock.icon">
+        <Setter Property="FontFamily" Value="{DynamicResource InboundIconFont}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.tool">
+        <Setter Property="MinWidth" Value="72" />
+        <Setter Property="Height" Value="58" />
+        <Setter Property="Padding" Value="10,2" />
+        <Setter Property="Margin" Value="1,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <!-- Flat when disabled: it only dims. -->
+    <Style Selector="Button.tool:disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Opacity" Value="0.4" />
+    </Style>
+    <Style Selector="Button.tool TextBlock.icon">
+        <Setter Property="FontSize" Value="25" />
+    </Style>
+    <Style Selector="Button.tool TextBlock.label">
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="Margin" Value="0,3,0,0" />
+    </Style>
+
+    <Style Selector="Border.toolSeparator">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Margin" Value="6,10" />
+        <Setter Property="Background" Value="{DynamicResource InboundDividerBrush}" />
+    </Style>
+
+    <!-- Category sidebar. -->
+    <Style Selector="ListBox.categories">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox.categories ListBoxItem">
+        <Setter Property="MinHeight" Value="23" />
+        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Margin" Value="4,0" />
+    </Style>
+    <Style Selector="ListBox.categories TextBlock.icon">
+        <Setter Property="FontSize" Value="13.5" />
+    </Style>
+
+    <!-- Download list rows. -->
+    <Style Selector="ListBox.jobs">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox.jobs ListBoxItem">
+        <Setter Property="MinHeight" Value="27" />
+        <Setter Property="Height" Value="27" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.jobs ListBoxItem" x:DataType="local:JobRow">
+        <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleText}" />
+    </Style>
+    <Style Selector="ListBox.jobs TextBlock.cell">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="ListBox.jobs TextBlock.right">
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="TextAlignment" Value="Right" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+    <Style Selector="ListBox.jobs TextBlock.dim">
+        <Setter Property="Foreground" Value="{DynamicResource InboundSecondaryTextBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.header">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Padding" Value="4,0" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="Button.header">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="ProgressBar.inbound">
+        <Setter Property="Foreground" Value="{DynamicResource InboundProgressFillBrush}" />
+        <Setter Property="Background" Value="{DynamicResource InboundProgressTrackBrush}" />
+        <Setter Property="MinHeight" Value="6" />
+        <Setter Property="Height" Value="6" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="MinWidth" Value="0" />
+    </Style>
+
+    <Style Selector="Menu.bar">
+        <Setter Property="Padding" Value="4,2" />
+    </Style>
+    <Style Selector="Menu.bar > MenuItem">
+        <Setter Property="Padding" Value="11,5" />
+        <Setter Property="FontSize" Value="13.5" />
+    </Style>
+
+    <Style Selector="Button.flat">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+    </Style>
+</Styles>

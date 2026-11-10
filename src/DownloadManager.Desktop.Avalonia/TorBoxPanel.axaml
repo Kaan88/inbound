@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="DownloadManager.AvaloniaUi.TorBoxPanel">
+    <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="16,12" RowSpacing="8">
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <StackPanel Spacing="3">
+                <TextBlock Text="TorBox" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock x:Name="AccountStatus" Text="Checking account…" Foreground="{DynamicResource InboundSecondaryTextBrush}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Account" Click="Account_Click" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Content="Refresh" Click="Refresh_Click" VerticalAlignment="Center" />
+        </Grid>
+        <Border x:Name="AccountEditor" Grid.Row="1" IsVisible="False" Background="{DynamicResource InboundChromeBrush}" CornerRadius="6" Padding="8">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <TextBox x:Name="ApiKey" PasswordChar="●" PlaceholderText="TorBox API key" AutomationProperties.Name="TorBox API key" />
+                <Button Grid.Column="1" Content="Save key" Click="SaveKey_Click" />
+                <Button Grid.Column="2" Content="Remove key" Click="RemoveKey_Click" />
+            </Grid>
+        </Border>
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+            <TabStrip x:Name="Kinds" SelectedIndex="0" SelectionChanged="Kind_Changed" AutomationProperties.Name="TorBox catalog kind">
+                <TabStripItem Content="Torrents" Tag="torrents" />
+                <TabStripItem Content="Web downloads" Tag="webdl" />
+                <TabStripItem Content="Usenet" Tag="usenet" />
+            </TabStrip>
+            <TextBlock Grid.Column="1" x:Name="Notice" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{DynamicResource InboundSecondaryTextBrush}" />
+            <Button Grid.Column="2" x:Name="PreviousPage" Content="Previous" Click="Previous_Click" />
+            <Button Grid.Column="3" x:Name="NextPage" Content="Next" Click="Next_Click" />
+        </Grid>
+        <Grid Grid.Row="3" ColumnDefinitions="*,360" ColumnSpacing="12">
+            <Border BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="1" CornerRadius="6"
+                    Background="{DynamicResource InboundSurfaceBrush}">
+                <Grid RowDefinitions="30,*">
+                    <Border Background="{DynamicResource InboundChromeBrush}" Padding="10,4">
+                        <Grid ColumnDefinitions="*,100,95">
+                            <TextBlock Text="Name" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="1" Text="Status" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Text="Size" FontWeight="SemiBold" />
+                        </Grid>
+                    </Border>
+                    <ListBox x:Name="Catalog" Grid.Row="1" SelectionChanged="Item_Changed" AutomationProperties.Name="TorBox catalog" />
+                </Grid>
+            </Border>
+            <Border Grid.Column="1" BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="1" CornerRadius="6"
+                    Background="{DynamicResource InboundSurfaceBrush}" Padding="12">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
+                    <TextBlock x:Name="ItemTitle" Text="Select an item" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <ListBox x:Name="Files" Grid.Row="1" AutomationProperties.Name="Files to download" />
+                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <TextBox x:Name="Destination" PlaceholderText="Default download folder" AutomationProperties.Name="Destination folder" />
+                        <Button Grid.Column="1" Content="Browse…" Click="Browse_Click" />
+                    </Grid>
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                        <Button x:Name="DownloadSelected" Content="Download selected" Classes="accent" Click="DownloadSelected_Click" />
+                        <Button x:Name="DownloadAll" Content="Download all" Click="DownloadAll_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

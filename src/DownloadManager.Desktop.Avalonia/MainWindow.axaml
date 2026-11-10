@@ -1,0 +1,259 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:DownloadManager.AvaloniaUi"
+        x:Class="DownloadManager.AvaloniaUi.MainWindow"
+        x:DataType="local:MainWindow"
+        Title="Inbound Download Manager (Avalonia prototype)"
+        Icon="avares://DownloadManager.Desktop.Avalonia/Assets/app.ico"
+        Width="1180" Height="680" MinWidth="900" MinHeight="560"
+        FontFamily="Segoe UI Variable Text, Segoe UI, Noto Sans, Cantarell, sans-serif"
+        FontSize="12">
+
+    <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*,Auto,Auto">
+
+        <Menu Grid.Row="0" Classes="bar" Background="{DynamicResource InboundChromeBrush}">
+            <MenuItem Header="_Tasks">
+                <MenuItem Header="Add New Download…" InputGesture="Ctrl+N" HotKey="Ctrl+N" Click="Add_Click" />
+                <MenuItem Header="Add Links…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="Export Download List…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="Import Download List…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="E_xit" Click="Exit_Click" />
+            </MenuItem>
+            <MenuItem Header="_File">
+                <MenuItem x:Name="FileOpenItem" Header="_Open" Click="Open_Click" />
+                <MenuItem x:Name="FileOpenFolderItem" Header="Open _Folder" Click="OpenFolder_Click" />
+                <MenuItem Header="_Move/Rename…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="_Progress Details…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem x:Name="FileDownloadNowItem" Header="_Download Now" Click="Resume_Click" />
+                <MenuItem x:Name="FileStopItem" Header="_Stop Download" Click="Pause_Click" />
+                <MenuItem Header="_Redownload" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem x:Name="FileDeleteItem" Header="D_elete…" InputGesture="Delete" Click="Delete_Click" />
+                <Separator />
+                <MenuItem Header="Ser_vers…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+            </MenuItem>
+            <MenuItem Header="_Downloads">
+                <MenuItem Header="_Stop All" Click="StopAll_Click" />
+                <Separator />
+                <MenuItem Header="_Delete All Completed" Click="DeleteCompleted_Click" />
+                <MenuItem Header="Clean Up _Leftover Partial Files…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="_Find…" InputGesture="Ctrl+F" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="Find _Next" InputGesture="F3" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="Start _Queue" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="Stop Q_ueue" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="Si_multaneous Downloads" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="_Connections per Download" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="S_peed Limit" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="Sc_heduler…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem Header="Op_tions…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="_Statistics…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem x:Name="ShowSpeedGraphMenuItem" Header="Download Speed _Graph" ToggleType="CheckBox" IsChecked="True" Click="SpeedGraphMenu_Click" />
+                <MenuItem x:Name="HideCategoriesMenuItem" Header="Hide _Categories" ToggleType="CheckBox" Click="HideCategories_Click" />
+                <MenuItem Header="_Arrange Files">
+                    <MenuItem Header="By Order of _Addition" Tag="added" Click="Sort_Click" />
+                    <MenuItem Header="By File _Name" Tag="name" Click="Sort_Click" />
+                    <MenuItem Header="By _Size" Tag="size" InputGesture="Ctrl+Shift+S" Click="Sort_Click" />
+                    <MenuItem Header="By S_tatus" Tag="status" Click="Sort_Click" />
+                    <MenuItem Header="By Transfer _Rate" Tag="rate" Click="Sort_Click" />
+                    <MenuItem Header="By _Last Try Date" Tag="lastTry" Click="Sort_Click" />
+                </MenuItem>
+                <MenuItem Header="_Toolbar" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <MenuItem x:Name="DarkModeMenuItem" Header="_Dark Mode" ToggleType="CheckBox" IsChecked="True" Click="DarkMode_Click" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="Check for _Updates…" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+                <Separator />
+                <MenuItem Header="_About Inbound Download Manager" Click="About_Click" />
+                <MenuItem Header="Open _Diagnostics Folder" IsEnabled="False" ToolTip.Tip="Not in the prototype" />
+            </MenuItem>
+        </Menu>
+
+        <Border Grid.Row="1" Background="{DynamicResource InboundChromeBrush}" BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="0,1,0,1">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <StackPanel Orientation="Horizontal" Margin="8,4">
+                    <Button x:Name="AddButton" Classes="tool" AutomationProperties.Name="Add URL" ToolTip.Tip="Add a new download URL" Click="Add_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE710;" Foreground="{DynamicResource InboundIconInfoBrush}" />
+                            <TextBlock Classes="label" Text="Add URL" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="toolSeparator" />
+                    <Button x:Name="ResumeButton" Classes="tool" AutomationProperties.Name="Resume" ToolTip.Tip="Resume the selected download" Click="Resume_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE768;" Foreground="{DynamicResource InboundIconStartBrush}" />
+                            <TextBlock Classes="label" Text="Resume" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="PauseButton" Classes="tool" AutomationProperties.Name="Stop" ToolTip.Tip="Stop the selected download (partial data is kept)" Click="Pause_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE769;" Foreground="{DynamicResource InboundIconPauseBrush}" />
+                            <TextBlock Classes="label" Text="Stop" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="StopAllButton" Classes="tool" AutomationProperties.Name="Stop All" ToolTip.Tip="Stop all active downloads" Click="StopAll_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE71A;" Foreground="{DynamicResource InboundIconPauseBrush}" />
+                            <TextBlock Classes="label" Text="Stop All" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="toolSeparator" />
+                    <Button x:Name="DeleteButton" Classes="tool" AutomationProperties.Name="Delete" ToolTip.Tip="Delete the selected download and its partial data" Click="Delete_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE74D;" Foreground="{DynamicResource InboundIconDangerBrush}" />
+                            <TextBlock Classes="label" Text="Delete" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="DeleteCompletedButton" Classes="tool" AutomationProperties.Name="Delete Completed" ToolTip.Tip="Remove completed downloads from the list" Click="DeleteCompleted_Click">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE894;" Foreground="{DynamicResource InboundIconDangerBrush}" />
+                            <TextBlock Classes="label" Text="Delete Completed" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="toolSeparator" />
+                    <Button x:Name="OptionsButton" Classes="tool" AutomationProperties.Name="Options" IsEnabled="False" ToolTip.Tip="Not in the prototype">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE713;" Foreground="{DynamicResource InboundIconNeutralBrush}" />
+                            <TextBlock Classes="label" Text="Options" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SchedulerButton" Classes="tool" AutomationProperties.Name="Scheduler" IsEnabled="False" ToolTip.Tip="Not in the prototype">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE787;" Foreground="{DynamicResource InboundIconInfoBrush}" />
+                            <TextBlock Classes="label" Text="Scheduler" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="toolSeparator" />
+                    <Button x:Name="TorBoxButton" Classes="tool" IsEnabled="False" Click="TorBox_Click" AutomationProperties.Name="My TorBox">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE753;" Foreground="{DynamicResource InboundIconInfoBrush}" />
+                            <TextBlock Classes="label" Text="My TorBox" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="toolSeparator" />
+                    <Button x:Name="StartQueueButton" Classes="tool" AutomationProperties.Name="Start Queue" IsEnabled="False" ToolTip.Tip="Not in the prototype">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE768;" Foreground="{DynamicResource InboundIconStartBrush}" />
+                            <TextBlock Classes="label" Text="Start Queue" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="StopQueueButton" Classes="tool" AutomationProperties.Name="Stop Queue" IsEnabled="False" ToolTip.Tip="Not in the prototype">
+                        <StackPanel>
+                            <TextBlock Classes="icon" Text="&#xE71A;" Foreground="{DynamicResource InboundIconPauseBrush}" />
+                            <TextBlock Classes="label" Text="Stop Queue" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Row="2" x:Name="MainArea" ColumnDefinitions="192,*">
+            <Border x:Name="CategoryPane" Grid.Column="0" Background="{DynamicResource InboundChromeBrush}" BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="0,0,1,0">
+                <Grid RowDefinitions="Auto,*">
+                    <TextBlock Text="Categories" FontSize="12" FontWeight="SemiBold" Margin="22,9,8,3" />
+                    <ListBox x:Name="CategoryList" AutomationProperties.Name="Categories" Grid.Row="1" Classes="categories" SelectionMode="Single" SelectionChanged="CategoryList_SelectionChanged">
+                        <ListBoxItem Tag="all" AutomationProperties.Name="All Downloads" Padding="24,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE8B7;" Foreground="{DynamicResource InboundIconNeutralBrush}" /><TextBlock Text="All Downloads" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="compressed" AutomationProperties.Name="Compressed" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE7C3;" Foreground="{DynamicResource InboundIconPauseBrush}" /><TextBlock Text="Compressed" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="documents" AutomationProperties.Name="Documents" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE8A5;" Foreground="{DynamicResource InboundIconInfoBrush}" /><TextBlock Text="Documents" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="music" AutomationProperties.Name="Music" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE8D6;" Foreground="{DynamicResource InboundIconMediaBrush}" /><TextBlock Text="Music" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="programs" AutomationProperties.Name="Programs" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE756;" Foreground="{DynamicResource InboundIconStartBrush}" /><TextBlock Text="Programs" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="video" AutomationProperties.Name="Video" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE714;" Foreground="{DynamicResource InboundIconDangerBrush}" /><TextBlock Text="Video" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="other" AutomationProperties.Name="Other" Padding="38,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE7C3;" Foreground="{DynamicResource InboundIconNeutralBrush}" /><TextBlock Text="Other" /></StackPanel></ListBoxItem>
+                        <ListBoxItem IsEnabled="False" MinHeight="8" Height="8" Padding="0" Focusable="False" />
+                        <ListBoxItem Tag="unfinished" AutomationProperties.Name="Unfinished" Padding="14,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE81C;" Foreground="{DynamicResource InboundIconNeutralBrush}" /><TextBlock Text="Unfinished" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="active" AutomationProperties.Name="Active" Padding="30,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE895;" Foreground="{DynamicResource InboundIconInfoBrush}" /><TextBlock Text="Active" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="queued" AutomationProperties.Name="Queued" Padding="30,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE823;" Foreground="{DynamicResource InboundIconPauseBrush}" /><TextBlock Text="Queued" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="failed" AutomationProperties.Name="Failed" Padding="30,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE783;" Foreground="{DynamicResource InboundIconDangerBrush}" /><TextBlock Text="Failed" /></StackPanel></ListBoxItem>
+                        <ListBoxItem Tag="finished" AutomationProperties.Name="Finished" Padding="14,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE73E;" Foreground="{DynamicResource InboundIconStartBrush}" /><TextBlock Text="Finished" /></StackPanel></ListBoxItem>
+                        <ListBoxItem x:Name="TorBoxCategory" Tag="torbox" IsEnabled="False" AutomationProperties.Name="My TorBox" Padding="14,2,8,2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Classes="icon" Text="&#xE753;" Foreground="{DynamicResource InboundIconInfoBrush}" />
+                                <TextBlock Text="My TorBox" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="queues" AutomationProperties.Name="Queues" Padding="14,2,8,2"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Classes="icon" Text="&#xE8FD;" Foreground="{DynamicResource InboundIconNeutralBrush}" /><TextBlock Text="Queues" /></StackPanel></ListBoxItem>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <ScrollViewer x:Name="DownloadsPane" Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <Grid MinWidth="1040" RowDefinitions="27,*" Background="{DynamicResource InboundSurfaceBrush}">
+                    <Border Grid.Row="0" Background="{DynamicResource InboundChromeBrush}" BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+                        <!-- Filled from ListColumnSets.Downloads(), the WinUI list's own column set. -->
+                        <Grid x:Name="JobsHeader" Margin="4,0" />
+                    </Border>
+                    <Grid Grid.Row="1">
+                        <ListBox x:Name="JobsList" Classes="jobs" AutomationProperties.Name="Downloads" SelectionMode="Multiple"
+                                 SelectionChanged="JobsList_SelectionChanged" DoubleTapped="JobsList_DoubleTapped">
+                            <ListBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open" Click="Open_Click" />
+                                    <MenuItem Header="Open Folder" Click="OpenFolder_Click" />
+                                    <Separator />
+                                    <MenuItem Header="Download Now" Click="Resume_Click" />
+                                    <MenuItem Header="Stop Download" Click="Pause_Click" />
+                                    <Separator />
+                                    <MenuItem Header="Delete…" Click="Delete_Click" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:JobRow">
+                                    <Grid Height="27" Margin="4,0" Background="Transparent" ColumnDefinitions="30,*,30,78,140,78,86,116,210"
+                                          ToolTip.Tip="{Binding RowToolTip}">
+                                        <Grid Grid.ColumnSpan="2" Width="30" HorizontalAlignment="Left" Margin="{Binding IconIndent}" IsVisible="{Binding FileIconAreaVisibility}">
+                                            <TextBlock Classes="icon" Text="{Binding FileGlyph}" FontSize="15" Foreground="{DynamicResource InboundIconInfoBrush}" />
+                                        </Grid>
+                                        <Border Width="22" Height="22" CornerRadius="4" Background="Transparent" IsVisible="{Binding ChevronVisibility}"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Hand"
+                                                ToolTip.Tip="Expand or collapse" PointerPressed="Chevron_PointerPressed">
+                                            <TextBlock Classes="icon" Text="{Binding ChevronGlyph}" FontSize="11" Foreground="{DynamicResource InboundSecondaryTextBrush}" />
+                                        </Border>
+                                        <TextBlock Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12"
+                                                   FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Classes="cell dim" Text="{Binding QueueText}" HorizontalAlignment="Center" ToolTip.Tip="{Binding QueueName}" />
+                                        <TextBlock Grid.Column="3" Classes="cell right" Text="{Binding SizeText}" />
+                                        <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
+                                            <ProgressBar Classes="inbound" Value="{Binding ProgressPercent}" Maximum="100" Margin="0,1,6,0"
+                                                         IsVisible="{Binding ProgressVisibility}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="5" Classes="cell right dim" Text="{Binding EtaText}" />
+                                        <TextBlock Grid.Column="6" Classes="cell right dim" Text="{Binding SpeedText}" />
+                                        <TextBlock Grid.Column="7" Classes="cell dim" Text="{Binding LastTryText}" />
+                                        <TextBlock Grid.Column="8" Classes="cell dim" Text="{Binding Description}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="EmptyText" Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                                   Foreground="{DynamicResource InboundSecondaryTextBrush}" FontSize="12" />
+                    </Grid>
+                </Grid>
+            </ScrollViewer>
+            <local:TorBoxPanel x:Name="TorBoxView" Grid.Column="1" IsVisible="False" />
+        </Grid>
+
+        <local:SpeedGraph x:Name="SpeedGraph" Grid.Row="3" />
+
+        <Border Grid.Row="4" Height="23" Background="{DynamicResource InboundChromeBrush}" BorderBrush="{DynamicResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+            <Grid Margin="2,0,8,0" ColumnDefinitions="Auto,*,Auto">
+                <Button x:Name="ServerSwitcher" Classes="flat" Content="This PC ▾" FontSize="11" Padding="6,0" Height="21" VerticalAlignment="Center"
+                        IsEnabled="False" ToolTip.Tip="Server switching is not in the prototype" />
+                <TextBlock x:Name="StatusText" Grid.Column="1" Margin="12,0" Text="Starting…" FontSize="11"
+                           Foreground="{DynamicResource InboundSecondaryTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="ConnectionText" Grid.Column="2" Text="Connecting…" FontSize="11"
+                           Foreground="{DynamicResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- D7 Stage 2 prototype A: the desktop window in Avalonia 12, one codebase for Windows and Linux. Not a product. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Not DownloadManager.Desktop.Avalonia: a namespace ending in "Avalonia" would hide the framework's own. -->
+    <RootNamespace>DownloadManager.AvaloniaUi</RootNamespace>
+    <AssemblyName>DownloadManager.Desktop.Avalonia</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <!-- The linked WinUI files call Windows-only APIs (DPAPI, WaitNamedPipe) behind their own checks. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <!-- Native AOT try: dotnet publish -r win-x64 -p:Aot=true -->
+  <PropertyGroup Condition="'$(Aot)' == 'true'">
+    <PublishAot>true</PublishAot>
+    <!-- The IPC DTOs go through reflection-based System.Text.Json (Contracts has no source-generated context yet). -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Aot)' == 'true'">
+    <TrimmerRootAssembly Include="DownloadManager.Contracts" />
+    <TrimmerRootDescriptor Include="TrimRoots.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- All MIT. -->
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Reused unchanged: the WinUI project's UI-free files, linked the way Core.Tests links them. -->
+  <ItemGroup>
+    <Compile Include="..\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="Shared\HostConnection.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteClient.cs" Link="Shared\Remote\RemoteClient.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteClient.WebUi.cs" Link="Shared\Remote\RemoteClient.WebUi.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteState.cs" Link="Shared\Remote\RemoteState.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\WebUiForm.cs" Link="Shared\Remote\WebUiForm.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\WebUiFirewall.cs" Link="Shared\Remote\WebUiFirewall.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="Shared\Remote\RemoteText.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="Shared\Remote\ArchiveForm.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteRows.cs" Link="Shared\Remote\RemoteRows.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\ArchiveRows.cs" Link="Shared\Remote\ArchiveRows.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="Shared\Remote\RemoteFileTree.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="Shared\Remote\AddLines.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="Shared\Remote\ContainerImport.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Remote\AutoOpen.cs" Link="Shared\Remote\AutoOpen.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Servers\ServerStore.cs" Link="Shared\Servers\ServerStore.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="Shared\Servers\RemoteRules.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\PassingLine.cs" Link="Shared\PassingLine.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\NaturalStringComparer.cs" Link="Shared\NaturalStringComparer.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\CrashLogText.cs" Link="Shared\CrashLogText.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\JobAddress.cs" Link="Shared\JobAddress.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\SelectionCommands.cs" Link="Shared\SelectionCommands.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\ListColumns.cs" Link="Shared\ListColumns.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\DurationText.cs" Link="Shared\DurationText.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="Shared\RegionSelection.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="Shared\SpeedLimitText.cs" />
+    <Compile Include="..\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="Shared\PackageArchiveSection.cs" />
+    <Compile Include="../DownloadManager.Desktop.WinUI/UiFormat.cs" Link="Shared/UiFormat.cs" />
+    <Compile Include="../DownloadManager.Desktop.WinUI/Servers/ServerSecrets.cs" Link="Shared/Servers/ServerSecrets.cs" />
+    <ProjectReference Include="../DownloadManager.Persistence/DownloadManager.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\assets\app.ico" Link="Assets\app.ico" />
+  </ItemGroup>
+</Project>

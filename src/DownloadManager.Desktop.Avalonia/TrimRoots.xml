@@ -1,0 +1,7 @@
+<linker>
+  <!-- Reflection-based System.Text.Json reads the DTOs' properties; keep them all. -->
+  <assembly fullname="DownloadManager.Contracts" preserve="all" />
+  <assembly fullname="DownloadManager.Desktop.Avalonia">
+    <namespace fullname="DownloadManager.Desktop.WinUI" preserve="all" />
+  </assembly>
+</linker>
