@@ -1,7 +1,7 @@
 {
   "name": "download-manager-bridge",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Inbound Download Manager Chrome extension",
   "scripts": {
     "build": "node scripts/build.mjs",
