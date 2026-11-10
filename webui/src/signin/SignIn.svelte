@@ -51,6 +51,12 @@
   async function load() {
     try {
       const response = await fetch('/api/auth/status', { credentials: 'same-origin', cache: 'no-store' });
+      // A refusal (a name not in DOWNLOADMANAGER_HOSTS, a proxy's error page) is text, not JSON: say what it says.
+      if (!response.ok) {
+        const said = (await response.text().catch(() => '')).trim();
+        problem = said && !said.startsWith('<') ? said : `The server answered ${response.status}.`;
+        return;
+      }
       status = (await response.json()) as Status;
       if (!status.signInRequired || status.signedIn) location.replace('/');
     } catch {
