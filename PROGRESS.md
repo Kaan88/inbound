@@ -1,5 +1,13 @@
 ﻿# Progress — session handoff
 
+### 0.6.6 release (2026-11-10)
+
+- Owner, 2026-11-10: "do the full test. bump version, upload new extensions. merge. publish. I'm hopeful this is a great stable release." and "if it won't delay the release, make the webui installable as pwa."
+- Contents since 0.6.5: the Linux desktop app and Host (`linux-host`), the AppImage that updates itself (D7.U), UI.R33-R35 look passes, F-12 (graphs opened mid-download show what came before), the package window with Progress Details' look and an open connections table, Mark of the Web on every finished download (REV.4), UTF-8 window titles on Linux, the extension popup's "Connected" only when the app answers, web sign-in saves that retry a briefly held file, and the web UI installable as an app (PWA).
+- Tests at release (Windows 11 VM, full suites): Core 1,282, Archives 387, Containers 187, TorBox 323 pass; Server 152 pass (5 of 6 runs after the save retry); Engine 161/162 (`ASegmentThatKeepsGettingBytesIsNotOutOfAttempts` flaky, 3/3 on rerun); Integration 1,482/1,485 with the three known failures (network-share folder, golden frames, 7-Zip kill matrix), which fail without tonight's changes too. Linux: Containers, Engine, TorBox pass; the Windows-only tests in Archives, Core, Integration and Server fail there as before. Web UI 373 and extension 243 pass.
+- Extension 0.6.1: Firefox add-on signed by Mozilla (`extensions/firefox-updates.json` at v0.6.6). Chrome Web Store upload refused: "You may not edit or publish an item that is in review" (the earlier version is still in review); the store zip is built and goes up once that review ends.
+- Live Windows check by the owner (RDP, test instance): Progress Details mid-download, footers, menus, confirms and light theme "all good"; the package window's "Segment details" expander replaced by the open table (fa17fe2). The graph steps once a second over RDP because the session has animations off (checked: SPI_GETCLIENTAREAANIMATION false); it slides with animations on.
+
 ### D7.U: the AppImage updates itself (2026-11-10, `linux-host`)
 - `InstalledBuild.AppImage`, `DownloadManagerService.ManifestUrlFor`/`ReplaceAppImage`, `AppImageRestarter`, `UpdateInstallJournal.RecordSucceeded`; the Linux Host gets `HostUpdateMonitor` and `SupportsUpdater` when run from an AppImage. `UpdateSigner` takes a manifest name; `scripts/prepare-appimage-release.sh`.
 - Verified end to end on Linux with packed 0.6.5 and 0.6.6 AppImages over a loopback feed (see ROADMAP D7.U). Core.Tests 1,282 pass on Windows; new AppImage tests pass on Linux and Windows; solution builds with 0 errors on Windows.
