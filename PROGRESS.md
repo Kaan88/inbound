@@ -1,5 +1,9 @@
 ﻿# Progress — session handoff
 
+### Owner checks marked done (2026-11-11)
+
+- Owner, 2026-11-11: "check these as done" for the open Linux items: a real browser with the extension through the AppImage's native host; sign-in start and the power actions (power off, restart, sign out); and UI.B22 (Progress Details graph slides in). Recorded in ROADMAP (UI.B22, D7). I did not run these myself; they rest on the owner's word.
+
 ### Linux window fixes after 0.6.6 (2026-11-10, `linux-host`)
 
 - Owner: "cold start very briefly opens in light mode when dark mode is set"; "added servers are not saved, or saved but not visible on ui, webui records as saved"; "also remove some windows related settings like firewall setup."
