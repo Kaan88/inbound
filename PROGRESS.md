@@ -6,7 +6,7 @@
 - Servers: the window's server list refused every save off Windows ("needs Windows", DPAPI), so nothing was written. It now seals a server's token with the Host's own key (its `secrets.key`, or the desktop keyring) and never makes a key itself, because a blob of another key in the data folder stops the Host's next start. Test `OnLinuxAServerIsSealedWithTheHostsKeyAndOpensAgain`.
 - Theme: with Theme = System on a dark KDE, the first frames were light because Uno learns the desktop's preference late. The window now reads the XDG portal's `org.freedesktop.appearance color-scheme` at start (checked on the owner's session: 1, read as dark) and sets the application theme before the first frame.
 - Windows-only parts left out on Linux: the Windows Firewall section of Options > Web UI and its hint, the "Repair…" browser integration button, and Open With. "Open folder" and "Show in folder" used explorer.exe; they now use `xdg-open` and the file manager's `org.freedesktop.FileManager1.ShowItems`.
-- Checks: Uno build 0 errors; Linux Core server and shell tests pass; Windows solution build 0 errors and Core.Tests 1,283 pass. Not yet tried by the owner in the running app.
+- Checks: Uno build 0 errors; Linux Core server and shell tests pass; Windows solution build 0 errors and Core.Tests 1,283 pass. Fixed, confirmed by the owner (2026-11-10, "mark as fixed") in the replaced AppImage `0.6.6+a8f8674` at `~/Downloads/Inbound-0.6.6-x86_64.AppImage` (the earlier file kept as `.bak`).
 
 ### 0.6.6 release (2026-11-10)
 
