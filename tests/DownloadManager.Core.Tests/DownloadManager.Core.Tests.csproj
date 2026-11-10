@@ -58,12 +58,14 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerStore.cs" Link="WinUI\ServerStore.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSecrets.cs" Link="WinUI\ServerSecrets.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSwitch.cs" Link="WinUI\ServerSwitch.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellWords.cs" Link="WinUI\ShellWords.cs" />
     <Compile Include="..\..\src\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="WinUI\DpapiSecretProtector.cs" />
+    <Compile Include="..\..\src\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="WinUI\AesGcmSecretProtector.cs" />
   </ItemGroup>
 
   <ItemGroup>

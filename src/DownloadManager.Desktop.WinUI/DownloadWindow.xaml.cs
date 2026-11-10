@@ -473,6 +473,7 @@ public sealed partial class DownloadWindow : Window
         // A download on another server: its file is on that machine, so this PC can't open or show it.
         var mayOpen = complete && _job?.FileRemovedAfterExtraction != true && RemoteDataRules.MayUseFiles(_connection.IsRemote);
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility = mayOpen ? Visibility.Visible : Visibility.Collapsed;
+        if (!OperatingSystem.IsWindows()) OpenWithButton.Visibility = Visibility.Collapsed; // Windows' chooser only
         // The completion window's own default is this PC's choice, kept on this PC's Host; this window talks to the server.
         if (_connection.IsRemote) DontShowAgain.Visibility = Visibility.Collapsed;
     }
@@ -669,7 +670,7 @@ public sealed partial class DownloadWindow : Window
         try
         {
             if (folder)
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{_job.FinalFilePath}\"") { UseShellExecute = true });
+                Process.Start(ShellActions.RevealFile(_job.FinalFilePath));
             else if (File.Exists(_job.FinalFilePath))
                 Process.Start(ShellActions.OpenFile(_job.FinalFilePath));
             else Notice.Text = "The downloaded file could not be found.";

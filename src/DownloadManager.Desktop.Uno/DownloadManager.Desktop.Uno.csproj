@@ -47,6 +47,9 @@
     <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
     <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
+    <!-- Linux: a saved server's token is sealed with the Host's own key (its key file, or the desktop keyring). -->
+    <Compile Include="..\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="Servers\AesGcmSecretProtector.cs" />
+    <Compile Include="..\DownloadManager.Host.Linux\SecretServiceKeyStore.cs" Link="Servers\SecretServiceKeyStore.cs" />
   </ItemGroup>
 
   <!-- Native AOT trial: the WinUI sources use reflection-based System.Text.Json everywhere (no source-generated
@@ -61,5 +64,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2" />
   </ItemGroup>
 </Project>

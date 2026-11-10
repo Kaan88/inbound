@@ -444,6 +444,28 @@ public sealed class RemoteServerRulesTests
         Assert.Equal("Local\\DownloadManager.UI.Show.key.Update", WindowInstance.EventName("key", true, null, null, id));
     }
 
+    [Fact]
+    public void OnLinuxAServerIsSealedWithTheHostsKeyAndOpensAgain()
+    {
+        if (OperatingSystem.IsWindows()) return; // Windows seals with DPAPI.
+        var folder = NewFolder();
+        var path = Path.Combine(folder, ServerStore.FileName);
+
+        // No key from the Host yet: saving says so and writes nothing.
+        var before = new ServerStore(path);
+        var refused = Assert.ThrowsAny<IOException>(() =>
+            before.Add("Home", new Uri("http://homeserver:8080/"), "dmrc_invented", "t1", plainHttpConfirmed: true, HostKinds.Server));
+        Assert.Contains("secret key", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(before.Load());
+
+        // The Host's key file in the data folder: the token is sealed with it and opens again in a new store.
+        DownloadManager.Persistence.AesGcmSecretProtector.OpenOrCreate(Path.Combine(folder, DownloadManager.Persistence.AesGcmSecretProtector.DefaultFileName));
+        var saved = new ServerStore(path).Add("Home", new Uri("http://homeserver:8080/"), "dmrc_invented", "t1", plainHttpConfirmed: true, HostKinds.Server);
+        Assert.DoesNotContain("dmrc_invented", File.ReadAllText(path));
+        Assert.StartsWith("aesgcm:v1:", Assert.Single(new ServerStore(path).Load()).SealedToken);
+        Assert.Equal("dmrc_invented", new ServerStore(path).Target(saved.Id)!.Token);
+    }
+
     private static string NewFolder()
     {
         var folder = Path.Combine(AppContext.BaseDirectory, "test-work", "servers-" + Guid.NewGuid().ToString("N"));

@@ -17,6 +17,10 @@ internal static class AppTheme
     private static readonly List<(WeakReference<FrameworkElement> Root, DispatcherQueue Queue)> Roots = new();
     private static readonly object Gate = new();
     private static UISettings? _windowsSettings;
+#if HAS_UNO
+    private static bool? _desktopDark;
+    private static volatile bool _desktopStale;
+#endif
     private static string _choice = InitialChoice();
 
     /// <summary>The settings' value: System, Light or Dark.</summary>
@@ -105,6 +109,9 @@ internal static class AppTheme
             // whose theme differs, on that root's own thread.
             _windowsSettings.ColorValuesChanged += (_, _) =>
             {
+#if HAS_UNO
+                _desktopStale = true;
+#endif
                 if (_choice == ThemeChoices.System) ApplyToAll();
             };
         }
@@ -117,6 +124,16 @@ internal static class AppTheme
     /// <summary>Windows' app theme: a dark window background means dark mode.</summary>
     private static bool WindowsUsesDark()
     {
+#if HAS_UNO
+        // Linux: the desktop's own preference, asked once at start-up (Uno's answer is light until it has read it), then
+        // again whenever Uno reports a change.
+        if (_desktopDark is null || _desktopStale)
+        {
+            _desktopStale = false;
+            _desktopDark = LinuxColorScheme.PrefersDark() ?? _desktopDark;
+        }
+        if (_desktopDark is { } desktop) return desktop;
+#endif
         try
         {
             var background = (_windowsSettings ?? new UISettings()).GetColorValue(UIColorType.Background);

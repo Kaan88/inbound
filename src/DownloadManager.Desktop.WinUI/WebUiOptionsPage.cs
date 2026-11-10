@@ -126,14 +126,15 @@ internal sealed class WebUiOptionsPage
             _openInBrowser,
             _openResult.Text,
             SettingsWindow.Hint("Open in browser signs in for you, with a link that works once for a minute, so the password isn't typed into a page on this PC."),
-            SettingsWindow.Section("Windows Firewall"),
-            _firewallState.Text,
-            _profile.Text,
-            _publicNote.Text,
-            _allowPublic,
-            firewallButtons,
-            _firewallResult.Text,
-            SettingsWindow.Hint("Until Windows Firewall allows it, the web UI answers on this PC only. Allowing it asks Windows for permission once, in a Windows PowerShell prompt, and adds a rule for the web UI program, this port, and devices on your own network."),
+            .. WindowsOnly(
+                SettingsWindow.Section("Windows Firewall"),
+                _firewallState.Text,
+                _profile.Text,
+                _publicNote.Text,
+                _allowPublic,
+                firewallButtons,
+                _firewallResult.Text,
+                SettingsWindow.Hint("Until Windows Firewall allows it, the web UI answers on this PC only. Allowing it asks Windows for permission once, in a Windows PowerShell prompt, and adds a rule for the web UI program, this port, and devices on your own network.")),
         ];
 
         _client.WebUiChanged += OnChanged;
@@ -327,7 +328,7 @@ internal sealed class WebUiOptionsPage
             ? "Once Windows Firewall allows it, type one of these in the browser on the other device."
             : "Type one of these in the browser on the other device.";
         _addressesHint.Visibility = shown.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        _localOnlyHint.Visibility = status is { State: WebUiStates.Running, LocalOnly: true } ? Visibility.Visible : Visibility.Collapsed;
+        _localOnlyHint.Visibility = OperatingSystem.IsWindows() && status is { State: WebUiStates.Running, LocalOnly: true } ? Visibility.Visible : Visibility.Collapsed;
         RenderFirewall();
         RenderButtons();
     }
@@ -536,4 +537,7 @@ internal sealed class WebUiOptionsPage
             if (!_closing.IsCancellationRequested) RenderButtons();
         }
     }
+
+    /// <summary>The Windows Firewall step exists only on Windows; elsewhere the system's own firewall is the user's.</summary>
+    private static UIElement[] WindowsOnly(params UIElement[] elements) => OperatingSystem.IsWindows() ? elements : [];
 }
