@@ -19,8 +19,29 @@ public static class AtomicFile
 
         // UnixCreateMode applies only when the file is new; a temporary file left by a kill keeps its old mode.
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        File.Move(temp, path, overwrite: true);
+        Replace(temp, path);
         if (!OperatingSystem.IsWindows()) SyncDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
+    }
+
+    /// <summary>
+    /// On Windows a scanner or indexer can hold the old file for a moment (access denied), and that shouldn't cost a save,
+    /// as the job store's own save allows for.
+    /// </summary>
+    private static void Replace(string temp, string path)
+    {
+        const int MostAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < MostAttempts)
+            {
+                Thread.Sleep(20 << attempt);
+            }
+        }
     }
 
     /// <summary>

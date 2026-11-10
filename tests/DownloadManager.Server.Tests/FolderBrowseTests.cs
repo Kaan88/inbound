@@ -97,8 +97,12 @@ public sealed class FolderBrowseTests : IDisposable
         Assert.False(browser.Browse(Path.Combine(link, "secret")).Ok);
         Assert.False(browser.Create(link, "planted").Ok);
         Assert.False(Directory.Exists(Path.Combine(Outside, "planted")));
-        // ".." after the link is the outside folder's parent, as the file system sees it, not the root the text suggests.
-        Assert.Null(browser.Allowed(Path.Combine(link, "..")));
+        // ".." after the link: on Linux the file system takes it after following the link, so it is the outside folder's
+        // parent, not the root the text suggests. Windows takes ".." from the text before following any link, so there it
+        // is the root itself, and opening it opens the root.
+        var parent = browser.Allowed(Path.Combine(link, ".."));
+        if (OperatingSystem.IsWindows()) Assert.True(parent is null || Path.GetFullPath(parent).TrimEnd('\\') == Path.GetFullPath(Root).TrimEnd('\\'), parent);
+        else Assert.Null(parent);
     }
 
     [Fact]
