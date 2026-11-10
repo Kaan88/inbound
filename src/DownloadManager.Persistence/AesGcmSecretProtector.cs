@@ -66,6 +66,23 @@ public sealed class AesGcmSecretProtector : ISecretProtector
     }
 
     /// <summary>
+    /// The key a Host already made, from <paramref name="store"/>, or null when it holds none. Never makes a key: a second
+    /// process of the same data folder (the Linux window) seals with the Host's key or not at all, since a blob of another
+    /// key in the folder stops the Host's next start (<see cref="OpenForDataFolder(ISecretKeyStore, string, string, bool, Action{string}?)"/>).
+    /// </summary>
+    public static AesGcmSecretProtector? OpenExisting(ISecretKeyStore store, Action<string>? warn = null)
+    {
+        var key = store.TryRead();
+        if (key is null) return null;
+        if (key.Length != KeyBytes)
+        {
+            CryptographicOperations.ZeroMemory(key);
+            return null;
+        }
+        return new AesGcmSecretProtector(key, store.Describe, warn);
+    }
+
+    /// <summary>
     /// <see cref="OpenOrCreate"/> for a data folder that may already hold sealed secrets. Before any store opens, the folder
     /// is searched for blobs, and when one was sealed with another key than the key file's (or the key file is gone, and
     /// a new one would be made), this refuses with <see cref="SecretKeyMismatchException"/>. Starting anyway would read

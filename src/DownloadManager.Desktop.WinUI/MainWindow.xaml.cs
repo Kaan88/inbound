@@ -655,7 +655,8 @@ public sealed partial class MainWindow : Window
                 : "Host connected" + (host is null ? string.Empty : $" · {host}")
                     + (ShellWords.BrowserIntegration(_status?.BrowserIntegration) is { } integration ? $" · {integration}" : string.Empty);
         }
-        var repair = !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
+        // The repair runs Windows PowerShell against the Windows registry; on Linux the Host registers the native host itself.
+        var repair = OperatingSystem.IsWindows() && !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
         RepairBrowserButton.Visibility = repair ? Visibility.Visible : Visibility.Collapsed;
         if (ShellWords.FindCount(_search, _visibleJobs.Count(row => row.PackageId is null)) is { } shown) StatusText.Text += $" · {shown}";
         var selected = SelectedJobs.Count;
@@ -1104,7 +1105,9 @@ public sealed partial class MainWindow : Window
         var flyout = new MenuFlyout();
         flyout.Opening += JobsContextMenu_Opening;
         flyout.Items.Add(_menuOpen = CreateContextItem("Open", MenuOpen_Click));
-        flyout.Items.Add(_menuOpenWith = CreateContextItem("Open With…", MenuOpenWith_Click));
+        _menuOpenWith = CreateContextItem("Open With…", MenuOpenWith_Click);
+        // The "Open with" chooser is Windows' own; Linux desktops offer none to call, so the item is left out there.
+        if (OperatingSystem.IsWindows()) flyout.Items.Add(_menuOpenWith);
         flyout.Items.Add(_menuOpenFolder = CreateContextItem("Open Folder", MenuOpenFolder_Click));
         flyout.Items.Add(_menuShowDownload = CreateContextItem("Show Download", (_, _) => ShowDownloadsOfSelectedRecords()));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
@@ -1157,7 +1160,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
-        _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuDelete, separatorAfterRemove, progressDetails, _menuProperties]);
+        _recordFileItems.AddRange([_menuOpen, .. (OperatingSystem.IsWindows() ? [_menuOpenWith] : Array.Empty<MenuFlyoutItemBase>()), _menuOpenFolder, _separatorAfterOpen, _menuDelete, separatorAfterRemove, progressDetails, _menuProperties]);
         AddRemoteContextItems(flyout);
         AddShowInProviderItem(flyout);
         JobsList.ContextFlyout = flyout;

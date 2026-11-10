@@ -44,6 +44,7 @@
   <!-- A saved server's token is sealed for this Windows user the way the Host seals site logins (design D9). -->
   <ItemGroup>
     <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
+    <Compile Include="..\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="Servers\AesGcmSecretProtector.cs" />
   </ItemGroup>
 
   <ItemGroup>

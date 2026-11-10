@@ -218,9 +218,20 @@ public sealed class ShellActionsTests
         try
         {
             var start = ShellActions.RevealFile(path);
-            Assert.Equal("explorer.exe", start.FileName);
-            Assert.Equal($"/select,\"{path}\"", start.Arguments);
-            Assert.True(start.UseShellExecute);
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal("explorer.exe", start.FileName);
+                Assert.Equal($"/select,\"{path}\"", start.Arguments);
+                Assert.True(start.UseShellExecute);
+            }
+            else
+            {
+                // The desktop's file manager with the file selected, its path as one file:// URI, no shell.
+                Assert.Equal("gdbus", start.FileName);
+                Assert.False(start.UseShellExecute);
+                Assert.Contains("org.freedesktop.FileManager1.ShowItems", start.ArgumentList);
+                Assert.Contains($"['{new Uri(path).AbsoluteUri}']", start.ArgumentList);
+            }
         }
         finally
         {
@@ -232,6 +243,14 @@ public sealed class ShellActionsTests
     [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public void RevealFileFallsBackToFolderWhenMissing()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            var linux = ShellActions.RevealFile("/srv/dl/missing.bin");
+            Assert.Equal("xdg-open", linux.FileName);
+            Assert.Equal(["/srv/dl"], linux.ArgumentList);
+            Assert.False(linux.UseShellExecute);
+            return;
+        }
         var path = @"C:\Downloads\missing.bin";
         var start = ShellActions.RevealFile(path);
         Assert.Equal("explorer.exe", start.FileName);

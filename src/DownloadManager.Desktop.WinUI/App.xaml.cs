@@ -33,6 +33,11 @@ public partial class App : Application
             e.Handled = false;
         };
 
+#if HAS_UNO
+        // The first frames are drawn with the application's theme, before any window's own: without this a dark choice
+        // flashed light on a cold start. The saved choice (ui-state.json) is known before the Host answers.
+        RequestedTheme = AppTheme.Element == ElementTheme.Dark ? ApplicationTheme.Dark : ApplicationTheme.Light;
+#endif
         try
         {
             InitializeComponent();

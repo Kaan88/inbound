@@ -630,7 +630,7 @@ public sealed partial class MainWindow
         {
             try
             {
-                using var _ = Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+                using var _ = Process.Start(ShellActions.OpenFolder(folder));
             }
             catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
             {

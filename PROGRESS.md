@@ -1,5 +1,13 @@
 ﻿# Progress — session handoff
 
+### Linux window fixes after 0.6.6 (2026-11-10, `linux-host`)
+
+- Owner: "cold start very briefly opens in light mode when dark mode is set"; "added servers are not saved, or saved but not visible on ui, webui records as saved"; "also remove some windows related settings like firewall setup."
+- Servers: the window's server list refused every save off Windows ("needs Windows", DPAPI), so nothing was written. It now seals a server's token with the Host's own key (its `secrets.key`, or the desktop keyring) and never makes a key itself, because a blob of another key in the data folder stops the Host's next start. Test `OnLinuxAServerIsSealedWithTheHostsKeyAndOpensAgain`.
+- Theme: with Theme = System on a dark KDE, the first frames were light because Uno learns the desktop's preference late. The window now reads the XDG portal's `org.freedesktop.appearance color-scheme` at start (checked on the owner's session: 1, read as dark) and sets the application theme before the first frame.
+- Windows-only parts left out on Linux: the Windows Firewall section of Options > Web UI and its hint, the "Repair…" browser integration button, and Open With. "Open folder" and "Show in folder" used explorer.exe; they now use `xdg-open` and the file manager's `org.freedesktop.FileManager1.ShowItems`.
+- Checks: Uno build 0 errors; Linux Core server and shell tests pass; Windows solution build 0 errors and Core.Tests 1,283 pass. Not yet tried by the owner in the running app.
+
 ### 0.6.6 release (2026-11-10)
 
 - **Released 2026-11-10** (tag `v0.6.6`, squashed to `main` as 9815060 without the local-only docs; binaries `0.6.6+9815060`). Nine assets: Setup, the update zip, `manifest.json`, `public.pem`, the signed XPI, `SHA256SUMS`, the AppImage, `manifest-linux-x64.json`, `SHA256SUMS-linux`. Checks: hashes match SHA256SUMS; `public.pem` is byte-identical to 0.6.5's; both feeds (`latest/download/manifest.json`, `manifest-linux-x64.json`) serve 0.6.6; `extensions/firefox-updates.json` on `main` names 0.6.1; a scan of the zip, XPI, release files and the tree found no secret. Built on the Windows VM with a portable Node 26.13.0 (`C:\node`) and the owner's Inno Setup 7 copied to `C:\inno`; Setup and the zip ran from a release task in the owner's RDP session (PowerShell 5.1 over SSH turns npm's stderr into errors). Keys were copied to the VM only for signing and deleted after. Docker image workflow for the tag started.

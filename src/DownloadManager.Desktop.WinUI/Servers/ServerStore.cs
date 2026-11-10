@@ -59,7 +59,7 @@ internal sealed class ServerStore
     public ServerStore(string path, ISecretProtector? protector = null)
     {
         _path = path;
-        _protector = protector ?? new DpapiSecretProtector();
+        _protector = protector ?? ServerSecrets.For(Path.GetDirectoryName(Path.GetFullPath(path))!);
     }
 
     /// <summary>Beside the window's <c>ui-state.json</c>: the isolated data folder of a test instance, or the app's own.</summary>
@@ -86,7 +86,9 @@ internal sealed class ServerStore
     {
         if (Find(id) is not { } server || server.SealedToken is null) return null;
         if (!ServerAddress.TryNormalize(server.Address, out var address, out _)) return null;
-        var token = OperatingSystem.IsWindows() ? _protector.Unprotect(server.SealedToken, Purpose(server.Id)) : null;
+        string? token;
+        try { token = _protector.Unprotect(server.SealedToken, Purpose(server.Id)); }
+        catch (IOException) { return null; } // Linux before the Host has made its key
         return string.IsNullOrEmpty(token) ? null : ServerTarget.Remote(server.Id, server.Name, address, token, server.PlainHttpConfirmed);
     }
 
@@ -166,7 +168,6 @@ internal sealed class ServerStore
 
     private string Seal(string id, string token)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Saving a server's token needs Windows.");
         return _protector.Protect(token, Purpose(id));
     }
 
