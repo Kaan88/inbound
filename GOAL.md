@@ -1,5 +1,7 @@
 # Goal — Build a private Windows download manager
 
+Qt 6 prototype includes live downloads, queue management, transfer details, completion, core Options, and TorBox account and catalog workflows. Linux builds and isolated Host checks passed for core workflows. Authenticated TorBox transfers and WinUI feature parity remain open.
+
 Owner direction (2026-11-05): the owner prefers the current Inbound design; keep our own design and behavior. `implemented` still needs linked acceptance evidence.
 
 Release status (2026-11-08): the last release is v0.6.0 (extension 0.5.0), published 2026-11-08. It adds the headless server, web UI and Docker image for linux/amd64 (ROADMAP D1–D4; D1 is still in progress). in Edge the owner checked automatic catching; Firefox is not checked with 0.6.0 (EXT.B3). Clean install, upgrade and uninstall passed on a fresh Windows VM (TEST.2). The older dated entries below are history. ROADMAP and PROGRESS hold the current status of each item.

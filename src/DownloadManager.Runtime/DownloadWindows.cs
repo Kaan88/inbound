@@ -42,8 +42,9 @@ public sealed class DownloadWindows : IDisposable
         _service.PackageCompleted -= OnPackageCompleted;
     }
 
+    // The Qt frontend owns the completion window for jobs it adds.
     public static bool OpensWindows(JobDto job) =>
-        !job.AddedFromAnotherDevice && job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote");
+        !job.AddedFromAnotherDevice && job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote" or "qt");
 
     private bool ShowsCompletion(JobDto job) => job.ShowCompletionDialog ?? _showCompletionByDefault();
 

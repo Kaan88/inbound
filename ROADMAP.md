@@ -1,5 +1,7 @@
 ﻿# Roadmap and executable work
 
+Qt 6 prototype includes live downloads, queue management, transfer details, completion, core Options, and TorBox account and catalog workflows. Linux builds and isolated Host checks passed for core workflows. Authenticated TorBox transfers and WinUI feature parity remain open.
+
 
 Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
 

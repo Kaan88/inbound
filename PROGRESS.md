@@ -1,5 +1,7 @@
 ﻿# Progress — session handoff
 
+Qt 6 prototype includes live downloads, queue management, transfer details, completion, core Options, and TorBox account and catalog workflows. Linux builds and isolated Host checks passed for core workflows. Authenticated TorBox transfers and WinUI feature parity remain open.
+
 ### Linux window fixes after 0.6.6 (2026-11-10, `linux-host`)
 
 - Owner: "cold start very briefly opens in light mode when dark mode is set"; "added servers are not saved, or saved but not visible on ui, webui records as saved"; "also remove some windows related settings like firewall setup."
