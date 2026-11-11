@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Options Torrents page</title>
+<style>
+:root{--bg:#1c1c1c;--panel:#202020;--card:#262626;--field:#1f1f1f;--line:#2f2f2f;--text:#f2f2f2;--mute:#9a9a9a;--sel:#323232;--accent:#60cdff;--ok:#6ccb5f;--warn:#fce100;--bad:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:#0e0e0e;font:13px "Segoe UI",system-ui,sans-serif;color:var(--text);padding:20px}
+.win{width:1040px;min-height:900px;background:var(--bg);border:1px solid #333;display:flex;flex-direction:column;overflow:hidden}
+.title{height:30px;display:flex;align-items:center;padding:0 12px;color:#bbb;background:#171717;font-size:12px}.title .ctl{margin-left:auto;letter-spacing:22px;color:#999}
+.body{flex:1;display:flex;min-height:0}
+.nav{width:210px;border-right:1px solid var(--line);padding:10px}
+.nav div{padding:7px 12px;border-radius:5px;display:flex;gap:10px;align-items:center}
+.nav div.on{background:var(--sel);box-shadow:inset 3px 0 0 var(--accent)}
+.nav i{font-style:normal;width:16px;text-align:center;color:#ccc}
+.page{flex:1;padding:18px 28px 28px}
+h2{font-size:20px;font-weight:600;margin:0 0 14px}
+h3{font-size:14px;font-weight:600;margin:22px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+.tg{display:flex;align-items:center;gap:12px;margin:8px 0}
+.sw{width:40px;height:20px;border-radius:10px;border:1.5px solid #888;position:relative;flex:none}
+.sw:after{content:"";position:absolute;width:12px;height:12px;border-radius:50%;background:#ccc;top:2.5px;left:3px}
+.sw.on{background:var(--accent);border-color:var(--accent)}.sw.on:after{background:#000;left:23px}
+.cb{width:16px;height:16px;border:1.5px solid #888;border-radius:3px;flex:none;position:relative}
+.cb.on{background:var(--accent);border-color:var(--accent)}.cb.on:after{content:"✓";position:absolute;left:2px;top:-3px;color:#000;font-size:12px;font-weight:700}
+.dis{opacity:.45}
+.note{color:var(--mute);font-size:12px;line-height:1.5;margin:4px 0 0}
+.plain{background:#1e2a33;border:1px solid #2c4252;border-radius:6px;padding:12px 14px;line-height:1.55}
+.plain b{display:block;margin-bottom:4px}
+.plain ul{margin:6px 0 0;padding-left:18px}
+.row{display:flex;gap:10px;align-items:center;margin:8px 0}
+.tb{background:var(--field);border:1px solid #444;border-bottom:1px solid #666;border-radius:4px;padding:6px 10px;min-width:90px}
+.b{background:#3a3a3a;border:1px solid #444;border-radius:4px;padding:6px 14px;white-space:nowrap}
+.lbl{width:200px;color:var(--text)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.fw{display:flex;gap:12px;align-items:flex-start}
+.fw .st{color:var(--warn);font-weight:600}
+</style></head><body>
+<div class="win">
+ <div class="title">Options — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="body">
+  <div class="nav">
+   <div><i>⌂</i>General</div><div><i>▤</i>Save to</div><div><i>↓</i>Downloads</div><div><i>⇄</i>Connection</div>
+   <div><i>⛨</i>Proxy</div><div><i>⚿</i>Site logins</div><div><i>⟳</i>Updates</div><div><i>♪</i>Sounds</div>
+   <div><i>☁</i>TorBox</div><div><i>▣</i>Extraction</div><div><i>◎</i>Web UI</div>
+   <div class="on"><i>⇅</i>Torrents</div>
+  </div>
+  <div class="page">
+   <h2>Torrents</h2>
+   <div class="card">
+    <div class="tg"><span class="sw"></span><b>Download torrents on this PC</b></div>
+    <div class="plain">
+     <b>What turning this on does</b>
+     Magnet links and .torrent files can then download straight from other people's computers (peers), not only through TorBox.
+     <ul>
+      <li>Peers see this PC's public IP address, and it sees theirs.</li>
+      <li>While a torrent downloads, and afterwards until it reaches the seeding goal below, the app uploads pieces to other peers.</li>
+      <li>The app listens on one network port, and a small background program runs only while a torrent is active or seeding. When this is off, nothing runs and no port is open.</li>
+      <li>Download only what you have the right to download.</li>
+     </ul>
+    </div>
+    <p class="note">When TorBox is also set up, the Add dialog asks which one to use. TorBox stays the default.</p>
+   </div>
+
+   <div class="dis">
+   <h3>Connection</h3>
+   <div class="card">
+    <div class="row"><span class="lbl">Listening port</span><span class="tb">51413</span><span class="b">Random</span><span class="note">TCP and UDP</span></div>
+    <div class="tg"><span class="cb on"></span>Ask the router to forward this port (UPnP / NAT-PMP)</div>
+    <div class="fw"><span class="st">●</span><div>Windows Firewall: <b>no rule yet</b>. Without it, torrents still work, with fewer peers.<br>
+     <div class="row"><span class="b">Allow through Windows Firewall</span><span class="b">Check again</span></div>
+     <p class="note">Adds one inbound rule for the torrent program on this port, TCP and UDP, from any address (Windows asks once). This is a separate rule from the web UI's, which allows only your local network.</p></div></div>
+   </div>
+
+   <h3>Finding peers and privacy</h3>
+   <div class="card grid">
+    <div>
+     <div class="tg"><span class="cb on"></span>DHT (find peers without a tracker)</div>
+     <div class="tg"><span class="cb on"></span>Peer exchange (PEX)</div>
+     <div class="tg"><span class="cb on"></span>Local peers on this network (LSD)</div>
+     <p class="note">All three are always off for private torrents.</p>
+    </div>
+    <div>
+     <div class="row"><span>Encryption</span><span class="tb">Prefer encrypted ⌄</span></div>
+     <p class="note">Allow · Prefer encrypted · Require encrypted. Requiring it leaves out peers that can't encrypt.</p>
+     <div class="tg"><span class="cb"></span>Use the proxy from Options &gt; Proxy for peers and trackers</div>
+    </div>
+   </div>
+
+   <h3>Limits</h3>
+   <div class="card grid">
+    <div>
+     <div class="row"><span class="lbl">Upload limit</span><span class="tb">1000</span><span class="note">KB/s · empty for none</span></div>
+     <div class="row"><span class="lbl">Torrents downloading at once</span><span class="tb">3</span></div>
+     <div class="row"><span class="lbl">Torrents seeding at once</span><span class="tb">5</span></div>
+    </div>
+    <div>
+     <div class="row"><span class="lbl">Connections per torrent</span><span class="tb">50</span></div>
+     <div class="row"><span class="lbl">Memory for the disk cache</span><span class="tb">32</span><span class="note">MB</span></div>
+     <p class="note">The total speed limit in Options &gt; Connection covers torrents too.</p>
+    </div>
+   </div>
+
+   <h3>Seeding</h3>
+   <div class="card">
+    <div class="tg"><span class="cb on"></span>Stop seeding at ratio <span class="tb" style="margin-left:6px">1.0</span></div>
+    <div class="tg"><span class="cb on"></span>Stop seeding after <span class="tb" style="margin-left:6px">48</span> hours</div>
+    <div class="tg"><span class="cb"></span>Don't seed at all (stop as soon as the download finishes)</div>
+    <p class="note">A queue counts a torrent as finished when its download finishes, so "When the queue finishes" actions don't wait for seeding.</p>
+   </div>
+   </div>
+  </div>
+ </div>
+</div>
+</body></html>

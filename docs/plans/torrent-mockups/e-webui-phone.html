@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web UI torrents phone</title>
+<style>
+/* The web UI's dark tokens (webui/src/tokens.css). */
+:root{--chrome:#202020;--surface:#181818;--divider:#343434;--text:#f2f2f2;--muted:#a3a3a3;--progress:#4aa3f0;--track:#383838;--error:#f07a7a;--highlight:#2b3a4f;--accent:#4aa3f0;--accent-text:#0e1b2a;--start:#8ccf8c;--pause:#e8b36a;--media:#b49ad6}
+*{box-sizing:border-box}body{margin:0;background:#0b0b0b;font:14px "Segoe UI",system-ui,sans-serif;color:var(--text);padding:20px 16px;display:flex;gap:28px;flex-wrap:wrap;justify-content:center}
+.phone{width:390px;height:844px;background:var(--surface);border:1px solid #333;border-radius:28px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.cap{width:390px;text-align:center;color:var(--muted);font-size:12px;margin-top:8px}
+.top{background:var(--chrome);padding:14px 16px 10px;border-bottom:1px solid var(--divider)}
+.top .r1{display:flex;align-items:center;gap:10px}
+.top b{font-size:17px;font-weight:600}.top .host{margin-left:auto;color:var(--muted);font-size:12px;border:1px solid var(--divider);border-radius:12px;padding:3px 10px}
+.menu{font-size:22px;line-height:1}
+.chips{display:flex;gap:6px;margin-top:10px;overflow:hidden}
+.chip{border:1px solid var(--divider);border-radius:14px;padding:4px 11px;font-size:12.5px;white-space:nowrap;color:var(--muted)}
+.chip.on{background:var(--highlight);border-color:var(--accent);color:var(--text)}
+.sum{display:flex;justify-content:space-between;padding:8px 16px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--divider)}
+.list{flex:1;overflow:hidden}
+.row{padding:12px 16px;border-bottom:1px solid var(--divider)}
+.row.sel{background:var(--highlight)}
+.name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:5px;background:var(--track);border-radius:3px;margin:8px 0 6px}.bar b{display:block;height:100%;border-radius:3px;background:var(--progress)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted)}
+.meta .dn{color:var(--text)}.meta .up{color:var(--media)}.meta .ok{color:var(--start)}.meta .st{color:var(--pause)}
+.fab{position:absolute;right:18px;bottom:76px;width:56px;height:56px;border-radius:16px;background:var(--accent);color:var(--accent-text);font-size:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,0,0,.5)}
+.bottom{height:58px;border-top:1px solid var(--divider);background:var(--chrome);display:flex;justify-content:space-around;align-items:center;font-size:11px;color:var(--muted)}
+.bottom span{display:flex;flex-direction:column;align-items:center;gap:2px}.bottom span.on{color:var(--accent)}
+.bottom i{font-style:normal;font-size:18px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--chrome);border-top:1px solid var(--divider);border-radius:16px 16px 0 0;padding:10px 16px 18px;box-shadow:0 -10px 30px rgba(0,0,0,.5)}
+.grab{width:40px;height:4px;background:#555;border-radius:2px;margin:0 auto 10px}
+.sheet h4{margin:0 0 4px;font-size:15px}
+.sheet .sub{color:var(--muted);font-size:12px;margin-bottom:10px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--divider);margin:0 -16px 10px;padding:0 12px}
+.tabs span{padding:8px 8px;font-size:13px;color:var(--muted)}.tabs span.on{color:var(--text);box-shadow:inset 0 -3px 0 var(--accent)}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:13px}.kv span:nth-child(odd){color:var(--muted)}
+.acts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.acts span{border:1px solid var(--divider);border-radius:6px;padding:9px 0;text-align:center;font-size:13px}
+.acts .p{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:600}
+.acts .d{color:var(--error)}
+.dim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+</style></head><body>
+
+<div>
+<div class="phone">
+ <div class="top">
+  <div class="r1"><span class="menu">☰</span><b>Torrents</b><span class="host">home server ⌄</span></div>
+  <div class="chips"><span class="chip on">All 5</span><span class="chip">Downloading 2</span><span class="chip">Seeding 2</span><span class="chip">Stopped 1</span></div>
+ </div>
+ <div class="sum"><span>↓ 25.0 MB/s · <span style="color:var(--media)">↑ 2.2 MB/s</span></span><span>port 51413 · DHT 284</span></div>
+ <div class="list">
+  <div class="row sel"><div class="name">debian-13.2.0-amd64-DVD-1.iso</div><div class="bar"><b style="width:64%"></b></div>
+   <div class="meta"><span>64% of 3.9 GB</span><span class="dn">↓ 18.6 MB/s</span><span class="up">↑ 1.2 MB/s</span><span>1 min 18 s</span><span>48 seeds · 9 peers</span><span>ratio 0.08</span></div></div>
+  <div class="row"><div class="name">Blender open movies (4K masters)</div><div class="bar"><b style="width:23%"></b></div>
+   <div class="meta"><span>23% of 14.9 GB · 12 of 30 files</span><span class="dn">↓ 6.4 MB/s</span><span class="up">↑ 380 KB/s</span><span>1 h 23 min</span></div></div>
+  <div class="row"><div class="name">archlinux-2026.11.01-x86_64.iso</div><div class="bar"><b style="width:100%;background:var(--start)"></b></div>
+   <div class="meta"><span class="ok">Seeding</span><span class="up">↑ 640 KB/s</span><span>ratio 0.71 → 1.0</span><span>3 peers</span></div></div>
+  <div class="row"><div class="name">internet-archive-public-domain-audio</div><div class="bar"><b style="width:100%;background:var(--start)"></b></div>
+   <div class="meta"><span class="ok">Seeding</span><span class="up">↑ 22 KB/s</span><span>ratio 1.38 · 31 h left</span></div></div>
+  <div class="row"><div class="name">fedora-workstation-43-live-x86_64.iso</div><div class="bar"><b style="width:8%;background:#777"></b></div>
+   <div class="meta"><span class="st">Stopped</span><span>8% of 2.6 GB</span><span>Queue 2</span></div></div>
+ </div>
+ <div class="fab">+</div>
+ <div class="bottom"><span><i>↓</i>Downloads</span><span class="on"><i>⇅</i>Torrents</span><span><i>☰</i>Queues</span><span><i>☁</i>TorBox</span><span><i>⚙</i>Options</span></div>
+</div>
+<div class="cap">List: tap a row for details; long press or "…" for the row menu (as in D2d).</div>
+</div>
+
+<div>
+<div class="phone">
+ <div class="top">
+  <div class="r1"><span class="menu">☰</span><b>Torrents</b><span class="host">home server ⌄</span></div>
+  <div class="chips"><span class="chip on">All 5</span><span class="chip">Downloading 2</span><span class="chip">Seeding 2</span></div>
+ </div>
+ <div class="list">
+  <div class="row sel"><div class="name">debian-13.2.0-amd64-DVD-1.iso</div><div class="bar"><b style="width:64%"></b></div><div class="meta"><span>64% of 3.9 GB</span></div></div>
+  <div class="row"><div class="name">Blender open movies (4K masters)</div><div class="bar"><b style="width:23%"></b></div><div class="meta"><span>23%</span></div></div>
+ </div>
+ <div class="dim"></div>
+ <div class="sheet">
+  <div class="grab"></div>
+  <h4>debian-13.2.0-amd64-DVD-1.iso</h4>
+  <div class="sub">Downloading · 64% · 1 min 18 s left</div>
+  <div class="tabs"><span class="on">Overview</span><span>Files</span><span>Peers</span><span>Trackers</span><span>Speed</span></div>
+  <div class="kv">
+   <span>Down / Up</span><span>18.6 MB/s / <span style="color:var(--media)">1.2 MB/s</span></span>
+   <span>Seeds / peers</span><span>48 of 212 / 9 of 31</span>
+   <span>Ratio</span><span>0.08 (goal 1.0 or 48 h)</span>
+   <span>Have</span><span>2.5 of 3.9 GB · 10,124 of 15,820 pieces</span>
+   <span>Save to</span><span>/downloads/torrents</span>
+   <span>Port</span><span>51413, published by the container</span>
+  </div>
+  <div class="acts"><span>Stop</span><span>Files…</span><span class="d">Delete…</span></div>
+ </div>
+</div>
+<div class="cap">Details open as a sheet over the list, as the My TorBox dialog does (D2d).</div>
+</div>
+
+</body></html>

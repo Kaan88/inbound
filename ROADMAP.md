@@ -497,3 +497,17 @@ searching the account.
 | X.3 | Keep PROGRESS.md handoff current | in_progress | Next action + commit + commands |
 | X.4 | Commit coherent increments | in_progress | Each milestone increment pushed |
 | X.5 | Independent verification of critical recovery/handoff | verified 2026-11-08 (campaign-recovery) | E94 records main-session recovery results. Independent reproduction 2026-11-08: recovery as in P2.7/P5.6. Handoff in Chrome for Testing 156 with the unpacked `dist` (ID `pknddmneejadnnngffojnoecojhdfalc`) and a test-only native-host registration: automatic sending turned on in the options page; a TestServer file landed in the test instance with the matching SHA-256 and the browser entry removed. With the Host frozen and the request on its pipe, killing the Host either (a Host can be started) let the extension's one retry start a new Host that accepted it: one job, matching SHA-256; or (no Host can be started) had Chrome resume its own download, which finished with the matching SHA-256 and no job in the app. PROGRESS "Independent recovery check". |
+
+## Native torrent client (proposal, owner 2026-11-11; not started)
+
+Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-torrent-roadmap.md`; mockups: `docs/plans/torrent-mockups/`. Rule: when no torrent is downloading or seeding there is no torrent process, socket or timer. The backend (MonoTorrent, libtorrent through a binding, aria2) is undecided and chosen in T0 behind an engine-neutral worker contract.
+
+| ID | Item | Status | Depends | Notes |
+| --- | --- | --- | --- | --- |
+| T0 | Backend bake-off behind the worker contract | not started, owner go needed | - | 1.5 to 2 weeks (opinion); gates: cold start, throughput vs qBittorrent, idle (PERF.4 method), size, packaging, protocols, fit |
+| T1 | Smallest slice: supervised on-demand worker, Options > Torrents (off), Add Torrent, Torrents category, download only | not started | T0 | 4 to 5 weeks (opinion) |
+| T2 | Seeding, limits, details window, firewall rule, UPnP toggle | not started | T1 | 3 to 4 weeks (opinion) |
+| T3 | Web UI and Docker | not started | T1 | 2 to 3 weeks (opinion) |
+| T4 | Linux desktop (AppImage) | not started | T1 | 1 week (opinion) |
+| T5 | Polish and limits | not started | T2 | 1 to 2 weeks (opinion) |
+| T6 | Optional: connect to the user's qBittorrent or Transmission | not started | - | cheap alternative; does not touch idle cost; may come first |

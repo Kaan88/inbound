@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Torrent Details window</title>
+<style>
+:root{--bg:#1c1c1c;--panel:#202020;--card:#262626;--line:#2f2f2f;--text:#f2f2f2;--mute:#9a9a9a;--accent:#60cdff;--ok:#6ccb5f;--bad:#ff6b6b;--orange:#f5a14a;--up:#b794f6}
+*{box-sizing:border-box}body{margin:0;background:#0e0e0e;font:13px "Segoe UI",system-ui,sans-serif;color:var(--text);padding:20px}
+h1{font-size:15px;font-weight:600;color:var(--mute);margin:0 0 12px}
+.wall{display:grid;grid-template-columns:repeat(2,760px);gap:24px}
+.win{width:760px;height:620px;background:var(--bg);border:1px solid #333;display:flex;flex-direction:column;overflow:hidden}
+.title{height:30px;display:flex;align-items:center;padding:0 12px;color:#bbb;background:#171717;font-size:12px}
+.title .ctl{margin-left:auto;letter-spacing:22px;color:#999}
+.head{display:flex;gap:12px;align-items:center;padding:14px 20px 8px}
+.ico{width:36px;height:40px;border:2px solid var(--accent);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:16px}
+.head b{font-size:15px;display:block}.head small{font-size:12px;font-weight:600;color:var(--ok)}
+.tabs{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--line)}
+.tabs span{padding:9px 12px;color:var(--mute)}.tabs span.on{color:var(--text);box-shadow:inset 0 -3px 0 var(--accent)}
+.pane{flex:1;padding:14px 20px;overflow:hidden}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.tile em{display:block;font-style:normal;color:var(--mute);font-size:12px}.tile b{font-size:20px;font-weight:600}.tile b small{font-size:12px;color:var(--mute);font-weight:400;margin-left:3px}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;margin-top:14px}
+.kv span:nth-child(odd){color:var(--mute)}
+.bar{height:8px;background:#3a3a3a;border-radius:4px;margin-top:14px}.bar b{display:block;height:100%;width:64%;background:var(--accent);border-radius:4px}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--mute);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-weight:600;padding:7px 6px;border-bottom:1px solid var(--line)}
+td{padding:7px 6px;border-bottom:1px solid #262626;white-space:nowrap}
+.r{text-align:right}.m{color:var(--mute)}.u{color:var(--up)}
+.mini{display:inline-block;width:70px;height:5px;background:#3a3a3a;border-radius:3px;vertical-align:middle;margin-right:6px}.mini b{display:block;height:100%;background:var(--accent);border-radius:3px}
+.foot{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line);background:var(--panel)}
+.b{background:#333;border:1px solid #444;border-radius:4px;padding:6px 14px}.b.d{color:var(--bad)}.grow{flex:1}
+.pmap{height:54px;margin-top:6px;border-radius:3px;background:
+ repeating-linear-gradient(90deg,transparent 0 9px,#1c1c1c 9px 10px),
+ linear-gradient(90deg,#60cdff 0 58%,#f5a14a 58% 60%,#3a3a3a 60% 63%,#60cdff 63% 66%,#3a3a3a 66% 71%,#f5a14a 71% 72%,#3a3a3a 72% 78%,#60cdff 78% 80%,#3a3a3a 80% 100%)}
+.sec{font-weight:600;margin:14px 0 6px}
+.graph{height:150px;background:#222;border:1px solid var(--line);border-radius:6px;position:relative}
+.graph svg{position:absolute;inset:8px;width:calc(100% - 16px);height:calc(100% - 16px)}
+.flag{font-size:11px;border:1px solid #444;border-radius:3px;padding:0 4px;color:var(--mute)}
+.note{font-size:12px;color:var(--mute);margin-top:10px;line-height:1.45}
+</style></head><body>
+<h1>Torrent Details: the Progress Details layout (header, tabs, tiles, bottom buttons). The five tabs are shown side by side.</h1>
+<div class="wall">
+
+<!-- Overview -->
+<div class="win">
+ <div class="title">64% debian-13.2.0-amd64-DVD-1.iso — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>debian-13.2.0-amd64-DVD-1.iso</b><small>Downloading · 64%</small></div></div>
+ <div class="tabs"><span class="on">Overview</span><span>Files (1)</span><span>Peers (9)</span><span>Trackers (2)</span><span>Pieces &amp; Speed</span><span>Options</span></div>
+ <div class="pane">
+  <div class="tiles">
+   <div class="tile"><em>Down</em><b>18.6<small>MB/s</small></b></div>
+   <div class="tile"><em>Up</em><b class="u">1.2<small>MB/s</small></b></div>
+   <div class="tile"><em>Time left</em><b>1<small>min</small> 18<small>s</small></b></div>
+   <div class="tile"><em>Seeds / peers</em><b>48<small>of 212</small> 9<small>of 31</small></b></div>
+  </div>
+  <div class="bar"><b></b></div>
+  <div class="legend"><span><i style="background:var(--accent)"></i>Have 2.5 GB</span><span><i style="background:#3a3a3a"></i>Missing 1.4 GB</span><span>Ratio 0.08 · uploaded 204 MB</span></div>
+  <div class="kv">
+   <span>Info hash</span><span>v1 3f9c…a12e · v2 b07d…44c1</span>
+   <span>Save to</span><span>D:\Downloads\Torrents\debian-13.2.0-amd64-DVD-1.iso</span>
+   <span>Pieces</span><span>15,820 × 256 KB · 10,124 have</span>
+   <span>Added</span><span>11 Nov 2026 14:02 · from a magnet link</span>
+   <span>Seeding goal</span><span>Ratio 1.0 or 48 h, whichever comes first (Options)</span>
+   <span>Private</span><span>No · DHT, PEX and LSD allowed</span>
+  </div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="b">Force recheck</span><span class="grow"></span><span class="b">Open folder</span><span class="b">Hide</span></div>
+</div>
+
+<!-- Files -->
+<div class="win">
+ <div class="title">23% Blender open movies (4K masters) — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>Blender open movies (4K masters)</b><small>Downloading · 23% of 12 files</small></div></div>
+ <div class="tabs"><span>Overview</span><span class="on">Files (30)</span><span>Peers (4)</span><span>Trackers (3)</span><span>Pieces &amp; Speed</span><span>Options</span></div>
+ <div class="pane">
+  <table>
+   <tr><th style="width:50%">Name</th><th class="r">Size</th><th>Progress</th><th>Priority</th></tr>
+   <tr><td>☑ 📁 Charge</td><td class="r">5.1 GB</td><td><span class="mini"><b style="width:71%"></b></span>71%</td><td>High</td></tr>
+   <tr><td style="padding-left:28px">☑ charge-4k-master.mkv</td><td class="r">4.9 GB</td><td><span class="mini"><b style="width:70%"></b></span>70%</td><td>High</td></tr>
+   <tr><td style="padding-left:28px">☑ subtitles.zip</td><td class="r">1.2 MB</td><td><span class="mini"><b style="width:100%"></b></span>Done</td><td>Normal</td></tr>
+   <tr><td>☑ 📁 Sprite Fright</td><td class="r">6.8 GB</td><td><span class="mini"><b style="width:12%"></b></span>12%</td><td>Normal</td></tr>
+   <tr><td style="padding-left:28px">☑ sprite-fright-4k-master.mkv</td><td class="r">6.7 GB</td><td><span class="mini"><b style="width:12%"></b></span>12%</td><td>Normal</td></tr>
+   <tr class="m"><td>☐ 📁 Cosmos Laundromat</td><td class="r">12.3 GB</td><td>–</td><td>Skip</td></tr>
+   <tr class="m"><td>☐ 📁 Spring</td><td class="r">8.9 GB</td><td>–</td><td>Skip</td></tr>
+   <tr class="m"><td>☐ 📁 Agent 327</td><td class="r">8.6 GB</td><td>–</td><td>Skip</td></tr>
+  </table>
+  <div class="note">Right-click a file or folder to change its priority or skip it. A skipped file can still get a few bytes from pieces it shares with a neighbouring file. Archives are extracted once their files finish, as with any package. While the torrent seeds, "Delete archives after extraction" waits until seeding stops.</div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="grow"></span><span class="b">Open folder</span><span class="b">Hide</span></div>
+</div>
+
+<!-- Peers -->
+<div class="win">
+ <div class="title">64% debian-13.2.0-amd64-DVD-1.iso — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>debian-13.2.0-amd64-DVD-1.iso</b><small>Downloading · 64%</small></div></div>
+ <div class="tabs"><span>Overview</span><span>Files (1)</span><span class="on">Peers (9)</span><span>Trackers (2)</span><span>Pieces &amp; Speed</span><span>Options</span></div>
+ <div class="pane">
+  <table>
+   <tr><th>Address</th><th>Client</th><th>Flags</th><th>Has</th><th class="r">Down</th><th class="r">Up</th></tr>
+   <tr><td>peer 1 · IPv6</td><td>qBittorrent 5.3.0</td><td><span class="flag">uTP</span> <span class="flag">E</span></td><td>100%</td><td class="r">6.1 MB/s</td><td class="r u">0</td></tr>
+   <tr><td>peer 2 · IPv4</td><td>Transmission 4.1.4</td><td><span class="flag">TCP</span> <span class="flag">E</span></td><td>100%</td><td class="r">4.8 MB/s</td><td class="r u">0</td></tr>
+   <tr><td>peer 3 · IPv4</td><td>libtorrent 2.0.15</td><td><span class="flag">uTP</span> <span class="flag">DHT</span></td><td>100%</td><td class="r">3.9 MB/s</td><td class="r u">0</td></tr>
+   <tr><td>peer 4 · IPv4</td><td>qBittorrent 5.2.4</td><td><span class="flag">TCP</span> <span class="flag">PEX</span></td><td>41%</td><td class="r">1.4 MB/s</td><td class="r u">610 KB/s</td></tr>
+   <tr><td>peer 5 · IPv6</td><td>Deluge 2.2</td><td><span class="flag">uTP</span></td><td>12%</td><td class="r">0</td><td class="r u">420 KB/s</td></tr>
+   <tr><td>peer 6 · IPv4</td><td>unknown</td><td><span class="flag">TCP</span> <span class="flag">in</span></td><td>3%</td><td class="r">0</td><td class="r u">170 KB/s</td></tr>
+  </table>
+  <div class="note">Peers see this PC's public IP address and you see theirs; that is how BitTorrent works. The window shows a peer number, and the address appears on hover. Peer lists are sent only while this tab is open.</div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="grow"></span><span class="b">Copy addresses</span><span class="b">Hide</span></div>
+</div>
+
+<!-- Trackers -->
+<div class="win">
+ <div class="title">64% debian-13.2.0-amd64-DVD-1.iso — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>debian-13.2.0-amd64-DVD-1.iso</b><small>Downloading · 64%</small></div></div>
+ <div class="tabs"><span>Overview</span><span>Files (1)</span><span>Peers (9)</span><span class="on">Trackers (2)</span><span>Pieces &amp; Speed</span><span>Options</span></div>
+ <div class="pane">
+  <table>
+   <tr><th style="width:44%">Tracker</th><th>Status</th><th class="r">Seeds</th><th class="r">Peers</th><th>Next announce</th></tr>
+   <tr><td>http://bttracker.debian.org:6969/announce</td><td style="color:var(--ok)">Working</td><td class="r">198</td><td class="r">27</td><td>24 min</td></tr>
+   <tr><td>udp://tracker.example.org:1337</td><td class="m">Not contacted</td><td class="r m">–</td><td class="r m">–</td><td class="m">–</td></tr>
+   <tr><td class="m">DHT</td><td style="color:var(--ok)">Working · 284 nodes</td><td class="r">14</td><td class="r">4</td><td>13 min</td></tr>
+   <tr><td class="m">Peer exchange</td><td style="color:var(--ok)">On</td><td class="r">–</td><td class="r">6</td><td class="m">–</td></tr>
+   <tr><td class="m">Local peers (LSD)</td><td class="m">On · none found</td><td class="r">0</td><td class="r">0</td><td>4 min</td></tr>
+  </table>
+  <div class="note">For a private torrent the DHT, PEX and LSD rows read "Off: private torrent". A tracker address with a passkey is shown up to the passkey only, and never written to the log.</div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="b">Announce now</span><span class="grow"></span><span class="b">Hide</span></div>
+</div>
+
+<!-- Pieces & Speed -->
+<div class="win">
+ <div class="title">64% debian-13.2.0-amd64-DVD-1.iso — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>debian-13.2.0-amd64-DVD-1.iso</b><small>Downloading · 64%</small></div></div>
+ <div class="tabs"><span>Overview</span><span>Files (1)</span><span>Peers (9)</span><span>Trackers (2)</span><span class="on">Pieces &amp; Speed</span><span>Options</span></div>
+ <div class="pane">
+  <div class="sec" style="margin-top:0">Pieces</div>
+  <div class="pmap"></div>
+  <div class="legend"><span><i style="background:var(--accent)"></i>Have</span><span><i style="background:var(--orange)"></i>Downloading</span><span><i style="background:#3a3a3a"></i>Missing</span><span>Each cell is about 40 pieces</span></div>
+  <div class="sec">Speed, last 10 minutes</div>
+  <div class="graph"><svg viewBox="0 0 700 130" preserveAspectRatio="none">
+   <polyline fill="rgba(96,205,255,.18)" stroke="#60cdff" stroke-width="1.5" points="0,130 40,110 90,70 150,40 220,34 300,30 380,22 460,28 540,20 620,24 700,22 700,130"/>
+   <polyline fill="none" stroke="#b794f6" stroke-width="1.5" points="0,129 90,124 150,120 220,118 300,117 380,116 460,118 540,115 620,116 700,116"/>
+  </svg></div>
+  <div class="legend"><span><i style="background:var(--accent)"></i>Down 18.6 MB/s</span><span><i style="background:var(--up)"></i>Up 1.2 MB/s</span><span>Wasted 0 B · hash failures 0</span></div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="grow"></span><span class="b">Hide</span></div>
+</div>
+
+<!-- Options -->
+<div class="win">
+ <div class="title">64% debian-13.2.0-amd64-DVD-1.iso — Inbound Download Manager<span class="ctl">–▢✕</span></div>
+ <div class="head"><div class="ico">⇅</div><div><b>debian-13.2.0-amd64-DVD-1.iso</b><small>Downloading · 64%</small></div></div>
+ <div class="tabs"><span>Overview</span><span>Files (1)</span><span>Peers (9)</span><span>Trackers (2)</span><span>Pieces &amp; Speed</span><span class="on">Options</span></div>
+ <div class="pane">
+  <div class="sec" style="margin-top:0">Speed limits for this torrent</div>
+  <div class="kv" style="margin-top:4px"><span>Download</span><span>☐ Limit to ____ KB/s</span><span>Upload</span><span>☑ Limit to 500 KB/s</span></div>
+  <div class="sec">Seeding</div>
+  <div class="kv" style="margin-top:4px"><span>Stop at</span><span>◉ Global goal (ratio 1.0 or 48 h) ○ Ratio ___ ○ Time ___ ○ Never</span></div>
+  <div class="sec">Download order</div>
+  <div class="kv" style="margin-top:4px"><span>Order</span><span>☐ Download in order (first and last pieces first; slower for the swarm)</span></div>
+  <div class="note">The global limits in Options &gt; Torrents still apply. The total speed limit for all downloads covers torrents too.</div>
+ </div>
+ <div class="foot"><span class="b d">Delete</span><span class="b">Stop</span><span class="grow"></span><span class="b">Apply</span><span class="b">Hide</span></div>
+</div>
+
+</div>
+</body></html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Add Torrent dialog</title>
+<style>
+:root{--bg:#1c1c1c;--panel:#2b2b2b;--field:#1f1f1f;--line:#3a3a3a;--text:#f2f2f2;--mute:#9a9a9a;--accent:#60cdff;--ok:#6ccb5f;--warn:#fce100;--bad:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:#0e0e0e;font:13px "Segoe UI",system-ui,sans-serif;color:var(--text);padding:20px}
+.stage{width:1640px;height:940px;background:#101010;border:1px solid #333;position:relative;display:flex;align-items:center;justify-content:center}
+.stage:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,#1c1c1c 0 36px,#191919 36px 37px);opacity:.35}
+.dlg{position:relative;width:760px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+.in{padding:24px 24px 8px}
+h2{font-size:20px;font-weight:600;margin:0 0 16px}
+label.h{display:block;font-size:13px;margin:12px 0 6px}
+.row{display:flex;gap:8px;align-items:center}
+.tb{flex:1;background:var(--field);border:1px solid #444;border-bottom:2px solid var(--accent);border-radius:4px;padding:7px 10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb.plain{border-bottom:1px solid #555}
+.b{background:#3a3a3a;border:1px solid #444;border-radius:4px;padding:6px 14px;white-space:nowrap}
+.b.p{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+.radios{display:flex;gap:22px;margin-top:4px}.rd{display:flex;align-items:center;gap:8px}
+.rd i{width:18px;height:18px;border:1.5px solid #888;border-radius:50%;display:inline-block;position:relative}
+.rd.on i{border-color:var(--accent)}.rd.on i:after{content:"";position:absolute;inset:4px;background:var(--accent);border-radius:50%}
+.note{color:var(--mute);font-size:12px;margin-top:6px;line-height:1.45}
+.meta{display:flex;align-items:center;gap:8px;background:#232323;border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin-top:12px}
+.meta .ok{color:var(--ok)}
+.tree{border:1px solid var(--line);border-radius:6px;margin-top:8px;max-height:260px;overflow:hidden;background:#232323}
+.tree .hd,.tree .ln{display:grid;grid-template-columns:1fr 90px 90px;padding:6px 10px;align-items:center}
+.tree .hd{font-weight:600;border-bottom:1px solid var(--line);font-size:12px}
+.tree .ln{border-bottom:1px solid #2c2c2c}
+.cb{width:16px;height:16px;border:1.5px solid #888;border-radius:3px;display:inline-block;vertical-align:-3px;margin-right:8px;position:relative}
+.cb.on{background:var(--accent);border-color:var(--accent)}.cb.on:after{content:"✓";position:absolute;left:2px;top:-3px;color:#000;font-size:12px;font-weight:700}
+.cb.mid{border-color:var(--accent)}.cb.mid:after{content:"";position:absolute;left:3px;right:3px;top:6px;height:2px;background:var(--accent)}
+.r{text-align:right}.m{color:var(--mute)}
+.ind1{padding-left:22px}.ind2{padding-left:44px}
+.sum{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--mute)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.sel{background:var(--field);border:1px solid #444;border-radius:4px;padding:7px 10px;display:flex;justify-content:space-between}
+.foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 24px;background:#202020;border-top:1px solid var(--line);border-radius:0 0 8px 8px;margin-top:16px}
+.foot .b{min-width:120px;text-align:center}
+.chk{display:flex;align-items:center;margin-top:12px}
+</style></head><body>
+<div class="stage">
+ <div class="dlg">
+  <div class="in">
+   <h2>Add torrent</h2>
+   <label class="h">Magnet link or .torrent file</label>
+   <div class="row"><div class="tb">magnet:?xt=urn:btih:…&amp;dn=Blender%20open%20movies%20(4K%20masters)</div><span class="b">Choose file…</span></div>
+   <label class="h">Download with</label>
+   <div class="radios"><span class="rd on"><i></i>BitTorrent on this PC</span><span class="rd"><i></i>TorBox (your account)</span></div>
+   <div class="note">On this PC, other peers see your IP address, and the app uploads to them while it downloads. With TorBox, this PC downloads the files over HTTPS once TorBox has them.</div>
+   <div class="meta"><span class="ok">✓</span><span>Found the file list through 34 peers. 30 files, 41.7 GB, v1 + v2 hybrid.</span></div>
+   <label class="h">Files</label>
+   <div class="tree">
+    <div class="hd"><span><span class="cb mid"></span>Name</span><span class="r">Size</span><span class="r">Priority</span></div>
+    <div class="ln"><span><span class="cb mid"></span>📁 Blender open movies (4K masters)</span><span class="r">41.7 GB</span><span class="r m">mixed</span></div>
+    <div class="ln"><span class="ind1"><span class="cb on"></span>📁 Sprite Fright</span><span class="r">6.8 GB</span><span class="r">Normal</span></div>
+    <div class="ln"><span class="ind1"><span class="cb on"></span>📁 Charge</span><span class="r">5.1 GB</span><span class="r">High</span></div>
+    <div class="ln"><span class="ind2"><span class="cb on"></span>charge-4k-master.mkv</span><span class="r">4.9 GB</span><span class="r">High</span></div>
+    <div class="ln"><span class="ind2"><span class="cb on"></span>subtitles.zip</span><span class="r">1.2 MB</span><span class="r">Normal</span></div>
+    <div class="ln"><span class="ind1"><span class="cb"></span>📁 Cosmos Laundromat</span><span class="r m">12.3 GB</span><span class="r m">Skip</span></div>
+    <div class="ln"><span class="ind1"><span class="cb"></span>📁 Spring</span><span class="r m">8.9 GB</span><span class="r m">Skip</span></div>
+   </div>
+   <div class="sum"><span>12 of 30 files selected · 14.9 GB</span><span>Free on D: 612 GB</span></div>
+   <div class="grid">
+    <div><label class="h">Destination folder</label><div class="row"><div class="tb plain">D:\Downloads\Torrents</div><span class="b">Browse…</span></div></div>
+    <div><label class="h">Queue</label><div class="sel"><span>Main queue</span><span>⌄</span></div></div>
+   </div>
+   <div class="chk"><span class="cb on"></span>Start paused (choose when to start it from the list)</div>
+   <div class="chk"><span class="cb on"></span>Keep the torrent's top folder</div>
+  </div>
+  <div class="foot"><span class="b p">Add</span><span class="b">Cancel</span></div>
+ </div>
+</div>
+</body></html>

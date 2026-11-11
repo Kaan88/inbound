@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Main window torrents</title>
+<style>
+:root{--bg:#1c1c1c;--panel:#202020;--bar:#252525;--line:#2f2f2f;--text:#f2f2f2;--mute:#9a9a9a;--sel:#323232;--accent:#60cdff;--ok:#6ccb5f;--warn:#fce100;--bad:#ff6b6b;--orange:#f5a14a;--blue:#4f9cf5;--green:#6ccb5f;--red:#e87474;--purple:#b794f6;--up:#b794f6}
+*{box-sizing:border-box}body{margin:0;background:#0e0e0e;font:13px "Segoe UI",system-ui,sans-serif;color:var(--text);padding:20px}
+.win{width:1640px;height:940px;background:var(--bg);border:1px solid #333;display:flex;flex-direction:column;overflow:hidden}
+.title{height:30px;display:flex;align-items:center;padding:0 12px;color:#bbb;background:#171717}
+.title b{font-weight:400;margin-left:8px}.title .ctl{margin-left:auto;letter-spacing:28px;color:#999}
+.menu{height:40px;display:flex;align-items:center;padding:0 8px;background:var(--bg);border-bottom:1px solid var(--line)}
+.menu span{padding:0 14px;font-size:14px}
+.tool{height:68px;display:flex;align-items:center;padding:0 14px;background:var(--bar);border-bottom:1px solid var(--line);gap:4px}
+.btn{width:76px;text-align:center;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.btn.dis{opacity:.4}.btn i{width:26px;height:26px;border:2.5px solid;border-radius:6px;display:block}
+.sep{width:1px;height:46px;background:var(--line);margin:0 6px}.grow{flex:1}
+.body{flex:1;display:flex;min-height:0}
+.side{width:200px;border-right:1px solid var(--line);padding:10px 10px;background:var(--bg)}
+.side h4{margin:4px 8px 8px;font-size:13px}
+.it{padding:6px 10px;border-radius:5px;display:flex;gap:9px;align-items:center;margin:1px 0}
+.it.sub{padding-left:26px}.it.on{background:var(--sel);box-shadow:inset 3px 0 0 var(--accent)}
+.it i{width:11px;height:13px;border:1.8px solid;border-radius:2px;display:block}
+.it .n{margin-left:auto;color:var(--mute);font-size:12px}
+.gap{height:18px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+table{width:100%;border-collapse:collapse}
+th{font-weight:600;text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);background:var(--bg)}
+td{padding:9px 8px;border-bottom:1px solid #262626;white-space:nowrap;overflow:hidden}
+tr.sel td{background:#2b3a4a}
+.r{text-align:right}.bar{height:6px;background:#3a3a3a;border-radius:3px;width:130px;display:inline-block;vertical-align:middle;margin-right:8px}
+.bar b{display:block;height:100%;background:var(--accent);border-radius:3px}.bar b.seed{background:var(--green)}.bar b.paused{background:#777}
+.m{color:var(--mute)}.upc{color:var(--up)}
+.tag{font-size:11px;border:1px solid #444;border-radius:3px;padding:0 5px;margin-left:6px;color:var(--mute)}
+.graph{height:100px;border-top:1px solid var(--line);position:relative;background:#222;margin-top:auto}
+.graph .l{position:absolute;left:8px;font-size:11px;color:var(--mute)}
+.graph svg{position:absolute;left:76px;right:20px;top:6px;bottom:20px;width:calc(100% - 96px);height:74px}
+.axis{position:absolute;bottom:2px;left:76px;right:20px;display:flex;justify-content:space-between;font-size:11px;color:var(--mute)}
+.foot{height:24px;display:flex;align-items:center;padding:0 12px;gap:14px;font-size:12px;border-top:1px solid var(--line);background:var(--bg)}
+.foot em{color:var(--mute);font-style:normal}
+.status{height:26px;display:flex;align-items:center;padding:0 12px;font-size:12px;border-top:1px solid var(--line);background:var(--bg)}
+.status .rt{margin-left:auto;color:var(--mute);display:flex;gap:14px;align-items:center}
+.status .rep{background:#333;padding:3px 10px;border-radius:4px;color:var(--text)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px}
+.ctx{position:absolute;left:720px;top:318px;background:#2b2b2b;border:1px solid #3a3a3a;border-radius:8px;padding:4px;width:230px;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:13px}
+.ctx div{padding:7px 12px;border-radius:4px}.ctx div.h{background:#383838}.ctx hr{border:0;border-top:1px solid #3a3a3a;margin:4px 0}
+.ctx span{float:right;color:var(--mute);font-size:12px}
+.main{position:relative}
+</style></head><body>
+<div class="win">
+ <div class="title"><span>▣</span><b>Inbound Download Manager</b><span class="ctl">–▢✕</span></div>
+ <div class="menu"><span>Tasks</span><span>File</span><span>Downloads</span><span>View</span><span>Help</span></div>
+ <div class="tool">
+  <div class="btn"><i style="color:var(--accent);border:0;font-size:30px;line-height:24px;width:auto">+</i>Add URL</div><div class="sep"></div>
+  <div class="btn dis"><i style="color:var(--green)"></i>Resume</div>
+  <div class="btn"><i style="color:var(--orange)"></i>Stop</div>
+  <div class="btn"><i style="color:var(--orange)"></i>Stop All</div><div class="sep"></div>
+  <div class="btn"><i style="color:var(--red)"></i>Delete</div>
+  <div class="btn dis"><i style="color:var(--red)"></i>Delete Completed</div><div class="sep"></div>
+  <div class="btn"><i style="color:#ccc;border-radius:50%"></i>Options</div>
+  <div class="btn"><i style="color:var(--blue)"></i>Scheduler</div><div class="sep"></div>
+  <div class="btn dis"><i style="color:var(--green)"></i>Start Queue</div>
+  <div class="btn"><i style="color:var(--orange)"></i>Stop Queue</div>
+  <div class="grow"></div>
+  <div class="btn"><i style="color:var(--blue)"></i>This PC ⌄</div>
+ </div>
+ <div class="body">
+  <div class="side">
+   <h4>Categories</h4>
+   <div class="it"><i style="color:#ccc"></i>All Downloads</div>
+   <div class="it sub"><i style="color:var(--orange)"></i>Compressed</div>
+   <div class="it sub"><i style="color:#ccc"></i>Documents</div>
+   <div class="it sub"><i style="color:var(--purple)"></i>Music</div>
+   <div class="it sub"><i style="color:var(--green)"></i>Programs</div>
+   <div class="it sub"><i style="color:var(--red)"></i>Video</div>
+   <div class="it sub"><i style="color:#ccc"></i>Other</div>
+   <div class="gap"></div>
+   <div class="it">◔ Unfinished</div>
+   <div class="it sub"><span style="color:var(--blue)">⟳</span>Active</div>
+   <div class="it sub"><span style="color:var(--orange)">◷</span>Queued</div>
+   <div class="it sub"><span style="color:var(--red)">ⓘ</span>Failed</div>
+   <div class="it"><span style="color:var(--green)">✓</span>Finished</div>
+   <div class="it"><span style="color:var(--blue)">▤</span>Extractions</div>
+   <div class="it"><span>☰</span>Queues</div>
+   <div class="gap"></div>
+   <div class="it on"><span style="color:var(--accent)">⇅</span>Torrents<span class="n">5</span></div>
+   <div class="it sub"><span style="color:var(--blue)">↓</span>Downloading<span class="n">2</span></div>
+   <div class="it sub"><span style="color:var(--green)">↑</span>Seeding<span class="n">2</span></div>
+   <div class="it sub"><span style="color:#aaa">Ⅱ</span>Stopped<span class="n">1</span></div>
+  </div>
+  <div class="main">
+   <table>
+    <tr><th style="width:27%">Name</th><th>Q</th><th class="r">Size</th><th>Progress</th><th class="r">Seeds</th><th class="r">Peers</th><th class="r">Down</th><th class="r">Up</th><th class="r">Ratio</th><th>Time left</th><th>Added</th></tr>
+    <tr class="sel"><td>debian-13.2.0-amd64-DVD-1.iso</td><td>1</td><td class="r">3.9 GB</td><td><span class="bar"><b style="width:64%"></b></span>64%</td><td class="r">48 <span class="m">(212)</span></td><td class="r">9 <span class="m">(31)</span></td><td class="r">18.6 MB/s</td><td class="r upc">1.2 MB/s</td><td class="r">0.08</td><td>1 min 18 s</td><td>11 Nov 2026</td></tr>
+    <tr><td>Blender open movies (4K masters) <span class="tag">12 of 30 files</span></td><td>1</td><td class="r">41.7 GB</td><td><span class="bar"><b style="width:23%"></b></span>23%</td><td class="r">17 <span class="m">(64)</span></td><td class="r">4 <span class="m">(19)</span></td><td class="r">6.4 MB/s</td><td class="r upc">380 KB/s</td><td class="r">0.02</td><td>1 h 23 min</td><td>11 Nov 2026</td></tr>
+    <tr><td>archlinux-2026.11.01-x86_64.iso</td><td></td><td class="r">1.4 GB</td><td style="color:var(--ok)"><span class="bar"><b class="seed" style="width:100%"></b></span>Seeding</td><td class="r">0 <span class="m">(88)</span></td><td class="r">3 <span class="m">(14)</span></td><td class="r m">–</td><td class="r upc">640 KB/s</td><td class="r">0.71</td><td class="m">to ratio 1.0: 1 h</td><td>10 Nov 2026</td></tr>
+    <tr><td>internet-archive-public-domain-audio</td><td></td><td class="r">2.2 GB</td><td style="color:var(--ok)"><span class="bar"><b class="seed" style="width:100%"></b></span>Seeding</td><td class="r">0 <span class="m">(5)</span></td><td class="r">1 <span class="m">(2)</span></td><td class="r m">–</td><td class="r upc">22 KB/s</td><td class="r">1.38</td><td class="m">to 48 h: 31 h</td><td>9 Nov 2026</td></tr>
+    <tr><td>fedora-workstation-43-live-x86_64.iso</td><td>2</td><td class="r">2.6 GB</td><td class="m"><span class="bar"><b class="paused" style="width:8%"></b></span>Stopped · 8%</td><td class="r m">–</td><td class="r m">–</td><td class="r m">–</td><td class="r m">–</td><td class="r">0.00</td><td class="m">–</td><td>11 Nov 2026</td></tr>
+   </table>
+   <div class="ctx">
+    <div class="h">Torrent details…<span>Enter</span></div>
+    <div>Open folder</div>
+    <div>Choose files…</div>
+    <hr>
+    <div>Stop</div>
+    <div>Stop seeding now</div>
+    <div>Force recheck</div>
+    <div>Copy magnet link</div>
+    <hr>
+    <div>Move to queue ›</div>
+    <div>Set limits…</div>
+    <hr>
+    <div style="color:var(--bad)">Delete…</div>
+   </div>
+   <div class="graph">
+    <span class="l" style="top:6px">32 MB/s</span><span class="l" style="top:36px">16 MB/s</span><span class="l" style="top:66px">0 B/s</span>
+    <svg viewBox="0 0 1000 74" preserveAspectRatio="none">
+     <polyline fill="rgba(96,205,255,.18)" stroke="#60cdff" stroke-width="1.5" points="0,74 80,70 160,52 260,30 360,34 480,22 600,28 720,18 840,24 1000,22 1000,74"/>
+     <polyline fill="none" stroke="#b794f6" stroke-width="1.5" points="0,73 160,71 260,69 360,70 480,68 600,69 720,67 840,68 1000,68"/>
+    </svg>
+    <div class="axis"><span>−30 min</span><span>−22.5 min</span><span>−15 min</span><span>−7.5 min</span><span>Now</span></div>
+   </div>
+  </div>
+ </div>
+ <div class="foot"><span>⌄ Download speed</span><span>25.0 MB/s</span><em>Upload</em><span style="color:var(--up)">2.2 MB/s</span><em>Average</em><span>21.7 MB/s</span><em>Peak</em><span>29.3 MB/s</span><span style="margin-left:auto">30 min ⌃</span></div>
+ <div class="status"><span>This PC ⌄&nbsp;&nbsp;&nbsp;5 torrents · 2 downloading · 2 seeding · 1 stopped</span><span class="rt"><span><span class="dot"></span>Torrents on · port 51413 open · DHT 284 nodes</span>Host connected · 0.7.0 · browser integration on <span class="rep">Repair…</span></span></div>
+</div>
+</body></html>
