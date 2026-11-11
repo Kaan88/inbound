@@ -11,7 +11,8 @@
 - Do not stop to ask. Record anything that needs the owner under "Open for the owner" in `PROGRESS.md`, take the safer option, and continue.
 - Stop only if a task is impossible without the owner. Say which task and why.
 - Do not change unrelated finished features to make this easier.
-- No other providers, no direct hoster downloading, no BitTorrent engine, no plugin loader.
+- No other providers, no direct hoster downloading, no BitTorrent engine, no plugin loader. (This was the non-goal of the TorBox work. A
+  native torrent client is planned separately as an optional, off-by-default worker: ROADMAP T0 to T5 and `docs/plans/native-torrent-roadmap.md`.)
 
 ## Secrets
 
