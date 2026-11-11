@@ -4,6 +4,12 @@ Research only, 2026-11-11, against the shipped 0.6.7 tree (`main`). No code was 
 `docs/plans/torrent-mockups/` (open `index.html`). External claims carry a source number from the list at the
 end. Where no source exists, the text says **unsourced estimate** or **opinion**.
 
+> **Corrections (2026-11-11), from `native-torrent-engine-comparison.md`:** the 3.9 alpha of MonoTorrent has **no uTP** (no
+> release does; it is on `master` only, off by default); `csdl`'s "2.0" is its own version number and it bundles
+> libtorrent 2.0.11 (package 30.2 MB, 11 to 17 MB added per platform, not 5 to 9); MonoTorrent's IPv6 is only partial (no
+> IPv6 DHT); this report only considered libtorrent through a .NET binding, never as a native worker, which the owner has
+> since chosen. The recommendation below (MonoTorrent first) is **superseded**.
+
 ## Executive summary
 
 Today the app has no peer-to-peer code. A magnet or `.torrent` goes only to a provider account (TorBox). The provider

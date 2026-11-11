@@ -500,12 +500,12 @@ searching the account.
 
 ## Native torrent client (decided in principle, owner 2026-11-11; not started)
 
-Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-torrent-roadmap.md`; mockups: `docs/plans/torrent-mockups/`. Rule: when no torrent is downloading or seeding there is no torrent process, socket or timer. Owner decisions 2026-11-11: seeding yes; worker in the main Setup (10 MB size gate); Docker torrent ports in the example compose file; licence acceptable; the external-client account (T6) is dropped. The backend (MonoTorrent, libtorrent through a binding, aria2) is undecided and chosen in T0 behind an engine-neutral worker contract and the gate table in the roadmap.
+Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-torrent-roadmap.md`; mockups: `docs/plans/torrent-mockups/`. Rule: when no torrent is downloading or seeding there is no torrent process, socket or timer. Owner decisions 2026-11-11: seeding yes; worker in the main Setup (10 MB size gate); Docker torrent ports in the example compose file; licence acceptable; the external-client account (T6) is dropped. **Engine: libtorrent as a native C++ worker, no bake-off** (`docs/plans/native-torrent-engine-comparison.md`). Torrents on arm64 need arm64 Docker and AppImage builds, which do not exist yet for anything.
 
 | ID | Item | Status | Depends | Notes |
 | --- | --- | --- | --- | --- |
-| T0 | Backend bake-off behind the worker contract | not started, owner go needed | - | 1.5 to 2 weeks (opinion); gates: cold start, throughput vs qBittorrent, idle (PERF.4 method), size, packaging, protocols, fit |
-| T1 | Smallest slice: supervised on-demand worker, Options > Torrents (off), Add Torrent, Torrents category, download only | not started | T0 | 4 to 5 weeks (opinion) |
+| T0 | First native build and feasibility of the libtorrent worker | not started, owner go needed | - | 2.5 to 3 weeks (opinion); reproducible static builds for win-x64, linux-x64 and linux-arm64, stripped size against the 10 MB gate, patch path, crash containment, idle and throughput gates (roadmap section 3, gates 1 to 14) |
+| T1 | Smallest slice: supervised on-demand worker, Options > Torrents (off), Add Torrent, Torrents category, download only; packaging of the native worker into Setup, update zip, AppImage and Dockerfile | not started | T0 | 5 to 6 weeks (opinion) |
 | T2 | Seeding, limits, details window, firewall rule, UPnP toggle | not started | T1 | 3 to 4 weeks (opinion) |
 | T3 | Web UI and Docker | not started | T1 | 2 to 3 weeks (opinion) |
 | T4 | Linux desktop (AppImage) | not started | T1 | 1 week (opinion) |
