@@ -23,6 +23,13 @@ test('a copy whose ID came from its folder is told so, not told to update the ap
   assert.doesNotMatch(message, /^Update/);
 });
 
+test('a copy from a folder is pointed to the stores, not to an install folder the app no longer has', () => {
+  const message = connectionProblem(FORBIDDEN, FOLDER_ID);
+  assert.match(message, /Chrome Web Store/);
+  assert.match(message, /Microsoft Edge Add-ons/);
+  assert.doesNotMatch(message, /install folder|"extension" folder/);
+});
+
 for (const id of ['olhbcdbjdnfoiinllnlpandggadfabfm', 'ifoagddcenmjpbklkhghbdmgplldcdci', 'pknddmneejadnnngffojnoecojhdfalc']) {
   test(`an accepted ID refused by the app means the app is too old (${id})`, () => {
     assert.match(connectionProblem(FORBIDDEN, id), /^Update the Inbound Download Manager desktop app/);

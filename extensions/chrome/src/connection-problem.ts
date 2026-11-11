@@ -15,7 +15,7 @@ export function connectionProblem(
   extensionId: string | undefined = globalThis.chrome?.runtime?.id,
 ): string {
   if (isAppMissing(error)) {
-    return "This extension needs the Inbound Download Manager desktop app for Windows, which is not installed.";
+    return "This extension needs the Inbound Download Manager desktop app, which is not installed.";
   }
   if (/forbidden/i.test(error ?? "")) {
     // Updating the app cannot help a copy whose ID came from its own folder.
@@ -24,7 +24,7 @@ export function connectionProblem(
         extensionId !== FIREFOX_EXTENSION_ID) {
       return `The desktop app does not accept this copy of the extension (ID ${extensionId}). ` +
         "A store package loaded unpacked gets a new ID from its folder. " +
-        "Install from the Chrome Web Store, or load the \"extension\" folder from the app's install folder.";
+        "Install the extension from the Chrome Web Store (Chrome) or Microsoft Edge Add-ons (Edge).";
     }
     return "Update the Inbound Download Manager desktop app. The installed version does not recognise this extension.";
   }
