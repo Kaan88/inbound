@@ -35,7 +35,7 @@ with the XPI already signed:
 `-ReleaseTag vX.Y.Z -SignedXpi artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi`.
 Then build Setup (`scripts/build-installer.ps1`, which bundles that XPI).
 
-The Chrome Web Store (Chrome and Edge) is published with the Chrome Web Store API v2. Keep a second key
+The Chrome Web Store (Chrome) is published with the Chrome Web Store API v2. Keep a second key
 file outside the repository, `{ "client_id", "client_secret", "publisher_id", "refresh_token" }`: the OAuth
 client from Google Cloud (Chrome Web Store API enabled), the publisher ID from the Developer Dashboard
 (Publisher, Settings), and a refresh token that `scripts/chrome-store-auth.ps1 -KeysPath <file>` saves after
@@ -49,15 +49,23 @@ URI; a "Desktop app" client needs nothing). Then, after `scripts/package-extensi
 
 The store listing (screenshots, texts) is still edited in the dashboard.
 
+Edge has its own listing on Microsoft Edge Add-ons (Partner Center; store ID `0RDCKGXFWJ1N`). Edge assigns the
+extension its own ID (`ifoagddcenmjpbklkhghbdmgplldcdci`), which differs from Chrome's; the app trusts it
+(`BrowserBridge.EdgeStoreExtensionId`) from 0.6.7, so a release carrying that ID must be out before a listing goes live.
+Submit the zip from `scripts/package-extension-store.ps1` in Partner Center. There is no publish script for Edge yet
+(Microsoft's Edge Add-ons API can only update an existing product; keep any API credentials in environment
+variables or a file outside the repository).
+
 For version `X.Y.Z`, prepare from the already-built artifacts:
 
 ```powershell
 .\scripts\prepare-release.ps1 `
   -Version X.Y.Z `
-  -PrivateKeyPath "$env:USERPROFILE\.keys\download-manager-update.pem"
+  -PrivateKeyPath <path to update-signing.pem>
 ```
 
-Replace `X.Y.Z` with the release version and use the existing private key path.
+Replace `X.Y.Z` with the release version and use the existing private key. Keep a second, offline copy of it: no
+installed app accepts an update signed by any other key.
 
 The script expects `artifacts/installer/DownloadManagerSetup-X.Y.Z.exe`,
 `artifacts/package/download-manager-X.Y.Z.zip`, and the already-built
@@ -87,3 +95,19 @@ The output folder must not already exist. Failed preparation leaves its uniquely
 named `.vX.Y.Z.staging-*` folder in the scoped `artifacts/release` directory
 for review; remove only that exact staging folder after inspecting it before
 retrying.
+
+## Linux AppImage
+
+The AppImage is built on Linux x86_64 with the .NET 10 SDK and `appimagetool`: `scripts/package-appimage.sh` writes
+`artifacts/linux/Inbound-<version>-x86_64.AppImage`. Any Linux runner works; the project's own builds run on a
+self-hosted Forgejo Actions runner, not on GitHub. Sign it with the same key as the Windows manifest:
+
+```sh
+scripts/prepare-appimage-release.sh X.Y.Z artifacts/linux/Inbound-X.Y.Z-x86_64.AppImage <path to update-signing.pem>
+```
+
+That writes `artifacts/release/vX.Y.Z-linux/` with the AppImage, `manifest-linux-x64.json` and `SHA256SUMS-linux`.
+Upload all three with the Windows files. When a release does not rebuild the AppImage, still upload the previous
+`manifest-linux-x64.json` (it names the earlier release's AppImage) so that
+`releases/latest/download/manifest-linux-x64.json` keeps answering. The signed file must be the exact file uploaded:
+the manifest binds its size and SHA-256.
