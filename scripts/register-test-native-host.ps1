@@ -19,6 +19,7 @@ $key = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
 $marker = "Inbound Download Manager browser bridge (test registration)"
 $extensionOrigins = @(
     "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/",
+    "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/",
     "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/"
 )
 

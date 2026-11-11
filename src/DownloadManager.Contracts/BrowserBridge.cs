@@ -8,6 +8,10 @@ public static class BrowserBridge
     // The ID the Chrome Web Store assigned to the listing.
     public const string StoreExtensionId = "olhbcdbjdnfoiinllnlpandggadfabfm";
 
+    // The ID Microsoft Edge Add-ons assigned to the Edge listing (its CRX ID, derived from the public key
+    // Partner Center shows). It differs from the Chrome Web Store ID.
+    public const string EdgeStoreExtensionId = "ifoagddcenmjpbklkhghbdmgplldcdci";
+
     // Fixed by the manifest "key" of the unpacked build that Setup and the update package carry.
     public const string UnpackedExtensionId = "pknddmneejadnnngffojnoecojhdfalc";
 
@@ -15,6 +19,7 @@ public static class BrowserBridge
     public const string FirefoxExtensionId = "inbound-bridge@kaan88";
 
     public const string StoreExtensionOrigin = "chrome-extension://" + StoreExtensionId + "/";
+    public const string EdgeStoreExtensionOrigin = "chrome-extension://" + EdgeStoreExtensionId + "/";
     public const string UnpackedExtensionOrigin = "chrome-extension://" + UnpackedExtensionId + "/";
 
     // Chrome and Edge each look the native-messaging host up under their own HKCU key. Both keys hold
@@ -32,6 +37,7 @@ public static class BrowserBridge
     // Extension IDs are case-sensitive; Chrome always reports them in lower case.
     public static bool IsTrustedExtensionId(string? extensionId) =>
         string.Equals(extensionId, StoreExtensionId, StringComparison.Ordinal) ||
+        string.Equals(extensionId, EdgeStoreExtensionId, StringComparison.Ordinal) ||
         string.Equals(extensionId, UnpackedExtensionId, StringComparison.Ordinal) ||
         string.Equals(extensionId, FirefoxExtensionId, StringComparison.Ordinal);
 
@@ -39,6 +45,7 @@ public static class BrowserBridge
     {
         var trimmed = origin?.TrimEnd('/');
         return string.Equals(trimmed, StoreExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, EdgeStoreExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ||
             string.Equals(trimmed, UnpackedExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
     }
 

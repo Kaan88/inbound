@@ -9,6 +9,7 @@ public sealed class BrowserBridgeTests
 {
     [Theory]
     [InlineData("olhbcdbjdnfoiinllnlpandggadfabfm")]
+    [InlineData("ifoagddcenmjpbklkhghbdmgplldcdci")]
     [InlineData("pknddmneejadnnngffojnoecojhdfalc")]
     public void Trusts_the_store_and_unpacked_extension_ids(string id) =>
         Assert.True(BrowserBridge.IsTrustedExtensionId(id));
@@ -25,6 +26,7 @@ public sealed class BrowserBridgeTests
     [Theory]
     [InlineData("chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/")]
     [InlineData("chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm")]
+    [InlineData("chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/")]
     [InlineData("chrome-extension://pknddmneejadnnngffojnoecojhdfalc/")]
     public void Trusts_the_store_and_unpacked_origins(string origin) =>
         Assert.True(BrowserBridge.IsTrustedOrigin(origin));
@@ -81,6 +83,21 @@ public sealed class BrowserBridgeTests
         Assert.Contains(BrowserBridge.StoreExtensionId, text);
         Assert.Contains(BrowserBridge.UnpackedExtensionId, text);
     }
+
+    [Theory]
+    [InlineData("scripts", "register-native-host.ps1")]
+    [InlineData("extensions", "chrome", "src", "connection-problem.ts")]
+    public void Edge_store_id_is_listed_where_the_ids_are(params string[] path) =>
+        Assert.Contains(BrowserBridge.EdgeStoreExtensionId, RepoFile(path));
+
+    [Fact]
+    public void Edge_store_id_is_in_the_installer_manifest() =>
+        Assert.Contains("EdgeStoreExtensionId \"" + BrowserBridge.EdgeStoreExtensionId + "\"", RepoFile("installer", "DownloadManager.iss"));
+
+    [Fact]
+    public void The_Edge_public_key_gives_the_trusted_Edge_id() =>
+        Assert.Equal(BrowserBridge.EdgeStoreExtensionId, IdFromKey(
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAohOOQgwjEzgy/q20y+BvyDM0qpYk/nIO4cMELSzqa0vxKqcAZ917r+U5+KfLVebxtcIRI3nPoxMy/7uIrmwY5nsh9VKxOArUopwR3b0PP0Mosl3HKZjCiVX7y8dlqRalCxKcshcPXpTw3UBORndrYg/e7rmJdAK6yiOYpxqAIA7e5vBwsDQRg6bHhimU+3sMox8WfQEcZhwSFyxWW9O2PXpSmbLC4q2PwmkWv9uUGpQY0CqqCM/Egu8Tu3egx26JrYLfjDOdLaNcr8Wsml1cNmJvN74xR4RUS6K3O1wEKAaRSJGeDvqn3cjV2LoLlwS095teNE+KGSfkkRweyHZ4lQIDAQAB"));
 
     [Theory]
     [InlineData("installer", "DownloadManager.iss")]

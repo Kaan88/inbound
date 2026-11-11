@@ -7,9 +7,10 @@ param(
 $ErrorActionPreference = "Stop"
 $hostName = "com.kaank.downloadmanager"
 # The Chrome Web Store listing, and the unpacked build that Setup and the update package carry.
-# Edge users install the same store listing, so the same IDs apply in both browsers.
+# Edge has its own listing (its own ID); Edge users can also install the Chrome Web Store listing.
 $extensionOrigins = @(
     "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/",
+    "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/",
     "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/"
 )
 # Chrome and Edge each read their own key; both point at the same manifest file. Keep in step with

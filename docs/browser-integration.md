@@ -50,18 +50,19 @@ Chrome version during Phase 4.
 8. **Extension identity is fixed by the manifest `key`.** The native-host
    manifest must list exactly our extension origins. The Chrome Web Store refuses
    a first upload that has a `key` and assigns its own ID, so the store zip
-   (`scripts\package-extension-store.ps1`) has none. The native side trusts two IDs:
-   the store's (`olhbcdbjdnfoiinllnlpandggadfabfm`) and the unpacked build's (`pknddmneejadnnngffojnoecojhdfalc`).
+   (`scripts\package-extension-store.ps1`) has none. The native side trusts three IDs:
+   Chrome's store (`olhbcdbjdnfoiinllnlpandggadfabfm`), Edge's store (`ifoagddcenmjpbklkhghbdmgplldcdci`) and the unpacked build's (`pknddmneejadnnngffojnoecojhdfalc`).
    See `docs/chrome-store/LISTING.md`.
 
 ## Edge
 
 Edge is a supported browser (owner decision 2026-11-06). It runs the same extension and the same native host.
 
-- **Install route.** Edge users install the extension from the Chrome Web Store. Edge may ask to allow
-  extensions from other stores; that prompt has not been checked in Edge. The ID is therefore the store's, `olhbcdbjdnfoiinllnlpandggadfabfm`, and
-  needs no new `allowed_origins` entry. A separate Edge Add-ons listing is parked (ROADMAP EXT.S1) because
-  the owner cannot enroll in the Edge program.
+- **Install route.** Edge has its own listing on Microsoft Edge Add-ons (store ID `0RDCKGXFWJ1N`, extension ID
+  `ifoagddcenmjpbklkhghbdmgplldcdci`, which Edge assigned; it differs from Chrome's). Setup's last page and `INSTALL.txt` link it
+  beside the Chrome one. Edge can also install the Chrome Web Store listing (it may ask to allow extensions from other stores;
+  not checked in Edge), whose ID `olhbcdbjdnfoiinllnlpandggadfabfm` is also accepted. The native-host manifest lists both store
+  origins, and a manifest without the Edge one counts as broken until Repair or a Setup upgrade rewrites it.
 - **Registration.** Edge looks the native host up under its own key,
   `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager`, beside Chrome's under
   `Google\Chrome`. Setup and `register-native-host.ps1` (used by install, repair and the in-app updater) write

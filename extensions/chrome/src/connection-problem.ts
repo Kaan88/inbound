@@ -1,5 +1,6 @@
-// The IDs the desktop app accepts: BrowserBridge.cs holds the same three. Only these can connect.
+// The IDs the desktop app accepts: BrowserBridge.cs holds the same four. Only these can connect.
 const STORE_EXTENSION_ID = "olhbcdbjdnfoiinllnlpandggadfabfm";
+const EDGE_STORE_EXTENSION_ID = "ifoagddcenmjpbklkhghbdmgplldcdci";
 const UNPACKED_EXTENSION_ID = "pknddmneejadnnngffojnoecojhdfalc";
 const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 
@@ -18,7 +19,8 @@ export function connectionProblem(
   }
   if (/forbidden/i.test(error ?? "")) {
     // Updating the app cannot help a copy whose ID came from its own folder.
-    if (extensionId && extensionId !== STORE_EXTENSION_ID && extensionId !== UNPACKED_EXTENSION_ID &&
+    if (extensionId && extensionId !== STORE_EXTENSION_ID && extensionId !== EDGE_STORE_EXTENSION_ID &&
+        extensionId !== UNPACKED_EXTENSION_ID &&
         extensionId !== FIREFOX_EXTENSION_ID) {
       return `The desktop app does not accept this copy of the extension (ID ${extensionId}). ` +
         "A store package loaded unpacked gets a new ID from its folder. " +

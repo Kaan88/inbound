@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.6.6",
+    [string]$Version = "0.6.7",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -113,8 +113,10 @@ Inbound Download Manager installed at:
   $appDir
 
 Browser extension:
-  Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store:
+  Chrome: install Inbound Download Manager Bridge from the Chrome Web Store:
     https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm
+  Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:
+    https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci
   Or, in Chrome, load the unpacked copy:
   1. Open chrome://extensions
   2. Enable Developer mode

@@ -84,7 +84,7 @@ internal static class LinuxNativeMessaging
         ["description"] = "Inbound Download Manager browser bridge",
         ["path"] = launcher,
         ["type"] = "stdio",
-        ["allowed_origins"] = new JsonArray(BrowserBridge.StoreExtensionOrigin, BrowserBridge.UnpackedExtensionOrigin),
+        ["allowed_origins"] = new JsonArray(BrowserBridge.StoreExtensionOrigin, BrowserBridge.EdgeStoreExtensionOrigin, BrowserBridge.UnpackedExtensionOrigin),
     };
 
     private static JsonObject FirefoxManifest(string launcher) => new()

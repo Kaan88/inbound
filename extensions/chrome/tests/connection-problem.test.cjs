@@ -23,7 +23,7 @@ test('a copy whose ID came from its folder is told so, not told to update the ap
   assert.doesNotMatch(message, /^Update/);
 });
 
-for (const id of ['olhbcdbjdnfoiinllnlpandggadfabfm', 'pknddmneejadnnngffojnoecojhdfalc']) {
+for (const id of ['olhbcdbjdnfoiinllnlpandggadfabfm', 'ifoagddcenmjpbklkhghbdmgplldcdci', 'pknddmneejadnnngffojnoecojhdfalc']) {
   test(`an accepted ID refused by the app means the app is too old (${id})`, () => {
     assert.match(connectionProblem(FORBIDDEN, id), /^Update the Inbound Download Manager desktop app/);
   });

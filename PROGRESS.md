@@ -1,5 +1,18 @@
 ﻿# Progress — session handoff
 
+### Edge ID to-do, Windows part (2026-11-11, `linux-host`)
+
+- Steps 1 and 2 done on this PC: the Integration tests filtered to BrowserBridge and NativeHost pass (114 of 114), and `scriptsuild-installer.ps1 -NoFirefoxXpi` builds `DownloadManagerSetup-0.6.6.exe` (62.2 MB, Inno compile successful with the Edge origin in the manifest text). The built Setup was not installed, so the written manifest was not read back.
+- Step 3 decided by the owner (2026-11-11, "Yes, require it") and built: `NativeHostRegistrationState.IsManifestUsable` now needs both the Chrome and the Edge store origins, so an installed 0.6.6 whose manifest lacks the Edge origin reads "Chrome registration is broken" until Repair (it runs `register-native-host.ps1 -Force`, which writes both) or a Setup upgrade. Tests: a Chrome-only manifest is Broken; BrowserBridge, NativeHost and RuntimeServiceNativeHostStatus tests pass (115 of 115). Steps 4 to 7 still open.
+
+### Edge Add-ons submission and Edge extension ID (2026-11-10, `linux-host`) — CONTINUE ON WINDOWS
+
+- Owner submitted the extension to Microsoft Edge Add-ons (Partner Center), now pending review. Package: `artifacts\chrome-store\inbound-bridge-0.6.1-chrome.zip` (built with `scripts\package-extension-store.ps1 -NoBuild`; not committed). Store ID `0RDCKGXFWJ1N`, product ID `fe0ff30d-0da1-44a4-a540-9925a198cce6`. The owner's Privacy-tab text came from `docs/chrome-store/LISTING.md`.
+- Edge assigned its own CRX ID `ifoagddcenmjpbklkhghbdmgplldcdci`. It matches the public key Partner Center shows (checked by computing the ID from the key). Different from the Chrome Web Store ID, so the app refused it until now.
+- Changed, **untested on Windows**: `BrowserBridge.EdgeStoreExtensionId/Origin` (trusted as ID and origin), `installer\DownloadManager.iss` (`EdgeStoreExtensionId`, in `allowed_origins`), `scripts\register-native-host.ps1` and `register-test-native-host.ps1`, `Host.Linux\LinuxNativeMessaging.cs`, `extensions\chrome\src\connection-problem.ts`, and tests in `BrowserBridgeTests.cs`. Extension tests pass (244/244, `tsc` clean). The C# tests, the installer build and the scripts were NOT run: no `dotnet` on Linux, and `C:\dotnet` was gone on the WinApps VM.
+- **To do on Windows:** (1) `dotnet test` the Integration tests (BrowserBridge, NativeHostRegistration, NativeHostBridge); (2) build the installer; (3) upgrade gap: an installed 0.6.6 manifest lists only the Chrome store and unpacked origins, and `NativeHostRegistrationState.IsManifestUsable` accepts it, so Host repair will not add the Edge origin; only a Setup upgrade rewrites it. Decide whether `IsManifestUsable`/repair should require the Edge origin; (4) release a new app version with this ID BEFORE the Edge listing goes live; (5) once approved, install from Edge's store and check it connects; (6) then ROADMAP EXT.E1 and `docs/browser-integration.md`/`README.md` (which still say Edge uses the Chrome listing, ID `olhbcdbjdnfoiinllnlpandggadfabfm`) need updating; (7) optional: an Edge publish API script (first submission is manual; the API only updates an existing product; credentials only through `EDGE_CLIENT_ID`, `EDGE_API_KEY`, `EDGE_PRODUCT_ID` env vars, never in chat or files).
+- Also added `docs/new-frontend-guide.md` (written by a side agent, not reviewed in depth; its feature checklist was not checked against the WinUI code) and a pointer to it in `CLAUDE.md`.
+
 ### Owner checks marked done (2026-11-11)
 
 - Owner, 2026-11-11: "check these as done" for the open Linux items: a real browser with the extension through the AppImage's native host; sign-in start and the power actions (power off, restart, sign out); and UI.B22 (Progress Details graph slides in). Recorded in ROADMAP (UI.B22, D7). I did not run these myself; they rest on the owner's word.
@@ -143,7 +156,7 @@
 
 - Extension 0.5.2 (owner, 2026-11-08: the 0.5.1 upload to Firefox Add-ons went in unlisted, and a listed one needs a new version). It adds the pairing-path wording on top of 0.5.1; 161 extension tests pass. Zips for both stores are in the main checkout under artifacts, chrome-store and firefox-addon. The Firefox privacy-policy field took the policy text, not a link; addons.mozilla.org answered a first, longer paste with 406 Not Acceptable (cause not known).
 - Owner, 2026-11-08: 0.5.1 is waiting for Chrome Web Store review; the Chrome listing moves to 0.5.2 later. The bump is on `main` (0c99668).
-- **Released 2026-11-08** (tag `v0.6.2`, squashed to `main` as 541056b without the local-only docs). The assets were built from that commit (binaries `0.6.2+541056b`), not from `dev`: a first build from `dev` carried a local-only doc in the package and was deleted before upload. Checks: checksums and signature verified, the latest feed serves 0.6.2, Setup's hash on GitHub matches, the token scan found nothing, the Docker image workflow for `v0.6.2` passed. Assets: `artifacts\release\v0.6.2\` in the main checkout. The extension is unchanged (0.5.1).
+- **Released 2026-11-08** (tag `v0.6.2`, squashed to `main` as 541056b without the Komodo guide and the mini PC record). The assets were built from that commit (binaries `0.6.2+541056b`), not from `dev`: a first build from `dev` carried `docs/komodo.md` in the package and was deleted before upload. Checks: checksums and signature verified, the latest feed serves 0.6.2, Setup's hash on GitHub matches, the token scan found nothing, the Docker image workflow for `v0.6.2` passed. Assets: `artifacts\release\v0.6.2\` in the main checkout. The extension is unchanged (0.5.1).
 - Owner, 2026-11-08: "Just finish what's left and make a final release." Done for 0.6.2: UI.B12 (a Host started beside an exiting one takes over instead of quitting), UI.R23 (1), (2), (4), (6), PERF.7 (short-lived clients skip the snapshot), TEST.4 (cause found: the first `WM_CLOSE` went to Options; scripts fixed), UI.B9 (not reproduced). UI.R23 (5) is not built, because the row says only if wanted.
 - Built in four worktrees, each reviewed by two adversarial reviewers and fixed. Merged onto `dev` by cherry-pick (the worktrees had been cut from `main`). A review of the merge found that the PERF.7 no-events probe missed the exiting broadcast; an exiting Host now answers `host.openUi` with `host.exiting`, with a test that fails without the fix.
 - Every suite passed on the merged tree (`artifacts\campaign\20261108-062\`): Core 912, Engine 162, Integration 1,294, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 47, svelte-check 0 errors. After the merge fix, the dispatcher, restart and hello-pipe tests passed 41 of 41, before the full Integration rerun.
@@ -152,9 +165,6 @@
 ### 0.6.1 released; server running on the owner's mini PC (2026-11-08)
 
 - 0.6.1 is on GitHub (tag `v0.6.1`, squashed to `main`). The assets are in `artifacts\release\v0.6.1\`. Checks: signature and checksums verified, the latest feed serves 0.6.1, Setup's hash on GitHub matches, binaries are `0.6.1+f460462`, and the token scan found nothing. The Docker image workflow for `v0.6.1` passed. Extension 0.5.1 zips for the owner: `artifacts\chrome-store\` and `artifacts\firefox-addon\`.
-
-
-- Found on the way: the pairing path "Settings, Paired browsers" named a heading, not a tab. The tab is "Sign-in and browsers". Fixed in the extension's options page and pairing error, and in the server's wrong-code message; these ship with the next release. Extension 161 and Server 86 tests pass.
 
 ### 0.6.1 release preparation (2026-11-08, `dev`)
 

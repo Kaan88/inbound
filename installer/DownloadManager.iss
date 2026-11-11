@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.6.6"
+  #define AppVersion "0.6.7"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -22,8 +22,10 @@
 #define NativeHostName "com.kaank.downloadmanager"
 #define ExtensionId "pknddmneejadnnngffojnoecojhdfalc"
 #define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
+#define EdgeStoreExtensionId "ifoagddcenmjpbklkhghbdmgplldcdci"
 #define FirefoxExtensionId "inbound-bridge@kaan88"
 #define ChromeStoreUrl "https://chromewebstore.google.com/detail/" + StoreExtensionId
+#define EdgeStoreUrl "https://microsoftedge.microsoft.com/addons/detail/" + EdgeStoreExtensionId
 ; EXT.S4: the Firefox add-on is self-distributed. build-installer.ps1 passes /DFirefoxXpi=<signed XPI>; Setup
 ; installs it as {app}\firefox\{#FirefoxXpiName}, and Firefox updates it from the manifest's update_url.
 #define FirefoxXpiName "inbound-bridge.xpi"
@@ -107,7 +109,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
-Filename: "{#ChromeStoreUrl}"; Description: "Open the extension in the Chrome Web Store (Chrome, Edge)"; Flags: postinstall shellexec skipifsilent unchecked nowait
+Filename: "{#ChromeStoreUrl}"; Description: "Open the extension in the Chrome Web Store (Chrome)"; Flags: postinstall shellexec skipifsilent unchecked nowait
+Filename: "{#EdgeStoreUrl}"; Description: "Open the extension in Microsoft Edge Add-ons (Edge)"; Flags: postinstall shellexec skipifsilent unchecked nowait
 #ifdef FirefoxXpi
 ; Firefox opens the XPI and asks the user to add it. Ticked when Firefox is installed and no profile in the
 ; usual place has the add-on yet. Where one has it, offered unticked: a copy older than
@@ -311,7 +314,7 @@ begin
     '  "description": "{#AppName} browser bridge",' + #13#10 +
     '  "path": "' + JsonEscape(Root + '\app\DownloadManager.NativeHost.exe') + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
-    '  "allowed_origins": [ "chrome-extension://{#StoreExtensionId}/", "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
+    '  "allowed_origins": [ "chrome-extension://{#StoreExtensionId}/", "chrome-extension://{#EdgeStoreExtensionId}/", "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
     '}');
   WriteUtf8(ManifestDir + '\{#NativeHostName}.firefox.json',
     '{' + #13#10 +
@@ -326,9 +329,10 @@ begin
     '{#AppName} {#AppVersion} is installed in:' + #13#10 +
     '  ' + Root + '\app' + #13#10 + #13#10 +
     'Add the extension to your browser (one time).' + #13#10 + #13#10 +
-    'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store:' + #13#10 +
-    '  {#ChromeStoreUrl}' + #13#10 +
-    'Edge may ask you to allow extensions from other stores.' + #13#10 + #13#10 +
+    'Chrome: install Inbound Download Manager Bridge from the Chrome Web Store:' + #13#10 +
+    '  {#ChromeStoreUrl}' + #13#10 + #13#10 +
+    'Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:' + #13#10 +
+    '  {#EdgeStoreUrl}' + #13#10 + #13#10 +
 #ifdef FirefoxXpi
     'Firefox: drag this file onto a Firefox window, or open Add-ons and themes,' + #13#10 +
     'the gear menu, Install Add-on From File, and choose it. Firefox updates it after that:' + #13#10 +

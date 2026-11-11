@@ -15,10 +15,14 @@ namespace DownloadManager.Integration.Tests;
 public sealed class NativeHostRegistrationTests
 {
     private const string StoreOnly =
+        """{ "name": "com.kaank.downloadmanager", "path": "host.exe", "allowed_origins": [ "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/", "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/" ] }""";
+
+    // A manifest written before the Edge listing's ID: Chrome's store origin only.
+    private const string ChromeStoreOnly =
         """{ "name": "com.kaank.downloadmanager", "path": "host.exe", "allowed_origins": [ "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/" ] }""";
 
     private const string StoreAndUnpacked =
-        """{ "path": "host.exe", "allowed_origins": [ "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/", "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/" ] }""";
+        """{ "path": "host.exe", "allowed_origins": [ "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/", "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/", "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/" ] }""";
 
     private const string UnpackedOnly =
         """{ "path": "host.exe", "allowed_origins": [ "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/" ] }""";
@@ -68,6 +72,7 @@ public sealed class NativeHostRegistrationTests
     [InlineData(Ours, StoreAndUnpacked, true, NativeHostKeyState.Usable)]
     [InlineData(Ours, null, false, NativeHostKeyState.Broken)]
     [InlineData(Ours, UnpackedOnly, true, NativeHostKeyState.Broken)]
+    [InlineData(Ours, ChromeStoreOnly, true, NativeHostKeyState.Broken)]
     [InlineData(Ours, StoreOnly, false, NativeHostKeyState.Broken)]
     [InlineData(Ours, "not json", true, NativeHostKeyState.Broken)]
     [InlineData(Ours, """{ "allowed_origins": "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/" }""", true, NativeHostKeyState.Broken)]
@@ -100,7 +105,7 @@ public sealed class NativeHostRegistrationTests
     public void Origins_are_compared_without_regard_to_case()
     {
         Assert.True(NativeHostRegistrationState.IsManifestUsable(
-            """{ "allowed_origins": [ "CHROME-EXTENSION://OLHBCDBJDNFOIINLLNLPANDGGADFABFM/" ] }"""));
+            """{ "allowed_origins": [ "CHROME-EXTENSION://OLHBCDBJDNFOIINLLNLPANDGGADFABFM/", "CHROME-EXTENSION://IFOAGDDCENMJPBKLKHGHBDMGPLLDCDCI/" ] }"""));
     }
 
     [Fact]
@@ -469,10 +474,12 @@ public sealed class NativeHostRegistrationTests
     }
 
     [Fact]
-    public void Setup_does_not_state_an_unverified_edge_prompt_as_fact()
+    public void Setup_links_the_edge_listing_beside_chromes_and_does_not_state_an_unverified_prompt_as_fact()
     {
         var iss = Read(@"installer\DownloadManager.iss");
-        Assert.Contains("Edge may ask you to allow extensions from other stores.", iss);
+        Assert.Contains("#define EdgeStoreUrl \"https://microsoftedge.microsoft.com/addons/detail/\" + EdgeStoreExtensionId", iss);
+        Assert.Contains("Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:", iss);
+        Assert.Contains("Filename: \"{#EdgeStoreUrl}\"", iss);
         Assert.DoesNotContain("Edge asks you", iss);
     }
 

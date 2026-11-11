@@ -81,8 +81,9 @@ public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chr
     }
 
     /// <summary>
-    /// A manifest is usable when it names the store extension as an allowed origin. One written before
-    /// the store ID existed would block the store extension, so it does not count.
+    /// A manifest is usable when it names both store extensions (Chrome's and Edge's) as allowed origins.
+    /// One written before either ID existed would block that store's extension, so it does not count;
+    /// Repair rewrites it.
     /// </summary>
     public static bool IsManifestUsable(string? manifestText)
     {
@@ -101,15 +102,19 @@ public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chr
                 return false;
             }
 
-            return origins.EnumerateArray().Any(o =>
-                o.ValueKind == JsonValueKind.String &&
-                string.Equals(o.GetString(), BrowserBridge.StoreExtensionOrigin, StringComparison.OrdinalIgnoreCase));
+            return HasOrigin(origins, BrowserBridge.StoreExtensionOrigin) &&
+                HasOrigin(origins, BrowserBridge.EdgeStoreExtensionOrigin);
         }
         catch (JsonException)
         {
             return false;
         }
     }
+
+    private static bool HasOrigin(JsonElement origins, string origin) =>
+        origins.EnumerateArray().Any(o =>
+            o.ValueKind == JsonValueKind.String &&
+            string.Equals(o.GetString(), origin, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The program a manifest names, resolved against the manifest's folder; null when it names none.</summary>
     public static string? ManifestExecutable(string? manifestText, string manifestPath)

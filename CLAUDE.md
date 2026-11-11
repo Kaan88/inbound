@@ -64,6 +64,8 @@ extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
 handoffs completed with matching SHA-256 hashes. The extension is at
 `extensions\chrome\dist` and can be loaded unpacked in normal Chrome.
 
+Building or changing a frontend (another GUI, a new window toolkit)? Read `docs/new-frontend-guide.md` first: it lists the client contract, the feature checklist and the rules.
+
 ## Architecture
 
 One per-user **Host** process owns engine, persistence, scheduler, tray, and IPC.
