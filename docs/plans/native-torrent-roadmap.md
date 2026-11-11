@@ -1,6 +1,7 @@
 # Native torrent client: implementation roadmap
 
-Status: proposal, not started (owner, 2026-11-11: "plan a roadmap ... not sure of the backend ... the idea of it being
+Status: decided in principle, not started. Owner decisions of 2026-11-11 are in section 6; the plan runs T0 to T5 (the external-client
+account, T6, is dropped). Origin (owner, 2026-11-11: "plan a roadmap ... not sure of the backend ... the idea of it being
 disabled when no torrents are active is good"). Based on `docs/plans/native-torrent-research.md` (read its executive
 summary first) and `docs/plans/torrent-mockups/`. Effort figures are opinions, not measurements.
 
@@ -65,34 +66,41 @@ set before anything is measured. Candidates:
 | A. MonoTorrent in the worker | MIT, pure C#, same language, trivial arm64, ~1-2 MB (estimate) | thin release cadence, uTP in stable not verified, timer runs even with no torrents (fine: the worker exits) |
 | B. libtorrent-rasterbar through a .NET binding | reference engine, full protocols, BSD | third-party binding, native library per platform, packaging into the AppImage and image |
 | C. aria2 (its own RPC) as the engine | tiny, simple | dormant releases, no mention of uTP or BitTorrent v2 in its manual, GPL (separate process) |
-| (not a candidate) bundling qBittorrent or Transmission | 69 MiB for qBittorrent's static Linux build, GPL | would roughly double the AppImage |
+| (not a candidate) bundling qBittorrent or Transmission | 69 MiB for qBittorrent's static Linux build, GPL | cannot meet the size gate |
 
-Gates (proposed; the owner may change the numbers before T0 starts):
+Gates. These numbers are my proposals, anchored on figures the repository already measured (PERF.4: the Host idles at about
+0.17% of one core and 12 context switches/s; the Docker container idles at 34 to 54 MiB against a 100 MB target; Setup is
+about 62 MB, the AppImage about 70 MB). They are opinions, to be changed before T0 starts if you disagree. Every row is
+measured with the PERF.4 method (30 minutes, 10 s sampling) on the same machine, and recorded in PROGRESS.
 
-1. **Cold start to first piece** on a public Linux ISO magnet: reasonable on a normal connection (record the number).
-2. **Throughput** within an agreed share of qBittorrent on the same torrent and machine (record both).
-3. **Idle**: worker alive with 0 torrents, with 1 and with 20 seeding: CPU, wake-ups, disk IO, memory, sampled 30 minutes
-   at 10 s (the PERF.4 method). Off must be exactly zero, which the lifecycle guarantees.
-4. **Size**: added MB to the Setup, the update zip, the AppImage and the Docker image.
-5. **Packaging**: self-contained publish works; trimming/AOT result recorded; Linux x64 and arm64 both run.
-6. **Protocols**: DHT, PEX, magnet metadata, MSE, selective files, IPv6, uTP (yes/no), v2/hybrid (yes/no).
-7. **Fit**: per-file selection, resume blob round trip, speed limits applied from the Host, clean shutdown.
+| # | Gate | Proposed pass line |
+| --- | --- | --- |
+| 1 | **Feature off** | no torrent process, socket or timer; Host idle CPU, context switches, I/O and memory within measurement noise of the build without the feature (about +0.02% of a core, +1 switch/s, 0 added I/O operations) |
+| 2 | **Seeding, 1 torrent with no peers transferring** | worker at most 1% of one core on average and 100 context switches/s; no disk writes beyond one resume checkpoint per 5 minutes; memory at most 80 MB |
+| 3 | **Seeding, 20 torrents** | at most 150 MB and 3% of one core on average |
+| 4 | **Throughput** | at least 80% of qBittorrent's median of three runs, same torrent, machine and connection |
+| 5 | **Cold start to first piece** | magnet to first piece at most 15 s with a warm DHT cache, at most 45 s cold, on a healthy public swarm |
+| 6 | **Size** | added to each of Setup, the update zip, the AppImage and the Docker image: at most 10 MB |
+| 7 | **Docker** | container with the feature off unchanged from today; with 5 seeding torrents under 100 MiB in total |
+| 8 | **Soak** | 24 hours seeding: memory growth at most 5% after the first hour, handles flat, no unbounded log |
+| 9 | **Resume** | kill the worker mid-download and restart: continues within seconds; loses no more than one checkpoint interval |
+| 10 | **Packaging and protocols** | self-contained publish runs on Windows x64, Linux x64 and Linux arm64; DHT, PEX, magnet metadata, MSE, selective files and IPv6 work; uTP and v2/hybrid recorded as yes or no |
+| 11 | **Fit** | per-file selection, speed limits from the Host, clean shutdown, resume blob round trip |
 
-**Decision rule.** Take A if it passes every gate. If it fails only on protocols or maintenance, take B. If neither
-passes the idle and size gates, **do not build a native client**; do the "connect to my qBittorrent/Transmission"
-account (phase T6) instead, which costs the app nothing at idle.
+**Decision rule.** Take A (MonoTorrent) if it passes every row. If it fails only rows 4 or 10 or on maintenance, take B
+(libtorrent). If neither passes rows 1 to 3 and 6, **do not build a native client**: record the numbers and stop (there is
+no fallback phase).
 
 ## 4. Phases
 
 | Phase | Deliverable | Effort (opinion) | Exit gate |
 | --- | --- | --- | --- |
 | **T0. Bake-off** | the contract as a small library with a fake engine, one worker per candidate, the measurements above, a written decision in PROGRESS | 1.5 to 2 weeks | decision recorded; owner says go or no-go |
-| **T1. Smallest useful slice** | Host supervises the worker with the lifecycle above; `torrents` capability flag; Options > Torrents (off); Add Torrent dialog (magnet or file, file tree, destination, start paused); Torrents category; download to completion; seeding off; outgoing connections only; no firewall rule | 4 to 5 weeks | Integration test against a loopback seeder and tracker; kill-switch test (no process, no socket); idle comparison with and without the feature compiled in |
-| **T2. Seeding and control** | ratio and time limits, upload limit sharing the global budget, queues and scheduler semantics, details window (Files, Peers, Trackers, Pieces & Speed), firewall rule through the existing UAC flow, UPnP/NAT-PMP toggle, extraction waits until a torrent's download has finished | 3 to 4 weeks | scheduler and quota tests; firewall rule tests; 24-hour seeding soak with flat memory |
-| **T3. Web UI and Docker** | Torrents in the web UI including phone width, upload through the existing `/api/upload/torrent`, compose ports documented, UPnP off by default in the image, arm64 check | 2 to 3 weeks | `npm run screens` walk at 1360 and 390 px, vitest, container idle measurement against the memory target |
+| **T1. Smallest useful slice** | the worker ships in the main Setup, update zip, AppImage and image (owner: yes), inside the size gate; Host supervises the worker with the lifecycle above; `torrents` capability flag; Options > Torrents (off); Add Torrent dialog (magnet or file, file tree, destination, start paused); Torrents category; download to completion; seeding off; outgoing connections only; no firewall rule | 4 to 5 weeks | Integration test against a loopback seeder and tracker; kill-switch test (no process, no socket); idle comparison with and without the feature compiled in |
+| **T2. Seeding and control** | seeding on (owner: yes; proposed defaults: stop at ratio 1.0 or 48 hours, whichever comes first, editable), ratio and time limits, upload limit sharing the global budget, queues and scheduler semantics, details window (Files, Peers, Trackers, Pieces & Speed), firewall rule through the existing UAC flow, UPnP/NAT-PMP toggle, extraction waits until a torrent's download has finished | 3 to 4 weeks | scheduler and quota tests; firewall rule tests; 24-hour seeding soak with flat memory |
+| **T3. Web UI and Docker** | Torrents in the web UI including phone width, upload through the existing `/api/upload/torrent`, the torrent ports published in `docker/compose.example.yml` (owner: yes; nothing listens while the feature is off), UPnP off by default in the image, arm64 check | 2 to 3 weeks | `npm run screens` walk at 1360 and 390 px, vitest, container idle measurement against the memory target |
 | **T4. Linux desktop** | the worker inside the AppImage, port hint, Linux tests | 1 week | run on the owner's KDE/Wayland machine |
 | **T5. Polish and limits** | clearer errors, disk-full handling, torrent-level notifications, import/export of the list | 1 to 2 weeks | usability pass like TEST.5 |
-| **T6. Optional: external client account** | "Connect to my qBittorrent or Transmission" as a provider-like account (WebUI API / RPC) | 2 to 3 weeks | tests against both in Docker |
 
 Go/no-go checkpoints: after T0 (is any backend good enough?), after T1 (does the idle comparison prove "unchanged for
 non-users" and is the slice worth finishing?), after T2 (is seeding wanted at all?).
@@ -107,12 +115,14 @@ non-users" and is the slice worth finishing?), after T2 (is seeding wanted at al
 - `tests/DownloadManager.Server.Tests` and `webui` vitest/screens for T3.
 - Extension suite: one guard test that the manifest and source contain no magnet or torrent handling.
 
-## 6. Decisions only the owner can make
+## 6. Owner decisions (2026-11-11)
 
-1. Is seeding wanted, or download-only for good? (It changes the firewall, privacy and queue semantics a lot.)
-2. Which gates in section 3 are hard limits, and what numbers?
-3. Ship the worker in the main Setup/AppImage/image, or as an optional download the user triggers from Options?
-4. Docker: publish torrent ports in the example compose file, or require the user to add them?
-5. The repository names no licence ("Private use"): is linking an MIT or BSD engine acceptable as it stands, and is a
-   separate GPL process acceptable if aria2 or a client ends up in the picture?
-6. Should T6 (external client account) come first because it is cheap, and the native client wait for its result?
+1. **Seeding: yes.** It stays off per torrent until the owner or the default policy says otherwise; the firewall rule, UPnP
+   toggle and port hint come in T2.
+2. **Gate numbers:** section 3's table, through T5, as proposed above (the owner may still edit the numbers before T0).
+3. **Packaging: in the main Setup** (and the update zip, AppImage and image), not an optional download, so the 10 MB size
+   gate is a hard limit.
+4. **Docker: yes**, publish the torrent ports in the example compose file.
+5. **Licence: acceptable** as it stands: an MIT or BSD engine linked into the worker; a separate GPL process would also be
+   acceptable if it ever came to that.
+6. **T6 (connect to an external client): dropped.** The roadmap runs T0 to T5 only.

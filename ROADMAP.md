@@ -498,9 +498,9 @@ searching the account.
 | X.4 | Commit coherent increments | in_progress | Each milestone increment pushed |
 | X.5 | Independent verification of critical recovery/handoff | verified 2026-11-08 (campaign-recovery) | E94 records main-session recovery results. Independent reproduction 2026-11-08: recovery as in P2.7/P5.6. Handoff in Chrome for Testing 156 with the unpacked `dist` (ID `pknddmneejadnnngffojnoecojhdfalc`) and a test-only native-host registration: automatic sending turned on in the options page; a TestServer file landed in the test instance with the matching SHA-256 and the browser entry removed. With the Host frozen and the request on its pipe, killing the Host either (a Host can be started) let the extension's one retry start a new Host that accepted it: one job, matching SHA-256; or (no Host can be started) had Chrome resume its own download, which finished with the matching SHA-256 and no job in the app. PROGRESS "Independent recovery check". |
 
-## Native torrent client (proposal, owner 2026-11-11; not started)
+## Native torrent client (decided in principle, owner 2026-11-11; not started)
 
-Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-torrent-roadmap.md`; mockups: `docs/plans/torrent-mockups/`. Rule: when no torrent is downloading or seeding there is no torrent process, socket or timer. The backend (MonoTorrent, libtorrent through a binding, aria2) is undecided and chosen in T0 behind an engine-neutral worker contract.
+Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-torrent-roadmap.md`; mockups: `docs/plans/torrent-mockups/`. Rule: when no torrent is downloading or seeding there is no torrent process, socket or timer. Owner decisions 2026-11-11: seeding yes; worker in the main Setup (10 MB size gate); Docker torrent ports in the example compose file; licence acceptable; the external-client account (T6) is dropped. The backend (MonoTorrent, libtorrent through a binding, aria2) is undecided and chosen in T0 behind an engine-neutral worker contract and the gate table in the roadmap.
 
 | ID | Item | Status | Depends | Notes |
 | --- | --- | --- | --- | --- |
@@ -510,4 +510,3 @@ Research: `docs/plans/native-torrent-research.md`; roadmap: `docs/plans/native-t
 | T3 | Web UI and Docker | not started | T1 | 2 to 3 weeks (opinion) |
 | T4 | Linux desktop (AppImage) | not started | T1 | 1 week (opinion) |
 | T5 | Polish and limits | not started | T2 | 1 to 2 weeks (opinion) |
-| T6 | Optional: connect to the user's qBittorrent or Transmission | not started | - | cheap alternative; does not touch idle cost; may come first |
