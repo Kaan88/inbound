@@ -37,26 +37,6 @@ Start-Sleep -Milliseconds 500
 
 & (Join-Path $PSScriptRoot "register-native-host.ps1") -AppDir $AppDir -Force
 
-$extensionTarget = Join-Path $InstallRoot "extension"
-if (-not (Test-Path (Join-Path $extensionTarget "manifest.json"))) {
-    $extensionSource = if (Test-Path (Join-Path $PSScriptRoot "extension")) {
-        Join-Path $PSScriptRoot "extension"
-    }
-    else {
-        Join-Path $repoRoot "extensions\chrome\dist"
-    }
-    if (Test-Path (Join-Path $extensionSource "manifest.json")) {
-        if (Test-Path $extensionTarget) {
-            Remove-Item $extensionTarget -Recurse -Force
-        }
-        Copy-Item $extensionSource $extensionTarget -Recurse -Force
-        Write-Host "Restored extension files at $extensionTarget."
-    }
-    else {
-        Write-Warning "Extension files were not found; reload the unpacked extension manually."
-    }
-}
-
 if (-not $NoShortcut) {
     try {
         $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -82,7 +62,6 @@ if (-not (Test-Path $installFile)) {
 Inbound Download Manager repaired at $(Get-Date -Format O)
 
 Application: $AppDir
-Chrome extension: $extensionTarget
 Native host: com.kaank.downloadmanager
 "@
 }

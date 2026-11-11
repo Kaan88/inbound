@@ -474,12 +474,15 @@ public sealed class NativeHostRegistrationTests
     }
 
     [Fact]
-    public void Setup_links_the_edge_listing_beside_chromes_and_does_not_state_an_unverified_prompt_as_fact()
+    public void Setup_links_the_store_listings_and_ships_no_unpacked_extension_or_how_to_add_page()
     {
         var iss = Read(@"installer\DownloadManager.iss");
         Assert.Contains("#define EdgeStoreUrl \"https://microsoftedge.microsoft.com/addons/detail/\" + EdgeStoreExtensionId", iss);
-        Assert.Contains("Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:", iss);
         Assert.Contains("Filename: \"{#EdgeStoreUrl}\"", iss);
+        Assert.Contains("Filename: \"{#ChromeStoreUrl}\"", iss);
+        Assert.DoesNotContain("Show how to add the browser extension", iss);
+        Assert.DoesNotContain("installer-extension", iss);
+        Assert.DoesNotContain("Load unpacked", iss);
         Assert.DoesNotContain("Edge asks you", iss);
     }
 

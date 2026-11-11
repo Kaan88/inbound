@@ -78,7 +78,6 @@ try {
         "app/coreclr.dll",
         "app/Microsoft.ui.xaml.dll",
         "app/DownloadManager.Desktop.WinUI.pri",
-        "extension/manifest.json",
         "install.ps1",
         "apply-update.ps1"
     )) {

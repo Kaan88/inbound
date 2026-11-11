@@ -29,10 +29,9 @@ if ($Version -cne $sourceVersion) {
 }
 
 $appOut = Join-Path $root "artifacts\installer-app"
-$extOut = Join-Path $root "artifacts\installer-extension"
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $root "artifacts")).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
 $artifactsPrefix = $artifactsRoot + [IO.Path]::DirectorySeparatorChar
-foreach ($target in @($appOut, $extOut)) {
+foreach ($target in @($appOut)) {
     $canonicalTarget = [IO.Path]::GetFullPath($target).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
     if (-not $canonicalTarget.StartsWith($artifactsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Installer staging paths must be strict descendants of artifacts: $canonicalTarget"
@@ -55,7 +54,6 @@ function Assert-NoReparsePointInPath([string]$path) {
 }
 Assert-NoReparsePointInPath $artifactsRoot
 Assert-NoReparsePointInPath $appOut
-Assert-NoReparsePointInPath $extOut
 
 if (-not $Iscc) {
     $Iscc = @(
@@ -69,11 +67,6 @@ if (-not $Iscc) { throw "Inno Setup (ISCC.exe) not found; pass -Iscc <path>." }
 
 & (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release -Output ([IO.Path]::GetFullPath($appOut)) -SelfContained
 if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
-
-# publish.ps1 copies the extension next to the output folder as "extension".
-$publishedExtension = Join-Path (Split-Path -Parent $appOut) "extension"
-if (Test-Path -LiteralPath $extOut) { Remove-Item -LiteralPath $extOut -Recurse -Force }
-Copy-Item -LiteralPath $publishedExtension -Destination $extOut -Recurse -Force
 
 # EXT.S4: the signed Firefox add-on (scripts\sign-extension-firefox.ps1) for the extension version being built.
 $isccArgs = @("/DAppVersion=$Version", "/DSourceRoot=$(Join-Path $root 'artifacts')")

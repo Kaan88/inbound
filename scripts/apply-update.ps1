@@ -363,6 +363,11 @@ try {
         $extensionSwapped = $true
         Swap-In $extensionDir $newExtensionDir $extensionBackupDir
     }
+    elseif (Test-Path -LiteralPath $extensionDir) {
+        # Updates no longer carry the unpacked extension (the extensions are in the stores); best effort, the
+        # old copy is only a folder to remove and is no reason to undo the update.
+        try { Remove-Directory $extensionDir } catch { }
+    }
 
     # Setup puts these beside app\, where swapping app\ never reaches them, and repair.ps1 would go on
     # running the version Setup installed. A script install has no copies, so none is added. An old copy

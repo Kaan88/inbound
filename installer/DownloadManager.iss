@@ -1,10 +1,10 @@
 ﻿; Inno Setup script for Download Manager (per-user install, no admin rights).
 ; Build with scripts\build-installer.ps1, which publishes a self-contained app into
-; artifacts\installer-app and the Chrome extension into artifacts\installer-extension.
+; artifacts\installer-app. The browser extensions are in the Chrome Web Store, Edge Add-ons and (signed, self-distributed)
+; Firefox; Setup no longer ships an unpacked copy.
 ;
 ; Layout matches scripts\install.ps1 so the in-app updater and repair script keep working:
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\app\           program files (replaced on upgrade)
-;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked browser extension
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\native-host\   browser bridge manifest
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\install.json   installed version/channel
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
@@ -65,7 +65,6 @@ Name: "startup"; Description: "Start {#AppName} when I sign in to Windows"; Grou
 
 [Files]
 Source: "{#SourceRoot}\installer-app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SourceRoot}\installer-extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\scripts\apply-update.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\repair.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\register-native-host.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -79,6 +78,7 @@ Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 [InstallDelete]
 ; Upgrades replace the program folder completely, like install.ps1 does.
 Type: filesandordirs; Name: "{app}\app"
+; An unpacked extension folder from an earlier Setup (0.6.7 and before) is removed here.
 Type: filesandordirs; Name: "{app}\extension"
 Type: filesandordirs; Name: "{app}\firefox"
 ; Leftovers of an interrupted or failed auto-update.
@@ -108,7 +108,6 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
 Filename: "{#ChromeStoreUrl}"; Description: "Open the extension in the Chrome Web Store (Chrome)"; Flags: postinstall shellexec skipifsilent unchecked nowait
 Filename: "{#EdgeStoreUrl}"; Description: "Open the extension in Microsoft Edge Add-ons (Edge)"; Flags: postinstall shellexec skipifsilent unchecked nowait
 #ifdef FirefoxXpi
@@ -328,26 +327,6 @@ begin
   SaveStringToFile(Root + '\INSTALL.txt',
     '{#AppName} {#AppVersion} is installed in:' + #13#10 +
     '  ' + Root + '\app' + #13#10 + #13#10 +
-    'Add the extension to your browser (one time).' + #13#10 + #13#10 +
-    'Chrome: install Inbound Download Manager Bridge from the Chrome Web Store:' + #13#10 +
-    '  {#ChromeStoreUrl}' + #13#10 + #13#10 +
-    'Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:' + #13#10 +
-    '  {#EdgeStoreUrl}' + #13#10 + #13#10 +
-#ifdef FirefoxXpi
-    'Firefox: drag this file onto a Firefox window, or open Add-ons and themes,' + #13#10 +
-    'the gear menu, Install Add-on From File, and choose it. Firefox updates it after that:' + #13#10 +
-    '  ' + Root + '\firefox\{#FirefoxXpiName}' + #13#10 + #13#10 +
-#else
-    'Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,' + #13#10 +
-    '  https://github.com/Kaan88/inbound/releases/latest' + #13#10 +
-    'and drag it onto a Firefox window. Firefox updates it after that.' + #13#10 + #13#10 +
-#endif
-    'Or, in Chrome, load the unpacked copy that came with this install:' + #13#10 +
-    '  1. Open chrome://extensions' + #13#10 +
-    '  2. Turn on Developer mode (top right)' + #13#10 +
-    '  3. Click "Load unpacked" and select:' + #13#10 +
-    '     ' + Root + '\extension' + #13#10 +
-    '  4. Check that the extension ID is {#ExtensionId}' + #13#10 + #13#10 +
     'Web UI (off by default):' + #13#10 +
     '  Options > Web UI turns on a page you can open from a browser on this PC or on your home network.' + #13#10 +
     '  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.' + #13#10 +

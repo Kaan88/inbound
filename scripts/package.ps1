@@ -16,7 +16,6 @@ $packageFile = Join-Path $root "artifacts\package\download-manager-$Version.zip"
 if (Test-Path $packageRoot) { Remove-Item $packageRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Copy-Item (Join-Path $root "artifacts\app") (Join-Path $packageRoot "app") -Recurse -Force
-Copy-Item (Join-Path $root "artifacts\extension") (Join-Path $packageRoot "extension") -Recurse -Force
 $installText = Get-Content (Join-Path $PSScriptRoot "install.ps1") -Raw
 $installText = $installText.Replace('[string]$Version = "0.6.7"', "[string]`$Version = `"$Version`"")
 Set-Content -Path (Join-Path $packageRoot "install.ps1") -Value $installText -Encoding UTF8

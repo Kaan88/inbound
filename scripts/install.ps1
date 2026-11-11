@@ -28,16 +28,6 @@ if (-not (Test-Path (Join-Path $Source "DownloadManager.Host.exe"))) {
     throw "Published app not found at $Source. Run scripts\publish.ps1 first."
 }
 
-$extensionSource = if (Test-Path (Join-Path $PSScriptRoot "extension")) {
-    Join-Path $PSScriptRoot "extension"
-}
-else {
-    Join-Path $repoRoot "extensions\chrome\dist"
-}
-if (-not (Test-Path (Join-Path $extensionSource "manifest.json"))) {
-    throw "Chrome extension build not found at $extensionSource."
-}
-
 $appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
 $installedProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
     $_.ExecutablePath -and $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase) -and
@@ -63,11 +53,11 @@ if (Test-Path $appDir) {
 New-Item -ItemType Directory -Path $appDir -Force | Out-Null
 Copy-Item (Join-Path $Source "*") $appDir -Recurse -Force
 
-$extensionTarget = Join-Path $installRoot "extension"
-if (Test-Path $extensionTarget) {
-    Remove-Item $extensionTarget -Recurse -Force
+# The unpacked extension is no longer installed (the extensions are in the stores); remove one an older install left.
+$oldExtension = Join-Path $installRoot "extension"
+if (Test-Path $oldExtension) {
+    Remove-Item $oldExtension -Recurse -Force
 }
-Copy-Item $extensionSource $extensionTarget -Recurse -Force
 
 & (Join-Path $PSScriptRoot "register-native-host.ps1") -AppDir $appDir -Force
 # Publish the version only after replacing and registering all application files.
@@ -107,7 +97,6 @@ if (-not $NoLaunch) {
     Start-Process -FilePath (Join-Path $appDir "DownloadManager.Desktop.WinUI.exe")
 }
 
-$extensionId = "pknddmneejadnnngffojnoecojhdfalc"
 $instructions = @"
 Inbound Download Manager installed at:
   $appDir
@@ -117,12 +106,6 @@ Browser extension:
     https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm
   Edge: install Inbound Download Manager Bridge from Microsoft Edge Add-ons:
     https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci
-  Or, in Chrome, load the unpacked copy:
-  1. Open chrome://extensions
-  2. Enable Developer mode
-  3. Choose "Load unpacked"
-  4. Select: $extensionTarget
-  5. Confirm the extension ID is $extensionId
 
   Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,
     https://github.com/Kaan88/inbound/releases/latest
