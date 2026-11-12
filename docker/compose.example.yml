@@ -17,6 +17,11 @@ services:
     stop_grace_period: 30s
     ports:
       - "8080:8080"
+      # Torrents: peers connect in on this port, TCP and UDP. Nothing listens on it while torrents are off in Options,
+      # and while they are on, only while a torrent runs. Another port: change both sides and
+      # DOWNLOADMANAGER_TORRENT_PORT below to the same number. Remove these two lines to keep torrents outgoing-only.
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
     environment:
       # The user and group that own your download folder on the host (id -u, id -g). /data is given to them too.
       PUID: "1000"
@@ -34,6 +39,12 @@ services:
       # DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED: "1"
       # Host names you use in the browser for this server, besides IP addresses and localhost:
       # DOWNLOADMANAGER_HOSTS: "nas.home.arpa,downloads.example.org"
+      # The torrent port inside the container (6881 unless set), published above:
+      # DOWNLOADMANAGER_TORRENT_PORT: "6881"
+      # Asking the router to forward the torrent port (UPnP, NAT-PMP) is off; with network_mode: host it can work:
+      # DOWNLOADMANAGER_TORRENT_UPNP: "on"
+      # No torrents at all, whatever Options say:
+      # DOWNLOADMANAGER_TORRENTS: "off"
     secrets:
       - inbound_password
     volumes:

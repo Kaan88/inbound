@@ -71,6 +71,27 @@ internal static class FileMenuRules
     /// <param name="files">The files the selection stands for, a package's included.</param>
     /// <param name="localRows">The selected rows that are files or packages.</param>
     public static bool CanGroup(int files, int localRows) => files >= 2 && localRows >= 2;
+
+    /// <summary>A torrent has no single address or file for Move/Rename, Redownload and their like (T1).</summary>
+    public const string TorrentReason = "not for torrents";
+
+    /// <summary>The reason a command that needs an address is off: its own, or that the selection holds a torrent.</summary>
+    public static string? ForTorrent(string? reason, bool torrent) => reason ?? (torrent ? TorrentReason : null);
+
+    /// <summary>
+    /// The context menu offers Extract Archive… (pick an archive from the disk) on a download's row, but not on a
+    /// selection that holds a torrent or a torrent's file row, nor on extraction records alone: neither is a download
+    /// that picking an archive could be about (T1). The Downloads menu offers it whatever is selected.
+    /// </summary>
+    public static bool ContextOffersArchivePicking(bool onlyArchiveRows, bool torrentSelected) => !onlyArchiveRows && !torrentSelected;
+
+    /// <summary>
+    /// Redownload asks to stop the download first while it can still run or move: queued, paused, connecting,
+    /// downloading, waiting to retry, and verifying (audit L7: verifying was missing, so a file still being checked
+    /// was sent again).
+    /// </summary>
+    public static bool RedownloadNeedsStop(string state)
+        => state is "connecting" or "downloading" or "verifying" or "queued" or "paused" or "retryWaiting";
 }
 
 /// <summary>What the Host says about a finished download beyond its state. It sits beside the state and never changes it.</summary>

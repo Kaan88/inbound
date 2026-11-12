@@ -113,6 +113,39 @@ public sealed class HostConnectionTests
         await Until(() => Volatile.Read(ref exits) > 0);
     }
 
+    // Audit L8: an unreadable snapshot or update-progress payload used to end the connection (in a loop, as the
+    // snapshot comes on every connect); now that one message is skipped and the next ones arrive.
+    [Fact]
+    public async Task AMessageThisBuildCantReadIsSkippedAndTheConnectionStays()
+    {
+        var fake = new FakeServers
+        {
+            Snapshot = IpcMessage.Create(MessageTypes.JobsSnapshot, "not a snapshot"),
+            AfterHello = connection =>
+            {
+                connection.Push(IpcMessage.Create(MessageTypes.UpdateProgress, 42));
+                connection.Push(IpcMessage.Create(MessageTypes.GroupsChanged, new List<DownloadGroupDto>()));
+            },
+        };
+        await using var connection = fake.Connection(ServerTarget.Local);
+        var groups = 0;
+        connection.GroupsChanged += _ => Interlocked.Increment(ref groups);
+        // Handlers must be there, or the payloads are never read and nothing is skipped.
+        connection.SnapshotReceived += _ => { };
+        connection.UpdateProgressChanged += _ => { };
+        // Review: each skip is said (the app writes it to its UI trace), naming the message.
+        var skipped = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        connection.MessageSkipped += skipped.Enqueue;
+
+        connection.Start();
+        await Until(() => Volatile.Read(ref groups) == 1);
+        await Task.Delay(100);
+        Assert.True(connection.IsConnected);
+        Assert.Equal(1, fake.Attempts);
+        Assert.Contains(skipped, line => line.Contains(MessageTypes.JobsSnapshot, StringComparison.Ordinal));
+        Assert.Contains(skipped, line => line.Contains(MessageTypes.UpdateProgress, StringComparison.Ordinal));
+    }
+
     private static async Task Until(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + Patience;
@@ -133,6 +166,12 @@ public sealed class HostConnectionTests
 
         /// <summary>Each connection sends <c>host.exiting</c> right after the hello, then closes.</summary>
         public bool ExitAfterHello { get; init; }
+
+        /// <summary>Sent in place of an empty snapshot.</summary>
+        public IpcMessage? Snapshot { get; init; }
+
+        /// <summary>Pushes more messages after the hello and the snapshot.</summary>
+        public Action<FakeConnection>? AfterHello { get; init; }
 
         public int Attempts => Volatile.Read(ref _attempts);
 
@@ -155,7 +194,8 @@ public sealed class HostConnectionTests
             if (Fail?.Invoke() is { } failure) throw failure;
             var connection = new FakeConnection(hello?.Snapshot ?? true);
             connection.Push(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto { ProtocolVersion = Protocol.Version }));
-            if (connection.SnapshotFollowsHello) connection.Push(IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
+            if (connection.SnapshotFollowsHello) connection.Push(Snapshot ?? IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
+            AfterHello?.Invoke(connection);
             if (ExitAfterHello)
             {
                 connection.Push(IpcMessage.Create(MessageTypes.HostExiting, new { }));

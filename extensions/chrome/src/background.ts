@@ -11,10 +11,11 @@ import {
 import {
   applySettingChanges, DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
-import { JOB_ACTION_MESSAGES, latestJobs, type JobAction, type JobSummary } from "./job-list";
+import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
+import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
-  initialTarget, isNativeHostMissing, pairWithServer, pairingName, readPairing, type Envelope, type ServerPairing,
+  initialTarget, isNativeHostMissing, pairWithServer, pairingName, readPairing, refusalText, serverDisplayName, type Envelope, type ServerPairing,
   type TargetId, type Transport,
 } from "./transport";
 
@@ -43,6 +44,8 @@ interface PendingHandoff {
    * so the window starts from it rather than from the defaults.
    */
   windowDraft?: WindowDraft;
+  /** The id every send of this download carries, set at the first Download click (audit 3 L12). */
+  requestId?: string;
 }
 
 interface WindowDraft {
@@ -286,6 +289,55 @@ async function loadSettings(): Promise<void> {
   updateBadge();
   // A worker start is also when entries of right-click windows closed meanwhile are dropped.
   void forgetClosedHandoffWindows().catch(() => undefined);
+  void sweepPausedForHandoff().catch(() => undefined);
+}
+
+/**
+ * Audit 3 L12: browser downloads paused while an automatic send waits for its answer, by browser download id. Kept in
+ * session storage, so a worker that stopped before the answer leaves a record the next start finds.
+ */
+const PAUSED_FOR_HANDOFF_KEY = "pausedForHandoff";
+const pausedForHandoff = new Map<number, { fileName: string; at: number }>();
+let pausedSwept = false;
+
+async function storePausedForHandoff(): Promise<void> {
+  await chrome.storage.session.set({ [PAUSED_FOR_HANDOFF_KEY]: Object.fromEntries(pausedForHandoff) }).catch(() => undefined);
+}
+
+async function recordPausedForHandoff(downloadId: number, fileName: string): Promise<void> {
+  pausedForHandoff.set(downloadId, { fileName, at: Date.now() });
+  await storePausedForHandoff();
+}
+
+async function clearPausedForHandoff(downloadId: number): Promise<void> {
+  if (!pausedForHandoff.delete(downloadId)) return;
+  await storePausedForHandoff();
+}
+
+/**
+ * Once per worker start: a download a previous worker paused and never settled is still paused in the browser. It is
+ * not resumed, since the app may have taken it before the worker stopped; the user is told where to look.
+ */
+async function sweepPausedForHandoff(): Promise<void> {
+  if (pausedSwept) return;
+  pausedSwept = true;
+  const stored = (await chrome.storage.session.get(PAUSED_FOR_HANDOFF_KEY))[PAUSED_FOR_HANDOFF_KEY];
+  if (!stored || typeof stored !== "object") return;
+  const left: Array<[number, string]> = [];
+  for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+    const downloadId = Number(key);
+    if (!Number.isInteger(downloadId) || pausedForHandoff.has(downloadId)) continue;
+    const fileName = typeof (value as { fileName?: unknown })?.fileName === "string"
+      ? (value as { fileName: string }).fileName : "download";
+    left.push([downloadId, fileName]);
+  }
+  await storePausedForHandoff();
+  for (const [downloadId, fileName] of left) {
+    const [live] = await chrome.downloads.search({ id: downloadId }).catch(() => []);
+    if (!live || live.state !== "in_progress" || !live.paused) continue;
+    await noteLeftInBrowser(fileName, "The extension stopped while sending this to the app, so it is paused in the " +
+      "browser. If the app does not list it, resume it in the browser's download list.", false);
+  }
 }
 
 /**
@@ -528,6 +580,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
   const transport = transportFor(automaticTarget(settings.defaultTarget, server !== null));
   const where = targetWords(transport);
   let hostAccepted = false;
+  await recordPausedForHandoff(item.id, fileName);
   try {
     const ack = await requestHandoff(transport, {
       requestId,
@@ -543,6 +596,8 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
       startMode: settings.startMode,
       isAutoIntercept: true,
       headers: await browserCookieHeaders(item.url, cookieContextForDownload(item), item.finalUrl),
+      // EXT.R10: the browser's own default folder for This PC, when Settings sets one.
+      destinationDirectory: automaticDestination(transport),
     });
 
     if (ack?.accepted) {
@@ -555,10 +610,11 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
           : `Sent to ${where.name}, but still listed in your browser`,
         browserEntryRemoved ? fileName : "The browser's copy could not be removed. Check the browser's download list.",
       );
+      tellFolderReplaced(ack, fileName);
       return true;
     } else {
       const resumed = await resumeInBrowser(item.id, fileName);
-      const refusal = ack?.error ?? ack?.message ?? `The ${where.thing} refused it.`;
+      const refusal = refusalText(ack, `The ${where.thing} refused it.`);
       notify(`${where.subject} did not accept the download`, `${refusal} ${resumed
         ? "This download stays in your browser."
         : "The browser could not continue it: start it again from the browser's download list."}`);
@@ -578,6 +634,9 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     notify(where.unavailable, `${errorFor(transport, message)} ${resumed
       ? "This download stays in your browser."
       : "The browser could not continue it: start it again from the browser's download list."}`);
+  } finally {
+    // Settled one way or the other: accepted and removed, or given back to the browser.
+    await clearPausedForHandoff(item.id);
   }
   return false;
 }
@@ -598,6 +657,26 @@ const RESPONSE_WINDOW_CONNECT_MS = 20_000;
 function responseWindowConnectMs(): number {
   const override = (globalThis as { __inboundResponseWindowConnectMs?: unknown }).__inboundResponseWindowConnectMs;
   return typeof override === "number" ? override : RESPONSE_WINDOW_CONNECT_MS;
+}
+
+/** How many downloads one page's responses may hand over per minute (audit 3 L12). */
+const RESPONSE_CATCHES_PER_MINUTE = 10;
+/** Page origin to the times of its recent catches. */
+const responseCatches = new Map<string, number[]>();
+
+/** Counts one catch for the page; false once the page has had its share this minute. */
+function takeResponseCatch(pageUrl: string, now = Date.now()): boolean {
+  let origin: string;
+  try { origin = new URL(pageUrl).origin; } catch { origin = pageUrl; }
+  for (const [key, times] of responseCatches) {
+    const recent = times.filter((time) => now - time < 60_000);
+    if (recent.length) responseCatches.set(key, recent); else responseCatches.delete(key);
+  }
+  const times = responseCatches.get(origin) ?? [];
+  if (times.length >= RESPONSE_CATCHES_PER_MINUTE) return false;
+  times.push(now);
+  responseCatches.set(origin, times);
+  return true;
 }
 
 function settleFromResponse(url: string): void {
@@ -645,6 +724,15 @@ async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersD
     return proceed;
   }
 
+  // Audit 3 L12: a page can answer many frames as attachments at once, and each would go to the app with the
+  // site's cookies before Firefox's own "allow multiple downloads" question. Past a few a minute from one page,
+  // the rest stay with Firefox, which asks.
+  if (!takeResponseCatch(referrer ?? url)) {
+    await noteLeftInBrowser(fileName, "This page started many downloads at once; the rest stay in the browser.", true);
+    settleFromResponse(url);
+    return proceed;
+  }
+
   const cookieContext: BrowserCookieContext = extra.cookieStoreId ? { storeId: extra.cookieStoreId } : {};
   if (settings.destinationMode === "ask") {
     // Firefox has nothing to pause yet, so the request goes and the folder window holds the details. Keep in
@@ -668,12 +756,14 @@ async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersD
       startMode: settings.startMode,
       isAutoIntercept: true,
       headers: await browserCookieHeaders(url, cookieContext, url),
+      destinationDirectory: automaticDestination(transport),
     });
     if (ack?.accepted) {
       notify(ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`, fileName);
+      tellFolderReplaced(ack, fileName);
       return { cancel: true };
     }
-    const refusal = ack?.error ?? ack?.message ?? `The ${where.thing} refused it.`;
+    const refusal = refusalText(ack, `The ${where.thing} refused it.`);
     notify(`${where.subject} did not accept the download`, `${refusal} This download stays in your browser.`);
     setLastError(transport, refusal);
   } catch (error) {
@@ -795,22 +885,12 @@ async function keepInBrowser(pending: PendingHandoff): Promise<void> {
   await forgetHandoff(pending.id);
   const downloadId = pending.browserDownloadId;
   if (pending.restartInBrowser) {
-    // EXT.B5: Firefox never had it. It starts now, and onCreated lets this one through.
-    restartedInBrowser.add(pending.url);
-    // In the container (or private window) it came from, so its sign-in still applies.
+    // EXT.B5: Firefox never had it. It starts now, and onCreated lets this one through. In the container (or
+    // private window) it came from, so its sign-in still applies, and with the page as its referrer (audit 3 M4).
     const storeId = pending.cookieContext?.storeId;
     const where = storeId === "firefox-private" ? { incognito: true } : storeId ? { cookieStoreId: storeId } : {};
-    try {
-      await chrome.downloads.download({
-        url: pending.url,
-        filename: pending.suggestedFileName || undefined,
-        ...where,
-      } as chrome.downloads.DownloadOptions);
-    } catch {
-      restartedInBrowser.delete(pending.url);
-      await noteLeftInBrowser(pending.suggestedFileName ?? "download",
-        "The browser could not start it. Download it again from the page.", false);
-    }
+    await startAgainInBrowser(pending, where, isHttpUrl(pending.referrer) ? pending.referrer : undefined,
+      "The browser could not start it. Download it again from the page.");
     return;
   }
   if (typeof downloadId !== "number") return;
@@ -827,14 +907,69 @@ async function keepInBrowser(pending: PendingHandoff): Promise<void> {
   // through once. The page's referrer is not carried over; the browser's own cookies are.
   await chrome.downloads.cancel(downloadId).catch(() => undefined);
   await chrome.downloads.erase({ id: downloadId }).catch(() => undefined);
-  restartedInBrowser.add(pending.url);
-  try {
-    await chrome.downloads.download({ url: pending.url, filename: pending.suggestedFileName || undefined });
-  } catch {
-    restartedInBrowser.delete(pending.url);
-    await noteLeftInBrowser(pending.suggestedFileName ?? "download",
-      "The browser could not start it again. Download it again from the page.", false);
+  await startAgainInBrowser(pending, {}, undefined,
+    "The browser could not start it again. Download it again from the page.");
+}
+
+/**
+ * Starts a download again in the browser for keepInBrowser, which lets the new one through once. A file name the
+ * browser refuses (one with ":" or "?", say) is dropped and the browser names it (audit 3 L12). Firefox gets the
+ * page as referrer (Chromium refuses that header), and without it if Firefox refuses the header. The site answers a
+ * second time here, which a one-time link may refuse; the user is told when that download fails (audit 3 M4).
+ */
+async function startAgainInBrowser(pending: PendingHandoff, where: Record<string, unknown>,
+  referrer: string | undefined, failedText: string): Promise<void> {
+  const fileName = pending.suggestedFileName || "download";
+  const base: Record<string, unknown> = { url: pending.url, ...where };
+  const named = pending.suggestedFileName ? { ...base, filename: pending.suggestedFileName } : base;
+  const attempts: Array<Record<string, unknown>> = [];
+  if (referrer && !chrome.downloads.onDeterminingFilename) {
+    attempts.push({ ...named, headers: [{ name: "Referer", value: referrer }] });
   }
+  attempts.push(named);
+  if (named !== base) attempts.push(base);
+  restartedInBrowser.add(pending.url);
+  for (const options of attempts) {
+    try {
+      const downloadId = await chrome.downloads.download(options as unknown as chrome.downloads.DownloadOptions);
+      if (typeof downloadId === "number") watchRestart(downloadId, fileName, pending.mimeType);
+      return;
+    } catch {
+      // The next, plainer attempt.
+    }
+  }
+  restartedInBrowser.delete(pending.url);
+  await noteLeftInBrowser(fileName, failedText, false);
+}
+
+/** Downloads started again by startAgainInBrowser that have not finished yet: browser download id to what it is. */
+const restartWatches = new Map<number, { fileName: string; mimeType?: string }>();
+let watchingRestarts = false;
+
+function watchRestart(downloadId: number, fileName: string, mimeType: string | undefined): void {
+  restartWatches.set(downloadId, { fileName, mimeType });
+  // Only once something was started again, so the worker is not woken for every download's progress otherwise.
+  if (watchingRestarts || !chrome.downloads.onChanged) return;
+  watchingRestarts = true;
+  chrome.downloads.onChanged.addListener((delta) => {
+    const watched = restartWatches.get(delta.id);
+    if (watched === undefined) return;
+    const state = delta.state?.current;
+    if (state === "complete") {
+      restartWatches.delete(delta.id);
+      // The site may answer the second request with its error page, which the browser saves under the file's name.
+      void (async () => {
+        const [saved] = await chrome.downloads.search({ id: delta.id }).catch(() => []);
+        if (restartSavedWebPage(watched.mimeType, saved?.mime)) {
+          await noteLeftInBrowser(watched.fileName, RESTART_SAVED_WEB_PAGE_TEXT, false);
+        }
+      })();
+    } else if (state === "interrupted") {
+      restartWatches.delete(delta.id);
+      const text = restartInterruptedText(delta.error?.current);
+      if (text) void noteLeftInBrowser(watched.fileName, text, false);
+    }
+  });
 }
 
 /** The folder window's port closed: a window closed without a choice leaves the download in the browser. */
@@ -1438,7 +1573,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             url: item.url,
             accepted: !!ack?.accepted,
             duplicate: !!ack?.duplicate,
-            error: ack?.error ?? (ack?.accepted ? undefined : ack?.message),
+            error: ack?.accepted ? undefined : refusalText(ack, "It was not accepted."),
+            note: folderNote(ack),
             job: ack?.job,
           });
         } catch (error) {
@@ -1451,6 +1587,12 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       }
 
       const accepted = results.filter((result) => result.accepted === true).length;
+      // The app put them in its default folder instead (a folder it does not know): say so once.
+      const replaced = results.find((result) => result.accepted === true && typeof result.note === "string");
+      if (replaced) notify("Saved in the default folder", String(replaced.note), true);
+      // EXT.R10: "Last used folder" (Settings) starts the next form here; only once something was taken, and only
+      // a folder the app used.
+      if (accepted > 0) await rememberLastFolder(transport.target, replaced ? "" : destination ?? "");
       return {
         ok: true,
         accepted,
@@ -1497,7 +1639,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.pickFolder": {
       const sourcePage = (sender?.url ?? "").split(/[?#]/)[0];
       if (sender?.id !== chrome.runtime.id ||
-          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html")].includes(sourcePage ?? "")) {
+          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html"), chrome.runtime.getURL("options.html")]
+            .includes(sourcePage ?? "")) {
         return { ok: false, error: "Folder selection is available from the download destination screen." };
       }
       return await pickNativeFolder(typeof message.initialPath === "string" ? message.initialPath : undefined);
@@ -1604,9 +1747,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (!pending) {
         return { ok: false, error: "This download request has expired. Start again from the right-click menu." };
       }
-      // The window starts at the app's default folder every time; a folder chosen for one download
-      // is never carried to the next (UI.R3). Favorites are offered beside it. With a paired server,
-      // each target brings its own default folder and favorites.
+      // The window starts at the default folder every time; a folder chosen for one download is never
+      // carried to the next (UI.R3). That is Settings' default ("Ask where to save starts on: Default
+      // folder"); "Last used folder" and "Custom folder" are opt-in (EXT.R10, handoffTargets). The default
+      // folder is the app's, or the browser's own for This PC when Settings sets one. Favorites are offered
+      // beside it. With a paired server, each target brings its own default folder and favorites.
       const choice = await handoffTargets();
       const first = choice.targets.find((target) => target.id === choice.target) ?? choice.targets[0]!;
       return {
@@ -1644,8 +1789,16 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const transport = transportFor(chosenTarget(message.target));
       let ack: any;
       try {
+        // Audit 3 L12: one request id for this download however often Download is clicked, so a second click after
+        // a send that timed out (but reached the app) finds that download instead of adding it twice. A refused
+        // request claims nothing, so the corrected one can use the same id.
+        if (!pending.requestId) {
+          pending.requestId = crypto.randomUUID();
+          pendingHandoffs.set(id, pending);
+          await chrome.storage.session.set({ [`handoff.${id}`]: pending }).catch(() => undefined);
+        }
         ack = await requestHandoff(transport, {
-        requestId: crypto.randomUUID(),
+        requestId: pending.requestId,
         extensionId: chrome.runtime.id,
         url: pending.url,
         finalUrl: pending.finalUrl,
@@ -1680,7 +1833,12 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       }
 
       // The folder and the Start button chosen here belong only to this request (U-EX-7): the default start and
-      // the default folder are changed in Options only.
+      // the default folder are changed in Options only. EXT.R10: with "Last used folder" chosen in Settings, the
+      // next form starts on this folder; that is a starting point, not the default.
+      if (ack?.accepted) {
+        tellFolderReplaced(ack, message.fileName || pending.suggestedFileName || "");
+        await rememberLastFolder(transport.target, folderNote(ack) ? "" : destination);
+      }
 
       return { ok: true, ack, target: transport.target };
     }
@@ -1698,6 +1856,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         ? applySettingChanges(settings, message.changes)
         : migrateSettings({ ...DEFAULT_SETTINGS, ...message.settings }).settings;
       await chrome.storage.local.set({ settings });
+      // EXT.R10: the last used folders are kept only while "Last used folder" is chosen.
+      if (settings.askStartsOn !== "last") await chrome.storage.local.set({ [LAST_FOLDERS_KEY]: {} }).catch(() => undefined);
       settingsLoaded = true;
       updateBadge();
       await syncAutoSendWithTabs();
@@ -1723,39 +1883,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.jobs": {
-      const local = (async (): Promise<JobsAnswer> => {
-        try {
-          const snapshot = await sendNative("jobs.query", {}, 6000);
-          const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
-          lastJobs = new Map(jobs.map((job) => [job.id, job]));
-          return { ok: true, jobs };
-        } catch (error) {
-          return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
-        }
-      })();
-      if (!server) return await local;
-
-      // EXT.R1: with a paired server the popup lists both, each download labelled with where it is.
-      const paired = server;
-      const remote = (async (): Promise<JobsAnswer> => {
-        try {
-          const snapshot = await paired.send("jobs.query", {}, 6000);
-          return { ok: true, jobs: latestJobs((snapshot?.jobs ?? []) as JobSummary[]) };
-        } catch (error) {
-          return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: [] };
-        }
-      })();
-      const [mine, theirs] = await Promise.all([local, remote]);
-      const groups: Array<JobsAnswer & { target: TargetId }> = [
-        ...(localMissing() ? [] : [{ target: "local" as TargetId, ...mine }]),
-        { target: "server" as TargetId, ...theirs },
-      ];
-      return {
-        ok: groups.some((group) => group.ok),
-        error: groups.find((group) => !group.ok)?.error,
-        jobs: groups.flatMap((group) => group.jobs.map((job) => ({ ...job, target: group.target }))),
-        groups: groups.map((group) => ({ target: group.target, label: TARGET_LABELS[group.target], ok: group.ok, error: group.error })),
-      };
+      // Audit 3 M5: the popup asks every second. A question still waiting is answered by the same reply rather
+      // than a second one queued behind it, and a slow answer never retries, since a retry drops the shared
+      // connection an automatic handoff may be waiting on.
+      jobsInFlight ??= jobsAnswer().finally(() => { jobsInFlight = null; });
+      return await jobsInFlight;
     }
 
     case "dm.jobAction": {
@@ -1782,9 +1914,84 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         : { ok: false, error: result?.error || result?.message || "The app did not do that." };
     }
 
+    case "dm.jobCommand": {
+      // EXT.R11 (GitHub #4): the popup's row menu. Each names one download; the app checks the rest (a finished
+      // file, a bare new name, no overwriting) and the native host lets through only these exact payloads.
+      if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
+      const command = message.command as JobCommand;
+      const type = Object.prototype.hasOwnProperty.call(JOB_COMMAND_MESSAGES, command) ? JOB_COMMAND_MESSAGES[command] : undefined;
+      const jobId = typeof message.jobId === "string" ? message.jobId : "";
+      if (!type || !/^[0-9a-f-]{32,36}$/i.test(jobId)) return { ok: false, error: "Unknown download action." };
+      let payload: Record<string, unknown> = { jobId };
+      if (command === "rename") {
+        const newFileName = typeof message.newFileName === "string" ? message.newFileName.trim() : "";
+        if (!newFileName) return { ok: false, error: "Type a file name." };
+        payload = { jobId, newFileName };
+      }
+      if (serverGone(message.target)) return { ok: false, error: SERVER_GONE };
+      const target = chosenTarget(message.target);
+      // The server's screen is not this user's: its folders are not opened from here.
+      if (command === "reveal" && target === "server") return { ok: false, error: "Folders can be opened only for downloads on this PC." };
+      const transport = transportFor(target);
+      const reply = await transport.request(type, payload, 10000,
+        transport.target === "server" ? "Timed out waiting for the Inbound server." : "Timed out waiting for the desktop app.");
+      if (reply.type === "handoff.error" || reply.type === "server.incompatible") {
+        return { ok: false, error: errorFor(transport, extractError(reply.payload)) };
+      }
+      return jobCommandOutcome(command, reply.payload, {
+        newFileName: command === "rename" ? payload.newFileName as string : undefined,
+        server: transport.target === "server",
+      });
+    }
+
     default:
       return { ok: false, error: "Unknown message." };
   }
+}
+
+/** The popup's list question while one is waiting (dm.jobs). */
+let jobsInFlight: Promise<unknown> | null = null;
+
+/**
+ * The newest downloads of this PC, and of a paired server, for the popup. Audit 3 M3: the Host is asked for the
+ * newest POPUP_JOB_LIMIT only, so a long list can't make a reply over the browser's 1 MB native-message limit; an
+ * older Host sends them all and latestJobs picks.
+ */
+async function jobsAnswer(): Promise<unknown> {
+  const query = { limit: POPUP_JOB_LIMIT };
+  const local = (async (): Promise<JobsAnswer> => {
+    try {
+      const snapshot = await sendNative("jobs.query", query, 6000, 0);
+      const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
+      lastJobs = new Map(jobs.map((job) => [job.id, job]));
+      return { ok: true, jobs };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
+    }
+  })();
+  if (!server) return await local;
+
+  // EXT.R1: with a paired server the popup lists both, each download labelled with where it is.
+  const paired = server;
+  const remote = (async (): Promise<JobsAnswer> => {
+    try {
+      const snapshot = await paired.send("jobs.query", query, 6000);
+      return { ok: true, jobs: latestJobs((snapshot?.jobs ?? []) as JobSummary[]) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: [] };
+    }
+  })();
+  const [mine, theirs] = await Promise.all([local, remote]);
+  const groups: Array<JobsAnswer & { target: TargetId }> = [
+    ...(localMissing() ? [] : [{ target: "local" as TargetId, ...mine }]),
+    { target: "server" as TargetId, ...theirs },
+  ];
+  return {
+    ok: groups.some((group) => group.ok),
+    error: groups.find((group) => !group.ok)?.error,
+    jobs: groups.flatMap((group) => group.jobs.map((job) => ({ ...job, target: group.target }))),
+    groups: groups.map((group) => ({ target: group.target, label: TARGET_LABELS[group.target], ok: group.ok, error: group.error })),
+  };
 }
 
 interface DownloadFolders {
@@ -1792,10 +1999,15 @@ interface DownloadFolders {
   favorites: Array<{ name: string; path: string }>;
 }
 
-/** The app's default folder and favorite folders, or nothing (and why) when the app is too old or unreachable. */
-async function downloadFolders(transport: Transport = native): Promise<DownloadFolders & { error?: string }> {
+/**
+ * The app's default folder and favorite folders, or nothing (and why) when the app is too old or unreachable.
+ * EXT.R10: with candidates, the Host also says which of them are folders that exist ("existing"); a Host that does
+ * not answer that leaves it out, and the caller then treats them as unknown.
+ */
+async function downloadFolders(transport: Transport = native, candidates: string[] = []):
+  Promise<DownloadFolders & { error?: string; existing?: string[] }> {
   try {
-    const result = await transport.send("settings.downloadFolders", {}, 4000, 0);
+    const result = await transport.send("settings.downloadFolders", candidates.length > 0 ? { candidates } : {}, 4000, 0);
     if (result?.ok !== true) return { defaultFolder: "", favorites: [] };
     return {
       defaultFolder: typeof result.defaultFolder === "string" ? result.defaultFolder : "",
@@ -1803,10 +2015,73 @@ async function downloadFolders(transport: Transport = native): Promise<DownloadF
         .filter((item: any) => typeof item?.path === "string" && item.path.trim())
         .slice(0, 50)
         .map((item: any) => ({ name: typeof item.name === "string" && item.name.trim() ? item.name : item.path, path: item.path })),
+      ...(Array.isArray(result.existingCandidates)
+        ? { existing: result.existingCandidates.filter((path: unknown): path is string => typeof path === "string") }
+        : {}),
     };
   } catch (error) {
     return { defaultFolder: "", favorites: [], error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** EXT.R10: the last folder a form sent a download to, per target, kept only while Settings says "Last used folder". */
+const LAST_FOLDERS_KEY = "lastFolders";
+type LastFolders = Partial<Record<TargetId, string>>;
+
+async function readLastFolders(): Promise<LastFolders> {
+  try {
+    const stored = (await chrome.storage.local.get(LAST_FOLDERS_KEY))[LAST_FOLDERS_KEY];
+    if (!stored || typeof stored !== "object") return {};
+    const folders: LastFolders = {};
+    for (const id of ["local", "server"] as const) {
+      const path = (stored as Record<string, unknown>)[id];
+      if (typeof path === "string" && path.trim()) folders[id] = path.trim().slice(0, 4096);
+    }
+    return folders;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * EXT.R10: a form sent a download, accepted, to this folder ("" for the target's default). Remembered only with
+ * "Last used folder" chosen; otherwise a one-off folder is never kept (UI.R3).
+ */
+async function rememberLastFolder(target: TargetId, folder: string): Promise<void> {
+  if (settings.askStartsOn !== "last") return;
+  const folders = await readLastFolders();
+  if (folder) folders[target] = folder.slice(0, 4096);
+  else delete folders[target];
+  try { await chrome.storage.local.set({ [LAST_FOLDERS_KEY]: folders }); } catch { /* the next form starts on the default */ }
+}
+
+/** Whether the server lists this folder (folders.browse): it is there and within its roots. Quiet; false on any failure. */
+async function serverHasFolder(transport: Transport, path: string): Promise<boolean> {
+  try {
+    const listing = await transport.send("folders.browse", { path }, 4000, 0);
+    return listing?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The app's note when it took a download but not into the folder sent (report 3, M1: the desktop app saves browser
+ * downloads only in its own folders and ones picked with its folder dialog), else undefined.
+ */
+function folderNote(ack: { accepted?: boolean; note?: unknown } | null | undefined): string | undefined {
+  return ack?.accepted && typeof ack.note === "string" && ack.note.trim() ? ack.note.trim() : undefined;
+}
+
+/** Tells the user, even with notifications off, that a download went to the default folder instead. */
+function tellFolderReplaced(ack: { accepted?: boolean; note?: unknown } | null | undefined, fileName: string): void {
+  const note = folderNote(ack);
+  if (note) notify("Saved in the default folder", fileName ? `${fileName}: ${note}` : note, true);
+}
+
+/** EXT.R10: the folder automatic sends to This PC use: the browser's own default folder, or the app's (undefined). */
+function automaticDestination(transport: Transport): string | undefined {
+  return transport.target === "local" && settings.browserFolder ? settings.browserFolder : undefined;
 }
 
 interface JobsAnswer {
@@ -1822,24 +2097,57 @@ interface HandoffTarget extends DownloadFolders {
   chooser: "dialog" | "list";
   /** The server's address, for the label. */
   address?: string;
+  /** The server's name as shown (EXT.R9). */
+  name?: string;
   error?: string;
+  /**
+   * EXT.R10: the default folder is the browser's own (Settings), which the app does not know, so a form sends it
+   * as it is rather than "" for "the default".
+   */
+  sendDefault?: boolean;
+  /** EXT.R10: the folder the form starts on, when it is not the default folder. */
+  startFolder?: string;
 }
 
 /**
  * The targets the folder window (and the batch window) offer, each with its default folder and favorites,
- * and the one to start on. Without a paired server this is exactly one request to the desktop app, as
- * before pairing existed.
+ * and the one to start on. Without a paired server and with the default Settings this is exactly one request to
+ * the desktop app, as before pairing existed.
+ *
+ * EXT.R10: for This PC the default folder is the browser's own when Settings sets one. Each target starts on its
+ * default folder (UI.R3), unless Settings says "Last used folder" or "Custom folder"; such a folder is used only
+ * when it is known to exist (the Host's answer for This PC, the server's folder list for the server), and the
+ * default otherwise.
  */
 async function handoffTargets(): Promise<{ targets: HandoffTarget[]; target: TargetId }> {
   const paired = server;
-  const [local, remote] = await Promise.all([
-    downloadFolders(native),
+  const last = settings.askStartsOn === "last" ? await readLastFolders() : {};
+  const localStart = settings.askStartsOn === "last" ? last.local ?? ""
+    : settings.askStartsOn === "custom" ? settings.askStartFolder : "";
+  // Custom is a folder on this PC; the server starts on its own default then.
+  const serverStart = settings.askStartsOn === "last" ? last.server ?? "" : "";
+  const [local, remote, serverStartExists] = await Promise.all([
+    downloadFolders(native, localStart ? [localStart] : []),
     paired ? downloadFolders(paired) : Promise.resolve(undefined),
+    paired && serverStart ? serverHasFolder(paired, serverStart) : Promise.resolve(false),
   ]);
   const offered = availableTargets({ serverPaired: paired !== null, localMissing: isNativeHostMissing(local.error) });
-  const targets: HandoffTarget[] = offered.map((id): HandoffTarget => id === "server"
-    ? { id, label: TARGET_LABELS.server, chooser: "list", address: paired!.address, ...remote! }
-    : { id, label: TARGET_LABELS.local, chooser: "dialog", ...local });
+  const targets: HandoffTarget[] = offered.map((id): HandoffTarget => {
+    if (id === "server") {
+      const target: HandoffTarget = { id, label: TARGET_LABELS.server, chooser: "list", address: paired!.address, name: displayName(paired!.pairing), ...remote! };
+      if (serverStartExists && serverStart !== target.defaultFolder) target.startFolder = serverStart;
+      return target;
+    }
+    const { existing, ...folders } = local;
+    const target: HandoffTarget = { id, label: TARGET_LABELS.local, chooser: "dialog", ...folders };
+    if (settings.browserFolder) {
+      target.defaultFolder = settings.browserFolder;
+      target.sendDefault = true;
+    }
+    // An older app does not say which folders exist: unknown, so the default.
+    if (localStart && existing?.includes(localStart) && localStart !== target.defaultFolder) target.startFolder = localStart;
+    return target;
+  });
   return { targets, target: initialTarget(settings.defaultTarget, offered) };
 }
 
@@ -1878,10 +2186,17 @@ function serverTransport(pairing: ServerPairing): ServerTransport {
   return transport;
 }
 
-function serverStatus(): { address: string; name?: string; pairedAt?: number; connected: boolean; lastError: string } | null {
+function serverStatus(): {
+  address: string; name?: string; serverName?: string; displayName: string; pairedAt?: number; connected: boolean; lastError: string;
+} | null {
   if (!server) return null;
-  const { address, name, pairedAt } = server.pairing as ServerPairing;
-  return { address, name, pairedAt, connected: server.connected, lastError: server.lastError };
+  const { address, name, serverName, pairedAt } = server.pairing as ServerPairing;
+  return { address, name, serverName, displayName: displayName(server.pairing), pairedAt, connected: server.connected, lastError: server.lastError };
+}
+
+/** The paired server's name as every page shows it (EXT.R9): the user's name, the server's, else its address's host. */
+function displayName(pairing: ServerPairing): string {
+  return serverDisplayName(pairing.address, pairing.serverName, settings.serverCustomName);
 }
 
 function fromPage(sender: chrome.runtime.MessageSender | undefined, page: string): boolean {

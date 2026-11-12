@@ -6,16 +6,18 @@ using TestServer;
 namespace DownloadManager.Integration.Tests;
 
 /// <summary>
-/// UI.B14: a CLI batch or import is headless like a single CLI add, and unlike one, no completion window opens per
-/// job either. Each has a source of its own, so the list still shows "Batch" and "App" as it did, and an import
-/// still keeps its links out of the recent addresses.
+/// UI.B14, the Host's side: what the Host does with the sources a CLI batch or import sends. These call the service
+/// with each source and run no CLI code; that the CLI sends them is <see cref="CliBatchSourceHostTests"/>.
+/// A batch or import is headless like a single CLI add, and unlike one, no completion window opens per job either.
+/// Each has a source of its own, so the list still shows "Batch" and "App" as it did, and an import still keeps its
+/// links out of the recent addresses.
 /// </summary>
 public sealed partial class RuntimeServiceTests
 {
     [Theory]
     [InlineData("cliBatch")]
     [InlineData("cliImport")]
-    public async Task CliBatchAndImportAddsOpenNoProgressOrCompletionWindow(string source)
+    public async Task AddsWithTheCliBatchAndImportSourcesOpenNoProgressOrCompletionWindow(string source)
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
         var windows = new ConcurrentQueue<DownloadWindowRequest>();
@@ -72,7 +74,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task ACliImportKeepsItsLinksOutOfRecentAddressesAndACliBatchDoesNot()
+    public async Task AnAddWithTheCliImportSourceKeepsItsLinksOutOfRecentAddressesAndOneWithTheBatchSourceDoesNot()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
         var imported = $"{_server.BaseAddress}/file/imported.bin?size=16";

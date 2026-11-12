@@ -26,12 +26,21 @@ public interface IDownloadCheckpointStore
 {
     /// <summary>
     /// Null means there is no usable checkpoint, and a transfer that hears this starts over, deleting what it has. So a
-    /// file that exists but can't be read right now throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> instead.
+    /// file that exists but can't be read right now throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> instead,
+    /// and one that can't be used at all (damaged, or saved by a newer build) throws <see cref="CheckpointUnusableException"/>.
     /// </summary>
     Task<DownloadCheckpoint?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// A checkpoint file exists but can never be used by this build: its content is damaged, or a newer build wrote it.
+/// Trying again won't help, so it is not worth a retry; reading it as none would truncate the part, so callers keep
+/// the part and stop instead. An <see cref="IOException"/>, so callers that only know the store contract stay safe.
+/// The message is written for the user.
+/// </summary>
+public class CheckpointUnusableException(string message) : IOException(message);
 
 public interface ISettingsStore
 {
@@ -110,8 +119,24 @@ public sealed class NullPostDownloadHook : IPostDownloadHook
 
 public static class PostDownloadCommandLine
 {
+    /// <summary>Why a post-download program can't be used, in the words a refusal shows.</summary>
+    public const string ProgramRefused = "The post-download program must be the full path of an .exe file.";
+
+    /// <summary>
+    /// A program the Host may start after a download: a full path, and on Windows an <c>.exe</c>. A <c>.bat</c> or
+    /// <c>.cmd</c> would run through <c>cmd.exe</c>, which reads <c>&amp;</c>, <c>%</c> and <c>^</c> in the file's name
+    /// (a server or a torrent chooses that name) as commands. Linux programs have no extension, so there any full path
+    /// passes and starting it says whether it can run.
+    /// </summary>
+    public static bool IsAllowedProgram(string? program)
+        => !string.IsNullOrWhiteSpace(program) && Path.IsPathFullyQualified(program) &&
+           (!OperatingSystem.IsWindows() || string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase));
+
+    /// <exception cref="ArgumentException">The program is not one <see cref="IsAllowedProgram"/> allows.</exception>
     public static System.Diagnostics.ProcessStartInfo Create(string command, string filePath)
     {
+        // Checked here too: a command saved before this rule existed is refused when it would run.
+        if (!IsAllowedProgram(command)) throw new ArgumentException(ProgramRefused, nameof(command));
         var start = new System.Diagnostics.ProcessStartInfo(command)
         {
             UseShellExecute = false,

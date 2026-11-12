@@ -5,7 +5,7 @@
   import { newUuid } from '../lib/ids';
   import {
     canStartQueue, canStopQueue, checkScheduleDraft, defaultMoveTarget, downloadsText, editScheduleDraft, isMember, newScheduleDraft, orderedQueues,
-    queueStartedText, queueStateText, retryConflict, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
+    queueStartedText, queueStateText, applyScheduleEdit, applyScheduleRemoval, retryConflict, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
   } from '../lib/queues';
   import { store } from '../lib/store.svelte';
   import type { Queue, Schedule } from '../lib/types';
@@ -113,17 +113,8 @@
     errors[id] = '';
     saving = id;
     const value = checked.schedule;
-    // Rebased on the latest settings: only this schedule and its queue's retry limit change.
-    const ok = await store.saveSettings((settings) => {
-      const index = settings.schedules.findIndex((s) => s.id === value.id);
-      if (index >= 0) settings.schedules[index] = { ...settings.schedules[index], ...value };
-      else settings.schedules.push(value);
-      for (const queue of settings.queues) {
-        if (!retryChanged || queue.id !== value.queueId) continue;
-        if (retry === null) delete queue.retryLimit;
-        else queue.retryLimit = retry;
-      }
-    }, 'Schedule saved.');
+    // Rebased on the latest settings, and checked again on them: only this schedule and its queue's retry limit change.
+    const ok = await store.saveSettings((settings) => applyScheduleEdit(settings, draft, value, retryChanged ? retry : undefined), 'Schedule saved.');
     saving = null;
     if (ok) closeDraft(id);
   }
@@ -136,7 +127,7 @@
     const conflict = scheduleConflict(schedules, { isNew: false, schedule: snapshot, baseline: snapshot }, true);
     removing = null;
     if (conflict) { store.toast(conflict.error, 'error'); return; }
-    const ok = await store.saveSettings((settings) => { settings.schedules = settings.schedules.filter((s) => s.id !== id); }, 'Schedule removed.');
+    const ok = await store.saveSettings((settings) => applyScheduleRemoval(settings, snapshot), 'Schedule removed.');
     if (ok) closeDraft(id);
   }
 

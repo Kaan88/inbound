@@ -90,7 +90,11 @@ internal static class UiStateStore
         return new UiState();
     }
 
-    public static void Save(UiState state)
+    /// <summary>
+    /// Saves the layout; false when no location took it. Audit L1: it never throws, since a full disk or a locked file
+    /// must not end the window from a click that only expanded a package.
+    /// </summary>
+    public static bool Save(UiState state)
     {
         Exception? last = null;
         foreach (var path in Paths)
@@ -101,17 +105,15 @@ internal static class UiStateStore
                 var temp = path + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(state, Options));
                 File.Move(temp, path, overwrite: true);
-                return;
+                return true;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
                 last = ex;
             }
         }
 
-        if (last is not null)
-        {
-            throw last;
-        }
+        if (last is not null) UiTrace.Write($"UI state save failed: {last.Message}");
+        return false;
     }
 }

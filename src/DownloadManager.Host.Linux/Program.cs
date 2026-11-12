@@ -90,7 +90,7 @@ internal static class Program
             checkpoints: checkpoints,
             mediaCheckpoints: mediaCheckpoints);
         // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
-        var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
+        var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
         var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
         log.Secrets = remote.Registry;
         using var notifications = new DesktopNotifications(log.Warn);
@@ -104,7 +104,8 @@ internal static class Program
             mediaCheckpoints: mediaCheckpoints,
             ftpEngine: ftpEngine,
             linkBroker: remote.Broker,
-            linkSecrets: remote.Registry);
+            linkSecrets: remote.Registry,
+            torrentEngine: DownloadManager.Torrents.TorrentSetup.Create(paths.Root, new TorrentStore(paths), log.Info));
         foreach (var provider in remote.Registry.All)
         {
             // Addresses saved earlier may turn out to hold a key that was only just entered.
@@ -150,6 +151,7 @@ internal static class Program
         var bridgeLauncher = new WebBridgeLauncher(log.Warn);
         if (File.Exists(bridgeLauncher.BridgePath))
             remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
+        service.ResolveTorrentUpload = remoteJobs.ResolveReference is null ? null : remoteJobs.ResolveUpload;
         // D8: a browser on another device, through the web bridge, asks for the web role and gets these rights.
         using var webSessions = new WebSessionProfile(service, platform.Capabilities, archivesStarted ? archives : null,
             remoteStarted ? remote.Registry : null, remoteStarted ? remoteJobs : null, log.Info);
@@ -186,10 +188,13 @@ internal static class Program
         // finds no installed build and stays idle.
         using var updateMonitor = new HostUpdateMonitor(service, log.Info);
         service.UpdateShutdownRequested += (_, _) => platform.RequestShutdown();
+        var torrentHandler = new TorrentHandlerSync(log);
+        torrentHandler.Apply(service.TorrentsAvailable && currentSettings.TorrentsEnabled && currentSettings.TorrentHandler);
         service.SettingsChanged += (_, _) =>
         {
             currentSettings = service.GetSettings();
             updateMonitor.ApplySettings(currentSettings);
+            torrentHandler.Apply(service.TorrentsAvailable && currentSettings.TorrentsEnabled && currentSettings.TorrentHandler);
         };
         TryApplyStartup(currentSettings.LaunchAtStartup, log);
         try
@@ -224,6 +229,11 @@ internal static class Program
                 notifications.Notify(notice.Title, notice.Message);
             }, log.Warn)
             : null;
+        using var torrentNotices = TorrentNotices.Listen(service, TimeProvider.System, () => currentSettings.NotifyOnCompletion, () => false, notice =>
+        {
+            log.Info("Torrent notice: ready to choose files");
+            notifications.Notify(notice.Title, notice.Message);
+        }, log.Warn);
         using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
         {
             _ = Task.Run(() =>
@@ -290,6 +300,7 @@ internal static class Program
         // Shutting down stops what is running, which isn't news about any package.
         downloadNotices.Dispose();
         remoteNotices?.Dispose();
+        torrentNotices.Dispose();
         downloadWindows.Dispose();
         await Step(async () =>
         {
@@ -373,6 +384,78 @@ internal static class Program
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             log.Warn($"Could not update sign-in startup: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// T4: the magnet and .torrent handler follows Options › Torrents, as on Windows. Applied once at start and when the
+    /// wanted state changes; a failed write is tried again on the next settings change.
+    /// </summary>
+    private sealed class TorrentHandlerSync(FileLogger log)
+    {
+        private readonly Lock _sync = new();
+        private bool? _applied;
+
+        public void Apply(bool wanted)
+        {
+            // A sandbox data folder (tests, a second profile) must not change the real handler.
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+            lock (_sync)
+            {
+                if (_applied == wanted) return;
+                // Inside an AppImage its own file, whose AppRun hands the arguments to the window; else the window program.
+                var appImage = Environment.GetEnvironmentVariable("APPIMAGE");
+                var command = !string.IsNullOrWhiteSpace(appImage) && File.Exists(appImage) ? appImage : LinuxHostPlatform.FindUiExecutable();
+                if (command is null)
+                {
+                    if (wanted) log.Warn("The magnet and .torrent handler wasn't set up: the window program wasn't found.");
+                    return;
+                }
+
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var applications = LinuxTorrentHandler.ApplicationsDirectory(home, Environment.GetEnvironmentVariable("XDG_DATA_HOME"));
+                var handler = new LinuxTorrentHandler(applications,
+                    LinuxTorrentHandler.MimeAppsLists(home, Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"), applications),
+                    command, RunXdgMime, LinuxApp.IconName);
+                try
+                {
+                    var changed = wanted ? handler.Register() : handler.Remove();
+                    _applied = wanted;
+                    if (changed) log.Info(wanted ? "Set up the magnet and .torrent handler." : "Removed the magnet and .torrent handler.");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    log.Warn($"Could not update the magnet and .torrent handler: {ex.GetType().Name}");
+                }
+            }
+        }
+
+        private bool RunXdgMime(IReadOnlyList<string> arguments)
+        {
+            try
+            {
+                var start = new System.Diagnostics.ProcessStartInfo("xdg-mime") { UseShellExecute = false };
+                foreach (var argument in arguments) start.ArgumentList.Add(argument);
+                using var process = System.Diagnostics.Process.Start(start);
+                if (process is null) return false;
+                if (!process.WaitForExit(TimeSpan.FromSeconds(10)))
+                {
+                    log.Warn("xdg-mime didn't finish within 10 seconds.");
+                    try { process.Kill(entireProcessTree: true); }
+                    catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                    return false;
+                }
+
+                if (process.ExitCode != 0) log.Warn($"xdg-mime exited with {process.ExitCode}.");
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                // No xdg-utils: the entry is there, so the desktop's own settings can still choose Inbound; the entry keeps its
+                // pending mark, so the next settings change or start tries again.
+                log.Warn($"xdg-mime could not run: {ex.GetType().Name}");
+                return false;
+            }
         }
     }
 

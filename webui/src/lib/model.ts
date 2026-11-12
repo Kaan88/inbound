@@ -86,6 +86,17 @@ export function apply(model: Model, message: Envelope): boolean {
       return true;
     }
 
+    // Sent by a server that says when its settings change (audit 4 H1); an older one doesn't, and the page then reads
+    // them before each save (Store.saveSettings). The settings come alone or as { settings }.
+    case 'settings.changed': {
+      const payload = message.payload as (Settings & { settings?: Settings }) | undefined;
+      const settings = payload?.settings ?? (payload && 'queues' in payload ? payload : undefined);
+      if (!settings) return false;
+      model.settings = settings;
+      if (settings.downloadGroups) model.groups = settings.downloadGroups;
+      return true;
+    }
+
     case 'remote.listResult': {
       const result = message.payload as { ok: boolean; jobs?: RemoteJob[] };
       if (!result?.ok) return false;

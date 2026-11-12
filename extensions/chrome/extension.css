@@ -86,6 +86,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .target-field .segmented { margin-top: 0; }
 .target-choice > label { position: relative; }
 .target-choice > label.target-down { color: var(--muted); }
+/* EXT.R9: "Home NAS (192.168.1.150)": the host after the name, smaller and muted. */
+.target-address { color: var(--muted); font-size: 12px; }
 .what-is-sent summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .what-is-sent[open] summary { margin-bottom: 4px; }
 .what-is-sent .hint { max-width: 60ch; }
@@ -107,6 +109,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .dialog-footer > .footer-start { margin-right: auto; }
 .dialog-message { margin-bottom: 10px; overflow-wrap: anywhere; }
 .dialog .check { margin-bottom: 6px; }
+.dialog-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.dialog-field > .field { width: 100%; box-sizing: border-box; }
 
 /* ---- Popup (380 wide, up to 600 tall) ----------------------------------------------------------------------- */
 

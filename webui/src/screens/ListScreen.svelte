@@ -23,7 +23,14 @@
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
   import { foldTools } from '../lib/toolbar';
-  import { buildRows, selectedJobIds, type Row, type ViewKey } from '../lib/views';
+  import { buildRows, isTorrentView, selectedJobIds, viewHash, type Row, type TorrentFilesView, type ViewKey } from '../lib/views';
+  import { knownListenPort, magnetToCopy, sortForView, sortMenuTitles, torrentCounts, torrentFilters, torrentSummary } from '../lib/torrentList';
+  import { blocksAddressCommands, canChooseFiles, filesRefreshMs, isActive as torrentRuns, primaryIsChooseFiles, showsFiles } from '../lib/torrents';
+  import type { TorrentFilesResult } from '../lib/types';
+  import TorrentChooseFiles from './TorrentChooseFiles.svelte';
+  import { hasTorrentControls, mayRun, seedSaid, seedTargets } from '../lib/torrentDetails';
+  import { announceSaid, canAnnounce, canRecheck, recheckSaid } from '../lib/torrentControls';
+  import { watchTorrents } from '../lib/torrentWatch.svelte';
   import ArchiveRecord from './ArchiveRecord.svelte';
   import ChangeCategory from './ChangeCategory.svelte';
   import MoveRename from './MoveRename.svelte';
@@ -73,7 +80,13 @@
   let details = $state<string | null>(null);
   /** Details opened to run Redownload at once (its questions live there). */
   let detailsStart = $state<'redownload' | undefined>(undefined);
+  /** T3: details opened on a torrent's Options tab (Set Limits…). */
+  let detailsTab = $state<'options' | undefined>(undefined);
   let moving = $state<Job | null>(null);
+  /** T1: the torrent whose Choose files dialog is open. */
+  let choosingFiles = $state<string | null>(null);
+  /** T1: the files of the open torrent rows, as torrent.files last said (never in job events: a torrent can have 100,000). */
+  let torrentFiles = $state<Record<string, TorrentFilesView>>({});
   let refreshing = $state<Job | null>(null);
   let recategorizing = $state<Job[] | null>(null);
   let packageOpen = $state<string | null>(null);
@@ -109,10 +122,22 @@
   let speedDialog = $state(false);
   let speedText = $state('');
 
-  const rows = $derived(buildRows(store.model, view, search, expanded, sort));
+  // The column is there whenever there is a set to talk about, and the Host answers archive.list.
+  const showExtraction = $derived(store.model.archivesAnswered && Object.keys(store.model.archives).length > 0);
+  // The Extractions view lists archives, which have no queue, size, status, time left or rate of their own (U-WU-20).
+  const onlyExtraction = $derived(view === 'extractions' && showExtraction);
+  // The Torrents views show Seeds, Peers, Up and Ratio in place of Last Try Date (WEB-T2), and on a phone the views
+  // as chips with a line of what the torrents move (WEB-T1, WEB-T3).
+  const torrentCols = $derived(isTorrentView(view) && !onlyExtraction);
+  // A sort by a swarm column holds in the torrent views only; elsewhere the default (WEB-T2).
+  const shownSort = $derived(sortForView(sort, torrentCols));
+
+  const rows = $derived(buildRows(store.model, view, search, expanded, shownSort, torrentFiles));
   const settings = $derived(store.model.settings);
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
 
+  /** The rows that can be selected: a torrent's file rows stand for no download. */
+  const selectableCount = $derived(rows.filter((row) => row.kind !== 'torrentFile').length);
   const selectedRows = $derived(rows.filter((row) => selected.has(row.id)));
   const packageRows = $derived(selectedRows.filter((row): row is PackageRow => row.kind === 'package'));
   const remoteRows = $derived(selectedRows.filter((row): row is RemoteRow => row.kind === 'remote'));
@@ -142,10 +167,8 @@
     for (const set of Object.values(store.model.archives)) for (const id of set.jobIds) map.set(id, set);
     return map;
   });
-  // The column is there whenever there is a set to talk about, and the Host answers archive.list.
-  const showExtraction = $derived(store.model.archivesAnswered && Object.keys(store.model.archives).length > 0);
-  // The Extractions view lists archives, which have no queue, size, status, time left or rate of their own (U-WU-20).
-  const onlyExtraction = $derived(view === 'extractions' && showExtraction);
+  const torrentCount = $derived(torrentCols ? torrentCounts(Object.values(store.model.jobs)) : null);
+  const torrentLine = $derived(torrentCols ? torrentSummary(Object.values(store.model.jobs), knownListenPort(store.model.settings, store.model.hello?.hostKind)) : '');
 
   // A toast's Show opens that download.
   $effect(() => {
@@ -157,6 +180,53 @@
 
   // What the archive commands take for the selection (ArchiveRules.Plan), for the toolbar and the row menu.
   const archivePlan = $derived(planForRows(rows, selected, (id) => archiveByJob.get(id), connected));
+  // ---- T1: the files of an open torrent row, read when it opens and again while it downloads ----
+
+  const openTorrents = $derived(Object.values(store.model.jobs).filter((job) => expanded.has(job.id) && showsFiles(job.torrent)));
+  const filesRead = new Map<string, number>();
+  const filesReading = new Set<string>();
+
+  async function readTorrentFiles(jobId: string) {
+    if (filesReading.has(jobId)) return;
+    filesReading.add(jobId);
+    try {
+      const result = await store.ask<TorrentFilesResult>('torrent.files', { jobId });
+      torrentFiles = { ...torrentFiles, [jobId]: { files: result.files ?? [] } };
+    } catch (error) {
+      // An earlier list stays; only a first read shows the problem.
+      const before = torrentFiles[jobId];
+      if (!before || 'error' in before) torrentFiles = { ...torrentFiles, [jobId]: { error: error instanceof Error ? error.message : String(error) } };
+    } finally {
+      filesRead.set(jobId, Date.now());
+      filesReading.delete(jobId);
+    }
+  }
+
+  $effect(() => {
+    if (!connected) return;
+    const now = Date.now();
+    for (const job of openTorrents) {
+      const at = filesRead.get(job.id);
+      // Read once on opening; then, while it runs, at most every 3 s (30 s for a big list), as the job events come.
+      // A first read that failed is tried again on the next change after that wait too.
+      const failed = !!torrentFiles[job.id] && 'error' in torrentFiles[job.id];
+      const due = at === undefined || ((torrentRuns(job) || failed) && now - at >= filesRefreshMs(job.torrent?.fileCount ?? 0));
+      if (due) void readTorrentFiles(job.id);
+    }
+  });
+  // A closed row forgets its files, so opening it again reads them fresh.
+  $effect(() => {
+    const open = new Set(openTorrents.map((job) => job.id));
+    const stale = Object.keys(torrentFiles).filter((id) => !open.has(id));
+    if (stale.length === 0) return;
+    const next = { ...torrentFiles };
+    for (const id of stale) {
+      delete next[id];
+      filesRead.delete(id);
+    }
+    torrentFiles = next;
+  });
+
   const canCheckRemote = $derived(Object.values(store.model.remoteJobs).some((job) => actionsOf(job).checkNow));
 
   async function extractSelection() {
@@ -236,6 +306,12 @@
 
   function click(row: Row, event: MouseEvent) {
     if (longPress.takeClick()) return;
+    // A torrent's file row stands for no download: nothing to select. The last one opens the details.
+    if (row.kind === 'torrentFile') {
+      cursor = row.id;
+      if (row.more || touchFirst()) open(row);
+      return;
+    }
     const ctrl = event.ctrlKey || event.metaKey;
     cursor = row.id;
     if (touchFirst() && !event.shiftKey && !ctrl) {
@@ -248,6 +324,7 @@
   }
 
   function toggle(row: Row) {
+    if (row.kind === 'torrentFile') return;
     const next = new Set(selected);
     if (next.has(row.id)) next.delete(row.id);
     else next.add(row.id);
@@ -258,7 +335,8 @@
   }
 
   function toggleAll() {
-    selected = selected.size === rows.length ? new Set() : new Set(rows.map((row) => row.id));
+    const all = rows.filter((row) => row.kind !== 'torrentFile');
+    selected = selected.size === all.length ? new Set() : new Set(all.map((row) => row.id));
   }
 
   function toggleExpanded(id: string) {
@@ -275,13 +353,16 @@
   }
 
   function headerSort(key: SortKey) {
-    applySort(nextSort(sort, key));
+    applySort(nextSort(shownSort, key));
   }
 
   // ---- What a double-click or Enter does ----
 
   function open(row: Row) {
-    if (row.kind === 'job') details = row.job.id;
+    if (row.kind === 'torrentFile') { if (row.more) details = row.parentId; return; }
+    // A torrent waiting for its file choice opens that choice (TorrentRules.PrimaryIsChooseFiles).
+    if (row.kind === 'job' && primaryIsChooseFiles(row.job)) choosingFiles = row.job.id;
+    else if (row.kind === 'job') details = row.job.id;
     else if (row.kind === 'package') toggleExpanded(row.group.id);
     else if (row.kind === 'remote') void runRemote(remoteEnterAction([row.remote]), [row.remote], true);
     else if (row.kind === 'archive') {
@@ -301,6 +382,32 @@
       case 'enterLinkPassword': remoteOpen = jobs[0]; break;
       default: if (dialogFallback) remoteOpen = jobs[0];
     }
+  }
+
+  /** T3: Force Recheck on every selected torrent it may apply to (the Host says why for one it doesn't). */
+  async function recheckSelection() {
+    const targets = selectedJobs.filter(canRecheck);
+    let ok = 0;
+    for (const job of targets) if (await store.attempt('torrent.recheck', { jobId: job.id })) ok++;
+    if (ok) store.toast(targets.length === 1 ? recheckSaid(mayRun(targets[0])) : `A check of the files was asked for ${ok} torrents.`);
+  }
+
+  /** T3: Announce Now for every selected torrent that runs. */
+  async function announceSelection() {
+    let ok = 0;
+    for (const job of selectedJobs.filter(canAnnounce)) if (await store.attempt('torrent.announce', { jobId: job.id })) ok++;
+    if (ok) store.toast(announceSaid);
+  }
+
+  // T3: while a torrent is on the list in view or its details are open, and the page is visible, the server is told
+  // (torrent.watch) so its progress comes every second; otherwise every 5 s. No torrent shown: nothing is sent.
+  watchTorrents(() => rows.some((row) => row.kind === 'job' && !!row.job.torrent) || (!!details && !!store.model.jobs[details]?.torrent));
+
+  /** T2: Start seeding or Stop seeding on every selected torrent it applies to (torrent.seed, one each). */
+  async function seedSelection(on: boolean) {
+    let ok = 0;
+    for (const job of seedTargets(selectedJobs, on)) if (await store.attempt('torrent.seed', { jobId: job.id, on })) ok++;
+    if (ok) store.toast(seedSaid(on, ok));
   }
 
   async function each<T>(items: T[], type: string, payload: (item: T) => Record<string, unknown>, done: string) {
@@ -538,10 +645,8 @@
 
   // ---- Menus ----
 
-  const columnTitles: [SortKey, string][] = [
-    ['name', 'File Name'], ['queue', 'Q'], ['size', 'Size'], ['status', 'Status'], ['extraction', 'Extraction'], ['eta', 'Time left'],
-    ['rate', 'Transfer rate'], ['lastTry', 'Last Try Date'], ['description', 'Description'], ['added', 'Order of addition'],
-  ];
+  // The torrent views add Seeds, Peers, Up and Ratio: below 1024 px this menu is the only way to sort by them.
+  const columnTitles = $derived(sortMenuTitles(torrentCols));
 
   // ---- The toolbar ----
 
@@ -639,12 +744,12 @@
     const limit = s?.globalSpeedLimitBytesPerSecond && s.globalSpeedLimitBytesPerSecond > 0 ? s.globalSpeedLimitBytesPerSecond : 0;
     return [
       {
-        label: `Sort by: ${columnTitles.find(([key]) => key === sort.key)?.[1] ?? ''}`,
+        label: `Sort by: ${columnTitles.find(([key]) => key === shownSort.key)?.[1] ?? ''}`,
         items: columnTitles.map(([key, label]) => ({
           label,
-          checked: sort.key === key,
-          hint: sort.key === key ? (sort.ascending ? 'Ascending' : 'Descending') : undefined,
-          onselect: () => applySort(sort.key === key ? { key, ascending: !sort.ascending } : nextSort(sort, key)),
+          checked: shownSort.key === key,
+          hint: shownSort.key === key ? (shownSort.ascending ? 'Ascending' : 'Descending') : undefined,
+          onselect: () => applySort(nextSort(shownSort, key)),
         })),
       },
       { separator: true },
@@ -715,17 +820,31 @@
       if (items.length) items.push({ separator: true });
       const unfinished = selectedJobs.filter((job) => job.state !== 'completed');
       const sizeOnly = single?.finalFilePath && !single.fileRemovedAfterExtraction;
-      const commands = fileCommands(single, plan, selectedJobs.length);
+      const commands = fileCommands(single, plan, selectedJobs.length, blocksAddressCommands(selectedJobs));
+      const torrentJobs = selectedJobs.filter((job) => job.torrent);
+      // T3's items only where the server has them; an older server's torrents keep the T2 menu.
+      const controlJobs = torrentJobs.filter(hasTorrentControls);
       items.push(
         { label: menuLabel('Copy path', plan.openReason), disabled: plan.openReason !== null || !sizeOnly, onselect: () => void copy(single?.finalFilePath ?? '', 'Path copied.') },
         { label: menuLabel('Copy folder path', plan.openReason), disabled: plan.openReason !== null || !single?.destinationDirectory, onselect: () => void copy(single?.destinationDirectory ?? '', 'Folder path copied.') },
-        { label: commands.move.label, hint: 'Ctrl+M', disabled: !commands.move.enabled, onselect: () => (moving = single) },
+        // WEB-T4: the info hash and the name; the trackers stay with the server.
+        { label: 'Copy Magnet Link', hidden: !magnetToCopy(single?.torrent), onselect: () => void copy(magnetToCopy(single?.torrent) ?? '', 'Magnet link copied.') },
+        { label: commands.move.label, hint: 'Ctrl+M', hidden: commands.move.hidden, disabled: !commands.move.enabled, onselect: () => (moving = single) },
         { separator: true },
         ...(showsArchive ? [...archiveItems(archive, records, null), { separator: true } as MenuItem] : []),
         { label: 'Resume', disabled: !canResume, onselect: () => void resume() },
         { label: 'Stop', disabled: !canPause, onselect: () => void stop() },
         { label: 'Cancel Package…', hidden: packageRows.length === 0, disabled: !canCancelPackage, onselect: askCancelPackage },
-        { label: commands.redownload.label, disabled: !commands.redownload.enabled, onselect: () => { if (single) { detailsStart = 'redownload'; details = single.id; } } },
+        // T1: one torrent whose files are known and that hasn't finished.
+        { label: 'Choose Files…', hidden: torrentJobs.length === 0, disabled: !canChooseFiles(selectedJobs), onselect: () => { if (single) choosingFiles = single.id; } },
+        // T2: a finished torrent shares its pieces until the seeding goal; these start or stop it for the selection.
+        { label: 'Start Seeding', hidden: seedTargets(selectedJobs, true).length === 0, disabled: !connected, onselect: () => void seedSelection(true) },
+        { label: 'Stop Seeding', hidden: seedTargets(selectedJobs, false).length === 0, disabled: !connected, onselect: () => void seedSelection(false) },
+        // T3: check the files again, ask the trackers for peers now, and the torrent's own limits (its Options tab).
+        { label: 'Force Recheck', hidden: controlJobs.length === 0, disabled: !connected || !controlJobs.some(canRecheck), onselect: () => void recheckSelection() },
+        { label: 'Announce Now', hidden: controlJobs.length === 0, disabled: !connected || !controlJobs.some(canAnnounce), onselect: () => void announceSelection() },
+        { label: 'Set Limits…', hidden: controlJobs.length === 0, disabled: selectedJobs.length !== 1 || !hasTorrentControls(single), onselect: () => { if (single?.torrent) { detailsTab = 'options'; details = single.id; } } },
+        { label: commands.redownload.label, hidden: commands.redownload.hidden, disabled: !commands.redownload.enabled, onselect: () => { if (single) { detailsStart = 'redownload'; details = single.id; } } },
         { label: commands.refresh.label, hidden: commands.refresh.hidden, disabled: !commands.refresh.enabled, onselect: () => (refreshing = single) },
         { separator: true },
         { label: 'Add to Queue', items: queues.map((queue) => ({ label: queue.name, onselect: () => void addToQueue(queue.id) })) },
@@ -778,6 +897,7 @@
 
 
   function openMenu(row: Row, x: number, y: number) {
+    if (row.kind === 'torrentFile') return;
     if (!selected.has(row.id)) {
       selected = new Set([row.id]);
       anchor = row.id;
@@ -826,8 +946,12 @@
   function moveTo(id: string | null, extend: boolean, keepSelection: boolean) {
     if (!id) return;
     cursor = id;
-    if (extend) selected = selectAfterClick(selected, rows.map((r) => r.id), id, anchor ?? id, { shift: true, ctrl: false });
-    else if (!keepSelection) {
+    const fileRow = (key: string) => rows.find((r) => r.id === key)?.kind === 'torrentFile';
+    // The cursor may rest on a torrent's file row, but that row never joins the selection.
+    if (extend) selected = new Set([...selectAfterClick(selected, rows.map((r) => r.id), id, anchor ?? id, { shift: true, ctrl: false })].filter((key) => !fileRow(key)));
+    else if (fileRow(id)) {
+      if (!keepSelection) selected = new Set();
+    } else if (!keepSelection) {
       selected = new Set([id]);
       anchor = id;
     }
@@ -856,7 +980,7 @@
     }
     if (ctrl && event.key.toLowerCase() === 'a') {
       event.preventDefault();
-      selected = new Set(rows.map((r) => r.id));
+      selected = new Set(rows.filter((r) => r.kind !== 'torrentFile').map((r) => r.id));
       return;
     }
     // A box or button that has the focus answers Space and Enter itself; every other key is the list's.
@@ -920,15 +1044,15 @@
       event.preventDefault();
       applySort({ key: 'size', ascending: false });
     } else if (ctrl && !event.shiftKey && key === 'm') {
-      if (firstLocal?.kind === 'job' && firstLocal.job.state === 'completed' && !firstLocal.job.fileRemovedAfterExtraction) {
+      if (firstLocal?.kind === 'job' && firstLocal.job.state === 'completed' && !firstLocal.job.fileRemovedAfterExtraction && !firstLocal.job.torrent) {
         event.preventDefault();
         moving = firstLocal.job;
       }
     }
   }
 
-  const sortMark = (key: SortKey) => (sort.key === key ? (sort.ascending ? '▲' : '▼') : '');
-  const ariaSort = (key: SortKey) => (sort.key === key ? (sort.ascending ? 'ascending' : 'descending') : 'none') as 'ascending' | 'descending' | 'none';
+  const sortMark = (key: SortKey) => (shownSort.key === key ? (shownSort.ascending ? '▲' : '▼') : '');
+  const ariaSort = (key: SortKey) => (shownSort.key === key ? (shownSort.ascending ? 'ascending' : 'descending') : 'none') as 'ascending' | 'descending' | 'none';
 </script>
 
 <!-- The finger may lift on the menu the long press opened, not on the row: the swallow still runs out. -->
@@ -971,8 +1095,19 @@
   </div>
 {/snippet}
 
-<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} role="row">
-  <label class="flex items-center justify-center self-stretch"><input type="checkbox" aria-label="Select all" checked={rows.length > 0 && selected.size === rows.length} onchange={toggleAll} /></label>
+{#if torrentCols && torrentCount}
+  <!-- A phone has no sidebar in view: the torrent views are chips, with what the torrents move under them. -->
+  <nav aria-label="Torrent views" class="flex gap-1.5 overflow-x-auto border-b border-divider bg-chrome px-3 py-2 md:hidden">
+    <a href={viewHash('torrents')} class="torrent-chip" aria-current={view === 'torrents' ? 'page' : undefined}>All <span class="tabular">{torrentCount.all}</span></a>
+    {#each torrentFilters as filter (filter.key)}
+      <a href={viewHash(`torrents-${filter.key}`)} class="torrent-chip" aria-current={view === `torrents-${filter.key}` ? 'page' : undefined}>{filter.label} <span class="tabular">{torrentCount[filter.key]}</span></a>
+    {/each}
+  </nav>
+  {#if torrentLine}<p class="tabular border-b border-divider px-3 py-1 text-[12px] text-muted md:hidden">{torrentLine}</p>{/if}
+{/if}
+
+<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} class:torrent-cols={torrentCols} role="row">
+  <label class="flex items-center justify-center self-stretch"><input type="checkbox" aria-label="Select all" checked={selectableCount > 0 && selected.size === selectableCount} onchange={toggleAll} /></label>
   {@render head('name', 'File Name', 'text-left')}
   {#if !onlyExtraction}
     {@render head('queue', 'Q', 'text-center')}
@@ -984,7 +1119,14 @@
     {@render head('eta', 'Time left', 'text-right')}
     {@render head('rate', 'Transfer rate', 'text-right')}
   {/if}
-  {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block')}
+  {#if torrentCols}
+    {@render head('seeds', 'Seeds', 'hidden text-right lg:block')}
+    {@render head('peers', 'Peers', 'hidden text-right lg:block')}
+    {@render head('up', 'Up', 'hidden text-right lg:block')}
+    {@render head('ratio', 'Ratio', 'hidden text-right lg:block')}
+  {:else}
+    {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block')}
+  {/if}
   {@render head('description', 'Description', 'hidden text-left lg:block')}
 </div>
 
@@ -1011,6 +1153,7 @@
       class="list-row group border-b border-divider/60 text-[12.5px] {selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'}"
       class:with-extraction={showExtraction}
       class:only-extraction={onlyExtraction}
+      class:torrent-cols={torrentCols}
       class:is-cursor={cursor === row.id}
       role="row"
       aria-selected={selected.has(row.id)}
@@ -1023,12 +1166,26 @@
     >
       <!-- The whole cell is the box's target, so a finger can tick it (U-WU-8). -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
+      {#if row.kind === 'torrentFile'}
+        <span class="cell-check"></span>
+      {:else}
       <label class="cell-check flex items-center justify-center self-stretch" onclick={(event) => event.stopPropagation()}>
         <input type="checkbox" tabindex="-1" aria-label="Select {v.name}" checked={selected.has(row.id)} onclick={(event) => event.stopPropagation()} onchange={() => toggle(row)} />
       </label>
+      {/if}
 
-      <span class="cell-name flex min-w-0 items-center gap-1.5 {row.kind === 'job' && row.depth ? 'pl-6' : ''} {row.kind === 'remote' ? 'italic' : ''}">
-        {#if row.kind === 'package'}
+      <span class="cell-name flex min-w-0 items-center gap-1.5 {(row.kind === 'job' && row.depth) || row.kind === 'torrentFile' ? 'pl-6' : ''} {row.kind === 'remote' ? 'italic' : ''}">
+        {#if row.kind === 'job' && row.job.torrent}
+          <!-- T1: a torrent row opens to list its files when it has several; the swarm tells it from a package. -->
+          {#if showsFiles(row.job.torrent)}
+            <button tabindex="-1" class="row-expand rounded p-0.5 hover:bg-hover" aria-label={expanded.has(row.job.id) ? 'Hide files' : 'Show files'} title="Show or hide files" aria-expanded={expanded.has(row.job.id)} onclick={(event) => { event.stopPropagation(); toggleExpanded(row.job.id); }}>
+              <Icon name={expanded.has(row.job.id) ? 'chevron-down' : 'chevron-right'} size={14} />
+            </button>
+          {/if}
+          <Icon name={row.job.torrent.hasMetadata ? 'swarm' : 'link'} size={16} class="shrink-0 text-icon-info" />
+        {:else if row.kind === 'torrentFile'}
+          <Icon name={row.more ? 'info' : row.problem ? 'alert' : row.file ? 'file' : 'queue'} size={14} class="shrink-0 {row.problem ? 'text-icon-danger' : 'text-icon-neutral'}" />
+        {:else if row.kind === 'package'}
           <button tabindex="-1" class="row-expand rounded p-0.5 hover:bg-hover" aria-label={row.expanded ? 'Collapse' : 'Expand'} aria-expanded={row.expanded} onclick={(event) => { event.stopPropagation(); toggleExpanded(row.group.id); }}>
             <Icon name={row.expanded ? 'chevron-down' : 'chevron-right'} size={14} />
           </button>
@@ -1040,15 +1197,15 @@
         {:else}
           <Icon name="file" size={15} class="shrink-0 text-icon-neutral" />
         {/if}
-        <span class="min-w-0 flex-1 truncate {row.kind === 'package' ? 'font-semibold' : ''}" title={row.kind === 'job' ? v.name : row.kind === 'archive' ? row.set.firstVolume : v.name}>{v.name}</span>
-        <button tabindex="-1" class="row-menu" aria-label="Actions for {v.name}" aria-haspopup="menu" onclick={(event) => menuButton(row, event)}><Icon name="more" size={16} /></button>
+        <span class="min-w-0 flex-1 truncate {row.kind === 'package' || (row.kind === 'job' && row.job.torrent) ? 'font-semibold' : ''} {row.kind === 'torrentFile' && !row.file ? 'text-muted' : ''}" title={row.kind === 'archive' ? row.set.firstVolume : row.kind === 'torrentFile' && row.file ? row.file.path : v.name}>{v.name}</span>
+        {#if row.kind !== 'torrentFile'}<button tabindex="-1" class="row-menu" aria-label="Actions for {v.name}" aria-haspopup="menu" onclick={(event) => menuButton(row, event)}><Icon name="more" size={16} /></button>{/if}
       </span>
 
       <span class="cell-queue text-center text-muted" title={v.queueTip}>{v.queue}</span>
       <span class="cell-size tabular text-right">{v.sizeText}</span>
       <span class="cell-status min-w-0">
         <span class="block truncate tone-{v.statusTone}" title={v.statusTip}>{v.status}</span>
-        {#if v.bar !== null}<span class="mt-0.5 block"><ProgressBar value={v.bar} label={row.kind === 'package' ? 'Package progress' : 'Progress'} /></span>{/if}
+        {#if v.bar !== null}<span class="mt-0.5 block"><ProgressBar value={v.bar} label={row.kind === 'package' ? 'Package progress' : v.swarm?.goal !== null && v.swarm?.goal !== undefined ? 'Seeding goal' : 'Progress'} /></span>{/if}
         {#if row.kind === 'remote'}
           <button tabindex="-1" class="mt-0.5 rounded border border-divider px-1.5 py-0 text-[11px] not-italic text-text hover:bg-hover" onclick={(event) => { event.stopPropagation(); remoteOpen = row.remote; }}>Actions</button>
         {/if}
@@ -1068,8 +1225,16 @@
       {/if}
       <span class="cell-eta tabular text-right">{connected ? v.etaText : ''}</span>
       <span class="cell-rate tabular text-right">{#if connected}{v.rateText}{#if v.etaText}<span class="phone-eta">{v.rateText ? ' · ' : ''}{v.etaText} left</span>{/if}{/if}</span>
-      <span class="cell-added hidden text-muted lg:block">{v.lastTryText}</span>
-      <span class="cell-desc truncate text-muted" title={v.description}>{v.description}</span>
+      {#if torrentCols}
+        <!-- Peers counts every connected peer, the seeds among them; Up is known while a torrent seeds. -->
+        <span class="cell-swarm tabular text-right" title="Seeds connected">{connected ? v.swarm?.seedsText ?? '' : ''}</span>
+        <span class="cell-swarm tabular text-right" title="Peers connected, seeds included">{connected ? v.swarm?.peersText ?? '' : ''}</span>
+        <span class="cell-swarm tabular text-right">{connected ? v.swarm?.upText ?? '' : ''}</span>
+        <span class="cell-swarm tabular truncate text-right" title={v.swarm?.goal !== null && v.swarm?.goal !== undefined ? 'On the way to the seeding goal of Options › Torrents' : undefined}>{v.swarm?.ratioText ?? ''}</span>
+      {:else}
+        <span class="cell-added hidden text-muted lg:block">{v.lastTryText}</span>
+      {/if}
+      <span class="cell-desc truncate text-muted" title={v.description}>{v.description}{#if row.kind === 'job' && torrentCols && v.swarm && connected}<span class="phone-swarm">{v.description ? ' · ' : ''}{v.swarm.line}</span>{/if}</span>
     </div>
   {:else}
     <div class="px-6 py-16 text-center text-muted">
@@ -1159,11 +1324,18 @@
 {/if}
 
 {#if details}
-  <JobDetails jobId={details} start={detailsStart} set={archiveByJob.get(details)} onclose={() => { details = null; detailsStart = undefined; }} onpassword={(target) => { details = null; detailsStart = undefined; passwordTarget = target; }} />
+  <!-- Keyed: a toast's Show for another download makes a new dialog, not this one with the last download's state. -->
+  {#key details}
+  <JobDetails jobId={details} start={detailsStart} startTab={detailsTab} set={archiveByJob.get(details)} onclose={() => { details = null; detailsStart = undefined; detailsTab = undefined; }} onpassword={(target) => { details = null; detailsStart = undefined; detailsTab = undefined; passwordTarget = target; }} />
+  {/key}
 {/if}
 
 {#if moving}
   <MoveRename job={store.model.jobs[moving.id] ?? moving} onclose={() => (moving = null)} />
+{/if}
+
+{#if choosingFiles}
+  <TorrentChooseFiles jobId={choosingFiles} onclose={() => (choosingFiles = null)} />
 {/if}
 
 {#if refreshing}
@@ -1257,7 +1429,22 @@
   /* The server can't be reached: what the rows say is from before, so it is dimmed (U-WU-3). */
   .list-body.stale { opacity: 0.6; }
   .phone-eta { color: var(--muted); }
-  @media (min-width: 768px) { .phone-eta { display: none; } }
+  @media (min-width: 768px) { .phone-eta, .phone-swarm { display: none; } }
+  .torrent-chip {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  .torrent-chip span { color: var(--muted); }
+  .torrent-chip[aria-current='page'] { border-color: var(--accent); background: var(--selected); font-weight: 600; }
+  @media (pointer: coarse) { .torrent-chip { min-height: 36px; } }
   .list-row.only-extraction :is(.cell-queue, .cell-size, .cell-status, .cell-eta, .cell-rate) { display: none !important; }
   /* A touch screen: the box column, the expand arrow and the row's menu are a finger wide (U-WU-8). */
   @media (pointer: coarse) {
@@ -1283,7 +1470,7 @@
   .list-row .cell-rate { grid-area: rate; font-size: 11.5px; color: var(--muted); }
   .list-row .cell-size { grid-area: size; font-size: 11.5px; color: var(--muted); text-align: right; }
   .list-row .cell-desc { grid-area: desc; font-size: 11.5px; }
-  .list-row .cell-eta, .list-row .cell-extract, .list-row .cell-added, .list-row .cell-queue { display: none; }
+  .list-row .cell-eta, .list-row .cell-extract, .list-row .cell-added, .list-row .cell-queue, .list-row .cell-swarm { display: none; }
   .list-row .cell-desc:empty { display: none; }
 
   /* The menu button: always there on a touch screen, on hover or selection with a mouse. */
@@ -1314,6 +1501,9 @@
     .list-grid, .list-row { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 80px 90px 150px minmax(120px, 1fr); }
     .list-grid.with-extraction, .list-row.with-extraction { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 120px 80px 90px 150px minmax(120px, 1fr); }
     .list-grid.only-extraction, .list-row.only-extraction { grid-template-columns: 28px minmax(200px, 2fr) 260px 150px minmax(160px, 1.5fr); }
-    .list-row .cell-desc, .list-row .cell-added { display: block; font-size: inherit; }
+    .list-row .cell-desc, .list-row .cell-added, .list-row .cell-swarm { display: block; font-size: inherit; }
+    /* The torrent views: Seeds, Peers, Up and Ratio in place of Last Try Date. */
+    .list-grid.torrent-cols, .list-row.torrent-cols { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
+    .list-grid.torrent-cols.with-extraction, .list-row.torrent-cols.with-extraction { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 120px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
   }
 </style>

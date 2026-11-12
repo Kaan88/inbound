@@ -49,7 +49,12 @@ internal static partial class Program
         var command = args[0].ToLowerInvariant();
         var json = args.Contains("--json", StringComparer.OrdinalIgnoreCase);
         var noStart = args.Contains("--no-start", StringComparer.OrdinalIgnoreCase);
-        var optionArgs = args.Skip(1).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        var optionArgs = CliArgs.Positional(args);
+        if (CliArgs.ReadsArgumentsHere(command) && CliArgs.MissingValue(args) is { } bare)
+        {
+            Console.Error.WriteLine($"{bare} needs a value.");
+            return 2;
+        }
 
         if (command == "doctor")
         {
@@ -119,15 +124,16 @@ internal static partial class Program
                     request.Priority = priority;
                 }
 
-                if (int.TryParse(GetOption(args, "--connections"), out var connections))
+                if (!CliArgs.TryInt(args, "--connections", out var connections, out var numberError) ||
+                    !CliArgs.TryInt(args, "--queue", out var queueId, out numberError))
                 {
-                    request.Connections = connections;
+                    Console.Error.WriteLine(numberError);
+                    return 2;
                 }
 
-                if (int.TryParse(GetOption(args, "--queue"), out var queueId))
-                {
-                    request.QueueId = queueId;
-                }
+                request.Connections = connections;
+                // No --queue: the default queue, as add-batch and the app send (-1 names no queue; 0 is one queue's id).
+                request.QueueId = queueId ?? -1;
 
                 foreach (var header in GetOptions(args, "--header"))
                 {
@@ -138,8 +144,7 @@ internal static partial class Program
                     }
                 }
 
-                var reply = await client.RequestAsync(MessageTypes.JobAdd, request).ConfigureAwait(false);
-                var result = reply.GetPayload<AddJobResponse>();
+                var result = await client.AskAsync<AddJobResponse>(MessageTypes.JobAdd, request).ConfigureAwait(false);
                 if (json)
                 {
                     PrintJson(result);
@@ -225,8 +230,28 @@ internal static partial class Program
                 }
 
                 var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-                var content = JobListFile.Serialize(snapshot.Jobs);
-                await File.WriteAllTextAsync(optionArgs[0], content).ConfigureAwait(false);
+                // A torrent is saved with its .torrent and file choice, which only the Host has; an older Host's alone.
+                IReadOnlyDictionary<Guid, TorrentListEntry>? torrents = null;
+                if (snapshot.Jobs.Any(job => job.Torrent is not null))
+                {
+                    // Page by page, so a long list stays under the message size limit.
+                    var all = new Dictionary<Guid, TorrentListEntry>();
+                    Guid? after = null;
+                    do
+                    {
+                        var listed = await client.RequestAsync(TorrentMessageTypes.ListEntries, new TorrentListEntriesRequest { After = after }).ConfigureAwait(false);
+                        if (listed.Type != TorrentMessageTypes.ListEntriesResult) break;
+                        var page = listed.GetPayload<TorrentListEntriesResult>();
+                        foreach (var (id, entry) in page.Entries) all[id] = entry;
+                        after = page.Next is { } next && next != after ? next : null;
+                    }
+                    while (after is not null);
+
+                    if (all.Count > 0) torrents = all;
+                }
+
+                var content = JobListFile.Serialize(snapshot.Jobs, torrents);
+                await WriteFileAtomicallyAsync(optionArgs[0], content).ConfigureAwait(false);
                 Console.WriteLine($"exported {snapshot.Jobs.Count} downloads to {optionArgs[0]}");
                 return 0;
             }
@@ -270,13 +295,46 @@ internal static partial class Program
                 var duplicates = 0;
                 var failed = 0;
                 string? firstError = null;
-                foreach (var entry in entries)
+                // Torrents go to the Host's torrent import: one already in the list, or every one while torrents are off, is skipped.
+                var torrentEntries = entries.Where(JobListFile.IsTorrent).ToList();
+                var skipped = 0;
+                string? skipReason = null;
+                if (torrentEntries.Count > 0)
                 {
+                    // In requests that each fit one message.
+                    var sent = 0;
+                    foreach (var chunk in TorrentListPaging.Chunk(torrentEntries))
+                    {
+                        var imported = await client.RequestAsync(TorrentMessageTypes.Import,
+                            new TorrentImportRequest { Entries = chunk, StartMode = startOverride }).ConfigureAwait(false);
+                        if (imported.Type == TorrentMessageTypes.ImportResult)
+                        {
+                            var result = imported.GetPayload<TorrentImportResult>();
+                            accepted += result.Added;
+                            failed += result.Failed;
+                            firstError ??= result.FirstError;
+                            skipped += result.Skipped;
+                            skipReason ??= result.SkipReason;
+                            sent += chunk.Count;
+                        }
+                        else
+                        {
+                            skipped += torrentEntries.Count - sent;
+                            skipReason ??= "This Host does not download torrents.";
+                            break;
+                        }
+                    }
+                }
+
+                foreach (var entry in entries.Where(entry => !JobListFile.IsTorrent(entry)))
+                {
+                    // The schemes a download can have, and the ones dm export writes (FTP among them). The address is
+                    // shown without a user name or password it may hold.
                     if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
-                        uri.Scheme is not ("http" or "https"))
+                        uri.Scheme is not ("http" or "https" or "ftp"))
                     {
                         failed++;
-                        firstError ??= $"Invalid URL: {entry.Url}";
+                        firstError ??= $"Invalid URL: {UrlRedactor.Redact(entry.Url)}";
                         continue;
                     }
 
@@ -289,7 +347,7 @@ internal static partial class Program
                             continue;
                         }
 
-                        var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
+                        var result = await client.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest
                         {
                             Url = entry.Url,
                             FileName = entry.FileName,
@@ -305,7 +363,6 @@ internal static partial class Program
                             // MainWindow), which a long list would flood. Shown as "App", as "import" was.
                             Source = "cliImport",
                         }).ConfigureAwait(false);
-                        var result = reply.GetPayload<AddJobResponse>();
                         if (result.Accepted)
                         {
                             accepted++;
@@ -330,7 +387,8 @@ internal static partial class Program
                 Console.WriteLine(
                     $"imported {accepted} of {entries.Count} downloads" +
                     (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
-                    (failed > 0 ? $"; {failed} failed: {firstError}" : "."));
+                    (failed > 0 ? $"; {failed} failed: {firstError}" : ".") +
+                    (skipped > 0 ? $" {skipped} torrent{(skipped == 1 ? string.Empty : "s")} skipped: {skipReason}" : string.Empty));
                 return failed > 0 ? 1 : 0;
             }
 
@@ -401,14 +459,17 @@ internal static partial class Program
             case "archive":
                 return await ArchiveCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
 
+            case "torrent":
+                return await TorrentCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
+
             case "package":
                 return await PackageAsync(client, optionArgs, json).ConfigureAwait(false);
 
             case "pause":
-                return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobPause, json).ConfigureAwait(false);
+                return await SimpleJobActionAsync(client, optionArgs, command, MessageTypes.JobPause, json).ConfigureAwait(false);
             case "resume":
             case "retry":
-                return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobResume, json).ConfigureAwait(false);
+                return await SimpleJobActionAsync(client, optionArgs, command, MessageTypes.JobResume, json).ConfigureAwait(false);
             case "refresh":
             {
                 if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var refreshId))
@@ -512,7 +573,7 @@ internal static partial class Program
                     var delete = args.Contains("--delete", StringComparer.OrdinalIgnoreCase);
                     var reply = await client.RequestAsync(MessageTypes.HostCleanOrphans,
                         new CleanOrphansRequest { Delete = delete }).ConfigureAwait(false);
-                    var result = reply.GetPayload<CleanOrphansResponse>();
+                    var result = CliClient.Checked<CleanOrphansResponse>(reply);
                     if (result is null)
                     {
                         Console.Error.WriteLine("error: host returned no clean-orphans result");
@@ -547,8 +608,10 @@ internal static partial class Program
 
                 if (sub == "open")
                 {
+                    // The main window; "host open settings" opens Options, which plain "open" used to.
+                    var page = optionArgs.ElementAtOrDefault(1)?.ToLowerInvariant();
                     var reply = await client.RequestAsync(MessageTypes.HostOpenUi,
-                        new HostActionRequest { Action = "settings" }).ConfigureAwait(false);
+                        new HostActionRequest { Action = page == "settings" ? "settings" : string.Empty }).ConfigureAwait(false);
                     return PrintAction(reply, json);
                 }
 
@@ -558,7 +621,7 @@ internal static partial class Program
                     return PrintAction(reply, json);
                 }
 
-                Console.Error.WriteLine("usage: host status|open|shutdown");
+                Console.Error.WriteLine("usage: host status|open [settings]|shutdown|clean-orphans [--delete]");
                 return 2;
             }
             default:
@@ -629,7 +692,7 @@ internal static partial class Program
         }
 
         var reply = await client.RequestAsync(MessageTypes.GroupAction, request).ConfigureAwait(false);
-        var result = reply.GetPayload<GroupActionResult>();
+        var result = CliClient.Checked<GroupActionResult>(reply);
         if (json)
         {
             PrintJson(result);
@@ -655,11 +718,11 @@ internal static partial class Program
         return result.Ok ? 0 : 1;
     }
 
-    private static async Task<int> SimpleJobActionAsync(CliClient client, string[] positional, string type, bool json)
+    private static async Task<int> SimpleJobActionAsync(CliClient client, string[] positional, string command, string type, bool json)
     {
         if (!Guid.TryParse(positional.FirstOrDefault(), out var id))
         {
-            Console.Error.WriteLine($"usage: {type.Replace("job.", string.Empty)} <job-id>");
+            Console.Error.WriteLine($"usage: {command} <job-id>");
             return 2;
         }
 
@@ -671,7 +734,7 @@ internal static partial class Program
     {
         if (reply.Type == MessageTypes.JobActionResult)
         {
-            var result = reply.GetPayload<JobActionResponse>();
+            var result = CliClient.Checked<JobActionResponse>(reply);
             if (json)
             {
                 PrintJson(result);
@@ -705,17 +768,42 @@ internal static partial class Program
         return action.Ok ? 0 : 1;
     }
 
+    /// <summary>
+    /// Changes the settings the Host holds now: they are read right before the change and sent straight back, so what
+    /// the Host or another window changed meanwhile (a queue stopped, a quota used, a schedule added) is not put back.
+    /// <paramref name="change"/> returns an exit code to stop without saving, after saying why.
+    /// </summary>
+    private static async Task<int> ChangeSettingsAsync(
+        CliClient client,
+        Func<SettingsDto, int?> change,
+        bool json,
+        Action<SettingsDto>? saved = null)
+    {
+        var settings = await client.SettingsAsync().ConfigureAwait(false);
+        if (change(settings) is { } stop)
+        {
+            return stop;
+        }
+
+        var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
+            new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+        var result = CliClient.Checked<SettingsResult>(reply);
+        if (result.Ok && !json)
+        {
+            saved?.Invoke(result.Settings);
+        }
+
+        return PrintSettingsResult(result, json);
+    }
+
     private static async Task<int> SiteAsync(CliClient client, string[] args, bool json)
     {
-        var positional = args.Skip(1)
-            .Where(a => !a.StartsWith("--", StringComparison.Ordinal))
-            .ToArray();
+        var positional = CliArgs.Positional(args);
         var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
-        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-        var settings = snapshot.Settings;
 
         if (sub == "list")
         {
+            var settings = (await client.SnapshotAsync().ConfigureAwait(false)).Settings;
             if (json)
             {
                 PrintJson(settings.SiteLogins);
@@ -738,32 +826,39 @@ internal static partial class Program
         {
             if (positional.Length < 3)
             {
-                Console.Error.WriteLine("usage: site add <site> <username> [--password ...] [--password-env VAR]");
+                Console.Error.WriteLine("usage: site add <site> <username> [--password-env VAR]   (otherwise the password is read from standard input)");
                 return 2;
             }
 
-            var password = GetOption(args, "--password");
-            if (GetOption(args, "--password-env") is { } envName)
+            if (GetOption(args, "--password") is not null)
             {
-                password = Environment.GetEnvironmentVariable(envName);
+                // Not used, as remote key set: a command line can be read by other programs and stays in shell history.
+                Console.Error.WriteLine("A password is only read from standard input or --password-env, so that one was not used. Pipe it in, or run this and type it. What you just typed may be in your shell history.");
+                return 2;
             }
 
+            var password = GetOption(args, "--password-env") is { } envName
+                ? Environment.GetEnvironmentVariable(envName)
+                : SecretInput.ReadLine("Password: ");
             if (string.IsNullOrEmpty(password))
             {
-                Console.Error.WriteLine("A password is required (--password or --password-env).");
+                Console.Error.WriteLine("No password was given. Pipe it in, type it, or use --password-env VAR.");
                 return 2;
             }
 
-            settings.SiteLogins.Add(new SiteLoginDto
+            var site = positional[1];
+            var username = positional[2];
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Id = Guid.NewGuid(),
-                Site = positional[1],
-                Username = positional[2],
-                Password = password,
-            });
-            var added = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(added, json);
+                settings.SiteLogins.Add(new SiteLoginDto
+                {
+                    Id = Guid.NewGuid(),
+                    Site = site,
+                    Username = username,
+                    Password = password,
+                });
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         if (sub == "remove")
@@ -775,19 +870,20 @@ internal static partial class Program
             }
 
             var selector = positional[1].Replace("-", string.Empty, StringComparison.Ordinal);
-            var matches = settings.SiteLogins
-                .Where(login => login.Id.ToString("N").StartsWith(selector, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (matches.Count != 1)
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Console.Error.WriteLine($"site '{positional[1]}' did not match exactly one entry.");
-                return 1;
-            }
+                var matches = settings.SiteLogins
+                    .Where(login => login.Id.ToString("N").StartsWith(selector, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (matches.Count != 1)
+                {
+                    Console.Error.WriteLine($"site '{positional[1]}' did not match exactly one entry.");
+                    return 1;
+                }
 
-            settings.SiteLogins.RemoveAll(login => login.Id == matches[0].Id);
-            var removed = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(removed, json);
+                settings.SiteLogins.RemoveAll(login => login.Id == matches[0].Id);
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         Console.Error.WriteLine("usage: site list|add|remove");
@@ -796,15 +892,12 @@ internal static partial class Program
 
     private static async Task<int> ScheduleAsync(CliClient client, string[] args, bool json)
     {
-        var positional = args.Skip(1)
-            .Where(a => !a.StartsWith("--", StringComparison.Ordinal))
-            .ToArray();
+        var positional = CliArgs.Positional(args);
         var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
-        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-        var settings = snapshot.Settings;
 
         if (sub == "list")
         {
+            var settings = (await client.SnapshotAsync().ConfigureAwait(false)).Settings;
             if (json)
             {
                 PrintJson(settings.Schedules);
@@ -871,7 +964,6 @@ internal static partial class Program
             var schedule = new ScheduleDto
             {
                 Id = Guid.NewGuid(),
-                Name = GetOption(args, "--name") ?? $"Schedule {settings.Schedules.Count + 1}",
                 QueueId = queueId,
                 Enabled = !args.Contains("--disabled", StringComparer.OrdinalIgnoreCase),
                 Kind = kind,
@@ -885,19 +977,15 @@ internal static partial class Program
                 ShutdownMode = shutdownMode ?? "shutdown",
                 ForceShutdown = args.Contains("--force", StringComparer.OrdinalIgnoreCase),
             };
-            settings.Schedules.Add(schedule);
-            var added = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            var addedResult = added.GetPayload<SettingsResult>();
-            if (addedResult.Ok)
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Console.WriteLine(
-                    $"added: {schedule.Id:N} {schedule.Kind} " +
-                    $"queue {schedule.QueueId}" +
-                    $" at {schedule.StartTime}");
-            }
-
-            return PrintSettingsResult(added, json);
+                schedule.Name = GetOption(args, "--name") ?? $"Schedule {settings.Schedules.Count + 1}";
+                settings.Schedules.Add(schedule);
+                return null;
+            }, json, _ => Console.WriteLine(
+                $"added: {schedule.Id:N} {schedule.Kind} " +
+                $"queue {schedule.QueueId}" +
+                $" at {schedule.StartTime}")).ConfigureAwait(false);
         }
 
         if (sub is "remove" or "enable" or "disable")
@@ -910,27 +998,28 @@ internal static partial class Program
 
             var selector = positional[1];
             var normalized = selector.Replace("-", string.Empty, StringComparison.Ordinal);
-            var matches = settings.Schedules
-                .Where(s => s.Id.ToString("N").StartsWith(normalized, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (matches.Count != 1)
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Console.Error.WriteLine($"schedule '{selector}' did not match exactly one entry.");
-                return 1;
-            }
+                var matches = settings.Schedules
+                    .Where(s => s.Id.ToString("N").StartsWith(normalized, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (matches.Count != 1)
+                {
+                    Console.Error.WriteLine($"schedule '{selector}' did not match exactly one entry.");
+                    return 1;
+                }
 
-            if (sub == "remove")
-            {
-                settings.Schedules.RemoveAll(s => s.Id == matches[0].Id);
-            }
-            else
-            {
-                matches[0].Enabled = sub == "enable";
-            }
+                if (sub == "remove")
+                {
+                    settings.Schedules.RemoveAll(s => s.Id == matches[0].Id);
+                }
+                else
+                {
+                    matches[0].Enabled = sub == "enable";
+                }
 
-            var changed = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(changed, json);
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         Console.Error.WriteLine("usage: schedule list|add|remove|enable|disable");
@@ -943,6 +1032,12 @@ internal static partial class Program
         bool json)
     {
         var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "check";
+        if (sub is not ("check" or "download" or "install"))
+        {
+            Console.Error.WriteLine("usage: update check|download|install");
+            return 2;
+        }
+
         var type = sub switch
         {
             "download" => MessageTypes.UpdateDownload,
@@ -953,7 +1048,7 @@ internal static partial class Program
 
         if (sub == "install")
         {
-            var install = reply.GetPayload<UpdateInstallResult>();
+            var install = CliClient.Checked<UpdateInstallResult>(reply);
             if (json)
             {
                 PrintJson(install);
@@ -974,7 +1069,7 @@ internal static partial class Program
 
         if (sub == "download")
         {
-            var result = reply.GetPayload<UpdateDownloadResult>();
+            var result = CliClient.Checked<UpdateDownloadResult>(reply);
             if (json)
             {
                 PrintJson(result);
@@ -992,7 +1087,7 @@ internal static partial class Program
             return result.Ok ? 0 : 1;
         }
 
-        var check = reply.GetPayload<UpdateCheckResult>();
+        var check = CliClient.Checked<UpdateCheckResult>(reply);
         if (json)
         {
             PrintJson(check);
@@ -1030,11 +1125,10 @@ internal static partial class Program
         bool json)
     {
         var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
-        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-        var settings = snapshot.Settings;
 
         if (sub == "list")
         {
+            var settings = (await client.SnapshotAsync().ConfigureAwait(false)).Settings;
             if (json)
             {
                 PrintJson(settings.ConnectionProfiles);
@@ -1056,21 +1150,22 @@ internal static partial class Program
                 !int.TryParse(positional[2], out var maxConnections) ||
                 maxConnections < 1 || maxConnections > 32)
             {
-                Console.Error.WriteLine("usage: profile add <host-pattern> <max-connections>");
+                Console.Error.WriteLine("usage: profile add <host-pattern> <max-connections 1-32>");
                 return 2;
             }
 
             var pattern = positional[1].Trim();
-            settings.ConnectionProfiles.RemoveAll(profile =>
-                string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
-            settings.ConnectionProfiles.Add(new ConnectionProfileDto
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Pattern = pattern,
-                MaxConnections = maxConnections,
-            });
-            var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(reply, json);
+                settings.ConnectionProfiles.RemoveAll(profile =>
+                    string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+                settings.ConnectionProfiles.Add(new ConnectionProfileDto
+                {
+                    Pattern = pattern,
+                    MaxConnections = maxConnections,
+                });
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         if (sub == "remove")
@@ -1082,17 +1177,18 @@ internal static partial class Program
             }
 
             var pattern = positional[1].Trim();
-            var removed = settings.ConnectionProfiles.RemoveAll(profile =>
-                string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
-            if (removed == 0)
+            return await ChangeSettingsAsync(client, settings =>
             {
-                Console.Error.WriteLine($"profile '{pattern}' not found.");
-                return 1;
-            }
+                var removed = settings.ConnectionProfiles.RemoveAll(profile =>
+                    string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+                if (removed == 0)
+                {
+                    Console.Error.WriteLine($"profile '{pattern}' not found.");
+                    return 1;
+                }
 
-            var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(reply, json);
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         Console.Error.WriteLine("usage: profile list|add|remove");
@@ -1149,12 +1245,13 @@ internal static partial class Program
         }
 
         var startMode = GetOption(args, "--start") ?? "now";
-        int? connections = int.TryParse(GetOption(args, "--connections"), out var parsedConnections)
-            ? parsedConnections
-            : null;
-        int? queueId = int.TryParse(GetOption(args, "--queue"), out var parsedQueue)
-            ? parsedQueue
-            : null;
+        if (!CliArgs.TryInt(args, "--connections", out var connections, out var numberError) ||
+            !CliArgs.TryInt(args, "--queue", out var queueId, out numberError))
+        {
+            Console.Error.WriteLine(numberError);
+            return 2;
+        }
+
         var (destination, destinationError) = await DestinationAsync(client, args).ConfigureAwait(false);
         if (destinationError is not null)
         {
@@ -1198,7 +1295,7 @@ internal static partial class Program
                     continue;
                 }
 
-                var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
+                var result = await client.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest
                 {
                     Url = url,
                     DestinationDirectory = destination,
@@ -1211,7 +1308,6 @@ internal static partial class Program
                     QueueId = queueId.GetValueOrDefault(-1),
                     Priority = priority,
                 }).ConfigureAwait(false);
-                var result = reply.GetPayload<AddJobResponse>();
                 results.Add((url, result));
                 if (!json)
                 {
@@ -1245,7 +1341,8 @@ internal static partial class Program
 
         if (args.Contains("--wait", StringComparer.OrdinalIgnoreCase))
         {
-            var exit = 0;
+            // A URL the Host refused is a failure here too, as it is without --wait.
+            var exit = failed > 0 ? 1 : 0;
             foreach (var entry in results.Where(r => r.Result.Accepted && r.Result.Job is not null))
             {
                 exit = Math.Max(exit, await WaitForAsync(client, entry.Result.Job!.Id, json)
@@ -1260,13 +1357,13 @@ internal static partial class Program
 
     private static async Task<int> QueueAsync(CliClient client, string[] args, bool json)
     {
-        var optionArgs = args.Skip(1).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        var optionArgs = CliArgs.Positional(args);
         var sub = optionArgs.FirstOrDefault()?.ToLowerInvariant() ?? "list";
-        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-        var settings = snapshot.Settings;
 
         if (sub == "list")
         {
+            var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+            var settings = snapshot.Settings;
             if (json)
             {
                 PrintJson(settings.Queues);
@@ -1294,23 +1391,29 @@ internal static partial class Program
             var name = optionArgs.Skip(1).FirstOrDefault();
             if (string.IsNullOrWhiteSpace(name))
             {
-                Console.Error.WriteLine("usage: queue add <name> [max]");
+                Console.Error.WriteLine("usage: queue add <name> [max 1-16]");
                 return 2;
             }
 
-            var max = optionArgs.Length > 2 && int.TryParse(optionArgs[2], out var parsedMax) ? parsedMax : 3;
-            var nextId = settings.Queues.Count == 0 ? 0 : settings.Queues.Max(q => q.Id) + 1;
-            settings.Queues.Add(new QueueDto
+            var max = 3;
+            if (optionArgs.Length > 2 && (!int.TryParse(optionArgs[2], out max) || max is < 1 or > 16))
             {
-                Id = nextId,
-                Name = name,
-                MaxConcurrentDownloads = max,
-                IsRunning = true,
-                Order = settings.Queues.Count,
-            });
-            var update = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(update, json);
+                Console.Error.WriteLine("usage: queue add <name> [max 1-16]");
+                return 2;
+            }
+
+            return await ChangeSettingsAsync(client, settings =>
+            {
+                settings.Queues.Add(new QueueDto
+                {
+                    Id = settings.Queues.Count == 0 ? 0 : settings.Queues.Max(q => q.Id) + 1,
+                    Name = name,
+                    MaxConcurrentDownloads = max,
+                    IsRunning = true,
+                    Order = settings.Queues.Count,
+                });
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         if (sub == "move")
@@ -1330,71 +1433,82 @@ internal static partial class Program
 
         if (sub == "quota")
         {
+            const string quotaUsage = "usage: queue quota <queue-id> <megabytes> <window-hours> | queue quota <queue-id> off";
             if (optionArgs.Length < 3 || !int.TryParse(optionArgs[1], out var quotaQueueId))
             {
-                Console.Error.WriteLine("usage: queue quota <queue-id> <megabytes> <window-hours> | queue quota <queue-id> off");
+                Console.Error.WriteLine(quotaUsage);
                 return 2;
             }
 
-            var queue = settings.Queues.FirstOrDefault(q => q.Id == quotaQueueId);
-            if (queue is null)
+            var off = optionArgs[2].Equals("off", StringComparison.OrdinalIgnoreCase);
+            long megabytes = 0;
+            var hours = 0;
+            if (!off && (!long.TryParse(optionArgs[2], out megabytes) || megabytes <= 0 ||
+                         optionArgs.Length < 4 || !int.TryParse(optionArgs[3], out hours) || hours <= 0))
             {
-                Console.Error.WriteLine("Queue not found.");
-                return 1;
+                Console.Error.WriteLine(quotaUsage);
+                return 2;
             }
 
-            if (optionArgs[2].Equals("off", StringComparison.OrdinalIgnoreCase))
+            return await ChangeSettingsAsync(client, settings =>
             {
-                queue.QuotaEnabled = false;
-            }
-            else
-            {
-                if (!long.TryParse(optionArgs[2], out var megabytes) || megabytes <= 0 ||
-                    optionArgs.Length < 4 || !int.TryParse(optionArgs[3], out var hours) || hours <= 0)
+                var queue = settings.Queues.FirstOrDefault(q => q.Id == quotaQueueId);
+                if (queue is null)
                 {
-                    Console.Error.WriteLine("usage: queue quota <queue-id> <megabytes> <window-hours>");
-                    return 2;
+                    Console.Error.WriteLine("Queue not found.");
+                    return 1;
                 }
 
-                queue.QuotaEnabled = true;
-                queue.QuotaBytes = megabytes * 1024 * 1024;
-                queue.QuotaWindowHours = hours;
-                queue.QuotaWindowStart = DateTimeOffset.UtcNow;
-                queue.QuotaBytesUsed = 0;
-            }
+                if (off)
+                {
+                    queue.QuotaEnabled = false;
+                }
+                else
+                {
+                    queue.QuotaEnabled = true;
+                    queue.QuotaBytes = megabytes * 1024 * 1024;
+                    queue.QuotaWindowHours = hours;
+                    // The Host keeps quota use; this asks it for a fresh window (settings.update ignores the two fields).
+                    queue.ResetQuota = true;
+                }
 
-            var quotaUpdate = await client.RequestAsync(MessageTypes.SettingsUpdate,
-                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-            return PrintSettingsResult(quotaUpdate, json);
+                return null;
+            }, json).ConfigureAwait(false);
         }
 
         if (sub is "start" or "stop" or "max")
         {
+            var usage = sub == "max" ? "usage: queue max <queue-id> <max 1-16>" : $"usage: queue {sub} <queue-id>";
             if (optionArgs.Length < 2 || !int.TryParse(optionArgs[1], out var queueId))
             {
-                Console.Error.WriteLine($"usage: queue {sub} <queue-id> [max]");
+                Console.Error.WriteLine(usage);
                 return 2;
             }
 
-            var request = new QueueActionRequest
+            var request = new QueueActionRequest { QueueId = queueId, Action = sub };
+            if (sub == "max")
             {
-                QueueId = queueId,
-                Action = sub,
-                MaxConcurrentDownloads = optionArgs.Length > 2 && int.TryParse(optionArgs[2], out var maxValue)
-                    ? maxValue
-                    : 3,
-            };
+                // The Host's action is "setmax"; a missing or wrong number is said, never sent as some default.
+                if (optionArgs.Length < 3 || !int.TryParse(optionArgs[2], out var maxValue) || maxValue is < 1 or > 16)
+                {
+                    Console.Error.WriteLine(usage);
+                    return 2;
+                }
+
+                request.Action = "setmax";
+                request.MaxConcurrentDownloads = maxValue;
+            }
+
             var reply = await client.RequestAsync(MessageTypes.QueueAction, request).ConfigureAwait(false);
-            return PrintSettingsResult(reply, json);
+            return PrintSettingsResult(CliClient.Checked<SettingsResult>(reply), json);
         }
 
-        Console.Error.WriteLine("usage: queue list|add|start|stop|max");
+        Console.Error.WriteLine("usage: queue list|add|start|stop|max|move|quota");
         return 2;
     }
 
-    private static int PrintSettingsResult(IpcMessage reply, bool json)
+    private static int PrintSettingsResult(SettingsResult result, bool json)
     {
-        var result = reply.GetPayload<SettingsResult>();
         if (json)
         {
             PrintJson(result);
@@ -1421,7 +1535,8 @@ internal static partial class Program
     /// </summary>
     private static async Task<(string? Folder, string? Error)> DestinationAsync(CliClient client, string[] args)
     {
-        var dest = GetOption(args, "--dest");
+        // A relative folder is the caller's, not the Host's (the Host would resolve it against its own folder).
+        var dest = GetOption(args, "--dest") is { } given ? Path.GetFullPath(given) : null;
         var to = GetOption(args, "--to");
         if (to is null) return (dest, null);
         if (dest is not null) return (null, "Use --dest or --to, not both.");
@@ -1507,13 +1622,15 @@ internal static partial class Program
             }
 
             var current = await client.SnapshotAsync().ConfigureAwait(false);
+            // A backup carries no revision: restored, it replaces the queues and schedules (see import).
+            current.Settings.Revision = 0;
             current.Settings.Proxy.Password = null;
             foreach (var login in current.Settings.SiteLogins)
             {
                 login.Password = null;
             }
 
-            await File.WriteAllTextAsync(
+            await WriteFileAtomicallyAsync(
                 optionArgs[1],
                 JsonSerializer.Serialize(current.Settings, PrettyJson)).ConfigureAwait(false);
             Console.WriteLine($"exported settings to {optionArgs[1]}");
@@ -1547,6 +1664,9 @@ internal static partial class Program
                 return 2;
             }
 
+            // A restore replaces the queues and schedules with the file's: one deleted since the export comes back and
+            // one added since goes. A revision (a file exported by an older build) would merge them instead.
+            imported.Revision = 0;
             imported.Proxy.Password = null;
             foreach (var login in imported.SiteLogins)
             {
@@ -1555,7 +1675,7 @@ internal static partial class Program
 
             var importedReply = await client.RequestAsync(MessageTypes.SettingsUpdate,
                 new SettingsUpdateRequest { Settings = imported }).ConfigureAwait(false);
-            return PrintSettingsResult(importedReply, json);
+            return PrintSettingsResult(CliClient.Checked<SettingsResult>(importedReply), json);
         }
 
         if (!optionArgs[0].Equals("set", StringComparison.OrdinalIgnoreCase))
@@ -1564,141 +1684,172 @@ internal static partial class Program
             return 2;
         }
 
-        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
-        var settings = snapshot.Settings;
-        // `settings set proxypass --clear`: "--" arguments are filtered from optionArgs above,
-        // so the flag is read from the raw arguments.
+        // `settings set proxypass --clear`: "--" arguments are not positional, so the flag is read from the raw arguments.
         var clearProxyPassword = optionArgs.Length == 2 &&
                                  optionArgs[1].Equals("proxypass", StringComparison.OrdinalIgnoreCase) &&
                                  args.Contains("--clear", StringComparer.OrdinalIgnoreCase);
-        if (clearProxyPassword)
+        // `settings set proxypass` with no value: the password is read from standard input, never from the command line.
+        var proxyPasswordFromInput = !clearProxyPassword && optionArgs.Length == 2 &&
+                                     optionArgs[1].Equals("proxypass", StringComparison.OrdinalIgnoreCase);
+        if (!clearProxyPassword && !proxyPasswordFromInput && (optionArgs.Length < 3 || optionArgs.Length % 2 == 0))
         {
-            settings.Proxy.Password = null;
-            settings.Proxy.ClearPassword = true;
-        }
-        else if (optionArgs.Length < 3)
-        {
-            Console.Error.WriteLine("usage: settings set <key> <value> (or: settings set proxypass --clear)");
+            Console.Error.WriteLine("usage: settings set <key> <value> [<key> <value>...] (or: settings set proxypass, which reads it from standard input; settings set proxypass --clear)");
             return 2;
         }
 
         for (var i = 1; i + 1 < optionArgs.Length; i += 2)
         {
-            var key = optionArgs[i].ToLowerInvariant();
-            var value = optionArgs[i + 1];
-            switch (key)
+            if (optionArgs[i].Equals("proxypass", StringComparison.OrdinalIgnoreCase))
             {
-                case "defaultdir":
-                case "default-download-directory":
-                    settings.DefaultDownloadDirectory = value;
-                    break;
-                case "maxconcurrent":
-                    settings.MaxConcurrentDownloads = int.Parse(value, CultureInfo.InvariantCulture);
-                    break;
-                case "defaultconnections":
-                    settings.DefaultConnections = int.Parse(value, CultureInfo.InvariantCulture);
-                    break;
-                case "launchatstartup":
-                    settings.LaunchAtStartup = ParseBool(value);
-                    break;
-                case "clipboard":
-                    settings.ClipboardMonitoring = ParseBool(value);
-                    break;
-                case "usecategoryfolders":
-                    settings.UseCategoryFolders = ParseBool(value);
-                    break;
-                case "closewindowcompletely":
-                    settings.CloseWindowCompletely = ParseBool(value);
-                    break;
-                case "browserintegration":
-                    settings.BrowserIntegrationEnabled = ParseBool(value);
-                    break;
-                case "speedlimit":
-                    settings.GlobalSpeedLimitBytesPerSecond = long.Parse(value, CultureInfo.InvariantCulture);
-                    break;
-                case "proxymode":
-                    settings.Proxy.Mode = value.ToLowerInvariant();
-                    break;
-                case "proxyaddress":
-                    settings.Proxy.Address = value;
-                    break;
-                case "proxyuser":
-                    settings.Proxy.Username = value;
-                    break;
-                case "proxypass":
-                    settings.Proxy.Password = value;
-                    break;
-                case "allowsystemcompletionactions":
-                    settings.AllowSystemCompletionActions = ParseBool(value);
-                    break;
-                case "preventsleep":
-                    settings.PreventSleepWhileDownloading = ParseBool(value);
-                    break;
-                case "ffmpegpath":
-                    settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
-                    break;
-                case "postdownload":
-                    settings.PostDownloadCommand =
-                        string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
-                    break;
-                case "updatemanifest":
-                    settings.UpdateManifestUrl =
-                        string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
-                    break;
-                case "updatekey":
-                    settings.UpdatePublicKey = value;
-                    break;
-                case "updatekeyfile":
-                    settings.UpdatePublicKey = File.ReadAllText(value).Trim();
-                    break;
-                case "updatechannel":
-                    settings.UpdateChannel = value;
-                    break;
-                case "autocheckupdates":
-                    settings.AutoCheckUpdates = ParseBool(value);
-                    break;
-                case "compresseddir":
-                    SetCategoryFolder(settings, "compressed", value);
-                    break;
-                case "documentsdir":
-                    SetCategoryFolder(settings, "documents", value);
-                    break;
-                case "musicdir":
-                    SetCategoryFolder(settings, "music", value);
-                    break;
-                case "programsdir":
-                    SetCategoryFolder(settings, "programs", value);
-                    break;
-                case "videodir":
-                    SetCategoryFolder(settings, "video", value);
-                    break;
-                default:
-                    Console.Error.WriteLine($"unknown setting '{key}'");
-                    return 2;
+                Console.Error.WriteLine("The proxy password is only read from standard input, so that one was not used. Run: dm settings set proxypass, then pipe it in or type it. What you just typed may be in your shell history.");
+                return 2;
             }
         }
 
-        var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
-            new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
-        var result = reply.GetPayload<SettingsResult>();
-        if (json)
+        string? proxyPassword = null;
+        if (proxyPasswordFromInput)
         {
-            PrintJson(result);
-        }
-        else if (result.Ok)
-        {
-            PrintSettings(result.Settings);
-        }
-        else
-        {
-            Console.Error.WriteLine(result.Error);
+            proxyPassword = SecretInput.ReadLine("Proxy password: ");
+            if (string.IsNullOrEmpty(proxyPassword))
+            {
+                Console.Error.WriteLine("No password was given. Pipe it in or type it; to remove it use: dm settings set proxypass --clear");
+                return 2;
+            }
         }
 
-        return result.Ok ? 0 : 1;
+        // Read once, before the settings are: a key file that can't be read stops here.
+        string? updateKeyFromFile = null;
+        for (var i = 1; i + 1 < optionArgs.Length; i += 2)
+        {
+            if (optionArgs[i].Equals("updatekeyfile", StringComparison.OrdinalIgnoreCase))
+            {
+                updateKeyFromFile = (await File.ReadAllTextAsync(optionArgs[i + 1]).ConfigureAwait(false)).Trim();
+            }
+        }
+
+        return await ChangeSettingsAsync(client, settings =>
+        {
+            if (clearProxyPassword)
+            {
+                settings.Proxy.Password = null;
+                settings.Proxy.ClearPassword = true;
+            }
+            else if (proxyPassword is not null)
+            {
+                settings.Proxy.Password = proxyPassword;
+            }
+
+            for (var i = 1; i + 1 < optionArgs.Length; i += 2)
+            {
+                var key = optionArgs[i].ToLowerInvariant();
+                var value = optionArgs[i + 1];
+                switch (key)
+                {
+                    case "defaultdir":
+                    case "default-download-directory":
+                        settings.DefaultDownloadDirectory = value;
+                        break;
+                    case "maxconcurrent":
+                        settings.MaxConcurrentDownloads = int.Parse(value, CultureInfo.InvariantCulture);
+                        break;
+                    case "defaultconnections":
+                        settings.DefaultConnections = int.Parse(value, CultureInfo.InvariantCulture);
+                        break;
+                    case "launchatstartup":
+                        settings.LaunchAtStartup = ParseBool(value);
+                        break;
+                    case "clipboard":
+                        settings.ClipboardMonitoring = ParseBool(value);
+                        break;
+                    case "usecategoryfolders":
+                        settings.UseCategoryFolders = ParseBool(value);
+                        break;
+                    case "closewindowcompletely":
+                        settings.CloseWindowCompletely = ParseBool(value);
+                        break;
+                    case "browserintegration":
+                        settings.BrowserIntegrationEnabled = ParseBool(value);
+                        break;
+                    case "speedlimit":
+                        settings.GlobalSpeedLimitBytesPerSecond = long.Parse(value, CultureInfo.InvariantCulture);
+                        break;
+                    case "proxymode":
+                        settings.Proxy.Mode = value.ToLowerInvariant();
+                        break;
+                    case "proxyaddress":
+                        settings.Proxy.Address = value;
+                        break;
+                    case "proxyuser":
+                        settings.Proxy.Username = value;
+                        break;
+                    case "allowsystemcompletionactions":
+                        settings.AllowSystemCompletionActions = ParseBool(value);
+                        break;
+                    case "preventsleep":
+                        settings.PreventSleepWhileDownloading = ParseBool(value);
+                        break;
+                    case "ffmpegpath":
+                        settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
+                        break;
+                    case "postdownload":
+                        settings.PostDownloadCommand =
+                            string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
+                        break;
+                    case "updatemanifest":
+                        settings.UpdateManifestUrl =
+                            string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
+                        break;
+                    case "updatekey":
+                        settings.UpdatePublicKey = value;
+                        break;
+                    case "updatekeyfile":
+                        settings.UpdatePublicKey = updateKeyFromFile;
+                        break;
+                    case "updatechannel":
+                        settings.UpdateChannel = value;
+                        break;
+                    case "autocheckupdates":
+                        settings.AutoCheckUpdates = ParseBool(value);
+                        break;
+                    case "compresseddir":
+                        SetCategoryFolder(settings, "compressed", value);
+                        break;
+                    case "documentsdir":
+                        SetCategoryFolder(settings, "documents", value);
+                        break;
+                    case "musicdir":
+                        SetCategoryFolder(settings, "music", value);
+                        break;
+                    case "programsdir":
+                        SetCategoryFolder(settings, "programs", value);
+                        break;
+                    case "videodir":
+                        SetCategoryFolder(settings, "video", value);
+                        break;
+                    default:
+                        Console.Error.WriteLine($"unknown setting '{key}'. Keys: {SettingKeys}");
+                        return 2;
+                }
+            }
+
+            return null;
+        }, json).ConfigureAwait(false);
     }
 
+    /// <summary>The keys <c>settings set</c> knows, for its help and its error.</summary>
+    private const string SettingKeys =
+        "defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard, usecategoryfolders, " +
+        "closewindowcompletely, browserintegration, speedlimit, proxymode, proxyaddress, proxyuser, proxypass, " +
+        "allowsystemcompletionactions, preventsleep, ffmpegpath, postdownload, updatemanifest, updatekey, updatekeyfile, " +
+        "updatechannel, autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir";
+
+    /// <summary>
+    /// Until the download ends. Paused (as "--start later" leaves it) it would never end by itself, so that ends the
+    /// wait too. The list is asked for less often the longer it takes: every half second at first, every 5 seconds later.
+    /// </summary>
     private static async Task<int> WaitForAsync(CliClient client, Guid id, bool json)
     {
+        var delay = TimeSpan.FromMilliseconds(500);
         while (true)
         {
             var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
@@ -1736,7 +1887,19 @@ internal static partial class Program
                 return 1;
             }
 
-            await Task.Delay(500).ConfigureAwait(false);
+            // Paused, or added to start later: neither goes on by itself, so the wait would never end.
+            if (job.State is "paused" || job.State is "queued" && job.StartMode == "later")
+            {
+                if (!json)
+                {
+                    Console.WriteLine($"\n{(job.State == "paused" ? "paused" : "not started")}: it does not go on by itself; start it with: dm resume {job.Id:N}");
+                }
+
+                return 1;
+            }
+
+            await Task.Delay(delay).ConfigureAwait(false);
+            delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 1.5, 5000));
         }
     }
 
@@ -1840,6 +2003,37 @@ internal static partial class Program
     private static void PrintJson<T>(T value)
         => Console.WriteLine(JsonSerializer.Serialize(value, PrettyJson));
 
+    /// <summary>
+    /// Writes beside the file and then puts it in place, so a stop part way (Ctrl+C, a full disk) leaves the old file
+    /// as it was rather than a cut-off one.
+    /// </summary>
+    private static async Task WriteFileAtomicallyAsync(string path, string content)
+    {
+        var full = Path.GetFullPath(path);
+        var temporary = Path.Combine(Path.GetDirectoryName(full) ?? ".", $".{Path.GetFileName(full)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            await using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                await writer.WriteAsync(content).ConfigureAwait(false);
+                await writer.FlushAsync().ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    internal static string? Option(string[] args, string name) => GetOption(args, name);
+
     private static string? GetOption(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -1877,8 +2071,10 @@ internal static partial class Program
 
             Usage:
               dm add <url> [--dest DIR | --to FAVORITE] [--name NAME] [--category ID] [--start now|later] [--direct] [--wait]
-                          [--connections N] [--header "Name: value"] [--sha256 HEX]
+                          [--connections N] [--queue ID] [--header "Name: value"] [--sha256 HEX]
                           [--conflict rename|overwrite|fail] [--priority high|normal|low]
+                          [--description TEXT] [--referrer URL] [--user-agent TEXT]
+                          [--package KEY] [--package-name NAME]
               dm folders [--json]   favorite, default and recent folders with free space
               dm add-batch <pattern> [--dest DIR | --to FAVORITE] [--start now|later] [--direct] [--wait] [--yes]
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
@@ -1905,16 +2101,35 @@ internal static partial class Program
                           [--destination next|subfolder|folder] [--folder PATH]
                           [--preserve-folders on|off] [--conflict rename|overwrite|skip]
                           [--archives keep|delete]
+              dm torrent inspect <magnet|file.torrent> [--dest DIR]   name, files and free space
+              dm torrent add <magnet|file.torrent> [--dest DIR] [--later] [--files 0,2]
+                          [--priority 0=high,1=skip] [--down BYTES/S] [--up BYTES/S] [--sequential]
+              dm torrent files <job-id>
+              dm torrent priority <job-id> INDEX=skip|low|normal|high ...
+              dm torrent options <job-id> [--down BYTES/S] [--up BYTES/S]
+                          [--seed-goal global|never|ratio:N|hours:N] [--sequential on|off]
+              dm torrent recheck|announce|details <job-id>
+              dm torrent seed <job-id> on|off
+              dm torrent peers|trackers|pieces <job-id>
+              dm torrent network   the torrent port, router forwarding and incoming connections
               dm refresh <job-id> <new-url> [--direct]
-              dm cancel|remove <job-id> [--keep-file]
+              dm cancel|remove <job-id> [--keep-file]   (deletes the downloaded file too, unless --keep-file)
               dm pause-all | resume-all
-              dm queue list|add|start|stop|max|move|quota
+              dm queue list | add <name> [max] | start|stop <queue-id> | max <queue-id> <1-16>
+              dm queue move <job-id> <queue-id> | quota <queue-id> <megabytes> <hours> | quota <queue-id> off
               dm schedule list|add|remove|enable|disable
                           [--open] [--exit]
                           [--shutdown shutdown|restart|logoff] [--force]
-              dm site list|add|remove
-              dm settings [get] | settings set <key> <value>
+              dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
+                          (the password is read from standard input unless --password-env names it)
+              dm settings [get] | settings set <key> <value> [<key> <value>...]
+              | settings set proxypass   (reads it from standard input) | settings set proxypass --clear
               | settings export <file.json> | settings import <file.json>
+                          keys: defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard,
+                          usecategoryfolders, closewindowcompletely, browserintegration, speedlimit, proxymode,
+                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep, ffmpegpath,
+                          postdownload, updatemanifest, updatekey, updatekeyfile, updatechannel,
+                          autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir
               dm remote status
               dm remote key set        (reads the key from standard input, never from the command line)
               dm remote key clear
@@ -1935,7 +2150,7 @@ internal static partial class Program
               dm remote container <file.rsdf|file.ccf|file.dlc> [--add ID,ID | --all] [--dest DIR]
                           [--approve-uncached] [--queue ID] [--start startNow|queue|later]
               dm remote container-send-jd <file.dlc|file.ccf>
-              dm host status|open|shutdown
+              dm host status | open [settings] | shutdown | clean-orphans [--delete]
               dm doctor [--no-start]
 
             Global:
@@ -1946,6 +2161,9 @@ internal static partial class Program
 }
 
 internal sealed class HostUnavailableException(string message) : Exception(message);
+
+/// <summary>The Host answered, but with a refusal or an error instead of the result asked for.</summary>
+internal sealed class HostRefusedException(string message) : Exception(message);
 
 internal sealed class CliClient : IAsyncDisposable
 {
@@ -2065,7 +2283,8 @@ internal sealed class CliClient : IAsyncDisposable
             // greeting's snapshot nor the events are wanted.
             client = await IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = false },
                 TimeSpan.FromMilliseconds(700)).ConfigureAwait(false);
-            var hello = await client.ReadAsync().ConfigureAwait(false);
+            // A Host that takes the connection and then says nothing must not hang every command (Setup runs one).
+            var hello = await ReadWithinAsync(client, HelloTimeout).ConfigureAwait(false);
             if (hello is null || hello.Type != MessageTypes.ServerHello)
             {
                 await client.DisposeAsync().ConfigureAwait(false);
@@ -2080,7 +2299,7 @@ internal sealed class CliClient : IAsyncDisposable
             }
 
             // An older Host sends the snapshot anyway.
-            if (client.SnapshotFollowsHello) await client.ReadAsync().ConfigureAwait(false);
+            if (client.SnapshotFollowsHello) await ReadWithinAsync(client, HelloTimeout).ConfigureAwait(false);
             return client;
         }
         catch
@@ -2094,14 +2313,71 @@ internal sealed class CliClient : IAsyncDisposable
         }
     }
 
+    /// <summary>How long the Host has to greet a new connection.</summary>
+    private static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long a reply may take. Most come at once; these wait on the network or the disk.</summary>
+    private static TimeSpan ReplyTimeout(string type) => type switch
+    {
+        MessageTypes.UpdateDownload or MessageTypes.UpdateInstall => TimeSpan.FromMinutes(30),
+        _ when type.StartsWith("remote.", StringComparison.Ordinal) || type.StartsWith("torrent.", StringComparison.Ordinal) ||
+               type.StartsWith("archive.", StringComparison.Ordinal) || type == MessageTypes.UpdateCheck ||
+               type == MessageTypes.JobRefreshUrl || type == MessageTypes.JobAdd => TimeSpan.FromMinutes(5),
+        _ => TimeSpan.FromMinutes(1),
+    };
+
+    private static async Task<IpcMessage?> ReadWithinAsync(IpcClient client, TimeSpan timeout)
+    {
+        using var cancel = new CancellationTokenSource(timeout);
+        try
+        {
+            return await client.ReadAsync(cancel.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            throw new HostUnavailableException($"The background host did not answer within {timeout.TotalSeconds:0} seconds.");
+        }
+    }
+
+    /// <summary>
+    /// The reply's payload as <typeparamref name="T"/>. A Host that could not do the command answers with
+    /// host.actionResult instead (a refusal, or the error that stopped it); that becomes an error with its words, so it
+    /// is never read as an empty result.
+    /// </summary>
+    public async Task<T> AskAsync<T>(string type, object payload)
+        => Checked<T>(await RequestAsync(type, payload).ConfigureAwait(false));
+
+    public static T Checked<T>(IpcMessage reply)
+    {
+        if (reply.Type == MessageTypes.HostActionResult && typeof(T) != typeof(HostActionResult))
+        {
+            throw new HostRefusedException(reply.GetPayload<HostActionResult>()?.Message is { Length: > 0 } message
+                ? message
+                : "The Host didn't take this command.");
+        }
+
+        return reply.GetPayload<T>() ?? throw new HostRefusedException("The Host's answer was empty.");
+    }
+
     public async Task<IpcMessage> RequestAsync<T>(string type, T payload)
     {
         var request = IpcMessage.Create(type, payload);
         await _client.SendAsync(request).ConfigureAwait(false);
+        var timeout = ReplyTimeout(type);
+        using var cancel = new CancellationTokenSource(timeout);
         while (true)
         {
-            var message = await _client.ReadAsync().ConfigureAwait(false)
-                          ?? throw new HostUnavailableException("The background host closed the connection.");
+            IpcMessage? read;
+            try
+            {
+                read = await _client.ReadAsync(cancel.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+            {
+                throw new HostUnavailableException($"The background host did not answer within {timeout.TotalSeconds:0} seconds.");
+            }
+
+            var message = read ?? throw new HostUnavailableException("The background host closed the connection.");
             if (message.ReplyTo == request.Id)
             {
                 if (message.Type == MessageTypes.ServerIncompatible)
@@ -2116,16 +2392,15 @@ internal sealed class CliClient : IAsyncDisposable
         }
     }
 
-    public async Task<SnapshotDto> SnapshotAsync()
-    {
-        var reply = await RequestAsync(MessageTypes.JobsQuery, new { }).ConfigureAwait(false);
-        return reply.GetPayload<SnapshotDto>();
-    }
+    public Task<SnapshotDto> SnapshotAsync() => AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { });
 
-    public async Task<HostStatusDto> StatusAsync()
+    public Task<HostStatusDto> StatusAsync() => AskAsync<HostStatusDto>(MessageTypes.HostStatus, new { });
+
+    /// <summary>The settings as the Host holds them now: read right before a change is made to them and sent back.</summary>
+    public async Task<SettingsDto> SettingsAsync()
     {
-        var reply = await RequestAsync(MessageTypes.HostStatus, new { }).ConfigureAwait(false);
-        return reply.GetPayload<HostStatusDto>();
+        var result = await AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { }).ConfigureAwait(false);
+        return result.Ok ? result.Settings : throw new HostRefusedException(result.Error ?? "The Host did not send its settings.");
     }
 
     public async ValueTask DisposeAsync() => await _client.DisposeAsync().ConfigureAwait(false);

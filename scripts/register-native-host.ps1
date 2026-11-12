@@ -6,8 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $hostName = "com.kaank.downloadmanager"
-# The Chrome Web Store listing, and the unpacked build that Setup and the update package carry.
-# Edge has its own listing (its own ID); Edge users can also install the Chrome Web Store listing.
+# The Chrome Web Store listing; the Edge Add-ons listing (its own ID; Edge users can also install the Chrome Web Store
+# listing); and the unpacked development build's fixed ID (extensions\chrome\dist, loaded by hand or in Chrome for
+# Testing). Setup and the update package no longer carry an unpacked copy.
 $extensionOrigins = @(
     "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/",
     "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/",

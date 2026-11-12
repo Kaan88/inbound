@@ -274,7 +274,7 @@ test('EXT.R7 on Firefox: a download caught from its response waits in the popup;
     assert.deepEqual((await queue(harness)).map(item => item.fileName), ['ff.zip']);
     popup.close();
     await settle(() => log.downloaded.length);
-    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/get?id=9', filename: 'ff.zip' }]);
+    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/get?id=9', filename: 'ff.zip', headers: [{ name: 'Referer', value: 'https://site.test/page' }] }], 'started again with the page as referrer (audit 3 M4)');
   });
 });
 

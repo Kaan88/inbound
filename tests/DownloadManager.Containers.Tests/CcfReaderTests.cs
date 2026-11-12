@@ -124,6 +124,22 @@ public class CcfReaderTests
     }
 
     [Fact]
+    public void Repeated_and_endless_passwords_are_kept_once_and_capped()
+    {
+        var max = CcfPayloadParser.MaxPasswordsPerPackage;
+        var options = string.Concat(Enumerable.Range(0, 5_000).Select(i => $"<Passwort>pw{i % (max + 10)}</Passwort><Passwort>pw0</Passwort>"));
+        var xml = CryptLoadXml($"<Package name=\"P\"><Options>{options}</Options>{DownloadXml(UrlA)}</Package>");
+
+        var result = ContainerReader.Read(CcfLegacy(xml), "links.ccf");
+
+        var candidates = result.Packages[0].ArchivePasswordCandidates;
+        Assert.Equal(max, candidates.Count);
+        Assert.Equal(Enumerable.Range(0, max).Select(i => $"pw{i}"), candidates);
+        Assert.Single(result.Problems, p => p.Kind == ContainerProblemKind.TooManyEntries);
+        Assert.Single(result.Links);
+    }
+
+    [Fact]
     public void Mixed_metadata_with_names_missing_and_links_outside_packages_is_read()
     {
         var xml = CryptLoadXml(

@@ -137,7 +137,11 @@ internal static class Program
 
                 if (NativeBridgePolicy.ToExtension(message) is { } allowed)
                 {
-                    await WriteToExtensionAsync(allowed).ConfigureAwait(false);
+                    // Audit 3 M3: a frame over the browser's 1 MB limit would close the port under every request on it.
+                    var fitted = NativeBridgePolicy.FitForBrowser(allowed, out var size);
+                    if (!ReferenceEquals(fitted, allowed))
+                        log($"Refused to pass '{allowed.Type}' to the browser: {size} bytes is over its 1 MB limit.");
+                    if (fitted is not null) await WriteToExtensionAsync(fitted).ConfigureAwait(false);
                 }
             }
         }
@@ -310,11 +314,22 @@ internal static class NativeLog
             }
         }
 
+        // L7: old files go at start, and a day's file stops at the shared size limit. Several native hosts can
+        // write at once, so the size is read from the file rather than counted here.
+        LogFileRetention.DeleteOld(directory, "native-host", DateTime.Now);
         var path = Path.Combine(directory, $"native-host-{DateTimeOffset.Now:yyyyMMdd}.log");
+        var capped = false;
         return message =>
         {
             try
             {
+                if (capped) return;
+                if (LogFileRetention.CurrentSize(path) >= LogFileRetention.MaxDailyBytes)
+                {
+                    capped = true;
+                    return;
+                }
+
                 File.AppendAllText(path, $"{DateTimeOffset.Now:O} {UrlRedactor.RedactText(message)}{Environment.NewLine}", new UTF8Encoding(false));
             }
             catch (Exception)

@@ -188,6 +188,8 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
             text = text.Replace("\"nativeHostRegistered\":true", "\"nativeHostRegistered\":<bool>", StringComparison.Ordinal)
                 .Replace("\"nativeHostRegistered\":false", "\"nativeHostRegistered\":<bool>", StringComparison.Ordinal);
             text = BrowserIntegration().Replace(text, "\"browserIntegration\":\"<state>\"");
+            // A settings revision starts from the clock at each start (audit 4 H1); only its presence is the protocol's.
+            text = Revisions().Replace(text, "\"revision\":<revision>");
             result.Add(text);
         }
 
@@ -207,6 +209,9 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
 
     [GeneratedRegex("\"browserIntegration\":\"[^\"]*\"")]
     private static partial Regex BrowserIntegration();
+
+    [GeneratedRegex("\"revision\":\\d+")]
+    private static partial Regex Revisions();
 
     [GeneratedRegex(@"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?")]
     private static partial Regex Times();

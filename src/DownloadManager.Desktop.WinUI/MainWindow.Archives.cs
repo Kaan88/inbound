@@ -197,7 +197,9 @@ public sealed partial class MainWindow
 
         // Open Folder goes there already when the record's download has a file to show.
         var needsArchiveFolder = OnlyArchiveRowsSelected && RecordDownload is not { FileRemovedAfterExtraction: false };
-        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected, needsArchiveFolder, offerPicking: !OnlyArchiveRowsSelected);
+        var torrentSelected = JobsList.SelectedItems.OfType<JobViewModel>().Any(row => row.IsTorrent || row.IsTorrentFile);
+        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected, needsArchiveFolder,
+            offerPicking: FileMenuRules.ContextOffersArchivePicking(OnlyArchiveRowsSelected, torrentSelected));
     }
 
     private bool OnlyArchiveRowsSelected => FirstLocalRow is null && SelectedRemoteRows.Count == 0 && SelectedArchiveRows.Count > 0;

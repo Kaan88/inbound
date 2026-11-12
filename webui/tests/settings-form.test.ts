@@ -144,6 +144,21 @@ describe('applyForm', () => {
     expect(current.updateManifestUrl).toBe('https://feed');
   });
 
+  it('reads and writes the Torrents page: off with files chosen first by default, an unknown route asks', () => {
+    const fresh = formOf();
+    expect(fresh).toMatchObject({ torrentsEnabled: false, torrentRoute: 'ask', torrentChooseFiles: true });
+    expect(formOf({ torrentRoute: 'somewhere' }).torrentRoute).toBe('ask');
+
+    const current = settings({ torrentsEnabled: false, torrentRoute: 'ask', torrentChooseFiles: true, torrentHandler: true });
+    const form = formFrom(current);
+    form.torrentsEnabled = true;
+    form.torrentRoute = 'thisPc';
+    form.torrentChooseFiles = false;
+    applyForm(current, form);
+    expect(current).toMatchObject({ torrentsEnabled: true, torrentRoute: 'thisPc', torrentChooseFiles: false, torrentHandler: true });
+    expect(friendlyRefusal('These settings can only be changed in the app on this PC: torrentsEnabled. Nothing was saved.')).toContain('Download torrents.');
+  });
+
   it('clears the proxy address when the proxy is not manual, and forgets the password when asked', () => {
     const current = settings({ proxy: { mode: 'manual', address: 'h:80', username: 'u', hasPassword: true } });
     const form = formFrom(current);

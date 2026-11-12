@@ -342,10 +342,96 @@ public sealed partial class RuntimeServiceTests
         var view = rig.View(job.Id);
         Assert.Equal(RemoteJobState.Intended, view.State);
         Assert.Equal(RemoteFailureKind.Authentication, view.FailureKind);
-        Assert.Equal(rig.Time.GetUtcNow() + RemoteJobRules.LongestIdlePoll, view.NextCheckAt);
+        Assert.Null(view.NextCheckAt);
         Assert.Equal(0, rig.Mock.Calls(CreateWeb));
 
         await rig.Box.Account.SetKeyAsync(MockKey);
+        await rig.Jobs.CheckNowAsync();
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+    }
+
+    [Fact]
+    public async Task AJobBeingSentCanNotBeRemovedUntilTheAnswerIsKept()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (link, _, _) = rig.ScriptHoster("sent", MockTorBoxState.Ready);
+        RemoteActionResult? duringSend = null;
+        Guid id = default;
+        AsItGoesOut(rig, () => duringSend = rig.Jobs.RemoveAsync(id).GetAwaiter().GetResult());
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, ApprovedUncached = true, Selection = RemoteSelectionMode.All });
+        id = job.Id;
+        await rig.RunAsync();
+
+        Assert.NotNull(duringSend);
+        Assert.False(duringSend.Ok);
+        Assert.Contains("being sent", duringSend.Error);
+        Assert.Equal(1, rig.Mock.Calls(CreateWeb));
+        // The item the request made is known here, so it can be found and removed from the account.
+        var kept = rig.View(id);
+        Assert.NotNull(kept.ItemId);
+
+        Assert.True((await rig.Jobs.RemoveAsync(id)).Ok);
+    }
+
+    [Fact]
+    public async Task WithNoKeyAJobOnTheProviderIsNotLookedAtAgainUntilOneIsSet()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, 31)]);
+        var job = await rig.AddAsync(new RemoteAddRequest { ExistingItem = new RemoteItemRef("torbox", RemoteItemKind.Torrent, item.Id.ToString()), Selection = RemoteSelectionMode.All });
+        await rig.Box.Account.ClearAsync();
+        await rig.Jobs.CheckNowAsync();
+        await rig.RunAsync();
+
+        var view = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Waiting, view.State);
+        Assert.Equal(RemoteFailureKind.Authentication, view.FailureKind);
+        Assert.Null(view.NextCheckAt);
+
+        // Hours pass with no key: nothing is due, so nothing runs and no client hears of a change.
+        var changes = 0;
+        rig.Jobs.Changed += (_, _) => Interlocked.Increment(ref changes);
+        for (var hour = 0; hour < 6; hour++)
+        {
+            rig.Time.Advance(TimeSpan.FromHours(1));
+            await rig.RunAsync();
+        }
+
+        Assert.Equal(0, changes);
+        Assert.Equal(0, rig.Mock.TotalApiCalls);
+
+        await rig.Box.Account.SetKeyAsync(MockKey);
+        await rig.Jobs.CheckNowAsync();
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+    }
+
+    [Fact]
+    public async Task ARefusedKeyHoldsTheJobInsteadOfAskingAgainAndAgain()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, 32)]);
+        rig.Mock.Fail("GET torrents/mylist", MockFault.Error("BAD_TOKEN", "Bad token.", 403));
+        var job = await rig.AddAsync(new RemoteAddRequest { ExistingItem = new RemoteItemRef("torbox", RemoteItemKind.Torrent, item.Id.ToString()), Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+
+        var view = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Waiting, view.State);
+        Assert.Equal(RemoteFailureKind.Authentication, view.FailureKind);
+        Assert.Null(view.NextCheckAt);
+        var calls = rig.Mock.Calls("GET torrents/mylist");
+
+        for (var hour = 0; hour < 6; hour++)
+        {
+            rig.Time.Advance(TimeSpan.FromHours(1));
+            await rig.RunAsync();
+        }
+
+        Assert.Equal(calls, rig.Mock.Calls("GET torrents/mylist"));
+
+        // Check Now (or a new key, which does the same) looks again.
+        rig.Mock.ClearFaults();
         await rig.Jobs.CheckNowAsync();
         await rig.RunAsync();
         Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);

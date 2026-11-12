@@ -48,7 +48,19 @@ public sealed class TestSocks5Server : IAsyncDisposable
         Interlocked.Exchange(ref _authorized, 0);
         Interlocked.Exchange(ref _denied, 0);
         Interlocked.Exchange(ref _connects, 0);
+        _lastAuthPresent = false;
+        _lastTarget = string.Empty;
     }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _portMap = new();
+
+    /// <summary>
+    /// Requests for <paramref name="from"/> are forwarded to <paramref name="to"/>. A test points a download at a port
+    /// that counts direct connections; only a request that really went through this proxy reaches the server.
+    /// </summary>
+    public void MapPort(int from, int to) => _portMap[from] = to;
+
+    private int Mapped(int port) => _portMap.TryGetValue(port, out var to) ? to : port;
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
@@ -164,7 +176,7 @@ public sealed class TestSocks5Server : IAsyncDisposable
                 using var upstream = new TcpClient();
                 try
                 {
-                    await upstream.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+                    await upstream.ConnectAsync(host, Mapped(port), cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {

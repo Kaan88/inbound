@@ -38,6 +38,9 @@ internal sealed partial class SandboxHost : IAsyncDisposable
     public string Destination { get; }
     public string Instance { get; }
     public string PipeName { get; private set; } = string.Empty;
+
+    /// <summary>Extra environment for the Host process, set before it starts (for example the torrent kill switch).</summary>
+    public Dictionary<string, string> ExtraEnvironment { get; } = new(StringComparer.OrdinalIgnoreCase);
     public int? LastExitCode { get; private set; }
 
     /// <summary>The running Host's process id, for a test that has to kill it from another thread at an exact moment.</summary>
@@ -107,6 +110,7 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         info.Environment["DOWNLOADMANAGER_HOST"] = HostExecutable;
         info.Environment["DOWNLOADMANAGER_BRIDGE"] = BridgeExecutable;
         info.Environment[ApiVariable] = _apiAddress;
+        foreach (var (name, value) in ExtraEnvironment) info.Environment[name] = value;
         return info;
     }
 

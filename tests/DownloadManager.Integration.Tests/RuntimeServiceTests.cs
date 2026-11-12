@@ -75,6 +75,28 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task A_browser_download_to_a_folder_that_is_gone_creates_the_folder()
+    {
+        // EXT.R10: automatic sends carry the browser default folder unchecked. When it was deleted, the Host makes it
+        // again and the file lands there; it does not fall back to another folder.
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var gone = Path.Combine(ctx.Destination, "deleted browser folder", "inner");
+        Assert.False(Directory.Exists(gone));
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/gone.bin?size=65536&seed=31",
+            DestinationDirectory = gone,
+            FileName = "gone.bin",
+            Source = "chromeAuto",
+        });
+
+        Assert.True(response.Accepted, response.Error);
+        var job = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed");
+        Assert.Equal(Path.Combine(gone, "gone.bin"), job.FinalFilePath);
+        Assert.True(File.Exists(job.FinalFilePath));
+    }
+
+    [Fact]
     public async Task PauseAndResumePreservesBytes()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -412,6 +434,40 @@ public sealed partial class RuntimeServiceTests
             var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 TestContent.Generate(6, size))).ToLowerInvariant();
             Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The hand-off's content type is kept in its own field, which the transfer never overwrites, so a stream is
+    /// decided the same way after a restart; ContentType alone (the server's answer) never makes a playlist.
+    /// </summary>
+    [Fact]
+    public async Task HandoffContentTypeIsStoredApartFromTheServersType()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/media/hls/playlist?n=2&size=1000",
+                DestinationDirectory = ctx.Destination,
+                FileName = "stream",
+                ContentType = " application/vnd.apple.mpegurl ",
+                Source = "cli",
+                StartMode = "later",
+            });
+            Assert.NotNull(response.Job);
+
+            var stored = (await new JsonJobStore(ctx.Paths).LoadAllAsync()).Single(j => j.Id == response.Job!.Id);
+            Assert.Equal("application/vnd.apple.mpegurl", stored.HandoffContentType);
+            Assert.True(StreamManifestHint.IsHls(stored));
+
+            stored.HandoffContentType = null;
+            Assert.False(StreamManifestHint.IsHls(stored));
         }
         finally
         {
@@ -1203,8 +1259,14 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
             await Hashing.Sha256FileAsync(resumed.FinalFilePath));
         Assert.True(_server.Ftp.RestCount > restBefore, $"REST count {_server.Ftp.RestCount}, before {restBefore}");
+        // BytesServed now counts the transfer the pause cut short too, so a full re-download would reach 1.5x.
         var served = _server.Ftp.BytesServed("slow.bin") - servedBefore;
         Assert.True(served < 524_288 * 3 / 2, $"served {served}");
+        // The completing RETR began past zero and sent only the rest of the file.
+        var last = _server.Ftp.Transfers("slow.bin").Last(transfer => transfer.Completed);
+        Assert.True(last.Offset > 0, "the resumed transfer started from zero");
+        Assert.True(last.Offset <= paused.ReceivedBytes, $"REST {last.Offset} past the {paused.ReceivedBytes} bytes kept");
+        Assert.Equal(524_288 - last.Offset, last.Sent);
         // The server took REST, so a lowered limit may now requeue this job without losing its data (UI.R21).
         Assert.True(resumed.ResumeSupported, $"ResumeSupported false; paused at {paused.ReceivedBytes}, REST {_server.Ftp.RestCount} (before {restBefore}), served {served}");
     }
@@ -1633,6 +1695,17 @@ public sealed partial class RuntimeServiceTests
     public async Task ConcurrencyLimitIsObserved()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 1);
+        // Every state change of every job, so the most that ran at once is known for the whole run, not one sample.
+        var states = new Dictionary<Guid, string>();
+        var mostRunning = 0;
+        ctx.Service.JobChanged += (_, e) =>
+        {
+            lock (states)
+            {
+                states[e.Job.Id] = e.Job.State;
+                mostRunning = Math.Max(mostRunning, states.Values.Count(state => state is "connecting" or "downloading"));
+            }
+        };
         var first = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/slow/c1.bin?size=524288&seed=7&bps=524288",
@@ -1648,13 +1721,13 @@ public sealed partial class RuntimeServiceTests
             Source = "cli",
         });
 
-        await Task.Delay(250);
-        var snapshot = ctx.Service.GetSnapshot();
-        var running = snapshot.Jobs.Count(j => j.State is "connecting" or "downloading");
-        Assert.InRange(running, 0, 1);
+        // The second waits while the first runs: it is still queued once the first has data.
+        await ctx.WaitFor(first.Job!.Id, j => j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
+        Assert.Equal("queued", ctx.Service.GetJob(second.Job!.Id)!.State);
 
-        await ctx.WaitFor(first.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await ctx.WaitFor(second.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await ctx.WaitFor(first.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await ctx.WaitFor(second.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        lock (states) Assert.Equal(1, mostRunning);
     }
 
     [Fact]
@@ -1699,12 +1772,18 @@ public sealed partial class RuntimeServiceTests
             Source = "cli",
         });
 
-        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65536);
+        var running = await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65536);
+        // The partial data is in the destination folder, beside where the file will be.
+        Assert.Equal(ctx.Destination, Path.GetDirectoryName(running.PartFilePath));
+        Assert.True(File.Exists(running.PartFilePath), "the part file should exist while it downloads");
         var cancel = await ctx.Service.CancelAsync(response.Job.Id, deleteFile: true);
         Assert.True(cancel.Ok, cancel.Error);
-        await Task.Delay(500);
+        await WaitUntil(() => !File.Exists(running.PartFilePath), "the part file to be deleted");
+        Assert.Empty(Directory.EnumerateFiles(ctx.Destination, "*.part"));
         Assert.False(File.Exists(Path.Combine(ctx.Destination, "cancel.bin")));
-        Assert.Empty(Directory.EnumerateFiles(ctx.Paths.PartialsDirectory, "*.part"));
+        await WaitUntil(() => !File.Exists(Path.Combine(ctx.Paths.CheckpointsDirectory, $"{response.Job.Id:N}.json")),
+            "the checkpoint to be deleted");
+        Assert.Equal("cancelled", ctx.Service.GetJob(response.Job.Id)!.State);
     }
 
     [Fact]
@@ -1816,8 +1895,9 @@ public sealed partial class RuntimeServiceTests
     public async Task QueueFileOrderControlsSchedulingSurvivesRestartAndRejectsStaleLists()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        // A queue is stopped by its own command; a settings save leaves its run state alone (audit 4 H1).
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "stop" })).Ok);
         var settings = ctx.Service.GetSnapshot().Settings;
-        settings.Queues[0].IsRunning = false;
         settings.Queues[0].MaxConcurrentDownloads = 1;
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
         var ids = new List<Guid>();
@@ -1925,11 +2005,12 @@ public sealed partial class RuntimeServiceTests
         var windowStart = DateTimeOffset.UtcNow;
         try
         {
-            await using (var ctx = await ServiceContext.CreateAsync(
-                             _server, paths, destination, autoResume: false))
-            {
-                var settings = ctx.Service.GetSnapshot().Settings;
-                settings.Queues.Add(new QueueDto
+            // Queues with quota already in use: the use is the Host's own record, which a settings save can't set
+            // (audit 4 H1), so it is in the saved settings before the Host starts.
+            var store = new JsonSettingsStore(paths);
+            var seeded = await store.LoadAsync();
+            seeded.Queues = [.. seeded.Queues,
+                new DownloadQueue
                 {
                     Id = 1,
                     Name = "Night",
@@ -1941,8 +2022,8 @@ public sealed partial class RuntimeServiceTests
                     QuotaWindowHours = 8,
                     QuotaWindowStart = windowStart,
                     QuotaBytesUsed = 123_456,
-                });
-                settings.Queues.Add(new QueueDto
+                },
+                new DownloadQueue
                 {
                     Id = 2,
                     Name = "Sync",
@@ -1954,10 +2035,12 @@ public sealed partial class RuntimeServiceTests
                     QuotaWindowHours = 24,
                     QuotaWindowStart = windowStart.AddHours(-1),
                     QuotaBytesUsed = 789_012,
-                });
+                }];
+            await store.SaveAsync(seeded);
 
-                var created = await ctx.Service.UpdateSettingsAsync(settings);
-                Assert.True(created.Ok, created.Error);
+            await using (var ctx = await ServiceContext.CreateAsync(
+                             _server, paths, destination, autoResume: false))
+            {
 
                 var beforeQueueCreation = ctx.Service.GetSnapshot().Settings.Queues;
                 var invalidCreate = await ctx.Service.QueueActionAsync(new QueueActionRequest
@@ -3349,9 +3432,38 @@ public sealed partial class RuntimeServiceTests
         var start = new DateTimeOffset(2026, 3, 7, 23, 0, 0, TimeSpan.FromHours(-5));
         Assert.Equal("start", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(start)).Action);
 
+        // Eight hours after the start is 08:00 by the clock after the change; 06:30 by the clock is only 6.5 hours
+        // after it, so a stop counted in elapsed hours would not be due yet, nor one counted in the old offset.
+        var beforeStop = new DateTimeOffset(2026, 3, 8, 6, 59, 0, TimeSpan.FromHours(-4));
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(beforeStop));
+        Assert.True(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
         var stop = new DateTimeOffset(2026, 3, 8, 7, 0, 0, TimeSpan.FromHours(-4));
+        Assert.Equal(TimeSpan.FromHours(7), stop - start);
         Assert.Equal("stop", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(stop)).Action);
         Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+    }
+
+    [Fact]
+    public async Task ScheduleStartingInTheSkippedSpringForwardHourStartsWhenTheClockJumps()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto { Id = 1, Name = "Early", MaxConcurrentDownloads = 1, IsRunning = false, Order = 1 });
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(), Name = "In the gap", QueueId = 1, Enabled = true,
+            Kind = "daily", Days = "Sun", StartTime = "02:30",
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        // 2026-03-08: clocks go from 01:59:59 EST straight to 03:00 EDT, so 02:30 never shows on the clock.
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(new DateTimeOffset(2026, 3, 8, 1, 59, 0, TimeSpan.FromHours(-5))));
+        var jumped = new DateTimeOffset(2026, 3, 8, 3, 0, 0, TimeSpan.FromHours(-4));
+        Assert.Equal("start", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(jumped)).Action);
+        Assert.True(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+        // Once that day.
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(jumped.AddMinutes(30)));
     }
 
     [Fact]
@@ -3384,6 +3496,15 @@ public sealed partial class RuntimeServiceTests
         Assert.True(paused.ReceivedBytes > 0);
         Assert.True(File.Exists(paused.PartFilePath));
 
+        // A copy of the settings taken before the quota was reached (running, nothing used) changes neither (audit 4 H1).
+        var stale = settings;
+        stale.GlobalSpeedLimitBytesPerSecond = null;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(stale)).Ok);
+        var afterStaleSave = ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 0);
+        Assert.False(afterStaleSave.IsRunning);
+        Assert.Equal(afterQuota.QuotaBytesUsed, afterStaleSave.QuotaBytesUsed);
+        Assert.Equal(afterQuota.QuotaWindowStart, afterStaleSave.QuotaWindowStart);
+
         var second = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/quota2.bin?size=262144&seed=111",
@@ -3394,12 +3515,21 @@ public sealed partial class RuntimeServiceTests
         await Task.Delay(400);
         Assert.Equal("queued", ctx.Service.GetJob(second.Job!.Id)!.State);
 
-        // A fresh window (and a larger limit) lets the queue resume.
+        // Starting the queue while the quota is used up doesn't run anything: the quota stops it again.
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" })).Ok);
+        await ctx.WaitFor(first.Job.Id, j => j.State is "queued" or "paused", TimeSpan.FromSeconds(5));
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 0).IsRunning);
+        Assert.Equal("queued", ctx.Service.GetJob(second.Job.Id)!.State);
+
+        // An explicit reset starts a fresh window (and a larger limit lets both finish).
         var reset = ctx.Service.GetSnapshot().Settings;
         var resetQueue = reset.Queues.Single(q => q.Id == 0);
-        resetQueue.QuotaWindowStart = DateTimeOffset.UtcNow.AddHours(-25);
+        resetQueue.ResetQuota = true;
         resetQueue.QuotaBytes = 10 * 1024 * 1024;
-        Assert.True((await ctx.Service.UpdateSettingsAsync(reset)).Ok);
+        var resetResult = await ctx.Service.UpdateSettingsAsync(reset);
+        Assert.True(resetResult.Ok, resetResult.Error);
+        Assert.Equal(0, resetResult.Settings.Queues.Single(q => q.Id == 0).QuotaBytesUsed);
+        Assert.False(resetResult.Settings.Queues.Single(q => q.Id == 0).ResetQuota);
         var start = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" });
         Assert.True(start.Ok, start.Error);
 
@@ -3415,12 +3545,15 @@ public sealed partial class RuntimeServiceTests
     public async Task CompletionActionsFireAfterQueueFinishes()
     {
         var executor = new RecordingCompletionExecutor();
-        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor);
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor,
+            hooks: new ContextHooks { Log = log.Enqueue });
         var settings = ctx.Service.GetSnapshot().Settings;
         settings.AllowSystemCompletionActions = true;
+        var scheduleId = Guid.NewGuid();
         settings.Schedules.Add(new ScheduleDto
         {
-            Id = Guid.NewGuid(),
+            Id = scheduleId,
             Name = "Completion",
             QueueId = 0,
             Enabled = true,
@@ -3431,12 +3564,29 @@ public sealed partial class RuntimeServiceTests
         });
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
 
+        // Audit 2 M10: a download run the schedule didn't start (the queue was already running) takes none of its
+        // actions. The log line is the decision, so nothing here waits on a timer.
+        var manual = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/action0.bin?size=131072&seed=111",
+            DestinationDirectory = ctx.Destination,
+            FileName = "action0.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(manual.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await WaitUntil(() => log.Any(line => line.Contains("did not start", StringComparison.Ordinal)), "the skipped actions to be logged");
+        Assert.Empty(executor.OpenedPaths);
+        Assert.Equal(0, executor.ExitCount);
+
+        // The schedule starts the queue with two downloads waiting in it; the end of that run opens the last file and
+        // exits, once.
         var first = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/action1.bin?size=131072&seed=112",
             DestinationDirectory = ctx.Destination,
             FileName = "action1.bin",
             Source = "cli",
+            StartMode = "later",
         });
         var second = await ctx.Service.AddJobAsync(new AddJobRequest
         {
@@ -3444,21 +3594,41 @@ public sealed partial class RuntimeServiceTests
             DestinationDirectory = ctx.Destination,
             FileName = "action2.bin",
             Source = "cli",
+            StartMode = "later",
         });
+        var started = Assert.Single(await ctx.Service.EvaluateSchedulesAsync(new DateTimeOffset(2026, 11, 5, 8, 0, 0, TimeSpan.Zero)));
+        Assert.Equal("start", started.Action);
+        Assert.True(started.Ok, started.Error);
         await ctx.WaitFor(first.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         await ctx.WaitFor(second.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await Task.Delay(300);
+        await WaitUntil(() => executor.ExitCount == 1, "the exit action");
 
+        var opened = Assert.Single(executor.OpenedPaths);
+        Assert.Contains(opened, new[] { ctx.Service.GetJob(first.Job.Id)!.FinalFilePath, ctx.Service.GetJob(second.Job.Id)!.FinalFilePath });
+        Assert.Equal(0, executor.ShutdownCount);
+
+        // The run's actions are used up: another download into the queue, by hand, takes none.
+        var later = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/action3.bin?size=131072&seed=114",
+            DestinationDirectory = ctx.Destination,
+            FileName = "action3.bin",
+            Source = "cli",
+        });
+        var skipped = log.Count(line => line.Contains("did not start", StringComparison.Ordinal));
+        await ctx.WaitFor(later.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await WaitUntil(() => log.Count(line => line.Contains("did not start", StringComparison.Ordinal)) > skipped, "the skipped actions to be logged");
         Assert.Single(executor.OpenedPaths);
         Assert.Equal(1, executor.ExitCount);
-        Assert.Equal(0, executor.ShutdownCount);
     }
 
     [Fact]
     public async Task SystemCompletionActionsRequireOptInAndNoActiveDownloads()
     {
         var executor = new RecordingCompletionExecutor();
-        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor);
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor,
+            hooks: new ContextHooks { Log = log.Enqueue });
         var settings = ctx.Service.GetSnapshot().Settings;
         settings.Schedules.Add(new ScheduleDto
         {
@@ -3471,16 +3641,21 @@ public sealed partial class RuntimeServiceTests
             ExitWhenDone = true,
         });
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
+        var day = new DateTimeOffset(2026, 11, 5, 8, 0, 0, TimeSpan.Zero);
+        // Each scheduled run has a download waiting for it: a start with nothing to do arms no actions (audit 2 M10).
         var first = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/exit1.bin?size=131072&seed=114",
             DestinationDirectory = ctx.Destination,
             FileName = "exit1.bin",
             Source = "cli",
+            StartMode = "later",
         });
+        Assert.True(Assert.Single(await ctx.Service.EvaluateSchedulesAsync(day)).Ok);
         await ctx.WaitFor(first.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await Task.Delay(200);
+        // Not allowed in Options: the decision is logged, and nothing exits.
+        await WaitUntil(() => log.Any(line => line.Contains("system completion actions are disabled", StringComparison.Ordinal)),
+            "the refused exit to be logged");
         Assert.Equal(0, executor.ExitCount);
 
         var enabled = ctx.Service.GetSnapshot().Settings;
@@ -3504,28 +3679,34 @@ public sealed partial class RuntimeServiceTests
             QueueId = 1,
         });
         await ctx.WaitFor(slow.Job!.Id, j => j.ReceivedBytes > 65536);
+        // A new scheduled run of queue 0 while another queue still downloads: the exit waits for nothing and is refused.
         var blocked = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/exit2.bin?size=131072&seed=116",
             DestinationDirectory = ctx.Destination,
             FileName = "exit2.bin",
             Source = "cli",
+            StartMode = "later",
         });
+        Assert.True(Assert.Single(await ctx.Service.EvaluateSchedulesAsync(day.AddDays(1))).Ok);
         await ctx.WaitFor(blocked.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await Task.Delay(200);
+        await WaitUntil(() => log.Any(line => line.Contains("other downloads are unfinished", StringComparison.Ordinal)),
+            "the blocked exit to be logged");
         Assert.Equal(0, executor.ExitCount);
 
         await ctx.Service.CancelAsync(slow.Job.Id, deleteFile: true);
+        await ctx.WaitFor(slow.Job.Id, j => j.State == "cancelled");
         var finalJob = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/exit3.bin?size=131072&seed=117",
             DestinationDirectory = ctx.Destination,
             FileName = "exit3.bin",
             Source = "cli",
+            StartMode = "later",
         });
+        Assert.True(Assert.Single(await ctx.Service.EvaluateSchedulesAsync(day.AddDays(2))).Ok);
         await ctx.WaitFor(finalJob.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await Task.Delay(300);
-        Assert.Equal(1, executor.ExitCount);
+        await WaitUntil(() => executor.ExitCount == 1, "the exit action");
     }
 
     [Fact]
@@ -3549,17 +3730,18 @@ public sealed partial class RuntimeServiceTests
             ForceShutdown = true,
         });
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
         var job = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{_server.BaseAddress}/file/action-fail.bin?size=131072&seed=118",
             DestinationDirectory = ctx.Destination,
             FileName = "action-fail.bin",
             Source = "cli",
+            StartMode = "later",
         });
+        Assert.True(Assert.Single(await ctx.Service.EvaluateSchedulesAsync(new DateTimeOffset(2026, 11, 5, 8, 0, 0, TimeSpan.Zero))).Ok);
         var completed = await ctx.WaitFor(job.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        await Task.Delay(300);
-        Assert.Equal("completed", completed.State);
+        await WaitUntil(() => executor.ShutdownCount == 1, "the shutdown action");
+        Assert.Equal("completed", ctx.Service.GetJob(job.Job.Id)!.State);
         Assert.Equal(1, executor.OpenAttempts);
         Assert.Equal(1, executor.ShutdownCount);
         Assert.Equal("restart", executor.LastShutdownMode);
@@ -3687,15 +3869,9 @@ public sealed partial class RuntimeServiceTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task HlsAlternateAudioMuxesWhenFfmpegAvailable()
     {
-        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
-        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
-        {
-            return;
-        }
-
         await using var ctx = await ServiceContext.CreateAsync(_server);
         using var http = new HttpClient();
         using var expectedJson = System.Text.Json.JsonDocument.Parse(
@@ -3927,15 +4103,9 @@ public sealed partial class RuntimeServiceTests
         Assert.True(_server.DashSegmentRequests("rotating-chunk-0-00002.m4s") >= 1);
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task DashSeparateAudioVideoMuxesWhenFfmpegAvailable()
     {
-        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
-        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
-        {
-            return;
-        }
-
         await using var ctx = await ServiceContext.CreateAsync(_server);
         using var http = new HttpClient();
         using var expectedJson = System.Text.Json.JsonDocument.Parse(
@@ -4187,7 +4357,7 @@ public sealed partial class RuntimeServiceTests
                 handler: handler,
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
             var service = new DownloadManagerService(
                 paths,
                 store,
@@ -4260,6 +4430,22 @@ public sealed partial class RuntimeServiceTests
                     // best effort
                 }
             }
+        }
+    }
+}
+
+/// <summary>
+/// A test that needs a real FFmpeg (DOWNLOADMANAGER_FFMPEG). Without one it shows as skipped, with the reason, rather
+/// than passing without having run.
+/// </summary>
+public sealed class FfmpegFactAttribute : FactAttribute
+{
+    public FfmpegFactAttribute()
+    {
+        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
+        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
+        {
+            Skip = "Needs FFmpeg: set DOWNLOADMANAGER_FFMPEG to ffmpeg.exe.";
         }
     }
 }

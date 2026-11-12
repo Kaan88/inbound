@@ -16,7 +16,7 @@ export const loginPasswordMessage = 'Re-enter the password for a login whose sit
 
 // ---- The whole Options draft -------------------------------------------------------------------------------------
 
-export type OptionsPage = 'general' | 'saveto' | 'downloads' | 'connection' | 'proxy' | 'logins' | 'updates' | 'extraction' | 'signin';
+export type OptionsPage = 'general' | 'saveto' | 'downloads' | 'connection' | 'proxy' | 'logins' | 'updates' | 'extraction' | 'torrents' | 'signin';
 
 export interface LoginRow {
   id: string;
@@ -77,8 +77,133 @@ export interface OptionsForm {
   autoResume: boolean;
   allowLocalNetwork: boolean;
   browserIntegration: boolean;
+  /** Options > Torrents (shown only when the hello lists `torrents`). Where only the PC may turn them on, the box is locked. */
+  torrentsEnabled: boolean;
+  /** `ask`, `thisPc` or `provider`; offered only with an account that takes torrents. */
+  torrentRoute: string;
+  torrentChooseFiles: boolean;
+  /** T2 seeding, shown when the server sends it (an older one doesn't, and then nothing is written back). */
+  seeding: SeedingForm | null;
+  /** T3 peers, privacy and connections, shown when the server sends them (an older one doesn't). */
+  peers: TorrentPeerForm | null;
   proxy: ProxyForm;
   logins: LoginRow[];
+}
+
+/** Options > Torrents > Seeding: the Host's TorrentSeedAfterDownload, TorrentSeedRatio, TorrentSeedHours and TorrentUploadLimit. */
+export interface SeedingForm {
+  afterDownload: boolean;
+  ratio: number | null;
+  hours: number | null;
+  /** KB/s; empty is none of its own (the total speed limit, or no limit). */
+  uploadKb: number | null;
+  /** The limit as stored and as shown when the draft was made, so an untouched box keeps the stored bytes. */
+  uploadBytesAtOpen: number;
+  uploadKbAtOpen: number | null;
+}
+
+/** The Host's bounds (DownloadManagerService.TorrentSeedSettingsError). */
+export const maxSeedRatio = 100;
+export const maxSeedHours = 8760;
+
+export function seedingFrom(settings: Settings): SeedingForm | null {
+  if (typeof settings.torrentSeedRatio !== 'number' || typeof settings.torrentSeedHours !== 'number') return null;
+  const bytes = typeof settings.torrentUploadLimit === 'number' && settings.torrentUploadLimit > 0 ? settings.torrentUploadLimit : 0;
+  const kb = bytes > 0 ? Math.max(1, Math.floor(bytes / 1024)) : null;
+  return {
+    afterDownload: settings.torrentSeedAfterDownload !== false,
+    ratio: settings.torrentSeedRatio,
+    hours: settings.torrentSeedHours,
+    uploadKb: kb,
+    uploadBytesAtOpen: bytes,
+    uploadKbAtOpen: kb,
+  };
+}
+
+/** The Host's own words for a seeding value it would refuse, with the box to mark; null when it would take them. */
+export function seedingProblem(form: SeedingForm): { message: string; field: string } | null {
+  const ratio = form.ratio;
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio) || ratio < 0 || ratio > maxSeedRatio)
+    return { message: 'Enter a seeding ratio from 0 to 100 (0 is no ratio limit).', field: 'seed-ratio' };
+  const hours = form.hours;
+  if (hours === null || hours === undefined || !Number.isFinite(hours) || hours < 0 || hours > maxSeedHours)
+    return { message: 'Enter seeding hours from 0 to 8760 (0 is no time limit).', field: 'seed-hours' };
+  if (ratio === 0 && hours === 0) return { message: "Seeding needs a ratio or a time limit; both can't be 0.", field: 'seed-ratio' };
+  const kb = form.uploadKb;
+  if (kb !== null && kb !== undefined) {
+    // The Host's rule and words for a negative limit; the top bound is the page's own, like the other speed boxes.
+    if (kb < 0) return { message: "The torrent upload limit can't be below 0.", field: 'seed-upload' };
+    if (!Number.isFinite(kb) || kb > maxSpeedKb)
+      return { message: `The torrent upload limit can be at most ${maxSpeedKb} KB/s. 0 or empty is none.`, field: 'seed-upload' };
+  }
+  return null;
+}
+
+/** Bytes per second to save: an untouched box keeps the stored value; empty or 0 is none. */
+export function uploadLimitBytes(form: SeedingForm): number {
+  const kb = form.uploadKb === null || form.uploadKb === undefined || !Number.isFinite(form.uploadKb) ? null : Math.round(form.uploadKb);
+  if (kb === form.uploadKbAtOpen) return form.uploadBytesAtOpen;
+  return kb !== null && kb > 0 ? kb * 1024 : 0;
+}
+
+/**
+ * Options > Torrents > Finding peers and Connections (T3): the Host's TorrentDht, TorrentPex, TorrentLsd,
+ * TorrentEncryption, TorrentUseProxy, TorrentSeedsAtOnce, TorrentConnectionsPerTorrent and TorrentMaxConnections. From
+ * the Windows app's web UI only the three numbers may change (WebSettingsRules); the rest stay with the PC.
+ */
+export interface TorrentPeerForm {
+  dht: boolean;
+  pex: boolean;
+  lsd: boolean;
+  /** `prefer`, `require` or `off`. */
+  encryption: string;
+  useProxy: boolean;
+  /** Empty or 0: all of them / no limit of its own / the torrent program's own default. */
+  seedsAtOnce: number | null;
+  perTorrent: number | null;
+  total: number | null;
+}
+
+/** The encryption choices, as the Host names them (TorrentEncryptionModes). */
+export const torrentEncryptions: readonly [string, string][] = [
+  ['prefer', 'Prefer encrypted'],
+  ['require', 'Require encrypted (leaves out peers that can\'t)'],
+  ['off', 'Off (unencrypted only)'],
+];
+
+/** The settings the Windows app's web UI may only look at (WebSettingsRules.PipeOnly). */
+export const pcOnlyTorrentPeerSettings = ['torrentDht', 'torrentPex', 'torrentLsd', 'torrentEncryption', 'torrentUseProxy'] as const;
+
+export function peersFrom(settings: Settings): TorrentPeerForm | null {
+  if (typeof settings.torrentDht !== 'boolean' || typeof settings.torrentSeedsAtOnce !== 'number') return null;
+  const count = (value: number | undefined) => (typeof value === 'number' && value > 0 ? value : null);
+  return {
+    dht: settings.torrentDht,
+    pex: settings.torrentPex !== false,
+    lsd: settings.torrentLsd === true,
+    encryption: torrentEncryptions.some(([key]) => key === settings.torrentEncryption) ? settings.torrentEncryption! : 'prefer',
+    useProxy: settings.torrentUseProxy === true,
+    seedsAtOnce: count(settings.torrentSeedsAtOnce),
+    perTorrent: count(settings.torrentConnectionsPerTorrent),
+    total: count(settings.torrentMaxConnections),
+  };
+}
+
+function countOf(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || (typeof value === 'string' && value === '')) return 0;
+  return Number.isFinite(value) && Number.isInteger(Number(value)) ? Number(value) : null;
+}
+
+/** The Host's own words for a peer or connection value it would refuse (TorrentPeerSettingsError), with the box to mark. */
+export function peersProblem(form: TorrentPeerForm): { message: string; field: string } | null {
+  const seeds = countOf(form.seedsAtOnce);
+  if (seeds === null || seeds < 0 || seeds > 1000) return { message: 'Enter torrents seeding at once from 0 to 1000 (0 is all of them).', field: 'tor-seeds' };
+  const per = countOf(form.perTorrent);
+  if (per === null || per < 0 || per === 1 || per > 2000) return { message: 'Enter connections per torrent from 2 to 2000, or 0 for no limit of its own.', field: 'tor-per' };
+  const total = countOf(form.total);
+  if (total === null || total < 0 || (total > 0 && total < 10) || total > 20000)
+    return { message: "Enter torrent connections in all from 10 to 20000, or 0 for the torrent program's own default.", field: 'tor-total' };
+  return null;
 }
 
 /** The built-in categories, in the order of the desktop's Save to page. */
@@ -209,6 +334,9 @@ export function isUnsupportedReply(message: string): boolean {
   return /^Unknown message type/i.test(message);
 }
 
+/** Where magnets and .torrent files go when an account takes torrents too (TorrentRoutes): ask, this PC or server, the account. */
+export const torrentRoutes = ['ask', 'thisPc', 'provider'];
+
 let rowKey = 0;
 export function nextRowKey(): number {
   return ++rowKey;
@@ -244,6 +372,11 @@ export function formFrom(settings: Settings): OptionsForm {
     autoResume: settings.autoResumeUnfinishedOnStartup,
     allowLocalNetwork: settings.allowLocalNetwork,
     browserIntegration: settings.browserIntegrationEnabled,
+    torrentsEnabled: settings.torrentsEnabled === true,
+    torrentRoute: torrentRoutes.includes(settings.torrentRoute ?? '') ? settings.torrentRoute! : 'ask',
+    torrentChooseFiles: settings.torrentChooseFiles !== false,
+    seeding: seedingFrom(settings),
+    peers: peersFrom(settings),
     proxy: {
       mode: settings.proxy?.mode ?? 'none', type: split.type, host: split.host, username: settings.proxy?.username ?? '',
       password: '', forget: false, hasPassword: !!settings.proxy?.hasPassword,
@@ -307,6 +440,10 @@ export function validateAll(
     problems.push({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy', field: 'proxy-address' });
   const profiles = parseProfiles(form.profiles);
   if (profiles.error) problems.push({ message: profiles.error, page: 'connection', field: 'set-profiles' });
+  const seeding = form.seeding ? seedingProblem(form.seeding) : null;
+  if (seeding) problems.push({ ...seeding, page: 'torrents' });
+  const peers = form.peers ? peersProblem(form.peers) : null;
+  if (peers) problems.push({ ...peers, page: 'torrents' });
   return problems;
 }
 
@@ -342,6 +479,22 @@ const settingLabels: Record<string, string> = {
   interceptedFileExtensions: 'File types captured',
   closeWindowCompletely: 'Closing the window',
   theme: 'Theme',
+  torrentsEnabled: 'Download torrents',
+  torrentHandler: 'Open magnet links and .torrent files with Inbound',
+  torrentListenPort: 'Listening port',
+  torrentUpnp: 'Ask my router to forward the port',
+  torrentSeedAfterDownload: 'Keep seeding after the download finishes',
+  torrentSeedRatio: 'Stop seeding at ratio',
+  torrentSeedHours: 'Stop seeding after',
+  torrentUploadLimit: 'Torrent upload limit',
+  torrentDht: 'DHT',
+  torrentPex: 'Peer exchange (PEX)',
+  torrentLsd: 'Local peers (LSD)',
+  torrentEncryption: 'Encryption',
+  torrentUseProxy: 'Use the proxy for torrents',
+  torrentSeedsAtOnce: 'Torrents seeding at once',
+  torrentConnectionsPerTorrent: 'Connections per torrent',
+  torrentMaxConnections: 'Torrent connections in all',
 };
 
 /** The server's "These settings can only be changed in the app on this PC: a, b." with the names Options uses. */
@@ -382,6 +535,25 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   settings.autoResumeUnfinishedOnStartup = form.autoResume;
   settings.allowLocalNetwork = form.allowLocalNetwork;
   settings.browserIntegrationEnabled = form.browserIntegration;
+  settings.torrentsEnabled = form.torrentsEnabled;
+  settings.torrentRoute = form.torrentRoute;
+  settings.torrentChooseFiles = form.torrentChooseFiles;
+  if (form.seeding) {
+    settings.torrentSeedAfterDownload = form.seeding.afterDownload;
+    settings.torrentSeedRatio = Number(form.seeding.ratio);
+    settings.torrentSeedHours = Number(form.seeding.hours);
+    settings.torrentUploadLimit = uploadLimitBytes(form.seeding);
+  }
+  if (form.peers) {
+    settings.torrentDht = form.peers.dht;
+    settings.torrentPex = form.peers.pex;
+    settings.torrentLsd = form.peers.lsd;
+    settings.torrentEncryption = form.peers.encryption;
+    settings.torrentUseProxy = form.peers.useProxy;
+    settings.torrentSeedsAtOnce = countOf(form.peers.seedsAtOnce) ?? 0;
+    settings.torrentConnectionsPerTorrent = countOf(form.peers.perTorrent) ?? 0;
+    settings.torrentMaxConnections = countOf(form.peers.total) ?? 0;
+  }
 
   const currentFavorites: FavoriteFolder[] = settings.favoriteFolders ?? [];
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -408,6 +580,33 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   for (const c of original) if (!form.customCategories.some((row) => row.id === c.id)) defined.push(c);
   settings.customCategories = defined;
   settings.deleteCategoryIds = removed;
+}
+
+/**
+ * What Options sends on OK or Apply (audit 4 H1): the server's current settings with only the fields this form changed
+ * since it opened. A field is changed when the form as opened and the form now write it differently; such a field is
+ * written onto the current settings (so favorites or categories added elsewhere meanwhile are still kept, see
+ * applyForm). Every other field stays as the server holds it now, so a setting, queue or schedule changed elsewhere
+ * while Options was open is not put back, and the Windows app's settings that only the PC may change are sent as they are.
+ */
+export function mergeEditedSettings(current: Settings, opened: Settings, formAtOpen: OptionsForm, draft: OptionsForm): Settings {
+  const copy = (settings: Settings) => JSON.parse(JSON.stringify(settings)) as Settings;
+  const before = copy(opened);
+  applyForm(before, formAtOpen);
+  const after = copy(opened);
+  applyForm(after, draft);
+  const written = copy(current);
+  applyForm(written, draft);
+  const result = copy(current) as unknown as Record<string, unknown>;
+  const was = before as unknown as Record<string, unknown>;
+  const now = after as unknown as Record<string, unknown>;
+  const onCurrent = written as unknown as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(was), ...Object.keys(now)])) {
+    if (JSON.stringify(was[key]) === JSON.stringify(now[key])) continue;
+    if (onCurrent[key] === undefined) delete result[key];
+    else result[key] = onCurrent[key];
+  }
+  return result as unknown as Settings;
 }
 
 /**

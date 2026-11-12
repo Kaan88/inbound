@@ -32,7 +32,8 @@ internal sealed class HostCompletionActionExecutor : ICompletionActionExecutor
     {
         var arguments = ShutdownCommand.BuildArguments(mode, force);
         _log($"Completion action: running shutdown.exe {arguments}.");
-        Process.Start(new ProcessStartInfo("shutdown.exe", arguments)
+        // By its full path: a bare name is looked for in the Host's own and current folders first (report 3, L3).
+        Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), arguments)
         {
             UseShellExecute = false,
             CreateNoWindow = true,

@@ -35,3 +35,30 @@ test('unsupported and malformed link URLs cannot keep a download in the browser'
     assert.equal(normalizeDownloadUrl(url), '');
   }
 });
+
+const { restartInterruptedText, restartSavedWebPage, RESTART_SAVED_WEB_PAGE_TEXT } = loaded.exports;
+
+test('Audit 3 M4 review: a restarted download\'s interruption gives its own reason, and only a server reason blames the site', () => {
+  assert.equal(restartInterruptedText('USER_CANCELED'), undefined);
+  assert.equal(restartInterruptedText('USER_SHUTDOWN'), undefined, 'the browser was closed; it offers to resume it');
+  for (const code of ['SERVER_FORBIDDEN', 'SERVER_FAILED', 'SERVER_UNAUTHORIZED', 'SERVER_BAD_CONTENT']) {
+    assert.match(restartInterruptedText(code), /site refused it/);
+  }
+  for (const code of ['FILE_NO_SPACE', 'FILE_ACCESS_DENIED', 'FILE_FAILED', 'NETWORK_FAILED', 'NETWORK_DISCONNECTED', 'CRASH', undefined, 'SOMETHING_NEW']) {
+    const text = restartInterruptedText(code);
+    assert.ok(text, `${code} is said`);
+    assert.doesNotMatch(text, /site refused/, `${code} does not blame the site`);
+  }
+  assert.match(restartInterruptedText('FILE_NO_SPACE'), /disk is full/);
+  assert.match(restartInterruptedText('NETWORK_FAILED'), /connection failed/);
+});
+
+test('Audit 3 M4 review: a restart that saved a web page in place of a file is recognised', () => {
+  assert.equal(restartSavedWebPage('application/zip', 'text/html; charset=utf-8'), true);
+  assert.equal(restartSavedWebPage('application/zip', 'application/xhtml+xml'), true);
+  assert.equal(restartSavedWebPage('application/zip', 'application/zip'), false);
+  assert.equal(restartSavedWebPage('text/html', 'text/html'), false, 'a page that was a page');
+  assert.equal(restartSavedWebPage(undefined, 'text/html'), false, 'nothing known about the first response');
+  assert.equal(restartSavedWebPage('application/zip', undefined), false);
+  assert.match(RESTART_SAVED_WEB_PAGE_TEXT, /web page/);
+});

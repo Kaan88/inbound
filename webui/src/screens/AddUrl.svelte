@@ -8,7 +8,9 @@
     serverNameToShow, validUserName, type ConflictPolicy, type FileInfo,
   } from '../lib/addflow';
   import { hideAddresses, isMagnet } from '../lib/addview';
+  import { magnetsIn } from '../lib/torrents';
   import { statusText } from '../lib/format';
+  import { newUuid } from '../lib/ids';
   import { submitsOnEnter } from '../lib/keys';
   import { store } from '../lib/store.svelte';
   import type { ClassifyResult, Job } from '../lib/types';
@@ -16,7 +18,8 @@
   // Add URL, in the desktop's two steps: "Enter new address to download", then "Download file info" with the
   // checks, the name, category, folder, description, sign-in and conflict choices. An address a provider handles
   // goes on to the multi-line dialog with that one line.
-  let { initial = '', onclose, onprovider }: { initial?: string; onclose: () => void; onprovider: (input: string, result: ClassifyResult) => void } = $props();
+  // ontorrent: set while the server downloads torrents itself (T1); a magnet then goes to the torrent dialog.
+  let { initial = '', onclose, onprovider, ontorrent }: { initial?: string; onclose: () => void; onprovider: (input: string, result: ClassifyResult) => void; ontorrent?: (magnets: string[]) => void } = $props();
 
   const settings = $derived(store.model.settings);
   const providerAdd = $derived(store.has('remote') && store.model.accounts.some((a) => a.hasKey && !a.keyUnreadable));
@@ -74,6 +77,9 @@
     const text = address.trim();
     addressProblem = false;
     if (direct && canChooseDirect && text === url) { toInfo(text, result); return; }
+    // T1: magnets go to the torrent dialog, which offers This PC and the provider per line (TorrentAddDialog).
+    const magnets = ontorrent ? magnetsIn(text) : [];
+    if (ontorrent && magnets.length > 0 && isMagnet(text)) { ontorrent(magnets); return; }
     if (!text) { addressStatus = providerAdd ? 'Enter an http or https address, a magnet, or the address of a .torrent file.' : 'Enter an absolute http or https URL.'; addressProblem = true; return; }
     const web = /^(https?|ftp):\/\//i.test(text);
     if (!providerAdd) {
@@ -194,12 +200,17 @@
     const label = newCategoryName.trim();
     if (!label) { categoryError = 'Enter a name for the category.'; return; }
     creating = true;
-    const id = crypto.randomUUID().replace(/-/g, '');
+    // newUuid: the browser's own UUID call is missing over plain http from another computer (audit 4 M9).
+    const id = newUuid().replace(/-/g, '');
     const extensions = newCategoryExtensions.split(/[\s,;]+/).map((e) => e.replace(/^\./, '')).filter(Boolean);
-    const saved = await store.saveSettings((s) => {
-      s.customCategories = [...customCategories(s), { id, name: label, destinationDirectory: destination.trim(), extensions }];
-    }, '');
-    creating = false;
+    let saved = false;
+    try {
+      saved = await store.saveSettings((s) => {
+        s.customCategories = [...customCategories(s), { id, name: label, destinationDirectory: destination.trim(), extensions }];
+      }, '');
+    } finally {
+      creating = false;
+    }
     if (!saved) { categoryError = "The category wasn't saved."; return; }
     // The new category reaches the list with the next snapshot; wait for it so the box doesn't show blank.
     for (let wait = 0; wait < 20 && !categories.some((c) => c.id === id); wait++) await new Promise((r) => setTimeout(r, 100));
@@ -278,7 +289,7 @@
     <label class="label" for="url-box">URL</label>
     <div class="flex gap-2">
       <input id="url-box" class="field font-mono" data-autofocus bind:value={address} list="recent-urls" spellcheck="false" autocomplete="off"
-        placeholder={providerAdd ? 'https://example.com/file.zip, or a magnet' : 'https://example.com/file.zip'}
+        placeholder={providerAdd || ontorrent ? 'https://example.com/file.zip, or a magnet' : 'https://example.com/file.zip'}
         oninput={() => { canChooseDirect = false; direct = false; addressStatus = ''; }} />
       <button class="btn shrink-0" type="button" title="Paste the address from the clipboard"
         onclick={async () => { try { const clip = (await navigator.clipboard.readText()).trim(); if (clip) address = clip.length < 4096 ? clip : address; } catch { store.toast("The browser wouldn't hand over the clipboard. Paste into the box instead.", 'error'); } }}><Icon name="link" size={15} /> Paste</button>

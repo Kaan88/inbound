@@ -16,6 +16,7 @@
     <Project Path="src/DownloadManager.Providers.TorBox/DownloadManager.Providers.TorBox.csproj" />
     <Project Path="src/DownloadManager.Runtime/DownloadManager.Runtime.csproj" />
     <Project Path="src/DownloadManager.Server/DownloadManager.Server.csproj" />
+    <Project Path="src/DownloadManager.Torrents/DownloadManager.Torrents.csproj" />
     <Project Path="src/DownloadManager.Tray/DownloadManager.Tray.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -27,8 +28,10 @@
     <Project Path="tests/DownloadManager.Server.Tests/DownloadManager.Server.Tests.csproj" />
     <Project Path="tests/DownloadManager.TorBox.LiveTests/DownloadManager.TorBox.LiveTests.csproj" />
     <Project Path="tests/DownloadManager.TorBox.Tests/DownloadManager.TorBox.Tests.csproj" />
+    <Project Path="tests/DownloadManager.Torrents.Tests/DownloadManager.Torrents.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/TestServer/TestServer.csproj" />
+    <Project Path="tools/TorrentWorkerProbe/TorrentWorkerProbe.csproj" />
   </Folder>
 </Solution>

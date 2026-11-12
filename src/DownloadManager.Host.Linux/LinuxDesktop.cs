@@ -208,18 +208,7 @@ internal static class AutostartEntry
     }
 
     /// <summary>The desktop entry spec's quoting for one Exec argument.</summary>
-    internal static string QuoteExec(string argument)
-    {
-        var escaped = new StringBuilder();
-        foreach (var c in argument)
-        {
-            if (c is '"' or '`' or '$' or '\\') escaped.Append('\\');
-            escaped.Append(c);
-        }
-
-        // In a desktop file the backslash itself is escaped once more.
-        return "\"" + escaped.ToString().Replace("\\", "\\\\", StringComparison.Ordinal) + "\"";
-    }
+    internal static string QuoteExec(string argument) => DesktopEntryText.QuoteExec(argument);
 }
 
 /// <summary>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import Dialog from '../components/Dialog.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
@@ -7,13 +7,15 @@
   import { newUuid } from '../lib/ids';
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
-    applyForm, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
-    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
+    mergeEditedSettings, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
+    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
   } from '../lib/settingsRules';
   import { hostKindOf } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
   import Confirm from '../components/Confirm.svelte';
   import { providerNameOf } from '../lib/remote';
+  import { torrentProvider } from '../lib/torrents';
+  import { networkLines, type TorrentNetwork } from '../lib/torrentOptions';
   import { store, type Theme } from '../lib/store.svelte';
   import type { ArchiveSettings, Settings } from '../lib/types';
   import ProviderAccount from './ProviderAccount.svelte';
@@ -29,6 +31,8 @@
   store.settingsPage = null;
   let form = $state<OptionsForm | null>(null);
   let baseline = '';
+  // The settings the form was made from: OK and Apply send only what the form changed since, onto the current ones.
+  let opened: Settings | null = null;
   let themeChoice = $state<Theme>(store.theme);
   let notifyChoice = $state(notifyEnabled());
   let notifyBase = notifyEnabled();
@@ -43,6 +47,22 @@
   // shown as they are, set in the app on the PC (U-WR-14).
   const pcOnly = $derived(hostKindOf(store.model.hello?.hostKind) === 'windows');
   const pcOnlyNote = 'Set in the app on the PC. A browser can only look at it here.';
+  // Options > Torrents: the Windows app's TorrentOptionsPage. Where they go is asked only when an account takes torrents too.
+  const torrentAccount = $derived(torrentProvider(store.has('remote'), store.model.accounts));
+  // The port as the engine last used it (torrent.network): read once each time the page opens, never polled.
+  let network = $state<TorrentNetwork | null>(null);
+  let networkProblem = $state('');
+  $effect(() => {
+    if (page !== 'torrents' || store.connection !== 'open') return;
+    untrack(() => {
+      networkProblem = '';
+      void store.ask<TorrentNetwork>('torrent.network', {}).then((result) => (network = result)).catch((error) => {
+        network = null;
+        networkProblem = isUnsupportedReply(text(error)) ? '' : text(error);
+      });
+    });
+  });
+  const portLines = $derived(form ? networkLines({ pcOnly, settings: store.model.settings, network }) : []);
 
   // Extraction: read from the server when the screen opens; its page shows only where the server extracts.
   let archiveState = $state<'loading' | 'ready' | 'failed' | 'unsupported'>('loading');
@@ -59,6 +79,7 @@
     { key: 'connection', label: 'Connection' },
     { key: 'proxy', label: 'Proxy' },
     { key: 'logins', label: 'Site logins' },
+    ...(store.has('torrents') ? [{ key: 'torrents' as OptionsPage, label: 'Torrents' }] : []),
     { key: 'updates', label: 'Updates' },
     ...(store.has('remote') ? store.model.accounts.map((account) => ({ key: `provider:${account.provider}` as Page, label: `${providerNameOf(account)} account` })) : []),
     ...(archiveState === 'ready' || archiveState === 'failed' ? [{ key: 'extraction' as OptionsPage, label: 'Extraction' }] : []),
@@ -76,6 +97,7 @@
   function loadForm() {
     const settings = store.model.settings;
     if (!settings) return;
+    opened = JSON.parse(JSON.stringify(settings)) as Settings;
     form = formFrom(JSON.parse(JSON.stringify(settings)) as Settings);
     baseline = JSON.stringify(form);
   }
@@ -154,9 +176,10 @@
         if (first.field) void tick().then(() => document.getElementById(first.field!)?.focus());
         return false;
       }
-      const copy = JSON.parse(JSON.stringify(store.model.settings)) as Settings;
-      applyForm(copy, draft);
       try {
+        // Onto the settings as the server holds them now, not the copy this page read: see mergeEditedSettings.
+        const current = await store.currentSettings();
+        const copy = mergeEditedSettings(current, opened ?? current, JSON.parse(baseline) as OptionsForm, draft);
         await store.ask('settings.update', { settings: copy });
       } catch (error) {
         message = friendlyRefusal(text(error));
@@ -551,6 +574,81 @@
         <div><button class="btn" type="button" onclick={addLogin}><Icon name="add" size={15} class="text-icon-info" /> Add site login</button></div>
       </div>
       </fieldset>
+    {:else if page === 'torrents'}
+      <h1 class="mb-3 text-[18px] font-semibold">Torrents</h1>
+      <div class="grid max-w-xl gap-3">
+        <div>
+          <label class="flex items-center gap-2 text-[13px] font-semibold {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.torrentsEnabled} disabled={pcOnly} /> Download torrents on {hostWord}</label>
+          {#if pcOnly}<p class="hint mt-1 flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
+          <p class="hint mt-1">Adds Add magnet and Import torrent file, and a Torrents view. The torrent engine runs only while a torrent is downloading; with nothing to do it is closed and nothing listens on the network.</p>
+        </div>
+        <fieldset class="grid gap-3 pl-6 {form.torrentsEnabled ? '' : 'opacity-60'}" disabled={!form.torrentsEnabled}>
+          {#if torrentAccount}
+            <div role="radiogroup" aria-label="Magnets and .torrent files go to">
+              <p class="label">Magnets and .torrent files go to</p>
+              {#each [['ask', 'Ask each time'], ['thisPc', pcOnly ? 'This PC' : 'This server'], ['provider', providerNameOf(torrentAccount)]] as [value, label] (value)}
+                <label class="flex items-center gap-2 text-[13px]"><input type="radio" name="torrent-route" value={value} bind:group={form.torrentRoute} /> {label}</label>
+              {/each}
+            </div>
+          {/if}
+          <div>
+            <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.torrentChooseFiles} /> Ask which files to download before starting</label>
+            <p class="hint mt-1">For a torrent with several files. A magnet asks once its file list arrives.</p>
+          </div>
+        </fieldset>
+        {#if form.seeding}
+          {@render section('Seeding')}
+          <fieldset class="grid gap-3 {form.torrentsEnabled ? '' : 'opacity-60'}" disabled={!form.torrentsEnabled}>
+            <div>
+              <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.seeding.afterDownload} /> Keep seeding after the download finishes</label>
+              <p class="hint mt-1">Other peers can then download its pieces from {hostWord}. Start seeding and Stop seeding in a torrent's menu do it for one torrent.</p>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div><label class="label" for="seed-ratio">Stop seeding at ratio</label><input id="seed-ratio" class="field" type="number" min="0" max="100" step="0.1" required bind:value={form.seeding.ratio} aria-invalid={invalid('seed-ratio')} /></div>
+              <div><label class="label" for="seed-hours">Stop seeding after (hours)</label><input id="seed-hours" class="field" type="number" min="0" max="8760" step="1" required bind:value={form.seeding.hours} aria-invalid={invalid('seed-hours')} /></div>
+            </div>
+            <p class="hint">Seeding stops at whichever comes first. 0 is no limit, but not both.</p>
+            <div class="max-w-xs"><label class="label" for="seed-upload">Upload limit for torrents (KB/s)</label><input id="seed-upload" class="field" type="number" min="0" max="10000000" placeholder="None of its own" bind:value={form.seeding.uploadKb} aria-invalid={invalid('seed-upload')} /></div>
+            <p class="hint">Empty: torrents upload at most at the total speed limit in Options › Connection, or without a limit when there is none.</p>
+          </fieldset>
+        {/if}
+        {#if form.peers}
+          {@render section('Finding peers and privacy')}
+          <fieldset class="grid gap-2 {form.torrentsEnabled && !pcOnly ? '' : 'opacity-60'}" disabled={!form.torrentsEnabled || pcOnly}>
+            {#if pcOnly}<p class="hint flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
+            <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.peers.dht} /> DHT (find peers without a tracker)</label>
+            <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.peers.pex} /> Peer exchange (PEX)</label>
+            <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.peers.lsd} /> Local peers on this network (LSD)</label>
+            <p class="hint">All three are always off for private torrents.</p>
+            <div class="max-w-xs">
+              <label class="label" for="tor-encryption">Encryption</label>
+              <select id="tor-encryption" class="field" bind:value={form.peers.encryption}>
+                {#each torrentEncryptions as [value, label] (value)}<option {value}>{label}</option>{/each}
+              </select>
+            </div>
+            <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.peers.useProxy} /> Use the proxy from Options › Proxy for peers and trackers</label>
+            <p class="hint">It needs a proxy typed in Options › Proxy: HTTP or SOCKS5, not the system proxy. With HTTP, DHT, local peers and uTP are off while this is on.</p>
+          </fieldset>
+          {@render section('Connections')}
+          <fieldset class="grid gap-3 {form.torrentsEnabled ? '' : 'opacity-60'}" disabled={!form.torrentsEnabled}>
+            <div class="grid gap-3 sm:grid-cols-3">
+              <div><label class="label" for="tor-seeds">Torrents seeding at once</label><input id="tor-seeds" class="field" type="number" min="0" max="1000" step="1" placeholder="All" bind:value={form.peers.seedsAtOnce} aria-invalid={invalid('tor-seeds')} /></div>
+              <div><label class="label" for="tor-per">Connections per torrent</label><input id="tor-per" class="field" type="number" min="0" max="2000" step="1" placeholder="No limit of its own" bind:value={form.peers.perTorrent} aria-invalid={invalid('tor-per')} /></div>
+              <div><label class="label" for="tor-total">Connections in all</label><input id="tor-total" class="field" type="number" min="0" max="20000" step="1" placeholder="The engine's default" bind:value={form.peers.total} aria-invalid={invalid('tor-total')} /></div>
+            </div>
+            <p class="hint">Empty or 0: every finished torrent seeds, a torrent has no connection limit of its own, and the torrent engine's own total applies. The others wait their turn to seed.</p>
+          </fieldset>
+        {/if}
+        {@render section('Network')}
+        <dl class="grid grid-cols-[minmax(120px,auto)_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+          {#each portLines as line (line.label)}
+            <dt class="text-muted">{line.label}</dt><dd class="min-w-0 break-words {line.problem ? 'text-error' : ''}">{line.value}</dd>
+          {/each}
+        </dl>
+        <p class="hint flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnly ? 'The port, router forwarding and firewall are set in the app on the PC.' : 'The port and router forwarding are set where the server starts: DOWNLOADMANAGER_TORRENT_PORT (6881 unless set) and DOWNLOADMANAGER_TORRENT_UPNP. Publish the port, TCP and UDP.'}</p>
+        {#if networkProblem}<p class="hint text-error">Couldn't read the port status. {networkProblem}</p>{/if}
+        {#if !form.peers}<p class="hint">Torrents connect directly: the proxy in Options › Proxy is not used for them.</p>{/if}
+      </div>
     {:else if page === 'updates'}
       <h1 class="mb-3 text-[18px] font-semibold">Updates</h1>
       <div class="card mb-3 max-w-xl bg-highlight p-3 text-[13px]">

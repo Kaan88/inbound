@@ -276,10 +276,11 @@ public static class RemoteInputClassifier
 
     /// <summary>
     /// A .torrent file's own list, with ids that only say where each file is in it. What is chosen from this goes back
-    /// by path and size, which is how the provider's files are matched to it once it lists them.
+    /// by path and size, which is how the provider's files are matched to it once it lists them. None when the parse kept
+    /// only the first files (<see cref="TorrentMetadata.FilesCut"/>), so a partial list is never offered as the whole.
     /// </summary>
     private static List<RemoteFileView>? FilesToChoose(TorrentMetadata metadata, string providerName)
-        => metadata.Files.Count is > 0 and <= RemoteJobCoordinator.MostFilesToChooseFrom
+        => !metadata.FilesCut && metadata.Files.Count is > 0 and <= RemoteJobCoordinator.MostFilesToChooseFrom
             ? metadata.Files.Select((file, index) => RemoteJobCoordinator.ToFileView(providerName, new RemoteFile
             {
                 FileId = index.ToString(System.Globalization.CultureInfo.InvariantCulture),

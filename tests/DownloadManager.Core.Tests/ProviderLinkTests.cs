@@ -223,11 +223,13 @@ public sealed class NativeBridgePolicyTests
     [InlineData("job.cancel")]
     [InlineData("job.remove")]
     [InlineData("settings.downloadFolders")]
+    [InlineData("job.reveal")]
+    [InlineData("job.update")]
+    [InlineData("job.redownload")]
     public void ForwardsWhatTheExtensionUses(string type) => Assert.True(NativeBridgePolicy.AllowFromExtension(type));
 
     [Theory]
     [InlineData("job.add")]
-    [InlineData("job.update")]
     [InlineData("job.refreshUrl")]
     [InlineData("job.moveToQueue")]
     [InlineData("jobs.pauseAll")]
@@ -327,6 +329,60 @@ public sealed class NativeBridgePolicyTests
         using var document = System.Text.Json.JsonDocument.Parse(payload);
         var message = new IpcMessage(Protocol.Version, type, "request-1", null, document.RootElement.Clone());
         Assert.False(NativeBridgePolicy.AllowFromExtension(message));
+    }
+
+    private const string OneJob = "6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f";
+
+    private static IpcMessage Raw(string type, string payload)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(payload);
+        return new IpcMessage(Protocol.Version, type, "request-1", null, document.RootElement.Clone());
+    }
+
+    [Theory]
+    [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""renamed.bin""}")]
+    [InlineData("job.update", @"{""JobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""NewFileName"":""renamed.bin""}")]
+    public void EXT_R11_TheMenusMessagesForOneDownloadCross(string type, string payload)
+        => Assert.True(NativeBridgePolicy.AllowFromExtension(Raw(type, payload)));
+
+    [Theory]
+    // job.update from the extension renames only: no path, no other change, a name that is a string.
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFilePath"":""C:\\Windows\\x.exe""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""a.bin"",""newFilePath"":""C:\\x.bin""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""a.bin"",""completionOptions"":{""programPath"":""C:\\x.exe""}}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""a.bin"",""description"":""x""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""""}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":7}")]
+    [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""a.bin"",""NewFileName"":""b.bin""}")]
+    [InlineData("job.update", @"{""newFileName"":""a.bin""}")]
+    // One download and nothing else.
+    [InlineData("job.reveal", @"{}")]
+    [InlineData("job.reveal", @"[]")]
+    [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":false}")]
+    [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""path"":""C:\\Windows""}")]
+    [InlineData("job.reveal", @"{""jobId"":""00000000-0000-0000-0000-000000000000""}")]
+    [InlineData("job.redownload", @"{""jobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""]}")]
+    [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""JOBID"":""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""url"":""https://elsewhere.test/x.exe""}")]
+    [InlineData("job.redownload", @"{""jobId"":""not-a-job""}")]
+    public void EXT_R11_TheMenusMessagesBeyondOneDownloadOrWithMoreAreRefused(string type, string payload)
+    {
+        Assert.False(NativeBridgePolicy.AllowFromExtension(Raw(type, payload)));
+        Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, Raw(type, payload)));
+    }
+
+    [Fact]
+    public void EXT_R11_APairedServerMayRenameAndRedownloadButNotShowAFolder()
+    {
+        Assert.True(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, Raw(MessageTypes.JobRedownload, $@"{{""jobId"":""{OneJob}""}}")));
+        Assert.True(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension,
+            Raw(MessageTypes.JobUpdate, $@"{{""jobId"":""{OneJob}"",""newFileName"":""a.bin""}}")));
+        Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, Raw(MessageTypes.JobReveal, $@"{{""jobId"":""{OneJob}""}}")));
+        Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, MessageTypes.JobReveal));
+        Assert.True(NativeBridgePolicy.AllowFrom(BridgeRole.BrowserExtension, MessageTypes.JobReveal));
     }
 
     [Fact]

@@ -38,12 +38,17 @@ internal static class Program
         LeaveProgramFolder();
         var configureStartup = args.FirstOrDefault(arg =>
             arg.StartsWith("--configure-sign-in-launch=", StringComparison.OrdinalIgnoreCase));
+        // Setup's "Open magnet links and .torrent files with Inbound" task (owner, 2026-11-12): turns torrents and the
+        // handler on. Only "enabled": an unticked task leaves the user's choice as it is.
+        var configureTorrentHandler = args.FirstOrDefault(arg =>
+            arg.StartsWith("--configure-torrent-handler=", StringComparison.OrdinalIgnoreCase));
+        var configuring = configureStartup is not null || configureTorrentHandler is not null;
         using var mutex = new Mutex(initiallyOwned: true, PipeNames.MutexName(), out var createdNew);
         string? takeOverNote = null;
         if (!createdNew)
         {
             // Never rewrite settings behind a running service's single-writer authority.
-            if (configureStartup is not null) return 1;
+            if (configuring) return 1;
             switch (WaitForExistingInstance(mutex, TimeSpan.FromSeconds(5), out var sawExiting))
             {
                 case ExistingInstance.Answered:
@@ -94,7 +99,7 @@ internal static class Program
         {
             // Setup must apply this even when the optional postinstall launch is skipped.
             // Do not initialize the runtime: configuration must not start queued downloads.
-            if (configureStartup is not null)
+            if (configuring)
             {
                 // A fallback data folder (roaming or next to the exe) would configure the wrong settings.
                 var overridden = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
@@ -102,13 +107,27 @@ internal static class Program
                     .TrimEnd(Path.DirectorySeparatorChar);
                 if (!string.Equals(Path.GetFullPath(paths.Root).TrimEnd(Path.DirectorySeparatorChar), expectedRoot, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"Setup could not use the data folder {expectedRoot}; the host resolved {paths.Root}.");
-                var value = configureStartup.Split('=', 2)[1];
-                if (value is not ("enabled" or "disabled")) return 2;
+                var value = configureStartup?.Split('=', 2)[1];
+                if (value is not (null or "enabled" or "disabled")) return 2;
+                var handler = configureTorrentHandler?.Split('=', 2)[1];
+                if (handler is not (null or "enabled")) return 2;
                 var store = new JsonSettingsStore(paths);
                 var settings = store.LoadAsync().GetAwaiter().GetResult();
-                settings.LaunchAtStartup = value == "enabled";
+                if (value is not null) settings.LaunchAtStartup = value == "enabled";
+                if (handler is not null)
+                {
+                    settings.TorrentsEnabled = true;
+                    settings.TorrentHandler = true;
+                }
+
                 store.SaveAsync(settings).GetAwaiter().GetResult();
-                StartupRegistration.Apply(settings.LaunchAtStartup, StartupRegistration.HostExecutablePath());
+                // Like TryApplyStartup: isolated test state must not replace or delete the installed user's Run entry
+                // (2026-11-12: a test run with DOWNLOADMANAGER_DATA removed the installed app's entry).
+                if (value is not null && string.IsNullOrWhiteSpace(overridden))
+                    StartupRegistration.Apply(settings.LaunchAtStartup, StartupRegistration.HostExecutablePath());
+                // Registered now, so links open with Inbound even before the app is started; the Host keeps it in step
+                // with Options from then on (it removes it again when torrents are turned off).
+                if (handler is not null) new TorrentHandlerSync(log).Apply(true);
                 return 0;
             }
 
@@ -133,7 +152,7 @@ internal static class Program
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
             // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;
@@ -145,7 +164,8 @@ internal static class Program
                 ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook,
                 linkBroker: remote.Broker,
-                linkSecrets: remote.Registry);
+                linkSecrets: remote.Registry,
+                torrentEngine: DownloadManager.Torrents.TorrentSetup.Create(paths.Root, new TorrentStore(paths), log.Info));
             foreach (var provider in remote.Registry.All)
             {
                 // Addresses saved earlier may turn out to hold a key that was only just entered.
@@ -165,6 +185,7 @@ internal static class Program
             var bridgeLauncher = new WebBridgeLauncher(log.Warn);
             if (File.Exists(bridgeLauncher.BridgePath))
                 remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
+            service.ResolveTorrentUpload = remoteJobs.ResolveReference is null ? null : remoteJobs.ResolveUpload;
             service.DirectAddresses = remoteJobs;
             service.InitializeAsync().GetAwaiter().GetResult();
 
@@ -232,11 +253,14 @@ internal static class Program
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
             TryRepairNativeHostKeys(log);
+            var torrentHandler = new TorrentHandlerSync(log);
+            torrentHandler.Apply(service.TorrentsAvailable && currentSettings.TorrentsEnabled && currentSettings.TorrentHandler);
             service.SettingsChanged += (_, next) =>
             {
                 currentSettings = service.GetSettings();
                 updateMonitor.ApplySettings(currentSettings);
                 TryApplyStartup(next.LaunchAtStartup, log);
+                torrentHandler.Apply(service.TorrentsAvailable && currentSettings.TorrentsEnabled && currentSettings.TorrentHandler);
                 log.Info("Settings updated.");
             };
 
@@ -279,7 +303,7 @@ internal static class Program
                 copiedLinks.DescribeForLog,
                 log.Info);
             clipboardMonitor.Start();
-            // Settings change on the pipe's threads; the clipboard timer belongs to this one.
+            // Settings change on the pipe's threads; the clipboard listener window belongs to this one.
             service.SettingsChanged += (_, _) => controller.UiContext?.Post(_ => clipboardMonitor.Apply(), null);
             // The tray refreshes on changes instead of every second.
             service.JobChanged += (_, _) => tray.RequestRefresh();
@@ -330,6 +354,12 @@ internal static class Program
                     tray.Notify(notice.Title, notice.Message);
                 }, log.Warn)
                 : null;
+            // Magnets whose file list came in and wait for a choice: as a provider's "ready to choose".
+            using var torrentNotices = TorrentNotices.Listen(service, TimeProvider.System, () => currentSettings.NotifyOnCompletion, AppWindowInFront.Now, notice =>
+            {
+                log.Info("Torrent notice: ready to choose files");
+                tray.Notify(notice.Title, notice.Message);
+            }, log.Warn);
             using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
             {
                 // Process launch has no WinForms affinity. Keep it off the engine's event path
@@ -353,6 +383,20 @@ internal static class Program
                     PlayEventSound("queueFinished", current);
             };
 
+            // Audit 2 M18: timers count only time awake, so a resume from sleep or a clock or time-zone change wakes the
+            // scheduler at once. Raised on this thread's message loop (Application.Run below).
+            Microsoft.Win32.PowerModeChangedEventHandler onPowerMode = (_, e) =>
+            {
+                if (e.Mode == Microsoft.Win32.PowerModes.Resume) service.NotifyClockChanged();
+            };
+            EventHandler onTimeChanged = (_, _) =>
+            {
+                TimeZoneInfo.ClearCachedData();
+                service.NotifyClockChanged();
+            };
+            Microsoft.Win32.SystemEvents.PowerModeChanged += onPowerMode;
+            Microsoft.Win32.SystemEvents.TimeChanged += onTimeChanged;
+
             log.Info("Host ready.");
             // Start Menu / desktop shortcuts pass --open so a fresh start shows the window;
             // a second launch already opens it through ProbeExistingInstance.
@@ -365,10 +409,13 @@ internal static class Program
             if (!controller.ExitWasRequested) Application.Run(tray);
 
             log.Info("UI loop exited; shutting down.");
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= onPowerMode;
+            Microsoft.Win32.SystemEvents.TimeChanged -= onTimeChanged;
 
             // Shutting down stops what is running, which isn't news about any package.
             downloadNotices.Dispose();
             remoteNotices?.Dispose();
+            torrentNotices.Dispose();
             downloadWindows.Dispose();
             try
             {
@@ -604,6 +651,49 @@ internal static class Program
             if (client is not null)
             {
                 client.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+        }
+    }
+
+    /// <summary>
+    /// T1 step 6b: the magnet and .torrent handler follows Options › Torrents. Written only when the wanted state
+    /// changes (and once at start, which also points it at this install's exe after an update).
+    /// </summary>
+    private sealed class TorrentHandlerSync(FileLogger log)
+    {
+        private readonly Lock _sync = new();
+        private bool? _applied;
+
+        public void Apply(bool wanted)
+        {
+            // Isolated test/portable state must not replace or delete the installed user's handler.
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+            lock (_sync)
+            {
+                // Counted as applied only once the registry write succeeded, so a failed one is tried again on the next
+                // settings change instead of being skipped until the Host restarts.
+                if (_applied == wanted) return;
+                var executable = HostController.FindUiExecutable();
+                if (executable is null)
+                {
+                    if (wanted) log.Warn("The magnet and .torrent handler wasn't registered: the window exe wasn't found.");
+                    return;
+                }
+
+                try
+                {
+                    using var machineClasses = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"Software\Classes");
+                    var registration = new TorrentHandlerRegistration(Microsoft.Win32.Registry.CurrentUser, executable, machineClasses);
+                    var changed = wanted ? registration.Register() : registration.Remove();
+                    _applied = wanted;
+                    if (!changed) return;
+                    TorrentHandlerRegistration.NotifyShell();
+                    log.Info(wanted ? "Registered the magnet and .torrent handler." : "Removed the magnet and .torrent handler.");
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+                {
+                    log.Warn($"Could not update the magnet and .torrent handler: {ex.GetType().Name}");
+                }
             }
         }
     }

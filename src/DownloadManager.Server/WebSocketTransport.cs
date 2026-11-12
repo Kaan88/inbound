@@ -180,6 +180,14 @@ internal static class WebSocketTransport
 
     private sealed class WebSocketClientSession(WebSocket socket, IHostLog log) : QueuedClientSession(log)
     {
+        /// <summary>Ends the connection at once (a full queue, L19): the reader stops and the client connects again for a new snapshot.</summary>
+        public override void Close()
+        {
+            base.Close();
+            try { socket.Abort(); }
+            catch (ObjectDisposedException) { /* already gone */ }
+        }
+
         protected override async Task WriteFrameAsync(IpcMessage message, CancellationToken cancellationToken)
         {
             var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options);

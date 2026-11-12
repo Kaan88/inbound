@@ -65,7 +65,7 @@ public sealed class TorrentMetadataTests
                    "d6:lengthi10e4:pathl3:sub5:a.bineed6:lengthi20e4:pathl5:b.bineee" +
                    $"4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e";
         Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(info)), out var metadata, out var problem), problem);
-        Assert.Equal([new TorrentFileEntry("pack/sub/a.bin", 10), new TorrentFileEntry("pack/b.bin", 20)], metadata!.Files);
+        Assert.Equal([new TorrentFileEntry("pack/sub/a.bin", 10), new TorrentFileEntry("pack/b.bin", 20) { Index = 1 }], metadata!.Files);
     }
 
     [Fact]
@@ -84,6 +84,68 @@ public sealed class TorrentMetadataTests
                    $"e4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e";
         Assert.True(TorrentMetadata.TryParse(Encoding.UTF8.GetBytes(Wrap(info)), out var metadata, out var problem), problem);
         Assert.Equal([new TorrentFileEntry("pack/été.b", 10)], metadata!.Files);
+    }
+
+    [Fact]
+    public void ANameLongerThanAnyPathIsRefused()
+    {
+        var name = new string('n', TorrentMetadata.MaxNameBytes + 1);
+        Assert.Contains("name is too long", Refused(Wrap(SingleFileInfo(name))));
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(SingleFileInfo(name[..^1]))), out _, out var problem), problem);
+    }
+
+    [Fact]
+    public void FilesPastTheListLimitAreCountedNotCollected()
+    {
+        // Each entry adds the torrent's name again; past the limit only the count and the sizes go on.
+        var count = TorrentMetadata.MaxListedFiles + 5;
+        var entries = new StringBuilder("d5:filesl");
+        for (var i = 0; i < count; i++)
+        {
+            var file = $"f{i}";
+            entries.Append($"d6:lengthi1e4:pathl{file.Length}:{file}ee");
+        }
+
+        var info = entries.Append($"e4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e").ToString();
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(info)), out var metadata, out var problem), problem);
+        Assert.Equal(count, metadata!.FileCount);
+        Assert.Equal(count, metadata.TotalBytes);
+        Assert.Equal(TorrentMetadata.MaxListedFiles, metadata.Files.Count);
+        Assert.True(metadata.FilesCut);
+        Assert.Equal($"pack/f{TorrentMetadata.MaxListedFiles - 1}", metadata.Files[^1].Path);
+    }
+
+    [Fact]
+    public void PathTextPastItsLimitIsNotCollected()
+    {
+        // A long name repeated in every entry: the kept text stops at its cap, the rest is still checked and counted.
+        var name = new string('n', TorrentMetadata.MaxNameBytes);
+        var perEntry = name.Length + 1 + 1;
+        var fits = TorrentMetadata.MaxListedPathChars / perEntry;
+        var entries = new StringBuilder("d5:filesl");
+        for (var i = 0; i < fits + 3; i++) entries.Append("d6:lengthi1e4:pathl1:xee");
+        var info = entries.Append($"e4:name{name.Length}:{name}12:piece lengthi16384e6:pieces{Pieces}e").ToString();
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(info)), out var metadata, out var problem), problem);
+        Assert.Equal(fits + 3, metadata!.FileCount);
+        Assert.Equal(fits, metadata.Files.Count);
+        Assert.True(metadata.FilesCut);
+    }
+
+    [Fact]
+    public void AnEntryPastTheLimitIsStillChecked()
+    {
+        var entries = new StringBuilder("d5:filesl");
+        for (var i = 0; i < TorrentMetadata.MaxListedFiles + 1; i++) entries.Append("d6:lengthi1e4:pathl1:xee");
+        entries.Append("d6:lengthi1e4:pathlee"); // no parts: incomplete
+        var info = entries.Append($"e4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e").ToString();
+        Assert.Contains("incomplete", Refused(Wrap(info)));
+    }
+
+    [Fact]
+    public void AnOrdinaryTorrentIsNotCut()
+    {
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(SingleFileInfo())), out var metadata, out var problem), problem);
+        Assert.False(metadata!.FilesCut);
     }
 
     [Fact]

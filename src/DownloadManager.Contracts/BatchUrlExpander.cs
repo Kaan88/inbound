@@ -41,20 +41,22 @@ public static class BatchUrlExpander
         }
 
         var token = value[(open + 1)..close];
-        var replacements = ExpandToken(token).ToList();
-        if (replacements.Count == 0)
+        // Lazily: "[1-2000000000]" must stop at the limit, not build two billion strings first.
+        var any = false;
+        foreach (var replacement in ExpandToken(token))
         {
-            throw new FormatException($"The batch range '[{token}]' is empty.");
-        }
-
-        foreach (var replacement in replacements)
-        {
+            any = true;
             if (results.Count >= limit)
             {
                 throw new FormatException($"The batch pattern expands beyond {limit} URLs.");
             }
 
             ExpandInto(value[..open] + replacement + value[(close + 1)..], results, limit);
+        }
+
+        if (!any)
+        {
+            throw new FormatException($"The batch range '[{token}]' is empty.");
         }
     }
 

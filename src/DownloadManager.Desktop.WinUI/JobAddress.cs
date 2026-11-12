@@ -16,7 +16,9 @@ internal static class JobAddress
     public static bool IsHidden(JobDto job) => ShownAddress.IsHidden(job.Url, job.AddressHidden);
 
     /// <summary>The address as it may be shown or copied. Empty when the job has none.</summary>
-    public static string Shown(JobDto job) => HasAddress(job) ? ShownAddress.For(job.Url, job.AddressHidden) : string.Empty;
+    public static string Shown(JobDto job)
+        => job.Torrent is { InfoHash.Length: > 0 } torrent ? TorrentRules.ShortMagnet(torrent)
+            : HasAddress(job) ? ShownAddress.For(job.Url, job.AddressHidden) : string.Empty;
 
     public static string Label(JobDto job) => ShownAddress.Label(job.Url, job.AddressHidden);
 

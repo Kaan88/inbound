@@ -6,21 +6,32 @@
   import ProgressBar from '../components/ProgressBar.svelte';
   import SegmentMap from '../components/SegmentMap.svelte';
   import SegmentTable from '../components/SegmentTable.svelte';
+  import TorrentFilesPanel from '../components/TorrentFilesPanel.svelte';
+  import TorrentOptionsPanel from '../components/TorrentOptionsPanel.svelte';
+  import TorrentOverview from '../components/TorrentOverview.svelte';
+  import TorrentSwarmPanel from '../components/TorrentSwarmPanel.svelte';
+  import { canStartSeeding, canStopSeeding, hasTorrentControls, mayRun, seedGoalText, seedSaid, torrentTabs } from '../lib/torrentDetails';
+  import { knownListenPort, saveToText, seedGoalLine } from '../lib/torrentList';
+  import { announceSaid, canAnnounce, canRecheck, recheckSaid } from '../lib/torrentControls';
   import { cantTell, routeOf } from '../lib/addlines';
   import {
     addressLabel, barValue, completedSize, detailRows, failureLabel, hasOwnAddress, heading, mergeSegments, noFileText, noticeText,
-    hideAddresses, pollsSegments, redownloadRefusal, segmentRows, updateRates, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
+    hideAddresses, pollsSegments, redownloadRefusal, segmentRows, segmentsMove, updateRates, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
   } from '../lib/details';
   import { archiveRowView, extractSummary, fullWithNote, looksLikeArchive, planFor, type ArchivePasswordTarget } from '../lib/archives';
   import { dateTime, percent, speed, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
+  import { everyWhileVisible } from '../lib/ticker';
   import type { ArchiveSet, ClassifyResult, ConnectionInfo, Job, Segment } from '../lib/types';
   import MoveRename from './MoveRename.svelte';
   import Properties from './Properties.svelte';
   import RefreshAddress from './RefreshAddress.svelte';
 
-  // start: 'redownload' when the row menu's Redownload opened this, so its questions show here (U-WU-10).
-  let { jobId, set, start, onclose, onpassword }: { jobId: string; set?: ArchiveSet; start?: 'redownload'; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void } = $props();
+  // start: 'redownload' when the row menu's Redownload opened this, so its questions show here (U-WU-10). startTab: the
+  // tab to open on (T3: the row menu's Set limits… opens a torrent's Options).
+  let { jobId, set, start, startTab, onclose, onpassword }: {
+    jobId: string; set?: ArchiveSet; start?: 'redownload'; startTab?: 'options' | 'files'; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void;
+  } = $props();
 
   // The download as the server has it. When it leaves the list the dialog stays, saying so, until it is closed (D21).
   let last = $state<Job | null>(untrack(() => store.model.jobs[jobId] ?? null));
@@ -48,8 +59,39 @@
   // Opening a download is a click, which is when a browser lets the page ask for system notices.
   store.askForNotices();
 
-  type Tab = 'status' | 'speed' | 'completion';
-  let tab = $state<Tab>('status');
+  type Tab = 'status' | 'files' | 'peers' | 'trackers' | 'pieces' | 'options' | 'speed' | 'completion';
+  // T1: a torrent waiting for its files opens on them (DownloadWindow); T3: Set limits… opens its Options.
+  let tab = $state<Tab>(untrack(() => (startTab && store.model.jobs[jobId]?.torrent ? startTab : store.model.jobs[jobId]?.torrent?.awaitingFileChoice ? 'files' : 'status')));
+  const isTorrent = $derived(!!job?.torrent);
+  // T3: Overview facts, Options, Force recheck and Announce now only where the server has them (an older one keeps T2's tabs).
+  const controls = $derived(hasTorrentControls(job));
+  // T2: a torrent has Files, Peers, Trackers and Pieces & Speed, finished or not (it may be seeding).
+  const tabs = $derived<[Tab, string][]>(isTorrent
+    ? (torrentTabs(job?.state === 'completed', controls) as [Tab, string][])
+    : [['status', 'Download status'], ['speed', 'Speed limiter'], ['completion', 'Options on completion']]);
+  // A tab that went away (the torrent finished while its speed limiter was open) falls back to the status.
+  $effect(() => {
+    if (!tabs.some(([key]) => key === tab)) tab = 'status';
+  });
+  const showTabs = $derived(!!job && !removed && (!complete || isTorrent));
+  // WEB-T8: the goal from Options › Torrents, or that a finished torrent isn't shared at all.
+  const seedGoal = $derived(seedGoalLine(store.model.settings, job?.torrent?.seeding === true, seedGoalText(store.model.settings?.torrentSeedRatio, store.model.settings?.torrentSeedHours)));
+  // The Docker server's real port isn't in its settings (DOWNLOADMANAGER_TORRENT_PORT), so only the Windows app shows one.
+  const listenPort = $derived(knownListenPort(store.model.settings, store.model.hello?.hostKind));
+
+  async function seed(on: boolean) {
+    if (await run('torrent.seed', { on })) store.toast(seedSaid(on, 1));
+  }
+
+  // T3: check the files on disk again, or ask the trackers for peers now. The Host says why when it can't.
+  async function recheck() {
+    const running = !!job && mayRun(job);
+    if (await run('torrent.recheck')) store.toast(recheckSaid(running));
+  }
+
+  async function announce() {
+    if (await run('torrent.announce')) store.toast(announceSaid);
+  }
   let notice = $state('');
   let working = $state(false);
   let dialog = $state<'cancel' | 'delete' | 'move' | 'properties' | 'refresh' | null>(null);
@@ -83,11 +125,18 @@
     }
   }
 
-  // Depends on nothing reactive: the timer is made once per dialog, whatever the download does meanwhile.
+  // Read once when the dialog opens; again each second only while the download transfers and this tab shows (audit 4
+  // M11). `moving` changes with the state, not with each progress event, so the timer is not made again for those.
+  const moving = $derived(!!job && segmentsMove(job));
   $effect(() => {
-    const timer = setInterval(() => void loadSegments(), 1000);
+    // Again when the connection comes back, or the download stops or starts moving.
+    void connected;
+    void moving;
     untrack(() => void loadSegments());
-    return () => clearInterval(timer);
+  });
+  $effect(() => {
+    if (!moving) return;
+    return everyWhileVisible(1000, () => void loadSegments());
   });
 
   // A download that ended has no live segments left to show.
@@ -290,6 +339,40 @@
   const folderOf = $derived(job ? splitPath(job.finalFilePath).directory : '');
 </script>
 
+{#snippet finished(job: Job)}
+  <div class="grid gap-2 text-[13px]">
+    <div>{completedSize(job)}</div>
+    {#if ownAddress}
+      <label class="mt-1.5 font-semibold" for="done-address">{addressLabel(job)}</label>
+      <input id="done-address" class="field font-mono" readonly value={shownAddress(job)} onfocus={(event) => event.currentTarget.select()} />
+    {:else}
+      <div><span class="text-muted">Source</span> <span class="ml-2">{providerName}</span></div>
+    {/if}
+    <label class="font-semibold" for="done-path">The file saved as</label>
+    <input id="done-path" class="field font-mono" readonly value={job.finalFilePath} onfocus={(event) => event.currentTarget.select()} />
+    {#if job.fileRemovedAfterExtraction}<p class="hint">{noFileText(hideAddresses(job.statusNote))}</p>{/if}
+    {#if job.torrent}
+      <!-- A finished torrent keeps its summary here; its files and peers are in the other tabs. -->
+      <dl class="mt-1 grid grid-cols-[minmax(110px,auto)_1fr] gap-x-4 gap-y-1.5">
+        {#each rows.filter((row) => ['Status', 'Peers', 'Uploaded', 'Seeding', 'Files', 'Info hash'].includes(row.label)) as row (row.label)}
+          <dt class="text-muted">{row.label}</dt><dd class="tabular break-all">{row.value}</dd>
+        {/each}
+        <dt class="text-muted">Save to</dt><dd class="break-all">{saveToText(job)}</dd>
+        {#if !controls}<dt class="text-muted">Seeding goal</dt><dd>{seedGoal} (Options › Torrents)</dd>{/if}
+        {#if listenPort > 0}<dt class="text-muted">Listen port</dt><dd class="tabular">{listenPort}</dd>{/if}
+      </dl>
+      {#if controls}<TorrentOverview {job} />{/if}
+    {/if}
+    {#if set}
+      <div><span class="text-muted">Extraction</span> <span class="tone-{archive?.tone} ml-2" title={archive?.tooltip}>{archive?.text || fullWithNote(set)}</span></div>
+    {/if}
+    {#if desktopApp}
+      <label class="mt-2 flex items-center gap-2"><input type="checkbox" checked={showForJob} disabled={!connected} onchange={(event) => void setShowForJob(event.currentTarget.checked)} /> Show the completion window for this download</label>
+      <label class="flex items-center gap-2"><input type="checkbox" checked={!globalShow} disabled={!connected} onchange={(event) => void setDontShowAgain(event.currentTarget.checked)} /> Don't show this dialog again</label>
+    {/if}
+  </div>
+{/snippet}
+
 <Dialog {title} {onclose} wide>
   <div class="mb-3 text-[15px] font-semibold">{removed ? 'Download removed' : job ? heading(job) : ''}</div>
 
@@ -297,19 +380,21 @@
     <div class="mb-3 truncate text-[13px] font-semibold" title={job.fileName}>{job.fileName || 'Download'}</div>
   {/if}
 
-  {#if job && !removed && !complete}
-    <div role="tablist" aria-label="Download details" class="mb-3 flex gap-1 border-b border-divider">
-      {#each [['status', 'Download status'], ['speed', 'Speed limiter'], ['completion', 'Options on completion']] as [key, label] (key)}
+  {#if showTabs && job}
+    <div role="tablist" aria-label="Download details" class="mb-3 flex gap-1 overflow-x-auto border-b border-divider">
+      {#each tabs as [key, label] (key)}
         <button
           role="tab"
-          class="-mb-px border-b-2 px-3 py-1.5 text-[13px] {tab === key ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}"
+          class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-1.5 text-[13px] {tab === key ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}"
           aria-selected={tab === key}
           onclick={() => (tab = key as Tab)}
         >{label}</button>
       {/each}
     </div>
 
-    {#if tab === 'status'}
+    {#if tab === 'status' && complete}
+      {@render finished(job)}
+    {:else if tab === 'status'}
       <div class="grid gap-2">
         {#if ownAddress}
           <div class="text-[13px] font-semibold">{addressLabel(job)}</div>
@@ -329,6 +414,11 @@
         {/if}
         <dt class="text-muted">Queue</dt><dd>{job.queueName ?? job.queueId}</dd>
         <dt class="text-muted">Added</dt><dd>{dateTime(job.createdAt)}</dd>
+        {#if job.torrent}
+          <dt class="text-muted">Save to</dt><dd class="break-all">{saveToText(job)}</dd>
+          {#if !controls}<dt class="text-muted">Seeding goal</dt><dd>{seedGoal} (Options › Torrents)</dd>{/if}
+          {#if listenPort > 0}<dt class="text-muted">Listen port</dt><dd class="tabular">{listenPort}</dd>{/if}
+        {/if}
         {#if hideAddresses(job.statusNote)}<dt class="text-muted">Note</dt><dd>{hideAddresses(job.statusNote)}</dd>{/if}
         {#if failLabel && job.failure}<dt class="text-muted">{failLabel}</dt><dd class="text-error">{job.failure.message}</dd>{/if}
         {#if set}
@@ -340,7 +430,15 @@
         {/if}
       </dl>
 
-      <SegmentTable rows={segmentView} problem={segmentProblem} />
+      {#if !isTorrent}<SegmentTable rows={segmentView} problem={segmentProblem} />{/if}
+      {#if isTorrent && controls}<div class="mt-3"><TorrentOverview {job} /></div>{/if}
+    {:else if tab === 'files' && job.torrent}
+      <TorrentFilesPanel {job} />
+    {:else if tab === 'options' && job.torrent && controls}
+      <TorrentOptionsPanel {job} />
+    {:else if (tab === 'peers' || tab === 'trackers' || tab === 'pieces') && job.torrent}
+      <!-- One panel per tab, so a tab never shows another tab's replies or waits for another tab's timer. -->
+      {#key tab}<TorrentSwarmPanel {job} kind={tab} />{/key}
     {:else if tab === 'speed'}
       <div class="grid gap-3">
         <div class="text-[13px]">Current transfer rate: <span class="tabular inline-block min-w-20 text-right" aria-label="Current transfer rate">{speed(job.bytesPerSecond) || '—'}</span></div>
@@ -363,6 +461,7 @@
       </div>
     {/if}
 
+    {#if !complete}
     <div class="mt-4">
       {#if segments.length > 0 && job.totalBytes}
         <SegmentMap {segments} total={job.totalBytes} />
@@ -372,27 +471,11 @@
         <ProgressBar value={bar} height={14} />
       {/if}
     </div>
+    {/if}
   {:else if job && !removed}
-    <div class="grid gap-2 text-[13px]">
-      <div>{completedSize(job)}</div>
-      {#if ownAddress}
-        <label class="mt-1.5 font-semibold" for="done-address">{addressLabel(job)}</label>
-        <input id="done-address" class="field font-mono" readonly value={shownAddress(job)} onfocus={(event) => event.currentTarget.select()} />
-      {:else}
-        <div><span class="text-muted">Source</span> <span class="ml-2">{providerName}</span></div>
-      {/if}
-      <label class="font-semibold" for="done-path">The file saved as</label>
-      <input id="done-path" class="field font-mono" readonly value={job.finalFilePath} onfocus={(event) => event.currentTarget.select()} />
-      {#if job.fileRemovedAfterExtraction}<p class="hint">{noFileText(hideAddresses(job.statusNote))}</p>{/if}
-      {#if set}
-        <div><span class="text-muted">Extraction</span> <span class="tone-{archive?.tone} ml-2" title={archive?.tooltip}>{archive?.text || fullWithNote(set)}</span></div>
-      {/if}
-      {#if desktopApp}
-        <label class="mt-2 flex items-center gap-2"><input type="checkbox" checked={showForJob} disabled={!connected} onchange={(event) => void setShowForJob(event.currentTarget.checked)} /> Show the completion window for this download</label>
-        <label class="flex items-center gap-2"><input type="checkbox" checked={!globalShow} disabled={!connected} onchange={(event) => void setDontShowAgain(event.currentTarget.checked)} /> Don't show this dialog again</label>
-      {/if}
-    </div>
+    {@render finished(job)}
   {/if}
+
 
   <p class="mt-3 min-h-5 text-[12.5px] {notice || (job?.failure && !removed) ? 'text-error' : 'text-muted'}" role="status">{noticeLine}</p>
 
@@ -400,17 +483,24 @@
     {#if job && !removed}
       <button class="btn" disabled={!connected || !job.canPause || working} onclick={() => run('job.pause')}>Pause</button>
       <button class="btn" disabled={!connected || !job.canResume || working} onclick={() => run('job.resume')}>Resume</button>
+      {#if canStartSeeding(job)}<button class="btn" disabled={!connected || working} onclick={() => void seed(true)}>Start seeding</button>{/if}
+      {#if canStopSeeding(job)}<button class="btn" disabled={!connected || working} onclick={() => void seed(false)}>Stop seeding</button>{/if}
+      {#if job.torrent && controls}
+        <button class="btn" disabled={!connected || working || !canRecheck(job)} title="Check the files on disk again" onclick={() => void recheck()}>Force recheck</button>
+        <button class="btn" disabled={!connected || working || !canAnnounce(job)} title="Ask the trackers for peers now" onclick={() => void announce()}>Announce now</button>
+      {/if}
       {#if job.canCancel}<button class="btn" disabled={!connected || working} onclick={() => (dialog = 'cancel')}>Cancel</button>{/if}
       <button class="btn" disabled={!connected || working} title="Remove this download and delete its file" onclick={() => (dialog = 'delete')}>Delete</button>
       {#if !removed}
-        <button class="btn" disabled={!connected || working} onclick={() => void redownload()}>Redownload</button>
+        <!-- T1: a torrent has no single address or file to redownload, move or rename. -->
+        {#if !job.torrent}<button class="btn" disabled={!connected || working} onclick={() => void redownload()}>Redownload</button>{/if}
         {#if complete && !job.fileRemovedAfterExtraction}
-          <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'move')}>Move/Rename…</button>
+          {#if !job.torrent}<button class="btn" disabled={!connected || working} onclick={() => (dialog = 'move')}>Move/Rename…</button>{/if}
           <button class="btn" onclick={() => copy(job.finalFilePath, 'The path was copied.')}>Copy path</button>
           <button class="btn" onclick={() => copy(folderOf, 'The folder path was copied.')}>Copy folder path</button>
         {/if}
         <!-- A finished download keeps its file: only the address Redownload uses changes. -->
-        {#if !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
+        {#if !job.isRemote && !job.url.toLowerCase().startsWith('remote://') && !job.torrent}
           <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'refresh')}>Refresh download address…</button>
         {/if}
         <button class="btn" disabled={!connected} onclick={() => (dialog = 'properties')}>Properties…</button>

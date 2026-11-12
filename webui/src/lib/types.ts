@@ -62,6 +62,90 @@ export interface Job {
   categoryIsAutomatic?: boolean;
   showCompletionDialog?: boolean | null;
   completionOptions?: JobCompletionOptions;
+  /** T1: set on a torrent job only (TorrentDto). Its url is the magnet, which may carry trackers: never show it. */
+  torrent?: Torrent;
+}
+
+/** What every client is told about a torrent job (TorrentDto). No file list: that is asked for (torrent.files). */
+export interface Torrent {
+  infoHash: string;
+  name: string;
+  hasMetadata: boolean;
+  /** The file list is in and the download waits for a choice of files. */
+  awaitingFileChoice: boolean;
+  fileCount: number;
+  wantedCount: number;
+  totalBytes: number;
+  wantedBytes: number;
+  peers: number;
+  seeds: number;
+  /** T2: the download is complete and the torrent is shared with other peers now. Older servers leave these out. */
+  seeding?: boolean;
+  seedingSince?: string | null;
+  /** Bytes sent to other peers over the torrent's life. */
+  uploaded?: number;
+  /** Uploaded against the downloaded (wanted) size. */
+  ratio?: number;
+  /** Bytes per second sent now, while it seeds. */
+  uploadRate?: number;
+  /** T3: `magnet` or `file`. Older servers leave the T3 fields out. */
+  source?: string;
+  /** T3: the files on disk are being checked now. */
+  checking?: boolean;
+  /** T3: a check of the files runs when the torrent next starts. */
+  recheckPending?: boolean;
+  /** T3: the torrent's own caps in bytes/s; null is none. */
+  downloadLimit?: number | null;
+  uploadLimit?: number | null;
+  /** T3: `global`, `ratio`, `hours` or `never`, with the ratio or hours. */
+  seedGoal?: string;
+  seedGoalValue?: number | null;
+  /** T3: downloads its pieces in order. */
+  sequential?: boolean;
+}
+
+/** One file of a torrent (TorrentFileDto). The path is relative, '/' separated. */
+export interface TorrentFile {
+  index: number;
+  path: string;
+  size: number;
+  wanted: boolean;
+  /** T3: `skip`, `low`, `normal` or `high`; an older server leaves it out (normal when wanted). */
+  priority?: string | null;
+  /** Bytes on disk so far; absent when not known (the torrent isn't running). */
+  done?: number | null;
+}
+
+export interface TorrentInspectResult {
+  ok: boolean;
+  error?: string;
+  /** `magnet` or `torrentFile`. */
+  kind?: string;
+  infoHash?: string;
+  name?: string;
+  /** Absent for a magnet: its files come from the peers. */
+  totalBytes?: number | null;
+  files?: TorrentFile[] | null;
+  /** A job with the same info hash is already in the list. */
+  existingJobId?: string | null;
+  /** T3: the folder the free space was measured for, the free bytes there (null: not measured), and, when every file
+   * would not fit, why in words. */
+  destination?: string | null;
+  freeBytes?: number | null;
+  spaceProblem?: string | null;
+}
+
+export interface TorrentAddResult {
+  ok: boolean;
+  error?: string;
+  existing?: boolean;
+  job?: Job;
+}
+
+export interface TorrentFilesResult {
+  ok: boolean;
+  error?: string;
+  files?: TorrentFile[];
 }
 
 /** What happens when one download completes: a program (null = the global one, '' = none), opening it, a system action. */
@@ -213,6 +297,32 @@ export interface Settings {
   favoriteFolders: FavoriteFolder[];
   recentDestinationDirectories: string[];
   downloadGroups: DownloadGroup[];
+  /** Torrents are on in the Host's Options. The Windows app's web UI can't change it (WebSettingsRules.PipeOnly). */
+  torrentsEnabled?: boolean;
+  /** `ask`, `thisPc` or `provider`. */
+  torrentRoute?: string;
+  torrentChooseFiles?: boolean;
+  torrentHandler?: boolean;
+  /** T2: the torrent listen port (0 before one is chosen) and the router request; changed only on that PC. */
+  torrentListenPort?: number;
+  torrentUpnp?: boolean;
+  /** T2 seeding: keep sharing a finished torrent until the ratio or the hours (0 is no limit; never both 0). */
+  torrentSeedAfterDownload?: boolean;
+  torrentSeedRatio?: number;
+  torrentSeedHours?: number;
+  /** Bytes per second; 0 is the total speed limit, or none. */
+  torrentUploadLimit?: number;
+  /** T3: how peers are found and met. Changed only on that PC from the Windows app's web UI (WebSettingsRules.PipeOnly). */
+  torrentDht?: boolean;
+  torrentPex?: boolean;
+  torrentLsd?: boolean;
+  /** `prefer`, `require` or `off`. */
+  torrentEncryption?: string;
+  torrentUseProxy?: boolean;
+  /** T3 limits: 0 is all of them / no limit of its own / the torrent program's default. */
+  torrentSeedsAtOnce?: number;
+  torrentConnectionsPerTorrent?: number;
+  torrentMaxConnections?: number;
   excludedFileExtensions: string[];
   excludedHosts: string[];
   /** Built-in category name to its folder; a category left out uses the default folder. */

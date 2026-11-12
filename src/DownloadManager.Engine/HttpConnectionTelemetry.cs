@@ -14,8 +14,10 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
 
     private async Task<HttpResponseMessage> SendTrackedAsync(DownloadJob job, HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        // Every request of such a download, a playlist's segments and each redirect included, before anything is sent.
-        if (job.PublicNetworkOnly && request.RequestUri is { } target && NetworkAddresses.IsLocalTarget(target))
+        // Every request of such a download, a playlist's segments and each redirect included, before anything is sent;
+        // and every request of any download while "allow local network" is off.
+        if ((job.PublicNetworkOnly || !_options.AllowLocalNetwork) &&
+            request.RequestUri is { } target && NetworkAddresses.IsLocalTarget(target))
         {
             throw new DownloadEngineException(
                 new JobFailure(FailureKind.Forbidden, LocalNetworkRefused, false, false, DateTimeOffset.UtcNow),

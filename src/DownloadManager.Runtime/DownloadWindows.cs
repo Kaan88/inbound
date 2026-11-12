@@ -42,6 +42,7 @@ public sealed class DownloadWindows : IDisposable
         _service.PackageCompleted -= OnPackageCompleted;
     }
 
+    /// <remarks>The desktop window's TorrentRules.ProgressWindowComing follows this rule: change them together.</remarks>
     public static bool OpensWindows(JobDto job) =>
         !job.AddedFromAnotherDevice && job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote");
 

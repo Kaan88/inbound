@@ -83,6 +83,8 @@ public sealed class JobDto
     /// <summary>True when a provider supplies this file; its Url is then a reference, not an address.</summary>
     public bool IsRemote { get; set; }
     public string? RemoteProvider { get; set; }
+    /// <summary>Set on a torrent; its file list comes from <c>torrent.files</c>.</summary>
+    public TorrentDto? Torrent { get; set; }
     /// <summary>The package whose Cancel stopped this file; null when it was cancelled on its own.</summary>
     public Guid? CancelledByPackageId { get; set; }
 }
@@ -134,13 +136,21 @@ public sealed class QueueDto
     public int Id { get; set; }
     public string Name { get; set; } = "Main";
     public int MaxConcurrentDownloads { get; set; } = 3;
+    /// <summary>Host-owned for an existing queue: <c>settings.update</c> ignores it; use <c>queue.action</c> start/stop.</summary>
     public bool IsRunning { get; set; } = true;
     public int Order { get; set; }
     public bool QuotaEnabled { get; set; }
     public long QuotaBytes { get; set; } = 200L * 1024 * 1024;
     public int QuotaWindowHours { get; set; } = 5;
+    /// <summary>Host-owned: <c>settings.update</c> ignores it for an existing queue. See <see cref="ResetQuota"/>.</summary>
     public DateTimeOffset? QuotaWindowStart { get; set; }
+    /// <summary>Host-owned: <c>settings.update</c> ignores it for an existing queue. See <see cref="ResetQuota"/>.</summary>
     public long QuotaBytesUsed { get; set; }
+    /// <summary>
+    /// Request only: <c>settings.update</c> starts this queue's quota window afresh (now, nothing used). The only way a
+    /// client changes the Host's quota use; snapshots always leave it false.
+    /// </summary>
+    public bool ResetQuota { get; set; }
 }
 
 public sealed class ConnectionProfileDto
@@ -200,6 +210,12 @@ public sealed class SiteLoginDto
 
 public sealed class SettingsDto
 {
+    /// <summary>
+    /// The Host's settings revision this copy came with. Send it back unchanged in <c>settings.update</c>: a queue or
+    /// schedule the Host added after it is kept even though the copy lacks it, and one removed after it is not brought
+    /// back. Zero (an older client) removes whatever the copy lacks, as before. See docs\ipc-protocol.md.
+    /// </summary>
+    public long Revision { get; set; }
     public string DefaultDownloadDirectory { get; set; } = string.Empty;
     public int MaxConcurrentDownloads { get; set; } = 3;
     public int DefaultQueueId { get; set; }
@@ -226,6 +242,39 @@ public sealed class SettingsDto
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+    public bool TorrentsEnabled { get; set; }
+    public string TorrentRoute { get; set; } = "ask";
+    public bool TorrentChooseFiles { get; set; } = true;
+    public bool TorrentHandler { get; set; }
+    public bool TorrentSeedAfterDownload { get; set; } = true;
+    public double TorrentSeedRatio { get; set; } = 1.0;
+    public double TorrentSeedHours { get; set; } = 48;
+    public long TorrentUploadLimit { get; set; }
+    /// <summary>T2: the port torrents listen on (<see cref="TorrentListenPorts"/>); 0 before one is chosen.</summary>
+    public int TorrentListenPort { get; set; }
+    /// <summary>T2: ask the router to forward that port (UPnP and NAT-PMP). Off by default.</summary>
+    public bool TorrentUpnp { get; set; }
+    /// <summary>T3: find peers through the DHT. Always off for a private torrent.</summary>
+    public bool TorrentDht { get; set; } = true;
+    /// <summary>T3: peer exchange (PEX). Always off for a private torrent. Applied at once, also to running torrents.</summary>
+    public bool TorrentPex { get; set; } = true;
+    /// <summary>T3: local peer discovery (LSD). Always off for a private torrent.</summary>
+    public bool TorrentLsd { get; set; }
+    /// <summary>T3: <c>prefer</c> (encrypted when the peer can), <c>require</c> (encrypted only; peers that can't are left
+    /// out) or <c>off</c> (plain only).</summary>
+    public string TorrentEncryption { get; set; } = "prefer";
+    /// <summary>T3: finished torrents seeding at once, 0 to 1000; 0 is all of them. The others wait their turn.</summary>
+    public int TorrentSeedsAtOnce { get; set; }
+    /// <summary>T3: connections per torrent, 0 or 2 to 2000; 0 is no limit of its own.</summary>
+    public int TorrentConnectionsPerTorrent { get; set; }
+    /// <summary>T3: connections of every torrent together, 0 or 10 to 20000; 0 is the torrent engine's own default.</summary>
+    public int TorrentMaxConnections { get; set; }
+    /// <summary>
+    /// T3: peers, trackers and host names go through the proxy of Options › Proxy. Needs a proxy typed in there: HTTP
+    /// or SOCKS5 (not the system's, not SOCKS4 or SOCKS4a). With HTTP, DHT, local peer discovery and uTP are off
+    /// while it is on, since they would go around it. A Host whose torrent engine can't use a proxy starts no torrent then.
+    /// </summary>
+    public bool TorrentUseProxy { get; set; }
     public string? FfmpegPath { get; set; }
     public string? PostDownloadCommand { get; set; }
     public string? UpdateManifestUrl { get; set; }
@@ -265,7 +314,6 @@ public sealed class HostStatusDto
     public int TotalJobs { get; set; }
     public string StateDirectory { get; set; } = string.Empty;
     public string BrowserIntegration { get; set; } = "unknown";
-    public string? LastError { get; set; }
     public List<string> OrphanPartFiles { get; set; } = new();
 }
 
@@ -339,6 +387,15 @@ public sealed class SnapshotDto
     public List<JobDto> Jobs { get; set; } = new();
     public SettingsDto Settings { get; set; } = new();
     public HostStatusDto Status { get; set; } = new();
+}
+
+/// <summary>
+/// Audit 3 M3: <c>jobs.query</c>'s optional payload. With <see cref="Limit"/> the answer lists only that many jobs,
+/// newest first, so a long list stays under the browsers' 1 MB native-message limit. Without it, all jobs.
+/// </summary>
+public sealed class JobsQueryRequest
+{
+    public int? Limit { get; set; }
 }
 
 /// <summary>
@@ -417,6 +474,8 @@ public sealed class AddJobRequest
     public int? Connections { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
     public string? Description { get; set; }
+    /// <summary>The MIME type a browser hand-off saw. Decides whether the download is an HLS playlist or a DASH manifest; the description does not.</summary>
+    public string? ContentType { get; set; }
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
     public bool? AutoResumeAfterRestart { get; set; }
@@ -520,6 +579,12 @@ public sealed class JobUpdateRequest
     /// <summary>New absolute path for a completed download (Move/Rename).</summary>
     public string? NewFilePath { get; set; }
 
+    /// <summary>
+    /// EXT.R11: a new name for a completed download's file, in the same folder. A bare file name: no folder, no
+    /// separator, not a device name. Never replaces another file. Not together with <see cref="NewFilePath"/>.
+    /// </summary>
+    public string? NewFileName { get; set; }
+
     /// <summary>Null leaves unchanged; otherwise a <see cref="JobPriorities"/> value.</summary>
     public int? Priority { get; set; }
 }
@@ -560,6 +625,25 @@ public sealed class DownloadFoldersResult
     public bool Ok { get; set; }
     public string DefaultFolder { get; set; } = string.Empty;
     public List<FavoriteFolderDto> Favorites { get; set; } = new();
+
+    /// <summary>
+    /// EXT.R10: which of the request's <see cref="DownloadFoldersRequest.Candidates"/> are folders that exist, as they
+    /// were given. Null when none were asked about, or this Host does not answer that (a server, a web session).
+    /// </summary>
+    public List<string>? ExistingCandidates { get; set; }
+}
+
+/// <summary>
+/// <c>settings.downloadFolders</c>'s optional payload. EXT.R10: the extension asks whether a few folders it would start
+/// its folder form on still exist (the last used one, a custom one), so a folder that is gone falls back to the
+/// default. Older Hosts ignore it and the extension then starts on the default.
+/// </summary>
+public sealed class DownloadFoldersRequest
+{
+    /// <summary>At most <see cref="MaxCandidates"/> are looked at; the rest are ignored.</summary>
+    public const int MaxCandidates = 4;
+
+    public List<string>? Candidates { get; set; }
 }
 
 public sealed class HostActionRequest
@@ -601,6 +685,9 @@ public sealed class HandoffAck
     public JobDto? Job { get; set; }
     public string? Error { get; set; }
     public string? ErrorCode { get; set; }
+
+    /// <summary>Accepted, with something the user should know: the folder asked for was not used. Added without a protocol bump.</summary>
+    public string? Note { get; set; }
 }
 
 public sealed class DownloadGroupDto

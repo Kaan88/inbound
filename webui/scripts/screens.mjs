@@ -7,6 +7,7 @@
 //   INBOUND_FILES          a plain web server with holiday-photos.7z (password "screens") and documents.zip, optional
 //   INBOUND_DOWNLOADS      the folder downloads go to; inside DOWNLOADMANAGER_ROOTS
 //   INBOUND_TORRENT        a small .torrent file to upload, optional
+//   INBOUND_TORRENT_NAME   its name, to add it stopped and open its Files tab (T3), optional
 //   INBOUND_MOCK_KEY       the mock TorBox key the TestServer prints (an invented one), optional
 //   INBOUND_TEST_PASSWORD  the throwaway password to set or sign in with
 //   INBOUND_OUT            where screenshots go (default ../artifacts/webui)
@@ -482,6 +483,118 @@ for (const label of optionPages) {
     if (label === 'Sign-in and browsers') await p.getByRole('button', { name: 'Pair a browser' }).click();
     if (label === 'Site logins') await p.getByRole('button', { name: 'Add site login' }).click();
   });
+}
+// T2/T3 torrents, when the server has the torrent worker (its hello offers `torrents`): Options > Torrents, and a
+// torrent's details with the live tabs. The torrent is a magnet added stopped, so nothing connects to any peer.
+async function ipc(page, type, payload = {}) {
+  return page.evaluate(async ([t, body]) => {
+    const response = await fetch('/api/ipc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ v: 1, type: t, id: crypto.randomUUID(), payload: body }) });
+    return response.json();
+  }, [type, payload]);
+}
+const torrentName = 'Screens torrent';
+let torrentsOffered = false;
+await step('e2e: torrents on, one stopped magnet', async () => {
+  const { context, page } = await newPage(variants[0], signedIn);
+  try {
+    await app(page, '#/all');
+    torrentsOffered = (await ipc(page, 'torrent.network')).type === 'torrent.networkResult';
+    if (!torrentsOffered) return;
+    const settings = (await ipc(page, 'settings.get')).payload.settings;
+    if (!settings.torrentsEnabled) {
+      settings.torrentsEnabled = true;
+      const saved = await ipc(page, 'settings.update', { settings });
+      expect(saved.payload?.ok !== false, `torrents could not be turned on: ${saved.payload?.error}`);
+    }
+    const added = await ipc(page, 'torrent.add', { input: `magnet:?xt=urn:btih:${'5c'.repeat(20)}&dn=${encodeURIComponent(torrentName)}`, startMode: 'later' });
+    expect(added.payload?.ok, `the magnet was not added: ${added.payload?.error}`);
+  } finally {
+    await context.close();
+  }
+});
+if (torrentsOffered) {
+  await capture(`${at++}-options-torrents`, signedIn, async (p, v) => {
+    await app(p, '#/settings');
+    await optionsPage(p, v, 'Torrents');
+    await p.getByLabel('Stop seeding at ratio').waitFor();
+  }, { fullPage: true });
+  // WEB-T1/T2/T3: the Torrents view with Seeds, Peers, Up and Ratio on a desktop, the view chips and the line of what
+  // the torrents move on a phone. The magnet added for later waits in its queue, so it is under Downloading.
+  await capture(`${at++}-torrents-view`, signedIn, async (p) => {
+    await app(p, '#/torrents');
+    await rowNamed(p, torrentName).waitFor();
+  });
+  await capture(`${at++}-torrents-downloading`, signedIn, async (p) => {
+    await app(p, '#/torrents-downloading');
+    await rowNamed(p, torrentName).waitFor();
+  });
+  // A stopped torrent: the live tabs say so and ask the server nothing; T3's Overview and Options read the Host's facts.
+  for (const [tab, ready] of [['Overview', /^Added from$/], ['Peers', /^Not running\./], ['Trackers', /^Not running\./], ['Pieces & Speed', /^Not running\./], ['Options', /^Stop seeding at$/]]) {
+    await capture(`${at++}-torrent-details-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}`, signedIn, async (p, v) => {
+      await app(p, '#/all');
+      const row = rowNamed(p, torrentName);
+      if (v.hasTouch) await row.tap();
+      else await row.dblclick();
+      await dialog(p).waitFor();
+      await p.getByRole('tab', { name: tab, exact: true }).click();
+      await dialog(p).getByText(ready).first().waitFor();
+    });
+  }
+  // T3: the row menu's Force Recheck, Announce Now and Set Limits…, which opens the Options tab.
+  await capture(`${at++}-torrent-row-menu`, signedIn, async (p, v) => {
+    await app(p, '#/all');
+    await openRowMenu(p, v, rowNamed(p, torrentName));
+    for (const item of ['Force Recheck', 'Announce Now', 'Set Limits…']) await p.getByRole('menuitem', { name: item }).waitFor();
+  });
+  await capture(`${at++}-torrent-set-limits`, signedIn, async (p, v) => {
+    await app(p, '#/all');
+    await openRowMenu(p, v, rowNamed(p, torrentName));
+    await p.getByRole('menuitem', { name: 'Set Limits…' }).click();
+    await dialog(p).getByText(/^Speed limits for this torrent$/).waitFor();
+  });
+}
+
+// T3: a .torrent file with several files (INBOUND_TORRENT): the add dialog's file tree with priorities and the free space,
+// then, added stopped, the details' Files tab. Nothing connects to a peer.
+const torrentFile = process.env.INBOUND_TORRENT;
+const filesTorrentName = process.env.INBOUND_TORRENT_NAME ?? '';
+if (torrentsOffered && torrentFile) {
+  await capture(`${at++}-torrent-add-priorities`, signedIn, async (p, v) => {
+    await app(p, '#/all');
+    await addItem(p, v, 'Import torrent file');
+    await dialog(p).waitFor();
+    await p.locator('input[type="file"]').setInputFiles(torrentFile);
+    await p.getByRole('button', { name: /^Choose the files of/ }).click();
+    const first = p.getByRole('combobox', { name: /^Priority of/ }).first();
+    await first.selectOption('high');
+    await p.getByLabel('Free space').waitFor();
+  });
+  if (filesTorrentName) {
+    await step('e2e: a .torrent file added stopped', async () => {
+      const { context, page } = await newPage(variants[0], signedIn);
+      try {
+        await app(page, '#/all');
+        await addItem(page, variants[0], 'Import torrent file');
+        await page.locator('input[type="file"]').setInputFiles(torrentFile);
+        await page.getByRole('button', { name: /^Choose the files of/ }).waitFor();
+        await page.selectOption('#torrent-start', 'later');
+        await dialog(page).getByRole('button', { name: /^Add( \d+)?$/ }).click();
+        await rowNamed(page, filesTorrentName).waitFor();
+      } finally {
+        await context.close();
+      }
+    });
+    await capture(`${at++}-torrent-details-files-priorities`, signedIn, async (p, v) => {
+      await app(p, '#/all');
+      const row = rowNamed(p, filesTorrentName);
+      if (v.hasTouch) await row.tap();
+      else await row.dblclick();
+      await dialog(p).waitFor();
+      await p.getByRole('tab', { name: 'Files', exact: true }).click();
+      await p.getByRole('combobox', { name: /^Priority of/ }).first().waitFor();
+    });
+  }
 }
 await capture(`${at++}-options-folder-picker`, signedIn, async (p, v) => {
   await app(p, '#/settings');

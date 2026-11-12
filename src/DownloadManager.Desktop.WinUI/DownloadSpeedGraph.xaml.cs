@@ -28,6 +28,13 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private bool _expanded = true;
     private bool _seen = true;
     private bool _stale;
+    /// <summary>UI.B23: the scale moves with hysteresis; this makes the next drawing fit it at once instead.</summary>
+    private bool _refit = true;
+    private readonly SpeedGraphScale _scale = new();
+    private Storyboard? _rescale;
+    private int _bucketSeconds = 1;
+    /// <summary>The top of the last drawing with a line, so a change of scale can ease the line into place.</summary>
+    private double _drawnTop;
     private Storyboard? _transition;
     private Storyboard? _slide;
     private double _pixelsPerSecond;
@@ -54,6 +61,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
             item.Click += (_, _) =>
             {
                 _seconds = period.Seconds;
+                _refit = true;
                 ShowPeriod(period.Short, period.Name);
                 Draw();
             };
@@ -92,7 +100,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
             _seen = value;
             // Nothing moves while nobody can see it.
             if (!value) StopSlide();
-            if (value && _stale) Draw();
+            // The scale wasn't kept up while hidden; it fits what is there at once rather than stepping down in view.
+            if (value && _stale) { _refit = true; Draw(); }
         }
     }
 
@@ -105,6 +114,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
             var period = Periods.FirstOrDefault(candidate => candidate.Seconds == value);
             if (period.Seconds == 0 || period.Seconds == _seconds) return;
             _seconds = period.Seconds;
+            _refit = true;
             foreach (var item in PeriodMenu.Items.OfType<RadioMenuFlyoutItem>()) item.IsChecked = item.Text == period.Name;
             ShowPeriod(period.Short, period.Name);
             Draw();
@@ -123,6 +133,24 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
     public void AddSample(DateTimeOffset time, double? bytesPerSecond)
     {
+        Append(time, bytesPerSecond);
+        Draw();
+    }
+
+    /// <summary>Audit M11: several samples (oldest first), drawn once, such as the zeros of a pause that took no samples.</summary>
+    public void AddSamples(IEnumerable<(DateTimeOffset Time, double? BytesPerSecond)> samples)
+    {
+        var any = false;
+        foreach (var (time, rate) in samples)
+        {
+            Append(time, rate);
+            any = true;
+        }
+        if (any) Draw();
+    }
+
+    private void Append(DateTimeOffset time, double? bytesPerSecond)
+    {
         var value = bytesPerSecond is { } rate && double.IsFinite(rate) && rate >= 0 ? rate : (double?)null;
         if (_samples.Count > 0)
         {
@@ -133,7 +161,6 @@ public sealed partial class DownloadSpeedGraph : UserControl
         _samples.Enqueue((time, value));
         _sampledAt = Environment.TickCount64;
         while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < time.AddHours(-1)) _samples.Dequeue();
-        Draw();
     }
 
     /// <summary>
@@ -159,6 +186,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (after.Count == 0) _sampledAt = Environment.TickCount64;
         var latest = _samples.Last().Time;
         while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < latest.AddHours(-1)) _samples.Dequeue();
+        _refit = true;
         Draw();
     }
 
@@ -180,7 +208,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
         _expanded = expanded;
         DescribeToggle();
         // Drawn before it shows, since the plot is not kept up to date while closed.
-        if (expanded) Draw();
+        if (expanded) { _refit = true; Draw(); }
         var height = expanded ? OpenHeight : 0;
         var angle = expanded ? 0 : 180;
 
@@ -257,13 +285,22 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var width = Plot.ActualWidth;
         var height = Plot.ActualHeight;
         if (width < 150 || height < 60) { DrawHover(); return; }
-        var top = peak <= 0 ? 1024 : Math.Pow(10, Math.Floor(Math.Log10(peak)));
-        top *= Math.Ceiling(Math.Max(peak, top) / top);
-        if (!double.IsFinite(top) || top <= 0) top = Math.Max(peak, 1024);
         const double left = 62, upper = 8, lower = 16;
         const int rows = 2, columns = 4;
         var chartWidth = width - left - 8;
         var chartHeight = height - upper - lower;
+
+        // UI.B23: points stand for clock-aligned buckets and are drawn a little late (SpeedGraphPoints), so the samples
+        // that reach the left edge start a lag earlier than the period.
+        var bucket = SpeedGraphPoints.BucketSeconds(_seconds, chartWidth);
+        if (bucket != _bucketSeconds) { _bucketSeconds = bucket; _refit = true; }
+        var lineStart = start - SpeedGraphPoints.Lag(bucket) - TimeSpan.FromSeconds(bucket);
+        var drawnSamples = _samples.Where(sample => sample.Time >= lineStart).ToArray();
+        var linePeak = drawnSamples.Length == 0 ? 0 : drawnSamples.Max(sample => sample.Rate ?? 0);
+        var previousTop = _drawnTop;
+        // UI.B23: grows at once, shrinks only after a hold and a step at a time, always to a round figure.
+        var top = _refit ? _scale.Reset(linePeak) : _scale.Update(linePeak, now);
+        _refit = false;
         LineClip.Clip = new RectangleGeometry { Rect = new Rect(left, 0, chartWidth, height) };
         (_left, _upper, _chartWidth, _chartHeight, _top, _start, _drawn) = (left, upper, chartWidth, chartHeight, top, start, true);
         var foreground = InboundTheme.Brush("InboundSecondaryTextBrush", this);
@@ -290,36 +327,56 @@ public sealed partial class DownloadSpeedGraph : UserControl
         }
         var stroke = InboundTheme.Brush("InboundProgressFillBrush", this);
         Polyline? line = null;
-        // Keep peaks/troughs when a period contains more samples than horizontal pixels.
-        var bucketWidth = Math.Max(1, (int)chartWidth);
-        var compact = visible.GroupBy(sample => (int)((sample.Time - start).TotalSeconds / _seconds * bucketWidth))
-            .SelectMany(bucket => bucket.Any(sample => sample.Rate is null)
-                ? (IEnumerable<(DateTimeOffset Time, double? Rate)>)bucket
-                : bucket.OrderBy(sample => sample.Rate).Take(1).Concat(bucket.OrderByDescending(sample => sample.Rate).Take(1))
-                    .Distinct().OrderBy(sample => sample.Time));
-        foreach (var sample in compact)
+        // UI.B23: every point sits at a fixed place on the time axis and is never chosen again, so a new sample adds
+        // to the right and moves nothing already drawn. Points past either edge are clipped, not squeezed onto it.
+        double X(DateTimeOffset at) => left + (at - start).TotalSeconds / _seconds * chartWidth;
+        foreach (var point in SpeedGraphPoints.Build(drawnSamples, now, bucket))
         {
-            if (sample.Rate is null) { line = null; continue; }
+            if (point.Rate is null) { line = null; continue; }
             if (line is null)
             {
                 line = new Polyline { Stroke = stroke, StrokeThickness = 1.5, Points = new PointCollection() };
                 Lines.Children.Add(line);
             }
-            line.Points.Add(new Point(left + Math.Clamp((sample.Time - start).TotalSeconds / _seconds, 0, 1) * chartWidth,
-                upper + chartHeight * (1 - Math.Clamp(sample.Rate.Value / top, 0, 1))));
+            line.Points.Add(new Point(X(point.At), upper + chartHeight * (1 - Math.Clamp(point.Rate.Value / top, 0, 1))));
         }
 
-        // The line slides left until the next sample; without this its end would pull away from "Now" and leave an empty
-        // strip. The last value carries on past the edge (clipped) for as long as a slide lasts.
-        if (line is { Points.Count: > 0 } && visible.LastOrDefault().Rate is not null)
-        {
-            var end = line.Points[^1];
-            line.Points.Add(new Point(left + chartWidth + chartWidth / _seconds * SlideSeconds, end.Y));
-        }
+        // The newest point is normally past the right edge for as long as the line slides. Should it not be (samples
+        // came late), its value carries on flat to where the slide stops, as before, rather than leaving a blank strip.
+        var slideEnd = left + chartWidth + chartWidth / _seconds * SpeedGraphPoints.MaxSlide.TotalSeconds;
+        if (line is { Points.Count: > 0 } && _samples.LastOrDefault().Rate is not null && line.Points[^1].X < slideEnd)
+            line.Points.Add(new Point(slideEnd, line.Points[^1].Y));
 
         // A new sample moves the line under a pointer that is still there.
         DrawHover();
         Slide(chartWidth / _seconds);
+        EaseScale(previousTop, top, upper + chartHeight);
+        _drawnTop = top;
+    }
+
+    /// <summary>
+    /// UI.B23: when the scale changes, the line is redrawn against the new top at once, then eased from its old height to
+    /// its new one with a short one-off animation of a transform, so it doesn't leap. The labels change at once.
+    /// </summary>
+    private void EaseScale(double previousTop, double top, double baseline)
+    {
+        _rescale?.Stop();
+        _rescale = null;
+        LineScale.ScaleY = 1;
+        if (previousTop <= 0 || previousTop == top || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
+        LineScale.CenterY = baseline;
+        var animation = new DoubleAnimation
+        {
+            From = top / previousTop,
+            To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(animation, LineScale);
+        Storyboard.SetTargetProperty(animation, nameof(ScaleTransform.ScaleY));
+        _rescale = new Storyboard();
+        _rescale.Children.Add(animation);
+        _rescale.Begin();
     }
 
     /// <summary>
@@ -327,14 +384,14 @@ public sealed partial class DownloadSpeedGraph : UserControl
     /// stepping once a second. The next sample redraws it from where the slide has got to, so nothing jumps.
     /// It is one composition animation of a transform, with no timer, and it stops while the graph can't be seen.
     /// </summary>
-    private const double SlideSeconds = 2;
+    private static readonly double SlideSeconds = SpeedGraphPoints.MaxSlide.TotalSeconds;
 
     private void Slide(double pixelsPerSecond)
     {
         _pixelsPerSecond = pixelsPerSecond;
         if (!_seen || !_expanded || pixelsPerSecond <= 0 || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
         // Two seconds at most: a sample that is late leaves the line where it got to, not sliding away.
-        const double longest = SlideSeconds;
+        var longest = SlideSeconds;
         // UI.B22: a redraw that is not a new sample (the plot resized as the window's text changed, the theme, the
         // period) starts from where the slide had got to by now, not from 0. Restarting at 0 jumped the line back to
         // the right each time, so it moved in steps with blank stretches instead of sliding in from the right.
@@ -378,11 +435,18 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (_pointerX is not { } x || !_drawn || !_expanded || x < _left || x > _left + _chartWidth) return;
         var shift = TimeSpan.FromSeconds(SlidSeconds);
         var time = _start + shift + TimeSpan.FromSeconds((x - _left) / _chartWidth * _seconds);
-        var nearest = _samples.Where(sample => sample.Time >= _start)
-            .OrderBy(sample => Math.Abs((sample.Time - time).TotalSeconds)).FirstOrDefault();
-        var close = nearest.Time != default && Math.Abs((nearest.Time - time).TotalSeconds) <= Math.Max(2, _seconds / _chartWidth * 4);
+        // UI.B23: a sample is where the line draws it (a little late, in its bucket), and only once it is drawn. In a
+        // bucket, the highest figure speaks for it.
+        var latest = _samples.LastOrDefault().Time;
+        var nearest = _samples
+            .Where(sample => sample.Time >= _start - SpeedGraphPoints.Lag(_bucketSeconds) && SpeedGraphPoints.IsFinished(sample.Time, latest, _bucketSeconds))
+            .OrderBy(sample => Math.Abs((SpeedGraphPoints.ShownAt(sample.Time, _bucketSeconds) - time).TotalSeconds))
+            .ThenByDescending(sample => sample.Rate ?? -1)
+            .FirstOrDefault();
+        var shownAt = SpeedGraphPoints.ShownAt(nearest.Time, _bucketSeconds);
+        var close = nearest.Time != default && Math.Abs((shownAt - time).TotalSeconds) <= Math.Max(2, _seconds / _chartWidth * 4);
         var guide = InboundTheme.Brush("InboundSecondaryTextBrush", this);
-        var pointX = close ? _left + Math.Clamp((nearest.Time - _start - shift).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
+        var pointX = close ? _left + Math.Clamp((shownAt - _start - shift).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
         Hover.Children.Add(new Line { X1 = pointX, X2 = pointX, Y1 = _upper, Y2 = _upper + _chartHeight, Stroke = guide, StrokeThickness = 1, Opacity = 0.6 });
 
         string text;

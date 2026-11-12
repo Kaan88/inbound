@@ -64,9 +64,11 @@ public sealed class FfmpegMediaMuxer : IMediaMuxer
             return new MediaMuxResult(false, "FFmpeg could not be started.");
         }
 
+        // Both pipes are drained: a full pipe would block FFmpeg until the timeout killed it.
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        _ = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        timeout.CancelAfter(MuxTimeout(new FileInfo(videoPath).Length + new FileInfo(audioPath).Length));
         try
         {
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
@@ -109,6 +111,13 @@ public sealed class FfmpegMediaMuxer : IMediaMuxer
 
         return new MediaMuxResult(true, null);
     }
+
+    /// <summary>
+    /// How long a mux may take. It only copies streams, but +faststart writes the output twice, so a large film on a
+    /// slow disk needs time in proportion: five minutes, plus a minute for every 500 MB of input (about 8 MB/s at worst).
+    /// </summary>
+    internal static TimeSpan MuxTimeout(long inputBytes)
+        => TimeSpan.FromMinutes(5) + TimeSpan.FromMinutes(Math.Ceiling(Math.Max(0, inputBytes) / (500.0 * 1024 * 1024)));
 
     internal static string? ResolveFfmpeg(string? configured)
     {

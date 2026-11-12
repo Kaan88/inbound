@@ -603,10 +603,13 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
     {
         lock (_sync)
         {
-            if (_settings.RecentUrls is null || _settings.RecentUrls.RemoveAll(HoldsProviderSecret) == 0)
+            if (_settings.RecentUrls is null || !_settings.RecentUrls.Any(HoldsProviderSecret))
             {
                 return;
             }
+
+            // A new list, never the published one changed in place: a save outside this lock may be reading it (audit 2 M19).
+            _settings.RecentUrls = _settings.RecentUrls.Where(url => !HoldsProviderSecret(url)).ToList();
         }
 
         try
@@ -644,6 +647,14 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             try
             {
                 checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (CheckpointUnusableException ex)
+            {
+                // Damaged or from a newer build: a retry can't mend it, and going on without it would truncate the part.
+                _log?.Invoke($"The checkpoint of job {job.Id} can't be used: {ex.GetType().Name}");
+                return DownloadResult.Fail(DownloadState.Failed,
+                    new JobFailure(FailureKind.Unknown, ex.Message, IsRetryable: false, IsResumable: true, DateTimeOffset.UtcNow),
+                    job.ReceivedBytes, job.TotalBytes);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

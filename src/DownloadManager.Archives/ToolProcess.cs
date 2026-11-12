@@ -19,9 +19,16 @@ internal sealed record ToolInvocation(string ToolPath, IReadOnlyList<string> Arg
     public Action<string>? OnOutput { get; init; }
 
     public Action<Process>? Started { get; init; }
+
+    /// <summary>Asked while the tool runs, a few times a second. A failure it returns stops the tool and is thrown.</summary>
+    public Func<ExtractionException?>? Check { get; init; }
 }
 
-internal sealed record ToolRun(int ExitCode, string Output, string Errors);
+internal sealed record ToolRun(int ExitCode, string Output, string Errors)
+{
+    /// <summary>The archive the run was about, as the tool was given it. Its name is left out when messages are read.</summary>
+    public string Subject { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// Runs the tool with an argument list and no shell. Both pipes are always drained and only a
@@ -88,6 +95,11 @@ internal static class ToolProcess
                 if (stdout.Overflowed)
                 {
                     throw new ExtractionException(ExtractionFailureKind.UnsafePath, "The archive's listing is larger than the limit allows.");
+                }
+
+                if (!exited.IsCompleted && invocation.Check?.Invoke() is { } stop)
+                {
+                    throw stop;
                 }
 
                 if (!exited.IsCompleted && Stopwatch.GetElapsedTime(Volatile.Read(ref lastActivity)) > invocation.StallTimeout)

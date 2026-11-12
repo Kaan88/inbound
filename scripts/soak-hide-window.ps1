@@ -1,8 +1,8 @@
 param([Parameter(Mandatory = $true)][string]$Root)
 # For scripts\soak.sh and perf-window.sh: closes the main window of a test instance's own window process (found
 # by its path under $Root) the way the title bar's close button does, by posting WM_CLOSE. Starts nothing.
-# `dm host open` asks the Host for the Options page, so the process also has an Options window, and UI Automation
-# lists it first. TEST.4 (2026-11-08): a single WM_CLOSE sent to the main window itself reaches AppWindow.Closing
+# `dm host open settings` (and `dm host open` before audit 4 L19, which now opens the main window) asks the Host for
+# the Options page, so the process can also have an Options window, and UI Automation lists it first. TEST.4 (2026-11-08): a single WM_CLOSE sent to the main window itself reaches AppWindow.Closing
 # the first time; the "ignored" first close of earlier runs went to the Options window (WindowPattern.Close was
 # checked only with Options closed). So every secondary window is closed first, whether or not the main window
 # is on screen (Options can open after it, and the per-download, package and update windows have no main window),

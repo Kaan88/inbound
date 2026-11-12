@@ -19,7 +19,11 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 public sealed partial class HostConnection : IAsyncDisposable
 {
+    // Audit M11: with no Host running the window tried the pipe every 2 s for ever. Now 2, 4, 8, then every 10 s; a
+    // connection that works, a retarget or showing the window starts from 2 s again.
     private static readonly TimeSpan LocalRetryDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LocalRetryMaximum = TimeSpan.FromSeconds(10);
+    private readonly ReconnectBackoff _localBackoff = new(LocalRetryDelay, LocalRetryMaximum);
 
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
@@ -101,6 +105,7 @@ public sealed partial class HostConnection : IAsyncDisposable
             _stopped = false;
             _hello = null;
             _backoff.Reset();
+            _localBackoff.Reset();
             CancelSession();
             _wake.TrySetResult();
         }
@@ -118,7 +123,17 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             if (_eventsWanted == wanted) return;
             _eventsWanted = wanted;
-            if (!IsRemote || _stopped) return;
+            if (!IsRemote)
+            {
+                // This PC's pipe is left as it is; a window shown while waiting for the Host tries at once.
+                if (wanted && _session is null)
+                {
+                    _localBackoff.Reset();
+                    _wake.TrySetResult();
+                }
+                return;
+            }
+            if (_stopped) return;
             if (_session is not null) CancelSession();
             else if (wanted) _wake.TrySetResult();
         }
@@ -175,6 +190,276 @@ public sealed partial class HostConnection : IAsyncDisposable
         if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
         if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This Host does not support file information previews." };
         return reply.GetPayload<FileMetadataResult>();
+    }
+
+    /// <summary>A torrent job's files (T1); a Host without torrents answers with an error.</summary>
+    public async Task<TorrentFilesResult> GetTorrentFilesAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(TorrentMessageTypes.Files, new TorrentFilesRequest { JobId = jobId }, TimeSpan.FromSeconds(15), cancellationToken)
+            .ConfigureAwait(false);
+        return reply.Type == TorrentMessageTypes.FilesResult
+            ? reply.GetPayload<TorrentFilesResult>()
+            : new TorrentFilesResult { Error = TorrentReplyError(reply) };
+    }
+
+    /// <summary>Which of a torrent job's files to download (T1).</summary>
+    public async Task<TorrentActionResult> SetTorrentFilesAsync(Guid jobId, IEnumerable<int> indexes, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(TorrentMessageTypes.SetFiles, new TorrentSetFilesRequest { JobId = jobId, FileIndexes = indexes.ToList() },
+            TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        return reply.Type == TorrentMessageTypes.ActionResult
+            ? reply.GetPayload<TorrentActionResult>()
+            : new TorrentActionResult { Error = TorrentReplyError(reply) };
+    }
+
+    /// <summary>T2: starts or stops seeding a finished torrent.</summary>
+    public async Task<TorrentActionResult> SetTorrentSeedingAsync(Guid jobId, bool on, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(TorrentMessageTypes.Seed, new TorrentSeedRequest { JobId = jobId, On = on },
+            TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        return reply.Type == TorrentMessageTypes.ActionResult
+            ? reply.GetPayload<TorrentActionResult>()
+            : new TorrentActionResult { Error = TorrentReplyError(reply) };
+    }
+
+    /// <summary>T2: a running torrent's peers. Null when the Host doesn't know the request (an older one).</summary>
+    public Task<TorrentPeersResult?> GetTorrentPeersAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentQueryAsync(TorrentMessageTypes.Peers, TorrentMessageTypes.PeersResult, jobId,
+            error => new TorrentPeersResult { Error = error }, cancellationToken);
+
+    /// <summary>T2: a running torrent's trackers. Null when the Host doesn't know the request.</summary>
+    public Task<TorrentTrackersResult?> GetTorrentTrackersAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentQueryAsync(TorrentMessageTypes.Trackers, TorrentMessageTypes.TrackersResult, jobId,
+            error => new TorrentTrackersResult { Error = error }, cancellationToken);
+
+    /// <summary>T2: the pieces a running torrent has. Null when the Host doesn't know the request.</summary>
+    public Task<TorrentPiecesResult?> GetTorrentPiecesAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentQueryAsync(TorrentMessageTypes.Pieces, TorrentMessageTypes.PiecesResult, jobId,
+            error => new TorrentPiecesResult { Error = error }, cancellationToken);
+
+    private async Task<T?> TorrentQueryAsync<T>(string type, string resultType, Guid jobId, Func<string, T> failed, CancellationToken cancellationToken)
+        where T : class
+    {
+        var reply = await RequestAsync(type, new TorrentJobRequest { JobId = jobId }, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        if (reply.Type == resultType) return reply.GetPayload<T>();
+        return IsUnknownRequest(reply) ? null : failed(TorrentReplyError(reply));
+    }
+
+    // ---- T3: the torrent controls (options, recheck, announce, details, watch, priorities) ----
+
+    private readonly Lock _probeSync = new();
+    private HostHelloDto? _probedHello;
+    private bool? _torrentControls;
+    private Task<bool?>? _probe;
+
+    /// <summary>
+    /// T3: the connected Host answers the torrent controls; null until <see cref="ProbeTorrentControlsAsync"/> asked this
+    /// connection's Host. Never true without <c>torrents</c> in its hello.
+    /// </summary>
+    public bool? TorrentControls
+    {
+        get
+        {
+            lock (_probeSync) return _probedHello is not null && ReferenceEquals(_probedHello, _hello) ? _torrentControls : null;
+        }
+    }
+
+    /// <summary>
+    /// Asks the connected Host once per connection whether it has the T3 torrent controls: <c>torrent.options</c> for no
+    /// job, which a T3 Host answers with an options reply and an older one with "Unknown message type". Never throws.
+    /// </summary>
+    public Task<bool?> ProbeTorrentControlsAsync()
+    {
+        var hello = _hello;
+        if (hello is null || _client is null) return Task.FromResult<bool?>(null);
+        if (!hello.Capabilities.Contains("torrents", StringComparer.Ordinal)) return Task.FromResult<bool?>(false);
+        lock (_probeSync)
+        {
+            // Asked once per connection, whatever the answer: a Host that didn't answer is asked again only after a reconnect.
+            if (ReferenceEquals(_probedHello, hello)) return _probe ?? Task.FromResult(_torrentControls);
+            _probedHello = hello;
+            _torrentControls = null;
+            return _probe = ProbeAsync(hello);
+        }
+    }
+
+    private async Task<bool?> ProbeAsync(HostHelloDto hello)
+    {
+        bool? answer;
+        try
+        {
+            var reply = await RequestAsync(TorrentMessageTypes.Options, new TorrentJobRequest { JobId = Guid.Empty }, TimeSpan.FromSeconds(8), CancellationToken.None)
+                .ConfigureAwait(false);
+            answer = TorrentControlRules.ProbeAnswer(reply.Type, reply.Type != TorrentMessageTypes.OptionsResult && IsUnknownRequest(reply));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            answer = null;
+        }
+
+        lock (_probeSync)
+        {
+            if (ReferenceEquals(_probedHello, hello))
+            {
+                _torrentControls = answer;
+                _probe = null;
+            }
+        }
+
+        return answer;
+    }
+
+    /// <summary>T3: a torrent's own options; null when the Host doesn't know the request.</summary>
+    public Task<TorrentOptionsResult?> GetTorrentOptionsAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentQueryAsync(TorrentMessageTypes.Options, TorrentMessageTypes.OptionsResult, jobId,
+            error => new TorrentOptionsResult { Error = error }, cancellationToken);
+
+    /// <summary>T3: changes a torrent's own options.</summary>
+    public async Task<TorrentOptionsResult> SetTorrentOptionsAsync(TorrentOptionsDto options, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(TorrentMessageTypes.SetOptions, options, TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        return reply.Type == TorrentMessageTypes.OptionsResult
+            ? reply.GetPayload<TorrentOptionsResult>()
+            : new TorrentOptionsResult { Error = IsUnknownRequest(reply) ? TorrentControlRules.OlderHost : TorrentReplyError(reply) };
+    }
+
+    /// <summary>T3: the Overview's facts; null when the Host doesn't know the request.</summary>
+    public Task<TorrentDetailsResult?> GetTorrentDetailsAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentQueryAsync(TorrentMessageTypes.Details, TorrentMessageTypes.DetailsResult, jobId,
+            error => new TorrentDetailsResult { Error = error }, cancellationToken);
+
+    /// <summary>T3: Force recheck.</summary>
+    public Task<TorrentActionResult> RecheckTorrentAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentActionAsync(TorrentMessageTypes.Recheck, new TorrentJobRequest { JobId = jobId }, cancellationToken);
+
+    /// <summary>T3: Announce now.</summary>
+    public Task<TorrentActionResult> AnnounceTorrentAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => TorrentActionAsync(TorrentMessageTypes.Announce, new TorrentJobRequest { JobId = jobId }, cancellationToken);
+
+    /// <summary>T3: changes only these files' priorities (Skip leaves one out).</summary>
+    public Task<TorrentActionResult> SetTorrentPrioritiesAsync(Guid jobId, IEnumerable<TorrentFilePriorityDto> priorities, CancellationToken cancellationToken = default)
+        => TorrentActionAsync(TorrentMessageTypes.SetFiles, new TorrentSetFilesRequest { JobId = jobId, Priorities = priorities.ToList() }, cancellationToken);
+
+    /// <summary>T3: the file choice that starts a waiting torrent, with the priorities chosen meanwhile.</summary>
+    public Task<TorrentActionResult> SetTorrentFilesAsync(Guid jobId, IEnumerable<int> indexes, IReadOnlyList<TorrentFilePriorityDto>? priorities,
+        CancellationToken cancellationToken = default)
+        => priorities is not { Count: > 0 }
+            ? SetTorrentFilesAsync(jobId, indexes, cancellationToken)
+            : TorrentActionAsync(TorrentMessageTypes.SetFiles,
+                new TorrentSetFilesRequest { JobId = jobId, FileIndexes = indexes.ToList(), Priorities = priorities.ToList() }, cancellationToken);
+
+    /// <summary>T3: this client shows torrents now (<paramref name="on"/>), for <see cref="TorrentControlRules.LeaseSeconds"/>.
+    /// False when the Host doesn't know the request; it never throws for a dropped connection.</summary>
+    public async Task<bool> WatchTorrentsAsync(bool on, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reply = await RequestAsync(TorrentMessageTypes.Watch, new TorrentWatchRequest { On = on, LeaseSeconds = TorrentControlRules.LeaseSeconds },
+                TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+            return reply.Type == TorrentMessageTypes.ActionResult || !IsUnknownRequest(reply);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or TimeoutException or OperationCanceledException or ObjectDisposedException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>T3: the torrent engine's DHT nodes and listening; null when not answered.</summary>
+    public async Task<TorrentNetworkResult?> GetTorrentNetworkAsync(CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(TorrentMessageTypes.Network, new { }, TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+        return reply.Type == TorrentMessageTypes.NetworkResult ? reply.GetPayload<TorrentNetworkResult>() : null;
+    }
+
+    private async Task<TorrentActionResult> TorrentActionAsync<T>(string type, T payload, CancellationToken cancellationToken)
+    {
+        var reply = await RequestAsync(type, payload, TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        if (reply.Type == TorrentMessageTypes.ActionResult) return reply.GetPayload<TorrentActionResult>();
+        return new TorrentActionResult { Error = IsUnknownRequest(reply) && _hello?.Capabilities.Contains("torrents", StringComparer.Ordinal) == true
+            ? TorrentControlRules.OlderHost
+            : TorrentReplyError(reply) };
+    }
+
+    /// <summary>The Host answered that it doesn't know the request: an older Host, or one without torrents.</summary>
+    internal static bool IsUnknownRequest(IpcMessage reply)
+    {
+        if (reply.Type != MessageTypes.HostActionResult) return true;
+        try
+        {
+            return reply.GetPayload<HostActionResult>().Message?.Trim().StartsWith("Unknown message type", StringComparison.OrdinalIgnoreCase) == true;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>What Export list saves of each torrent job; null from a Host without torrents (its magnets are saved alone).
+    /// Asked page by page, so a long list stays under the message size limit.</summary>
+    public async Task<IReadOnlyDictionary<Guid, TorrentListEntry>?> GetTorrentListEntriesAsync(CancellationToken cancellationToken = default)
+    {
+        var all = new Dictionary<Guid, TorrentListEntry>();
+        Guid? after = null;
+        do
+        {
+            var reply = await RequestAsync(TorrentMessageTypes.ListEntries, new TorrentListEntriesRequest { After = after },
+                TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+            if (reply.Type != TorrentMessageTypes.ListEntriesResult) return all.Count > 0 ? all : null;
+            var page = reply.GetPayload<TorrentListEntriesResult>();
+            foreach (var (id, entry) in page.Entries) all[id] = entry;
+            // A page that moves nothing on ends it, whatever it says.
+            after = page.Next is { } next && next != after ? next : null;
+        }
+        while (after is not null);
+
+        return all;
+    }
+
+    /// <summary>Adds an imported list's torrents, in requests that each fit one message; a Host without torrents skips
+    /// them all and says why.</summary>
+    public async Task<TorrentImportResult> ImportTorrentsAsync(IReadOnlyList<JobListEntry> entries, CancellationToken cancellationToken = default)
+    {
+        var total = new TorrentImportResult { Ok = true };
+        var sent = 0;
+        foreach (var chunk in TorrentListPaging.Chunk(entries))
+        {
+            var reply = await RequestAsync(TorrentMessageTypes.Import, new TorrentImportRequest { Entries = chunk },
+                TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
+            if (reply.Type != TorrentMessageTypes.ImportResult)
+            {
+                if (sent == 0) return new TorrentImportResult { Ok = true, Skipped = entries.Count, SkipReason = TorrentReplyError(reply) };
+                total.Failed += entries.Count - sent;
+                total.FirstError ??= TorrentReplyError(reply);
+                break;
+            }
+
+            TorrentListPaging.AddTo(total, reply.GetPayload<TorrentImportResult>());
+            sent += chunk.Count;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// The reason in a reply that isn't the torrent answer. A Host without torrents (or an older one) answers
+    /// "Unknown message type"; any other error reply carries the Host's own reason, which is shown as it is.
+    /// </summary>
+    internal static string TorrentReplyError(IpcMessage reply)
+    {
+        const string noTorrents = "This Host does not download torrents.";
+        if (reply.Type != MessageTypes.HostActionResult) return noTorrents;
+        string? message;
+        try
+        {
+            message = reply.GetPayload<HostActionResult>().Message?.Trim();
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return "The Host could not do that.";
+        }
+
+        if (string.IsNullOrEmpty(message)) return "The Host could not do that.";
+        return message.StartsWith("Unknown message type", StringComparison.OrdinalIgnoreCase) ? noTorrents : message;
     }
 
     public Task<IpcMessage> GetSegmentsAsync(Guid id, CancellationToken cancellationToken = default)
@@ -410,15 +695,16 @@ public sealed partial class HostConnection : IAsyncDisposable
                 var snapshot = client.SnapshotFollowsHello ? await client.ReadAsync(session.Token).ConfigureAwait(false) : null;
                 _client = client;
                 if (remote) _backoff.Reset();
+                else _localBackoff.Reset();
                 ConnectionChanged?.Invoke(true, null);
 
                 if (snapshot?.Type == MessageTypes.JobsSnapshot)
                 {
-                    SnapshotReceived?.Invoke(snapshot.GetPayload<SnapshotDto>());
+                    DispatchOne(snapshot.Type, () => SnapshotReceived?.Invoke(snapshot.GetPayload<SnapshotDto>()));
                 }
                 else if (snapshot is not null)
                 {
-                    Dispatch(snapshot, snapshot: false);
+                    DispatchOne(snapshot.Type, () => Dispatch(snapshot, snapshot: false));
                 }
 
                 while (!session.IsCancellationRequested)
@@ -429,7 +715,7 @@ public sealed partial class HostConnection : IAsyncDisposable
                         break;
                     }
 
-                    Dispatch(message, snapshot: false);
+                    DispatchOne(message.Type, () => Dispatch(message, snapshot: false));
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -514,7 +800,7 @@ public sealed partial class HostConnection : IAsyncDisposable
             try
             {
                 // Stopped: only Retarget wakes it (SetEventsWanted leaves a stopped connection alone).
-                var delay = stopTrying ? Timeout.InfiniteTimeSpan : remote ? _backoff.Next() : LocalRetryDelay;
+                var delay = stopTrying ? Timeout.InfiniteTimeSpan : remote ? _backoff.Next() : _localBackoff.Next();
                 await wake.WaitAsync(delay, cancellationToken).ConfigureAwait(false);
             }
             catch (TimeoutException)
@@ -541,6 +827,40 @@ public sealed partial class HostConnection : IAsyncDisposable
             return null;
         }
     }
+
+    /// <summary>
+    /// Audit L8: one message this build can't read (a payload of a newer Host, a handler that throws) is skipped; it
+    /// used to end the connection, and in a loop when it was the snapshot sent on every connect. The skip is written
+    /// to <see cref="Trace"/> (the app's UI trace) and raised as <see cref="MessageSkipped"/>, so an empty list after an
+    /// unreadable snapshot can be told apart from an empty Host.
+    /// </summary>
+    private void DispatchOne(string? type, Action dispatch)
+    {
+        try
+        {
+            dispatch();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var line = $"Skipped a Host message ({type ?? "no type"}): {ex.GetType().Name}: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine(line);
+            try
+            {
+                Trace?.Invoke(line);
+                MessageSkipped?.Invoke(line);
+            }
+            catch (Exception traceError) when (traceError is not OperationCanceledException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Skip not traced: {traceError.Message}");
+            }
+        }
+    }
+
+    /// <summary>Where every connection writes a skipped message (audit L8); the app sets it to its UI trace.</summary>
+    internal static Action<string>? Trace { get; set; }
+
+    /// <summary>A message from the Host was skipped because this build could not read it; the words say which and why.</summary>
+    public event Action<string>? MessageSkipped;
 
     private void Dispatch(IpcMessage message, bool snapshot)
     {

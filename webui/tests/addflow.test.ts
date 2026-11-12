@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  basicAuthorization, categoryChoices, categoryOf, destinationFor, findExisting, importSummary, metadataText, nameFromUrl, packageNameFor, parseList,
+  basicAuthorization, categoryChoices, categoryOf, chunkTorrentEntries, destinationFor, findExisting, importSummary, isTorrentEntry, metadataText, nameFromUrl, packageNameFor, parseList,
   serializeList, serverNameToShow, spaceLine, validUserName,
 } from '../src/lib/addflow';
 import { routeOf, type AddLine } from '../src/lib/addlines';
@@ -288,6 +288,27 @@ describe('download lists (A21)', () => {
     expect(importSummary(3, 3, 0, undefined, 0)).toBe('Added 3 of 3 downloads.');
     expect(importSummary(2, 4, 1, 'Nope', 1)).toBe("Added 2 of 4 downloads directly; 1 failed. Nope 1 entry isn't added yet: the next dialog shows what can be done with it. Saved names, folders and checksums from the file don't carry over to it.");
   });
+
+  it('says how many torrents were skipped and why (T5)', () => {
+    expect(importSummary(1, 3, 0, undefined, 0, 2, 'Already in the list.')).toBe('Added 1 of 3 downloads. 2 torrents skipped: Already in the list.');
+    expect(importSummary(0, 2, 1, 'No.', 0, 1, 'Torrents are turned off.')).toBe('Added 0 of 2 downloads; 1 failed. No. 1 torrent skipped: Torrents are turned off.');
+  });
+
+  it('keeps a torrent with its part, or its magnet alone from an older server (T5)', () => {
+    const hash = 'a'.repeat(40);
+    const torrent = { infoHash: hash, name: 'Album', hasMetadata: true, awaitingFileChoice: false, fileCount: 3, wantedCount: 2, totalBytes: 3, wantedBytes: 2, peers: 0, seeds: 0 };
+    const torrents = [
+      { id: 't1', url: `magnet:?xt=urn:btih:${hash}&dn=Album`, queueId: 1, torrent },
+      { id: 't2', url: `magnet:?xt=urn:btih:${hash}`, queueId: 1, torrent },
+    ] as Job[];
+    const text = serializeList([...jobs, ...torrents], { t1: { infoHash: hash, magnet: torrents[0].url, data: 'ZGF0YQ==', fileIndexes: [0, 2] } });
+    const read = parseList(text);
+    expect(read.map((entry) => isTorrentEntry(entry))).toEqual([false, true, true]);
+    expect(read[1].torrent).toEqual({ infoHash: hash, magnet: torrents[0].url, data: 'ZGF0YQ==', fileIndexes: [0, 2] });
+    expect(read[2].torrent).toEqual({ infoHash: hash, name: 'Album', magnet: torrents[1].url });
+    expect(text).not.toContain('"torrent": null');
+    expect(isTorrentEntry({ url: ' MAGNET:?xt=urn:btih:' + hash })).toBe(true);
+  });
 });
 
 describe('keys (A27)', () => {
@@ -336,5 +357,23 @@ describe('review fixes', () => {
       { fileId: 'a', size: 1, name: 'a' }, { fileId: 'b', size: 2, name: 'b', relativePath: 'd/b' }, { fileId: 'c', size: 3, name: 'c', relativePath: 'd/c' }] } } as never;
     expect(fileChoiceFrom(line, new Set(['a', 'b']))).toEqual({ selection: 'chosen', fileIds: ['a', 'b'] });
     expect(fileChoiceFrom(line, new Set(['b', 'c']))).toEqual({ selection: 'chosen', filePaths: [{ path: 'd/b', size: 2 }, { path: 'd/c', size: 3 }] });
+  });
+});
+
+describe('torrent import requests', () => {
+  const hash = '0123456789abcdef0123456789abcdef01234567';
+  const entry = (dataChars: number) => ({
+    url: `magnet:?xt=urn:btih:${hash}`, queueId: 0, requestedConnections: 0, startMode: 'later', conflictPolicy: 'rename',
+    torrent: { infoHash: hash, magnet: `magnet:?xt=urn:btih:${hash}`, data: 'A'.repeat(dataChars) },
+  });
+
+  it('splits a list over the size limit and sends a too-large .torrent as its magnet', () => {
+    const limit = 10_000;
+    const huge = entry(limit + 1);
+    const chunks = chunkTorrentEntries([entry(limit / 2), entry(limit / 2), entry(10), huge], limit);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([1, 2, 1]);
+    expect(chunks[2][0].torrent?.data).toBeUndefined();
+    expect(chunks[2][0].torrent?.magnet).toBe(huge.torrent.magnet);
+    expect(huge.torrent.data).toHaveLength(limit + 1);
   });
 });

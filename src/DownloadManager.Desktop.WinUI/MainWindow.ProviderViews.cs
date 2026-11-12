@@ -53,7 +53,8 @@ public sealed partial class MainWindow
         AppWindow.Changed += (sender, args) =>
         {
             // Hidden to the tray, nothing is read or ticks; shown again, the view it had reads again.
-            if (args.DidVisibilityChange) _providerPanel?.SetShown(sender.IsVisible && ProviderPanelOnShow);
+            // Audit M11: minimised too.
+            if (args.DidVisibilityChange || args.DidPresenterChange) _providerPanel?.SetShown(WindowShown && ProviderPanelOnShow);
         };
     }
 

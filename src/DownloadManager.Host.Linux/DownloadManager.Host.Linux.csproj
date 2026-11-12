@@ -23,6 +23,7 @@
     <!-- Shared with the Windows Host rather than copied: neither uses anything of Windows. -->
     <Compile Include="..\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\DownloadManager.Host\HostUpdateMonitor.cs" Link="HostUpdateMonitor.cs" />
+    <Compile Include="..\DownloadManager.Host\UpdatePostponement.cs" Link="UpdatePostponement.cs" />
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
     <Compile Include="..\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
     <Compile Include="..\DownloadManager.Host\WebBridgeLauncher.cs" Link="WebBridgeLauncher.cs" />
@@ -36,6 +37,7 @@
     <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
     <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
     <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\DownloadManager.Containers\DownloadManager.Containers.csproj" />
     <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />

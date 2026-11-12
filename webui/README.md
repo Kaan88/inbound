@@ -50,7 +50,8 @@ DOWNLOADMANAGER_TORBOX_API=http://127.0.0.1:18731/torbox/v1/api/ \
 `npm run screens` (`scripts/screens.mjs`, Playwright's Chromium) walks every screen against such a server and saves
 screenshots at 1360 and 390 pixels wide, dark and light, into `artifacts\webui\`: the list (row menu, toolbar More menu,
 delete and cancel-package dialogs, package and download details), the Add menu and every add dialog, Extractions, Queues,
-every Options page, My TorBox (its tabs, an item's dialog and a row's menu), Statistics, the host switcher as a page reached
+every Options page (Torrents too, and a stopped torrent's Peers, Trackers and Pieces & Speed tabs, when the server
+has the torrent worker: start it with `INBOUND_TORRENT_WORKER` set to `inbound-torrent.exe`), My TorBox (its tabs, an item's dialog and a row's menu), Statistics, the host switcher as a page reached
 from another host shows it (Back to that host), numbered addresses in Add links, a folder outside the allowed ones in the
 folder picker, and Options with two invalid values. It sets the test server's password on a first run, seeds downloads through
 the Add URL and Add links dialogs, then does a few things end to end: enters an archive password and checks the

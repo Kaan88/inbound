@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- T0 (docs/plans/native-torrent-roadmap.md): the engine-neutral contract between the Host and the native torrent
+       worker. No torrent library is referenced here; the worker is a separate native process.
+       T1 adds the supervisor and the IDownloadEngine for torrent jobs. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DownloadManager.Torrents.Tests" />
+  </ItemGroup>
+
+</Project>

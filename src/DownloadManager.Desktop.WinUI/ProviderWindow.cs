@@ -37,6 +37,12 @@ internal sealed class ProviderWindow : Window
         Content = root;
         WindowLayout.ApplyChrome(this, root);
         Panel.SetShown(true);
+        // Audit M11: minimised or hidden, its 2 s refresh and its reads stop; shown again, they start at once.
+        AppWindow.Changed += (sender, change) =>
+        {
+            if (change.DidPresenterChange || change.DidVisibilityChange)
+                Panel.SetShown(sender.IsVisible && sender.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized });
+        };
     }
 
     public ProviderPanel Panel { get; }

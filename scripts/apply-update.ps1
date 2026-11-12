@@ -372,7 +372,7 @@ try {
     # Setup puts these beside app\, where swapping app\ never reaches them, and repair.ps1 would go on
     # running the version Setup installed. A script install has no copies, so none is added. An old copy
     # still works, so one that cannot be replaced is no reason to undo the update.
-    foreach ($name in @("register-native-host.ps1", "repair.ps1")) {
+    foreach ($name in @("register-native-host.ps1", "repair.ps1", "stop-for-setup.ps1")) {
         $packagedScript = Join-Path $PackageDir $name
         $installedScript = Join-Path $InstallRoot $name
         if (-not (Test-Path -LiteralPath $packagedScript) -or -not (Test-Path -LiteralPath $installedScript)) { continue }

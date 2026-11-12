@@ -88,6 +88,8 @@ public sealed partial class HostCommandDispatcher
                 _ => await remote.DeleteRemoteAsync(message.GetPayload<RemoteDeleteRequest>(), cancellationToken).ConfigureAwait(false),
             };
 
+            // M4: a web session isn't told the folder of a provider job outside its folders.
+            if (rights.Scope is { } scope) reply = RemoteReplyForScope(reply, scope);
             await ReplyWithinFrameAsync(client, message, replyType, reply).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -124,5 +126,6 @@ public sealed partial class HostCommandDispatcher
     private void OnRemoteChanged(object? sender, RemoteChangedDto change) => BroadcastRemoteChanged(change);
 
     public void BroadcastRemoteChanged(RemoteChangedDto change)
-        => Broadcast(IpcMessage.Create(MessageTypes.RemoteChanged, change));
+        => Broadcast(IpcMessage.Create(MessageTypes.RemoteChanged, change),
+            scope => IpcMessage.Create(MessageTypes.RemoteChanged, RemoteChangeForScope(change, scope)));
 }

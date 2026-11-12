@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-10, release 0.6.6, extension 0.6.1)
+## Current status (2026-11-10, release 0.6.6, extension 0.6.2 in Chrome review)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and

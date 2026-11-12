@@ -20,6 +20,9 @@ public sealed class FtpServer : IAsyncDisposable
     private readonly Task _acceptTask;
     private readonly ConcurrentDictionary<string, long> _bytesServed = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _retrCounts = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> _cutNext = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> _stallNext = new(StringComparer.Ordinal);
+    private readonly ConcurrentQueue<FtpTransfer> _transfers = new();
     private int _restCount;
 
     private FtpServer(TcpListener listener, string root)
@@ -51,7 +54,24 @@ public sealed class FtpServer : IAsyncDisposable
         return Task.FromResult(server);
     }
 
+    /// <summary>Bytes written to data connections for this file, counted as they are sent, cut transfers included.</summary>
     public long BytesServed(string fileName) => _bytesServed.GetValueOrDefault(fileName);
+
+    /// <summary>Every RETR of this file so far, in order: the REST offset it started at and what it sent.</summary>
+    public IReadOnlyList<FtpTransfer> Transfers(string fileName)
+        => _transfers.Where(transfer => transfer.FileName == fileName).ToList();
+
+    /// <summary>The next RETR of this file closes its data connection after this many bytes (426 on the control one).</summary>
+    public void CutNextTransfer(string fileName, long afterBytes) => _cutNext[fileName] = afterBytes;
+
+    /// <summary>The next RETR of this file sends this many bytes and then nothing, keeping the connection open.</summary>
+    public void StallNextTransfer(string fileName, long afterBytes) => _stallNext[fileName] = afterBytes;
+
+    /// <summary>When set, REST is answered with this reply (for example "502 Command not implemented").</summary>
+    public string? RestReply { get; set; }
+
+    /// <summary>When set, RETR of an existing file is answered with this reply and sends nothing (for example "451 Local error").</summary>
+    public string? RetrReply { get; set; }
     public int RetrCount(string fileName) => _retrCounts.GetValueOrDefault(fileName);
     public int RestCount => Volatile.Read(ref _restCount);
 
@@ -222,7 +242,11 @@ public sealed class FtpServer : IAsyncDisposable
                         break;
                     }
                     case "REST":
-                        if (long.TryParse(argument, out var offset) && offset >= 0)
+                        if (RestReply is { } restReply)
+                        {
+                            await WriteAsync(writer, restReply).ConfigureAwait(false);
+                        }
+                        else if (long.TryParse(argument, out var offset) && offset >= 0)
                         {
                             restartOffset = offset;
                             Interlocked.Increment(ref _restCount);
@@ -272,8 +296,18 @@ public sealed class FtpServer : IAsyncDisposable
                             break;
                         }
 
+                        if (RetrReply is { } retrReply)
+                        {
+                            restartOffset = 0;
+                            await WriteAsync(writer, retrReply).ConfigureAwait(false);
+                            break;
+                        }
+
                         var name = Path.GetFileName(path);
                         _retrCounts.AddOrUpdate(name, 1, (_, count) => count + 1);
+                        var cutAfter = _cutNext.TryRemove(name, out var cut) ? cut : (long?)null;
+                        var stallAfter = _stallNext.TryRemove(name, out var stall) ? stall : (long?)null;
+                        var transfer = new FtpTransfer(name, restartOffset);
                         await WriteAsync(writer, "150 Opening binary data connection").ConfigureAwait(false);
                         try
                         {
@@ -283,16 +317,34 @@ public sealed class FtpServer : IAsyncDisposable
                             passive.Stop();
                             passive = null;
                             using var dataStream = dataClient.GetStream();
-                            var served = await SendFileAsync(
-                                path, dataStream, restartOffset, cancellationToken).ConfigureAwait(false);
-                            _bytesServed.AddOrUpdate(name, served, (_, total) => total + served);
+                            _transfers.Enqueue(transfer);
+                            var complete = await SendFileAsync(
+                                path, dataStream, restartOffset, cutAfter, stallAfter, transfer,
+                                sent => _bytesServed.AddOrUpdate(name, sent, (_, total) => total + sent),
+                                cancellationToken).ConfigureAwait(false);
                             restartOffset = 0;
-                            await WriteAsync(writer, "226 Transfer complete").ConfigureAwait(false);
+                            if (complete)
+                            {
+                                transfer.Completed = true;
+                                await WriteAsync(writer, "226 Transfer complete").ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                dataClient.Client.Close();
+                                await WriteAsync(writer, "426 Connection closed; transfer aborted").ConfigureAwait(false);
+                            }
                         }
                         catch (Exception) when (!cancellationToken.IsCancellationRequested)
                         {
                             restartOffset = 0;
-                            await WriteAsync(writer, "426 Connection closed; transfer aborted").ConfigureAwait(false);
+                            try
+                            {
+                                await WriteAsync(writer, "426 Connection closed; transfer aborted").ConfigureAwait(false);
+                            }
+                            catch (IOException)
+                            {
+                                // The client has gone.
+                            }
                         }
 
                         break;
@@ -307,10 +359,15 @@ public sealed class FtpServer : IAsyncDisposable
         }
     }
 
-    private static async Task<long> SendFileAsync(
+    /// <returns>False when the transfer was cut short or stalled on purpose.</returns>
+    private static async Task<bool> SendFileAsync(
         string path,
         Stream dataStream,
         long offset,
+        long? cutAfter,
+        long? stallAfter,
+        FtpTransfer transfer,
+        Action<long> sent,
         CancellationToken cancellationToken)
     {
         var throttle = string.Equals(Path.GetFileName(path), "slow.bin", StringComparison.OrdinalIgnoreCase)
@@ -328,7 +385,18 @@ public sealed class FtpServer : IAsyncDisposable
         var stopwatch = Stopwatch.StartNew();
         while (true)
         {
-            var read = await file.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            var limit = cutAfter ?? stallAfter;
+            var want = limit is { } stop ? (int)Math.Min(buffer.Length, Math.Max(0, stop - served)) : buffer.Length;
+            if (want == 0)
+            {
+                await dataStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                if (cutAfter is not null) return false;
+                // A stalled connection: nothing more is sent, and the socket stays open until the client gives up.
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            var read = await file.ReadAsync(buffer.AsMemory(0, want), cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
                 break;
@@ -336,6 +404,8 @@ public sealed class FtpServer : IAsyncDisposable
 
             await dataStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             served += read;
+            transfer.Sent = served;
+            sent(read);
             if (throttle > 0)
             {
                 var expected = served / (double)throttle;
@@ -348,7 +418,7 @@ public sealed class FtpServer : IAsyncDisposable
         }
 
         await dataStream.FlushAsync(cancellationToken).ConfigureAwait(false);
-        return served;
+        return true;
     }
 
     private string? Resolve(string argument)
@@ -365,6 +435,15 @@ public sealed class FtpServer : IAsyncDisposable
         }
 
         return Path.Combine(Root, name);
+    }
+
+    /// <summary>One RETR: the file, the REST offset it began at, the bytes it sent and whether it finished.</summary>
+    public sealed class FtpTransfer(string fileName, long offset)
+    {
+        public string FileName { get; } = fileName;
+        public long Offset { get; } = offset;
+        public long Sent { get; set; }
+        public bool Completed { get; set; }
     }
 
     private static Task WriteAsync(StreamWriter writer, string line) => writer.WriteLineAsync(line);

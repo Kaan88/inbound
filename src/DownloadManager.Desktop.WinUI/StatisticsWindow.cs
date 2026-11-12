@@ -101,6 +101,22 @@ public sealed class StatisticsWindow : Window
         _connection.ConnectionChanged += OnConnectionChanged;
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _timer.Tick += async (_, _) => await RefreshAsync();
+        // Audit M11: no statistics.get every 2 s while minimised or hidden; back in view, it reads them at once.
+        AppWindow.Changed += (sender, change) =>
+        {
+            if (!change.DidPresenterChange && !change.DidVisibilityChange || _closed) return;
+            var shown = sender.IsVisible && sender.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+            if (shown == _timer.IsEnabled) return;
+            if (shown)
+            {
+                _timer.Start();
+                _ = RefreshAsync();
+            }
+            else
+            {
+                _timer.Stop();
+            }
+        };
         _connection.Start();
         _timer.Start();
         _ = RefreshAsync();

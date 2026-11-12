@@ -12,10 +12,17 @@ export interface ConfirmOptions {
   checkbox?: { label: string; checked?: boolean };
   /** A muted line under the message. */
   note?: string;
+  /**
+   * A text box under the message (EXT.R11 Rename), focused with the part before the last dot selected. Enter confirms.
+   * The answer carries what it holds.
+   */
+  input?: { label: string; value: string };
 }
 
 export interface ConfirmAnswer {
   checked: boolean;
+  /** The text box's value, when there is one. */
+  value?: string;
 }
 
 let openCount = 0;
@@ -59,6 +66,21 @@ export function confirmDialog(options: ConfirmOptions, host: HTMLElement = docum
     const text = document.createElement("span");
     text.textContent = options.checkbox.label;
     label.append(box, text);
+    body.append(label);
+  }
+  let field: HTMLInputElement | undefined;
+  if (options.input) {
+    const label = document.createElement("label");
+    label.className = "dialog-field";
+    const text = document.createElement("span");
+    text.textContent = options.input.label;
+    field = document.createElement("input");
+    field.type = "text";
+    field.className = "field";
+    field.value = options.input.value;
+    field.spellcheck = false;
+    field.autocomplete = "off";
+    label.append(text, field);
     body.append(label);
   }
   if (options.note) {
@@ -108,9 +130,19 @@ export function confirmDialog(options: ConfirmOptions, host: HTMLElement = docum
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener("keydown", onKey, true);
-    confirm.addEventListener("click", () => finish({ checked: box?.checked === true }));
+    const answer = (): ConfirmAnswer => field ? { checked: box?.checked === true, value: field.value } : { checked: box?.checked === true };
+    confirm.addEventListener("click", () => finish(answer()));
+    field?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); finish(answer()); }
+    });
     cancel.addEventListener("click", () => finish(null));
     backdrop.addEventListener("click", (event) => { if (event.target === backdrop) finish(null); });
-    (options.danger ? cancel : confirm).focus();
+    if (field) {
+      field.focus();
+      const dot = field.value.lastIndexOf(".");
+      field.setSelectionRange(0, dot > 0 ? dot : field.value.length);
+    } else {
+      (options.danger ? cancel : confirm).focus();
+    }
   });
 }

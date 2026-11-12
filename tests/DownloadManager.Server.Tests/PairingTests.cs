@@ -56,6 +56,125 @@ public sealed class PairingTests
     }
 
     [Fact]
+    public async Task ThePairAnswerGivesTheServersNameAndLeavesItOutForNone()
+    {
+        // EXT.R9 (GitHub #2): the name set on the server.
+        await using (var server = await AuthServer.StartAsync(change: options => options with { ServerName = "  Home NAS\t" }))
+        {
+            using var user = await AuthServer.SetUpAsync(server);
+            var code = await NewCodeAsync(user);
+            using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+            using var response = await extension.PostAsync("/api/pair", new { code, name = "Chrome on Windows" });
+            var body = await extension.JsonAsync(response);
+            Assert.Equal("Home NAS", body.GetProperty("serverName").GetString());
+            // name stays the browser's own name, as before.
+            Assert.Equal("Chrome on Windows", body.GetProperty("name").GetString());
+        }
+
+        // The machine's name when none is set.
+        Assert.Equal("nas-box", await PairedServerNameAsync(() => "nas-box"));
+        // A container id as the machine's name (12 or 64 hex digits), or no name at all, gives none, so the extension
+        // shows the address. The rest of the answer is as before.
+        Assert.Null(await PairedServerNameAsync(() => "3f2a9c1b7d4e"));
+        Assert.Null(await PairedServerNameAsync(() => new string('a', 64)));
+        Assert.Null(await PairedServerNameAsync(() => null));
+    }
+
+    /// <summary>Pairs with a server whose machine name is <paramref name="machineName"/>; the answer's serverName, or null when left out.</summary>
+    private static async Task<string?> PairedServerNameAsync(Func<string?> machineName)
+    {
+        await using var server = await AuthServer.StartAsync(change: options => options with { ServerName = null, MachineName = machineName });
+        using var user = await AuthServer.SetUpAsync(server);
+        var code = await NewCodeAsync(user);
+        using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+        using var response = await extension.PostAsync("/api/pair", new { code, name = "Chrome on Windows" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await extension.JsonAsync(response);
+        Assert.True(body.GetProperty("ok").GetBoolean());
+        Assert.StartsWith(Pairing.TokenPrefix, body.GetProperty("token").GetString());
+        Assert.False(string.IsNullOrEmpty(body.GetProperty("id").GetString()));
+        Assert.Equal("Chrome on Windows", body.GetProperty("name").GetString());
+        Assert.Equal("extension", body.GetProperty("role").GetString());
+        return body.TryGetProperty("serverName", out var name) ? name.GetString() : null;
+    }
+
+    [Theory]
+    [InlineData("Home NAS", "3f2a9c1b7d4e", "Home NAS")]
+    [InlineData(null, "nas-box", "nas-box")]
+    [InlineData("   ", "DESKTOP-42", "DESKTOP-42")]
+    [InlineData(null, "3f2a9c1b7d4e", null)]
+    [InlineData(null, "3F2A9C1B7D4E", null)]
+    [InlineData(null, "3f2a9c1b7d4e3f2a9c1b7d4e3f2a9c1b7d4e3f2a9c1b7d4e3f2a9c1b7d4e3f2a", null)]
+    [InlineData(null, "3f2a9c1b7d4", "3f2a9c1b7d4")]
+    [InlineData(null, "abcdefabcdeg", "abcdefabcdeg")]
+    [InlineData(null, null, null)]
+    public void TheServersNameIsTheSetOneElseTheMachinesUnlessThatIsAContainerId(string? configured, string? machine, string? expected) =>
+        Assert.Equal(expected, ServerOptions.NameFor(configured, machine));
+
+    [Fact]
+    public void TheServersNameComesFromTheEnvironmentAndIsCut()
+    {
+        Assert.Equal("Home NAS", ServerOptions.FromEnvironment(name => name == ServerOptions.NameVariable ? "Home NAS" : null).ServerName);
+        Assert.Null(ServerOptions.FromEnvironment(_ => null).ServerName);
+        Assert.Equal(ServerOptions.MaxNameLength, ServerOptions.NameFor(new string('n', 300), null)!.Length);
+        // The cut counts code points: an emoji across the 100th place is kept whole or left out, never halved.
+        var astral = ServerOptions.NameFor(new string('n', 99) + "😀" + "tail", null)!;
+        Assert.Equal(new string('n', 99) + "😀", astral);
+        Assert.Equal(ServerOptions.MaxNameLength, astral.EnumerateRunes().Count());
+        Assert.DoesNotContain(astral.EnumerateRunes(), rune => rune == System.Text.Rune.ReplacementChar);
+    }
+
+    [Fact]
+    public async Task Audit3L1_APasswordChangeEndsAWaitingCode()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var owner = await AuthServer.SetUpAsync(server);
+        using var other = new AuthClient(server.Base);
+        await other.PostAsync("/api/auth/signin", new { password = AuthServer.Password });
+        var code = await NewCodeAsync(other);
+
+        Assert.Equal(HttpStatusCode.OK,
+            (await owner.PostAsync("/api/auth/password", new { current = AuthServer.Password, password = "the new password" })).StatusCode);
+        using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+        Assert.Equal(HttpStatusCode.Unauthorized, (await extension.PostAsync("/api/pair", new { code })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Audit3L1_SigningOutEndsTheCodeThatBrowserShowedOnly()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var owner = await AuthServer.SetUpAsync(server);
+        using var other = new AuthClient(server.Base);
+        await other.PostAsync("/api/auth/signin", new { password = AuthServer.Password });
+
+        // Another browser's sign-out leaves the owner's code alone.
+        var code = await NewCodeAsync(owner);
+        Assert.Equal(HttpStatusCode.OK, (await other.PostAsync("/api/auth/signout")).StatusCode);
+        await PairAsync(server, code);
+
+        // The browser that showed the code signing out ends it.
+        code = await NewCodeAsync(owner);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PostAsync("/api/auth/signout")).StatusCode);
+        using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+        Assert.Equal(HttpStatusCode.Unauthorized, (await extension.PostAsync("/api/pair", new { code })).StatusCode);
+    }
+
+    [Fact]
+    public void Audit3L1_CancelCodeOfTouchesOnlyItsOwnersCode()
+    {
+        var work = ServerHarness.NewWork();
+        var pairing = new Pairing(AuthStore.Open(work), new ManualTime(DateTimeOffset.UtcNow));
+        object owner = new(), stranger = new();
+        var (code, _) = pairing.NewCode(owner);
+        pairing.CancelCodeOf(stranger);
+        Assert.NotNull(pairing.CodeExpiresAt);
+        pairing.CancelCodeOf(owner);
+        Assert.Null(pairing.CodeExpiresAt);
+        Assert.Null(pairing.Redeem(code, "late"));
+        Directory.Delete(work, recursive: true);
+    }
+
+    [Fact]
     public void ACodeExpiresAfterTenMinutesAndAThousandWrongTriesEndIt()
     {
         var work = ServerHarness.NewWork();

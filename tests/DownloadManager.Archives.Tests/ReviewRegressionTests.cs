@@ -417,6 +417,44 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Assert.Contains("hidden data stream", failure.Message);
     }
 
+    [RequiresSevenZipTheory]
+    [InlineData("plain.rar", "Cannot open encrypted archive.txt")]
+    [InlineData("Cannot open encrypted archive.rar", "a.txt")]
+    public async Task NamesThatReadLikeToolMessagesAreNotTakenForThem(string archiveName, string entry)
+    {
+        // Audit L22: the tool's output was matched as free text, and it holds the entries' names and the archive's.
+        var archive = Space.WriteArchive(archiveName, RarBuilder.Rar5((entry, Text)));
+
+        var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
+        Assert.False(probe.HeadersEncrypted);
+        Assert.False(probe.IsEncrypted);
+        Assert.Empty(probe.MissingVolumes);
+
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        Assert.Equal(Text, File.ReadAllBytes(Space.Output(entry)));
+    }
+
+    [Fact]
+    [Trait("Platform", "Windows")] // NTFS alternate data streams
+    public void AReadOnlyFileIsStillMarkedAndStaysReadOnly()
+    {
+        // 7-Zip restores the R attribute from the archive, and Windows refuses a stream write to such a file.
+        var file = Path.Combine(Space.Root, "setup.exe");
+        File.WriteAllBytes(file, Text);
+        File.SetAttributes(file, FileAttributes.ReadOnly | FileAttributes.Archive);
+        try
+        {
+            DataStreams.WriteZone(file, 3);
+
+            Assert.Equal(3, DataStreams.ReadZoneId(file));
+            Assert.True(File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly));
+        }
+        finally
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+    }
+
     [Fact]
     [Trait("Platform", "Windows")] // NTFS alternate data streams
     public void AZoneMarkPassesAWalkOnlyWhenTheArchiveHasOneForTheToolToHaveCopied()
@@ -459,6 +497,50 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
         Assert.False(result.FlushedToDisk);
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
+    }
+
+    [RequiresSevenZipFact]
+    public async Task ACancelAsTheLastFileIsPlacedNoLongerReportsCancelledWithTheFilesInPlace()
+    {
+        var archive = Space.WriteArchive("one.rar", RarBuilder.Rar5(("a.txt", Text)));
+        var request = new ExtractionRequest { FirstVolume = archive, Destination = Space.Destination, StagingRoot = Space.Staging, MakeDurable = true };
+        using var cancel = new CancellationTokenSource();
+        var progress = new ImmediateProgress<ExtractionProgress>(report =>
+        {
+            if (report is { Phase: ExtractionPhase.Finalizing } && report.FilesFinalized == report.FilesTotal) cancel.Cancel();
+        });
+
+        var result = await Extractor().ExtractAsync(request, progress, cancel.Token);
+
+        Assert.True(cancel.IsCancellationRequested);
+        Assert.True(result.FlushedToDisk);
+        Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
+        Space.AssertNoStagingLeft();
+    }
+
+    [RequiresSevenZipFact]
+    public async Task AFailureAfterTheFilesArePlacedTakesThemBackOutAndRestoresWhatOverwriteDisplaced()
+    {
+        var archive = Space.WriteArchive("two.rar", RarBuilder.Rar5(("a.txt", Text), ("b.txt", Text)));
+        Directory.CreateDirectory(Space.Destination);
+        File.WriteAllBytes(Space.Output("a.txt"), Other);
+        var request = new ExtractionRequest
+        {
+            FirstVolume = archive, Destination = Space.Destination, StagingRoot = Space.Staging, MakeDurable = true,
+            ConflictPolicy = ExtractionConflictPolicy.Overwrite,
+        };
+
+        // Files flush fine; the folder flush after the move fails with something no flush is expected to throw.
+        var options = new SevenZipExtractorOptions
+        {
+            FlushOverride = path => { if (Directory.Exists(path)) throw new InvalidOperationException("after the move"); },
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Extractor(options).ExtractAsync(request, null, CancellationToken.None));
+
+        Assert.Equal(Other, File.ReadAllBytes(Space.Output("a.txt")));
+        Assert.False(File.Exists(Space.Output("b.txt")));
+        Space.AssertNoStagingLeft();
     }
 
     [RequiresSevenZipFact]

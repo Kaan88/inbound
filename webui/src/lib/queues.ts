@@ -1,6 +1,6 @@
 // Queue and schedule rules for the Queues screen, kept out of the component so they can be tested. The wording and
 // limits are the desktop Scheduler window's (SchedulerWindow.cs, SchedulerRunOptionsEditor.cs, MainWindow queue editor).
-import type { Job, Queue, Schedule } from './types';
+import type { Job, Queue, Schedule, Settings } from './types';
 
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 export const ALL_DAYS = DAY_NAMES.join(',');
@@ -295,6 +295,42 @@ export function scheduleConflict(current: Schedule[], draft: Pick<ScheduleDraft,
     return { error: removing ? `Schedule '${name}' changed elsewhere; it was not removed.` : `Schedule '${name}' changed elsewhere; its unsaved edit was not applied.` };
   }
   return null;
+}
+
+/**
+ * Puts a saved schedule edit into `settings`, the server's current ones (audit 4 H1): only this schedule changes, and its
+ * queue's retry limit when the form changed it (`retry` undefined: not changed; null: no limit). The conflict checks run
+ * again on these settings, as the page's copy may be older, so a schedule removed or changed elsewhere is not put back.
+ */
+export function applyScheduleEdit(
+  settings: Pick<Settings, 'schedules' | 'queues'>,
+  draft: Pick<ScheduleDraft, 'isNew' | 'baseline' | 'schedule' | 'retryInitial'>,
+  value: Schedule,
+  retry?: number | null,
+): { refused: string } | undefined {
+  const conflict = scheduleConflict(settings.schedules, draft);
+  if (conflict) return { refused: conflict.error };
+  const queue = settings.queues.find((q) => q.id === value.queueId);
+  if (retry !== undefined) {
+    const clash = retryConflict(queue, draft);
+    if (clash) return { refused: clash.error };
+  }
+  const index = settings.schedules.findIndex((s) => s.id === value.id);
+  if (index >= 0) settings.schedules[index] = { ...settings.schedules[index], ...value };
+  else settings.schedules.push(value);
+  if (queue && retry !== undefined) {
+    if (retry === null) delete queue.retryLimit;
+    else queue.retryLimit = retry;
+  }
+  return undefined;
+}
+
+/** Removes a schedule from `settings`, the server's current ones, unless it changed or went since `baseline` was read. */
+export function applyScheduleRemoval(settings: Pick<Settings, 'schedules'>, baseline: Schedule): { refused: string } | undefined {
+  const conflict = scheduleConflict(settings.schedules, { isNew: false, schedule: baseline, baseline }, true);
+  if (conflict) return { refused: conflict.error };
+  settings.schedules = settings.schedules.filter((s) => s.id !== baseline.id);
+  return undefined;
 }
 
 /** "every day", the picked days, or the one-time date. */

@@ -1,4 +1,501 @@
-﻿# Progress — session handoff
+# Progress — session handoff
+
+### T1.SETUP magnet and .torrent association in Setup (owner request, 2026-11-12)
+
+Owner: "have torrent and magnet file association added to installer for the actual release." Status: **partial**
+(built and tested automatically; Setup not run). Setup has a new task, "Open magnet links and .torrent files with
+Inbound Download Manager (turns torrents on)", checked by default. Ticked, Setup runs the Host's configure step with
+`--configure-torrent-handler=enabled`, which turns on Options › Torrents and its "open with" option and registers the
+handler at once (the Host registers it only with torrents on, and keeps it in step with Options afterwards). Unticked,
+nothing changes. Another app's magnet handler is never replaced (unchanged `TorrentHandlerRegistration` rule).
+Found on the way: the configure step wrote the real sign-in Run entry even with `DOWNLOADMANAGER_DATA` set (a check
+run here removed the installed app's entry; restored at once); it now skips it like the Host's normal start.
+Evidence: Host build; configure run against a throwaway data folder (exit 0, settings torrentsEnabled and
+torrentHandler true, "disabled" refused with 2, Run entry untouched); `NativeHostRegistrationTests` 63 of 63 with
+the new `Setup_offers_the_magnet_and_torrent_association_through_the_hosts_configure_step`. Still to do: the VM run
+(fresh install with the task ticked: a magnet link and a .torrent file open in Inbound).
+
+### UPD.N1 changelog popup (owner request, 2026-11-12)
+
+Owner: "future goal, definitely in next release. changelog popup when update is found or is done and the app is first
+opened." Status: **planned** (ROADMAP UPD.N1); not started.
+
+### AUDIT.1 whole-codebase audit and fixes (2026-11-12, `torrent-t1`)
+
+Owner: a full audit of the codebase (never done before), split in four read-only parts, then "layout a plan and begin
+fixing". Status: **partial** (merged and tested automatically). Reports (local, not committed): `tmp\audit\1-engine-persistence-core.md`,
+`2-runtime-torrents.md`, `3-host-server-browser.md`, `4-frontends-cli-scripts.md`. Totals: no critical; 6 high
+(HLS/DASH retried fragment corrupts the file; fragment deadline; schedule when-done actions run for web-session jobs;
+a completed job with a missing file is downloaded again; stale whole-settings saves revert queue state, quotas and
+schedules; Scheduler rename can end the window process), about 50 medium, about 90 low, plus tests that don't check
+what they claim. Fixing in eight tracks (engine media; engine HTTP/FTP/persistence; runtime queues/scheduler/settings;
+runtime IPC and web-session security; archives/torrents/providers; Host/Server/NativeHost/extension; WinUI; web UI,
+CLI and scripts), each implemented, reviewed adversarially and fixed again, then merged here.
+
+All eight tracks are merged (branch `audit-merge`, then here): about 190 findings fixed, each with a test where one
+could be written. Status stays **partial**: built and tested automatically (results below), not yet tried in the
+running app or on the VM.
+
+What changes for the user, by area:
+
+- Engine: a retried HLS/DASH fragment no longer corrupts the file; fragment deadlines hold; multi-Period DASH is
+  refused in words instead of joined wrongly; SegmentTimeline `r=-1` repeats to the period's end; the FFmpeg mux
+  timeout grows with the input size; track files are kept when a mux fails. FTP checks MDTM before resuming. The HTTP
+  engine never sends `Proxy-Authorization` to a server. A site login matches only its own scheme. Leftover atomic
+  temp files are swept at start.
+- Runtime: settings saves from an older copy no longer revert a queue's run state, quota use or schedules (Host keeps
+  `IsRunning`, quota use and window start; a `settings.changed` event tells every client; `queue.ResetQuota` starts a
+  fresh quota window). A completed job whose file is missing is not downloaded again by itself. Schedule when-done
+  actions run only for runs the schedule started, and a web session can't edit such a schedule. Resume All skips
+  cancelled and non-resumable jobs; jobs paused by exit resume at start; scheduler wake-ups are capped at 1 h.
+- Host and browser: a handoff folder is used only when it is a known folder or one the Host's own dialog returned
+  (kept in `picked-folders.json`, newest 64); any other falls back to the default folder with a notification.
+  `host.openUi` accepts only `settings`. A frame over the browsers' 1 MB limit is never sent (`message_too_large`);
+  the popup asks for the newest 20. Client queues hold 4096 messages and close on overflow. Update checks retry from
+  2 min up to 1 h. Logs are kept 30 days, 20 MB a day. Firefox catches at most 10 downloads per site a minute; Firefox
+  ask mode got only the minimal fix (letting Firefox continue would bring back its Save dialog). Pairing: a password
+  change or the showing browser's sign-out ends a waiting code.
+- Archives, torrents, providers: 7z comments handled; finalize writes its intent first; 64 passwords at most per CCF
+  package; the torrent worker refuses out-of-range numbers (L5, worker rebuilt in the track 5 worktree: the release
+  build must rebuild it).
+- WinUI: reconnect backoff 2/4/8/10 s; charts stop redrawing when idle; the Scheduler refreshes on events instead of
+  polling; Options and the Scheduler read the Host's settings before saving and send only what changed; the Scheduler
+  rename no longer ends the window process.
+- CLI and web UI: passwords only from stdin or `--password-env`; `dm host open` with no argument opens the main window;
+  `dm add` uses the default queue; the web UI keeps a per-torrent options form the user is editing across reconnects.
+
+Waiting on the owner (asked 2026-11-12; ROADMAP AUDIT.Q1 and AUDIT.Q2):
+
+- **AUDIT.Q1 (L10): should `dm remove` keep deleting a finished download's file by default?** Today it does, and
+  `dm remove --help` now says so. The desktop and web UI ask each time. Options: keep it; or keep the file unless
+  `--delete-file` is given (safer, but changes what scripts that use `dm remove` do). Nothing changes until answered.
+- **AUDIT.Q2 (L25): TorBox, sending a failed item's hash again.** When a TorBox item fails and the app sends the same
+  torrent or link again, the app can't tell whether TorBox makes a new item or answers with the old failed one, so a
+  retry may keep finding the failed item. Fixing it needs a few live calls on the TorBox account (allowed by the
+  owner for live tests) to see what TorBox does; it waits for a session with the key set. Not a release blocker.
+
+Left as is, for the owner or for later:
+
+- L10: `dm remove` still deletes a finished download's file by default (help now says so). Owner's call.
+- L24 reverted: rollback copies are kept.
+- L25 (TorBox resubmitting a failed hash): needs live TorBox calls to learn what TorBox does.
+- A damaged or newer-schema settings file still resets to defaults (the old file stays in the corrupt folder).
+- The torrent worker does not check the addresses it connects to (DNS rebinding); needs libtorrent changes.
+- Live speed limits are still not offered for stream jobs. `HandoffRequest.TotalBytes` is still sent and unread.
+- `webui/src/lib/types.ts` still has an optional `lastError` the Host no longer sends.
+- No end-to-end test for the CLI showing a Host refusal (M12) or for removal-cancel timeouts (2-M12).
+
+Checks on the merged branch (2026-11-12): solution build clean; extension `tsc` and 311 tests; web UI 530 tests and
+svelte-check 0 errors; Core 1,688, Engine 229, Archives 401, Containers 188, TorBox 323, Server 187 all pass;
+Torrents 120 of 121 with the rebuilt worker; Integration 1,760 of 1,762 run (2 skipped). Two older tests were updated
+to the audit's intended rules (a missing finished file stays completed with a note; the post-download program must be
+a full .exe path). Still failing, and not from this work: `AFolderNamedInTheSettingsInAnyFormStays(share)` (fails the
+same on 2ca5935; the `\\localhost\C$` form of the folder isn't matched) and
+`WorkerSeedingTests.SeedTurnsSeedingOnAndOff...` (the seeder never lists the incoming peer; fails the same with the
+pre-audit worker, so likely this machine's loopback/firewall; not looked into further). An independent review of the
+four merges' conflict resolutions found nothing. The rebuilt worker is in `artifacts\torrent-worker\win-x64` (the
+old one kept as `.pre-audit`); the release build should still rebuild it with `scripts\build-torrent-worker.ps1`.
+
+Chrome Web Store (owner, 2026-11-12: "push the updated extension to chrome store immediately"): extension **0.6.2**
+(this merge's extension: the torrent-era popup work and audit track 6) was built with `package-extension-store.ps1`
+(19 files; no torrent or magnet wording; permissions the same as the live 0.6.0), uploaded and submitted with
+`publish-extension-chrome.ps1`: state PENDING_REVIEW, 0.6.0 stays live until Google approves. 0.6.2 rather than
+0.6.1 because 0.6.1 is the Firefox build already signed from older code. Firefox and Edge still have to get 0.6.2.
+
+### Torrents T1–T5 in all four frontends (2026-11-12, `torrent-t1`)
+
+Owner (2026-11-11): torrents fully in the WinUI app, the Linux app, the extension and the web UI, real tests last; then
+say "ready for review" (the owner runs the Fable review). Status: **partial**: built and tested automatically in three
+waves of build, adversarial review and fix, then walked in the WinUI app, the web UI and the extension popup on
+loopback (below); one gap found in the walk is open (damaged pieces can't be repaired).
+
+- Wave A (merged before e3cf7a3): T2 seeding core and network (listen port outside Windows' dynamic range, UPnP/NAT-PMP,
+  firewall rule, port hint), T3 web UI Options › Torrents and server port, T4 Linux magnet/.torrent handler, T5 polish
+  (plain errors, disk-full pause, ready-to-choose notice, list export/import).
+- Wave B (6707a0c): one shared speed budget; seeding against queues, schedules and extraction; CLI `torrent seed`,
+  `peers`, `trackers`, `pieces`, `network`; desktop and web seeding settings, seeding rows and Start/Stop Seeding,
+  Peers/Trackers/Pieces & Speed tabs. Extension "safe parity only" (owner): torrent rows show the short magnet, no
+  useless Resume, "Open in app"; no torrent wording in the store build.
+- Wave C (this merge): a parity check of each frontend against `docs/plans/torrent-mockups/` confirmed about 30 gaps;
+  filled as follows.
+  - Worker 0.4.0-t3 (`native/torrent-worker/PROTOCOL.md`): `recheck`, `announce`, `sequential`, `details`,
+    `setPeerLimits`, `setProxy`; per-torrent limits; tracker `nextAnnounce`; `dhtNodes`; libtorrent's seeding queue
+    for "seeds at once". A recheck sent with an add waits for the add's own check; a finished torrent is checked in
+    upload mode and paused with an error if damaged.
+  - Host (`docs/ipc-protocol.md`): file priorities (Skip/Low/Normal/High), `torrent.options`/`setOptions` (own limits,
+    seeding goal global/ratio/hours/never, download in order), `torrent.recheck`, `torrent.announce`,
+    `torrent.details`, `torrent.watch` (progress every 5 s unless a window watches, then 1 s), free-space check on
+    inspect/add, DHT/PEX/LSD/encryption, seeds at once, connection limits, torrents through the app's proxy (system
+    proxy and SOCKS4a refused in words). CLI `dm torrent inspect|add|files|priority|options|recheck|announce|details`.
+  - Desktop (WinUI and the Uno Linux window, which links its files) and web UI: Downloading/Seeding/Stopped views with
+    counts, Seeds/Peers/Up/Ratio columns (their sort holds only in the torrent views), Copy Magnet Link, seeding goal
+    bar and line, per-file priorities in the add dialog and Files tab, per-torrent Options tab, Force Recheck and
+    Announce Now, Overview facts (added from, v2 hash, private, pieces, wasted), DHT nodes in the chip, the new
+    Options › Torrents settings; web: phone summary line, ready-to-choose notice, Docker doc seeding section.
+  - After the merge: the list's goal bar, Ratio cell, Time left and the goal line follow a torrent's own seeding goal
+    (they read only Options' before); the web Overview no longer shows Options' goal beside the torrent's own.
+  - Left out on purpose (low value or privacy): disk-cache size, Random port button, Copy addresses of peers, a phone
+    bottom bar (the drawer covers it), "keep top folder".
+- Firewall: test runs and the port probe stay on loopback (`INBOUND_TORRENT_LOOPBACK_ONLY=1` set by the test projects'
+  module initializers; `CanListenOn` binds 127.0.0.1), so no Windows Firewall prompt comes from tests (9aed20a).
+- Linux: deferred (owner, 2026-11-12: "delay linux tests and build completely for another version"). No Linux build,
+  AppImage or Linux test for torrents in this version; the shared Uno code stays as it is.
+- arm64: on hold (owner, 2026-11-11): nothing is built, tested or checked for arm64 until the owner says so.
+- Known test failures: `AFolderNamedInTheSettingsInAnyFormStays(how: "share")` fails on `main` too. Flaky under load:
+  `ATorrentDeletedAndAddedAgainWhileTheWorkerStillRunsDownloadsAgain(stage: "metadata")`,
+  `WorkerSeedingTests.SeedTurnsSeedingOnAndOff…` (passes alone).
+- Evidence (automatic): `dotnet build DownloadManager.slnx -c Release` clean; Core 1,615,
+  Torrents 110 (incl. the real worker 0.4.0-t3 on loopback), Server 179 of 180 (`ContainerUploadTests.OnlyContainerKindsAndSizesAreTaken`
+  failed under load, passes alone), Integration 1,620 of 1,621 (only the `share` case above); web UI vitest 508,
+  `svelte-check` 0 errors; extension `tsc`, both builds and `npm test` 290 (torrent-free store build guard included);
+  golden frames unchanged.
+- Walk (2026-11-12, dark mode, isolated test instance `uitest-t1` and a headless server on 127.0.0.1:8099; a
+  `TorrentWorkerProbe` seeder on 127.0.0.1:4919 with 3 torrents: a 6-file pack, 250 files, one 30 MB file):
+  - WinUI: Options › Torrents shows the new settings; Add Magnet from the clipboard with free space; file choice with
+    a Priority column and right-click High/Normal/Low/Skip; three downloads complete with SHA-256 equal to the seed's
+    for every file, the skipped file never written, no part file left; seeding rows with Time left to the goal;
+    Torrents views with Seeds/Peers/Up/Ratio and counts; Copy Magnet Link gives the short magnet; Peers (no
+    addresses), Pieces & Speed, Options tab (own Ratio 3 goal: "Saved. The torrent uses them now.", the list and
+    `dm torrent options` follow it); Overview facts; Delete with files; `dm torrent recheck`; a byte changed on disk
+    then Force Recheck stops seeding with "the file check found damaged or missing pieces".
+  - Web UI: Add magnet, Choose files (making-of skipped), download completes, 5 files hash-equal and the skipped one
+    absent (482 of 642 pieces); Files tab priority pickers; Peers, Trackers ("Peers are found through DHT"), Pieces &
+    Speed, Options tab own Ratio 2 ("Saved and applied now"; Overview "Ratio 2.0 (this torrent's own)"); Force recheck
+    after a changed byte stops seeding and the row says why; Torrents view columns and sub-view chips; Copy Magnet
+    Link gives the short magnet; phone width (375 px) list and details without sideways scroll.
+  - Extension popup (Playwright's Chromium 1254, `dist` unpacked as `pknddmneejadnnngffojnoecojhdfalc`, test
+    native-host registration under the Chromium key, removed after): the test instance's torrent rows show name,
+    size and state with Stop/Delete/Open folder, no torrent wording, no console error, no sideways overflow. A row
+    waiting for a file choice was not walked (covered by `app-managed-rows.test.cjs`).
+  - Idle (G13/G15): with seeding stopped and nothing downloading the test Host's worker exits ("no torrent is
+    running") and the Host used under 15 ms CPU in 79 s (below the timer's resolution), 11 threads.
+  - Fixed from the walk: priorities chosen before Start were lost when the file list arrived again
+    (`TorrentDownloadEngine.MergeFiles` kept no `Level`); a seeding fault was only logged and the row said
+    "Completed" (`TorrentJobInfo.SeedingStoppedNote`, said on the row until seeding starts again); the Progress
+    Details footer squeezed "Don't show this again" beside Seed/Recheck/Announce (`LayOutFooter` puts the buttons on
+    their own line); the CLI said "connections: 0 of -1" (now "(no limit)"). A review of these fixes (Haiku,
+    verified) added: the footer is laid out again whenever Recheck/Announce show (Announce appears with the Trackers
+    tab); a fault that comes after seeding was already off is still saved and said; the note shows only on a completed
+    row. Tests: `TheFileListArrivingAgainKeepsEachFilesPriority`, `ASeedingFaultIsSaidOnTheRowUntilItSeedsAgain` (now
+    also reads the store), `AFaultThatComesAfterSeedingWasOffIsStillSaidAndSaved`.
+    After the fixes: build clean; Core 1,615, Torrents 111, Server 180, Integration 1,622 of 1,623 (only the `share`
+    case, which fails on `main` too).
+  - Open: a torrent whose files were damaged after it finished can't be repaired in the app: Start Seeding fails
+    again at once with the same note, and Resume and Force Recheck are disabled while it doesn't seed (ROADMAP T3).
+    The web Choose files dialog has no priority picker (the Files tab and the desktop's file choice have one).
+    Torrents waiting for a file choice count under "Stopped". In the web Options dialog the first OK click once
+    seemed not to register.
+
+### UI.B23 steady speed graph (2026-11-11, `claude/speed-graph-stable`, side session from `torrent-t1`)
+
+Owner: the graph's right end jumps up and down as the speed changes and the graph adapts, like waves. Status: fixed,
+tests pass, watched on a test instance; owner to check.
+
+- Causes in `DownloadSpeedGraph` (main window and Progress Details): the top was recomputed from the visible peak on
+  every sample (decimal steps); min/max buckets were measured from the right edge, so each sample changed which figures
+  a bucket kept; the newest point was drawn at "Now" at once.
+- New UI-free `SpeedGraphModel.cs` (linked into Core.Tests): `SpeedGraphScale` (round binary steps 1, 2, 4, 6, 8, 10 …
+  800 per unit; grows at once; shrinks one step after 5 s with the figures under 85 % of the lower step, then every 3 s;
+  refits at once on a new period, history load, being shown again) and `SpeedGraphPoints` (one point per sample when a
+  period has fewer seconds than pixels, else clock-aligned buckets of whole seconds giving min and max; the bucket under
+  way isn't drawn; points drawn 2 s late, plus 1.5 buckets when bucketed, so the line always reaches past the edge while
+  it slides). A scale change eases the line over 250 ms (one-off transform animation). No new timers.
+- Web UI `SpeedGraph.svelte`: its line was already index-based and fixed per sample; its top (`graphCeiling`) halved as
+  soon as a peak left the ten minutes. New `webui/src/lib/graphScale.ts` gives it the same hysteresis.
+- Evidence: `dotnet build DownloadManager.slnx -c Release` clean; Core.Tests 1,384 passed (34 new cases in
+  `SpeedGraphModelTests`: finished points never move for buckets of 1, 2, 4, 24 s; the line reaches past the edge with
+  jittered ticks; scale steps and hysteresis); web UI 377 passed (4 new), `svelte-check` 0 errors. Test instance
+  (`its own DOWNLOADMANAGER_INSTANCE`, three throttled TestServer downloads, one paused and resumed every 5 s),
+  dark mode, 1 min and 30 min periods: bumps kept their shape while sliding, the right end followed changes without
+  snapping, the scale stayed at 20 MB/s. Light mode not checked (deferred). Not tried in the web UI's browser view.
+- Trade-off: the line's end shows the speed of about 2 s ago (up to 8 s at 1 hour); the summary figures are current.
+
+### Torrent T1 in progress (2026-11-11, `torrent-t1`)
+
+Design: `docs/plans/torrent-t1-design.md`. Status: partial (steps 1 to 5 of 7 built and tested automatically; nothing
+tried in the running app yet).
+
+- Step 1, worker 0.2.0-t1: `partSuffix`, `rootName`, `hold`, `finalize` (17 worker tests). Since then: an add without
+  `hold` clears upload mode (resume data saved while held carried it, so the torrent never asked for a piece). After the
+  review: what is on disk never decides a file's name on add (a user's file of the final name was taken for a finished
+  one and then overwritten); every file gets its part name unless the resume data names it, and a new add flag
+  `finalized` gives the files their own names instead. `finalize` takes an optional `rootName` and refuses, renaming
+  nothing, when any target is already there. Windows build redone; the Linux builds are still the step 1 ones (redo in
+  step 7).
+- Step 2: job model, `TorrentStore`, settings, IPC types (commit 80c064d).
+- Step 3: `TorrentWorkerSupervisor` (Off/Starting/Active/Draining; starts on the first torrent, waits up to 5 s for the
+  listen port, closes 30 s after the last; a dead worker is started again once per 2 minutes and its torrents added back
+  from their resume data; a second death fails them, retryable) and `TorrentDownloadEngine` (progress, finalize, graceful
+  stop with resume data, a held magnet saves its metadata and leaves the worker, the job then shows paused waiting for the
+  file choice). The service picks it for `job.Torrent`, keeps torrent part files out of the orphan scan, deletes a
+  torrent's files and data on delete, reconciles torrent jobs on start without the single part file rules, leaves queued
+  torrents waiting while torrents are off and stops running ones when they are turned off. The Host, the Linux Host and the
+  server get the engine through `TorrentSetup.Create` (none without the worker beside the program or with
+  `DOWNLOADMANAGER_TORRENTS=off`; then nothing starts). Tests: 6 in `EngineTests` (4 on the in-memory engine: lifecycle,
+  stop, restart then failure, no worker while waiting; 2 on the real worker against a loopback seeder: a .torrent job
+  ends under its own name with matching bytes, and a held magnet waits, then downloads after the choice).
+- Step 4: `torrent.inspect`, `torrent.add`, `torrent.setFiles`, `torrent.files` in the service and the dispatcher; the
+  hello lists `torrents` where the Host has the worker. `TorrentFileEntry.Index` counts padding files, as libtorrent does.
+  Torrents ignore the proxy setting in T1 (the worker has no proxy support yet); to be said in the Options page.
+- Review of steps 1 to 4 (workflow, findings checked), fixed:
+  - The top-level name is chosen when the torrent finishes, not on add: a free name like the torrent's (extension
+    kept) when the disk or another download in the list has it. The job then records `Finalized` and the name.
+  - The engine saves queued resume blobs before `pause`/`finalize` and keeps the newest that follows. A failed or
+    cancelled attach, and a run that ends without removing its torrent, send `remove`. A worker that exited before its
+    pump noticed is restarted first, and one being removed is not added back.
+  - `hold` is sent with resume data too. A file choice made while a run starts is kept, and one made while it finishes
+    is refused.
+  - A held result is recognised from the result itself. A choice that came meanwhile requeues it.
+  - Torrent uploads (`upload:` references) resolve in all three hosts and say when the file is gone.
+  - `torrent.setFiles` is refused once the torrent finished, and Move/Rename is refused for torrents.
+  - Deleting removes files under their own names only when this download named them, and only the wanted ones.
+  - Each wanted file gets the Mark of the Web.
+  - Turning torrents off leaves running ones queued, not paused by the user.
+  - Tests: 3 more real-worker tests (a free name at the end with the user's file left alone, refusal over an existing
+    file, a finalized re-add without resume data), 3 more dispatcher tests (free name and the finished-torrent
+    refusals, torrents turned off, a gone upload).
+- Step 5, Windows app (built and tested automatically; **not yet checked in the running app**, so partial):
+  - Options › Torrents (after the provider's page, only where the Host has the engine): "Download torrents on this
+    PC", where magnets and .torrent files go (only with a TorBox account; Ask each time / This PC / TorBox), "Ask which
+    files to download before starting", and the note that torrents don't use the proxy. The mockup's "Save torrents to"
+    and "Speed limit for torrents" are left out (no setting behind them); the handler option comes with step 6.
+  - Tasks › Add Magnet… / Import Torrent File… also without an account. Add URL, drag and drop of .torrent files or
+    magnet text on the window, and Ctrl+V on the list lead to the torrent dialog. With torrents off, an account takes
+    them as before; without one, Add URL says how to turn torrents on.
+  - Torrent dialog (`TorrentAddDialog`): one line per magnet or file, read with `torrent.inspect` (name, size, files,
+    "Already in the list", errors); This PC / TorBox per line with an account; a file tree for multi-file .torrent
+    files; magnets ask once their list arrives; Save to, Start, Queue. TorBox lines go on to the provider's own dialog.
+  - The list: torrent rows (swarm icon, "Downloading · N peers", "3 of 11 files", short magnet only), expandable
+    display-only file rows (at most 200, then "N more files"), a Torrents view, a status-bar chip
+    ("Torrents: 2 active · 47 peers") that opens it, Choose Files…, and Move/Rename, Redownload, Refresh address,
+    grouping and Open With refused for torrents.
+  - Progress Details: torrent facts (status, peers, files, info hash) and a Files tab with tick boxes and progress; a
+    torrent waiting for its file choice opens there with Start.
+  - Remote servers: a local .torrent is uploaded before it is inspected or added there.
+  - Tests: UI-free rules in `TorrentRules`/`TorrentAddLines` (Core.Tests links them).
+  - Review (2026-11-11, 12 findings confirmed and fixed): a network or device .torrent path is refused before anything
+    opens it (Host `TorrentCommands`, the window's Host client, drop and paste), so no Windows credentials go to another
+    computer; the provider hand-off keeps its own lines instead of the clipboard's; one dropped .torrent goes to TorBox
+    as a file; a server switch during an add no longer crashes the window; Add URL with torrents off offers Options;
+    Tasks items follow the snapshot; "Show in list" for a torrent already listed; the file choice opens by itself when
+    a magnet's list arrives (also after another dialog closes); torrent file lists are read on change, not every 3 s;
+    the Host's own error is shown; the chosen-file check is linear for big torrents.
+  - Gaps: per-file progress shows the torrent's state word until `torrent.files` carries done bytes; no sidebar count
+    badge, no "Free on D:" figure, the Start combo has no "queue" choice (as Add Links), TorBox
+    lines open the provider's dialog as a second step, the web UI and the other frontends have no torrent UI yet (web
+    UI and extension work started in their own sessions on 2026-11-11).
+- Walked in the running app (2026-11-11, dark mode, an isolated instance with `INBOUND_TORRENT_TEST_LISTEN=6899` and the
+  probe's new `seed` mode on 127.0.0.1; nothing left the machine, no firewall prompt). Worked: Options › Torrents (the
+  file box greys out while off; OK adds the Torrents view and Tasks › Add Magnet / Import Torrent File without an
+  account); Add Magnet with the clipboard; Ctrl+V on the list; Add URL with a magnet; the file choice opening by itself
+  when a magnet's list came in; a 6-file pack with 2 files unticked and a single file downloaded, every file's SHA-256
+  the same as the seed's and the skipped files not written; the chip ("Torrents: 1 active · 1 peer") and clicking it;
+  open rows with Skipped/Completed file rows; 250 files listing 200 rows and "50 more files: open Progress Details";
+  Import Torrent File with two files, the inline file tree, "Already in the list" and "Show in list"; Choose Files…
+  from the menu (the row then said "249 of 250 files" without a timer); Delete. Found:
+  - A torrent deleted and added again while the worker still runs (its 30 s wait) stays at "Getting file list · 0
+    peers" with no error; after the worker closed and the torrent resumed, it connected at once.
+  - A multi-file torrent's row, Progress Details and the complete window are named after its first file
+    ("film.mkv", "page-001.txt") once the list arrives, not after the torrent ("Inbound T1 test pack").
+  - Two file choices at once: Progress Details opens on Files with Start while the window's Choose files opens too.
+  - A single-file magnet waits for a file choice although the option says it is for several files.
+  - A hidden `.<info hash>.parts` file (44 KB) stays in the save folder after a torrent with skipped files finished.
+  - Extract Archive… is offered on a torrent row.
+  - Not walked: drag and drop (File Explorer can only be clicked here), the TorBox route (no account in the test
+    instance), Add URL with torrents off, light mode (deferred). The loopback seeder's own outgoing connection never
+    reached the app's worker (incoming handshakes are answered), so the walk gave the seeder's address in the magnet
+    (`x.pe`); that is the test seeder, not the app.
+- The six findings fixed (2026-11-11, commits 3bfdb3a, 5fe12e0, 67df6a1 and the race fix after them; each checked by an
+  adversarial reviewer, Core 1358, Torrents 38 and Integration's Torrent filter 92 passing). The Host runs one
+  engine run per info hash (a re-add waits up to 30 s for the earlier run to leave) and fails the job, retryably,
+  when the worker can't add it; a multi-file torrent keeps the torrent's name (libtorrent's `\` separators are read as
+  `/`); one held file starts without asking; a finished torrent's `.<v1 info hash>.parts` file is deleted, but not
+  while another job of the same hash uses the same folder; Extract Archive… is gone from torrent rows. The file choice
+  is asked in one place: an open Progress Details window gets it (brought forward on its Files tab), and the main
+  window waits up to 10 s for the window the Host opens by itself for a download just added here
+  (`TorrentRules.ProgressWindowComing`, following Runtime's `DownloadWindows.OpensWindows`) before it opens its own
+  dialog. Walked again in the isolated instance (dark mode): a single-file magnet downloaded without asking, no
+  `.parts` left, same SHA-256; the pack's row and Progress Details say "Inbound T1 test pack" and only Progress Details
+  asked for files; deleted while downloading and added again at once, its list came in within seconds and nothing
+  got stuck. That re-add first showed the race (the list came in before the new progress window's process was up, so
+  both asked). After the fix, only Progress Details asked. The pack then finished with one file skipped: five files
+  matching the seed, no skipped file or folder written, no `.parts` left. The torrent row's menu has no Extract
+  Archive…. Limits: the first stuck re-add did not reproduce in tests or this walk, so it is hardened, not proven
+  fixed; a hybrid v1/v2 torrent may name its parts file after the v2 hash, which is not deleted; a re-add without the
+  seeder's address in the magnet can't be walked on loopback. **Owner question:** a single-file torrent that is
+  itself a `.rar` still offers Extract (as a downloaded `.rar` does) — keep it? **Answered (owner, 2026-11-11):** keep it.
+- Left for T1: `done` bytes per file in `torrent.files` (needs a worker command), steps 6 and 7.
+
+### Torrent T1 in the web UI (2026-11-11, `claude/webui-torrents-41e988`, from `torrent-t1` at 97cab16)
+
+Status: partial. Built and unit-tested; not yet tried in a browser against a running Host or server with torrents on.
+Follows the Windows app's T1 UI (`TorrentRules`, `TorrentAddLines`, `DownloadWindow` on `torrent-t1`) and its words.
+
+- Shown only when the hello lists `torrents` and the Host's `TorrentsEnabled` is on; the four torrent settings stay
+  PipeOnly, so the web UI doesn't edit them. Logic in `webui/src/lib/torrents.ts`.
+- Adding: Add magnet and Import torrent file open the torrent dialog (`TorrentAdd.svelte`); a magnet typed in Add URL
+  goes there too. One line per magnet or uploaded .torrent (`upload:` reference), each read with `torrent.inspect`:
+  name, size, file count, "Already in the list", "Same torrent as above", errors. A multi-file .torrent has Choose files…
+  (the provider file tree). Magnets go with `askWhenReady` while choose-files is on. Save to (empty: each torrent's
+  category folder), Start, Queue. With a TorBox account: This PC (This server on Docker) / TorBox per line, default from
+  `TorrentRoute`; TorBox lines go on to the existing Add links dialog with the same magnets and uploads.
+- List: Torrents view (while on, or while torrents are listed); torrent rows say "Downloading · N peers", "Getting file
+  list · N peers", "Choose files to download"; the Description column (the phone's second line) says "3 of 11 files";
+  a torrent of several files opens to list them (`torrent.files`, at most 200 rows, read again every 3 s while it runs,
+  30 s above 1,000 files); Choose Files… in the row menu (`torrent.setFiles`), and Enter on a torrent that waits for it;
+  Move/Rename, Redownload and Refresh address hidden for torrents; only the short `magnet:?xt=urn:btih:<hash>` is shown
+  or searched; the status bar's "Torrents: N active · N peers" chip.
+- Details: Status, Size, Downloaded, Rate, Time left, Peers (seeds), Files, Info hash; a Files tab with tick boxes and
+  progress (ticks sent at once; while the torrent waits for its choice they wait for Start); no segment polling.
+- Tests: `webui/tests/torrents.test.ts` (40). `npm run check`, `npm test` (413) and `npm run build` pass.
+- No Host or protocol change: a web session already gets `torrent.*` (`WebSessionProfile` sets `Torrents`), held to the
+  app's folders by the service; uploads resolve on the bridge and the server.
+- Not done here: page-wide Ctrl+V and drag and drop of torrents (the Windows app has them); the TorBox cache check per
+  line (T1 step 6); `npm run screens` with torrents.
+
+#### Browser extension and torrents (2026-11-11, branch `claude/ext-torrents-024a15`, partial)
+
+Status: partial; tested automatically, not tried in a browser. The roadmap decides the extension's part: rule 5 ("the
+extension stays untouched. No magnet or torrent handling in it"), the research's Extension row (a `.torrent` file caught
+as an ordinary file download stays an ordinary download; no torrent wording, no "send torrent") and the owner's "the
+extension still never handles magnets". So no extension code changed; T1 adds the guards the roadmap's test plan asks for.
+
+- `extensions/chrome/tests/no-torrent-handling.test.cjs` (4 tests): the source, pages, both manifests, `build.mjs` and the
+  store listing contain no torrent/magnet wording and no `protocol_handlers`; a built `dist`/`dist-firefox` carries none
+  either (checked only when built, so run `npm test` after a build) (the popup bundles `webui/src/lib/format.ts`, so torrent words added there would reach the store build); a
+  `.torrent` download is caught exactly like an unknown binary; a magnet is never caught, and Download All never collects
+  one (a `.torrent` link is collected like any link).
+- `TorrentBridgePolicyTests` (Core): no `torrent.*` message crosses either bridge role, either way. The extension cannot
+  add or inspect a torrent.
+- Two dispatcher tests (Integration): with torrents on, a browser handoff of a magnet is refused by the handoff's own
+  address check (http, https and ftp only; `invalid_url`, no job, no worker), and a `.torrent` handoff is a plain download (`Torrent` null, no worker).
+- Today a torrent job in the popup's list is a generic row: its name, the shared status words, size, bar, Stop/Resume and
+  Delete. Its address (the full magnet) is in the jobs snapshot the extension receives but is never shown.
+- Checks: `npx tsc --noEmit`, `npm run build`, `npm run build:firefox`, `npm test` (249 pass); Core bridge tests 63 pass;
+  `HostCommandDispatcherTests` 121 pass.
+
+Questions for the owner (not built; the brief suggested them, the roadmap says otherwise):
+
+Owner's answer (2026-11-11): **safe parity only**. Rule 5 stays: no magnet catching, no `.torrent` handoff to the torrent dialog, no torrent
+wording in the store build (questions 1 and 2: no). Torrent rows in the popup must work correctly: question 3 (a torrent
+waiting for its file choice offers no useless Resume) and question 4 (the extension's snapshot drops the full magnet) are
+in scope for wave B.
+
+1. Should a `.torrent` file the extension catches open the app's torrent dialog (or `torrent.add`) when torrents are on?
+   The roadmap and research say no (store policy); the brief for this track suggested yes.
+2. Should the popup show torrent rows with torrent words ("Downloading · 12 peers", "3 of 11 files")? That puts torrent
+   wording in the store build, which the research advises against. If yes, it needs the web UI's `statusText` or a
+   popup-only rule, and the dist guard above relaxed on purpose.
+3. A torrent waiting for its file choice is paused; the popup offers Resume, which does nothing visible (the engine holds
+   it again). Should the Host report `canResume` false for it, or the popup open the app instead?
+4. Should the jobs snapshot sent to the extension drop a torrent job's full magnet (trackers) from `url`, as the window
+   shows only the short magnet?
+
+### Torrent UI mockups before T1 (2026-11-11, `torrent-t0`)
+
+- Owner asked for realistic mockups before T1: where torrents show up when enabled, how magnets and .torrent files are
+  added, and whether the list is separate or combined. Published as a private artifact
+  (https://claude.ai/artifact/Lky3Wvsdq76aCjNqRTmRH6; local copy `artifacts\torrent-t0\mockups\torrents-in-inbound.html`).
+  Proposed: Options › Torrents (off), Add Magnet and Import Torrent File in Tasks also without TorBox, a Torrents
+  sidebar filter, torrents as package rows in the one main list, a two-step magnet dialog (file list, then files), a
+  per-line This PC / TorBox choice when an account exists, a status-bar chip only while the engine runs. **Owner
+  questions:** one list as drawn; an Add Torrent toolbar button; a magnet/.torrent handler (not in the roadmap); the
+  default route with TorBox; choose files before starting. **Answered (owner, 2026-11-11):** one list; no toolbar
+  button; yes to the handler (an option, off until ticked); TorBox default *Ask each time*; choose files first for
+  multi-file torrents; "I agree with everything else". New request: with TorBox set up, check every magnet and
+  .torrent file against TorBox's cache and show the result on its line. All recorded in the torrent roadmap section 6
+  item 7 and its T1 row; the mockup page shows the decisions and the cache check.
+
+### Torrent T0: first native build (2026-11-11, `torrent-t0`)
+
+- **Owner accepted T0 (2026-11-11):** "ignore arm64, docker, ci, ipv6 checks. so it looks good to go". Set aside, not
+  failed: running the arm64 build, the Docker image size line, CI for gate 12, and the IPv6 and uTP checks of gate 10.
+  Gate 8 (24 h soak) was skipped earlier. Note on throughput: the worker's median was 101% of qBittorrent's on one
+  swarm, which is level within the run-to-run spread, not clearly faster.
+
+- Owner go 2026-11-11 ("t0, go"). Plan: `docs/plans/native-torrent-roadmap.md` section 3 (gates 1 to 14). Windows x64 is
+  built and measured; Linux x64 and arm64 built on the owner's Docker test VM (owner, 2026-11-11), where gates 4, 5
+  and 7 also ran. Gate 12 says "in CI": which CI (Forgejo runner or GitHub Actions) is still open.
+- Built: `native/torrent-worker` (C++20, libtorrent 2.1.2 through vcpkg at baseline e54ef0f, an overlay port pinning the
+  tag and source SHA-512, WebTorrent off, static CRT and OpenSSL; protocol in `PROTOCOL.md`, build and patch steps in
+  `README.md`), `src/DownloadManager.Torrents` (frames, `ITorrentEngine`, `TorrentWorkerProcess`, `FakeTorrentEngine`),
+  `tests/DownloadManager.Torrents.Tests` (14 tests), `tools/TorrentWorkerProbe` (holds N seeding torrents for the
+  sampler); `scripts/perf-idle-sample.ps1` takes `-NameLike`/`-CounterLike`. The Host does not start the worker yet (T1).
+- Evidence, Windows 11, this PC (`artifacts\torrent-t0\`, `artifacts\torrent-worker\win-x64`, SHA-256 432b3cd0...):
+  - Gate 6 (size): `inbound-torrent.exe` 9,564,672 bytes; 3,555,369 deflate-9 (zip), 2,731,484 LZMA2 (Setup). Imports
+    only Windows system DLLs (no Visual C++ runtime). Linux and Docker sizes not measured.
+  - Gates 2 and 3 (PERF.4 sampler, 30 min each, 10 s): 1 torrent of 256 MiB seeding: 0.08 s CPU (0.2 s an hour),
+    6.6 context switches/s (max 13.8), 3.6 MB private, 15 MB working set. 20 torrents of 64 MiB: 0.17 s CPU, 7.1 switches/s
+    (max 21.3), 4.6 MB private, 16 MB working set. Limits: loopback only, no DHT, LSD, UPnP or peers, so these are
+    floors; disk I/O was not sampled. DHT needs a listen socket on a real interface, which brings a firewall prompt (T2).
+  - Gate 9 and 14 (tests): a download killed or aborted inside the worker (`debugAbort`, exit 0xC0000409) resumes from
+    its last blob in about 250 ms and finishes with a matching SHA-256; a seeder that aborts comes back from its blob
+    seeding with no full recheck. Found: libtorrent drops a peer given while it checks resume data (the worker now
+    reconnects manual peers after the check), and a seeder refuses a second connection from the same IP until it
+    notices the dead one (about 5.6 s on loopback).
+  - Gate 11 in part (tests): 24 MiB over loopback in 0.6 to 1 s with a matching hash; file priority 0 fetches nothing;
+    a magnet gets its metadata from a peer, then downloads, and its blob restores without a swarm; stdin closed: blob,
+    `bye`, exit 0. Limits on loopback need the per-torrent limit: libtorrent exempts local peers from session limits.
+  - Gate 13 (patch path): moving between 2.1.1 and 2.1.2 is two edits in `ports/libtorrent`, a 162 s rebuild when not
+    cached (19 s cached), and the tests in about 30 s. Windows only.
+  - Gate 1 holds by construction for now (nothing starts the worker); the Host comparison comes with T1.
+  - Linux, on the owner's Docker test VM (owner, 2026-11-11: "use my vm for linux"; Debian 13, Docker 29.9):
+    - Gate 12 in part: `Dockerfile.build` builds linux-x64 (selftest passes; `inbound-torrent 0.1.0-t0 (libtorrent
+      2.1.2.0, protocol 1)`), SHA-256 55b6926e.... 11,657,280 bytes stripped; 4,457,025 gzip-9; 3,379,388 xz-9. Needs
+      only `libc.so.6` and the loader, at most GLIBC_2.34. Fixed on the way: `VCPKG_FORCE_SYSTEM_BINARIES=0` still
+      counts as set in vcpkg, so it could not fetch CMake. linux-arm64 (cross-compiled): 10,750,072 bytes stripped,
+      4,732,996 gzip-9, 3,523,340 xz-9, at most GLIBC_2.34, SHA-256 1718a775...; not run, because the VM has no arm64
+      emulation and installing it was not asked. Fixed on the way: the main project linked with the x64 compiler
+      (now `aarch64-linux-gnu-g++` for arm64), and the VM (8 GB, 20 cores) stopped answering, even SSH, twice during
+      the arm64 dependency build with one compile job per core; `JOBS` (default 4) now caps it and the build passed.
+    - Gate 6 for Docker: 11.7 MB (x64) as `docker images` counts it, over the 10 MB line with OpenSSL linked in
+      statically; the AppImage and zip lines (compressed) hold for both Linux builds.
+    - Gate 10 in part: the 14 tests pass on Linux x64 (SDK 10.0 container, `INBOUND_TORRENT_WORKER` set; 29 s).
+    - Gates 4 and 5 (pass): Debian 13.7.0 netinst (792,723,456 bytes; magnet from the official torrent's info hash with
+      its tracker), host network, DHT and PEX on, UPnP and LSD off, no port forward, so neither client got incoming
+      connections. qBittorrent 5.3.0 (`qbittorrent-nox` image), three runs, add to done: 23.01, 23.33, 24.40 MiB/s
+      (median 23.33); first piece 2.5 to 3.9 s. Worker (`TorrentWorkerProbe download`, timed from process start), with
+      the tracker: 18.60, 27.26, 23.53 MiB/s (median 23.53, 101% of qBittorrent's); metadata 0.54 to 0.71 s, first
+      piece 1.06 to 1.88 s. Without the tracker (DHT only): cold DHT 21.48 MiB/s, metadata 1.34 s, first piece 2.93 s;
+      warm DHT 15.97 MiB/s, first piece 1.69 s. Lines: 80% throughput, first piece 45 s cold and 15 s warm. Limits:
+      one healthy swarm on one evening, the two clients ran about 45 minutes apart, runs vary by 1.7x.
+    - Gate 7 (worker part): seeding 5 torrents of 64 MiB in an `aspnet:10.0` container for 10 minutes, 57 samples:
+      worker RSS 11.2 to 11.3 MiB, PSS 9.9 MiB, 9 open handles, flat; container CPU 0.01 to 0.1%. The probe itself
+      held about 330 MiB (the payloads it made), so the container total says nothing; under `--memory 100m` the probe
+      ran out of memory before the worker started. The server alone idles at 44 MiB (D4 above), so server plus worker
+      is about 55 MiB; the real combined container comes with T1.
+    - Evidence: `artifacts\torrent-t0\vm-logs`, binaries in `artifacts\torrent-worker\linux-*`. Removed from the VM
+      afterwards: the `torrent-t0-*` containers and `~/torrent-t0`; the downloaded images and the BuildKit cache stay.
+  - Not run: gate 8 (24 h soak; owner: skip), 10 (arm64 run, IPv6, uTP), 12 (CI; the builds ran by hand on the VM).
+- Review (Haiku, 15 points, each checked): fixed a frame that a cancelled send could cut in half; a reply loop that could
+  hang after a protocol error (now kills the worker and fails waiters); a failed `add` that left a torrent running;
+  shutdown that could miss the last blob (now counts every request per torrent); an oversized message that shut the
+  worker down (now an error event); a magnet that could write before its file list was checked (now upload mode until
+  checked; `stop_when_ready` paused magnets before their metadata, seen in a test); Windows device names (`nul.txt`,
+  `COM¹`) now renamed with a leading `_` instead of refusing the torrent (libtorrent already rewrites `:` and trailing
+  dots); priority lists capped; listen addresses parsed. Left: junctions inside the save folder (Host check, T1); the
+  1 s progress tick while seeding (the Host sets 5 s when no window shows torrents).
+
+### GitHub issues #2, #3, #4: extension requests (2026-11-11, branches `gh-issue-2`, `gh-issue-3`, `gh-issue-4`, combined on `gh-issues`)
+
+- Owner, 2026-11-11: implement the feature requests in the repository's open GitHub issues. Three are open, all feature requests from one GitHub user, all about the extension: [#2](https://github.com/Kaan88/inbound/issues/2) server names in Send to (ROADMAP EXT.R9), [#3](https://github.com/Kaan88/inbound/issues/3) where Ask where to save starts and a browser-only default folder (EXT.R10), [#4](https://github.com/Kaan88/inbound/issues/4) a right-click menu and an Open folder button in the popup (EXT.R11). No issue was commented on, closed or labelled.
+- Not built, for the owner: **#4 "Open file"**. Opening a downloaded file from the extension means the browser can make the Host start a downloaded program, which the bridge has never allowed (it is an allow-list so a compromised extension can't do more than the popup needs). Open containing folder (Explorer with the file selected) is built instead. Question: should the popup open files at all, and if so only non-executable types, or only after a confirmation shown by the app?
+- Built with a choice, for the owner: **#3 "Last used folder"** is opt-in and off by default. UI.R3 (owner) says a folder chosen for one download must not change the next one's starting folder, and that stays the default. With Last used chosen, the extension stores the last folder per target in its local storage. Question: is an opt-in Last used acceptable next to UI.R3, or should it go?
+- **#2 built (EXT.R9, branch `gh-issue-2`), not yet tried in a browser.** The server's `POST /api/pair` answer adds `serverName`: `DOWNLOADMANAGER_NAME` (new, `docs/docker.md`), else the machine's name, left out when that is a Docker container id (12 or 64 hex digits) or there is none. Only the pairing answer gives it (no new endpoint), so a renamed server shows its new name after pairing again. The extension keeps it in the pairing record (`serverName`) and the user's own name in its settings (`serverCustomName`, Settings, Server, Name; can be set before pairing, survives unpair and pairing again, empty falls back). Shown name = custom, else the server's, else the address's host; used by Send to (`Home NAS (192.168.1.150)`, host smaller and muted, once when it equals the name), the popup's group row and Send to switch, and Settings' paired line. Old stored pairings read as before. Evidence: Server tests `PairingTests.ThePairAnswerGivesTheServersNameAndLeavesItOutForNone`, `TheServersNameIsTheSetOneElseTheMachinesUnlessThatIsAContainerId` (9 cases), `TheServersNameComesFromTheEnvironmentAndIsCut`; all Server tests pass (163 of 163). Extension: `tests/server-name.test.cjs` (7 tests: precedence, pairing answer and old records, kept across unpair and re-pair, Send to rendering, popup, Settings field, Name field reset after Unpair); `npm test` 252 of 252, `tsc` clean, `npm run build` done; solution build 0 errors. Review fixes (2026-11-11): the machine's name is injectable (`ServerOptions.MachineName`), so the pair-answer test now checks a machine name, a 12- and a 64-hex container id and no name over HTTP (with `ok`, `token`, `id`, `name`, `role` still there); both sides cut names at 100 code points, so an emoji at the cut is never halved (C# `TheServersNameComesFromTheEnvironmentAndIsCut`, npm precedence test); Settings resets the Name field's placeholder and hint on Unpair even when the answer carries no settings (new npm test fails without the fix); a doubled clause in `docs/ipc-protocol.md` removed. Not checked: dark mode and the real look in a browser.
+- **#3 built (EXT.R10, `gh-issue-3`), tested automatically, not tried in a browser yet.** Extension Settings > General: "Default folder for browser downloads on This PC" (The app's default folder, or This folder with Choose..., which opens the app's folder dialog) and "Ask where to save starts on" (Default folder, the default and UI.R3; Last used folder; Custom folder, This PC only). With a browser folder set, automatic sends to This PC carry it as `destinationDirectory`, and the popup, folder window and Download All call it the default folder and send it as it is (the Host does not know it); an emptied field still sends "" for the app's default. Last used is stored per target in `chrome.storage.local` (`lastFolders`), written only when a form's send is accepted (popup, folder window, Download All), and cleared when another choice is saved. A start folder is used only when known to exist: for This PC `settings.downloadFolders` takes an optional `candidates` list (at most 4 looked at) and the Host answers `existingCandidates` (`Directory.Exists`, local fully qualified paths only: never a share, a device path or a drive letter mapped to a share, and only for the platform's own sessions with a folder dialog, so not a server or web session); an older Host's missing answer means the default. For the server, a quiet `folders.browse`; any failure means the default. No new bridge message. Settings refuses a folder that is not a full path: on Windows a drive path or a share, not `\Downloads`, `/Downloads` or a device path (`/Downloads` would have become the current drive's root); in a browser on Linux (`runtime.getPlatformInfo`) a path from `/`. A browser folder that was deleted is not checked; automatic sends still carry it and the Host creates it again (tested). Review (2026-11-11) fixed: the path check above; mapped network drives skipped (`OnNetworkDrive`); the hint now says the browser folder is for downloads to This PC; tests for the cap with existing folders past it, device paths, the session gate, the popup's move to the folder window with the folder as shown ("" when emptied) and the missing browser folder; a cross-test timer leak in `form-gate.test.cjs` (the server free-space line of one test asked the next test's page, failing `EXT.B7 Download All: Browse and Download wait...` in about half the runs). Evidence: Integration `NativeHostBridgeTests.The_folder_window_learns_which_start_folders_exist_and_nothing_else`, `Start_folder_candidates_are_capped_and_skip_shares_and_device_paths`, `A_drive_letter_mapped_to_a_share_counts_as_another_machine`, `HostCommandDispatcherTests.OnlyThisUsersOwnSessionOnAPcWithAFolderDialogLearnsWhichStartFoldersExist`, `RuntimeServiceTests.A_browser_download_to_a_folder_that_is_gone_creates_the_folder`; NativeHostBridge and HostCommandDispatcher tests 135 of 135; with all RuntimeServiceTests 810 of 812, the two failures untouched by this branch: `AFolderNamedInTheSettingsInAnyFormStays(share)` fails here every run (the `\\localhost\C$` form; `DownloadManagerService` is not changed on this branch) and `StartingTheQueueRetriesAQueuedFailureOnlyWhileItsRetriesLast` passed when run alone. Server tests 152 of 152; Core 1283 of 1283; extension `tests/ext-r10-start-folder.test.cjs` 20 tests, `npm test` 265 of 265 in six runs in a row after the leak fix, `tsc` clean, `npm run build` done, `dotnet build` 0 errors.
+- **#4 built (2026-11-11, `gh-issue-4`, EXT.R11):** the popup's rows have a right-click menu (also the Menu key and Shift+F10): Open containing folder (This PC only), Copy download link (the popup copies the job's own link; off for a provider's file or a hidden key), Redownload (asks first; "Saves as a new copy. The existing file is kept."), Rename… (a text box in the dialog; finished downloads only) and Delete… (the Delete button's question). A finished This PC row has a folder button left of Delete. Host side: `job.reveal` (Explorer with the file selected, else its folder, else "The file and its folder are gone."; through a new `IHostPlatform.RevealFile`, on the Windows and Linux desktop Hosts only, never for a server or web session), `job.update` `newFileName` (a bare name in the same folder, finished file only, never replaces another file), `job.redownload` (the desktop's Redownload moved into the Runtime: rename conflict policy, refused while running or waiting, for `remote://` and for a hidden key). `NativeBridgePolicy` lets the three through with exactly `jobId` (plus `newFileName` for `job.update`), and a paired server without `job.reveal`. Docs: `ipc-protocol.md`, `browser-integration.md`. Review fixes (2026-11-11, second commit): an older app's refusal ("The browser extension cannot send this message.", "Unknown message type …", a server's "A paired browser can't send …") reads "Update Inbound to use this." (or "Update the Inbound server …"), and a rename counts as done only when the returned job has the new name, because a Host older than `newFileName` ignores it and answers ok; a case-only rename (`report.pdf` to `Report.pdf`) now renames on disk and in the list instead of answering ok and doing nothing (this also fixes the desktop's Move/Rename); a scoped (web) caller is refused for a download outside its folders before the name is checked; `job.reveal` checks the disk off the dispatcher's thread with a 10-second limit, and the browse comment it displaced is back; the Linux Host offers reveal only with `DISPLAY` or `WAYLAND_DISPLAY` and opens the folder with `xdg-open` when gdbus fails (not tried on a real Linux desktop); the Menu key's own contextmenu event is swallowed for 0.8 s after the keydown opened the menu, and a contextmenu with no pointer press before it opens the menu under the row. Redownload from the popup always downloads directly; the desktop's offer to add a hoster link through the provider is left out (documented). Rejected: advertising the commands in the hello, because the native host consumes the hello and the extension never sees it; forwarding it would be a protocol change, and the refusal text plus the rename check cover an older app. Evidence: Core `NativeBridgePolicyTests` (`EXT_R11_*`, 23 cases; Core 1,308 of 1,308); Integration `HostCommandDispatcherTests` Reveal/Rename/Redownload (20, two new: a case-only rename, and a web session that can't reveal and can't rename or redownload outside its folders); Integration filtered to HostCommandDispatcher, NativeHost, BrowserBridge, WebUi, HostPipe, HostHello and RuntimeServiceTests: 1,007 of 1,010, the three failures in code this branch does not touch: `PackagePriorityRaisesItsUnfinishedFilesPastEarlierOnes` and `StartingTheQueueRetriesAQueuedFailureOnlyWhileItsRetriesLast` passed when run again alone (the first run shared the machine with the Core and Server runs), and `AFolderNamedInTheSettingsInAnyFormStays(how: "share")` (the administrative-share form of a folder) fails again alone, not checked on `main`; Server 153 of 153 (new `BridgeTests.AnExtensionsTokenMayRenameAndRedownloadOneDownloadButNeverShowAFolderOnTheServer`); npm `ext-r11-row-menu.test.cjs` (8) and server-target "EXT.R11: a server download…" (npm 254 of 254), `tsc` clean, `npm run build` done, solution build 0 errors. Not done: tried in a real browser with the app (Explorer coming to the front over the browser, and the Menu key in Chrome and Firefox, are not checked by hand), Open file (owner question above). Not committed to `gh-issues` or pushed.
+- **Combined on `gh-issues` (2026-11-11)**: the three branches merged (conflicts were side-by-side additions in Settings, `capture-rules.ts`, `background.ts` handoffTargets, `HostCommandDispatcher.cs` and these docs; resolved by keeping both). On the merged tree: `dotnet build` 0 errors; Core 1,308 of 1,308; Server 164 of 164; Integration 1,516 of 1,517; extension `tsc` clean, `npm test` 281 of 281, Chrome and Firefox builds made. The one Integration failure, `RuntimeServiceTests.AFolderNamedInTheSettingsInAnyFormStays(how: "share")`, fails the same way on `gh-issue-2`, which changes neither the Runtime nor the Integration tests, so it is not from this work (it uses `\localhostC﻿# Progress — session handoff
+
+### GitHub issues #2, #3, #4: extension requests (2026-11-11, branches `gh-issue-2`, `gh-issue-3`, `gh-issue-4`, combined on `gh-issues`)
+
+- Owner, 2026-11-11: implement the feature requests in the repository's open GitHub issues. Three are open, all feature requests from one GitHub user, all about the extension: [#2](https://github.com/Kaan88/inbound/issues/2) server names in Send to (ROADMAP EXT.R9), [#3](https://github.com/Kaan88/inbound/issues/3) where Ask where to save starts and a browser-only default folder (EXT.R10), [#4](https://github.com/Kaan88/inbound/issues/4) a right-click menu and an Open folder button in the popup (EXT.R11). No issue was commented on, closed or labelled.
+- Not built, for the owner: **#4 "Open file"**. Opening a downloaded file from the extension means the browser can make the Host start a downloaded program, which the bridge has never allowed (it is an allow-list so a compromised extension can't do more than the popup needs). Open containing folder (Explorer with the file selected) is built instead. Question: should the popup open files at all, and if so only non-executable types, or only after a confirmation shown by the app?
+- Built with a choice, for the owner: **#3 "Last used folder"** is opt-in and off by default. UI.R3 (owner) says a folder chosen for one download must not change the next one's starting folder, and that stays the default. With Last used chosen, the extension stores the last folder per target in its local storage. Question: is an opt-in Last used acceptable next to UI.R3, or should it go?
+- **#2 built (EXT.R9, branch `gh-issue-2`), not yet tried in a browser.** The server's `POST /api/pair` answer adds `serverName`: `DOWNLOADMANAGER_NAME` (new, `docs/docker.md`), else the machine's name, left out when that is a Docker container id (12 or 64 hex digits) or there is none. Only the pairing answer gives it (no new endpoint), so a renamed server shows its new name after pairing again. The extension keeps it in the pairing record (`serverName`) and the user's own name in its settings (`serverCustomName`, Settings, Server, Name; can be set before pairing, survives unpair and pairing again, empty falls back). Shown name = custom, else the server's, else the address's host; used by Send to (`Home NAS (192.168.1.150)`, host smaller and muted, once when it equals the name), the popup's group row and Send to switch, and Settings' paired line. Old stored pairings read as before. Evidence: Server tests `PairingTests.ThePairAnswerGivesTheServersNameAndLeavesItOutForNone`, `TheServersNameIsTheSetOneElseTheMachinesUnlessThatIsAContainerId` (9 cases), `TheServersNameComesFromTheEnvironmentAndIsCut`; all Server tests pass (163 of 163). Extension: `tests/server-name.test.cjs` (7 tests: precedence, pairing answer and old records, kept across unpair and re-pair, Send to rendering, popup, Settings field, Name field reset after Unpair); `npm test` 252 of 252, `tsc` clean, `npm run build` done; solution build 0 errors. Review fixes (2026-11-11): the machine's name is injectable (`ServerOptions.MachineName`), so the pair-answer test now checks a machine name, a 12- and a 64-hex container id and no name over HTTP (with `ok`, `token`, `id`, `name`, `role` still there); both sides cut names at 100 code points, so an emoji at the cut is never halved (C# `TheServersNameComesFromTheEnvironmentAndIsCut`, npm precedence test); Settings resets the Name field's placeholder and hint on Unpair even when the answer carries no settings (new npm test fails without the fix); a doubled clause in `docs/ipc-protocol.md` removed. Not checked: dark mode and the real look in a browser.
+- **#3 built (EXT.R10, `gh-issue-3`), tested automatically, not tried in a browser yet.** Extension Settings > General: "Default folder for browser downloads on This PC" (The app's default folder, or This folder with Choose..., which opens the app's folder dialog) and "Ask where to save starts on" (Default folder, the default and UI.R3; Last used folder; Custom folder, This PC only). With a browser folder set, automatic sends to This PC carry it as `destinationDirectory`, and the popup, folder window and Download All call it the default folder and send it as it is (the Host does not know it); an emptied field still sends "" for the app's default. Last used is stored per target in `chrome.storage.local` (`lastFolders`), written only when a form's send is accepted (popup, folder window, Download All), and cleared when another choice is saved. A start folder is used only when known to exist: for This PC `settings.downloadFolders` takes an optional `candidates` list (at most 4 looked at) and the Host answers `existingCandidates` (`Directory.Exists`, local fully qualified paths only: never a share, a device path or a drive letter mapped to a share, and only for the platform's own sessions with a folder dialog, so not a server or web session); an older Host's missing answer means the default. For the server, a quiet `folders.browse`; any failure means the default. No new bridge message. Settings refuses a folder that is not a full path: on Windows a drive path or a share, not `\Downloads`, `/Downloads` or a device path (`/Downloads` would have become the current drive's root); in a browser on Linux (`runtime.getPlatformInfo`) a path from `/`. A browser folder that was deleted is not checked; automatic sends still carry it and the Host creates it again (tested). Review (2026-11-11) fixed: the path check above; mapped network drives skipped (`OnNetworkDrive`); the hint now says the browser folder is for downloads to This PC; tests for the cap with existing folders past it, device paths, the session gate, the popup's move to the folder window with the folder as shown ("" when emptied) and the missing browser folder; a cross-test timer leak in `form-gate.test.cjs` (the server free-space line of one test asked the next test's page, failing `EXT.B7 Download All: Browse and Download wait...` in about half the runs). Evidence: Integration `NativeHostBridgeTests.The_folder_window_learns_which_start_folders_exist_and_nothing_else`, `Start_folder_candidates_are_capped_and_skip_shares_and_device_paths`, `A_drive_letter_mapped_to_a_share_counts_as_another_machine`, `HostCommandDispatcherTests.OnlyThisUsersOwnSessionOnAPcWithAFolderDialogLearnsWhichStartFoldersExist`, `RuntimeServiceTests.A_browser_download_to_a_folder_that_is_gone_creates_the_folder`; NativeHostBridge and HostCommandDispatcher tests 135 of 135; with all RuntimeServiceTests 810 of 812, the two failures untouched by this branch: `AFolderNamedInTheSettingsInAnyFormStays(share)` fails here every run (the `\\localhost\C$` form; `DownloadManagerService` is not changed on this branch) and `StartingTheQueueRetriesAQueuedFailureOnlyWhileItsRetriesLast` passed when run alone. Server tests 152 of 152; Core 1283 of 1283; extension `tests/ext-r10-start-folder.test.cjs` 20 tests, `npm test` 265 of 265 in six runs in a row after the leak fix, `tsc` clean, `npm run build` done, `dotnet build` 0 errors.
+- **#4 built (2026-11-11, `gh-issue-4`, EXT.R11):** the popup's rows have a right-click menu (also the Menu key and Shift+F10): Open containing folder (This PC only), Copy download link (the popup copies the job's own link; off for a provider's file or a hidden key), Redownload (asks first; "Saves as a new copy. The existing file is kept."), Rename… (a text box in the dialog; finished downloads only) and Delete… (the Delete button's question). A finished This PC row has a folder button left of Delete. Host side: `job.reveal` (Explorer with the file selected, else its folder, else "The file and its folder are gone."; through a new `IHostPlatform.RevealFile`, on the Windows and Linux desktop Hosts only, never for a server or web session), `job.update` `newFileName` (a bare name in the same folder, finished file only, never replaces another file), `job.redownload` (the desktop's Redownload moved into the Runtime: rename conflict policy, refused while running or waiting, for `remote://` and for a hidden key). `NativeBridgePolicy` lets the three through with exactly `jobId` (plus `newFileName` for `job.update`), and a paired server without `job.reveal`. Docs: `ipc-protocol.md`, `browser-integration.md`. Review fixes (2026-11-11, second commit): an older app's refusal ("The browser extension cannot send this message.", "Unknown message type …", a server's "A paired browser can't send …") reads "Update Inbound to use this." (or "Update the Inbound server …"), and a rename counts as done only when the returned job has the new name, because a Host older than `newFileName` ignores it and answers ok; a case-only rename (`report.pdf` to `Report.pdf`) now renames on disk and in the list instead of answering ok and doing nothing (this also fixes the desktop's Move/Rename); a scoped (web) caller is refused for a download outside its folders before the name is checked; `job.reveal` checks the disk off the dispatcher's thread with a 10-second limit, and the browse comment it displaced is back; the Linux Host offers reveal only with `DISPLAY` or `WAYLAND_DISPLAY` and opens the folder with `xdg-open` when gdbus fails (not tried on a real Linux desktop); the Menu key's own contextmenu event is swallowed for 0.8 s after the keydown opened the menu, and a contextmenu with no pointer press before it opens the menu under the row. Redownload from the popup always downloads directly; the desktop's offer to add a hoster link through the provider is left out (documented). Rejected: advertising the commands in the hello, because the native host consumes the hello and the extension never sees it; forwarding it would be a protocol change, and the refusal text plus the rename check cover an older app. Evidence: Core `NativeBridgePolicyTests` (`EXT_R11_*`, 23 cases; Core 1,308 of 1,308); Integration `HostCommandDispatcherTests` Reveal/Rename/Redownload (20, two new: a case-only rename, and a web session that can't reveal and can't rename or redownload outside its folders); Integration filtered to HostCommandDispatcher, NativeHost, BrowserBridge, WebUi, HostPipe, HostHello and RuntimeServiceTests: 1,007 of 1,010, the three failures in code this branch does not touch: `PackagePriorityRaisesItsUnfinishedFilesPastEarlierOnes` and `StartingTheQueueRetriesAQueuedFailureOnlyWhileItsRetriesLast` passed when run again alone (the first run shared the machine with the Core and Server runs), and `AFolderNamedInTheSettingsInAnyFormStays(how: "share")` (the administrative-share form of a folder) fails again alone, not checked on `main`; Server 153 of 153 (new `BridgeTests.AnExtensionsTokenMayRenameAndRedownloadOneDownloadButNeverShowAFolderOnTheServer`); npm `ext-r11-row-menu.test.cjs` (8) and server-target "EXT.R11: a server download…" (npm 254 of 254), `tsc` clean, `npm run build` done, solution build 0 errors. Not done: tried in a real browser with the app (Explorer coming to the front over the browser, and the Menu key in Chrome and Firefox, are not checked by hand), Open file (owner question above). Not committed to `gh-issues` or pushed.
+; likely this PC). Nothing tried in a real browser or the running app; nothing pushed; the GitHub issues were not touched.
+- Scope notes: #2 asks for names "if you have more than one server"; the extension pairs one server today, so names apply to that one. #3's "separate default folders" is a This PC folder for browser downloads in the extension's Settings (empty uses the app's); the server keeps its own default.
 
 ### Edge ID to-do, Windows part (2026-11-11, `linux-host`)
 

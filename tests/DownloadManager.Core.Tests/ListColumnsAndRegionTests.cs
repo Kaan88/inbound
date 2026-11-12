@@ -114,9 +114,15 @@ public sealed class ListColumnLayoutTests
     {
         var layout = ListColumnSets.Downloads();
         layout.SetVisible("extraction", false);
+        foreach (var key in TorrentListRules.ColumnKeys) layout.SetVisible(key, false);
         Assert.Equal(1040, layout.MinimumTotal);
         layout.SetVisible("extraction", true);
         Assert.Equal(1180, layout.MinimumTotal);
+
+        // DT-6: Seeds, Peers, Up and Ratio, in the torrent views only.
+        layout.SetVisible("extraction", false);
+        foreach (var key in TorrentListRules.ColumnKeys) layout.SetVisible(key, true);
+        Assert.Equal(1040 + 52 + 52 + 78 + 52, layout.MinimumTotal);
     }
 
     [Fact]

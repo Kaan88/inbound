@@ -310,6 +310,32 @@ public sealed class BridgeTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheWebUisTorrentCommandsReachTheHostInTheWebRole()
+    {
+        // The Host holds each to the session's folders (CallerScope); the bridge carries them as they are.
+        var address = await StartBridgeAsync();
+        using var user = await SignInAsync(address);
+        await using var socket = await ConnectAsync(address, user.Session);
+        Assert.Equal(MessageTypes.ServerHello, (await socket.ReadAsync())!.Type);
+        var types = new[]
+        {
+            TorrentMessageTypes.Peers, TorrentMessageTypes.Trackers, TorrentMessageTypes.Pieces, TorrentMessageTypes.Seed,
+            TorrentMessageTypes.Network, TorrentMessageTypes.ListEntries, TorrentMessageTypes.Import,
+            // T3: the web UI's options, recheck, announce, details and watch.
+            TorrentMessageTypes.Options, TorrentMessageTypes.SetOptions, TorrentMessageTypes.Recheck, TorrentMessageTypes.Announce,
+            TorrentMessageTypes.Details, TorrentMessageTypes.Watch,
+        };
+        foreach (var type in types)
+            Assert.Equal(type, (await socket.AskAsync<HostActionResult>(type, new { jobId = Guid.NewGuid(), on = true })).Message);
+        Assert.Equal(types, _host.Requests.Where(TorrentMessageTypes.IsRequest).ToArray());
+        Assert.All(_host.Hellos, hello => Assert.Equal(ClientRoles.Web, hello.Role));
+
+        var (status, reply) = await user.IpcAsync(TorrentMessageTypes.Seed, new { jobId = Guid.NewGuid(), on = false });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(TorrentMessageTypes.Seed, reply!.GetPayload<HostActionResult>().Message);
+    }
+
+    [Fact]
     public async Task OneIpcCallIsOneQuietWebConnection()
     {
         var address = await StartBridgeAsync();
@@ -346,6 +372,35 @@ public sealed class BridgeTests : IAsyncDisposable
         await using var socket = await ConnectAsync(address, null, bearer: desktop);
         Assert.Equal(MessageTypes.ServerHello, (await socket.ReadAsync())!.Type);
         Assert.All(_host.Hellos, hello => Assert.Equal(ClientRoles.Web, hello.Role));
+    }
+
+    [Fact]
+    public async Task AnExtensionsTokenMayRenameAndRedownloadOneDownloadButNeverShowAFolderOnTheServer()
+    {
+        var address = await StartBridgeAsync();
+        var (extension, _) = _bridge!.Auth.Pairing.Issue(TokenRoles.Extension, "Chrome");
+        using var app = new AuthClient(address, Cookie);
+        var jobId = Guid.NewGuid();
+
+        // EXT.R11: the server's screen is not the browser user's, so job.reveal is refused before the Host hears of it.
+        var (refused, refusal) = await app.IpcAsync(MessageTypes.JobReveal, new { jobId }, extension);
+        Assert.Equal(HttpStatusCode.Forbidden, refused);
+        Assert.Equal($"A paired browser can't send '{MessageTypes.JobReveal}'.", refusal!.GetPayload<HostActionResult>().Message);
+        Assert.DoesNotContain(MessageTypes.JobReveal, _host.Requests);
+
+        // Rename (a new name only) and Redownload, each on one download, reach the Host.
+        var (renamed, _) = await app.IpcAsync(MessageTypes.JobUpdate, new { jobId, newFileName = "new.bin" }, extension);
+        Assert.Equal(HttpStatusCode.OK, renamed);
+        var (again, _) = await app.IpcAsync(MessageTypes.JobRedownload, new { jobId }, extension);
+        Assert.Equal(HttpStatusCode.OK, again);
+        Assert.Contains(MessageTypes.JobUpdate, _host.Requests);
+        Assert.Contains(MessageTypes.JobRedownload, _host.Requests);
+
+        // job.update with anything else (a path, a program) is not the extension's.
+        var before = _host.Requests.Count(type => type == MessageTypes.JobUpdate);
+        var (moved, _) = await app.IpcAsync(MessageTypes.JobUpdate, new { jobId, newFilePath = "/elsewhere/new.bin" }, extension);
+        Assert.Equal(HttpStatusCode.Forbidden, moved);
+        Assert.Equal(before, _host.Requests.Count(type => type == MessageTypes.JobUpdate));
     }
 
     [Fact]

@@ -10,6 +10,12 @@ public partial class App : Application
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
 
+    /// <summary>Lets the window another process is about to signal take the foreground (Windows only; a no-op elsewhere).</summary>
+    internal static void AllowAnyForeground()
+    {
+        if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(AnyProcess);
+    }
+
     private readonly ActivationSignal _activation;
     private readonly bool _secondaryInstance;
     private MainWindow? _window;
@@ -26,6 +32,8 @@ public partial class App : Application
     public App()
     {
         UiTrace.Write("App ctor begin");
+        // Audit L8: a Host message this build could not read is skipped; the trace says which.
+        HostConnection.Trace = UiTrace.Write;
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject);
         UnhandledException += (_, e) =>
         {
@@ -69,6 +77,27 @@ public partial class App : Application
         UiTrace.Write($"App ctor end secondary={_secondaryInstance}");
     }
 
+    /// <summary>The folder <see cref="TorrentOpenRequests"/> queues into: the data folder, as the window's own state.</summary>
+    internal static string TorrentQueueDirectory()
+    {
+        var isolated = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
+        return TorrentOpenRequests.QueueDirectory(string.IsNullOrWhiteSpace(isolated) ? AppFolders.DataRoot() : isolated);
+    }
+
+    private static bool TryQueueTorrent(string input)
+    {
+        try
+        {
+            TorrentOpenRequests.Enqueue(TorrentQueueDirectory(), input, DateTimeOffset.UtcNow);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            UiTrace.Write($"A torrent to open couldn't be queued: {ex.GetType().Name}");
+            return false;
+        }
+    }
+
     private static void LogCrash(object? exception)
     {
         try
@@ -98,11 +127,23 @@ public partial class App : Application
         var pageIndex = Array.FindIndex(commandLine, arg => string.Equals(arg, "--page", StringComparison.OrdinalIgnoreCase));
         var openSettings = pageIndex >= 0 && pageIndex + 1 < commandLine.Length &&
             string.Equals(commandLine[pageIndex + 1], "settings", StringComparison.OrdinalIgnoreCase);
+        // T1 step 6b: a magnet or .torrent file opened from Windows. Queued first, so whichever window takes it, this
+        // launch's or the one already running, finds it in the same place.
+        var openTorrent = _updateMode || _jobId is not null || _packageId is not null ? null : TorrentOpenRequests.Parse(commandLine);
+        if (openTorrent is not null && !TryQueueTorrent(openTorrent)) openTorrent = null;
         // Explicit launches can restart an exited Host even when the hidden
         // frontend already owns the single-instance activation event.
         HostLauncher.EnsureStarted();
         if (_secondaryInstance)
         {
+            if (openTorrent is not null)
+            {
+                if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(AnyProcess);
+                _activation.SignalOpen();
+                Exit();
+                return;
+            }
+
             // This launch came from a click, so it may take the foreground; the running window may not unless
             // it is allowed to, and without this Windows leaves it behind (UI.B4).
             if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(AnyProcess);
@@ -191,15 +232,21 @@ public partial class App : Application
             _window.RequestSettingsPage();
         }
 
+        if (openTorrent is not null)
+        {
+            _window.RequestQueuedTorrents();
+        }
+
         _ = Task.Run(() =>
         {
             while (true)
             {
-                var activation = WaitHandle.WaitAny([_activation.Show, _activation.Settings]);
+                var activation = WaitHandle.WaitAny([_activation.Show, _activation.Settings, _activation.Open]);
                 _window.DispatcherQueue.TryEnqueue(() =>
                 {
                     _window.ShowFromTray();
                     if (activation == 1) _window.RequestSettingsPage();
+                    else if (activation == 2) _window.RequestQueuedTorrents();
                 });
             }
         });

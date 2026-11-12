@@ -64,6 +64,10 @@ ignored.
 | `DOWNLOADMANAGER_DATA` | `/data` | The state folder. |
 | `DOWNLOADMANAGER_URLS` | `http://0.0.0.0:8080` | Where the server listens inside the container. |
 | `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS` | - | `1`: start although the saved secrets can't be opened with `secrets.key` (they are lost). See "Backup". |
+| `DOWNLOADMANAGER_TORRENTS` | - | `off`: no torrents at all, whatever the web UI's Options say; the torrent engine never starts. Otherwise torrents are off until turned on in Options. |
+| `DOWNLOADMANAGER_TORRENT_PORT` | `6881` | The port the torrent engine listens on, TCP and UDP, while a torrent runs. Publish the same port (see "Torrents"). A value that isn't a port from 1 to 65535 stops the server from starting. |
+| `DOWNLOADMANAGER_TORRENT_UPNP` | `off` | `on`: the torrent engine asks the router to forward its port (UPnP and NAT-PMP). On Docker's own network the router can't be reached that way, so it only helps with `network_mode: host`. |
+| `DOWNLOADMANAGER_NAME` | the host name | The name the browser extension shows for this server once paired, such as `Home NAS`. Without it the extension gets the container's host name, or none when that is the container id (Docker's default), and shows the address. The user can still set their own name in the extension. |
 
 ## Volumes and file owners
 
@@ -161,6 +165,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 
 The server finds `ffmpeg` on `PATH`.
 
+## Torrents
+
+The server downloads magnets and `.torrent` files itself when the image has the torrent engine
+(`/app/inbound-torrent`) and torrents are turned on.
+
+- **Turn them on** in the web UI: Options > Torrents > Download torrents on the server. They are off on a new server.
+  The web UI then shows Add magnet and Import torrent file and a Torrents view. `DOWNLOADMANAGER_TORRENTS=off` keeps
+  them off whatever Options say (the Torrents page is then not shown).
+- **Adding**: the Add menu, Ctrl+V anywhere on the page, or dropping magnet links or `.torrent` files on the page. A
+  `.torrent` file is uploaded to the server's state folder (`/data/uploads`) and read there. With a TorBox account each
+  line of the torrent dialog also says whether TorBox has it cached; the choice between this server and TorBox stays
+  yours.
+- **Port**: the engine listens on `DOWNLOADMANAGER_TORRENT_PORT` (6881), TCP and UDP. The example compose file publishes
+  it (`6881:6881/tcp` and `6881:6881/udp`), so peers can connect in; forward the same port on your router to this
+  machine for connections from the internet. Without the published port torrents still download, over the connections
+  the engine makes out, usually more slowly.
+- **Seeding**: a finished torrent goes on sharing its files with other peers until it reaches a ratio (what it sent
+  against what it downloaded) or a number of hours, whichever comes first. Set it in Options > Torrents > Seeding:
+  - *Keep seeding after the download finishes*: on by default. Off, a finished torrent stops at once; Start seeding
+    in a torrent's menu still shares one.
+  - *Stop seeding at ratio*: 1.0 by default. *Stop seeding after (hours)*: 48 by default. 0 is no limit for that one,
+    but not both.
+  - *Upload limit for torrents (KB/s)*: empty by default, so torrents upload at most at the total speed limit of
+    Options > Connection, or without a limit when there is none.
+
+  Start seeding and Stop seeding in a torrent's menu do it for one torrent. The Torrents view lists the torrents
+  under Downloading, Seeding and Stopped, with their seeds, peers, upload rate and ratio; a seeding row's bar and
+  Ratio show how far it is to the goal. Seeding uses the same port as downloading (`DOWNLOADMANAGER_TORRENT_PORT`,
+  TCP and UDP), so publish it as above for peers to connect in. Stop All, a queue's stop or quota, and turning
+  torrents off also end seeding.
+- **Nothing runs while idle**: with torrents off, or on with none downloading or seeding, there is no torrent process
+  and nothing listens on the port. The engine starts with the first torrent and stops about 30 seconds after the last
+  one; a seeding torrent keeps it running.
+- **UPnP and NAT-PMP** are off in the image (`DOWNLOADMANAGER_TORRENT_UPNP=off`); see the table above.
+- **Where files go**: like any download, to the folder chosen in the dialog under `/downloads` (or another root).
+  The torrent's state (resume data, the DHT's node list) is kept in `/data/torrents`, so it is in the same backup.
+- The proxy in Options is not used for torrents: they connect directly.
+
 ## Building the image
 
 ```sh
@@ -168,8 +210,16 @@ docker build -t inbound .
 docker buildx build --platform linux/arm64 -t inbound .     # untested; needs QEMU/binfmt
 ```
 
-The build context is an allowlist (`.dockerignore`): only `Directory.Build.props`, the server's projects, `webui/`
-and the two scripts in `docker/` are sent, and build output, `node_modules`, keys, `.env` files and anything named
+The image includes the torrent engine (`/app/inbound-torrent`), built in its own stage from `native/torrent-worker`
+the same way as `native/torrent-worker/Dockerfile.build`. That stage compiles Boost, OpenSSL and libtorrent and takes
+a while. A worker built before can stand in for it:
+
+```sh
+docker build --build-context torrent-worker=artifacts/torrent-worker/linux-x64 -t inbound .
+```
+
+The build context is an allowlist (`.dockerignore`): only `Directory.Build.props`, the server's projects,
+`native/torrent-worker`, `webui/` and the two scripts in `docker/` are sent, and build output, `node_modules`, keys, `.env` files and anything named
 like credentials or secrets are left out even there. The Node and .NET stages run on the build machine's own
 architecture and cross-publish, so only the last stage is the target's.
 

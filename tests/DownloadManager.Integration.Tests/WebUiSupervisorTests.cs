@@ -407,6 +407,32 @@ public sealed class WebUiSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task APasswordIsNotChangedWhileABridgeThatDidNotStopStillRunsEvenWhenTriedAgain()
+    {
+        _passwords.Has = true;
+        await using var supervisor = Supervisor();
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
+        var stuck = Assert.Single(_launcher.Processes);
+        stuck.IgnoresStop = true;
+        lock (_timeline) _timeline.Clear();
+
+        const string Refusal = "The web UI did not stop, so the password was not changed. Try again in a moment.";
+        Assert.Equal(Refusal, (await supervisor.SetPasswordAsync("a long enough password")).Error);
+        // Tried again while that bridge still runs: asked to stop again, and still refused, with no password written.
+        Assert.Equal(Refusal, (await supervisor.SetPasswordAsync("a long enough password")).Error);
+        Assert.DoesNotContain("password", _timeline);
+        Assert.Equal(2, _timeline.Count(step => step == "stop"));
+
+        // Once it has ended the password is changed, and a new bridge starts.
+        stuck.Exit(WebBridgeExit.Stopped, null);
+        var status = await supervisor.SetPasswordAsync("a long enough password");
+        Assert.Null(status.Error);
+        Assert.Contains("password", _timeline);
+        Assert.Equal(WebUiStates.Running, status.State);
+        Assert.Equal(2, _launcher.Processes.Count);
+    }
+
+    [Fact]
     public async Task TheTicketIsGivenOnlyWhileRunningAndOnlyWhenTheBridgeItStartedIsTheOneListening()
     {
         _passwords.Has = true;
@@ -501,6 +527,9 @@ public sealed class WebUiSupervisorTests : IDisposable
         public Task<WebBridgeExitInfo> Exited => _exited.Task;
         public bool Stopped { get; private set; }
 
+        /// <summary>A bridge that doesn't end when asked to (it still runs after the grace and the kill).</summary>
+        public bool IgnoresStop { get; set; }
+
         public void MarkReady() => _ready.TrySetResult();
 
         public void Exit(int code, string? message) => _exited.TrySetResult(new WebBridgeExitInfo(code, message));
@@ -509,7 +538,7 @@ public sealed class WebUiSupervisorTests : IDisposable
         {
             Stopped = true;
             lock (timeline) timeline.Add("stop");
-            Exit(WebBridgeExit.Stopped, null);
+            if (!IgnoresStop) Exit(WebBridgeExit.Stopped, null);
             return Task.CompletedTask;
         }
     }

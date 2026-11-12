@@ -6,7 +6,8 @@
   // canProvider: the server has a provider (remote.*); a torrent file and a container's links can only go there.
   // canUpload: it takes uploaded files (the hello's "uploads"), which a torrent or container file is sent as.
   // disabled: the server can't be reached, so nothing can be added (U-WU-3); the toolbar's Add URL says the same.
-  let { onpick, onexport, canProvider = true, canUpload = true, disabled = false }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean; canUpload?: boolean; disabled?: boolean } = $props();
+  // canTorrents: the server downloads torrents itself (T1: the hello's "torrents" and Options' Torrents on), so a .torrent file needn't go to a provider.
+  let { onpick, onexport, canProvider = true, canUpload = true, canTorrents = false, disabled = false }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean; canUpload?: boolean; canTorrents?: boolean; disabled?: boolean } = $props();
 
   let open = $state(false);
 
@@ -36,7 +37,7 @@
   {#if open}
     <ul class="card absolute left-0 right-0 z-40 mt-1 overflow-hidden py-1 shadow-lg" role="menu">
       {#each items as item (item.kind)}
-        {#if (item.kind !== 'torrent' && item.kind !== 'container') || (canProvider && canUpload)}
+        {#if (item.kind !== 'torrent' && item.kind !== 'container') || (canUpload && (canProvider || (item.kind === 'torrent' && canTorrents)))}
           <li role="none"><button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={() => pick(item.kind)}><span>{item.label}</span>{#if item.hint}<span class="text-[11px] text-muted">{item.hint}</span>{/if}</button></li>
         {/if}
       {/each}

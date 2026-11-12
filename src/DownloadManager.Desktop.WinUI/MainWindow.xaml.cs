@@ -21,7 +21,22 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, JobViewModel> _packageRows = new();
     private StatisticsWindow? _statisticsWindow;
     private SchedulerWindow? _schedulerWindow;
-    private SettingsDto? _settings;
+    private SettingsDto? _shownSettings;
+
+    /// <summary>
+    /// The shown Host's settings. Every change, wherever it comes from (a snapshot, Options, the speed limits, a server
+    /// switch), takes the seeding rows to the new seeding goal at once (<see cref="SyncSeedGoal"/>).
+    /// </summary>
+    private SettingsDto? _settings
+    {
+        get => _shownSettings;
+        set
+        {
+            _shownSettings = value;
+            SyncSeedGoal();
+        }
+    }
+
     private HostStatusDto? _status;
     private SettingsWindow? _settingsWindow;
     private bool _pendingSettingsOpen;
@@ -77,12 +92,15 @@ public sealed partial class MainWindow : Window
             // UI.B20: Progress Details samples its one download by the same rule.
             var rate = SpeedSample.Total(_graphConnected && _graphSnapshotReady,
                 _jobsById.Values.Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.LastUpdated, now)));
-            SpeedGraph.IsSeen = AppWindow.IsVisible
-                && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized }
-                && SpeedGraph.Visibility == Visibility.Visible;
+            SpeedGraph.IsSeen = WindowShown && SpeedGraph.Visibility == Visibility.Visible;
             SpeedGraph.AddSample(now, rate);
+            // The sample after the last download stops is its 0; then the timer stops until one runs again.
+            UpdateSpeedTimer();
         };
-        _speedHistoryTimer.Start();
+        AppWindow.Changed += (_, change) =>
+        {
+            if (change.DidVisibilityChange || change.DidPresenterChange) UpdateSpeedTimer();
+        };
         InitializeLimitMenus();
         WindowLayout.UseBackdrop(this);
         RootGrid.ActualThemeChanged += (_, _) =>
@@ -176,6 +194,7 @@ public sealed partial class MainWindow : Window
         _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
         InitializeRemoteUi();
         InitializeArchiveUi();
+        InitializeTorrentUi();
         _remote.Start();
         InitializeServers();
 
@@ -241,6 +260,10 @@ public sealed partial class MainWindow : Window
             {
                 _category = _uiState.Category; // Restored once Host category definitions arrive.
             }
+            else if (TorrentListRules.IsTorrentView(_uiState.Category))
+            {
+                _pendingTorrentCategory = _uiState.Category; // Restored once the Host says whether torrents are on.
+            }
             else if (_uiState.Category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) || _uiState.Category == ArchiveSetsTag)
             {
                 _pendingRemoteCategory = _uiState.Category; // Restored once the Host says what it has.
@@ -275,7 +298,7 @@ public sealed partial class MainWindow : Window
             presenter.Restore();
         Activate();
         if (OperatingSystem.IsWindows()) SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
-        SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
+        UpdateSpeedTimer();
     }
 
 #if HAS_UNO
@@ -364,10 +387,49 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private bool WindowShown => AppWindow.IsVisible
+        && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+
+    /// <summary>
+    /// Audit M11: the graph's one-second sample runs only while the window is shown and connected with a download
+    /// transferring. Started again after a pause of more than a few seconds, the graph takes the Host's hour (UI.R24),
+    /// which has the pause's zeros, instead of drawing it as a gap.
+    /// </summary>
+    private void UpdateSpeedTimer()
+    {
+        var shown = WindowShown;
+        var graphSeen = shown && SpeedGraph.Visibility == Visibility.Visible;
+        var cameBack = graphSeen && !SpeedGraph.IsSeen;
+        SpeedGraph.IsSeen = graphSeen;
+        var run = shown && _graphConnected && _jobsById.Values.Any(job => SpeedSample.IsActive(job.State));
+        var paused = _speedTimerStoppedAt is { } stoppedAt && Environment.TickCount64 - stoppedAt > 5_000;
+        if (paused && _graphSnapshotReady && (cameBack || run && !_speedHistoryTimer.IsEnabled))
+            _ = LoadSpeedHistoryAsync();
+        if (run == _speedHistoryTimer.IsEnabled) return;
+        if (run)
+        {
+            _speedTimerStoppedAt = null;
+            _speedHistoryTimer.Start();
+        }
+        else
+        {
+            _speedHistoryTimer.Stop();
+            _speedTimerStoppedAt = Environment.TickCount64;
+        }
+    }
+
+    private long? _speedTimerStoppedAt = Environment.TickCount64;
+
     private void ApplySnapshot(SnapshotDto snapshot)
     {
-        if (!_graphSnapshotReady) _ = LoadSpeedHistoryAsync();
+        if (!_graphSnapshotReady)
+        {
+            _ = LoadSpeedHistoryAsync();
+            // The graph is up to date as of now; UpdateSpeedTimer reads the Host's hour again only after a later pause.
+            if (!_speedHistoryTimer.IsEnabled) _speedTimerStoppedAt = Environment.TickCount64;
+        }
         _graphSnapshotReady = true;
+        // Also sets the seeding goal the rows below show a seeding torrent's way to.
         _settings = snapshot.Settings;
         // A server's path style, for every folder check and hint while it is shown.
         if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
@@ -394,13 +456,24 @@ public sealed partial class MainWindow : Window
         }
 
         RebuildVisible(selectedId);
+        _torrentSnapshotSeen = true;
+        // The Tasks torrent items follow these settings too. The menu is rebuilt only when what it offers changed.
+        SyncRemoteEntryPoints();
+        SyncTorrentViews();
         UpdateStatusText();
+        UpdateSpeedTimer();
         TraceFirstList(snapshot.Jobs.Count);
 
         if (_pendingSettingsOpen)
         {
             _pendingSettingsOpen = false;
             _ = OpenOptionsAsync();
+        }
+
+        if (_pendingTorrentOpen)
+        {
+            _pendingTorrentOpen = false;
+            _ = OpenQueuedTorrentsAsync();
         }
     }
 
@@ -432,6 +505,7 @@ public sealed partial class MainWindow : Window
             {
                 _visibleJobs.Remove(removed);
                 if (removed.PackageId is not null) RebuildVisible();
+                if (removed.IsTorrent) ForgetTorrentRow(removed);
 
                 // A record whose last file left the list now needs a row of its own.
                 if (_setByJob.ContainsKey(job.Id)) QueueArchiveSync();
@@ -488,7 +562,15 @@ public sealed partial class MainWindow : Window
             {
                 _visibleJobs.Remove(vm);
             }
+
+            // An open torrent row lists its files under it, which a change to it can add, move or take away.
+            if (vm.IsTorrent && !TorrentFileRowsInPlace(vm))
+            {
+                RebuildVisible();
+            }
         }
+
+        if (job.Torrent is not null || changeType == "removed") SyncTorrentViews();
 
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatusText();
@@ -512,17 +594,21 @@ public sealed partial class MainWindow : Window
         }
 
         if (changeType == "completed") NoteRemoteCompletion(job);
+        // A download that starts wakes the speed graph's sample timer (it sleeps while nothing transfers).
+        if (!_speedHistoryTimer.IsEnabled && SpeedSample.IsActive(job.State)) UpdateSpeedTimer();
     }
 
     private void ApplyConnection(bool connected, string? error)
     {
         _graphConnected = connected;
         _graphSnapshotReady = false;
+        UpdateSpeedTimer();
         var target = _connection.Target;
         ConnectionText.Text = target.IsLocal
             ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
             : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}";
         NoteShownConnection(connected, error);
+        OnTorrentControlsConnection(connected);
         UpdateStatusText();
 
         // The rows stay on the list while the Host is away, so it isn't empty.
@@ -579,7 +665,8 @@ public sealed partial class MainWindow : Window
         ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
         CancelPackageGroup.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
         CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
-        var sideRows = rows.Count(row => row.IsSideRow);
+        // A torrent's file rows are only shown: nothing can act on them, so nothing says how.
+        var sideRows = rows.Count(row => row.IsSideRow && !row.IsTorrentFile);
         var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
         DeleteButton.IsEnabled = connected && (selection.Count > 0 || removableSideRows > 0);
         var deleteToolTip = FirstLocalRow is null && sideRows > 0 ? "Remove the selected rows from the list" : "Delete the selected download and its partial data";
@@ -600,13 +687,17 @@ public sealed partial class MainWindow : Window
             SelectedJob?.State == "completed");
         Apply(FileOpenItem, "Open", plan.LaunchReason);
         Apply(FileOpenFolderItem, "Open Folder", OpenFolderReason(plan));
-        Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
+        var torrent = TorrentRules.BlocksAddressCommands(SelectedJobDtos);
+        Apply(FileMoveRenameItem, "Move/Rename…", FileMenuRules.ForTorrent(plan.OpenReason, torrent));
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
         Apply(FileDownloadNowItem, "Download Now", plan.LocalReason, rows.Any(row => row.CanResume));
         Apply(FileStopItem, "Stop Download", plan.LocalReason, rows.Any(row => row.CanPause));
-        Apply(FileRedownloadItem, "Redownload", plan.FileReason);
+        Apply(FileRedownloadItem, "Redownload", FileMenuRules.ForTorrent(plan.FileReason, torrent));
         Apply(FileDeleteItem, "Delete…", plan.RemoveReason);
+        var chooseFiles = CanChooseTorrentFiles ? Visibility.Visible : Visibility.Collapsed;
+        if (FileChooseFilesItem.Visibility != chooseFiles) FileChooseFilesItem.Visibility = chooseFiles;
+        SyncSeedingItems(FileStartSeedingItem, FileStopSeedingItem);
 
         static void Apply(MenuFlyoutItem item, string text, string? reason, bool canAct = true)
         {
@@ -658,7 +749,7 @@ public sealed partial class MainWindow : Window
         // The repair runs Windows PowerShell against the Windows registry; on Linux the Host registers the native host itself.
         var repair = OperatingSystem.IsWindows() && !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
         RepairBrowserButton.Visibility = repair ? Visibility.Visible : Visibility.Collapsed;
-        if (ShellWords.FindCount(_search, _visibleJobs.Count(row => row.PackageId is null)) is { } shown) StatusText.Text += $" · {shown}";
+        if (ShellWords.FindCount(_search, _visibleJobs.Count(row => row.PackageId is null && !row.IsTorrentFile)) is { } shown) StatusText.Text += $" · {shown}";
         var selected = SelectedJobs.Count;
         if (selected > 1)
         {
@@ -672,6 +763,7 @@ public sealed partial class MainWindow : Window
         }
 
         if (_passing.Words is { } passing) StatusText.Text = passing;
+        UpdateTorrentChip();
 
         if (_status?.StateDirectory is { } stateDirectory)
         {
@@ -705,6 +797,8 @@ public sealed partial class MainWindow : Window
             "compressed" or "documents" or "music" or "programs" or "video" or "other" => job.CategoryId == _category,
             _ when _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) => false,
             ArchiveSetsTag => false,
+            TorrentRules.SidebarTag => job.IsTorrent,
+            _ when TorrentListRules.IsSubTag(_category) => job.IsTorrent && TorrentListRules.Matches(_category, job.Dto),
             _ when _category.StartsWith("category:", StringComparison.Ordinal) => job.CategoryId == _category[9..],
             _ => true,
         };
@@ -713,6 +807,7 @@ public sealed partial class MainWindow : Window
     /// <param name="sorting">The rows are being put in a new order, and the caller then shows where the list should be.</param>
     private void RebuildVisible(Guid? selectedId = null, bool sorting = false)
     {
+        SyncTorrentColumns();
         // Keep the whole (multi-)selection by id. Clearing the collection can leave the
         // ListView selecting row 0, so the selection is always rebuilt explicitly below.
         var keepSelected = selectedId is { } only
@@ -756,7 +851,9 @@ public sealed partial class MainWindow : Window
         {
             target.Add(row);
             if (row.IsPackage && row.IsExpanded)
-                foreach (var child in _sortKey == "added" ? row.Children.Where(Matches) : Sorted(row.Children.Where(Matches))) target.Add(child);
+                foreach (var child in ShownSort.Key == "added" ? row.Children.Where(Matches) : Sorted(row.Children.Where(Matches))) target.Add(child);
+            // A torrent's files, in the torrent's own order and never sorted: they are no jobs (see TorrentFileRows).
+            if (row.IsTorrent) target.AddRange(TorrentFileRows(row));
         }
 
         // Sync in place instead of Clear + Add: rows that stay keep their containers, so
@@ -802,7 +899,7 @@ public sealed partial class MainWindow : Window
     /// <summary>U-WL-8: a filtered list says so, with how many rows it shows, until the filter is cleared.</summary>
     private void UpdateFindBar()
     {
-        var words = ShellWords.FindFilter(_search, _visibleJobs.Count(row => row.PackageId is null));
+        var words = ShellWords.FindFilter(_search, _visibleJobs.Count(row => row.PackageId is null && !row.IsTorrentFile));
         FindBar.Visibility = words is null ? Visibility.Collapsed : Visibility.Visible;
         if (words is not null && FindBarText.Text != words) FindBarText.Text = words;
     }
@@ -930,7 +1027,7 @@ public sealed partial class MainWindow : Window
 
     private void PackageChevron_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is JobViewModel { IsPackage: true } row)
+        if ((sender as FrameworkElement)?.DataContext is JobViewModel { HasChevron: true } row)
         {
             e.Handled = true;
             TogglePackage(row);
@@ -941,7 +1038,7 @@ public sealed partial class MainWindow : Window
     private void PackageChevron_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
         e.Handled = true;
-        if ((sender as FrameworkElement)?.DataContext is JobViewModel { IsPackage: true } row) TogglePackage(row);
+        if ((sender as FrameworkElement)?.DataContext is JobViewModel { HasChevron: true } row) TogglePackage(row);
     }
 
     private void PackageChevron_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -955,11 +1052,14 @@ public sealed partial class MainWindow : Window
         if (sender is Border border) border.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 
+    /// <summary>Opens or closes a package row, or a torrent row's list of files. Either stays as left (UI state).</summary>
     private void TogglePackage(JobViewModel row)
     {
-        if (!row.IsPackage) return;
-        if (!_uiState.ExpandedPackages.Remove(row.Id)) _uiState.ExpandedPackages.Add(row.Id);
+        if (!row.HasChevron) return;
+        var opened = !_uiState.ExpandedPackages.Remove(row.Id);
+        if (opened) _uiState.ExpandedPackages.Add(row.Id);
         UiStateStore.Save(_uiState);
+        if (row.IsTorrent && !opened) CloseTorrentFiles(row.Id);
         RebuildVisible(row.Id);
     }
 
@@ -973,6 +1073,7 @@ public sealed partial class MainWindow : Window
 
     private void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (HandleTorrentRowKey(e)) return;
         if (e.Key == Windows.System.VirtualKey.Delete && SelectedJobs.Count > 0)
         {
             e.Handled = true;
@@ -1016,7 +1117,7 @@ public sealed partial class MainWindow : Window
         {
             if (tag == "queues")
             {
-                _ = ShowQueuesAsync();
+                _ = ShowQueuesSafelyAsync();
                 return;
             }
 
@@ -1067,6 +1168,7 @@ public sealed partial class MainWindow : Window
             TogglePackage(package);
             return;
         }
+        if (await RunTorrentPrimaryAsync()) return;
         if (FirstLocalRow is null && SelectedRemoteRows is [{ RemoteJob: { } remote }])
         {
             await RunRemotePrimaryAsync(remote);
@@ -1093,7 +1195,12 @@ public sealed partial class MainWindow : Window
             element = VisualTreeHelper.GetParent(element);
         }
 
-        if (element is ListViewItem { Content: JobViewModel job } &&
+        // A torrent's file row has no commands of its own: the menu is its torrent's.
+        if (element is ListViewItem { Content: JobViewModel { IsTorrentFile: true } file } && TorrentRowOf(file) is { } torrent)
+        {
+            JobsList.SelectedItem = torrent;
+        }
+        else if (element is ListViewItem { Content: JobViewModel job } &&
             !JobsList.SelectedItems.Contains(job))
         {
             JobsList.SelectedItem = job;
@@ -1122,8 +1229,8 @@ public sealed partial class MainWindow : Window
         moveShortcut.Invoked += (_, args) =>
         {
             args.Handled = true;
-            // A removed archive gets its reason from there, in the status bar.
-            if (SelectedJob is { State: "completed" }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
+            // A removed archive gets its reason from there, in the status bar; a torrent has no one file to move.
+            if (SelectedJob is { State: "completed", IsTorrent: false }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
         };
         JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);
@@ -1131,6 +1238,11 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_separatorAfterOpen = new MenuFlyoutSeparator());
         flyout.Items.Add(_menuResume = CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(_menuStop = CreateContextItem("Stop", MenuPause_Click));
+        flyout.Items.Add(_menuChooseFiles = CreateContextItem("Choose Files…", MenuChooseTorrentFiles_Click));
+        flyout.Items.Add(_menuStartSeeding = CreateContextItem("Start Seeding", MenuStartSeeding_Click));
+        flyout.Items.Add(_menuStopSeeding = CreateContextItem("Stop Seeding", MenuStopSeeding_Click));
+        flyout.Items.Add(_menuCopyMagnet = CreateContextItem("Copy Magnet Link", MenuCopyMagnet_Click));
+        AddTorrentControlItems(flyout);
         flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
         flyout.Items.Add(_menuRedownload = CreateContextItem("Redownload", MenuRedownload_Click));
         flyout.Items.Add(_menuRefreshUrl = CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
@@ -1197,6 +1309,9 @@ public sealed partial class MainWindow : Window
 
     private void JobsContextMenu_Opening(object? sender, object e)
     {
+        // A torrent's file rows stand for their torrent here, as a right-click on one does.
+        SelectTorrentsOfFileRows();
+
         // Offer only what applies to the current selection.
         var selection = SelectedJobs;
         ShowContextItemsForSelection();
@@ -1225,6 +1340,7 @@ public sealed partial class MainWindow : Window
         var providerFile = selection.Any(job => job.IsProviderFile);
         if (_menuRedownload is not null) _menuRedownload.Visibility = Show(!providerFile);
         if (_menuRefreshUrl is not null) _menuRefreshUrl.Visibility = Show(!providerFile);
+        ShowTorrentContextItems(selection);
         if (_menuCancelPackage is not null)
         {
             var packages = SelectedPackageRows;
@@ -1400,6 +1516,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
     {
+        if (SayIfTorrent("Open With")) return;
         if (SayIfOnAnotherServer()) return;
         if (CommandJob is { FileRemovedAfterExtraction: true } removed)
         {
@@ -1426,7 +1543,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuMoveRename_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job)
+        if (SelectedJob is not { } job || SayIfTorrent("Move/Rename"))
         {
             return;
         }
@@ -1576,12 +1693,12 @@ public sealed partial class MainWindow : Window
 
     private async void MenuRedownload_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job)
+        if (SelectedJob is not { } job || SayIfTorrent("Redownload"))
         {
             return;
         }
 
-        if (job.State is "connecting" or "downloading" or "queued" or "paused" or "retryWaiting")
+        if (FileMenuRules.RedownloadNeedsStop(job.State))
         {
             await ShowMessageAsync("Redownload", "Stop the current download before redownloading.");
             return;
@@ -1748,7 +1865,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuRefreshUrl_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job)
+        if (SelectedJob is not { } job || SayIfTorrent("Refresh Download Address"))
         {
             return;
         }
@@ -1844,7 +1961,7 @@ public sealed partial class MainWindow : Window
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
     {
         SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
-        SpeedGraph.IsSeen = ShowSpeedGraphMenuItem.IsChecked;
+        UpdateSpeedTimer();
         SaveUiState();
     }
 
@@ -1882,6 +1999,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuGroupSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (SayIfTorrent("Group into Package")) return;
         var selection = SelectedJobs;
         if (selection.Count < 2)
         {
@@ -1897,6 +2015,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuUngroup_Click(object sender, RoutedEventArgs e)
     {
+        if (SayIfTorrent("Remove from Package")) return;
         var byPackage = SelectedJobs.Where(job => job.PackageId is not null).GroupBy(job => job.PackageId!.Value).ToList();
         if (byPackage.Count == 0) return;
         foreach (var package in byPackage)
@@ -1913,6 +2032,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuRenamePackage_Click(object sender, RoutedEventArgs e)
     {
+        if (SayIfTorrent("Rename Package")) return;
         var row = SelectedPackage ?? (SelectedJob?.PackageId is { } id ? _packageRows.GetValueOrDefault(id) : null);
         if (row is null) return;
         if (await AskPackageNameAsync("Rename package", row.FileName) is not { } name) return;
@@ -2092,7 +2212,9 @@ public sealed partial class MainWindow : Window
         try
         {
             var snapshot = await _connection.RefreshAsync();
-            await File.WriteAllTextAsync(pathBox.Text.Trim(), JobListFile.Serialize(snapshot.Jobs));
+            // A torrent is saved with its .torrent and file choice, which only the Host has.
+            var torrents = snapshot.Jobs.Any(job => job.Torrent is not null) ? await _connection.GetTorrentListEntriesAsync() : null;
+            await File.WriteAllTextAsync(pathBox.Text.Trim(), JobListFile.Serialize(snapshot.Jobs, torrents));
             await ShowMessageAsync("Export download list",
                 $"Exported {snapshot.Jobs.Count} downloads to {pathBox.Text.Trim()}.");
         }
@@ -2168,14 +2290,33 @@ public sealed partial class MainWindow : Window
         if (await ProviderAddAppliesAsync())
         {
             ShowPassingStatus($"Checking {entries.Count} addresses…");
-            answers = await ImportRouting.ClassifyAllAsync(entries.Select(entry => entry.Url).Where(LinkExtractor.IsDownloadableLink), () => _remote.OpenClassifier());
+            answers = await ImportRouting.ClassifyAllAsync(entries.Where(entry => !JobListFile.IsTorrent(entry)).Select(entry => entry.Url).Where(LinkExtractor.IsDownloadableLink), () => _remote.OpenClassifier());
         }
 
         var accepted = 0;
         var failed = 0;
         string? firstError = null;
         var toReview = new List<(string Input, RemoteClassifyResult Result)>();
-        foreach (var entry in entries)
+        // Torrents go to the Host's torrent import, which skips those already in the list (or all, with torrents off).
+        var torrentEntries = entries.Where(JobListFile.IsTorrent).ToList();
+        var torrentImport = new TorrentImportResult();
+        if (torrentEntries.Count > 0)
+        {
+            try
+            {
+                torrentImport = await _connection.ImportTorrentsAsync(torrentEntries);
+            }
+            catch (Exception ex)
+            {
+                torrentImport = new TorrentImportResult { Failed = torrentEntries.Count, FirstError = ex.Message };
+            }
+
+            accepted += torrentImport.Added;
+            failed += torrentImport.Failed;
+            firstError ??= torrentImport.FirstError;
+        }
+
+        foreach (var entry in entries.Where(entry => !JobListFile.IsTorrent(entry)))
         {
             if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
                 uri.Scheme is not ("http" or "https" or "ftp"))
@@ -2236,7 +2377,7 @@ public sealed partial class MainWindow : Window
         }
 
         await RefreshAsync();
-        await ShowMessageAsync("Import download list", RemoteText.ImportSummary(accepted, entries.Count, failed, firstError, toReview.Count));
+        await ShowMessageAsync("Import download list", RemoteText.ImportSummary(accepted, entries.Count, failed, firstError, toReview.Count, torrentImport.Skipped, torrentImport.SkipReason));
         if (toReview.Count > 0 && !await ShowProviderAddAsync(AddFocus.ImportedLinks, answered: toReview))
         {
             ShowPassingStatus(RemoteText.ImportReviewNotOpened(accepted, entries.Count, failed, toReview.Count));
@@ -2892,7 +3033,7 @@ public sealed partial class MainWindow : Window
                 var text = (await clip.GetTextAsync()).Trim();
                 if (text.Length < 4096 && Uri.TryCreate(text, UriKind.Absolute, out var clipUri) &&
                     (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp ||
-                     (providerAdd && LinkExtractor.IsMagnet(text))))
+                     ((providerAdd || LocalTorrentsApply) && LinkExtractor.IsMagnet(text))))
                     urlBox.Text = text;
             }
         }
@@ -2933,6 +3074,10 @@ public sealed partial class MainWindow : Window
             {
                 case AddressWay.Cancelled:
                     return;
+                case AddressWay.Provider when LocalTorrentsApply && TorrentRules.IsTorrentInput(checkedAddress.Input):
+                    // T1: the torrent dialog, whose lines can still go to the provider.
+                    await AddTorrentsAsync("mixed", [checkedAddress.Input.Trim()]);
+                    return;
                 case AddressWay.Provider:
                     await ShowProviderAddAsync(AddFocus.OneAddress, [checkedAddress.Input], checkedAddress.Result);
                     return;
@@ -2952,6 +3097,16 @@ public sealed partial class MainWindow : Window
         {
             addressDialog.PrimaryButtonClick += (_, args) =>
             {
+                // T1: a magnet or .torrent file goes on to the torrent dialog. With torrents off there it asks whether to open
+                // Options; a Host without torrents keeps the box open.
+                if (TorrentRules.IsTorrentInput(urlBox.Text))
+                {
+                    if (LocalTorrentsApply || _remote.State.TorrentsOffered) return;
+                    addressError.Say("This Host doesn't download torrents.", isProblem: true);
+                    args.Cancel = true;
+                    return;
+                }
+
                 if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
                     candidate.Scheme is not ("http" or "https" or "ftp"))
                 {
@@ -2961,6 +3116,11 @@ public sealed partial class MainWindow : Window
             };
             if (await DialogGuard.ShowAsync(addressDialog) != ContentDialogResult.Primary) return;
             url = urlBox.Text.Trim();
+            if (TorrentRules.IsTorrentInput(url))
+            {
+                await AddTorrentsAsync("mixed", [url]);
+                return;
+            }
             // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
             if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
             {
@@ -3705,11 +3865,36 @@ public sealed partial class MainWindow : Window
         return new OrdinaryAddResult(urls.Count, accepted, duplicates, failed, firstError, firstJob);
     }
 
+    /// <summary>Audit L2: the Queues flow from the sidebar, whose failures (the Host away or slow) were dropped unsaid.</summary>
+    private async Task ShowQueuesSafelyAsync()
+    {
+        try
+        {
+            await ShowQueuesAsync();
+        }
+        catch (Exception ex)
+        {
+            // Called without waiting: anything not caught here (a send on a connection being torn down, a cancelled
+            // request, a dialog that would not open) is lost without a word, so every failure is said and traced.
+            UiTrace.Write($"Queues: {ex.GetType().Name}: {ex.Message}");
+            try
+            {
+                await ShowMessageAsync("Queues", ex.Message);
+            }
+            catch (Exception shown)
+            {
+                UiTrace.Write($"Queues message not shown: {shown.Message}");
+            }
+        }
+    }
+
     private async Task ShowQueuesAsync()
     {
         var snapshot = await _connection.RefreshAsync();
         _settings = snapshot.Settings;
         UpdateLimitButtons();
+        SyncRemoteEntryPoints();
+        SyncTorrentViews();
         var panel = new StackPanel { Spacing = 8 };
         var action = string.Empty;
         var actionQueue = 0;
@@ -4046,28 +4231,40 @@ public sealed partial class MainWindow : Window
 
         // Rebase onto current settings after the modal editor closes so quota
         // usage accumulated while it was open is preserved.
-        var saveSnapshot = await _connection.RefreshAsync();
-        settings = CloneSettings(saveSnapshot.Settings);
-        var saveExisting = queueId is { } existingId
-            ? settings.Queues.FirstOrDefault(queue => queue.Id == existingId)
-            : null;
-        if (queueId is not null && saveExisting is null)
+        QueueDto? saveExisting;
+        IpcMessage reply;
+        try
         {
-            await ShowMessageAsync("Queue", "This queue was removed before the changes could be saved.");
+            var saveSnapshot = await _connection.RefreshAsync();
+            settings = CloneSettings(saveSnapshot.Settings);
+            saveExisting = queueId is { } existingId
+                ? settings.Queues.FirstOrDefault(queue => queue.Id == existingId)
+                : null;
+            if (queueId is not null && saveExisting is null)
+            {
+                await ShowMessageAsync("Queue", "This queue was removed before the changes could be saved.");
+                return false;
+            }
+
+            var useQuota = quotaEnabled.IsChecked == true;
+            reply = await _connection.QueueActionAsync(new QueueActionRequest
+            {
+                QueueId = saveExisting?.Id ?? 0,
+                Action = saveExisting is null ? "create" : "policy",
+                Name = name.Text.Trim(),
+                MaxConcurrentDownloads = parsedConcurrent,
+                QuotaEnabled = useQuota,
+                QuotaBytes = useQuota ? parsedQuotaBytes : null,
+                QuotaWindowHours = useQuota ? parsedHours : null,
+            });
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException
+                                       or ObjectDisposedException or OperationCanceledException or System.Text.Json.JsonException)
+        {
+            // Audit L2: said, not lost without a word (the Host away or slow, or the connection being torn down).
+            await ShowMessageAsync("Could not save queue", $"'{name.Text.Trim()}' was not saved: {ex.Message}");
             return false;
         }
-
-        var useQuota = quotaEnabled.IsChecked == true;
-        var reply = await _connection.QueueActionAsync(new QueueActionRequest
-        {
-            QueueId = saveExisting?.Id ?? 0,
-            Action = saveExisting is null ? "create" : "policy",
-            Name = name.Text.Trim(),
-            MaxConcurrentDownloads = parsedConcurrent,
-            QuotaEnabled = useQuota,
-            QuotaBytes = useQuota ? parsedQuotaBytes : null,
-            QuotaWindowHours = useQuota ? parsedHours : null,
-        });
         var result = reply.GetPayload<SettingsResult>();
         if (!result.Ok)
         {
@@ -4121,6 +4318,9 @@ public sealed partial class MainWindow : Window
         // changes from the CLI), and Options would show and save the old values.
         await RefreshSettingsAsync();
         var settings = CloneSettings(_settings);
+        // Audit H1: what the pages showed when they opened, so Save sends only what the user changed (OptionsSettingsRebase).
+        // A field the form shows coarser than it is stored (the speed limit in KB/s, the proxy) counts as it is shown.
+        var settingsAtOpen = OptionsSettingsRebase.AsShown(CloneSettings(_settings));
         var window = new SettingsWindow();
         OptionsWindowCreated(window);
         try
@@ -4132,7 +4332,7 @@ public sealed partial class MainWindow : Window
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
             var speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
                 settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
-                1, 10_000_000, "Unlimited");
+                1, OptionsSettingsRebase.SpeedLimitMaxKb, "Unlimited");
             speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
             var profilesBox = new TextBox
             {
@@ -4305,7 +4505,6 @@ public sealed partial class MainWindow : Window
 
             // Favorite folders: name and folder per row, in order. The star beside a folder box saves at once, so OK
             // keeps any saved meanwhile and drops only the rows removed here.
-            var favoritesAtOpen = settings.FavoriteFolders.Select(favorite => favorite.Path).ToList();
             var favoriteRows = new List<(TextBox Name, TextBox Folder, UIElement Row)>();
             var favoritesPanel = new StackPanel { Spacing = 8 };
             void ShowFavoriteRows()
@@ -4440,6 +4639,23 @@ public sealed partial class MainWindow : Window
                 }
             }
 
+            // T1: after the provider's page, as in the owner-approved mockup; only where the Host has the torrent engine.
+            TorrentOptionsPage? torrentPage = null;
+            var torrentPageIndex = -1;
+            if (_connection.Hello?.Capabilities.Contains("torrents", StringComparer.Ordinal) == true)
+            {
+                // The handler is this PC's: only the local Host registers it, for this PC's window.
+                // T3: the peer, privacy and connection settings only where the Host has them; the proxy as this window has it now.
+                await _connection.ProbeTorrentControlsAsync();
+                torrentPage = new TorrentOptionsPage(settings, TorrentProviderName(), offerHandler: !_connection.IsRemote && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()), _remote,
+                    withControls: TorrentControls,
+                    proxy: () => (proxyMode.SelectedIndex switch { 1 => "system", 2 => "manual", _ => "none" },
+                        proxyMode.SelectedIndex == 2 ? ProxyAddress.Compose(proxyProtocol.SelectedIndex, proxyAddress.Text) : null));
+                torrentPageIndex = nextPage;
+                window.AddPage("Torrents", "\uF22C", torrentPage.Controls);
+                nextPage++;
+            }
+
             ExtractionOptionsPage? extraction = null;
             var extractionPageIndex = nextPage;
             if (_remote.State.ArchivesSupported)
@@ -4456,6 +4672,7 @@ public sealed partial class MainWindow : Window
             {
                 foreach (var (page, _) in accountPages) page.Close();
                 extraction?.Close();
+                torrentPage?.Close();
                 webUi.Close();
             };
 
@@ -4472,6 +4689,8 @@ public sealed partial class MainWindow : Window
                     return (extractionProblem, extractionPageIndex);
                 if (webUi.Validate() is { } webUiProblem)
                     return (webUiProblem, webUi.PageIndex);
+                if (torrentPage?.Validate() is { } torrentProblem)
+                    return (torrentProblem, torrentPageIndex);
                 if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
                     return (soundError ?? "Invalid sound choice.", SoundsPage);
                 foreach (var row in loginRows)
@@ -4556,10 +4775,8 @@ public sealed partial class MainWindow : Window
                 settings.UpdateCheckIntervalHours = checkInterval;
                 var edited = favoriteRows.Where(entry => !string.IsNullOrWhiteSpace(entry.Folder.Text))
                     .Select(entry => new FavoriteFolderDto { Name = entry.Name.Text.Trim(), Path = entry.Folder.Text.Trim() }).ToList();
-                var savedMeanwhile = (_settings?.FavoriteFolders ?? new()).Where(favorite =>
-                    !favoritesAtOpen.Contains(favorite.Path, StringComparer.OrdinalIgnoreCase) &&
-                    !edited.Any(row => string.Equals(row.Path, favorite.Path, StringComparison.OrdinalIgnoreCase)));
-                settings.FavoriteFolders = edited.Concat(savedMeanwhile).ToList();
+                // Favourites saved meanwhile (an add's star button) are kept by OptionsSettingsRebase.
+                settings.FavoriteFolders = edited;
                 settings.CategoryFolders = categoryBoxes
                     .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                     .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -4573,12 +4790,18 @@ public sealed partial class MainWindow : Window
                     .Where(category => !stagedCategoryRemovals.Contains(category.Id))
                     .ToList();
                 settings.DeleteCategoryIds = stagedCategoryRemovals.ToList();
+                torrentPage?.ApplyTo(settings);
 
-                var reply = await _connection.UpdateSettingsAsync(settings);
+                // Audit H1: onto the Host's latest settings, with only the fields changed here; the copy from when
+                // Options opened would undo Stop Queue, a Scheduler edit, a toolbar limit or another client's change.
+                var latest = CloneSettings((await _connection.RefreshAsync()).Settings);
+                var reply = await _connection.UpdateSettingsAsync(OptionsSettingsRebase.Rebase(settingsAtOpen, settings, latest));
                 var update = reply.GetPayload<SettingsResult>();
                 if (!update.Ok)
                     return (update.Error ?? "The host rejected the settings.", -1);
 
+                settingsAtOpen = CloneSettings(settings);
+                torrentPage?.Saved(update.Settings);
                 _settings = update.Settings;
                 // The Theme saved here is the user's latest choice, so a View > Dark Mode one still kept is dropped.
                 if (_uiState.DarkMode is not null)
@@ -4588,6 +4811,7 @@ public sealed partial class MainWindow : Window
                 }
                 AppTheme.Use(update.Settings.Theme);
                 UpdateLimitButtons();
+                SyncTorrentEntryPoints();
                 // UI.B6: a new default folder moves the category folders that sat under the old one. Show what the
                 // Host saved, or the boxes keep the old paths and the next OK writes them back.
                 directory.Text = update.Settings.DefaultDownloadDirectory;
@@ -4830,6 +5054,24 @@ public sealed partial class MainWindow : Window
             AutoResumeUnfinishedOnStartup = source.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = source.AllowLocalNetwork,
             PreventSleepWhileDownloading = source.PreventSleepWhileDownloading,
+            TorrentsEnabled = source.TorrentsEnabled,
+            TorrentRoute = source.TorrentRoute,
+            TorrentChooseFiles = source.TorrentChooseFiles,
+            TorrentHandler = source.TorrentHandler,
+            TorrentSeedAfterDownload = source.TorrentSeedAfterDownload,
+            TorrentSeedRatio = source.TorrentSeedRatio,
+            TorrentSeedHours = source.TorrentSeedHours,
+            TorrentUploadLimit = source.TorrentUploadLimit,
+            TorrentListenPort = source.TorrentListenPort,
+            TorrentUpnp = source.TorrentUpnp,
+            TorrentDht = source.TorrentDht,
+            TorrentPex = source.TorrentPex,
+            TorrentLsd = source.TorrentLsd,
+            TorrentEncryption = source.TorrentEncryption,
+            TorrentSeedsAtOnce = source.TorrentSeedsAtOnce,
+            TorrentConnectionsPerTorrent = source.TorrentConnectionsPerTorrent,
+            TorrentMaxConnections = source.TorrentMaxConnections,
+            TorrentUseProxy = source.TorrentUseProxy,
             AllowSystemCompletionActions = source.AllowSystemCompletionActions,
             FfmpegPath = source.FfmpegPath,
             Theme = source.Theme,
@@ -5102,6 +5344,21 @@ public sealed partial class MainWindow : Window
                 await ShowMessageAsync("Could not open file", ex.Message);
                 return;
             }
+        }
+
+        // Audit L6: a finished multi-file torrent's path is its folder; Open opens it, as Progress Details does,
+        // instead of revealing it in the folder above.
+        if (job.IsTorrent && !string.IsNullOrWhiteSpace(job.FinalFilePath) && Directory.Exists(job.FinalFilePath))
+        {
+            try
+            {
+                Process.Start(ShellActions.OpenFolder(job.FinalFilePath));
+            }
+            catch (Exception ex)
+            {
+                await ShowMessageAsync("Could not open folder", ex.Message);
+            }
+            return;
         }
 
         OpenContainingFolder(job);

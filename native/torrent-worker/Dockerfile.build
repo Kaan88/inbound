@@ -1,0 +1,42 @@
+# Builds the native torrent worker for Linux (T0, gate 12). CMake comes from vcpkg (Ubuntu 22.04 has 3.22; the build
+# needs 3.25). Ubuntu 22.04 (glibc 2.35) is the builder, so the binary
+# needs glibc 2.35 or older symbols only; libstdc++ and libgcc are linked in, OpenSSL and Boost statically.
+# TARGET is x64 (native) or arm64 (cross-compiled with aarch64-linux-gnu-g++, no emulation).
+#
+#   docker build -f native/torrent-worker/Dockerfile.build --build-arg TARGET=x64   --output artifacts/torrent-worker/linux-x64   native/torrent-worker
+#   docker build -f native/torrent-worker/Dockerfile.build --build-arg TARGET=arm64 --output artifacts/torrent-worker/linux-arm64 native/torrent-worker
+#
+# vcpkg is checked out at the manifest's builtin-baseline; libtorrent comes from the overlay port in ports/ (tag and
+# SHA-512 pinned there). vcpkg counts VCPKG_FORCE_SYSTEM_BINARIES as on whenever it is set (even to 0), so leave it unset.
+FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS build
+ARG TARGET=x64
+ARG VCPKG_COMMIT=e54ef0fcc9a82033a61e51002552a910a5d57282
+# JOBS caps parallel compiles. With one job per core, the owner's 20-core test VM stopped answering (even SSH)
+# during the arm64 dependency build twice; memory is the likely cause, not confirmed.
+ARG JOBS=4
+ENV DEBIAN_FRONTEND=noninteractive VCPKG_DISABLE_METRICS=1 VCPKG_MAX_CONCURRENCY=$JOBS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git ninja-build pkg-config python3 tar unzip zip perl linux-libc-dev \
+    && if [ "$TARGET" = arm64 ]; then apt-get install -y --no-install-recommends g++-aarch64-linux-gnu binutils-aarch64-linux-gnu; fi \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --filter=blob:none https://github.com/microsoft/vcpkg.git /vcpkg \
+    && git -C /vcpkg checkout --detach "$VCPKG_COMMIT" \
+    && /vcpkg/bootstrap-vcpkg.sh -disableMetrics
+WORKDIR /src
+COPY . .
+RUN set -eu; \
+    XC=""; \
+    if [ "$TARGET" = arm64 ]; then TRIPLET=arm64-linux-static-rel; STRIP=aarch64-linux-gnu-strip; \
+      XC="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"; \
+    else TRIPLET=x64-linux-static-rel; STRIP=strip; fi; \
+    CMAKE=$(/vcpkg/vcpkg fetch cmake --x-stderr-status | tail -n1); [ -x "$CMAKE" ]; \
+    $CMAKE -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/vcpkg/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=$TRIPLET -DVCPKG_OVERLAY_TRIPLETS=/src/triplets $XC; \
+    $CMAKE --build /build --parallel $JOBS; \
+    if [ "$TARGET" = x64 ]; then /build/inbound-torrent-selftest && /build/inbound-torrent --version; fi; \
+    $STRIP /build/inbound-torrent; \
+    mkdir /out && cp /build/inbound-torrent /out/
+
+FROM scratch
+COPY --from=build /out/ /

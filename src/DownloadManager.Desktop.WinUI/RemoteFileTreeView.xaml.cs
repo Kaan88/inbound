@@ -46,6 +46,13 @@ public sealed class RemoteFileRow : INotifyPropertyChanged
 
     public string ChevronName => _expanded ? $"Close folder {Node.Name}" : $"Open folder {Node.Name}";
 
+    private string? _priorityText;
+
+    /// <summary>T3: High, Normal, Low, Skip, or "mixed" for a folder; shown only where the tree has priorities.</summary>
+    public string PriorityText => _priorityText ??= RemoteFileTree.PriorityText(Node);
+
+    public Visibility PriorityVisibility => _owner.ShowPriorities ? Visibility.Visible : Visibility.Collapsed;
+
     /// <summary>The checkbox showing this row just now. The list reuses them as it scrolls.</summary>
     internal CheckBox? Box { get; set; }
 
@@ -68,6 +75,11 @@ public sealed class RemoteFileRow : INotifyPropertyChanged
     internal void Refresh()
     {
         if (Box is { } box && box.IsChecked != Node.Checked) _owner.ShowChecked(box, Node.Checked);
+        if (_owner.ShowPriorities && _priorityText is { } shown && shown != RemoteFileTree.PriorityText(Node))
+        {
+            _priorityText = null;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PriorityText)));
+        }
 
         if (_expanded != Node.IsExpanded)
         {
@@ -119,6 +131,55 @@ public sealed partial class RemoteFileTreeView : UserControl
     public event EventHandler? SelectionChanged;
 
     internal RemoteFileTree Tree => _tree;
+
+    /// <summary>
+    /// T3: the rows show a Priority column and a right-click changes it (a torrent's files on a Host that takes
+    /// priorities). Set before <see cref="SetFiles"/>.
+    /// </summary>
+    internal bool ShowPriorities
+    {
+        get => _showPriorities;
+        set
+        {
+            _showPriorities = value;
+            PriorityHint.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private bool _showPriorities;
+
+    /// <summary>Starting priorities by file id, after <see cref="SetFiles"/>.</summary>
+    internal void SetPriorities(IReadOnlyDictionary<string, string> priorities)
+    {
+        _tree.SetPriorities(priorities);
+        Changed();
+    }
+
+    /// <summary>T3: right-click, Shift+F10 or the menu key on a row: High, Normal, Low or Skip for it and what is under it.</summary>
+    private void RowsList_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (!_showPriorities || _readOnly) return;
+        var element = args.OriginalSource as FrameworkElement;
+        var row = element?.DataContext as RemoteFileRow ?? (element as ContentControl)?.Content as RemoteFileRow;
+        if (row is null || !row.CanCheck || element is null) return;
+        args.Handled = true;
+        var current = RemoteFileTree.PriorityText(row.Node);
+        var menu = new MenuFlyout();
+        foreach (var priority in TorrentPriorities.Menu)
+        {
+            var name = TorrentPriorities.Name(priority);
+            var item = new ToggleMenuFlyoutItem { Text = name, IsChecked = name == current };
+            item.Click += (_, _) =>
+            {
+                _tree.SetPriority(row.Node, priority);
+                Changed();
+            };
+            menu.Items.Add(item);
+        }
+
+        if (args.TryGetPosition(element, out var point)) menu.ShowAt(element, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
+        else menu.ShowAt(element);
+    }
 
     /// <summary>Shows these files, with the given ones chosen.</summary>
     /// <param name="chooseAll">Everything that can be chosen starts chosen.</param>

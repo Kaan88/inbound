@@ -29,7 +29,8 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
         catch (IOException) { /* best effort */ }
     }
 
-    private HttpDownloadEngine Engine(int maxAttempts = 3, TimeSpan? maxRetryAfter = null, int? hostLimit = null)
+    private HttpDownloadEngine Engine(int maxAttempts = 3, TimeSpan? maxRetryAfter = null, int? hostLimit = null,
+        HttpMessageHandler? handler = null)
     {
         Directory.CreateDirectory(Destination);
         Paths.EnsureCreated();
@@ -45,6 +46,7 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
                 AllowLocalNetwork = true,
                 MaxConnectionsPerHost = hostLimit ?? 8,
             },
+            handler: handler,
             checkpoints: Checkpoints);
         _engines.Add(engine);
         return engine;
@@ -149,9 +151,13 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
         await AssertCheckpointKeptAsync(job, saved);
 
         job.FinalUrl = null;
-        var result = await Engine().ExecuteAsync(job, await Checkpoints.LoadAsync(job.Id), null, CancellationToken.None);
+        var kept = await Checkpoints.LoadAsync(job.Id);
+        using var recorder = new RecordingHandler();
+        var result = await Engine(handler: recorder).ExecuteAsync(job, kept, null, CancellationToken.None);
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal(Sha256Of(502, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
+        // The hash alone would also match a full re-download.
+        recorder.AssertResumedFrom(kept!);
     }
 
     [Fact]
@@ -163,9 +169,12 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
 
         job.RequestedConnections = 1;
         job.Url = $"{_server.BaseAddress}/file/one-connection.bin?size={size}&seed=503";
-        var result = await Engine().ExecuteAsync(job, await Checkpoints.LoadAsync(job.Id), null, CancellationToken.None);
+        var saved = await Checkpoints.LoadAsync(job.Id);
+        using var recorder = new RecordingHandler();
+        var result = await Engine(handler: recorder).ExecuteAsync(job, saved, null, CancellationToken.None);
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal(Sha256Of(503, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
+        recorder.AssertResumedFrom(saved!);
     }
 
     [Fact]
@@ -202,8 +211,11 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
         var (job, checkpoint) = await SingleStreamCheckpointAsync("complete-416.bin", content, size, size,
             $"{_server.BaseAddress}/file/complete-416.bin?size={size}&seed=511");
 
-        var result = await Engine().ExecuteAsync(job, checkpoint, null, CancellationToken.None);
+        using var recorder = new RecordingHandler();
+        var result = await Engine(handler: recorder).ExecuteAsync(job, checkpoint, null, CancellationToken.None);
         Assert.True(result.Success, result.Failure?.Message);
+        // Completed from the bytes already there: only the range past the end was asked for.
+        Assert.All(recorder.TransferRanges(), range => Assert.Equal($"bytes={size}-", range));
         Assert.Equal(Sha256Of(511, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
     }
 

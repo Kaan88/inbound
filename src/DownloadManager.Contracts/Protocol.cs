@@ -41,6 +41,18 @@ public static class MessageTypes
     public const string JobMoveToQueue = "job.moveToQueue";
     public const string JobRefreshUrl = "job.refreshUrl";
     public const string JobUpdate = "job.update";
+    /// <summary>
+    /// EXT.R11: shows one download's file in the file manager of the Host's machine (Explorer with the file selected), or
+    /// its folder when the file is gone. A <see cref="JobActionRequest"/> with <c>jobId</c>; answered with
+    /// <see cref="HostActionResult"/>. Only where the platform can (<c>SupportsReveal</c>), never for a web session.
+    /// </summary>
+    public const string JobReveal = "job.reveal";
+    /// <summary>
+    /// EXT.R11: adds one download again from its address, into its folder under a new name when the file is there (the
+    /// conflict policy is always rename), as the desktop's Redownload does. A <see cref="JobActionRequest"/> with
+    /// <c>jobId</c>; answered with <see cref="JobActionResult"/> holding the new download.
+    /// </summary>
+    public const string JobRedownload = "job.redownload";
     public const string JobConnections = "job.connections";
     public const string JobConnectionsResult = "job.connectionsResult";
     public const string JobActionResult = "job.actionResult";
@@ -65,6 +77,8 @@ public static class MessageTypes
     public const string GroupActionResult = "group.actionResult";
     /// <summary>Host push: the current package (download group) definitions after any change.</summary>
     public const string GroupsChanged = "groups.changed";
+    /// <summary>Host push: the whole current settings (<c>SettingsDto</c>) after any change, as a session is shown them.</summary>
+    public const string SettingsChanged = "settings.changed";
     public const string HostStatus = "host.status";
     public const string HostShutdown = "host.shutdown";
     /// <summary>Host event: the user asked the whole app to exit (tray, menu, CLI, queue "exit when done"). Not sent for update restarts.</summary>

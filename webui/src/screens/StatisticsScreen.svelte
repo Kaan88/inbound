@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { exactBytes } from '../lib/details';
+  import { anyActive } from '../lib/list';
   import { bytes, dateOnly, dateTime } from '../lib/format';
   import { store } from '../lib/store.svelte';
+  import { everyWhileVisible } from '../lib/ticker';
   import type { Statistics } from '../lib/types';
 
-  // Download statistics (D20): the desktop's sections, read every 2 seconds while the page is visible.
+  // Download statistics (D20): the desktop's sections, read every 2 seconds while something downloads and the page shows.
   let stats = $state<Statistics | null>(null);
   let problem = $state('');
   let reading = false;
@@ -28,19 +30,25 @@
     }
   }
 
-  // Reads at once on mount and again when the connection comes back.
+  // Whether anything transfers or is about to: only then do the numbers move on their own. `active` and the count change
+  // with a state or the list, not with each progress event.
+  const active = $derived(anyActive(Object.values(store.model.jobs)));
+  const count = $derived(Object.keys(store.model.jobs).length);
+
+  // Reads at once on mount, again when the connection comes back, when something starts or stops downloading (so a
+  // download that just finished is counted) and when a download is added or removed.
   $effect(() => {
     void store.connection;
-    void read();
+    void active;
+    void count;
+    untrack(() => void read());
   });
 
-  onMount(() => {
-    const timer = setInterval(() => void read(), 2000);
-    document.addEventListener('visibilitychange', read);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', read);
-    };
+  // Every 2 seconds only while something downloads and this tab shows, and at once when it shows again; nothing while
+  // it is hidden or while nothing downloads (audit 4 M11).
+  $effect(() => {
+    if (!active) return;
+    return everyWhileVisible(2000, () => void read());
   });
 
   const number = (value: number) => value.toLocaleString('en-US');

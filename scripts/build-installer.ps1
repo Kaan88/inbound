@@ -1,9 +1,11 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "0.6.7",
+    [string]$Version = "0.7.0",
     [string]$Iscc,
     # A Setup without the Firefox add-on, for local test builds. A release Setup carries it (EXT.S4).
-    [switch]$NoFirefoxXpi
+    [switch]$NoFirefoxXpi,
+    # The native torrent worker, passed on to publish.ps1 (default: artifacts\torrent-worker\win-x64\inbound-torrent.exe).
+    [string]$TorrentWorker
 )
 
 # Builds artifacts\installer\DownloadManagerSetup-<Version>.exe: a per-user Inno Setup installer
@@ -65,7 +67,9 @@ if (-not $Iscc) {
 }
 if (-not $Iscc) { throw "Inno Setup (ISCC.exe) not found; pass -Iscc <path>." }
 
-& (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release -Output ([IO.Path]::GetFullPath($appOut)) -SelfContained
+$workerArgs = @{}
+if ($TorrentWorker) { $workerArgs.TorrentWorker = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TorrentWorker) }
+& (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release -Output ([IO.Path]::GetFullPath($appOut)) -SelfContained @workerArgs
 if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
 # EXT.S4: the signed Firefox add-on (scripts\sign-extension-firefox.ps1) for the extension version being built.

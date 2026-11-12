@@ -130,6 +130,44 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("two.txt")));
     }
 
+    [Fact]
+    public async Task APackagePasswordThatCanNotBeUnsealedIsAskedForInsteadOfTriedForever()
+    {
+        // Audit M15: state brought from another account or PC. The password resolved to "none", the run failed with
+        // "needs a password", and since the package's password was still on record the set went straight back in line.
+        var tool = new FakeExtractor
+        {
+            FailOnRun = _ => new ExtractionException(ExtractionFailureKind.PasswordRequired, "This archive needs a password."),
+        };
+        var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool };
+        await using var run = await ArchiveHarness.StartAsync(_server, options);
+        var job = await run.DownloadAsync("sealed.rar", Text, packageKey: "pkg");
+        var other = await run.DownloadAsync("readme.txt", Text, packageKey: "pkg");
+        await run.WaitForJobAsync(job.Id, "completed");
+        await run.WaitForJobAsync(other.Id, "completed");
+        var packageId = await WaitForPackageAsync(run, job.Id);
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(packageId, Secret));
+
+        await run.Archives.ShutdownAsync();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(run.Paths.Root, "archive", "packages"), "*.json"))
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+            var key = node.Select(pair => pair.Key).Single(name => name.Equals("protectedPassword", StringComparison.OrdinalIgnoreCase));
+            node[key] = DpapiSecretProtector.BlobPrefix + Convert.ToBase64String(new byte[64]);
+            File.WriteAllText(file, node.ToJsonString());
+        }
+
+        await run.StartCoordinatorAsync(options);
+        Assert.True((await run.Archives.ExtractAsync(new ArchiveExtractRequest { PackageId = packageId })).Ok);
+        var failed = await run.WaitForFailureAsync("passwordRequired");
+        await Task.Delay(500);
+
+        Assert.Equal(1, tool.Runs);
+        var now = run.Archives.List().Single(set => set.Id == failed.Id);
+        Assert.Equal("failed", now.State);
+        Assert.True(now.NeedsPassword);
+    }
+
     // ----- Scenario H: multi-part sets -----
 
     [Fact]

@@ -51,6 +51,9 @@ export const iconPaths: Record<string, string> = {
   image: 'M4 5h16v14H4zM4 16l4.5-4.5 3.5 3.5 2.5-2.5L20 17.5M15.5 8.5h.01',
   disc: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   'archive-file': 'M6 3.5h12v17H6zM11 3.5v2h2v2h-2v2h2v2h-2M10.5 14h3v3h-3z',
+  // T1: three joined nodes, the glyph of the desktop list's swarm rows. Comments here are bundled into the browser
+  // extension, whose build carries no word of what those rows are (rule 5; the extension's guard test checks it).
+  swarm: 'M12 3.5a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6zM5.5 15.4a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6zM18.5 15.4a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6zM10.9 8l-4.3 7.5M13.1 8l4.3 7.5M7.8 17.7h8.4',
 };
 
 export type IconName = keyof typeof iconPaths;

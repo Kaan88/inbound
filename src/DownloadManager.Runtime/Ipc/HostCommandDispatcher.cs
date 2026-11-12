@@ -10,7 +10,7 @@ namespace DownloadManager.Runtime.Ipc;
 
 /// <summary>
 /// The Host's whole IPC protocol without a transport: the hello and snapshot a client gets first, every command's
-/// answer, and the broadcasts (<c>job.event</c>, <c>update.progress</c>, <c>groups.changed</c>, <c>remote.changed</c>,
+/// answer, and the broadcasts (<c>job.event</c>, <c>update.progress</c>, <c>groups.changed</c>, <c>settings.changed</c>, <c>remote.changed</c>,
 /// <c>archive.changed</c>, <c>host.exiting</c>). The desktop Host's named pipe is one transport; a server's
 /// WebSocket is another. What the machine itself can do comes from <see cref="IHostPlatform"/>; what one client may do
 /// is its session's <see cref="SessionRights"/>, given when it opens: the platform's own, or a web session's
@@ -46,6 +46,7 @@ public sealed partial class HostCommandDispatcher
     private int _exiting;
     private List<DownloadGroupDto>? _lastGroups;
     private int _groupsBroadcastPending;
+    private int _settingsBroadcastPending;
 
     public HostCommandDispatcher(DownloadManagerService service, IHostPlatform platform, IHostLog log, RemoteCommands? remote = null)
     {
@@ -78,6 +79,7 @@ public sealed partial class HostCommandDispatcher
         Archives = Archives,
         Folders = Folders,
         Remote = _remote,
+        Torrents = _service.TorrentsAvailable,
     };
 
     /// <summary>What the hello offers a session with the platform's own rights. See <see cref="CapabilitiesOf"/>.</summary>
@@ -108,6 +110,8 @@ public sealed partial class HostCommandDispatcher
         if (rights.Archives is { } archives && archives.Coordinator.CanExtract) capabilities.Add("archives");
         // A .torrent file or a container can be uploaded (POST /api/upload/...) and then named by its reference.
         if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
+        // T1: torrent.* is answered, whether or not torrents are turned on in Options (the commands then say so).
+        if (rights.Torrents) capabilities.Add("torrents");
         return capabilities;
     }
 
@@ -200,6 +204,8 @@ public sealed partial class HostCommandDispatcher
     {
         _sessions.TryRemove(client.Id, out _);
         _open.TryRemove(client.Id, out _);
+        // T3: a client that watched torrents watches no longer.
+        _service.ForgetTorrentWatcher(client.Id);
     }
 
     /// <summary>
@@ -288,6 +294,12 @@ public sealed partial class HostCommandDispatcher
                 return;
             }
 
+            if (rights.Torrents && TorrentMessageTypes.IsRequest(message.Type))
+            {
+                await AnswerTorrentAsync(client, message, caller, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (WebUiMessageTypes.IsRequest(message.Type))
             {
                 await AnswerWebUiAsync(client, rights, message, cancellationToken).ConfigureAwait(false);
@@ -326,7 +338,8 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
-                    await Reply(client, message, MessageTypes.JobsSnapshot, ForSession(_service.GetSnapshot(), rights))
+                    await Reply(client, message, MessageTypes.JobsSnapshot,
+                            LimitJobs(ForSession(_service.GetSnapshot(), rights), message))
                         .ConfigureAwait(false);
                     break;
 
@@ -379,6 +392,13 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobMoveToQueue:
                     var moveToQueue = message.GetPayload<JobQueueRequest>();
+                    if (caller is not null && _service.HeldBy(moveToQueue.JobId, caller) == false)
+                    {
+                        await Reply(client, message, MessageTypes.JobActionResult,
+                            new JobActionResponse { Error = CallerScope.OutsideJobRefused, Job = _service.GetJob(moveToQueue.JobId) }).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.JobActionResult,
                         await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken) :
                             _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken))
@@ -397,7 +417,9 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.JobConnections:
                     var connectionsRequest = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobConnectionsResult,
-                        _service.GetConnections(connectionsRequest.JobId)).ConfigureAwait(false);
+                        caller is not null && _service.HeldBy(connectionsRequest.JobId, caller) == false
+                            ? Array.Empty<ConnectionTelemetryDto>()
+                            : _service.GetConnections(connectionsRequest.JobId)).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobUpdate:
@@ -423,10 +445,25 @@ public sealed partial class HostCommandDispatcher
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.JobReveal:
+                    await Reply(client, message, MessageTypes.HostActionResult,
+                        await RevealAsync(message.GetPayload<JobActionRequest>().JobId, platform, caller, cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.JobRedownload:
+                    var redownload = message.GetPayload<JobActionRequest>();
+                    await Reply(client, message, MessageTypes.JobActionResult,
+                        await _service.RedownloadAsync(redownload.JobId, cancellationToken, caller).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobSegments:
                     var segmentsRequest = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobSegmentsResult,
-                        await _service.GetSegmentsAsync(segmentsRequest.JobId, cancellationToken)
+                        caller is not null && _service.HeldBy(segmentsRequest.JobId, caller) == false
+                            ? Array.Empty<SegmentDto>()
+                            : await _service.GetSegmentsAsync(segmentsRequest.JobId, cancellationToken)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -525,6 +562,11 @@ public sealed partial class HostCommandDispatcher
                             Favorites = folderSettings.FavoriteFolders
                                 .Select(favorite => new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path })
                                 .ToList(),
+                            // EXT.R10: only on this user's own machine (the folder dialog's Host), never for a scoped
+                            // caller or a server, which answers folders.browse within its roots instead.
+                            ExistingCandidates = caller is null && platform.SupportsFolderPicker
+                                ? ExistingFolders(message)
+                                : null,
                         }).ConfigureAwait(false);
                     break;
 
@@ -563,6 +605,12 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.GroupAction:
                     var groupAction = message.GetPayload<GroupActionRequest>();
+                    if (caller is not null && RefuseGroupActionFor(groupAction, caller) is { } groupRefused)
+                    {
+                        await Reply(client, message, MessageTypes.GroupActionResult, groupRefused).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.GroupActionResult,
                         await _service.GroupActionAsync(groupAction, cancellationToken).ConfigureAwait(false))
                         .ConfigureAwait(false);
@@ -570,6 +618,12 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.QueueAction:
                     var queueAction = message.GetPayload<QueueActionRequest>();
+                    if (caller is not null && RefuseQueueActionFor(queueAction, caller) is { } queueRefused)
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, queueRefused).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.SettingsResult,
                         await _service.QueueActionAsync(queueAction, cancellationToken).ConfigureAwait(false))
                         .ConfigureAwait(false);
@@ -592,7 +646,8 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     var open = message.GetPayload<HostActionRequest>();
-                    _platform.OpenUi(string.IsNullOrWhiteSpace(open.Action) ? null : open.Action);
+                    // Only a page the window knows: the text goes on its command line (report 3, L2).
+                    _platform.OpenUi(ClientPage(open.Action));
                     await Reply(client, message, MessageTypes.HostActionResult,
                         new HostActionResult { Ok = true, Message = "Opening the desktop UI." }).ConfigureAwait(false);
                     break;
@@ -608,6 +663,7 @@ public sealed partial class HostCommandDispatcher
                     var pickFolder = message.GetPayload<FolderPickRequest>();
                     var pickedFolder = await _platform.PickFolderAsync(pickFolder.InitialPath, cancellationToken)
                         .ConfigureAwait(false);
+                    RememberPickedFolder(pickedFolder);
                     await Reply(client, message, MessageTypes.HostFolderPicked, pickedFolder).ConfigureAwait(false);
                     break;
 
@@ -637,8 +693,91 @@ public sealed partial class HostCommandDispatcher
         {
             var reason = UrlRedactor.RedactText(ex.Message);
             _log.Error($"IPC command '{message.Type}' failed: {reason}");
+            // L16: an exception's words can hold local paths and the Windows user name; another device gets its kind only.
             await Reply(client, message, MessageTypes.HostActionResult,
-                new HostActionResult { Ok = false, Message = reason }).ConfigureAwait(false);
+                new HostActionResult { Ok = false, Message = caller is null ? reason : $"That could not be done ({ex.GetType().Name}). The app's log has the details." })
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// EXT.R10: which of a few folders the extension names exist, and nothing more: no names, sizes or contents. Only
+    /// a local, fully qualified path is looked at. A network or device path (<c>\\server\share</c>, <c>\\?\</c>) or a
+    /// drive letter mapped to a share is never touched, so a request can't make this machine reach out to another one.
+    /// Null when none were asked about.
+    /// </summary>
+    public static List<string>? ExistingFolders(IpcMessage message)
+    {
+        DownloadFoldersRequest? request;
+        try { request = message.Payload is { ValueKind: System.Text.Json.JsonValueKind.Object } ? message.GetPayload<DownloadFoldersRequest>() : null; }
+        catch (Exception error) when (error is System.Text.Json.JsonException or InvalidDataException) { return null; }
+        if (request?.Candidates is not { Count: > 0 } candidates) return null;
+        var existing = new List<string>();
+        foreach (var candidate in candidates.Take(DownloadFoldersRequest.MaxCandidates))
+        {
+            if (IsLocalFolderPath(candidate) && Directory.Exists(candidate) && !existing.Contains(candidate, StringComparer.Ordinal))
+            {
+                existing.Add(candidate);
+            }
+        }
+        return existing;
+    }
+
+    private static bool IsLocalFolderPath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && path.Length <= 4096 && path.IndexOf('\0') < 0 &&
+        !path.StartsWith(@"\\", StringComparison.Ordinal) && !path.StartsWith("//", StringComparison.Ordinal) &&
+        Path.IsPathFullyQualified(path) && !OnNetworkDrive(path);
+
+    /// <summary>A drive letter mapped to a share (or a network mount) is another machine too; asking its type is local.</summary>
+    public static bool OnNetworkDrive(string path, Func<string, DriveType>? driveType = null)
+    {
+        if (Path.GetPathRoot(path) is not { Length: > 0 } root) return true;
+        try { return (driveType ?? (drive => new DriveInfo(drive).DriveType))(root) is DriveType.Network or DriveType.NoRootDirectory; }
+        catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException) { return true; }
+    }
+
+    private const string RevealUnavailable = "Showing a file in its folder is not available here.";
+
+    /// <summary>How long <c>job.reveal</c> waits for a folder to answer (a share that is gone can hang a while).</summary>
+    private static readonly TimeSpan RevealTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// EXT.R11: <c>job.reveal</c>. Only one download's own file or folder, never a path a client names: the file selected
+    /// when it is there, else its folder, else a short refusal. The disk is asked off the dispatcher's thread, with a
+    /// time limit, so a share that doesn't answer doesn't hold up the connection's other commands.
+    /// </summary>
+    private async Task<HostActionResult> RevealAsync(Guid jobId, PlatformCapabilities platform, CallerScope? caller, CancellationToken cancellationToken)
+    {
+        if (!platform.SupportsReveal || caller is not null) return new HostActionResult { Ok = false, Message = RevealUnavailable };
+        if (_service.GetJob(jobId) is not { } job) return new HostActionResult { Ok = false, Message = "Job not found." };
+        var path = job.FinalFilePath;
+        if (string.IsNullOrWhiteSpace(path)) return new HostActionResult { Ok = false, Message = "This download has no file yet." };
+        var reveal = Task.Run(() =>
+        {
+            if (File.Exists(path))
+            {
+                _platform.RevealFile(path);
+                return new HostActionResult { Ok = true, Message = "Showing the file in its folder." };
+            }
+
+            var folder = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+            {
+                _platform.RevealFile(path);
+                return new HostActionResult { Ok = true, Message = "The file is gone, so its folder was opened." };
+            }
+
+            return new HostActionResult { Ok = false, Message = "The file and its folder are gone." };
+        }, cancellationToken);
+        try
+        {
+            return await reveal.WaitAsync(RevealTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // The check goes on by itself; a late answer still opens the folder, which is what was asked.
+            _ = reveal.ContinueWith(static task => _ = task.Exception, TaskScheduler.Default);
+            return new HostActionResult { Ok = false, Message = "The download's folder didn't answer in time." };
         }
     }
 
@@ -757,11 +896,41 @@ public sealed partial class HostCommandDispatcher
         return status;
     }
 
-    private static SnapshotDto ForSession(SnapshotDto snapshot, SessionRights rights)
+    /// <summary>
+    /// Audit 3 M3: <c>jobs.query</c> with a limit lists that many jobs, newest first (the list's own order breaks
+    /// ties). The extension asks for 20, so a long list can't make a frame over the browsers' 1 MB limit.
+    /// </summary>
+    public static SnapshotDto LimitJobs(SnapshotDto snapshot, IpcMessage message)
+    {
+        if (message.Type != MessageTypes.JobsQuery || message.Payload is not { ValueKind: System.Text.Json.JsonValueKind.Object })
+            return snapshot;
+        JobsQueryRequest? query;
+        try
+        {
+            query = message.GetPayload<JobsQueryRequest>();
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
+        {
+            return snapshot;
+        }
+
+        if (query.Limit is not int limit || limit <= 0 || limit >= snapshot.Jobs.Count) return snapshot;
+        snapshot.Jobs = snapshot.Jobs
+            .Select((job, index) => (job, index))
+            .OrderByDescending(entry => entry.job.CreatedAt)
+            .ThenBy(entry => entry.index)
+            .Take(limit)
+            .Select(entry => entry.job)
+            .ToList();
+        return snapshot;
+    }
+
+    private SnapshotDto ForSession(SnapshotDto snapshot, SessionRights rights)
     {
         snapshot.Status = ForSession(snapshot.Status, rights);
-        if (rights.Scope is not null) snapshot.Settings = WebSettingsRules.ForWeb(snapshot.Settings);
-        return snapshot;
+        if (rights.Scope is not { } caller) return snapshot;
+        snapshot.Settings = WebSettingsRules.ForWeb(snapshot.Settings);
+        return JobsForScope(snapshot, caller);
     }
 
     // The settings store trims the command and the FFmpeg path and keeps an empty one as none, so " x" and "x", and
@@ -814,11 +983,23 @@ public sealed partial class HostCommandDispatcher
             return;
         }
 
+        // Report 3, M1: on this user's own PC (the Host with a folder dialog) the browser may only save into the app's
+        // folders or one the dialog returned; anything else goes to the default folder. A web session is held to its
+        // folders by the add itself, and a server to its roots.
+        var destination = handoff.DestinationDirectory;
+        string? note = null;
+        if (caller is null && RightsOf(client).Capabilities.SupportsFolderPicker && !HandoffFolderAllowed(destination))
+        {
+            _log.Warn("A browser download asked for a folder outside the app's folders; it was saved in the default folder.");
+            destination = null;
+            note = HandoffFolderReplaced;
+        }
+
         var request = new AddJobRequest
         {
             Url = handoff.Url,
             FinalUrl = handoff.FinalUrl,
-            DestinationDirectory = handoff.DestinationDirectory,
+            DestinationDirectory = destination,
             FileName = handoff.SuggestedFileName,
             StartMode = handoff.StartMode,
             Source = handoff.IsAutoIntercept ? "chromeAuto" : "chromeContextMenu",
@@ -829,6 +1010,7 @@ public sealed partial class HostCommandDispatcher
             UserAgent = handoff.UserAgent,
             PageUrl = handoff.PageUrl,
             Description = handoff.MimeType,
+            ContentType = handoff.MimeType,
             PackageKey = handoff.PackageKey,
             PackageName = handoff.PackageName,
         };
@@ -842,21 +1024,42 @@ public sealed partial class HostCommandDispatcher
             Job = result.Job,
             Error = result.Error,
             ErrorCode = result.ErrorCode,
+            Note = result.Accepted ? note : null,
         }).ConfigureAwait(false);
     }
 
     /// <summary>A web session's copy of the settings, in whichever reply carries them, leaves out what it isn't shown.</summary>
     private Task Reply<T>(IClientSession client, IpcMessage request, string type, T payload)
     {
-        if (payload is SettingsResult { Settings: { } settings } result && RightsOf(client).Scope is not null)
-            result.Settings = WebSettingsRules.ForWeb(settings);
+        if (RightsOf(client).Scope is { } caller)
+        {
+            if (payload is SettingsResult { Settings: { } settings } result) result.Settings = WebSettingsRules.ForWeb(settings);
+            ReplyForScope(payload, caller);
+        }
+
         client.Enqueue(IpcMessage.Create(type, payload, request.Id));
         return Task.CompletedTask;
     }
 
-    private void Broadcast(IpcMessage message)
+    /// <param name="forScope">
+    /// What a session with a <see cref="CallerScope"/> gets instead (M4): built once per scope, and null sends it nothing.
+    /// Without it every session gets <paramref name="message"/>.
+    /// </param>
+    private void Broadcast(IpcMessage message, Func<CallerScope, IpcMessage?>? forScope = null)
     {
-        foreach (var client in _sessions.Values) client.Enqueue(message);
+        Dictionary<CallerScope, IpcMessage?>? scoped = null;
+        foreach (var client in _sessions.Values)
+        {
+            if (forScope is not null && RightsOf(client).Scope is { } scope)
+            {
+                scoped ??= [];
+                if (!scoped.TryGetValue(scope, out var own)) scoped[scope] = own = forScope(scope);
+                if (own is not null) client.Enqueue(own);
+                continue;
+            }
+
+            client.Enqueue(message);
+        }
     }
 
     /// <summary>
@@ -877,7 +1080,8 @@ public sealed partial class HostCommandDispatcher
 
     /// <summary>Whole-state broadcast of one set. The Host subscribes this to the coordinator's change event.</summary>
     public void BroadcastArchiveChanged(ArchiveChangedDto change)
-        => Broadcast(IpcMessage.Create(ArchiveMessageTypes.Changed, change));
+        => Broadcast(IpcMessage.Create(ArchiveMessageTypes.Changed, change),
+            scope => IpcMessage.Create(ArchiveMessageTypes.Changed, ArchiveForScope(change, scope)));
 
     private void OnUpdateProgressChanged(object? sender, UpdateProgressDto progress) => BroadcastUpdateProgress(progress);
 
@@ -895,7 +1099,43 @@ public sealed partial class HostCommandDispatcher
         Broadcast(IpcMessage.Create(MessageTypes.UpdateProgress, progress));
     }
 
-    private void OnSettingsChanged(object? sender, AppSettings settings) => ScheduleGroupsBroadcast();
+    private void OnSettingsChanged(object? sender, AppSettings settings)
+    {
+        // The app's folders may have changed, and with them which downloads a web session holds.
+        ForgetHeldPaths();
+        ScheduleGroupsBroadcast();
+        ScheduleSettingsBroadcast();
+    }
+
+    /// <summary>
+    /// Audit 4 H1: <c>settings.changed</c> carries the whole current settings after any change, so a client's copy
+    /// (an open Options page, a web tab) follows changes made elsewhere instead of saving an old one back. A web session
+    /// gets them as it is shown them (<see cref="WebSettingsRules.ForWeb"/>). A burst shares one message.
+    /// </summary>
+    public void ScheduleSettingsBroadcast()
+    {
+        if (Interlocked.Exchange(ref _settingsBroadcastPending, 1) == 0) _ = BroadcastSettingsAsync();
+    }
+
+    private async Task BroadcastSettingsAsync()
+    {
+        try
+        {
+            await Task.Delay(GroupsBroadcastDelay, _stopping.Token).ConfigureAwait(false);
+            Interlocked.Exchange(ref _settingsBroadcastPending, 0);
+            var settings = _service.GetSettings();
+            IpcMessage? full = null;
+            IpcMessage? web = null;
+            foreach (var client in _sessions.Values)
+            {
+                client.Enqueue(RightsOf(client).Scope is null
+                    ? full ??= IpcMessage.Create(MessageTypes.SettingsChanged, settings)
+                    : web ??= IpcMessage.Create(MessageTypes.SettingsChanged, WebSettingsRules.ForWeb(settings)));
+            }
+        }
+        catch (OperationCanceledException) { /* stopping */ }
+        catch (Exception ex) { _log.Warn($"Could not announce a settings change: {ex.GetType().Name}"); }
+    }
 
     /// <summary>
     /// Packages are shown in the download list, so clients need membership changes live
@@ -938,6 +1178,10 @@ public sealed partial class HostCommandDispatcher
         => Broadcast(IpcMessage.Create(MessageTypes.JobEvent, new JobEventDto
         {
             Job = e.Job,
+            EventType = e.ChangeType,
+        }), scope => IpcMessage.Create(MessageTypes.JobEvent, new JobEventDto
+        {
+            Job = ForScope(e.Job, scope),
             EventType = e.ChangeType,
         }));
 }

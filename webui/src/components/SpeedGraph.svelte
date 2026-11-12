@@ -2,7 +2,8 @@
   import { onMount, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { speed } from '../lib/format';
-  import { agoText, graphCeiling, hoverPoint, liveSpeed, SpeedHistory, speedGraphWindow, speedSample } from '../lib/list';
+  import { GraphScale } from '../lib/graphScale';
+  import { agoText, anyActive, hoverPoint, liveSpeed, ServerClock, SpeedHistory, speedGraphWindow, speedSample } from '../lib/list';
   import { store } from '../lib/store.svelte';
   import type { SpeedHistoryResult } from '../lib/types';
 
@@ -11,6 +12,7 @@
   const width = 600;
   const height = 100;
   const history = new SpeedHistory();
+  const clock = new ServerClock();
   let version = $state(0);
   let open = $state(readOpen());
 
@@ -59,18 +61,40 @@
       void store.ask<SpeedHistoryResult>('speed.history', {}).then((result) => {
         if (stale || result.intervalSeconds !== 1 || !Array.isArray(result.bytesPerSecond)) return;
         history.replace(result.bytesPerSecond, result.start);
+        refit = true;
         version++;
       }).catch(() => undefined);
     });
     return () => (stale = true);
   });
 
+  // Idle: connected, and nothing transfers. Then no timer runs (audit 4 M11): the line stops at 0, and the seconds that
+  // went by idle are added as zeros when something starts, the graph is closed or the tab hidden.
+  const idle = $derived(store.connection === 'open' && store.model.snapshots > 0 && !anyActive(Object.values(store.model.jobs)));
+  let afterIdle = false;
   $effect(() => {
     if (!open || !visible) return;
-    // Time that went by unsampled shows as a gap.
-    if (history.samples.length > 0) history.add(null);
+    if (idle) {
+      const since = Date.now();
+      untrack(() => {
+        history.add(0);
+        version++;
+      });
+      return () => {
+        const seconds = Math.min(history.limit, Math.floor((Date.now() - since) / 1000));
+        for (let i = 0; i < seconds; i++) history.add(0);
+        version++;
+        afterIdle = true;
+      };
+    }
+    // Time that went by unsampled (hidden, closed) shows as a gap; idle time was filled in just above.
+    if (history.samples.length > 0 && !afterIdle) history.add(null);
+    afterIdle = false;
     const timer = setInterval(() => {
-      history.add(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
+      const jobs = Object.values(store.model.jobs);
+      const now = Date.now();
+      clock.observe(jobs, now);
+      history.add(speedSample(jobs, store.connection === 'open', store.model.snapshots > 0, now, clock.offsetMs));
       version++;
     }, 1000);
     return () => clearInterval(timer);
@@ -110,9 +134,15 @@
     void version;
     return Math.min(history.samples.length, speedGraphWindow);
   });
+  // UI.B23: grows at once, shrinks only after a hold and a step at a time; the server's history fits it afresh.
+  const scale = new GraphScale();
+  let refit = true;
   const ceiling = $derived.by(() => {
     void version;
-    return graphCeiling(history.peak());
+    const peak = history.peak();
+    if (!refit) return scale.update(peak, Date.now());
+    refit = false;
+    return scale.reset(peak);
   });
   const shape = $derived.by(() => {
     void version;

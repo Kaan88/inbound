@@ -1,3 +1,6 @@
+using System.Globalization;
+using DownloadManager.Contracts;
+
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>Words and figures for the progress window's ring and tiles.</summary>
@@ -27,4 +30,34 @@ internal static class ProgressOverviewText
         ? $"HTTP {status}"
         : string.IsNullOrWhiteSpace(kind) || kind == "none" ? "Failed"
         : char.ToUpperInvariant(kind[0]) + System.Text.RegularExpressions.Regex.Replace(kind[1..], "(?<=[a-z])(?=[A-Z])", " ").ToLowerInvariant();
+
+    /// <summary>T1: a torrent's Downloaded tile, received of wanted in the wanted size's unit: "2.6", "of 4.2 GB".</summary>
+    public static (string Number, string Unit) OfWords(long received, long total)
+    {
+        var (number, unit) = UiFormat.Of(received, total);
+        return (number, unit.StartsWith("/ ", StringComparison.Ordinal) ? "of " + unit[2..] : unit);
+    }
+
+    /// <summary>T1: a torrent's Peers tile: "41", "(12 seeds)".</summary>
+    public static (string Number, string Unit) Peers(int peers, int seeds)
+        => (Math.Max(0, peers).ToString(CultureInfo.CurrentCulture),
+            seeds == 1 ? "(1 seed)" : $"({Math.Max(0, seeds).ToString(CultureInfo.CurrentCulture)} seeds)");
+
+    /// <summary>
+    /// T1: how a file of a torrent stands in Progress Details' Files tab. A finished torrent has every wanted file,
+    /// even when the Host no longer reports its bytes on disk.
+    /// </summary>
+    public static string FileProgress(TorrentFileDto file, bool torrentComplete)
+        => torrentComplete && file.Wanted && file.Done is null ? "Done" : TorrentRules.FileProgress(file);
+
+    /// <summary>T1: a torrent file's relative path as Windows writes it.</summary>
+    public static string FilePath(string path) => path.Replace('/', '\\');
+
+    /// <summary>T1: what a screen reader says for a file row: its path, size and how it stands.</summary>
+    public static string FileRowName(TorrentFileDto file, bool torrentComplete)
+    {
+        var progress = FileProgress(file, torrentComplete);
+        var size = UiFormat.Bytes(file.Size);
+        return progress.Length > 0 ? $"{FilePath(file.Path)}, {size}, {progress}" : $"{FilePath(file.Path)}, {size}";
+    }
 }

@@ -8,13 +8,6 @@ public static class RemotePaths
     /// <summary>Every job carries this path several times over, to every client.</summary>
     public const int LongestPath = 512;
 
-    private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    };
-
     /// <summary>
     /// Returns a relative path using the platform separator, or null when nothing safe is left.
     /// Anything that climbs out of the folder is refused outright rather than repaired, because
@@ -57,7 +50,6 @@ public static class RemotePaths
         // Windows silently drops trailing dots and spaces, which would make two names collide.
         var clean = new string(buffer).Trim().TrimEnd('.', ' ');
         if (clean.Length == 0 || clean is "." or "..") return null;
-        var stem = clean.Split('.', 2)[0].TrimEnd();
-        return ReservedNames.Contains(stem) || Archives.ArchiveWorkingFolders.IsReserved(clean) ? "_" + clean : clean;
+        return FileNameResolver.IsReservedDeviceName(clean) || Archives.ArchiveWorkingFolders.IsReserved(clean) ? "_" + clean : clean;
     }
 }

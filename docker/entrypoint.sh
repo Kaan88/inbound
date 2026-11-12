@@ -36,7 +36,8 @@ fi
 # chown only when something in the data folder has another owner, so a restart doesn't rewrite every file's metadata.
 if [ -n "$(find "$data" \( ! -user "$uid" -o ! -group "$gid" \) -print -quit)" ]; then
     say "giving $data to $uid:$gid"
-    chown -R "$uid:$gid" "$data"
+    # -h: a symbolic link in the data folder changes owner itself; the file it points to (perhaps outside /data) does not.
+    chown -Rh "$uid:$gid" "$data"
 fi
 
 as_user() { setpriv --reuid="$uid" --regid="$gid" --clear-groups "$@"; }

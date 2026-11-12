@@ -112,9 +112,16 @@ internal sealed class SevenZipListing
         // A bare line counts only under ERRORS: or WARNINGS:, up to the next key or blank line. Elsewhere it is the
         // archive's comment, which is free text: it is ignored here, and if it imitates the entry section the
         // real section's own dashes then show up among the entries and make the listing untrusted.
+        //
+        // 7-Zip prints the comment verbatim between "Comment = {" and "}", and the comment can hold "}" itself, so where
+        // it ends can't be told. Everything from the first Comment key on is therefore ignored: otherwise a comment line
+        // "Type = gzip" would make the archive a compressed stream whose entries nobody checks, and "WARNINGS:" with
+        // "Missing volume : x" would send the set back to waiting again and again. The type, the errors and the
+        // warnings come before it (checked on 7-Zip 26.04); a zip lists its volume counts after it, and those are lost.
         var underHeading = false;
         foreach (var line in lines)
         {
+            if (line.StartsWith("Comment = ", StringComparison.Ordinal) || line == "Comment =") break;
             var split = line.IndexOf(" = ", StringComparison.Ordinal);
             if (split < 0)
             {

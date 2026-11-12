@@ -163,7 +163,7 @@ public sealed partial class HostCommandDispatcherTests
     {
         var web = await WebAsync();
         var settings = web.Service.GetSettings();
-        settings.PostDownloadCommand = @"C:\Tools\scan.exe ""%1""";
+        settings.PostDownloadCommand = @"C:\Tools\scan.exe";
         settings.FfmpegPath = @"C:\Tools\ffmpeg.exe";
         settings.UpdateManifestUrl = "https://updates.example.invalid/manifest.json";
         settings.Proxy = new ProxyDto { Mode = "manual", Address = "203.0.113.5:3128", Username = "proxy-user", Password = "invented-proxy-password" };
@@ -275,8 +275,8 @@ public sealed partial class HostCommandDispatcherTests
         var outsideJob = SeededJob(Outside, "kept.bin");
         Directory.CreateDirectory(Outside);
         Directory.CreateDirectory(Inside);
-        var outsideLeftover = Path.Combine(Outside, "leftover.bin.part");
-        var insideLeftover = Path.Combine(Inside, "leftover.bin.part");
+        var outsideLeftover = Path.Combine(Outside, "leftover.bin.0123456789abcdef0123456789abcdef.part");
+        var insideLeftover = Path.Combine(Inside, "leftover.bin.0123456789abcdef0123456789abcdef.part");
         File.WriteAllText(outsideLeftover, "x");
         File.WriteAllText(insideLeftover, "x");
         var web = await WebAsync(store => store.SaveAsync(outsideJob));

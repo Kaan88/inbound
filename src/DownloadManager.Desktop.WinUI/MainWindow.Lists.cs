@@ -19,6 +19,8 @@ public sealed partial class MainWindow
 
         // It stays away until there is an archive to talk about.
         _jobColumns.SetVisible("extraction", false);
+        // DT-6: the torrent columns show in the torrent views only (SyncTorrentColumns).
+        foreach (var key in TorrentListRules.ColumnKeys) _jobColumns.SetVisible(key, false);
         _jobsHeader = new ColumnHeaderRow(_jobColumns, JobsHeader, JobsList, RootGrid, HeaderSort_Clicked, SaveColumnWidths);
         _jobsHeader.MinimumWidthChanged += width => DownloadListGrid.MinWidth = width;
         _jobsHeader.ApplyToAll();
@@ -64,19 +66,32 @@ public sealed partial class MainWindow
         SaveUiState();
     }
 
-    /// <summary>Blank cells stay at the end whichever way the list runs.</summary>
-    private IEnumerable<JobViewModel> Sorted(IEnumerable<JobViewModel> rows) => _sortKey switch
+    /// <summary>The order the list is put in; a torrent column's sort holds only where that column shows.</summary>
+    private (string Key, bool Ascending) ShownSort => TorrentListRules.ShownSort(_sortKey, _sortAscending, _category);
+
+    private IEnumerable<JobViewModel> Sorted(IEnumerable<JobViewModel> rows)
     {
-        "name" => ListSort.Order(rows, job => job.FileName, NaturalStringComparer.Instance, _sortAscending),
-        "queue" => ListSort.Order(rows, job => job.QueueText, NaturalStringComparer.Instance, _sortAscending, job => job.QueueText.Length == 0),
-        "size" => ListSort.Order(rows, job => job.TotalSize, null, _sortAscending, job => job.TotalSize <= 0),
-        "status" => ListSort.Order(rows, job => job.StateText, NaturalStringComparer.Instance, _sortAscending),
-        "extraction" => ListSort.Order(rows, job => job.ArchiveText, NaturalStringComparer.Instance, _sortAscending, job => job.ArchiveText.Length == 0),
-        "eta" => ListSort.Order(rows, job => job.Remaining, null, _sortAscending, job => job.Remaining is null),
-        "rate" => ListSort.Order(rows, job => job.BytesPerSecond, null, _sortAscending, job => job.BytesPerSecond <= 0),
-        "lastTry" => ListSort.Order(rows, job => job.LastUpdated, null, _sortAscending),
-        "description" => ListSort.Order(rows, job => job.Description, NaturalStringComparer.Instance, _sortAscending, job => job.Description.Length == 0),
-        _ => ListSort.Order(rows, job => job.CreatedAt, null, _sortAscending),
+        var (key, ascending) = ShownSort;
+        return Sorted(rows, key, ascending);
+    }
+
+    /// <summary>Blank cells stay at the end whichever way the list runs.</summary>
+    private static IEnumerable<JobViewModel> Sorted(IEnumerable<JobViewModel> rows, string key, bool ascending) => key switch
+    {
+        "name" => ListSort.Order(rows, job => job.FileName, NaturalStringComparer.Instance, ascending),
+        "queue" => ListSort.Order(rows, job => job.QueueText, NaturalStringComparer.Instance, ascending, job => job.QueueText.Length == 0),
+        "size" => ListSort.Order(rows, job => job.TotalSize, null, ascending, job => job.TotalSize <= 0),
+        "status" => ListSort.Order(rows, job => job.StateText, NaturalStringComparer.Instance, ascending),
+        "extraction" => ListSort.Order(rows, job => job.ArchiveText, NaturalStringComparer.Instance, ascending, job => job.ArchiveText.Length == 0),
+        "seeds" => ListSort.Order(rows, job => job.SeedCount, null, ascending, job => job.SeedCount is null),
+        "peers" => ListSort.Order(rows, job => job.PeerCount, null, ascending, job => job.PeerCount is null),
+        "eta" => ListSort.Order(rows, job => job.Remaining, null, ascending, job => job.Remaining is null),
+        "up" => ListSort.Order(rows, job => job.UploadBytesPerSecond, null, ascending, job => job.UploadBytesPerSecond <= 0),
+        "ratio" => ListSort.Order(rows, job => job.RatioValue, null, ascending, job => job.RatioValue is null),
+        "rate" => ListSort.Order(rows, job => job.BytesPerSecond, null, ascending, job => job.BytesPerSecond <= 0),
+        "lastTry" => ListSort.Order(rows, job => job.LastUpdated, null, ascending),
+        "description" => ListSort.Order(rows, job => job.Description, NaturalStringComparer.Instance, ascending, job => job.Description.Length == 0),
+        _ => ListSort.Order(rows, job => job.CreatedAt, null, ascending),
     };
 
     private void BeginRegion(bool add)

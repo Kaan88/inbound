@@ -60,8 +60,8 @@ internal static class ArchiveCommands
 
     private static async Task<int> StatusAsync(CliClient client, bool json)
     {
-        var settings = (await client.RequestAsync(ArchiveMessageTypes.SettingsGet, new { }).ConfigureAwait(false)).GetPayload<ArchiveSettingsResult>();
-        var sets = (await client.RequestAsync(ArchiveMessageTypes.List, new { }).ConfigureAwait(false)).GetPayload<ArchiveListResult>().Sets;
+        var settings = (await client.AskAsync<ArchiveSettingsResult>(ArchiveMessageTypes.SettingsGet, new { }).ConfigureAwait(false));
+        var sets = (await client.AskAsync<ArchiveListResult>(ArchiveMessageTypes.List, new { }).ConfigureAwait(false)).Sets;
         if (json)
         {
             Print(new { settings.Tool, settings.Settings, Sets = sets });
@@ -80,7 +80,7 @@ internal static class ArchiveCommands
 
     private static async Task<int> ListAsync(CliClient client, bool json)
     {
-        var sets = (await client.RequestAsync(ArchiveMessageTypes.List, new { }).ConfigureAwait(false)).GetPayload<ArchiveListResult>().Sets;
+        var sets = (await client.AskAsync<ArchiveListResult>(ArchiveMessageTypes.List, new { }).ConfigureAwait(false)).Sets;
         if (json)
         {
             Print(sets);
@@ -127,7 +127,7 @@ internal static class ArchiveCommands
         if (request.FilePath is not null) request.FilePath = Path.GetFullPath(request.FilePath);
         if (HasFlag(args, "--password-stdin")) request.Password = ReadPassword();
 
-        var result = (await client.RequestAsync(ArchiveMessageTypes.Extract, request).ConfigureAwait(false)).GetPayload<ArchiveExtractResult>();
+        var result = (await client.AskAsync<ArchiveExtractResult>(ArchiveMessageTypes.Extract, request).ConfigureAwait(false));
         if (json)
         {
             Print(result);
@@ -168,7 +168,7 @@ internal static class ArchiveCommands
         }
 
         request.Password = ReadPassword();
-        return PrintAction((await client.RequestAsync(ArchiveMessageTypes.SetPassword, request).ConfigureAwait(false)).GetPayload<ArchiveActionResult>(), json);
+        return PrintAction((await client.AskAsync<ArchiveActionResult>(ArchiveMessageTypes.SetPassword, request).ConfigureAwait(false)), json);
     }
 
     private static async Task<int> ActionAsync(CliClient client, string type, IReadOnlyList<string> positional, bool json)
@@ -179,7 +179,7 @@ internal static class ArchiveCommands
             return 2;
         }
 
-        return PrintAction((await client.RequestAsync(type, new ArchiveActionRequest { SetId = setId }).ConfigureAwait(false)).GetPayload<ArchiveActionResult>(), json);
+        return PrintAction((await client.AskAsync<ArchiveActionResult>(type, new ArchiveActionRequest { SetId = setId }).ConfigureAwait(false)), json);
     }
 
     private static async Task<int> SettingsAsync(CliClient client, string[] args, bool json)
@@ -219,7 +219,7 @@ internal static class ArchiveCommands
         var reply = changes
             ? await client.RequestAsync(ArchiveMessageTypes.SettingsSet, update).ConfigureAwait(false)
             : await client.RequestAsync(ArchiveMessageTypes.SettingsGet, new { }).ConfigureAwait(false);
-        var result = reply.GetPayload<ArchiveSettingsResult>();
+        var result = CliClient.Checked<ArchiveSettingsResult>(reply);
         if (json)
         {
             Print(result);

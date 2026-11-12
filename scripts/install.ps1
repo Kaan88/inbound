@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.6.7",
+    [string]$Version = "0.7.0",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -122,7 +122,7 @@ Web UI (off by default):
   Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network
   protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".
 
-The host lives in the notification area. Closing the main window hides it;
+The host lives in the notification area. Closing the main window closes only the window;
 downloads and browser handoff continue. Use the tray Exit action to stop it.
 "@
 Write-Host $instructions

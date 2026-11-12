@@ -94,10 +94,23 @@ public sealed partial class JobDetailsPanel : UserControl
         _map = map;
         _movingBar = movingBar;
         _root = root;
-        _timer.Start();
+        UpdatePolling(readOnce: true);
     }
 
-    internal void SetConnected(bool connected) => _connected = connected;
+    internal void SetConnected(bool connected)
+    {
+        if (_connected == connected) return;
+        _connected = connected;
+        UpdatePolling(readOnce: connected);
+    }
+
+    /// <summary>False while the window is hidden or minimised: nothing is read until it is shown again.</summary>
+    internal void SetShown(bool shown)
+    {
+        if (_shown == shown) return;
+        _shown = shown;
+        UpdatePolling(readOnce: shown);
+    }
 
     internal void Stop()
     {
@@ -105,29 +118,58 @@ public sealed partial class JobDetailsPanel : UserControl
         _timer.Stop();
     }
 
+    private bool _shown = true;
+
+    /// <summary>
+    /// Audit M11: <c>job.segments</c> and <c>job.connections</c> are read every second only while the download can move
+    /// (connecting, downloading, verifying, waiting to retry) and the window is shown. A paused or queued download's
+    /// saved ranges are read once (when shown, connected, or after it stops moving), not every second.
+    /// </summary>
+    private void UpdatePolling(bool readOnce = false)
+    {
+        // T1: a torrent has pieces from many peers, not byte ranges on connections: never read.
+        var canRead = !_stopped && _connection is not null && _connected && _shown && _job is { IsTerminal: false, Torrent: null };
+        var poll = canRead && SpeedSample.IsActive(_job!.State);
+        if (poll)
+        {
+            if (!_timer.IsEnabled) _timer.Start();
+            return;
+        }
+        if (_timer.IsEnabled)
+        {
+            _timer.Stop();
+            readOnce = true;
+        }
+        if (readOnce && canRead) _ = LoadSegmentsAsync();
+    }
+
     internal void Show(JobDto job)
     {
-        if (_job?.Id != job.Id) ForgetSegments();
+        var another = _job?.Id != job.Id;
+        if (another) ForgetSegments();
         _job = job;
+        UpdatePolling(readOnce: another);
         var complete = job.State == "completed";
         var percent = Percent(job);
+        // T1: a torrent has pieces from many peers, not byte ranges on connections. No map, no table, no polling (UpdatePolling).
+        var torrent = job.Torrent is not null;
         var moving = ProgressBarRules.ShowsMovingBar(job.State, job.TotalBytes);
         if (_movingBar is { } bar)
         {
-            bar.IsIndeterminate = moving;
+            bar.IsIndeterminate = moving && !torrent;
             bar.Value = complete ? 100 : percent;
-            bar.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
+            bar.Visibility = moving && !torrent ? Visibility.Visible : Visibility.Collapsed;
         }
 
         // One main bar: the segment map when the size is known, the indeterminate bar only for unknown sizes.
         foreach (var map in Maps)
         {
-            map.Visibility = job.TotalBytes is > 0 || complete ? Visibility.Visible : Visibility.Collapsed;
+            map.Visibility = !torrent && (job.TotalBytes is > 0 || complete) ? Visibility.Visible : Visibility.Collapsed;
             if (complete) map.SetFraction(1);
             else if (!_haveSegmentMap) map.SetFraction(percent / 100);
         }
 
-        StatusValue.Text = JobViewModel.ToDisplayState(job.State);
+        StatusValue.Text = TorrentRules.StatusText(job) ?? JobViewModel.ToDisplayState(job.State);
         SizeValue.Text = job.TotalBytes is >= 0 ? Bytes(job.TotalBytes.Value) : "Unknown";
         DownloadedValue.Text = job.TotalBytes is > 0
             ? $"{Bytes(job.ReceivedBytes)} ({percent:0.00}%)"
@@ -136,7 +178,7 @@ public sealed partial class JobDetailsPanel : UserControl
         TimeLeftValue.Text = job.EstimatedRemaining is { } eta && !complete
             ? FormatDuration(eta)
             : complete ? "Complete" : "—";
-        ResumeValue.Text = job.ResumeSupported switch
+        ResumeValue.Text = torrent ? "—" : job.ResumeSupported switch
         {
             true => "Yes",
             false => "No",
@@ -144,7 +186,7 @@ public sealed partial class JobDetailsPanel : UserControl
         };
         SavePathValue.Text = job.FinalFilePath;
 
-        if (job.IsTerminal && Segments.Children.Count > 0)
+        if ((job.IsTerminal || torrent) && Segments.Children.Count > 0)
         {
             Segments.Children.Clear();
             _segmentRows.Clear();
@@ -157,6 +199,7 @@ public sealed partial class JobDetailsPanel : UserControl
     {
         ForgetSegments();
         _job = null;
+        UpdatePolling();
         StatusValue.Text = status;
         SizeValue.Text = "Unknown";
         DownloadedValue.Text = Bytes(0);
@@ -192,9 +235,9 @@ public sealed partial class JobDetailsPanel : UserControl
 
     private async Task LoadSegmentsAsync()
     {
-        if (_stopped || _loadingSegments || !_connected || _connection is null || _job is null || _job.IsTerminal) return;
+        if (_stopped || _loadingSegments || !_connected || _connection is null || _job is null || _job.IsTerminal || _job.Torrent is not null) return;
         var jobId = _job.Id;
-        bool StillShowing() => !_stopped && _job is { IsTerminal: false } shown && shown.Id == jobId;
+        bool StillShowing() => !_stopped && _job is { IsTerminal: false, Torrent: null } shown && shown.Id == jobId;
         _loadingSegments = true;
         try
         {

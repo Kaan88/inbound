@@ -347,6 +347,17 @@ public sealed class AddLinesTests
     // ---- The session ------------------------------------------------------------------------------
 
     [Fact]
+    public async Task HandedOffLinesStayWhenTheirTextIsEditedInTheBox()
+    {
+        var session = NewSession(new FakeClassifier());
+        session.SetInputs(["https://a.example/1", "https://a.example/2"]);
+        // The window passes the handed-off inputs as the box's text; a line typed after them adds to them.
+        session.SetTextNow("https://a.example/1\nhttps://a.example/2\nhttps://a.example/3");
+        await UntilAsync(() => session.Lines.Count == 3);
+        Assert.Equal(["https://a.example/1", "https://a.example/2", "https://a.example/3"], session.Lines.Select(line => line.Input));
+    }
+
+    [Fact]
     public async Task AddWaitsForTextThatHasNotReachedTheLinesYet()
     {
         var classifier = new FakeClassifier();

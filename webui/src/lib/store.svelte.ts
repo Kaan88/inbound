@@ -4,6 +4,7 @@ import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
 import { notifyEnabled } from './notify';
 import { noticeFor } from './details';
+import { becameReadyToChoose, readyToChooseText } from './torrentList';
 import { featuresOf, hostTexts, type Features, type HostTexts } from './hostKind';
 import type { Job, Settings } from './types';
 
@@ -87,9 +88,14 @@ export class Store {
 
   private receive(message: Envelope): void {
     const event = message.type === 'job.event' ? (message.payload as { job?: Job; eventType?: string } | undefined) : undefined;
-    const before = event?.job?.id ? this.model.jobs[event.job.id]?.state : undefined;
+    const earlier = event?.job?.id ? this.model.jobs[event.job.id] : undefined;
+    const before = earlier?.state;
     apply(this.model, message);
-    if (event?.job && event.eventType !== 'removed') this.announce(before, event.job);
+    if (event?.job && event.eventType !== 'removed') {
+      this.announce(before, event.job);
+      // WEB-T12: a torrent whose file list came in and that waits for the choice of files, said once.
+      if (becameReadyToChoose(earlier, event.job)) this.toast(readyToChooseText(event.job.torrent?.name || event.job.fileName || ''), 'info', event.job.id);
+    }
     if (message.type === 'jobs.snapshot') void this.afterSnapshot();
   }
 
@@ -173,11 +179,38 @@ export class Store {
     }
   }
 
-  /** Saves the whole settings object with the given changes; the server answers with what it kept. */
-  async saveSettings(change: (settings: Settings) => void, done = 'Settings saved.'): Promise<boolean> {
-    if (!this.model.settings) return false;
-    const copy = JSON.parse(JSON.stringify(this.model.settings)) as Settings;
-    change(copy);
+  /**
+   * The settings as the server holds them now (settings.get), which also brings the model up to date. The model's own
+   * copy changes only with a snapshot or a reply, so it can be behind what the server, the desktop or another tab
+   * changed since: a queue the server stopped at its quota, a schedule added elsewhere.
+   */
+  async currentSettings(): Promise<Settings> {
+    const result = await this.ask<{ ok?: boolean; settings?: Settings }>('settings.get', {});
+    if (!result?.settings) throw new Error('The server did not send its settings.');
+    return result.settings;
+  }
+
+  /**
+   * Changes the settings: the server's current ones are read first and only what `change` does to them is sent back,
+   * so nothing changed elsewhere since this page read them is put back. The server answers with what it kept.
+   * `change` may look at those current settings and answer `{ refused }` instead: nothing is sent, and the reason is
+   * shown, for an edit whose subject changed or went elsewhere since the page read it.
+   */
+  async saveSettings(change: (settings: Settings) => unknown, done = 'Settings saved.'): Promise<boolean> {
+    let current: Settings;
+    try {
+      current = await this.currentSettings();
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : String(error), 'error');
+      return false;
+    }
+    const copy = JSON.parse(JSON.stringify(current)) as Settings;
+    const outcome = change(copy);
+    // Any other value is ignored, so a one-line arrow that returns what it assigned still saves.
+    if (outcome && typeof outcome === 'object' && 'refused' in outcome && typeof outcome.refused === 'string') {
+      this.toast(outcome.refused, 'error');
+      return false;
+    }
     const result = await this.attempt<{ ok: boolean; error?: string }>('settings.update', { settings: copy }, done);
     return !!result?.ok;
   }

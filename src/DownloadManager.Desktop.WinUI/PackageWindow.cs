@@ -221,6 +221,8 @@ internal sealed class PackageWindow : Window
             _hostConnected = connected;
             _fileDetails.SetConnected(connected);
             _notice.Text = connected ? string.Empty : $"Host disconnected. Reconnecting… {error}";
+            // A drop ends the files' flat line while they wait (audit M11).
+            UpdateChartTimer();
         });
         Closed += async (_, _) =>
         {
@@ -293,10 +295,10 @@ internal sealed class PackageWindow : Window
     }
 
     /// <summary>The package's figure for the graph: every file's rate by the main window's rule, added up.</summary>
-    private void SampleChart()
+    private void SampleChart(DateTimeOffset? at = null)
     {
         if (_closed) return;
-        var now = DateTimeOffset.UtcNow;
+        var now = at ?? DateTimeOffset.UtcNow;
         var rates = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id])
             .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now));
         _chart.AddSample(now, SpeedSample.Total(_hostConnected, rates.ToList()));
@@ -336,8 +338,49 @@ internal sealed class PackageWindow : Window
         }
     }
 
-    private void UpdateChartSeen() => _chart.IsSeen = !_closed && AppWindow.IsVisible && _chartCard is { Visibility: Visibility.Visible }
-        && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+    private void UpdateChartSeen()
+    {
+        var shown = !_closed && AppWindow.IsVisible
+            && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+        _chart.IsSeen = shown && _chartCard is { Visibility: Visibility.Visible };
+        _fileDetails.SetShown(shown);
+        UpdateChartTimer();
+    }
+
+    private long? _chartStoppedAt;
+    private readonly ChartIdle _chartIdle = new();
+
+    /// <summary>
+    /// Audit M11: as in Progress Details, the package's chart samples every second only while it can be seen and a file
+    /// transfers. While the files wait or are paused nothing runs: <see cref="ChartIdle"/> adds the wait's zeros when one
+    /// moves again. Seen again after a stop of more than a few seconds, it reads the Host's history.
+    /// </summary>
+    private void UpdateChartTimer()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var members = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id]).ToList();
+        var transferring = members.Any(job => SpeedSample.IsActive(job.State));
+        var waiting = !transferring && members.Any(job => job.State is not ("completed" or "failed" or "cancelled"));
+        var (zeros, begins) = _chartIdle.Update(waiting, _hostConnected, now);
+        if (zeros.Count > 0) _chart.AddSamples(zeros.Select(at => (at, (double?)0)));
+        if (!_chart.IsSeen || !transferring)
+        {
+            if (_chartTimer.IsEnabled)
+            {
+                _chartTimer.Stop();
+                _chartStoppedAt = Environment.TickCount64;
+            }
+            // The wait's first figure: 0 from now until a file moves again.
+            if (begins) SampleChart(now);
+            return;
+        }
+
+        if (_chartTimer.IsEnabled) return;
+        if (_chartStoppedAt is { } stoppedAt && Environment.TickCount64 - stoppedAt > 5_000 && _hostConnected) _ = LoadSpeedHistoryAsync();
+        _chartStoppedAt = null;
+        SampleChart();
+        _chartTimer.Start();
+    }
 
     private void ShowTab()
     {
@@ -632,8 +675,6 @@ internal sealed class PackageWindow : Window
         // The speed card shows while anything in the package can still move, as in Progress Details.
         var moving = members.Any(job => job.State is not ("completed" or "failed" or "cancelled"));
         _chartCard!.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
-        if (moving && !_chartTimer.IsEnabled) { SampleChart(); _chartTimer.Start(); }
-        else if (!moving) _chartTimer.Stop();
         UpdateChartSeen();
         _ring.Value = percent;
         _ring.IsIndeterminate = !allKnown && !allDone && speed > 0;

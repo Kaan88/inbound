@@ -148,7 +148,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     form.showTargets(targets, first);
     if (draft) {
       if (draft.fileName) nameInput.value = draft.fileName;
-      if (draft.destination && first.id === draft.target) {
+      if (typeof draft.destination === "string" && first.id === draft.target) {
         destinationInput.value = draft.destination;
         form.freeSpace.update(first.id, draft.destination);
       }

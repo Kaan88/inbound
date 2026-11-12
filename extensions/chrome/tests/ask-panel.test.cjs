@@ -265,3 +265,23 @@ test('folder window: without pick=1 no dialog opens by itself', async () => {
     page.restore();
   }
 });
+
+test('Audit report 1 contracts: a refusal\'s message is shown only when the ack is a refusal (ok: false), through refusalText', async () => {
+  let ack = { accepted: false, ok: false, message: 'The bridge refused it.' };
+  const { page, panel } = panelPage({
+    'dm.askQueue': async () => ({ ok: true, items: [{ id: 'h1', fileName: 'a.iso', url: 'https://site.test/a.iso' }] }),
+    'dm.getHandoff': handoff('local'),
+    'dm.confirmHandoff': async () => ({ ok: true, ack }),
+  });
+  try {
+    await panel.refresh();
+    await page.el('askConfirm').click();
+    assert.equal(page.el('askError').textContent, 'The bridge refused it.');
+    // An ack's own text that is not a refusal is not shown as the reason.
+    ack = { accepted: false, message: 'Queued.' };
+    await page.el('askConfirm').click();
+    assert.equal(page.el('askError').textContent, 'Inbound Download Manager rejected this request.');
+  } finally {
+    page.restore();
+  }
+});

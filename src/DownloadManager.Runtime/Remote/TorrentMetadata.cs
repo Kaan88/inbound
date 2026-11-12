@@ -5,7 +5,11 @@ using System.Text;
 namespace DownloadManager.Runtime.Remote;
 
 /// <summary>One file a .torrent lists, with its path as <see cref="TorrentMetadata.Files"/> describes it. Untrusted, like the rest of the file.</summary>
-public sealed record TorrentFileEntry(string Path, long Length);
+public sealed record TorrentFileEntry(string Path, long Length)
+{
+    /// <summary>Its place among all the files, padding files counted: the index libtorrent and the torrent worker use.</summary>
+    public int Index { get; init; }
+}
 
 /// <summary>
 /// What a .torrent file says about itself, read just far enough to name it and find it again. The
@@ -13,7 +17,7 @@ public sealed record TorrentFileEntry(string Path, long Length);
 /// over the info dictionary's bytes exactly as written, so nothing may be repaired along the way.
 /// Refusals never quote the file: it can hold a private tracker's passkey.
 /// </summary>
-public sealed record TorrentMetadata(string InfoHash, string Name, long TotalBytes, int FileCount)
+public sealed partial record TorrentMetadata(string InfoHash, string Name, long TotalBytes, int FileCount)
 {
     /// <summary>
     /// What it holds, in its own order, without the padding files some torrents have. A torrent of several files puts
@@ -22,7 +26,22 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
     /// </summary>
     public IReadOnlyList<TorrentFileEntry> Files { get; init; } = [];
 
+    /// <summary>
+    /// True when the file lists more than <see cref="MaxListedFiles"/> files or more path text than is kept, so
+    /// <see cref="Files"/> holds only the first ones. <see cref="FileCount"/> and <see cref="TotalBytes"/> still count them all.
+    /// </summary>
+    public bool FilesCut { get; init; }
+
     public const int MaxFileBytes = 16 * 1024 * 1024;
+
+    /// <summary>The most files kept in <see cref="Files"/>; the torrent worker refuses a torrent with more.</summary>
+    public const int MaxListedFiles = 100_000;
+
+    /// <summary>The most characters of path text kept in <see cref="Files"/>, so a crafted file can't ask for gigabytes of strings.</summary>
+    public const int MaxListedPathChars = 16 * 1024 * 1024;
+
+    /// <summary>The longest name accepted, in bytes as written. The worker refuses any path longer than this, and a real name is far shorter.</summary>
+    public const int MaxNameBytes = 4096;
     private const int MaxDepth = 64;
     private const string NotATorrent = "This file is not a valid .torrent file";
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -84,11 +103,11 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             throw new TorrentFormatException($"{NotATorrent}: its info section has the wrong form.");
         }
 
-        var (name, totalBytes, fileCount, files) = ReadInfo(infoBytes);
-        return new TorrentMetadata(Convert.ToHexString(SHA1.HashData(infoBytes)).ToLowerInvariant(), name, totalBytes, fileCount) { Files = files };
+        var (name, totalBytes, fileCount, files, cut) = ReadInfo(infoBytes);
+        return new TorrentMetadata(Convert.ToHexString(SHA1.HashData(infoBytes)).ToLowerInvariant(), name, totalBytes, fileCount) { Files = files, FilesCut = cut };
     }
 
-    private static (string Name, long TotalBytes, int FileCount, List<TorrentFileEntry> Files) ReadInfo(ReadOnlySpan<byte> info)
+    private static (string Name, long TotalBytes, int FileCount, List<TorrentFileEntry> Files, bool Cut) ReadInfo(ReadOnlySpan<byte> info)
     {
         var reader = new BencodeReader(info);
         string? name = null;
@@ -104,7 +123,13 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             switch (Encoding.ASCII.GetString(info[key]))
             {
                 case "name":
-                    name = TextOf(RequireString(bytes, "name"));
+                    var nameBytes = RequireString(bytes, "name");
+                    if (nameBytes.Length > MaxNameBytes)
+                    {
+                        throw new TorrentFormatException($"{NotATorrent}: its name is too long.");
+                    }
+
+                    name = TextOf(nameBytes);
                     break;
                 case "piece length":
                     pieceLength = RequireWholeNumber(bytes, "piece length");
@@ -155,22 +180,26 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
 
         if (files is { } list)
         {
-            var (total, count, entries) = ReadFiles(info[list], name);
-            return (name, total, count, entries);
+            var (total, count, entries, cut) = ReadFiles(info[list], name);
+            return (name, total, count, entries, cut);
         }
 
         if (singleLength is { } length)
         {
-            return (name, length, 1, [new TorrentFileEntry(name, length)]);
+            return (name, length, 1, [new TorrentFileEntry(name, length)], false);
         }
 
         // A hybrid torrent may describe its files only in the version 2 tree.
         return hasFileTree
-            ? (name, 0, 0, [])
+            ? (name, 0, 0, [], false)
             : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
     }
 
-    private static (long Total, int Count, List<TorrentFileEntry> Files) ReadFiles(ReadOnlySpan<byte> list, string folder)
+    /// <summary>
+    /// Every entry is checked and counted, but only the first <see cref="MaxListedFiles"/> (and
+    /// <see cref="MaxListedPathChars"/> of path text) are kept: past that the rest is counted, not collected.
+    /// </summary>
+    private static (long Total, int Count, List<TorrentFileEntry> Files, bool Cut) ReadFiles(ReadOnlySpan<byte> list, string folder)
     {
         var reader = new BencodeReader(list);
         if (reader.Peek() != 'l')
@@ -181,9 +210,11 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
         var total = 0L;
         var count = 0;
         var files = new List<TorrentFileEntry>();
+        var chars = 0L;
+        var cut = false;
         foreach (var entry in reader.ReadList(depth: 0))
         {
-            var (length, path, padding) = ReadFile(list[entry]);
+            var (length, path, padding) = ReadFile(list[entry], wantPath: !cut);
             try
             {
                 total = checked(total + length);
@@ -193,18 +224,28 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
                 throw new TorrentFormatException($"{NotATorrent}: its file sizes don't add up to a real size.");
             }
 
-            count++;
-            if (!padding)
+            if (!padding && !cut)
             {
-                files.Add(new TorrentFileEntry($"{folder}/{path}", length));
+                var size = (long)folder.Length + 1 + path!.Length;
+                if (files.Count >= MaxListedFiles || chars + size > MaxListedPathChars)
+                {
+                    cut = true;
+                }
+                else
+                {
+                    chars += size;
+                    files.Add(new TorrentFileEntry($"{folder}/{path}", length) { Index = count });
+                }
             }
+
+            count++;
         }
 
-        return count > 0 ? (total, count, files) : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
+        return count > 0 ? (total, count, files, cut) : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
     }
 
     /// <summary>A file's size, its path joined with '/', and whether it only pads the pieces out, which nobody downloads.</summary>
-    private static (long Length, string Path, bool Padding) ReadFile(ReadOnlySpan<byte> entry)
+    private static (long Length, string? Path, bool Padding) ReadFile(ReadOnlySpan<byte> entry, bool wantPath)
     {
         if (entry[0] != 'd')
         {
@@ -226,11 +267,11 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             }
             else if (name.SequenceEqual("path"u8))
             {
-                path = PathOf(bytes);
+                path = PathOf(bytes, wantPath);
             }
             else if (name.SequenceEqual("path.utf-8"u8))
             {
-                utf8Path = PathOf(bytes);
+                utf8Path = PathOf(bytes, wantPath);
             }
             else if (name.SequenceEqual("attr"u8) && char.IsAsciiDigit((char)bytes[0]))
             {
@@ -244,8 +285,11 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             : throw new TorrentFormatException($"{NotATorrent}: an entry in its file list is incomplete.");
     }
 
-    /// <summary>A list of path parts, joined with '/'. Null when it isn't a list of strings with at least one part.</summary>
-    private static string? PathOf(ReadOnlySpan<byte> value)
+    /// <summary>
+    /// A list of path parts, joined with '/'. Null when it isn't a list of strings with at least one part. With
+    /// <paramref name="build"/> false the parts are checked the same way but not decoded, and "" stands for the result.
+    /// </summary>
+    private static string? PathOf(ReadOnlySpan<byte> value, bool build)
     {
         if (value[0] != 'l' || value.Length <= 2)
         {
@@ -254,6 +298,7 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
 
         var reader = new BencodeReader(value);
         var parts = new List<string>();
+        var any = false;
         foreach (var part in reader.ReadList(depth: 0))
         {
             var bytes = value[part];
@@ -262,10 +307,14 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
                 return null;
             }
 
-            parts.Add(TextOf(RequireString(bytes, "path")));
+            any = true;
+            if (build)
+            {
+                parts.Add(TextOf(RequireString(bytes, "path")));
+            }
         }
 
-        return parts.Count > 0 ? string.Join('/', parts) : null;
+        return !any ? null : build ? string.Join('/', parts) : "";
     }
 
     private static ReadOnlySpan<byte> RequireString(ReadOnlySpan<byte> value, string field)

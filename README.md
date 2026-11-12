@@ -26,6 +26,19 @@ To load it from source, build it (see below), open `chrome://extensions` (or `ed
 
 What the extension does with data is in its [privacy policy](docs/chrome-extension-privacy.md).
 
+## Torrents
+
+The app can download magnets and .torrent files on this PC. It is off until you tick **Options › Torrents › Download
+torrents on this PC**; then **Tasks** has **Add Magnet…** and **Import Torrent File…**, and a magnet pasted into Add URL
+goes the same way. A torrent is one row in the download list. For a torrent with several files the app asks which
+files to download first (an option on the same page). With a TorBox account the app asks by default whether a torrent
+goes to this PC or to TorBox, and says for every line whether TorBox has it cached.
+
+The torrent engine (`inbound-torrent.exe`, built on libtorrent) runs only while a torrent downloads and closes about
+30 seconds after the last one stops, so with nothing to do no torrent process runs and nothing listens on the network.
+Torrents connect directly: the proxy in Options is not used for them. Setting the environment variable
+`DOWNLOADMANAGER_TORRENTS=off` turns torrents off whatever Options says.
+
 ## Docker (headless server and web UI)
 
 The same download engine also runs as a headless server with a web UI, in a container for a home server or NAS:

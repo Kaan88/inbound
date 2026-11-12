@@ -42,6 +42,10 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
     private string _state = WebUiStates.Off;
     private string? _error;
     private Run? _run;
+
+    // Bridges that were asked to stop and had not ended: asked again by the next stop, which reports one as still
+    // running until it has ended (L20), so a retry can't change the password under it.
+    private readonly List<Run> _lingering = [];
     private CancellationTokenSource? _restart;
     private int _crashes;
     private bool _stopped;
@@ -206,8 +210,10 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         // The password in force, saved again: nothing to end, nobody to unpair, no restart.
         if (same) return Announce();
 
-        // The bridge keeps the sign-in file in memory and would write the old password back: it stops first.
-        await StopLockedAsync().ConfigureAwait(false);
+        // The bridge keeps the sign-in file in memory and would write the old password back: it stops first, and one
+        // that is still running leaves the password as it was (L20).
+        if (!await StopLockedAsync().ConfigureAwait(false))
+            return Refused("The web UI did not stop, so the password was not changed. Try again in a moment.");
         try
         {
             await _platform.Passwords.SetAsync(password!, keepPairedBrowsers, CancellationToken.None).ConfigureAwait(false);
@@ -395,7 +401,7 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
             return;
         }
 
-        await StopProcessAsync(run).ConfigureAwait(false);
+        if (!await StopProcessAsync(run).ConfigureAwait(false)) _lingering.Add(run);
         Fail($"The web UI did not start within {StartTimeout.TotalSeconds.ToString("0", CultureInfo.CurrentCulture)} seconds. Details are in the app's log.");
     }
 
@@ -403,23 +409,41 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
     /// Also end the web-role pipe sessions still being answered (off, a new port or password). A restart for other
     /// addresses only leaves that to the bridge's own pipes closing with it.
     /// </param>
-    private async Task StopLockedAsync(bool endSessions = true)
+    /// <returns>Whether no bridge is left running: false when the one there didn't end.</returns>
+    private async Task<bool> StopLockedAsync(bool endSessions = true)
     {
         CancelRestart();
+        var stopped = true;
+        foreach (var earlier in _lingering.ToArray())
+        {
+            if (earlier.Process.Exited.IsCompleted || await StopProcessAsync(earlier).ConfigureAwait(false))
+            {
+                _lingering.Remove(earlier);
+                continue;
+            }
+
+            stopped = false;
+            _log.Info("The web bridge asked to stop earlier has still not ended.");
+        }
+
         if (_run is { } run)
         {
             _run = null;
-            await StopProcessAsync(run).ConfigureAwait(false);
-            _log.Info("Web bridge stopped.");
+            var ended = await StopProcessAsync(run).ConfigureAwait(false);
+            _log.Info(ended ? "Web bridge stopped." : "The web bridge did not end when asked to.");
+            if (!ended) _lingering.Add(run);
+            stopped &= ended;
         }
 
         // The bridge's pipes close with it; this also ends any that are still being answered.
         var closed = endSessions ? CloseWebSessions?.Invoke() ?? 0 : 0;
         if (closed > 0) _log.Info($"Ended {closed} web session(s).");
         if (_state != WebUiStates.Failed || !_config.Enabled) SetState(WebUiStates.Off, null);
+        return stopped;
     }
 
-    private async Task StopProcessAsync(Run run)
+    /// <returns>Whether the bridge has ended.</returns>
+    private async Task<bool> StopProcessAsync(Run run)
     {
         try
         {
@@ -429,6 +453,8 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
         {
             _log.Warn($"The web bridge did not stop cleanly: {ex.GetType().Name}");
         }
+
+        return run.Process.Exited.IsCompleted;
     }
 
     /// <summary>After the bridge was ready: an end nobody asked for.</summary>

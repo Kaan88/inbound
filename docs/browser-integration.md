@@ -285,6 +285,15 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   write (UI.B19). Each action goes on a
   native connection of its own, as the folder picker does: the Host answers one command at a time per
   connection, and a slow delete must not hold up an automatic handoff past its time limit.
+- **Row menu and folder button (EXT.R11, GitHub #4):** a right-click on a row, the Menu key or Shift+F10 opens
+  Open containing folder (This PC only), Copy download link (off for a provider's file or a hidden key), Redownload
+  (finished, failed or stopped downloads; it saves a new copy and keeps the existing file), Rename… (finished
+  downloads; the app checks the name and never replaces another file) and Delete… (the Delete button's question).
+  A finished This PC download has a folder button left of Delete, which opens Explorer with the file selected, or
+  its folder when the file is gone, or says "The file and its folder are gone." There is no Open file: the browser
+  would then make the app start a downloaded file (owner question in PROGRESS). The link is copied by the popup
+  itself and asks nothing of the app. An app older than these commands refuses them, and the popup then says
+  "Update Inbound to use this."; a rename counts as done only when the app sends back the new name.
 
 ## Sending to the user's own server (EXT.R1 transport)
 
@@ -308,8 +317,16 @@ Sign-in and browsers). On the click the page asks the browser for access to that
 (`permissions.request`, origin pattern without the port); Chrome and Edge already have it through the
 all-sites host permission, Firefox may ask. The background then calls `POST /api/pair` with the code and a
 name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
-`{address, token, id, name, pairedAt}` under `server` in `chrome.storage.local`. No page gets the token:
-`dm.status` and the other replies carry the address, name and state only. On Chrome and Edge the background
+`{address, token, id, name, serverName, pairedAt}` under `server` in `chrome.storage.local` (`name` is this
+browser's name on the server, `serverName` the server's own name from the pairing answer, EXT.R9). No page gets the
+token: `dm.status` and the other replies carry the address, names and state only.
+
+**The server's name** (EXT.R9, GitHub #2): Send to, the popup and Settings call the server by its shown name: the
+user's own name from Settings, Server, Name (`settings.serverCustomName`, kept apart from the pairing, so it can be
+set before pairing and pairing again never replaces it), else the server's `serverName`, else the host of its
+address. Send to shows the host after a name, smaller: "Home NAS (192.168.1.150)". `dm.status` carries
+`server.serverName` and `server.displayName`; the folder windows' targets carry `name`. One custom name is kept, as
+only one server can be paired. On Chrome and Edge the background
 closes `storage.local` to content scripts (`setAccessLevel`, `TRUSTED_CONTEXTS`); Firefox has no such call,
 so there content scripts can read `storage.local`, token included, and `dm.status.storageClosedToPages` is
 false. The extension's own content script never reads storage. Unpair deletes it and sets
@@ -334,6 +351,14 @@ note that the token and cookies cross the network unencrypted.
   dialog for This PC, and for the server a list of its folders one level at a time (`folders.browse` through
   `dm.browseServerFolders`, which only `handoff.html`, `batch.html` and the popup may use; the server limits it
   to its roots). The window starts on the default target. A folder chosen there is for that download only.
+  EXT.R10: Settings can set a default folder for browser downloads on This PC (automatic sends carry it, and the
+  forms send it as it is, since the app does not know it) and where the forms start: Default folder (the default),
+  Last used folder (per target, kept in `chrome.storage.local` only while chosen) or Custom folder (This PC). A
+  start folder is used only when known to exist: `settings.downloadFolders` with `candidates` answers
+  `existingCandidates` for local paths on the user's own Host (never a share, a device path or a drive letter
+  mapped to a share), and the server is asked with `folders.browse`. A browser folder that was deleted is not
+  checked: automatic sends still carry it and the Host creates it again. Settings takes a drive path or a share
+  on Windows (not `\Downloads`, `/Downloads` or `\\?\`), and a path from `/` in a browser on Linux.
   Both windows fill the folder field (Save in, in Download All) with the chosen target's default folder and
   show the other target's default on a switch; Download All gets them from `dm.targets`, which only
   `batch.html` and the popup may use and which asks the desktop app for its folders even with no server
@@ -442,8 +467,9 @@ checkbox what it shares, so it can be turned off before the first download.
 ## Security boundaries
 
 - Cookies and Authorization values are never written to diagnostic logs.
-- The native host accepts only our two extension origins (store and unpacked) (validated by Chrome's
-  invocation and by `allowed_origins`). Any other ID is refused, including a store package unpacked
+- The native host accepts only our own extension IDs (`BrowserBridge.IsTrustedExtensionId`): the Chrome Web
+  Store build, the unpacked development build, the Edge Add-ons build and the Firefox add-on (validated by the
+  browser's invocation and by `allowed_origins`, or `allowed_extensions` for Firefox). Any other ID is refused, including a store package unpacked
   by hand, whose ID comes from its folder. Chrome reports that as `forbidden`, and the extension says
   which ID was refused. To test a store package unpacked: `docs/chrome-store/LISTING.md`.
 - The native host checks its own command line as well (`BrowserBridge.TrustedCaller`): a trusted
@@ -456,18 +482,41 @@ checkbox what it shares, so it can be turned off before the first download.
   extensions, not against local programs.
 - What crosses the bridge is an allow-list in both directions (`NativeBridgePolicy`, per `BridgeRole`):
   from the extension `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`, `jobs.query`,
-  `job.pause/resume/retry/cancel/remove` and `settings.downloadFolders`; to it only the replies and events it
-  reads. A job action is checked by payload too: it names exactly one download (`jobId`), carries no
-  `jobIds` list, and asks for `deleteFile` only on `job.remove`, so a compromised extension cannot remove
-  every download and its file in one request. A snapshot loses its settings on the way. Provider (`remote.*`) and
-  archive messages never cross.
-- To a paired server the extension is the `BridgeRole.ServerExtension` role: the same allow-list plus
-  `folders.browse`, checked by the server on every `POST /api/ipc` with the token, replies included. The
+  `job.pause/resume/retry/cancel/remove`, `settings.downloadFolders` and the popup row menu's `job.reveal`,
+  `job.update` and `job.redownload` (EXT.R11); to it only the replies and events it reads. A job action is
+  checked by payload too: it names exactly one download (`jobId`), carries no `jobIds` list, and asks for
+  `deleteFile` only on `job.remove`, so a compromised extension cannot remove every download and its file in
+  one request. The menu's commands carry exactly `jobId`, and `job.update` exactly `jobId` and `newFileName`: from
+  the browser it only renames a finished file in its own folder, never moves it, sets a completion program or
+  changes anything else. `host.openUi` opens only a page the window knows (`settings`); any other text opens
+  the main window and never reaches its command line (report 3, L2). `job.reveal` opens the file's folder on this PC for the job's own path only. A snapshot loses its settings on the way. Provider (`remote.*`) and
+  archive messages never cross. A download the app manages on its own (a torrent job; `NativeBridgePolicy.ForBridge`,
+  in snapshots, `job.event`, `job.actionResult` and `handoff.ack` alike, for both roles) reaches the browser with the
+  short magnet the window shows as `url` (no trackers), no `finalUrl`, `appManaged: true`, and `canResume: false`
+  while it is paused waiting for its file choice (a cancelled one keeps Retry, which brings it back to that wait). Its
+  `torrent` details and `statusNote` are dropped, its `failure.message` and an action's `error` become neutral text
+  (`kind` and the retry flags stay), since the Host words them for the app. The popup then offers "Open in app" for it
+  on this PC (nothing for a server's, whose note says it waits on the server), and no rename, redownload or link copy;
+  a finished row offers Delete and the folder only. The extension's own source
+  and build still say nothing of torrents (roadmap rule 5).
+- To a paired server the extension is the `BridgeRole.ServerExtension` role: the same allow-list without
+  `job.reveal` (the server's screen is not the user's) plus `folders.browse`, checked by the server on every `POST /api/ipc` with the token, replies included. The
   extension sends `handoff.request` with its own extension id, which the server checks as the desktop app does.
 - Inside the extension, content scripts can send only the messages they need
   (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.
-- The host validates every field and enforces size/depth limits.
-- The extension may not request arbitrary local file destinations; the host
-  applies its own destination policy and shows the resolved path in the UI.
+- The host validates every field and enforces size/depth limits. Toward the browser, a frame over the browsers'
+  1 MB native-message limit is never sent: a reply becomes `handoff.error` with `errorCode: "message_too_large"`
+  for the same request, and an event is dropped (`docs/ipc-protocol.md`, The browser extension). The popup's
+  `jobs.query` asks for `{ "limit": 20 }`, the newest 20.
+- The extension may not request arbitrary local file destinations (report 3, M1, 2026-11-12). On the
+  desktop Host a `handoff.request` folder is used only when it is the default folder, a favorite, a
+  category folder, a recent folder, or a folder inside one of those, or a folder this Host's own folder
+  dialog (`host.pickFolder`, Choose… in EXT.R1/R10) returned. The Host keeps the picked folders (the
+  newest 64) in `picked-folders.json` in its state folder, so the extension's saved browser folder still
+  works after a restart. Any other folder is replaced by the default folder, the Host logs a warning, and
+  `HandoffAck.note` says so; the extension shows that note as a notification even with notifications
+  off, and "Last used folder" then remembers the default folder. A folder typed in the extension's
+  Options (This folder, Custom folder) is confirmed in the desktop app's folder dialog on Apply.
+  The headless server keeps its own roots check (web-session folder limit) instead.
 - Credentials are scoped to the destination origin and dropped on cross-origin
   redirect unless the user configured a site login for the target.

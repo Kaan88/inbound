@@ -10,8 +10,8 @@ namespace DownloadManager.Runtime.Ipc;
 /// every <see cref="SettingsDto"/> field is in exactly one of <see cref="Allowed"/>, <see cref="PipeOnly"/> and
 /// <see cref="KeptByHost"/>, and a test fails when a new field is in none, so each new setting is decided on.
 /// <list type="bullet">
-/// <item><see cref="Allowed"/>: downloads, connections, speed, queues and schedule times, and categories' names and
-/// file types. Some carry a rule inside: a schedule's when-done actions and a category's folder stay as they are.</item>
+/// <item><see cref="Allowed"/>: downloads, connections, speed, queues and schedule times, categories' names and
+/// file types, and where torrents go and how long they seed. Some carry a rule inside: a schedule's when-done actions and a category's folder stay as they are.</item>
 /// <item><see cref="PipeOnly"/>: what reaches beyond the downloads (proxy, local network, clipboard, the browser
 /// integration and its lists, start at sign-in, the window, sounds, theme, updates, programs) and every folder, because
 /// the folders are the session's own roots and it must not widen them. A save must bring these back as they are, or
@@ -24,6 +24,9 @@ public static class WebSettingsRules
 {
     public static IReadOnlyList<string> Allowed { get; } =
     [
+        // The revision the copy came with (audit 4 H1). It changes nothing by itself: a stale one only keeps the Host's
+        // newer queues and schedules from being removed.
+        nameof(SettingsDto.Revision),
         nameof(SettingsDto.MaxConcurrentDownloads),
         nameof(SettingsDto.DefaultQueueId),
         nameof(SettingsDto.Queues),
@@ -36,6 +39,20 @@ public static class WebSettingsRules
         nameof(SettingsDto.AutoResumeUnfinishedOnStartup),
         nameof(SettingsDto.CustomCategories),
         nameof(SettingsDto.DeleteCategoryIds),
+        // Where magnets go and whether files are chosen first; turning torrents on stays with the PC (below).
+        nameof(SettingsDto.TorrentRoute),
+        nameof(SettingsDto.TorrentChooseFiles),
+        // T2 seeding: how long a finished torrent is shared and how fast it may upload. They only act on torrents the
+        // PC already runs (turning torrents on, the port and the router stay with the PC), and the Host checks the values.
+        nameof(SettingsDto.TorrentSeedAfterDownload),
+        nameof(SettingsDto.TorrentSeedRatio),
+        nameof(SettingsDto.TorrentSeedHours),
+        nameof(SettingsDto.TorrentUploadLimit),
+        // T3 limits: how many torrents seed at once and how many connections they make. Like the upload limit they only
+        // shape what the PC already runs, and the Host checks the values.
+        nameof(SettingsDto.TorrentSeedsAtOnce),
+        nameof(SettingsDto.TorrentConnectionsPerTorrent),
+        nameof(SettingsDto.TorrentMaxConnections),
     ];
 
     public static IReadOnlyList<string> PipeOnly { get; } =
@@ -58,6 +75,19 @@ public static class WebSettingsRules
         nameof(SettingsDto.ShowCompletionDialog),
         nameof(SettingsDto.AllowLocalNetwork),
         nameof(SettingsDto.PreventSleepWhileDownloading),
+        // Turning torrents on makes the PC take connections from peers, and the handler is Windows' own setting; the
+        // port and the router request open the PC to the network (and a firewall rule is made for that port).
+        nameof(SettingsDto.TorrentsEnabled),
+        nameof(SettingsDto.TorrentHandler),
+        nameof(SettingsDto.TorrentListenPort),
+        nameof(SettingsDto.TorrentUpnp),
+        // T3: how this PC finds peers and shows itself to them (DHT, PEX, LSD on the local network, encryption) and
+        // whether torrents go through the proxy, whose address is pipe-only too.
+        nameof(SettingsDto.TorrentDht),
+        nameof(SettingsDto.TorrentPex),
+        nameof(SettingsDto.TorrentLsd),
+        nameof(SettingsDto.TorrentEncryption),
+        nameof(SettingsDto.TorrentUseProxy),
         nameof(SettingsDto.FfmpegPath),
         nameof(SettingsDto.PostDownloadCommand),
         nameof(SettingsDto.UpdateManifestUrl),
@@ -80,7 +110,7 @@ public static class WebSettingsRules
     ];
 
     public const string ScheduleActionsRefused =
-        "What a schedule does when it is done (open the file, exit, shut down) can only be set in the app on this PC. Nothing was saved.";
+        "What a schedule does when it is done (open the file, exit, shut down), and a schedule that does any of these, can only be set in the app on this PC. Nothing was saved.";
 
     public const string CategoryFolderRefused =
         "A category's folder can only be set in the app on this PC. Nothing was saved.";
@@ -198,10 +228,24 @@ public static class WebSettingsRules
                 schedule.ShutdownWhenDone != reference.ShutdownWhenDone || schedule.ForceShutdown != reference.ForceShutdown ||
                 !string.Equals(Normal(schedule.ShutdownMode) ?? plain.ShutdownMode, Normal(reference.ShutdownMode) ?? plain.ShutdownMode, StringComparison.OrdinalIgnoreCase))
                 return true;
+            // Audit 2 H1: a schedule that opens a file, exits or shuts down when it is done is left wholly to this PC.
+            // Pointed at another queue, turned on or given other times, it would run those actions for downloads the
+            // web session puts there. Removing it is allowed: that only takes the actions away.
+            if (reference.OpenFileWhenDone || reference.ExitWhenDone || reference.ShutdownWhenDone)
+                if (!SameTrigger(schedule, reference)) return true;
         }
 
         return false;
     }
+
+    /// <summary>The same schedule apart from its run record (<c>last*</c>, which the Host keeps) and its name.</summary>
+    private static bool SameTrigger(ScheduleDto requested, ScheduleDto current) =>
+        requested.QueueId == current.QueueId && requested.Enabled == current.Enabled &&
+        string.Equals(Normal(requested.Kind) ?? "daily", Normal(current.Kind) ?? "daily", StringComparison.OrdinalIgnoreCase) &&
+        requested.StartDate == current.StartDate && SameText(requested.Days, current.Days) &&
+        SameText(requested.StartTime, current.StartTime) && SameText(requested.StopTime, current.StopTime) &&
+        requested.StartOnHostStartup == current.StartOnHostStartup && requested.TimedStartEnabled == current.TimedStartEnabled &&
+        requested.RepeatEveryMinutes == current.RepeatEveryMinutes;
 
     private static bool ChangesCategoryFolders(List<CategoryDefinitionDto>? requested, List<CategoryDefinitionDto>? current)
     {

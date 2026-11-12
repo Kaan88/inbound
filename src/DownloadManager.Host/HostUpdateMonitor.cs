@@ -11,6 +11,8 @@ internal sealed class HostUpdateMonitor : IDisposable
     private readonly System.Threading.Timer _timer;
     private readonly System.Threading.Timer _retryTimer;
     private readonly object _sync = new();
+    private readonly UpdatePostponement _postponement = new();
+    private volatile bool _waitingForIdle;
     private Action<string, string>? _notify;
     private UpdateCheckResult? _available;
     private string? _notifiedVersion;
@@ -25,15 +27,62 @@ internal sealed class HostUpdateMonitor : IDisposable
         _log = log;
         _timer = new System.Threading.Timer(
             _ => _ = CheckAsync(manual: false), null, Timeout.Infinite, Timeout.Infinite);
+        // M2: the retry installs the version already found; only the scheduled check fetches the manifest.
         _retryTimer = new System.Threading.Timer(
-            _ => _ = CheckAsync(manual: false), null, Timeout.Infinite, Timeout.Infinite);
-        _service.UpdateDeferred += (_, _) =>
+            _ => _ = RetryInstallAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _service.UpdateDeferred += OnUpdateDeferred;
+        _service.JobChanged += OnJobChanged;
+    }
+
+    private void OnUpdateDeferred(object? sender, string e)
+    {
+        lock (_sync)
         {
-            lock (_sync)
-            {
-                _available = null;
-            }
-        };
+            _available = null;
+            _waitingForIdle = false;
+            _postponement.Reset();
+            if (!_disposed) _retryTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+    }
+
+    /// <summary>
+    /// While an automatic install waits for downloads, the last one to stop brings the retry forward, at most once a
+    /// minute. Progress events arrive often, so this returns at once unless an install is waiting.
+    /// </summary>
+    private void OnJobChanged(object? sender, JobChangeEventArgs e)
+    {
+        if (!_waitingForIdle) return;
+        if (e.Job.State is { } state && (
+                state.Equals("connecting", StringComparison.OrdinalIgnoreCase) ||
+                state.Equals("downloading", StringComparison.OrdinalIgnoreCase) ||
+                state.Equals("verifying", StringComparison.OrdinalIgnoreCase) ||
+                state.Equals("retryWaiting", StringComparison.OrdinalIgnoreCase)))
+            return;
+        if (_service.ActiveDownloadCount() > 0) return;
+        lock (_sync)
+        {
+            if (_disposed || !_waitingForIdle) return;
+            if (!_postponement.TryEarlyRetry(DateTimeOffset.UtcNow)) return;
+            _waitingForIdle = false;
+            _retryTimer.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private async Task RetryInstallAsync()
+    {
+        lock (_sync)
+        {
+            if (_disposed || !_autoCheck || _available is null) return;
+        }
+
+        try
+        {
+            await InstallAsync(automatic: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log($"Update install retry failed: {ex.Message}");
+        }
     }
 
     public string? UpdateText
@@ -66,7 +115,11 @@ internal sealed class HostUpdateMonitor : IDisposable
                 _timer.Change(interval, interval);
             }
 
-            if (!_autoCheck) _retryTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            if (!_autoCheck)
+            {
+                _retryTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                _waitingForIdle = false;
+            }
             startCheck = _autoCheck && !wasEnabled;
         }
         if (startCheck)
@@ -119,7 +172,10 @@ internal sealed class HostUpdateMonitor : IDisposable
             $"Version {outcome.Version} could not be installed. You can try again from the tray or Help menu.");
     }
 
-    public async Task InstallAsync()
+    /// <summary>The tray's Install item; it always says why an install could not start.</summary>
+    public Task InstallAsync() => InstallAsync(automatic: false);
+
+    private async Task InstallAsync(bool automatic)
     {
         UpdateCheckResult? check;
         lock (_sync)
@@ -135,13 +191,23 @@ internal sealed class HostUpdateMonitor : IDisposable
         var result = await _service.InstallUpdateAsync(new UpdateInstallRequest()).ConfigureAwait(false);
         if (result.Status == "busy")
         {
+            bool retry;
+            bool notify;
             lock (_sync)
             {
-                if (!_disposed && _autoCheck)
-                    _retryTimer.Change(TimeSpan.FromMinutes(1), Timeout.InfiniteTimeSpan);
+                retry = !_disposed && _autoCheck;
+                // M2: one balloon per version on the automatic path; the tray item answers every click.
+                notify = _postponement.ShouldNotify(check.AvailableVersion) || !automatic;
+                if (retry)
+                {
+                    _retryTimer.Change(_postponement.NextDelay(), Timeout.InfiniteTimeSpan);
+                    // Only the downloads ending can clear a downloads refusal; other reasons wait for the delay.
+                    _waitingForIdle = UpdatePostponement.WaitsForDownloads(result.Error);
+                }
             }
-            _notify?.Invoke("Update postponed", "Downloads are active; the update will not restart the Host yet.");
-            _log("Automatic update install blocked by active downloads.");
+
+            if (notify) _notify?.Invoke("Update postponed", UpdatePostponement.Message(result.Error, retry));
+            _log($"Update install postponed: {result.Error}");
             return;
         }
 
@@ -154,6 +220,8 @@ internal sealed class HostUpdateMonitor : IDisposable
         lock (_sync)
         {
             _available = null;
+            _waitingForIdle = false;
+            _postponement.Reset();
         }
 
         _notify?.Invoke("Installing update", $"Version {result.Version} will be installed; the Host is restarting.");
@@ -210,7 +278,7 @@ internal sealed class HostUpdateMonitor : IDisposable
                     return;
                 }
 
-                await InstallAsync().ConfigureAwait(false);
+                await InstallAsync(automatic: true).ConfigureAwait(false);
                 return;
             }
 
@@ -251,6 +319,9 @@ internal sealed class HostUpdateMonitor : IDisposable
             if (_disposed) return;
             _disposed = true;
             _autoCheck = false;
+            _waitingForIdle = false;
+            _service.JobChanged -= OnJobChanged;
+            _service.UpdateDeferred -= OnUpdateDeferred;
             _retryTimer.Dispose();
             _timer.Dispose();
         }

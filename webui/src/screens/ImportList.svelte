@@ -1,6 +1,6 @@
 <script lang="ts">
   import Dialog from '../components/Dialog.svelte';
-  import { importSummary, parseList, type ListEntry } from '../lib/addflow';
+  import { chunkTorrentEntries, importSummary, isTorrentEntry, parseList, type ListEntry } from '../lib/addflow';
   import { routeOf, type AddLine } from '../lib/addlines';
   import { lineWords, newLine } from '../lib/addview';
   import { store } from '../lib/store.svelte';
@@ -46,7 +46,7 @@
     if (providerAdd) {
       summary = `Checking ${entries.length} addresses…`;
       for (const entry of entries) {
-        if (!/^https?:\/\//i.test(entry.url) || answers.has(entry.url)) continue;
+        if (isTorrentEntry(entry) || !/^https?:\/\//i.test(entry.url) || answers.has(entry.url)) continue;
         try {
           answers.set(entry.url, await store.ask<ClassifyResult>('remote.classify', { text: entry.url }));
         } catch (error) {
@@ -59,7 +59,31 @@
     let failed = 0;
     let firstError: string | undefined;
     const review: { input: string; result: ClassifyResult }[] = [];
-    for (const entry of entries) {
+    // Torrents go to the server's torrent import: one already in the list, or every one while torrents are off, is skipped.
+    const torrents = entries.filter(isTorrentEntry);
+    let skipped = 0;
+    let skipReason: string | undefined;
+    // In requests that each fit one message.
+    let sent = 0;
+    for (const chunk of chunkTorrentEntries(torrents)) {
+      try {
+        const result = await store.ask<{ added: number; skipped: number; skipReason?: string; failed: number; firstError?: string }>('torrent.import', { entries: chunk });
+        accepted += result.added;
+        failed += result.failed;
+        firstError ??= result.firstError;
+        skipped += result.skipped;
+        skipReason ??= result.skipReason;
+        sent += chunk.length;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // A server without torrents doesn't know the request: nothing went wrong with the entries.
+        if (/unknown message type/i.test(message)) { skipped += torrents.length - sent; skipReason ??= 'This server does not download torrents.'; }
+        else { failed += torrents.length - sent; firstError ??= message; }
+        break;
+      }
+    }
+
+    for (const entry of entries.filter((item) => !isTorrentEntry(item))) {
       if (!/^https?:\/\//i.test(entry.url)) {
         failed++;
         firstError ??= `Invalid URL: ${entry.url}`;
@@ -99,7 +123,7 @@
     }
 
     toReview = review;
-    summary = importSummary(accepted, entries.length, failed, firstError, review.length);
+    summary = importSummary(accepted, entries.length, failed, firstError, review.length, skipped, skipReason);
     step = 'done';
   }
 </script>

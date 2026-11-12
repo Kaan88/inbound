@@ -123,7 +123,9 @@ public static class FileNameResolver
             }
         }
 
-        var cleaned = builder.ToString().Trim().TrimEnd('.');
+        // Windows silently drops trailing dots and spaces ("a ." is stored as "a"), so the path this
+        // records would not be the file on disk.
+        var cleaned = TrimWindowsTail(builder.ToString().Trim());
         if (cleaned.Length == 0)
         {
             cleaned = "download";
@@ -132,11 +134,10 @@ public static class FileNameResolver
         var stem = Path.GetFileNameWithoutExtension(cleaned);
         if (string.IsNullOrWhiteSpace(stem))
         {
-            stem = "download";
             cleaned = "download" + Path.GetExtension(cleaned);
         }
 
-        if (ReservedNames.Contains(stem))
+        if (IsReservedDeviceName(cleaned))
         {
             cleaned = "_" + cleaned;
         }
@@ -151,11 +152,31 @@ public static class FileNameResolver
             }
 
             var allowedStem = Math.Max(1, maxLength - extension.Length);
-            cleaned = cleaned[..Math.Min(allowedStem, cleaned.Length)] + extension;
+            var head = cleaned[..Math.Min(allowedStem, cleaned.Length)];
+            cleaned = extension.Length > 0
+                ? head.TrimEnd(' ') + extension
+                : TrimWindowsTail(head);
+            if (cleaned.Length == 0 || cleaned[0] == '.') cleaned = "download" + cleaned;
+        }
+
+        // Again after the cut: trimming the spaces it leaves can turn "CON   ...x.txt" into "CON.txt". A name the
+        // cut makes reserved is that short, so the prefix keeps it within the limit.
+        if (IsReservedDeviceName(cleaned))
+        {
+            cleaned = "_" + cleaned;
         }
 
         return cleaned;
     }
+
+    private static string TrimWindowsTail(string name) => name.TrimEnd('.', ' ');
+
+    /// <summary>
+    /// True for a Windows device name (CON, NUL, COM1...). Windows 10 reserves the part before the
+    /// first dot, so "CON.tar.gz" is one too; trailing spaces before that dot are ignored as well.
+    /// </summary>
+    public static bool IsReservedDeviceName(string name)
+        => ReservedNames.Contains(name.Split('.', 2)[0].TrimEnd());
 
     public static string ResolveUniquePath(string directory, string fileName, ConflictPolicy policy = ConflictPolicy.Rename)
     {

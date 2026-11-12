@@ -10,7 +10,10 @@ import { confirmDialog, dialogOpen } from "./ui/dialog";
 import { fillIcons, icon } from "./ui/icon";
 import { menuOpen, openMenu } from "./ui/menu";
 import { applyTheme, followThemeChanges, type ThemeChoice } from "./ui/theme";
-import { deleteAsksAboutFile, deleteFileFor, type JobAction, type JobSummary } from "./job-list";
+import {
+  badFileName, deleteAsksAboutFile, deleteFileFor, REDOWNLOAD_NOTE, rowMenuEntries, type JobAction, type JobCommand, type JobSummary,
+  type RowMenuChoice,
+} from "./job-list";
 
 interface Settings {
   enabled: boolean;
@@ -22,7 +25,7 @@ interface Settings {
   destinationMode?: string;
 }
 
-interface ServerInfo { address: string; name?: string; connected: boolean; lastError: string }
+interface ServerInfo { address: string; name?: string; displayName?: string; connected: boolean; lastError: string }
 
 interface Status {
   ok: boolean;
@@ -61,9 +64,13 @@ let groupsOk: Partial<Record<"local" | "server", boolean>> = {};
 let leftOpen = false;
 let checking = true;
 
-/** The server's name as the user knows it: the host of its address ("home-server"). */
+/**
+ * The server's name as the user knows it (EXT.R9): the name Settings or the server gave it ("Home NAS"), else the
+ * host of its address ("home-server").
+ */
 export function serverName(server: ServerInfo | null | undefined): string {
   if (!server) return "Server";
+  if (server.displayName?.trim()) return server.displayName.trim();
   try { return new URL(server.address).hostname || "Server"; } catch { return server.address.replace(/^https?:\/\//, "") || "Server"; }
 }
 
@@ -298,7 +305,9 @@ function drawList(): void {
     empty.classList.remove("hidden");
     return;
   }
-  const shown = renderPopupRows(list, jobs, listView(), { onAction: runJobAction, onOpen: openJob });
+  const shown = renderPopupRows(list, jobs, listView(), {
+    onAction: runJobAction, onOpen: openJob, onReveal: (job) => void revealJob(job), onMenu: openRowMenu,
+  });
   if (shown === 0 && !checking) {
     list.classList.add("hidden");
     empty.replaceChildren(...emptyState("download", "tint-info", "No downloads yet",
@@ -410,6 +419,87 @@ async function runJobAction(job: JobSummary, action: JobAction): Promise<void> {
   if (result && !result.ok) showError(result.error || "The app did not do that.");
   else if (result) say(`${ACTION_WORDS[action]}: ${job.fileName}`);
   await pollJobs();
+}
+
+// ---- The row menu (EXT.R11, GitHub #4) ---------------------------------------------------------------------------
+
+async function sendCommand(job: JobSummary, command: JobCommand, extra: Record<string, unknown> = {}):
+  Promise<{ ok?: boolean; error?: string; message?: string } | undefined> {
+  clearError();
+  return await send({ type: "dm.jobCommand", command, jobId: job.id, target: job.target ?? "local", ...extra });
+}
+
+async function revealJob(job: JobSummary): Promise<void> {
+  const result = await sendCommand(job, "reveal");
+  if (result && !result.ok) showError(result.error || "Could not open the folder.");
+  else if (result) say(result.message || `Opened the folder of ${job.fileName}`);
+}
+
+async function copyLink(job: JobSummary): Promise<void> {
+  clearError();
+  try {
+    await navigator.clipboard.writeText(job.url ?? "");
+    say(`Link copied: ${job.fileName}`);
+  } catch {
+    showError("Could not copy the link.");
+  }
+}
+
+async function redownloadJob(job: JobSummary): Promise<void> {
+  const answer = await confirmDialog({
+    title: "Redownload?",
+    message: `Download '${job.fileName || "this download"}' again?`,
+    note: REDOWNLOAD_NOTE,
+    confirmLabel: "Redownload",
+  });
+  if (!answer) return;
+  const result = await sendCommand(job, "redownload");
+  if (result && !result.ok) showError(result.error || "The app did not do that.");
+  else if (result) say(`Redownloading: ${job.fileName}`);
+  await pollJobs();
+}
+
+async function renameJob(job: JobSummary): Promise<void> {
+  let name = job.fileName;
+  for (;;) {
+    const answer = await confirmDialog({
+      title: "Rename file",
+      message: "The file on disk is renamed in its folder.",
+      input: { label: "New name", value: name },
+      confirmLabel: "Rename",
+    });
+    if (!answer) return;
+    name = (answer.value ?? "").trim();
+    if (name === job.fileName) return;
+    const bad = badFileName(name);
+    if (bad) { showError(bad); continue; }
+    break;
+  }
+  const result = await sendCommand(job, "rename", { newFileName: name });
+  if (result && !result.ok) showError(result.error || "The app did not rename the file.");
+  else if (result) say(`Renamed to ${name}`);
+  await pollJobs();
+}
+
+function runMenuChoice(job: JobSummary, choice: RowMenuChoice): void {
+  if (choice === "reveal") void revealJob(job);
+  else if (choice === "copyLink") void copyLink(job);
+  else if (choice === "redownload") void redownloadJob(job);
+  else if (choice === "rename") void renameJob(job);
+  else void runJobAction(job, "remove");
+}
+
+function openRowMenu(job: JobSummary, row: HTMLElement, at?: { x: number; y: number }): void {
+  if (dialogOpen()) return;
+  // From the keyboard: under the row's start, kept inside the popup like a right-click's.
+  const rect = row.getBoundingClientRect();
+  at ??= { x: rect.left + 24, y: rect.bottom - 4 };
+  openMenu(row, rowMenuEntries(job).map((entry) => ({
+    label: entry.label,
+    disabled: !entry.enabled,
+    title: entry.title,
+    onSelect: () => runMenuChoice(job, entry.id),
+  })), { at });
 }
 
 function openJob(job: JobSummary): void {

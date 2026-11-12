@@ -14,6 +14,21 @@ public sealed class JobListEntry
     public string StartMode { get; set; } = "later";
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
+    /// <summary>A torrent job's own part; null for every other download. <see cref="Url"/> is then its magnet.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public TorrentListEntry? Torrent { get; set; }
+}
+
+/// <summary>A torrent in a saved list: added again through <c>torrent.import</c>, never as a plain address.</summary>
+public sealed class TorrentListEntry
+{
+    public string InfoHash { get; set; } = string.Empty;
+    public string? Name { get; set; }
+    public string? Magnet { get; set; }
+    /// <summary>The .torrent file (base64) when the torrent was added from one and the Host still has it.</summary>
+    public string? Data { get; set; }
+    /// <summary>The files chosen, by index; null when every file is wanted or the file list was not known.</summary>
+    public List<int>? FileIndexes { get; set; }
 }
 
 public static class JobListFile
@@ -23,7 +38,13 @@ public static class JobListFile
         WriteIndented = true,
     };
 
-    public static string Serialize(IEnumerable<JobDto> jobs)
+    /// <summary>An entry that is a torrent (from this list format, or a bare magnet in an older or hand-made list).</summary>
+    public static bool IsTorrent(JobListEntry entry)
+        => entry.Torrent is not null || entry.Url.TrimStart().StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
+
+    /// <param name="torrents">Each torrent job's entry from <c>torrent.listEntries</c>; a torrent missing from it (an
+    /// older Host) is saved with its magnet only.</param>
+    public static string Serialize(IEnumerable<JobDto> jobs, IReadOnlyDictionary<Guid, TorrentListEntry>? torrents = null)
     {
         var entries = jobs
             // A provider's file is reached through the account, so its reference means nothing in a list.
@@ -31,6 +52,8 @@ public static class JobListFile
             .Where(job => !string.IsNullOrWhiteSpace(job.Url) && !job.IsRemote && !job.AddressHidden)
             .Select(job => new JobListEntry
             {
+                Torrent = job.Torrent is not { } torrent ? null
+                    : torrents?.GetValueOrDefault(job.Id) ?? new TorrentListEntry { InfoHash = torrent.InfoHash, Name = torrent.Name, Magnet = job.Url },
                 Url = job.Url,
                 FileName = job.FileName,
                 CategoryId = job.CategoryId,

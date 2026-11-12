@@ -23,6 +23,8 @@
                         </Grid.ColumnDefinitions>
                         <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}" Width="16" Height="16" />
                         <FontIcon Glyph="{Binding FileGlyph}" Visibility="{Binding FileGlyphVisibility}" FontSize="15" />
+                        <FontIcon Glyph="{Binding FileGlyph}" Visibility="{Binding TorrentVisibility}" FontSize="15"
+                                  Foreground="{ThemeResource InboundIconMediaBrush}" />
                         <TextBlock Grid.Column="1" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
                     </Grid>
                     <TextBlock Grid.Column="1" Text="{Binding SizeText}" />
@@ -67,6 +69,11 @@
                 <MenuFlyoutItem x:Name="FileProgressItem" Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
                 <MenuFlyoutItem x:Name="FileDownloadNowItem" Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
                 <MenuFlyoutItem x:Name="FileStopItem" Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
+                <!-- T1: shown while one torrent with a known file list is selected. -->
+                <MenuFlyoutItem x:Name="FileChooseFilesItem" Text="Choose Files…" AccessKey="C" Visibility="Collapsed" Click="MenuChooseTorrentFiles_Click" />
+                <!-- T2: shown while a selected torrent is finished and not seeding, or seeds. -->
+                <MenuFlyoutItem x:Name="FileStartSeedingItem" Text="Start Seeding" AccessKey="G" Visibility="Collapsed" Click="MenuStartSeeding_Click" />
+                <MenuFlyoutItem x:Name="FileStopSeedingItem" Text="Stop Seeding" AccessKey="T" Visibility="Collapsed" Click="MenuStopSeeding_Click" />
                 <MenuFlyoutItem x:Name="FileRedownloadItem" Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="FileDeleteItem" Text="Delete…" AccessKey="E" KeyboardAcceleratorTextOverride="Delete" Click="MenuDelete_Click" />
@@ -530,8 +537,12 @@
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="140" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="52" />
+                                        <ColumnDefinition Width="52" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="86" />
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="52" />
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
@@ -541,6 +552,10 @@
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                         <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
                                                Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                        <!-- T1: a torrent row shows the swarm (or a link for a magnet still getting its file list). -->
+                                        <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconMediaBrush}"
+                                                  Visibility="{Binding TorrentGlyphVisibility}"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Grid>
                                     <Border Tag="RowAction" Width="22" Height="22" CornerRadius="4" Background="Transparent"
                                             Visibility="{Binding ChevronVisibility}"
@@ -548,12 +563,16 @@
                                             Tapped="PackageChevron_Tapped" DoubleTapped="PackageChevron_DoubleTapped"
                                             PointerEntered="PackageChevron_PointerEntered"
                                             PointerExited="PackageChevron_PointerExited"
-                                            ToolTipService.ToolTip="Expand or collapse"
-                                            AutomationProperties.Name="Expand or collapse package">
+                                            ToolTipService.ToolTip="{Binding ChevronName}"
+                                            AutomationProperties.Name="{Binding ChevronName}">
                                         <FontIcon Glyph="{Binding ChevronGlyph}" FontSize="11"
                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Border>
+                                    <!-- An open-able torrent row keeps its swarm glyph beside the chevron, before the name. -->
+                                    <FontIcon Grid.Column="1" Glyph="{Binding FileGlyph}" FontSize="14" Foreground="{ThemeResource InboundIconMediaBrush}"
+                                              Visibility="{Binding TorrentNameGlyphVisibility}" Width="16"
+                                              VerticalAlignment="Center" HorizontalAlignment="Left" />
                                     <TextBlock Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
@@ -568,6 +587,10 @@
                                         <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
                                         <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
+                                        <!-- DT-6: a seeding torrent's way to its seeding goal (ratio or time, whichever comes first). -->
+                                        <ProgressBar Value="{Binding SeedGoalPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
+                                                     Foreground="{ThemeResource InboundStatusDoneBrush}" Visibility="{Binding SeedGoalVisibility}"
+                                                     ToolTipService.ToolTip="{Binding SeedGoalToolTip}" />
                                     </StackPanel>
                                     <Grid Grid.Column="5" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
                                           Background="Transparent" ToolTipService.ToolTip="{Binding ArchiveToolTip}">
@@ -585,15 +608,29 @@
                                             <FontIcon Glyph="&#xE8D7;" FontSize="12" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                         </Button>
                                     </Grid>
-                                    <TextBlock Grid.Column="6" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
+                                    <!-- DT-6: Seeds and Peers, only in the torrent views. -->
+                                    <TextBlock Grid.Column="6" Text="{Binding SeedsText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="7" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
+                                    <TextBlock Grid.Column="7" Text="{Binding PeersText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="8" Text="{Binding LastTryText}" FontSize="11"
+                                    <TextBlock Grid.Column="8" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="9" Text="{Binding Description}" FontSize="11"
+                                    <TextBlock Grid.Column="9" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <!-- DT-6: Up and Ratio, only in the torrent views. -->
+                                    <TextBlock Grid.Column="10" Text="{Binding UpText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="11" Text="{Binding RatioText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="12" Text="{Binding LastTryText}" FontSize="11"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="13" Text="{Binding Description}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -644,6 +681,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <!-- Which Host the window shows: This PC or a saved server (design D9, section 5). -->
                 <DropDownButton x:Name="ServerSwitcher" Content="This PC" FontSize="11" Padding="6,0" MinHeight="0" Height="21"
@@ -659,10 +697,21 @@
                 <!-- Passing messages are announced here. StatusText changes on its own as counts move, so it isn't a live region. -->
                 <TextBlock x:Name="StatusAnnouncer" Grid.Column="1" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
                            AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
-                <TextBlock x:Name="ConnectionText" Grid.Column="2" Text="Connecting…" FontSize="11"
+                <!-- T1: while a torrent downloads (the engine runs then). It opens the Torrents view. -->
+                <Button x:Name="TorrentChip" Grid.Column="2" FontSize="11" Padding="8,0" MinHeight="0" Height="19" CornerRadius="9"
+                        VerticalAlignment="Center" Visibility="Collapsed" Click="TorrentChip_Click"
+                        Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                        AutomationProperties.Name="Torrents"
+                        ToolTipService.ToolTip="Show the Torrents view">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <FontIcon Glyph="&#xF22C;" FontSize="11" Foreground="{ThemeResource InboundIconMediaBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TorrentChipText" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <TextBlock x:Name="ConnectionText" Grid.Column="3" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
                 <!-- U-WL-9: a browser registration that is broken or missing can be put right from here. -->
-                <Button x:Name="RepairBrowserButton" Grid.Column="3" Content="Repair…" FontSize="11" Padding="8,0" MinHeight="0" Height="19"
+                <Button x:Name="RepairBrowserButton" Grid.Column="4" Content="Repair…" FontSize="11" Padding="8,0" MinHeight="0" Height="19"
                         VerticalAlignment="Center" Visibility="Collapsed" Click="RepairBrowser_Click"
                         AutomationProperties.Name="Repair browser integration"
                         ToolTipService.ToolTip="Register Inbound with your browsers again, so the extension can reach it" />

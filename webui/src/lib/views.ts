@@ -8,13 +8,24 @@ import {
   sortRows, summarizeGroup, type GroupSummary, type RowView, type SortState,
 } from './list';
 import { isRow } from './remote';
-import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteJob } from './types';
+import { fileRowName, fileRowStatus, mostFileRows, moreFiles, showsFiles } from './torrents';
+import { seedGoalOf, torrentFilterOf } from './torrentList';
+import { bytes, stateWord, tone as toneOf } from './format';
+import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteJob, TorrentFile } from './types';
 
-export type StateView = 'all' | 'unfinished' | 'active' | 'queued' | 'failed' | 'finished' | 'remote' | 'extractions';
+export type StateView = 'all' | 'unfinished' | 'active' | 'queued' | 'failed' | 'finished' | 'remote' | 'extractions' | 'torrents'
+  | 'torrents-downloading' | 'torrents-seeding' | 'torrents-stopped';
 /** A state view, or a category: `cat:compressed`, `cat:<custom id>`. */
 export type ViewKey = StateView | `cat:${string}`;
 
-export const stateViews: StateView[] = ['all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions'];
+export const stateViews: StateView[] = [
+  'all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions', 'torrents', 'torrents-downloading', 'torrents-seeding', 'torrents-stopped',
+];
+
+/** The Torrents view and the three under it, which show the Seeds, Peers, Up and Ratio columns. */
+export function isTorrentView(view: ViewKey): boolean {
+  return view === 'torrents' || view.startsWith('torrents-');
+}
 
 /** The desktop's sidebar labels. */
 export const views: { key: ViewKey; label: string }[] = [
@@ -55,6 +66,11 @@ export function inView(job: Job, view: ViewKey, custom: readonly CategoryDefinit
     case 'active': return ['connecting', 'downloading', 'verifying', 'retryWaiting'].includes(job.state);
     case 'queued': return job.state === 'queued' || job.state === 'paused';
     case 'failed': return job.state === 'failed';
+    // T1: the torrents, in every state. The sidebar shows it while torrents are on or any is listed.
+    case 'torrents': return !!job.torrent;
+    case 'torrents-downloading': return torrentFilterOf(job) === 'downloading';
+    case 'torrents-seeding': return torrentFilterOf(job) === 'seeding';
+    case 'torrents-stopped': return torrentFilterOf(job) === 'stopped';
     default: return false;
   }
 }
@@ -66,7 +82,46 @@ export type Row =
   | { kind: 'remote'; id: string; remote: RemoteJob; view: RowView }
   | { kind: 'archive'; id: string; set: ArchiveSet; view: RowView }
   | { kind: 'package'; id: string; group: DownloadGroup; jobs: Job[]; shown: Job[]; summary: GroupSummary; expanded: boolean; view: RowView }
-  | { kind: 'job'; id: string; job: Job; depth: 0 | 1; packageId?: string; view: RowView };
+  | { kind: 'job'; id: string; job: Job; depth: 0 | 1; packageId?: string; view: RowView }
+  /** T1: one of an open torrent row's files, or a line about them. A side row: it stands for no download. */
+  | { kind: 'torrentFile'; id: string; parentId: string; file: TorrentFile | null; more: boolean; problem: boolean; view: RowView };
+
+/**
+ * What an open torrent row lists under it: its files (from torrent.files), or the words for why there are none yet.
+ * Absent: not asked yet, so the row lists "Getting the file list…".
+ */
+export type TorrentFilesView = { files: TorrentFile[] } | { error: string };
+
+function blankView(name: string, detail = ''): RowView {
+  return {
+    name, queue: '', queueTip: '', size: 0, sizeText: '', status: '', statusTone: 'neutral', statusTip: '', bar: null, eta: null, etaText: '',
+    rate: 0, rateText: '', lastTry: 0, lastTryText: '', description: '', extraction: '', extractionTone: 'neutral', extractionTip: '', created: 0, detail,
+  };
+}
+
+/** The rows under an open torrent row (MainWindow.Torrents): at most {@link mostFileRows} files, then a line for the rest. */
+export function torrentFileRows(job: Job, listed: TorrentFilesView | undefined): Row[] {
+  const parentId = job.id;
+  const note = (text: string, problem: boolean): Row => ({ kind: 'torrentFile', id: `tfile:${parentId}:note`, parentId, file: null, more: false, problem, view: blankView(text) });
+  if (!listed) return [note('Getting the file list…', false)];
+  if ('error' in listed) return [note(`Couldn't get the file list: ${listed.error}`, true)];
+  const complete = job.state === 'completed';
+  const word = stateWord(job.state);
+  const rows: Row[] = listed.files.slice(0, mostFileRows).map((file) => {
+    const status = fileRowStatus(file, word, complete);
+    const v = blankView(fileRowName(file.path), file.path);
+    v.size = Math.max(0, file.size);
+    v.sizeText = file.size > 0 ? bytes(file.size) : '';
+    v.status = status;
+    v.statusTone = !file.wanted ? 'neutral' : status === 'Done' ? 'done' : toneOf(job.state);
+    v.statusTip = file.path;
+    return { kind: 'torrentFile', id: `tfile:${parentId}:${file.index}`, parentId, file, more: false, problem: false, view: v };
+  });
+  if (listed.files.length > mostFileRows) {
+    rows.push({ kind: 'torrentFile', id: `tfile:${parentId}:more`, parentId, file: null, more: true, problem: false, view: blankView(moreFiles(listed.files.length - mostFileRows)) });
+  }
+  return rows;
+}
 
 export type { SortKey, SortState } from './list';
 
@@ -93,11 +148,16 @@ function setsByJob(model: Model): Map<string, ArchiveSet> {
  * those. Remote work without local files yet, and the extraction records with no file on the list, come first in All
  * Downloads, in their own order.
  */
-export function buildRows(model: Model, view: ViewKey, search: string, expanded: ReadonlySet<string>, sort: SortState = defaultSort): Row[] {
+export function buildRows(
+  model: Model, view: ViewKey, search: string, expanded: ReadonlySet<string>, sort: SortState = defaultSort,
+  torrentFiles: Readonly<Record<string, TorrentFilesView>> = {},
+): Row[] {
   const rows: Row[] = [];
   const term = search.trim().toLocaleLowerCase();
   const custom = model.settings?.customCategories ?? [];
   const sets = setsByJob(model);
+  const goal = seedGoalOf(model.settings);
+  const now = Date.now();
   const matchesView = (text: string) => !term || text.includes(term);
 
   if (view === 'all' || view === 'remote') {
@@ -126,7 +186,7 @@ export function buildRows(model: Model, view: ViewKey, search: string, expanded:
   const jobView0 = new Map<string, RowView>();
   const jobViewOf = (job: Job) => {
     let v = jobView0.get(job.id);
-    if (!v) jobView0.set(job.id, (v = jobView(job, sets.get(job.id))));
+    if (!v) jobView0.set(job.id, (v = jobView(job, sets.get(job.id), goal, now)));
     return v;
   };
   const matches = (job: Job) => inView(job, view, custom) && matchesView(searchText(jobViewOf(job), job));
@@ -149,6 +209,8 @@ export function buildRows(model: Model, view: ViewKey, search: string, expanded:
   for (const entry of sortRows(top, (t) => t.v, sort)) {
     if ('job' in entry) {
       rows.push({ kind: 'job', id: entry.job.id, job: entry.job, depth: 0, view: entry.v });
+      // An open torrent row lists its files under it; they are no downloads of their own.
+      if (expanded.has(entry.job.id) && showsFiles(entry.job.torrent)) rows.push(...torrentFileRows(entry.job, torrentFiles[entry.job.id]));
       continue;
     }
     const { group, members, v } = entry;
@@ -181,10 +243,17 @@ export function selectedJobIds(rows: Row[], selected: ReadonlySet<string>): stri
 
 export function counts(model: Model): Record<string, number> {
   const custom = model.settings?.customCategories ?? [];
-  const result: Record<string, number> = { all: 0, unfinished: 0, active: 0, queued: 0, failed: 0, finished: 0, remote: 0, extractions: 0 };
+  const result: Record<string, number> = {
+    all: 0, unfinished: 0, active: 0, queued: 0, failed: 0, finished: 0, remote: 0, extractions: 0, torrents: 0,
+    'torrents-downloading': 0, 'torrents-seeding': 0, 'torrents-stopped': 0,
+  };
   for (const entry of categoryList(custom)) result[entry.key] = 0;
   for (const job of Object.values(model.jobs)) {
     for (const view of views) if (inView(job, view.key, custom)) result[view.key]++;
+    if (job.torrent) {
+      result.torrents++;
+      result[`torrents-${torrentFilterOf(job)}`]++;
+    }
     const category = `cat:${categoryOf(job, custom)}`;
     if (category in result) result[category]++;
   }

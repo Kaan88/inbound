@@ -284,6 +284,15 @@ public sealed class PathRoots
                     if (target.Length >= 2 && target[0] is '\\' or '/' && target[1] is '\\' or '/' or '?') return null;
                     // Nor one to a mapped network drive or a removable one: the next step would look there.
                     if (Path.IsPathFullyQualified(target) && DescribeUnsafeText(target) is not null) return null;
+                    // L17: rooted but not fully qualified. "C:foo" is relative to that drive's current folder, which
+                    // this process can't know the file system's view of, so it leads nowhere. "\foo" starts at the
+                    // root of the drive the link is on, not in the link's folder.
+                    if (!Path.IsPathFullyQualified(target) && Path.IsPathRooted(target))
+                    {
+                        if (target.Length >= 2 && target[1] == ':') return null;
+                        current = Path.GetPathRoot(current)!;
+                        target = target.TrimStart('\\', '/');
+                    }
                 }
 
                 if (Path.IsPathFullyQualified(target))

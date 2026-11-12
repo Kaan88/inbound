@@ -16,6 +16,8 @@
 !src/DownloadManager.Containers/
 !src/DownloadManager.Providers.TorBox/
 !src/DownloadManager.Server/
+!src/DownloadManager.Torrents/
+!native/torrent-worker/
 !src/DownloadManager.Host/RemoteProviderSetup.cs
 
 # Inside what came back: build output, installed packages and anything that looks like a secret stay out.
@@ -23,6 +25,7 @@
 **/obj/
 **/node_modules/
 webui/dist/
+native/torrent-worker/build/
 webui/test-results/
 webui/playwright-report/
 **/TestResults/

@@ -465,8 +465,13 @@ public sealed class TorBoxClientTests
         Assert.Equal(expected, TorBoxMapping.InfoHashFromMagnet(magnet));
 
     [Fact]
-    public void Base32InfoHashBecomesHex() =>
-        Assert.Equal(40, TorBoxMapping.InfoHashFromMagnet("magnet:?xt=urn:btih:3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF3")!.Length);
+    public void Base32InfoHashBecomesHex()
+    {
+        // Decoded independently (RFC 4648 base32) to these twenty bytes.
+        const string expected = "d984f67af9992f217d1c8501ab5f329e4c5aa0bb";
+        Assert.Equal(expected, TorBoxMapping.InfoHashFromMagnet("magnet:?xt=urn:btih:3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF3"));
+        Assert.Equal(expected, TorBoxMapping.InfoHashFromMagnet("magnet:?xt=urn:btih:3gcpm6xztexsc7i4qua2wxzstzgfvif3"));
+    }
 
     [Fact]
     public async Task MagnetSubmissionUsesTheTorrentEndpoint()

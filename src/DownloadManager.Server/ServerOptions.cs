@@ -14,6 +14,8 @@ namespace DownloadManager.Server;
 /// separated by <c>,</c> or <c>;</c>). <c>X-Forwarded-For</c> and <c>X-Forwarded-Proto</c> are believed from those addresses only.</item>
 /// <item><c>DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1</c>: with sign-in off, needed to listen on anything but loopback.</item>
 /// <item><c>DOWNLOADMANAGER_HOSTS</c>: host names a browser may use for the server, besides IP addresses and <c>localhost</c>.</item>
+/// <item><c>DOWNLOADMANAGER_TORRENT_PORT</c>: the port the torrent engine listens on (TCP and UDP) while a torrent runs. Default 6881.</item>
+/// <item><c>DOWNLOADMANAGER_TORRENT_UPNP</c>: <c>on</c> lets the torrent engine ask the router to forward that port (UPnP, NAT-PMP). Off by default.</item>
 /// <item><c>DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1</c>: start although saved secrets were sealed with another key file (they are lost).</item>
 /// </list>
 /// Where it listens comes from these variables only: Kestrel's own <c>Kestrel:Endpoints</c> configuration is ignored, so
@@ -29,6 +31,10 @@ public sealed record ServerOptions
     public const string PasswordVariable = "DOWNLOADMANAGER_PASSWORD";
     public const string PasswordFileVariable = "DOWNLOADMANAGER_PASSWORD_FILE";
     public const string TrustProxyVariable = "DOWNLOADMANAGER_TRUST_PROXY";
+    public const string NameVariable = "DOWNLOADMANAGER_NAME";
+    public const string TorrentPortVariable = "DOWNLOADMANAGER_TORRENT_PORT";
+    public const string TorrentUpnpVariable = "DOWNLOADMANAGER_TORRENT_UPNP";
+    public const int DefaultTorrentPort = 6881;
 
     public const string DefaultData = "/data";
     public const string DefaultRoot = "/downloads";
@@ -67,6 +73,46 @@ public sealed record ServerOptions
         return TrustedProxies.Any(network => network.Contains(address));
     }
 
+    /// <summary>
+    /// The port the torrent engine listens on, TCP and UDP, on every address, while a torrent runs (T3). Fixed, so a
+    /// container can publish it; with no torrent running nothing listens on it.
+    /// </summary>
+    public int TorrentPort { get; init; } = DefaultTorrentPort;
+
+    /// <summary>
+    /// Whether the torrent engine asks the router to forward <see cref="TorrentPort"/> (UPnP, NAT-PMP). Off by default: in
+    /// a container on Docker's own network the router can't be reached that way, and the published port does the job.
+    /// </summary>
+    public bool TorrentPortMapping { get; init; }
+
+    /// <summary>Why <c>DOWNLOADMANAGER_TORRENT_PORT</c> can't be used as given, or null. The server refuses to start then.</summary>
+    public string? TorrentPortProblem { get; init; }
+
+    /// <summary>Finds the torrent worker; tests give their own. Default: next to the server's program.</summary>
+    internal Func<string?> FindTorrentWorker { get; init; } = () => DownloadManager.Torrents.TorrentSetup.FindWorker();
+
+    /// <summary>The worker's <c>setListen</c>: <see cref="TorrentPort"/> on every address, DHT on, LSD off, port mapping as set.</summary>
+    public System.Text.Json.Nodes.JsonObject TorrentListen() => new()
+    {
+        ["port"] = TorrentPort,
+        ["dht"] = true,
+        ["lsd"] = false,
+        ["upnp"] = TorrentPortMapping,
+        ["natpmp"] = TorrentPortMapping,
+    };
+
+    /// <summary>The port in <c>DOWNLOADMANAGER_TORRENT_PORT</c>: empty gives the default; anything but 1 to 65535 is a problem.</summary>
+    internal static int ParseTorrentPort(string? value, out string? problem)
+    {
+        problem = null;
+        var text = value?.Trim() ?? string.Empty;
+        if (text.Length == 0) return DefaultTorrentPort;
+        if (int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var port) &&
+            port is >= 1 and <= 65535) return port;
+        problem = $"{TorrentPortVariable} takes a port number from 1 to 65535, not \"{text}\".";
+        return DefaultTorrentPort;
+    }
+
     /// <summary>A session ends after this long without a request; an open WebSocket keeps it alive.</summary>
     public TimeSpan SessionIdleTimeout { get; init; } = TimeSpan.FromHours(24);
 
@@ -81,6 +127,70 @@ public sealed record ServerOptions
 
     /// <summary>Names a browser may use for this server besides an IP address and <c>localhost</c> (<see cref="OriginCheck"/>).</summary>
     public IReadOnlyList<string> AllowedHostNames { get; init; } = [];
+
+    /// <summary>
+    /// The name a paired browser extension shows for this server (<c>DOWNLOADMANAGER_NAME</c>, GitHub #2, EXT.R9), such
+    /// as "Home NAS". Without it <see cref="DisplayName"/> falls back to the machine's name.
+    /// </summary>
+    public string? ServerName { get; init; }
+
+    /// <summary>The longest name <see cref="DisplayName"/> gives; a longer one is cut.</summary>
+    public const int MaxNameLength = 100;
+
+    /// <summary>
+    /// The name the pairing answer gives the extension: <see cref="ServerName"/>, else the machine's name, else none.
+    /// A Docker container's default host name is its id (12 or 64 hex digits), which names nothing a user would know,
+    /// so it gives none and the extension shows the address instead.
+    /// </summary>
+    public string? DisplayName => NameFor(ServerName, MachineName());
+
+    /// <summary>Gives the machine's name for <see cref="DisplayName"/>; tests set another. Not read from the environment.</summary>
+    internal Func<string?> MachineName { get; init; } = ReadMachineName;
+
+    internal static string? NameFor(string? configured, string? machineName)
+    {
+        if (Clean(configured) is { } name) return name;
+        var machine = Clean(machineName);
+        return machine is null || IsContainerId(machine) ? null : machine;
+    }
+
+    /// <summary>A Docker container id as its default host name: 12 or 64 hex digits.</summary>
+    internal static bool IsContainerId(string name) =>
+        name.Length is 12 or 64 && name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F');
+
+    private static string? Clean(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var text = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        text = Cut(text, MaxNameLength).TrimEnd();
+        return text.Length == 0 ? null : text;
+    }
+
+    /// <summary>At most <paramref name="max"/> characters, counted as code points, so a surrogate pair is never split.</summary>
+    internal static string Cut(string text, int max)
+    {
+        if (text.Length <= max) return text;
+        var builder = new System.Text.StringBuilder(max * 2);
+        var count = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (count++ == max) break;
+            builder.Append(rune.ToString());
+        }
+        return builder.ToString();
+    }
+
+    private static string? ReadMachineName()
+    {
+        try
+        {
+            return Environment.MachineName;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Which kind of server this is, in <c>/api/auth/status</c>, so the web UI's texts fit it: <c>server</c> for this
@@ -117,6 +227,7 @@ public sealed record ServerOptions
         var password = read(PasswordVariable);
         var passwordFile = read(PasswordFileVariable);
         var proxies = ParseTrustedProxies(read(TrustProxyVariable), out var proxyProblem);
+        var torrentPort = ParseTorrentPort(read(TorrentPortVariable), out var torrentPortProblem);
         return new ServerOptions
         {
             DataDirectory = string.IsNullOrWhiteSpace(data) ? DefaultData : data.Trim(),
@@ -133,6 +244,11 @@ public sealed record ServerOptions
             TrustProxyProblem = proxyProblem,
             DiscardUnreadableSecrets = read(DownloadManager.Persistence.AesGcmSecretProtector.DiscardVariable)?.Trim() is "1" or "true" or "yes",
             AllowedHostNames = OriginCheck.ParseHosts(read(OriginCheck.HostsVariable)),
+            ServerName = read(NameVariable),
+            TorrentPort = torrentPort,
+            TorrentPortProblem = torrentPortProblem,
+            // Only these words turn it on.
+            TorrentPortMapping = read(TorrentUpnpVariable)?.Trim().ToLowerInvariant() is "on" or "1" or "true" or "yes",
         };
     }
 

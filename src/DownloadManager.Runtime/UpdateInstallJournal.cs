@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using DownloadManager.Runtime.WebAuth;
 
 namespace DownloadManager.Runtime;
 
@@ -32,17 +34,22 @@ public sealed class UpdateInstallJournal
         File.Delete(_reportedPath);
     }
 
-    /// <summary>Best effort: without it, only a helper that dies silently goes unnoticed.</summary>
-    public void MarkPending(string version, int helperProcessId)
+    /// <summary>
+    /// Best effort: without it, only a helper that dies silently goes unnoticed. The helper's start time goes with its
+    /// id (audit 3 L5): after a restart the same id can belong to another program, which must not count as the helper.
+    /// </summary>
+    public void MarkPending(string version, int helperProcessId, DateTimeOffset? helperStartedAt = null)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_pendingPath)!);
-            File.WriteAllText(_pendingPath, JsonSerializer.Serialize(new Dictionary<string, object>
+            var pending = new Dictionary<string, object>
             {
                 ["version"] = version,
                 ["helperProcessId"] = helperProcessId,
-            }));
+            };
+            if (helperStartedAt is { } started) pending["helperStartedAt"] = started.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+            WriteAtomically(_pendingPath, JsonSerializer.Serialize(pending));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
@@ -56,7 +63,7 @@ public sealed class UpdateInstallJournal
 
     /// <summary>True while the helper named by the pending file is still at work.</summary>
     public bool HelperStillRunning(Func<int, bool>? isHelperRunning = null) =>
-        TryReadPending(out _, out var helperId) && (isHelperRunning ?? IsHelperRunning)(helperId);
+        TryReadPending(out _, out var helperId, out var startedAt) && (isHelperRunning ?? (id => IsHelperRunning(id, startedAt)))(helperId);
 
     /// <summary>
     /// The outcome not yet told to the user, once. A later result counts as new. Null while the
@@ -67,8 +74,8 @@ public sealed class UpdateInstallJournal
         var outcome = Read();
         if (outcome is null)
         {
-            if (!TryReadPending(out var version, out var helperId)) return null;
-            if ((isHelperRunning ?? IsHelperRunning)(helperId)) return null;
+            if (!TryReadPending(out var version, out var helperId, out var startedAt)) return null;
+            if ((isHelperRunning ?? (id => IsHelperRunning(id, startedAt)))(helperId)) return null;
             outcome = new UpdateInstallOutcome(false, version,
                 "The update stopped before it finished.", now ?? DateTimeOffset.Now);
             Write(outcome);
@@ -77,7 +84,7 @@ public sealed class UpdateInstallJournal
 
         var at = outcome.At.ToString("O", CultureInfo.InvariantCulture);
         if (File.Exists(_reportedPath) && ParseTime(File.ReadAllText(_reportedPath)) == outcome.At) return null;
-        File.WriteAllText(_reportedPath, at);
+        WriteAtomically(_reportedPath, at);
         return outcome;
     }
 
@@ -115,9 +122,13 @@ public sealed class UpdateInstallJournal
         }
     }
 
+    // Audit 2 L26 / audit 3 L5: a kill mid-write (likely during an update) leaves the old file or the new one, never a
+    // truncated one that reads as "no update pending".
+    private static void WriteAtomically(string path, string text) => AtomicFile.Write(path, Encoding.UTF8.GetBytes(text));
+
     private void Write(UpdateInstallOutcome outcome)
     {
-        File.WriteAllText(ResultPath, JsonSerializer.Serialize(new Dictionary<string, string?>
+        WriteAtomically(ResultPath, JsonSerializer.Serialize(new Dictionary<string, string?>
         {
             ["status"] = outcome.Succeeded ? "succeeded" : "failed",
             ["version"] = outcome.Version,
@@ -126,16 +137,19 @@ public sealed class UpdateInstallJournal
         }));
     }
 
-    private bool TryReadPending(out string version, out int helperProcessId)
+    private bool TryReadPending(out string version, out int helperProcessId, out DateTimeOffset? helperStartedAt)
     {
         version = string.Empty;
         helperProcessId = 0;
+        helperStartedAt = null;
         try
         {
             if (!File.Exists(_pendingPath)) return false;
             using var document = JsonDocument.Parse(File.ReadAllText(_pendingPath));
             version = document.RootElement.GetProperty("version").GetString() ?? string.Empty;
             helperProcessId = document.RootElement.GetProperty("helperProcessId").GetInt32();
+            if (document.RootElement.TryGetProperty("helperStartedAt", out var started) && started.ValueKind == JsonValueKind.String)
+                helperStartedAt = ParseTime(started.GetString());
             return version.Length > 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
@@ -148,18 +162,28 @@ public sealed class UpdateInstallJournal
     private static DateTimeOffset? ParseTime(string? text) =>
         DateTimeOffset.TryParse(text?.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value) ? value : null;
 
-    // After a restart its number may belong to another program.
-    private static bool IsHelperRunning(int processId)
+    private static bool IsHelperRunning(int processId, DateTimeOffset? startedAt) => ProcessRunning(processId, startedAt, "powershell");
+
+    /// <summary>
+    /// Whether process <paramref name="processId"/> runs, is named <paramref name="processName"/> and, when
+    /// <paramref name="startedAt"/> is given, started then. After a restart an id may belong to another program.
+    /// </summary>
+    public static bool ProcessRunning(int processId, DateTimeOffset? startedAt, string processName)
     {
         try
         {
             using var process = System.Diagnostics.Process.GetProcessById(processId);
             return !process.HasExited &&
-                string.Equals(process.ProcessName, "powershell", StringComparison.OrdinalIgnoreCase);
+                string.Equals(process.ProcessName, processName, StringComparison.OrdinalIgnoreCase) &&
+                (startedAt is not { } recorded || SameStart(process.StartTime, recorded));
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
             return false;
         }
     }
+
+    /// <summary>Within a second: the time is read back through a text round trip and the clock's resolution.</summary>
+    private static bool SameStart(DateTime processStart, DateTimeOffset recorded) =>
+        (new DateTimeOffset(processStart.ToUniversalTime(), TimeSpan.Zero) - recorded.ToUniversalTime()).Duration() < TimeSpan.FromSeconds(1);
 }

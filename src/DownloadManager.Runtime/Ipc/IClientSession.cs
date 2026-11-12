@@ -12,8 +12,9 @@ public interface IClientSession
 
     /// <summary>
     /// Queues a frame for the session's writer, in order. The queue holds <see cref="QueuedClientSession.QueueCapacity"/>
-    /// frames and drops the oldest when full, so a client that stops reading can't make the Host grow without bound.
-    /// Returns false once the session is closed, and the frame is then dropped.
+    /// frames; when it is full the session is closed (the client connects again and gets a new snapshot), so a client
+    /// that stops reading can't make the Host grow without bound and never silently misses a reply. Returns false once
+    /// the session is closed, and the frame is then dropped.
     /// </summary>
     bool Enqueue(IpcMessage message);
 

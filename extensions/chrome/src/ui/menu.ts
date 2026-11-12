@@ -5,6 +5,8 @@ export interface MenuItem {
   label: string;
   checked?: boolean;
   disabled?: boolean;
+  /** A tooltip, such as why the item is off. */
+  title?: string;
   onSelect: () => void;
 }
 
@@ -20,7 +22,10 @@ export function menuOpen(): boolean {
   return closeOpen !== null;
 }
 
-export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upward?: boolean } = {}): void {
+/**
+ * Opens a menu under (or above) the anchor, or at a point: a right-click's position (EXT.R11), kept inside the window.
+ */
+export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upward?: boolean; at?: { x: number; y: number } } = {}): void {
   closeMenu();
   const menu = document.createElement("div");
   menu.className = "menu popup-menu";
@@ -32,6 +37,7 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     button.setAttribute("role", item.checked === undefined ? "menuitem" : "menuitemradio");
     if (item.checked !== undefined) button.setAttribute("aria-checked", String(item.checked));
     button.disabled = item.disabled === true;
+    if (item.title) button.title = item.title;
     const mark = document.createElement("span");
     mark.className = "menu-check";
     mark.textContent = item.checked ? "✓" : "";
@@ -47,10 +53,21 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
 
   const rect = anchor.getBoundingClientRect();
   menu.style.position = "fixed";
-  menu.style.left = `${Math.max(4, rect.left)}px`;
-  if (options.upward) menu.style.bottom = `${Math.max(4, window.innerHeight - rect.top + 2)}px`;
-  else menu.style.top = `${rect.bottom + 2}px`;
+  if (options.at) {
+    menu.style.left = `${Math.max(4, options.at.x)}px`;
+    menu.style.top = `${Math.max(4, options.at.y)}px`;
+  } else {
+    menu.style.left = `${Math.max(4, rect.left)}px`;
+    if (options.upward) menu.style.bottom = `${Math.max(4, window.innerHeight - rect.top + 2)}px`;
+    else menu.style.top = `${rect.bottom + 2}px`;
+  }
   document.body.append(menu);
+  if (options.at) {
+    // Inside the popup: moved left or up by what would stick out.
+    const box = menu.getBoundingClientRect();
+    if (box.right > window.innerWidth - 4) menu.style.left = `${Math.max(4, window.innerWidth - 4 - box.width)}px`;
+    if (box.bottom > window.innerHeight - 4) menu.style.top = `${Math.max(4, window.innerHeight - 4 - box.height)}px`;
+  }
   anchor.setAttribute("aria-expanded", "true");
 
   const move = (step: number) => {

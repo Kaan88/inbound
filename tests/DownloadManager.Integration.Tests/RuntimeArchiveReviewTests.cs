@@ -359,6 +359,28 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.Equal(1, tool.Runs);
     }
 
+    [Fact]
+    public async Task AFileOnDiskThatIsNoVolumeButTheToolCallsMissingDoesNotLoop()
+    {
+        // Audit M7: an archive comment (or anything else) could make the tool's output name a file that is there and is
+        // no member of the set. It counted as "arrived" every time, so the set went back to waiting forever.
+        var tool = new FakeExtractor
+        {
+            FailOnRun = _ => new ExtractionException(ExtractionFailureKind.MissingVolume, "Missing volume: desktop.ini", ["desktop.ini"]),
+        };
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool });
+        run.WriteFile("desktop.ini", Other);
+
+        await AskAsync(run, run.WriteFile("w.rar", Text));
+        await run.WaitForFailureAsync("missingVolume");
+        await Task.Delay(500);
+
+        Assert.InRange(tool.Runs, 1, 2);
+        var runs = tool.Runs;
+        await Task.Delay(500);
+        Assert.Equal(runs, tool.Runs);
+    }
+
     // ----- Finding 9: a file held open is not a corrupt file -----
 
     [SevenZipFact]
@@ -611,9 +633,10 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         File.Delete(job.FinalFilePath);
         await run.RestartAsync();
 
+        // Audit 2 H2: it stays completed with a note, so a queue start or Resume All doesn't download it again.
         var after = run.Service.GetJob(job.Id)!;
-        Assert.Equal("failed", after.State);
-        Assert.Contains("missing from its destination", after.Failure!.Message);
+        Assert.Equal("completed", after.State);
+        Assert.Equal("File not found in its folder", after.StatusNote);
         Assert.False(after.FileRemovedAfterExtraction);
     }
 }

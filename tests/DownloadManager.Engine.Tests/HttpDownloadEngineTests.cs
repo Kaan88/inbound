@@ -173,15 +173,20 @@ public sealed class HttpDownloadEngineTests
     {
         const int size = 524_288;
         _proxy.ResetStats();
+        // The download names a port only the proxy knows how to reach: a request that skipped the proxy
+        // lands on the trap, not the server.
+        using var trap = new DirectConnectionTrap();
+        _proxy.MapPort(trap.Port, new Uri(_server.BaseAddress).Port);
         using var ctx = new EngineContext();
         var job = ctx.CreateJob(
-            $"{_server.BaseAddress}/file/proxy.bin?size={size}&seed=71",
+            $"http://127.0.0.1:{trap.Port}/file/proxy.bin?size={size}&seed=71",
             "proxy.bin");
 
         using var engine = CreateEngine(proxy: ProxyCredentials());
         var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
 
         Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(0, trap.Connections);
         Assert.True(_proxy.Authorized > 0);
         Assert.Equal(0, _proxy.Denied);
         Assert.True(_proxy.LastAuthorizationPresent);
@@ -195,9 +200,11 @@ public sealed class HttpDownloadEngineTests
     {
         const int size = 524_288;
         _socks5.ResetStats();
+        using var trap = new DirectConnectionTrap();
+        _socks5.MapPort(trap.Port, new Uri(_server.BaseAddress).Port);
         using var ctx = new EngineContext();
         var job = ctx.CreateJob(
-            $"{_server.BaseAddress}/file/socks5.bin?size={size}&seed=75",
+            $"http://127.0.0.1:{trap.Port}/file/socks5.bin?size={size}&seed=75",
             "socks5.bin");
         job.RequestedConnections = 4;
 
@@ -211,6 +218,7 @@ public sealed class HttpDownloadEngineTests
         var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
 
         Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(0, trap.Connections);
         Assert.True(_socks5.Authorized > 0);
         Assert.True(_socks5.Connects > 0);
         Assert.Equal(0, _socks5.Denied);
@@ -374,6 +382,42 @@ public sealed class HttpDownloadEngineTests
         Assert.True(_proxy.Authorized > 0);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RedirectHopCarriesOnlyWhatItsOriginMayHave(bool crossOrigin)
+    {
+        await using var target = await TestServerHost.StartAsync();
+        using var ctx = new EngineContext();
+        var destination = $"{(crossOrigin ? target.BaseAddress : _server.BaseAddress)}/sensitive/echo";
+        var job = ctx.CreateJob($"{_server.BaseAddress}/redirect?to={Uri.EscapeDataString(destination)}", "hop.json");
+        job.Referrer = $"{_server.BaseAddress}/page";
+        job.RequestHeaders["Cookie"] = "session=secret";
+        job.RequestHeaders["Authorization"] = "Bearer secret";
+        job.RequestHeaders["Proxy-Authorization"] = "Basic secret";
+        job.RequestHeaders["X-Custom-Token"] = "custom";
+
+        // What the engine put on the wire for each hop, not what the echo route chooses to report.
+        using var recorder = new RecordingHandler();
+        using var engine = CreateEngine(handler: recorder);
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        var first = recorder.Requests.First();
+        var hop = recorder.Requests.Last(request => request.Uri.AbsolutePath == "/sensitive/echo");
+        foreach (var name in new[] { "Cookie", "Authorization", "Referer" })
+        {
+            Assert.True(first.Headers.ContainsKey(name), $"{name} missing on the first request");
+            Assert.Equal(!crossOrigin, hop.Headers.ContainsKey(name));
+        }
+
+        // A proxy's credentials are not the site's: no request to an origin carries them, the first one included.
+        Assert.All(recorder.Requests, request => Assert.False(request.Headers.ContainsKey("Proxy-Authorization")));
+
+        // Other headers the browser sent go along, as a browser's fetch keeps them across a redirect.
+        Assert.Equal("custom", hop.Headers["X-Custom-Token"]);
+    }
+
     [Fact]
     public async Task SameOriginRedirectKeepsSensitiveHeaders()
     {
@@ -504,7 +548,8 @@ public sealed class HttpDownloadEngineTests
         Assert.True(checkpoint.CompletedBytes > 0);
         Assert.True(File.Exists(job.PartFilePath));
 
-        using (var engine = CreateEngine(store))
+        using var recorder = new RecordingHandler();
+        using (var engine = CreateEngine(store, handler: recorder))
         {
             var second = await engine.ExecuteAsync(job, checkpoint, null, CancellationToken.None);
             Assert.True(second.Success, second.Failure?.Message);
@@ -512,6 +557,9 @@ public sealed class HttpDownloadEngineTests
                 TestContent.Generate(22, size))).ToLowerInvariant();
             Assert.Equal(expected, await Hashing.Sha256FileAsync(second.FinalFilePath!));
         }
+
+        // A full re-download would also match the hash; the ranges show the saved segments were kept.
+        recorder.AssertResumedFrom(checkpoint);
     }
 
     [Fact]
@@ -598,15 +646,18 @@ public sealed class HttpDownloadEngineTests
             Assert.True(result.Failure.IsRetryable);
         }
 
-        using (var engine = CreateEngine(maxAttempts: 1, connectTimeout: TimeSpan.FromSeconds(3)))
+        // A real lookup would leave loopback and depend on this PC's resolver; the handler fails the way
+        // SocketsHttpHandler does for an unknown host, so the class can be checked exactly.
+        using (var dnsHandler = new ThrowingHandler(new HttpRequestException(HttpRequestError.NameResolutionError,
+                   "No such host is known.", new System.Net.Sockets.SocketException(11001))))
+        using (var engine = CreateEngine(maxAttempts: 1, handler: dnsHandler))
         {
             var result = await engine.ExecuteAsync(
                 ctx.CreateJob("http://download-manager-no-such-host.invalid/file.bin", "dns.bin"),
                 null, null, CancellationToken.None);
             Assert.False(result.Success);
             _output.WriteLine($"dns failure: {result.Failure!.Kind} {result.Failure.Message}");
-            Assert.True(result.Failure.Kind is FailureKind.Dns or FailureKind.Network,
-                $"unexpected DNS failure: {result.Failure.Kind} {result.Failure.Message}");
+            Assert.Equal(FailureKind.Dns, result.Failure.Kind);
         }
 
         using (var engine = CreateEngine(maxAttempts: 1, connectTimeout: TimeSpan.FromSeconds(3)))
@@ -617,8 +668,8 @@ public sealed class HttpDownloadEngineTests
                 null, null, CancellationToken.None);
             Assert.False(result.Success);
             _output.WriteLine($"tls failure: {result.Failure!.Kind} {result.Failure.Message}");
-            Assert.True(result.Failure.Kind is FailureKind.Tls or FailureKind.Network,
-                $"unexpected TLS failure: {result.Failure.Kind} {result.Failure.Message}");
+            // A TLS handshake answered in plain HTTP is a TLS failure, not a lost connection.
+            Assert.Equal(FailureKind.Tls, result.Failure.Kind);
         }
 
         using (var engine = CreateEngine(
@@ -1032,9 +1083,12 @@ public sealed class HttpDownloadEngineTests
         Assert.True(checkpoint!.CompletedBytes > 0);
         _output.WriteLine($"cancelled at {checkpoint.CompletedBytes} bytes");
 
-        using (var engine = CreateEngine(store))
+        using var recorder = new RecordingHandler();
+        using (var engine = CreateEngine(store, handler: recorder))
         {
             var second = await engine.ExecuteAsync(job, checkpoint, null, CancellationToken.None);
+            // The hash alone would pass after a full re-download.
+            Assert.Equal($"bytes={checkpoint.CompletedBytes}-", recorder.TransferRanges().First());
             Assert.True(second.Success, second.Failure?.Message);
             var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 TestContent.Generate(1, size))).ToLowerInvariant();
@@ -1124,7 +1178,8 @@ public sealed class HttpDownloadEngineTests
         ProxySettings? proxy = null,
         TimeSpan? readTimeout = null,
         TimeSpan? connectTimeout = null,
-        IFreeSpaceProvider? freeSpace = null)
+        IFreeSpaceProvider? freeSpace = null,
+        HttpMessageHandler? handler = null)
         => new(
             new EngineOptions
             {
@@ -1136,6 +1191,7 @@ public sealed class HttpDownloadEngineTests
                 AllowLocalNetwork = true,
                 Proxy = proxy ?? new ProxySettings(),
             },
+            handler: handler,
             checkpoints: store,
             freeSpace: freeSpace);
 
@@ -1149,6 +1205,47 @@ public sealed class HttpDownloadEngineTests
     private sealed class InlineProgress<T>(Action<T> action) : IProgress<T>
     {
         public void Report(T value) => action(value);
+    }
+
+    private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(exception);
+    }
+
+    /// <summary>A loopback port that only counts who connects to it.</summary>
+    private sealed class DirectConnectionTrap : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(System.Net.IPAddress.Loopback, 0);
+        private int _connections;
+
+        public DirectConnectionTrap()
+        {
+            _listener.Start();
+            Port = ((System.Net.IPEndPoint)_listener.LocalEndpoint).Port;
+            _ = AcceptAsync();
+        }
+
+        public int Port { get; }
+        public int Connections => Volatile.Read(ref _connections);
+
+        private async Task AcceptAsync()
+        {
+            try
+            {
+                while (true)
+                {
+                    using var client = await _listener.AcceptTcpClientAsync();
+                    Interlocked.Increment(ref _connections);
+                }
+            }
+            catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ObjectDisposedException)
+            {
+                // stopped
+            }
+        }
+
+        public void Dispose() => _listener.Stop();
     }
 
     private sealed class FixedFreeSpaceProvider(long available) : IFreeSpaceProvider

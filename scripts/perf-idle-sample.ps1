@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory = $true)][string]$Root,
     [Parameter(Mandatory = $true)][string]$Out,
     [int]$Minutes = 30,
-    [int]$EverySeconds = 10
+    [int]$EverySeconds = 10,
+    # Which processes: a WMI name pattern and a thread-counter instance pattern (the torrent worker: 'inbound-torrent%', 'inbound-torrent*').
+    [string]$NameLike = 'DownloadManager.%',
+    [string]$CounterLike = 'DownloadManager*'
 )
 # Read-only idle sampler for scripts\perf-window.sh (PERF.5). Starts nothing, changes nothing. Every
 # $EverySeconds it finds the processes running from $Root (one test instance's own copy of the binaries) and
@@ -13,13 +16,13 @@ $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
 $end = (Get-Date).AddMinutes($Minutes)
 while ((Get-Date) -lt $end) {
     $ours = @{}
-    foreach ($w in @(Get-CimInstance Win32_Process -Filter "Name LIKE 'DownloadManager.%'" -ErrorAction SilentlyContinue)) {
+    foreach ($w in @(Get-CimInstance Win32_Process -Filter "Name LIKE '$NameLike'" -ErrorAction SilentlyContinue)) {
         if ($w.ExecutablePath -and $w.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $ours[[int]$w.ProcessId] = $true }
     }
     $switches = @{}
     if ($ours.Count -gt 0) {
         try {
-            $c = Get-Counter '\Thread(DownloadManager*)\Context Switches/sec', '\Thread(DownloadManager*)\ID Process' -SampleInterval 2 -MaxSamples 1 -ErrorAction Stop
+            $c = Get-Counter "\Thread($CounterLike)\Context Switches/sec", "\Thread($CounterLike)\ID Process" -SampleInterval 2 -MaxSamples 1 -ErrorAction Stop
             $cs = @{}; $owner = @{}
             foreach ($s in $c.CounterSamples) {
                 if ($s.Status -ne 0) { continue }

@@ -464,6 +464,21 @@ public sealed class RemoteClientTests
         Assert.InRange(there.Attempts, 2, 6);
     }
 
+    // Audit M11: this PC's Host not running was tried at the fixed wait for ever; now the wait doubles up to five times it.
+    [Fact]
+    public async Task ThisPcsHostNotRunningIsTriedLessAndLessOften()
+    {
+        var here = new FakeHost { Fail = () => new IOException("no pipe") };
+        var ui = new UiQueue();
+        await using var client = new RemoteClient(ui.Post, here.Connector, reconnectDelay: TimeSpan.FromMilliseconds(50));
+
+        client.Start();
+        await Task.Delay(500);
+
+        // 0, 50, 150, 350 ms (then 600): the fixed 50 ms wait would have made about ten.
+        Assert.InRange(here.Attempts, 2, 6);
+    }
+
     [Fact]
     public async Task AHiddenWindowsCallToAServerGoesAsOneRequestAndLeavesTheEventSocketClosed()
     {

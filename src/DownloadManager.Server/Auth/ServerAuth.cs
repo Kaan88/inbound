@@ -42,6 +42,7 @@ public sealed class ServerAuth
     internal const int MaxFormBytes = 16 * 1024;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions OmitNulls = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
     private readonly ServerLog _log;
     private readonly TimeProvider _time;
@@ -329,14 +330,19 @@ public sealed class ServerAuth
         web.MapPost("/api/auth/signin", (Func<HttpContext, Task<IResult>>)SignInAsync);
         web.MapPost("/api/auth/signout", (HttpContext context) =>
         {
-            if (SessionOf(context) is { } session) Sessions.Remove(session);
+            if (SessionOf(context) is { } session)
+            {
+                Sessions.Remove(session);
+                // Audit 3 L1: a pairing code this browser showed ends with its sign-in.
+                Pairing.CancelCodeOf(session);
+            }
             ExpireCookie(context);
             return Results.Json(new { ok = true });
         });
         web.MapPost("/api/auth/password", (Func<HttpContext, Task<IResult>>)ChangePasswordAsync);
-        web.MapPost("/api/auth/pairing/code", () =>
+        web.MapPost("/api/auth/pairing/code", (HttpContext context) =>
         {
-            var (code, expires) = Pairing.NewCode();
+            var (code, expires) = Pairing.NewCode(SessionOf(context));
             return Results.Json(new { ok = true, code, expiresAt = expires });
         });
         web.MapDelete("/api/auth/pairing/code", () =>
@@ -546,6 +552,8 @@ public sealed class ServerAuth
             // Every other browser signs in again with the new password; this one stays. The two happen as one step for
             // the sessions file and for sign-ins under way (SessionStore.ChangePassword).
             if (!Sessions.ChangePassword(() => TrySave(() => Store.SetPassword(record)), SessionOf(context))) return NotSaved();
+            // Audit 3 L1: a pairing code shown before the change (perhaps to someone who knew the old password) ends too.
+            Pairing.CancelCode();
 
             // Someone who knew the old password may have paired an app too. A desktop app's token was made with the
             // password and has a signed-in browser's rights, so it always goes; the extensions go too unless the change
@@ -586,7 +594,12 @@ public sealed class ServerAuth
 
         Limiter.Succeeded(address);
         _log.Info($"A browser was paired: {paired.Record.Name} ({paired.Record.Id}).");
-        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role });
+        // serverName: what the extension calls this server (EXT.R9); left out when there is none, so it shows the address.
+        return Results.Json(new
+        {
+            ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role,
+            serverName = _options.DisplayName,
+        }, OmitNulls);
     }
 
     /// <summary>

@@ -17,7 +17,8 @@
   // many inputs. Every line says what it is as soon as the server does, and only then can it be added. A hoster,
   // folder or magnet link only ever goes to the provider; an ordinary link goes straight to a download.
   type Mode = 'links' | 'magnet' | 'torrent' | 'imported';
-  let { mode = 'links', seed = [], onclose }: { mode?: Mode; seed?: { input: string; result: ClassifyResult }[]; onclose: () => void } = $props();
+  // inputs: magnets and uploaded .torrent files (by reference) the torrent dialog sent to the provider (T1); each is asked about here.
+  let { mode = 'links', seed = [], inputs = [], onclose }: { mode?: Mode; seed?: { input: string; result: ClassifyResult }[]; inputs?: { input: string; label?: string }[]; onclose: () => void } = $props();
 
   interface Passwords { has: boolean; archive: string; site: string; same: boolean }
 
@@ -184,6 +185,23 @@
     const next = seed.map((entry, index) => ({ ...newLine(entry.input, index + 1, findExisting(Object.values(store.model.jobs), entry.input) !== undefined), result: entry.result }));
     extra = new Set(seed.map((entry) => entry.input));
     lines = withDefaults(renumber(next), skipListed);
+  });
+
+  let given = false;
+  $effect(() => {
+    if (given || inputs.length === 0) return;
+    given = true;
+    const uploads = inputs.filter((entry) => isUpload(entry.input));
+    const typedIn = inputs.filter((entry) => !isUpload(entry.input)).map((entry) => entry.input);
+    if (uploads.length > 0) {
+      extra = new Set(uploads.map((entry) => entry.input));
+      lines = withDefaults(renumber(uploads.map((entry) => ({ ...newLine(entry.input, 0), label: entry.label }))), skipListed);
+      for (const entry of uploads) enqueue(entry.input);
+    }
+    if (typedIn.length > 0) {
+      text = typedIn.join('\n');
+      applyInputs(extractInputs(text));
+    }
   });
 
   async function uploadFiles(files: File[]) {

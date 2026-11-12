@@ -15,7 +15,10 @@ public sealed class SchedulerWindow : Window
     private readonly ContentControl _editorSurface = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch,
         VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly HostConnection _connection;
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
+    // Audit M11: no 3 s jobs.query poll. Job events update the list (at most once a second); a state change, coming
+    // back to the window and a reconnect read the Host's settings again.
+    private readonly DispatcherTimer _eventTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private bool _settingsRefreshWanted;
     private readonly ListBox _queues = new() { SelectionMode = SelectionMode.Single };
     private readonly TextBlock _status = InboundUi.Secondary();
     private readonly Button _start = new() { Content = "Start now" };
@@ -76,6 +79,10 @@ public sealed class SchedulerWindow : Window
     private bool _scheduleEditorEnabled;
     private bool _closed;
     private bool _refreshing;
+    // Audit M11 (review): a refresh asked for while one is out runs once more after it, since the reply under way may
+    // predate the change that asked; job events that come meanwhile are put onto that reply.
+    private bool _refreshAgain;
+    private readonly List<(JobDto Job, string ChangeType)> _jobEventsDuringRefresh = new();
     private bool _draftsInitialized;
     private int? _lastSelectedQueueId;
 
@@ -214,17 +221,71 @@ public sealed class SchedulerWindow : Window
         Closed += async (_, _) =>
         {
             _closed = true;
-            _timer.Stop();
+            _eventTimer.Stop();
             _connection.ConnectionChanged -= OnConnectionChanged;
+            _connection.JobChanged -= OnJobChanged;
             await _connection.DisposeAsync();
         };
         _connection.ConnectionChanged += OnConnectionChanged;
+        _connection.JobChanged += OnJobChanged;
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
-        _timer.Tick += async (_, _) => await RefreshAsync();
+        _eventTimer.Tick += async (_, _) => await OnEventTimerAsync();
+        // A queue stopped or a schedule added in another window shows when the user comes back to this one.
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated) _ = RefreshAsync();
+        };
         _connection.Start();
-        _timer.Start();
         _ = RefreshAsync();
     }
+
+    private void OnJobChanged(JobDto job, string changeType)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            if (_refreshing) _jobEventsDuringRefresh.Add((job, changeType));
+            if (_snapshot is null) return;
+            var jobs = _snapshot.Jobs;
+            var index = jobs.FindIndex(item => item.Id == job.Id);
+            if (changeType == "removed")
+            {
+                if (index >= 0) jobs.RemoveAt(index);
+            }
+            else if (index >= 0)
+            {
+                var before = jobs[index];
+                // A start, stop or end can come with a queue's run state or quota changing on the Host.
+                if (before.State != job.State) _settingsRefreshWanted = true;
+                jobs[index] = job;
+            }
+            else
+            {
+                jobs.Add(job);
+            }
+            // Minimised: the list is read again when the window comes back (Activated).
+            if (!_eventTimer.IsEnabled && !IsMinimized) _eventTimer.Start();
+        });
+    }
+
+    private async Task OnEventTimerAsync()
+    {
+        _eventTimer.Stop();
+        if (_closed) return;
+        // Minimised: nothing is drawn; coming back (Activated) reads everything again.
+        if (IsMinimized) return;
+        if (_settingsRefreshWanted)
+        {
+            _settingsRefreshWanted = false;
+            await RefreshAsync();
+        }
+        else
+        {
+            UpdateQueueList(SelectedQueue?.Id);
+        }
+    }
+
+    private bool IsMinimized => AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
 
     public void ShowWindow()
     {
@@ -380,31 +441,53 @@ public sealed class SchedulerWindow : Window
 
     private async Task RefreshAsync()
     {
-        if (_closed || _refreshing) return;
+        if (_closed) return;
+        if (_refreshing)
+        {
+            _refreshAgain = true;
+            return;
+        }
         _refreshing = true;
         try
         {
-            var snapshot = await _connection.RefreshAsync();
-            if (_closed) return;
-            _snapshot = snapshot;
-            if (!_draftsInitialized)
+            do
             {
-                _draftsInitialized = true;
-                _globalOptInBaseline = snapshot.Settings.AllowSystemCompletionActions;
-                _allowSystemActions.IsChecked = _globalOptInBaseline;
-                foreach (var schedule in snapshot.Settings.Schedules)
-                {
-                    _scheduleDrafts[schedule.Id] = Clone(schedule);
-                    _scheduleBaselines[schedule.Id] = Clone(schedule);
-                }
+                _refreshAgain = false;
+                _jobEventsDuringRefresh.Clear();
+                await RefreshOnceAsync();
             }
-            UpdateQueueList(SelectedQueue?.Id);
-            if (_status.Text == "Loading queues…" ||
-                _status.Text.StartsWith("Could not refresh queues: ", StringComparison.Ordinal) ||
-                _status.Text == "Waiting for the background Host…") _status.Text = "Ready";
+            while (_refreshAgain && !_closed);
         }
         catch (Exception ex) { if (!_closed) _status.Text = "Could not refresh queues: " + ex.Message; }
-        finally { _refreshing = false; }
+        finally
+        {
+            _refreshing = false;
+            _refreshAgain = false;
+            _jobEventsDuringRefresh.Clear();
+        }
+    }
+
+    private async Task RefreshOnceAsync()
+    {
+        var snapshot = await _connection.RefreshAsync();
+        if (_closed) return;
+        SchedulerFileRules.ReplayJobEvents(snapshot.Jobs, _jobEventsDuringRefresh);
+        _snapshot = snapshot;
+        if (!_draftsInitialized)
+        {
+            _draftsInitialized = true;
+            _globalOptInBaseline = snapshot.Settings.AllowSystemCompletionActions;
+            _allowSystemActions.IsChecked = _globalOptInBaseline;
+            foreach (var schedule in snapshot.Settings.Schedules)
+            {
+                _scheduleDrafts[schedule.Id] = Clone(schedule);
+                _scheduleBaselines[schedule.Id] = Clone(schedule);
+            }
+        }
+        UpdateQueueList(SelectedQueue?.Id);
+        if (_status.Text == "Loading queues…" ||
+            _status.Text.StartsWith("Could not refresh queues: ", StringComparison.Ordinal) ||
+            _status.Text == "Waiting for the background Host…") _status.Text = "Ready";
     }
 
     private void OnConnectionChanged(bool connected, string? error)
@@ -430,6 +513,18 @@ public sealed class SchedulerWindow : Window
             {
                 _start.IsEnabled = QueueCommands.CanStart(selectedLive, _snapshot.Jobs);
                 _stop.IsEnabled = QueueCommands.CanStop(selectedLive);
+                // Audit M2: a download that joined or left the queue meanwhile reloads the Files tab.
+                var members = SchedulerFileRules.Members(_snapshot.Jobs, selectedLive.Id);
+                IReadOnlyCollection<Guid> stagedAway = _fileDrafts.TryGetValue(selectedLive.Id, out var fileDraft)
+                    ? fileDraft.MembershipChanges.Keys : Array.Empty<Guid>();
+                if (SchedulerFileRules.ListIsStale(_files.Items.OfType<JobViewModel>().Select(row => row.Id), members, stagedAway))
+                {
+                    var selectedFile = (_files.SelectedItem as JobViewModel)?.Id;
+                    LoadQueueFiles(selectedLive);
+                    if (selectedFile is { } keep && _files.ItemsSource is ObservableCollection<JobViewModel> rows)
+                        _files.SelectedItem = rows.FirstOrDefault(row => row.Id == keep);
+                    return;
+                }
                 var liveJobs = _snapshot.Jobs.ToDictionary(job => job.Id);
                 foreach (var row in _files.Items.OfType<JobViewModel>())
                     if (liveJobs.TryGetValue(row.Id, out var job)) row.Update(job);
@@ -521,15 +616,19 @@ public sealed class SchedulerWindow : Window
     private void LoadQueueFiles(QueueDto queue)
     {
         if (_snapshot is null) return;
-        var candidate = _snapshot.Jobs.Where(job => job.IsQueued && job.QueueId == queue.Id).ToArray();
-        if (!_fileDrafts.TryGetValue(queue.Id, out var draft))
+        var candidate = SchedulerFileRules.Members(_snapshot.Jobs, queue.Id);
+        // Audit M2: a draft with nothing staged is rebuilt from the Host's list every time; a staged one keeps its order
+        // and takes in the downloads that joined or left meanwhile, so its Apply still matches the queue.
+        if (!_fileDrafts.TryGetValue(queue.Id, out var draft) || (draft.MembershipChanges.Count == 0 && !draft.OrderDirty))
         {
-            var byId = candidate.ToDictionary(job => job.Id);
-            var order = candidate.OrderByDescending(job => job.Priority)
-                .ThenBy(job => { var index = queue.JobOrder.IndexOf(job.Id); return index < 0 ? int.MaxValue : index; })
-                .ThenBy(job => job.CreatedAt).Select(job => job.Id).ToList();
-            draft = new QueueFileDraft(candidate.Select(job => (job.Id, job.QueueId)).ToDictionary(p => p.Id, p => p.QueueId), order);
+            draft = new QueueFileDraft(candidate.ToDictionary(job => job.Id, job => job.QueueId),
+                SchedulerFileRules.HostOrder(candidate, queue.JobOrder));
             _fileDrafts[queue.Id] = draft;
+        }
+        else
+        {
+            draft.OrderIds = SchedulerFileRules.MergeOrder(draft.OrderIds, candidate, queue.JobOrder, draft.MembershipChanges.Keys);
+            foreach (var job in candidate) draft.OriginalMembership.TryAdd(job.Id, job.QueueId);
         }
         var viewModels = draft.OrderIds.Where(id => byIdContains(candidate, id)).Select(id =>
         {
@@ -848,7 +947,10 @@ public sealed class SchedulerWindow : Window
         if (SelectedQueue is not { } selected) return;
         var name = await AskTextAsync("Rename queue", "Queue name", "Save", selected.Name);
         if (name is null) return;
-        var latest = await _connection.RefreshAsync();
+        // Audit H2: with the Host away this threw out of the click handler and ended the window process.
+        SnapshotDto latest;
+        try { latest = await _connection.RefreshAsync(); }
+        catch (Exception ex) { _status.Text = "Could not update queue: " + ex.Message; return; }
         var queue = latest.Settings.Queues.FirstOrDefault(item => item.Id == selected.Id);
         if (queue is null) { _status.Text = "This queue was removed before it could be renamed."; await RefreshAsync(); return; }
         await QueueCrudAsync(new QueueActionRequest
@@ -1035,7 +1137,15 @@ public sealed class SchedulerWindow : Window
                     foreach (var id in removedSchedules) { _scheduleDrafts.Remove(id); _scheduleBaselines.Remove(id); _dirtySchedules.Remove(id); _removedSchedules.Remove(id); }
                     foreach (var id in newScheduleIds) { _scheduleBaselines[id] = Clone(_scheduleDrafts[id]); _newSchedules.Remove(id); _dirtySchedules.Remove(id); }
                     foreach (var id in appliedSchedules) _dirtySchedules.Remove(id);
-                    foreach (var id in appliedQueueIds) _queueDrafts.Remove(id);
+                    foreach (var id in appliedQueueIds)
+                    {
+                        _queueDrafts.Remove(id);
+                        // Audit M1: the saved limits are the next edit's baseline; the old one made every later
+                        // Apply say the limits had "changed elsewhere".
+                        if (result.Settings.Queues.FirstOrDefault(queue => queue.Id == id) is { } saved)
+                            _queuePolicyBaselines[id] = Clone(saved);
+                    }
+                    if (SelectedQueue is { } shown && appliedQueueIds.Contains(shown.Id)) LoadQueueLimits(shown);
                     if (optInApplied) { _globalOptInBaseline = _snapshot.Settings.AllowSystemCompletionActions; _globalOptInDirty = false; }
                 }
             }
@@ -1084,6 +1194,8 @@ public sealed class SchedulerWindow : Window
                 var currentQueue = latest.Settings.Queues.FirstOrDefault(item => item.Id == queueId);
                 if (currentQueue is null)
                 { errors.Add($"{queueName} was removed before file order could be saved."); continue; }
+                // Audit M2 (review): downloads that joined or left this queue since it was last on screen.
+                draft.OrderIds = SchedulerFileRules.OrderToApply(draft.OrderIds, latest.Jobs, currentQueue, draft.MembershipChanges.Keys);
                 var actualMembers = latest.Jobs.Where(job => job.IsQueued && job.QueueId == queueId).Select(job => job.Id).ToHashSet();
                 var expected = draft.OrderIds.ToHashSet();
                 if (!actualMembers.SetEquals(expected))

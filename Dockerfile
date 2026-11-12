@@ -3,9 +3,9 @@
 #   docker build -t inbound .                        (this machine's architecture)
 #   docker buildx build --platform linux/amd64,linux/arm64 -t inbound .
 #
-# Three build stages run on the build machine's own architecture (BUILDPLATFORM): Node builds the web UI from its
-# lockfile, a small stage fetches the official 7-Zip for Linux (7zz) and checks its SHA-256, and the .NET SDK publishes
-# the server for the target architecture (TARGETARCH -> linux-x64 / linux-arm64). Only the last stage is the target's
+# Four build stages run on the build machine's own architecture (BUILDPLATFORM): Node builds the web UI from its
+# lockfile, a small stage fetches the official 7-Zip for Linux (7zz) and checks its SHA-256, a C++ stage builds the
+# libtorrent worker (inbound-torrent), and the .NET SDK publishes the server for the target architecture (TARGETARCH -> linux-x64 / linux-arm64). Only the last stage is the target's
 # own, and it runs no command, so a cross build needs no emulation. Nothing in the image needs Node at run time.
 #
 # Base images are pinned by digest (the multi-architecture index), written out in each FROM line so Dependabot
@@ -65,6 +65,46 @@ RUN set -eu; \
     if find /out \( -iname '*.exe' -o -iname '7z.dll' \) | grep -q .; then echo "Windows files in the Linux publish" >&2; exit 1; fi; \
     mkdir -p /src/docker-empty
 
+# ---- The torrent worker (T1): libtorrent, built from native/torrent-worker ------------------------------------------
+# The same build as native/torrent-worker/Dockerfile.build (keep the two in step): Ubuntu 22.04, vcpkg at the pinned
+# commit, libtorrent from the overlay port. It runs on the build machine and cross-compiles for arm64, so no emulation.
+# It takes a while (Boost, OpenSSL and libtorrent from source). A worker built before can stand in for this stage:
+#   docker build --build-context torrent-worker=artifacts/torrent-worker/linux-x64 -t inbound .
+FROM --platform=$BUILDPLATFORM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS torrent-worker-build
+ARG TARGETARCH
+ARG VCPKG_COMMIT=e54ef0fcc9a82033a61e51002552a910a5d57282
+ARG TORRENT_JOBS=4
+ENV DEBIAN_FRONTEND=noninteractive VCPKG_DISABLE_METRICS=1 VCPKG_MAX_CONCURRENCY=$TORRENT_JOBS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git ninja-build pkg-config python3 tar unzip zip perl linux-libc-dev \
+    && if [ "$TARGETARCH" = arm64 ]; then apt-get install -y --no-install-recommends g++-aarch64-linux-gnu binutils-aarch64-linux-gnu; fi \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --filter=blob:none https://github.com/microsoft/vcpkg.git /vcpkg \
+    && git -C /vcpkg checkout --detach "$VCPKG_COMMIT" \
+    && /vcpkg/bootstrap-vcpkg.sh -disableMetrics
+WORKDIR /src
+COPY native/torrent-worker/ ./
+RUN set -eu; \
+    XC=""; \
+    case "$TARGETARCH" in \
+      amd64) TRIPLET=x64-linux-static-rel; STRIP=strip ;; \
+      arm64) TRIPLET=arm64-linux-static-rel; STRIP=aarch64-linux-gnu-strip; \
+        XC="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++" ;; \
+      *) echo "No torrent worker build for $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    CMAKE=$(/vcpkg/vcpkg fetch cmake --x-stderr-status | tail -n1); [ -x "$CMAKE" ]; \
+    $CMAKE -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=/vcpkg/scripts/buildsystems/vcpkg.cmake \
+      -DVCPKG_TARGET_TRIPLET=$TRIPLET -DVCPKG_OVERLAY_TRIPLETS=/src/triplets $XC; \
+    $CMAKE --build /build --parallel $TORRENT_JOBS; \
+    if [ "$TARGETARCH" = amd64 ] && [ "$(uname -m)" = x86_64 ]; then /build/inbound-torrent-selftest && /build/inbound-torrent --version; fi; \
+    $STRIP /build/inbound-torrent; \
+    mkdir /out && cp /build/inbound-torrent /out/
+
+# Laid out like Dockerfile.build's output (the worker at the root), so --build-context torrent-worker=<folder> fits.
+FROM scratch AS torrent-worker
+COPY --from=torrent-worker-build /out/ /
+
 # ---- Runtime ------------------------------------------------------------------------------------------------------
 # The regular ASP.NET image (Ubuntu), not the chiseled one: the entrypoint needs a shell, chown and setpriv to give
 # /data to PUID:PGID and then drop root, which a chiseled image (no shell, fixed user) can't do.
@@ -86,10 +126,15 @@ ENV DOWNLOADMANAGER_DATA=/data \
     ASPNETCORE_HTTP_PORTS= \
     PUID=1000 \
     PGID=1000 \
-    TZ=Etc/UTC
+    TZ=Etc/UTC \
+    DOWNLOADMANAGER_TORRENT_PORT=6881 \
+    DOWNLOADMANAGER_TORRENT_UPNP=off
 
 COPY --from=server /out/ /app/
 COPY --from=sevenzip /out/tools/ /app/tools/
+# The Server looks for the torrent worker next to itself (TorrentSetup.FindWorker). DOWNLOADMANAGER_TORRENTS=off turns
+# torrents off without it ever starting.
+COPY --from=torrent-worker --chmod=755 /inbound-torrent /app/inbound-torrent
 COPY --chmod=755 docker/entrypoint.sh docker/healthcheck.sh /usr/local/bin/
 # The two volumes, owned by the default PUID:PGID (1000, owner decision 2026-11-08), so the default needs no chown; the
 # entrypoint hands /data to another PUID:PGID. Only numbers are used, never an account name: whether the base image
@@ -98,7 +143,8 @@ COPY --from=server --chown=1000:1000 /src/docker-empty/ /data/
 COPY --from=server --chown=1000:1000 /src/docker-empty/ /downloads/
 
 VOLUME ["/data", "/downloads"]
-EXPOSE 8080
+# The torrent port listens only while a torrent runs (docs/docker.md, "Torrents").
+EXPOSE 8080 6881/tcp 6881/udp
 WORKDIR /app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["/usr/local/bin/healthcheck.sh"]
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

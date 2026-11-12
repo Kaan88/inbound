@@ -4,7 +4,9 @@ param(
     [string]$Configuration = "Release",
     [string]$Output,
     # Bundle the .NET runtime and the Windows App SDK so the app runs on a PC without them.
-    [switch]$SelfContained
+    [switch]$SelfContained,
+    # The native torrent worker (native\torrent-worker\build-windows.cmd), shipped next to the Host. Required.
+    [string]$TorrentWorker
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,17 @@ if (-not $resolvedOutputPath.StartsWith($artifactsPrefix, [StringComparison]::Or
     throw "Publish output must be a strict descendant of the repository's artifacts directory: $artifactsRoot"
 }
 $Output = $resolvedOutputPath
+
+# T1: the Host runs torrents through inbound-torrent.exe beside its own program (TorrentSetup.FindWorker).
+# Without it torrents would quietly be unavailable, so a publish without the worker is refused before anything is built.
+if ([string]::IsNullOrWhiteSpace($TorrentWorker)) {
+    $TorrentWorker = Join-Path $root "artifacts\torrent-worker\win-x64\inbound-torrent.exe"
+}
+# Resolve once against PowerShell's current location, so the check and the copy see the same file.
+$TorrentWorker = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TorrentWorker)
+if (-not (Test-Path -LiteralPath $TorrentWorker -PathType Leaf)) {
+    throw "The torrent worker $TorrentWorker is missing. Build it with native\torrent-worker\build-windows.cmd, or pass -TorrentWorker <path>."
+}
 $extension = [IO.Path]::GetFullPath((Join-Path $root "extensions\chrome\dist"))
 $extensionDestination = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $Output) "extension"))
 
@@ -160,6 +173,8 @@ if ($SelfContained) {
     }
 }
 
+# The extension is built and staged beside the app for local testing (Load unpacked, Chrome for Testing). Setup and the
+# update package do not ship it: users get the store listings.
 Push-Location (Join-Path $root "extensions\chrome")
 try {
     if (-not (Test-Path "node_modules")) {
@@ -199,8 +214,12 @@ if (Test-Path (Join-Path $extensionDestination "dist")) {
     throw "Extension staging unexpectedly contains a nested dist directory."
 }
 
+# The torrent worker was checked at the start.
+Copy-Item -LiteralPath $TorrentWorker (Join-Path $Output "inbound-torrent.exe") -Force
+
 $required = @(
     "DownloadManager.Host.exe",
+    "inbound-torrent.exe",
     "DownloadManager.Desktop.WinUI.exe",
     "DownloadManager.Desktop.WinUI.pri",
     "app.ico",

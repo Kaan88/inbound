@@ -305,6 +305,44 @@ test('NativeTransport: a missing desktop app fails every waiting request with th
   assert.equal(isNativeHostMissing(transport.lastError), true);
 });
 
+test('Audit 3 M5: a request that times out and retries fails the others on the dropped connection at once', async () => {
+  const { runtime, ports } = fakeRuntime();
+  const transport = new NativeTransport('com.kaank.downloadmanager', undefined, runtime);
+  const started = Date.now();
+  const other = transport.send('handoff.request', {}, 5000, 0);
+  const slow = transport.send('jobs.query', {}, 30, 1);
+  await assert.rejects(other, /connection to the desktop app was reset/);
+  assert.ok(Date.now() - started < 1000, 'not after its own five-second limit');
+  assert.equal(ports[0].disconnected, true);
+  // The retry goes out on a new connection and is answered there.
+  for (let i = 0; i < 200 && !(ports.length === 2 && ports[1].posted.length); i++) await new Promise(resolve => setTimeout(resolve, 2));
+  assert.equal(ports.length, 2);
+  ports[1].answer({ type: 'jobs.snapshot', replyTo: ports[1].posted[0].id, payload: { jobs: [] } });
+  assert.deepEqual(await slow, { jobs: [] });
+});
+
+test('Audit 3 L9: the native host\'s own error, answering no request, fails every waiting request with its reason', async () => {
+  const { runtime, ports } = fakeRuntime();
+  const events = [];
+  const transport = new NativeTransport('com.kaank.downloadmanager', m => events.push(m), runtime);
+  const one = transport.send('handoff.request', {}, 5000, 0);
+  const two = transport.send('jobs.query', {}, 5000, 0);
+  ports[0].answer({ type: 'handoff.error', payload: { errorCode: 'host_unavailable', error: 'Could not locate the Host program.' } });
+  await assert.rejects(one, /Could not locate the Host program/);
+  await assert.rejects(two, /Could not locate the Host program/);
+  assert.equal(events.length, 0);
+});
+
+test('Report 1 contracts: a refusal is read from error, and from message only in a bridge refusal', () => {
+  const { refusalText } = loaded.exports;
+  assert.equal(refusalText({ accepted: false, error: 'Disk full.' }, 'x'), 'Disk full.');
+  assert.equal(refusalText({ accepted: false, message: 'stray' }, 'fallback'), 'fallback');
+  assert.equal(refusalText({ ok: false, message: 'The browser extension cannot send this message.' }, 'x'),
+    'The browser extension cannot send this message.');
+  assert.equal(refusalText({ accepted: false, error: '  ' }, 'fallback'), 'fallback');
+  assert.equal(refusalText(undefined, 'fallback'), 'fallback');
+});
+
 test('NativeTransport: a long request goes on a connection of its own, closed after the answer', async () => {
   const { runtime, ports } = fakeRuntime();
   const transport = new NativeTransport('com.kaank.downloadmanager', undefined, runtime);

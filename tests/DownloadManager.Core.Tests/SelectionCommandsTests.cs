@@ -204,6 +204,25 @@ public sealed class SelectionCommandsTests
         return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
     }
 
+    [Fact]
+    public void A_torrent_turns_the_address_commands_off_with_its_reason()
+    {
+        Assert.Null(FileMenuRules.ForTorrent(null, torrent: false));
+        Assert.Equal(FileMenuRules.TorrentReason, FileMenuRules.ForTorrent(null, torrent: true));
+        // The selection's own reason comes first.
+        Assert.Equal("select a file, not a package", FileMenuRules.ForTorrent("select a file, not a package", torrent: true));
+        Assert.Equal("Move/Rename… (not for torrents)", FileMenuRules.Label("Move/Rename…", FileMenuRules.ForTorrent(null, torrent: true)));
+    }
+
+    [Fact]
+    public void Extract_Archive_is_not_offered_on_a_torrent_row()
+    {
+        Assert.True(FileMenuRules.ContextOffersArchivePicking(onlyArchiveRows: false, torrentSelected: false));
+        Assert.False(FileMenuRules.ContextOffersArchivePicking(onlyArchiveRows: false, torrentSelected: true));
+        // Extraction records alone never offered it.
+        Assert.False(FileMenuRules.ContextOffersArchivePicking(onlyArchiveRows: true, torrentSelected: false));
+    }
+
     private static double Luminance(string color)
     {
         static double Channel(string hex)

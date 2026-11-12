@@ -21,6 +21,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null,
         SupportsProgramSettings = true,
         SupportsCompletionActions = true,
+        // EXT.R11 review: only with a desktop to show a file manager on. A Host without a display has nowhere to open it.
+        SupportsReveal = HasDesktopSession(),
         HostKind = HostKinds.Linux,
     };
 
@@ -45,6 +47,60 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     public void OpenDownload(Guid jobId) => LaunchUi(["--job", jobId.ToString("D")]);
 
     public void OpenPackage(Guid packageId) => LaunchUi(["--package", packageId.ToString("D")]);
+
+    /// <summary>Whether this Host runs in a desktop session (X11 or Wayland), where a file manager can be shown.</summary>
+    internal static bool HasDesktopSession() =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY"));
+
+    /// <summary>
+    /// EXT.R11: the file manager with the file selected (FileManager1), or the folder through xdg-open. A program that
+    /// can't be started throws, and the client is told so. When no file manager answers FileManager1 (gdbus fails or
+    /// is missing), the folder is opened with xdg-open instead. Not yet tried on a Linux desktop.
+    /// </summary>
+    public void RevealFile(string path)
+    {
+        var start = ShellActions.RevealFile(path);
+        if (start.FileName != "gdbus")
+        {
+            using var _ = Process.Start(start);
+            return;
+        }
+
+        var folder = Path.GetDirectoryName(path) ?? path;
+        Process? show = null;
+        try { show = Process.Start(start); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            log.Warn($"gdbus could not be started ({ex.Message}); opening the folder instead.");
+        }
+
+        if (show is null)
+        {
+            using var open = Process.Start(ShellActions.OpenFolder(folder));
+            return;
+        }
+
+        // gdbus answers at once; a failure means no file manager took the call, so the folder is opened instead.
+        _ = Task.Run(async () =>
+        {
+            using (show)
+            {
+                try
+                {
+                    using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    await show.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+                    if (show.ExitCode == 0) return;
+                    log.Warn($"No file manager answered FileManager1 (gdbus exit {show.ExitCode}); opening the folder instead.");
+                    using var open = Process.Start(ShellActions.OpenFolder(folder));
+                }
+                catch (Exception ex)
+                {
+                    log.Warn($"Could not show the file in its folder: {ex.Message}");
+                }
+            }
+        });
+    }
 
     public void RequestShutdown()
     {
@@ -79,7 +135,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         }
     }
 
-    private static string? FindUiExecutable()
+    internal static string? FindUiExecutable()
     {
         var overridden = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UI");
         if (!string.IsNullOrWhiteSpace(overridden)) return File.Exists(overridden) ? Path.GetFullPath(overridden) : null;

@@ -49,4 +49,33 @@ public sealed class ProgressOverviewTests
         }
         finally { System.Globalization.CultureInfo.CurrentCulture = culture; }
     }
+
+    /// <summary>T1: Progress Details for a torrent: its tiles and its Files tab's rows.</summary>
+    [Fact]
+    public void A_torrent_reads_as_received_of_wanted_with_peers_and_file_progress()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        try
+        {
+            Assert.Equal(("2.6", "of 4.2 GB"), ProgressOverviewText.OfWords((long)(2.6 * 1024 * 1024 * 1024), (long)(4.2 * 1024 * 1024 * 1024)));
+            Assert.Equal(("41", "(12 seeds)"), ProgressOverviewText.Peers(41, 12));
+            Assert.Equal(("1", "(1 seed)"), ProgressOverviewText.Peers(1, 1));
+            Assert.Equal(("0", "(0 seeds)"), ProgressOverviewText.Peers(-1, 0));
+
+            var running = new DownloadManager.Contracts.TorrentFileDto { Index = 0, Path = "Show/Episode 1.mkv", Size = 1000, Wanted = true, Done = 710 };
+            Assert.Equal("71%", ProgressOverviewText.FileProgress(running, torrentComplete: false));
+            Assert.Equal("Show\\Episode 1.mkv, 1000 B, 71%", ProgressOverviewText.FileRowName(running, torrentComplete: false));
+
+            // Not running, so no bytes known: unknown while it is unfinished, done once the torrent is.
+            var stopped = new DownloadManager.Contracts.TorrentFileDto { Index = 1, Path = "readme.txt", Size = 10, Wanted = true };
+            Assert.Equal(string.Empty, ProgressOverviewText.FileProgress(stopped, torrentComplete: false));
+            Assert.Equal("readme.txt, 10 B", ProgressOverviewText.FileRowName(stopped, torrentComplete: false));
+            Assert.Equal("Done", ProgressOverviewText.FileProgress(stopped, torrentComplete: true));
+
+            var skipped = new DownloadManager.Contracts.TorrentFileDto { Index = 2, Path = "sample.mkv", Size = 10, Wanted = false };
+            Assert.Equal("Skipped", ProgressOverviewText.FileProgress(skipped, torrentComplete: true));
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = culture; }
+    }
 }

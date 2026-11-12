@@ -462,7 +462,8 @@ public sealed class RemoteCommands : IDisposable
 
     /// <summary>
     /// With <see cref="_jobRoots"/>: a job saved outside them (one the user added on this PC) is left alone by what would
-    /// add or start its downloads, because they would be saved there. Null when it may go ahead, or there is no such job.
+    /// add or start its downloads (they would be saved there), take it off the list or delete its item on the provider
+    /// for good: it is read-only there, as its downloads are. Null when it may go ahead, or there is no such job.
     /// </summary>
     private RemoteActionResultDto? RefuseOutside(Guid jobId)
         => _jobRoots is not null && _jobs.Find(jobId) is { Destination: { } destination } && !string.IsNullOrWhiteSpace(destination) &&
@@ -506,14 +507,14 @@ public sealed class RemoteCommands : IDisposable
     }
 
     public async Task<RemoteActionResultDto> RemoveAsync(RemoteJobIdRequest request, CancellationToken cancellationToken = default)
-        => ToDto(await _jobs.RemoveAsync(request.JobId, cancellationToken).ConfigureAwait(false));
+        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.RemoveAsync(request.JobId, cancellationToken).ConfigureAwait(false));
 
     /// <summary>TB.S1: starts the job's entry in the provider's queue. Removing it is <see cref="DeleteRemoteAsync"/>, confirmed.</summary>
     public async Task<RemoteActionResultDto> StartQueuedAsync(RemoteJobIdRequest request, CancellationToken cancellationToken = default)
         => RefuseOutside(request.JobId) ?? ToDto(await _jobs.ControlQueuedAsync(request.JobId, RemoteQueueAction.Start, cancellationToken).ConfigureAwait(false));
 
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(RemoteDeleteRequest request, CancellationToken cancellationToken = default)
-        => ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
+        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
 
     /// <summary>
     /// TB.S2: the link's password, when the user agreed to have it tried on this job's own archives and gave no archive

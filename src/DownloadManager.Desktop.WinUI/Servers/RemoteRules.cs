@@ -544,6 +544,13 @@ internal static class WindowInstance
             (update ? ".Update" : job is { } id ? $".Job.{id:D}" : package is { } pid ? $".Package.{pid:D}" : string.Empty);
         return serverId is null || update || (job is null && package is null) ? name : name + ".Server." + serverId;
     }
+
+    /// <summary>
+    /// The activation event of a download's progress window for <paramref name="target"/>: the name that window takes
+    /// when it is opened with <see cref="Arguments"/>, so another process can tell whether it is open.
+    /// </summary>
+    public static string JobWindowName(string userKey, Guid job, ServerTarget target) =>
+        EventName(userKey, update: false, job, package: null, ServerId(Arguments("job", job, target).Split(' ')));
 }
 
 /// <summary>The words of Options while another server is shown (U-WR-4, U-WR-6, U-WR-13).</summary>

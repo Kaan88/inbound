@@ -52,6 +52,7 @@ public sealed class WebSessionProfile : IDisposable
             Archives = archives is null ? null : new ArchiveIpcDispatcher(archives, Roots),
             Folders = new FolderBrowser(Roots),
             Remote = _remote,
+            Torrents = service.TorrentsAvailable,
         };
     }
 
@@ -61,7 +62,7 @@ public sealed class WebSessionProfile : IDisposable
     public SessionRights Rights { get; }
 
     /// <summary>
-    /// The host's capabilities without a window, a dialog, an exit, the updater, the program settings and the completion
+    /// The host's capabilities without a window, a dialog, a file shown in Explorer, an exit, the updater, the program settings and the completion
     /// actions, and with folder browsing (there is no dialog on the other device's side). The tray stays: it says what
     /// the PC has, not what the session may do.
     /// </summary>
@@ -73,6 +74,7 @@ public sealed class WebSessionProfile : IDisposable
         SupportsUpdater = false,
         SupportsProgramSettings = false,
         SupportsCompletionActions = false,
+        SupportsReveal = false,
         SupportsFolderBrowse = true,
     };
 

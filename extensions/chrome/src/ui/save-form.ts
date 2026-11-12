@@ -49,6 +49,8 @@ export class SaveForm {
   target: TargetId = "local";
   /** The target's default folder. A folder equal to it is sent as "", so the app (or server) keeps deciding. */
   defaultDestination = "";
+  /** EXT.R10: the default folder is the browser's own, which only the extension knows, so it is sent as it is. */
+  private sendDefault = false;
   private targetError = "";
 
   constructor(private readonly elements: SaveFormElements, private readonly showError: (message: string) => void,
@@ -83,9 +85,11 @@ export class SaveForm {
     const { destination, browse, favorites, favoritesField, localHint, serverHint } = this.elements;
     this.target = offered.id;
     this.defaultDestination = offered.defaultFolder ?? "";
+    this.sendDefault = offered.sendDefault === true && this.defaultDestination !== "";
     // A folder typed for one target means nothing on the other. keepTyped: a folder was set for this same target
-    // while the list was on its way.
-    if (!keepTyped) destination.value = this.defaultDestination;
+    // while the list was on its way. EXT.R10: the form starts on the start folder Settings chose, when there is one
+    // and it exists; the default folder otherwise (UI.R3).
+    if (!keepTyped) destination.value = offered.startFolder || this.defaultDestination;
     destination.placeholder = FOLDER_PLACEHOLDER[offered.id];
     browse.title = offered.id === "server" ? "Choose a folder on the server" : "Choose a folder on this PC";
     this.serverFolders.close();
@@ -109,10 +113,13 @@ export class SaveForm {
     this.freeSpace.update(offered.id, destination.value);
   }
 
-  /** The folder to send: "" when the target's default was left as it is. */
+  /**
+   * The folder to send: "" when the target's default was left as it is, so the app (or server) decides. EXT.R10: the
+   * browser's own default folder is sent as it is, since the app does not know it; an empty field still sends "".
+   */
   destinationToSend(): string {
     const typed = this.elements.destination.value.trim();
-    return typed === this.defaultDestination ? "" : typed;
+    return typed === this.defaultDestination && !this.sendDefault ? "" : typed;
   }
 
   setTargetChoiceEnabled(enabled: boolean): void {

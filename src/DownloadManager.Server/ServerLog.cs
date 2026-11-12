@@ -17,6 +17,8 @@ public sealed class ServerLog : IHostLog
     private readonly string _fileName;
     private string? _currentDate;
     private string? _currentPath;
+    private long _currentSize;
+    private bool _capped;
 
     /// <param name="fileName">The daily file's name before the date: <c>server</c>, or <c>web-bridge</c> in the desktop Host's logs.</param>
     public ServerLog(string directory, bool console = true, string fileName = "server")
@@ -25,7 +27,12 @@ public sealed class ServerLog : IHostLog
         _console = console;
         _fileName = fileName;
         Directory.CreateDirectory(_directory);
+        // L7: files older than 30 days go at start; a day's file stops at a size limit (see Write).
+        DownloadManager.Persistence.LogFileRetention.DeleteOld(_directory, _fileName, DateTime.Now);
     }
+
+    /// <summary>One day's file stops growing here (L7); standard output still gets every line.</summary>
+    public long MaxDailyBytes { get; init; } = DownloadManager.Persistence.LogFileRetention.MaxDailyBytes;
 
     /// <summary>Account keys to keep out of the log, wherever a line happens to quote one.</summary>
     public IRemoteSecretMatcher? Secrets { get; set; }
@@ -60,9 +67,23 @@ public sealed class ServerLog : IHostLog
                 {
                     _currentDate = date;
                     _currentPath = Path.Combine(_directory, $"{_fileName}-{date}.log");
+                    _currentSize = DownloadManager.Persistence.LogFileRetention.CurrentSize(_currentPath);
+                    _capped = _currentSize >= MaxDailyBytes;
                 }
 
-                File.AppendAllText(_currentPath, line + Environment.NewLine, new UTF8Encoding(false));
+                if (_capped) return;
+                var encoding = new UTF8Encoding(false);
+                var fileLine = line + Environment.NewLine;
+                var size = encoding.GetByteCount(fileLine);
+                if (_currentSize + size > MaxDailyBytes)
+                {
+                    _capped = true;
+                    fileLine = $"{now:O} [WARN] {DownloadManager.Persistence.LogFileRetention.CapReachedLine}{Environment.NewLine}";
+                    size = encoding.GetByteCount(fileLine);
+                }
+
+                File.AppendAllText(_currentPath, fileLine, encoding);
+                _currentSize += size;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

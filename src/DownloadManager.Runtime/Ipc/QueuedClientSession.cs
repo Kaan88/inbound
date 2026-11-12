@@ -10,18 +10,20 @@ namespace DownloadManager.Runtime.Ipc;
 /// </summary>
 public abstract class QueuedClientSession : IClientSession, IAsyncDisposable
 {
-    public const int QueueCapacity = 512;
+    public const int QueueCapacity = 4096;
 
     private readonly SemaphoreSlim _directWrite = new(1, 1);
     private readonly Channel<IpcMessage> _channel;
     private readonly IHostLog _log;
+    private int _completed;
 
     protected QueuedClientSession(IHostLog log)
     {
         _log = log;
+        // Full is never waited for: Enqueue uses TryWrite, and a full queue closes the session (L19).
         _channel = Channel.CreateBounded<IpcMessage>(new BoundedChannelOptions(QueueCapacity)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
         });
@@ -29,7 +31,26 @@ public abstract class QueuedClientSession : IClientSession, IAsyncDisposable
 
     public Guid Id { get; } = Guid.NewGuid();
 
-    public bool Enqueue(IpcMessage message) => _channel.Writer.TryWrite(message);
+    /// <summary>Whether the queue filled up and the session was closed for it.</summary>
+    public bool Overflowed { get; private set; }
+
+    /// <summary>
+    /// Queues a frame. A client so far behind that the queue is full is closed instead of losing frames silently: a
+    /// dropped reply would leave a request waiting for good and a dropped event a stale list, while a client that
+    /// connects again gets a whole new snapshot.
+    /// </summary>
+    public bool Enqueue(IpcMessage message)
+    {
+        if (_channel.Writer.TryWrite(message)) return true;
+        if (Volatile.Read(ref _completed) == 0)
+        {
+            Overflowed = true;
+            _log.Warn($"A client fell {QueueCapacity} messages behind, so its connection was closed; it gets a new snapshot when it connects again.");
+            Close();
+        }
+
+        return false;
+    }
 
     public async Task SendDirectAsync(IpcMessage message, CancellationToken cancellationToken)
     {
@@ -49,7 +70,11 @@ public abstract class QueuedClientSession : IClientSession, IAsyncDisposable
     protected abstract Task WriteFrameAsync(IpcMessage message, CancellationToken cancellationToken);
 
     /// <summary>No more frames are taken. The writer still sends what is already queued, then ends.</summary>
-    public void Complete() => _channel.Writer.TryComplete();
+    public void Complete()
+    {
+        Volatile.Write(ref _completed, 1);
+        _channel.Writer.TryComplete();
+    }
 
     /// <summary>
     /// Takes no more frames. A transport that can also stop reading overrides this and calls the base; without that its

@@ -323,9 +323,11 @@ public sealed partial class ArchiveCoordinator
             return (ownPlain, true, null);
         }
 
-        if (UsablePackagePassword(set) is { } package && SecretProtector.UnprotectArchivePassword(package.ProtectedPassword) is { } packagePlain)
+        if (UsablePackagePassword(set) is { } package)
         {
-            return (packagePlain, false, package.Stamp);
+            // Unreadable, it is still the package's password that was tried: its stamp goes with the run, so a failure
+            // can set it aside for this set rather than find it "still there" and run again at once (M15).
+            return (SecretProtector.UnprotectArchivePassword(package.ProtectedPassword), false, package.Stamp);
         }
 
         return (null, false, null);
@@ -541,7 +543,7 @@ public sealed partial class ArchiveCoordinator
 
         // A volume's download can finish while a run is failing, and that finish was no use to a set that was still extracting.
         // Read here, outside the gate, because a folder can be on a slow share.
-        var arrived = kind == ExtractionFailureKind.MissingVolume && missing.Count > 0 && AllOnTheirWay(claimed, missing);
+        var (arrived, repeated) = kind == ExtractionFailureKind.MissingVolume && missing.Count > 0 ? Arrivals(claimed, missing) : (false, []);
 
         await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
@@ -576,6 +578,10 @@ public sealed partial class ArchiveCoordinator
                         // Nothing readable was sent, so whatever is on record cannot be used.
                         next.ProtectedPassword = null;
 
+                        // The package's password was there but could not be unsealed (state from another account or PC):
+                        // it counts as rejected for this set, which then asks, instead of going back in line at once (M15).
+                        if (packageStamp is not null) next.RejectedPackagePasswordStamp = packageStamp;
+
                         // A package's password arrived while a run that started without one was going on. No need to ask for what is here.
                         if (!usedOwnPassword && packageStamp is null && UsablePackagePassword(next) is not null)
                         {
@@ -586,7 +592,9 @@ public sealed partial class ArchiveCoordinator
                         break;
 
                     case ExtractionFailureKind.MissingVolume:
-                        next.ToolMissingVolumes = [.. missing];
+                        // A name the tool called missing twice while it was on disk all along won't change by itself, so it
+                        // is no reason to look again: the set stays failed until a retry or a new download in it (M7).
+                        next.ToolMissingVolumes = [.. missing.Except(repeated, PathNames.Comparer)];
                         next.MissingVolumes = next.MissingVolumes.Union(missing, PathNames.Comparer).ToList();
                         if (arrived && next.Wanted)
                         {
@@ -629,12 +637,19 @@ public sealed partial class ArchiveCoordinator
     /// Whether what the tool said was absent has since turned up or is being downloaded. A volume that was already here when
     /// the run was claimed doesn't count: the tool looked at it and it didn't help, and trying again would never end.
     /// </summary>
-    private bool AllOnTheirWay(ArchiveSetRecord claimed, IReadOnlyList<string> missing)
+    /// <summary>
+    /// Whether every volume the tool said was missing has since turned up or is on its way, and which of them it named
+    /// before too, from the last run, while they were on disk and not downloading: those are not missing, whatever it says.
+    /// </summary>
+    private (bool Arrived, List<string> Repeated) Arrivals(ArchiveSetRecord claimed, IReadOnlyList<string> missing)
     {
         var view = ArchiveDirectoryView.Read(claimed.Directory, _service.GetSnapshot().Jobs);
-        return missing.All(name =>
-            !claimed.Volumes.Contains(name, PathNames.Comparer) &&
-            (view.IsOnDisk(name) || view.JobsNamed(name).Any(job => job.State is not ("completed" or "failed" or "cancelled"))));
+        bool Downloading(string name) => view.JobsNamed(name).Any(job => job.State is not ("completed" or "failed" or "cancelled"));
+        var repeated = missing.Where(name =>
+            claimed.ToolMissingVolumes.Contains(name, PathNames.Comparer) && view.IsOnDisk(name) && !Downloading(name)).ToList();
+        var arrived = repeated.Count == 0 && missing.All(name =>
+            !claimed.Volumes.Contains(name, PathNames.Comparer) && (view.IsOnDisk(name) || Downloading(name)));
+        return (arrived, repeated);
     }
 
     private sealed class ProgressSink(ArchiveCoordinator owner, Guid id) : IProgress<ExtractionProgress>

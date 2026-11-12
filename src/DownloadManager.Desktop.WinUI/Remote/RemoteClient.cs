@@ -71,6 +71,10 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     private readonly ReconnectBackoff _remoteBackoff;
     private string? _parked;
 
+    // Audit M11: this PC's pipe was tried every 2 s for ever while no Host ran. Now the wait doubles from the first one
+    // (2 s) up to five times it (10 s), and starts again once a connection works.
+    private readonly ReconnectBackoff _localBackoff;
+
     // A server's .torrent uploads: the server the files go to, and the reference each file got there, kept for a short
     // while and only for the same file (path, size and time written), so the check before an add and the add share one.
     private ServerTarget? _uploadTarget;
@@ -99,6 +103,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         _quickTimeout = quickTimeout ?? DefaultQuickTimeout;
         _slowTimeout = slowTimeout ?? DefaultSlowTimeout;
         _remoteBackoff = remoteBackoff ?? new ReconnectBackoff();
+        _localBackoff = new ReconnectBackoff(_reconnectDelay, _reconnectDelay * 5);
     }
 
     public RemoteState State { get; } = new();
@@ -152,6 +157,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
             _uploads.Clear();
             _parked = null;
             _remoteBackoff.Reset();
+            _localBackoff.Reset();
             _firstRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             start = !remote || _eventsWanted;
         }
@@ -163,6 +169,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
             State.RemoteSupported = false;
             State.ArchivesSupported = false;
             State.UploadsOffered = false;
+            State.TorrentsOffered = false;
             State.AccountsKnown = false;
             State.ClearRemote();
             State.ApplyArchiveList([]);
@@ -301,8 +308,12 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     {
         ServerTarget? target;
         lock (_sync) target = _uploadTarget;
-        if (target is null || !LinkExtractor.IsTorrentPath(text)) return (text, null);
+        if (!LinkExtractor.IsTorrentPath(text)) return (text, null);
         var path = text.Trim();
+        // A network or device path is refused for this PC's Host too, before anything asks about it.
+        if (TorrentRules.IsNetworkOrDevicePath(path))
+            return (null, target is null ? TorrentRules.OnlyLocalTorrentFiles : TorrentPathProblem(path) ?? TorrentRules.OnlyLocalTorrentFiles);
+        if (target is null) return (text, null);
         if (TorrentPathProblem(path) is { } problem) return (null, problem);
         byte[] bytes;
         string key;
@@ -557,6 +568,58 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
     public Task<ArchiveSettingsResult> GetArchiveSettingsAsync(CancellationToken cancellationToken = default)
         => QuickAsync(ArchiveMessageTypes.SettingsGet, new { }, ArchiveMessageTypes.SettingsResult, FailedSettings, cancellationToken);
+
+    /// <summary>A magnet, or a .torrent file on this PC (uploaded first when the target is another server).</summary>
+    /// <param name="destination">T3: the folder whose free space the Host measures; null is the category folder.</param>
+    public async Task<TorrentInspectResult> InspectTorrentAsync(string input, CancellationToken cancellationToken = default, string? destination = null)
+    {
+        var (sent, problem) = await ForServerAsync(input, cancellationToken).ConfigureAwait(false);
+        if (sent is null) return new TorrentInspectResult { Error = problem };
+        return await QuickAsync(TorrentMessageTypes.Inspect, new TorrentInspectRequest { Input = sent, Destination = destination }, TorrentMessageTypes.InspectResult,
+            error => new TorrentInspectResult { Error = error }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<TorrentAddResult> AddTorrentAsync(TorrentAddRequest request, CancellationToken cancellationToken = default)
+    {
+        var (sent, problem) = await ForServerAsync(request.Input, cancellationToken).ConfigureAwait(false);
+        if (sent is null) return new TorrentAddResult { Error = problem };
+        var payload = new TorrentAddRequest
+        {
+            Input = sent, Destination = request.Destination, QueueId = request.QueueId, StartMode = request.StartMode,
+            Files = request.Files, FileIndexes = request.FileIndexes, Description = request.Description,
+            Priorities = request.Priorities, Options = request.Options,
+        };
+        return await QuickAsync(TorrentMessageTypes.Add, payload, TorrentMessageTypes.AddResult, error => new TorrentAddResult { Error = error },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<TorrentActionResult> SetTorrentFilesAsync(Guid jobId, IEnumerable<int> indexes, CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.SetFiles, new TorrentSetFilesRequest { JobId = jobId, FileIndexes = indexes.ToList() },
+            TorrentMessageTypes.ActionResult, error => new TorrentActionResult { Error = error }, cancellationToken);
+
+    public Task<TorrentFilesResult> GetTorrentFilesAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.Files, new TorrentFilesRequest { JobId = jobId }, TorrentMessageTypes.FilesResult,
+            error => new TorrentFilesResult { Error = error }, cancellationToken);
+
+    /// <summary>T2: starts (<paramref name="on"/>) or stops seeding a finished torrent.</summary>
+    public Task<TorrentActionResult> SetTorrentSeedingAsync(Guid jobId, bool on, CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.Seed, new TorrentSeedRequest { JobId = jobId, On = on }, TorrentMessageTypes.ActionResult,
+            error => new TorrentActionResult { Error = error }, cancellationToken);
+
+    /// <summary>T3: checks a torrent's files on disk again.</summary>
+    public Task<TorrentActionResult> RecheckTorrentAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.Recheck, new TorrentJobRequest { JobId = jobId }, TorrentMessageTypes.ActionResult,
+            error => new TorrentActionResult { Error = error }, cancellationToken);
+
+    /// <summary>T3: asks a running torrent's trackers (and the DHT) for peers now.</summary>
+    public Task<TorrentActionResult> AnnounceTorrentAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.Announce, new TorrentJobRequest { JobId = jobId }, TorrentMessageTypes.ActionResult,
+            error => new TorrentActionResult { Error = error }, cancellationToken);
+
+    /// <summary>T2: the port hint of Options › Torrents.</summary>
+    public Task<TorrentNetworkResult> GetTorrentNetworkAsync(CancellationToken cancellationToken = default)
+        => QuickAsync(TorrentMessageTypes.Network, new { }, TorrentMessageTypes.NetworkResult,
+            error => new TorrentNetworkResult { Error = error }, cancellationToken);
 
     public Task<ArchiveSettingsResult> SetArchiveSettingsAsync(ArchiveSettingsUpdate update, CancellationToken cancellationToken = default)
         => QuickAsync(ArchiveMessageTypes.SettingsSet, update, ArchiveMessageTypes.SettingsResult, FailedSettings, cancellationToken);
@@ -855,6 +918,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                 var capabilities = hello.GetPayload<HostHelloDto>().Capabilities;
                 var offersRemote = capabilities.Contains("remote", StringComparer.Ordinal);
                 var offersUploads = remote && capabilities.Contains("uploads", StringComparer.Ordinal);
+                var offersTorrents = capabilities.Contains("torrents", StringComparer.Ordinal);
 
                 // The snapshot comes before any event, and this client has no use for it. A server's socket asks for none.
                 if (pipe.SnapshotFollowsHello) _ = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -862,10 +926,12 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                 lock (_sync) _control.TrySetResult(pipe);
                 published = true;
                 if (remote) _remoteBackoff.Reset();
+                else _localBackoff.Reset();
                 _post(() =>
                 {
                     State.IsConnected = true;
                     State.UploadsOffered = offersUploads;
+                    State.TorrentsOffered = offersTorrents;
                 });
 
                 // Not awaited: its replies arrive through the loop below.
@@ -920,7 +986,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
             try
             {
-                await Task.Delay(remote ? _remoteBackoff.Next() : _reconnectDelay, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(remote ? _remoteBackoff.Next() : _localBackoff.Next(), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

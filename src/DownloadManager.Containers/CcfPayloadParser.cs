@@ -14,6 +14,9 @@ namespace DownloadManager.Containers;
 /// </summary>
 internal static class CcfPayloadParser
 {
+    /// <summary>Far more than any real package names; each is tried on the archive in turn.</summary>
+    internal const int MaxPasswordsPerPackage = 64;
+
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     // Non-backtracking keeps this linear on hostile text.
@@ -296,7 +299,16 @@ internal static class CcfPayloadParser
                 if (!string.IsNullOrWhiteSpace(raw))
                 {
                     _package ??= new PackageDraft();
-                    if (!_package.Passwords.Contains(raw))
+                    if (_package.Passwords.Count >= MaxPasswordsPerPackage)
+                    {
+                        if (!_package.PasswordLimitReported)
+                        {
+                            // A hostile file can repeat this field without end; each one costs a lookup.
+                            _package.PasswordLimitReported = true;
+                            builder.AddProblem(ContainerProblemKind.TooManyEntries, $"A package in this CCF file lists more than {MaxPasswordsPerPackage} passwords. Only the first {MaxPasswordsPerPackage} are kept.");
+                        }
+                    }
+                    else if (_package.SeenPasswords.Add(raw))
                     {
                         _package.Passwords.Add(raw);
                     }
@@ -383,6 +395,8 @@ internal static class CcfPayloadParser
         public string? Name { get; init; }
         public string? Comment { get; set; }
         public List<string> Passwords { get; } = [];
+        public HashSet<string> SeenPasswords { get; } = new(StringComparer.Ordinal);
+        public bool PasswordLimitReported { get; set; }
         public List<LinkDraft> Links { get; } = [];
 
         public bool IsEmpty => Name is null && Comment is null && Passwords.Count == 0 && Links.Count == 0;

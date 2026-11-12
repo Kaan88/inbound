@@ -105,7 +105,7 @@ on arm64.
 | Phase | Deliverable | Effort (opinion) | Exit gate |
 | --- | --- | --- | --- |
 | **T0. First native build and feasibility** | the contract as a small library with a fake engine, the C++ worker against libtorrent 2.1 speaking it over stdio, reproducible static builds for win-x64, linux-x64 and linux-arm64, stripped size against gate 6, the patch path, the crash-containment test, the measurements above, results in PROGRESS | 2.5 to 3 weeks (opinion; was 1.5 to 2 for a bake-off) | gates 1 to 3, 6, 9, 12 to 14 pass or the owner is told why not |
-| **T1. Smallest useful slice** | the worker ships in the main Setup, update zip, AppImage and image (owner: yes), inside the size gate; Host supervises the worker with the lifecycle above; `torrents` capability flag; Options > Torrents (off); Add Torrent dialog (magnet or file, file tree, destination, start paused); Torrents category; download to completion; seeding off; outgoing connections only; no firewall rule | 5 to 6 weeks (includes about 1 week to package a native binary into Setup, the update zip, the AppImage and a pinned builder stage in the Dockerfile) | Integration test against a loopback seeder and tracker; kill-switch test (no process, no socket); idle comparison with and without the feature compiled in |
+| **T1. Smallest useful slice** | the worker ships in the main Setup, update zip, AppImage and image (owner: yes), inside the size gate; Host supervises the worker with the lifecycle above; `torrents` capability flag; Options > Torrents (off); Add Torrent dialog (magnet or file, file tree, destination, start paused; This PC / TorBox choice and the TorBox cache check when an account exists); optional magnet and .torrent handler; Torrents category (a filter of the one list); download to completion; seeding off; outgoing connections only; no firewall rule | 5 to 6 weeks (includes about 1 week to package a native binary into Setup, the update zip, the AppImage and a pinned builder stage in the Dockerfile) | Integration test against a loopback seeder and tracker; kill-switch test (no process, no socket); idle comparison with and without the feature compiled in |
 | **T2. Seeding and control** | seeding on (owner: yes; proposed defaults: stop at ratio 1.0 or 48 hours, whichever comes first, editable), ratio and time limits, upload limit sharing the global budget, queues and scheduler semantics, details window (Files, Peers, Trackers, Pieces & Speed), firewall rule through the existing UAC flow, UPnP/NAT-PMP toggle, extraction waits until a torrent's download has finished | 3 to 4 weeks | scheduler and quota tests; firewall rule tests; 24-hour seeding soak with flat memory |
 | **T3. Web UI and Docker** | Torrents in the web UI including phone width, upload through the existing `/api/upload/torrent`, the torrent ports published in `docker/compose.example.yml` (owner: yes; nothing listens while the feature is off), UPnP off by default in the image, arm64 check | 2 to 3 weeks | `npm run screens` walk at 1360 and 390 px, vitest, container idle measurement against the memory target |
 | **T4. Linux desktop** | the worker inside the AppImage, port hint, Linux tests | 1 week | run on the owner's KDE/Wayland machine |
@@ -138,3 +138,16 @@ non-users" and is the slice worth finishing?), after T2 (is seeding wanted at al
 5. **Licence: acceptable** as it stands: an MIT or BSD engine linked into the worker; a separate GPL process would also be
    acceptable if it ever came to that.
 6. **T6 (connect to an external client): dropped.** The roadmap runs T0 to T5 only.
+7. **UI, from the mockups** (owner, 2026-11-11; https://claude.ai/artifact/Lky3Wvsdq76aCjNqRTmRH6, "I agree with
+   everything else"):
+   - One list: a torrent is a package row in the main list, with a Torrents sidebar filter shown only while torrents
+     are on. No separate list or window.
+   - No Add Torrent toolbar button; Add URL, drag and drop, paste, and Tasks › Add Magnet… / Import Torrent File…
+     (shown with torrents on, with or without a TorBox account).
+   - Inbound can open magnet links and .torrent files from Explorer and browsers: an option in Options › Torrents,
+     off until ticked; unticking hands them back. Added to T1. The extension still never handles magnets.
+   - With a TorBox account, magnets and .torrent files default to *Ask each time*: a This PC / TorBox choice per line.
+   - Choose files before starting for multi-file torrents; a single-file torrent starts at once.
+   - **TorBox cache check:** when a TorBox account is set up, every magnet and .torrent file in the add dialog is
+     checked against TorBox's cache and its line says *Cached on TorBox* or *Not cached on TorBox*, whichever route is
+     chosen. The check never picks the route by itself. Added to T1.

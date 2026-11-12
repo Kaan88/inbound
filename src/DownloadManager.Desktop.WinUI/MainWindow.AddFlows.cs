@@ -247,12 +247,20 @@ public sealed partial class MainWindow
             else if (inputs is not null) session.SetInputs(inputs);
             foreach (var (input, result) in answered ?? []) session.Seed(input, result);
 
-            var initial = focus is AddFocus.Links or AddFocus.Magnet ? await ClipboardInputsAsync(focus) : null;
+            // Given inputs are the lines and the box's text, so an edit in the box keeps them; the clipboard only seeds
+            // an empty dialog.
+            var initial = focus is not (AddFocus.Links or AddFocus.Magnet) ? null
+                : inputs is not null ? string.Join(Environment.NewLine, inputs)
+                : answered is null ? await ClipboardInputsAsync(focus)
+                : null;
+            var connection = _connection;
             await RefreshSettingsAsync();
+            // Another server may have been chosen while the Host answered; this dialog belonged to the one before.
+            if (!ReferenceEquals(connection, _connection) || _settings is not { } settings) return true;
             var dialog = new AddLinksDialog(
                 session,
                 focus,
-                _settings,
+                settings,
                 ProviderWordForAdding(),
                 _remote.State.ArchivesSupported,
                 RootGrid,

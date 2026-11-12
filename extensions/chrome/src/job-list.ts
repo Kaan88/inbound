@@ -18,9 +18,23 @@ export interface JobSummary {
   isTerminal?: boolean;
   /** How the download was added: "startNow", "queue" or "later" (the Host's StartMode). */
   startMode?: string;
+  /** The address it was added from. A provider's file has a remote:// one, which is no link. */
+  url?: string;
+  /** The real address held a key and the app keeps it; url is a masked copy that downloads nothing. */
+  addressHidden?: boolean;
+  /** A finished download whose file was deleted on purpose after it was extracted. */
+  fileRemovedAfterExtraction?: boolean;
+  /**
+   * Its files are the app's to manage (the native host and a paired server set this): the popup offers no rename or
+   * redownload for it, and one that waits for the user in the app is opened there rather than resumed.
+   */
+  appManaged?: boolean;
 }
 
 export type JobAction = "start" | "pause" | "resume" | "retry" | "remove";
+
+/** A row's buttons: the job actions, and "open" for a download that waits for the user in the app. */
+export type RowAction = JobAction | "open";
 
 /** The commands the popup may send, as the native host's allow-list names them. */
 export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
@@ -31,6 +45,124 @@ export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
   retry: "job.retry",
   remove: "job.remove",
 };
+
+/**
+ * EXT.R11: the right-click menu's commands, each on one download, as the native host's allow-list names them. Rename
+ * is job.update with a new file name only; reveal goes to this PC only.
+ */
+export type JobCommand = "reveal" | "rename" | "redownload";
+
+export const JOB_COMMAND_MESSAGES: Record<JobCommand, string> = {
+  reveal: "job.reveal",
+  rename: "job.update",
+  redownload: "job.redownload",
+};
+
+/** Said when the app or server answering is older than these commands. */
+export const UPDATE_APP_FOR_COMMAND = "Update Inbound to use this.";
+export const UPDATE_SERVER_FOR_COMMAND = "Update the Inbound server to use this.";
+
+/** An older native host, Host or server refuses a message it doesn't know, in one of these words. */
+function refusedAsUnknown(text: string): boolean {
+  return text === "The browser extension cannot send this message." ||
+    text.startsWith("Unknown message type") ||
+    text.startsWith("A paired browser can't send");
+}
+
+export interface JobCommandOutcome {
+  ok: boolean;
+  error?: string;
+  job?: JobSummary;
+  message?: string;
+}
+
+/**
+ * EXT.R11: the app's answer to a row-menu command, as the popup shows it. An app older than the command refuses it
+ * with words of its own, which become "Update Inbound". A Host older than Rename ignores the new name and still says
+ * ok, so a rename counts as done only when the download it returns has the new name.
+ */
+export function jobCommandOutcome(command: JobCommand, result: any, options: { newFileName?: string; server?: boolean } = {}): JobCommandOutcome {
+  const update = options.server ? UPDATE_SERVER_FOR_COMMAND : UPDATE_APP_FOR_COMMAND;
+  if (result?.ok !== true) {
+    const text = String(result?.error || result?.message || "");
+    if (refusedAsUnknown(text)) return { ok: false, error: update };
+    return { ok: false, error: text || "The app did not do that." };
+  }
+  const job = result.job as JobSummary | undefined;
+  if (command === "rename" && options.newFileName !== undefined && job?.fileName !== options.newFileName) {
+    return { ok: false, error: `The file was not renamed. ${update}`, job };
+  }
+  return { ok: true, job, message: typeof result.message === "string" ? result.message : undefined };
+}
+
+/** What the row menu offers (GitHub #4). "Open file" is not offered: the browser would make the app start a file. */
+export type RowMenuChoice = "reveal" | "copyLink" | "redownload" | "rename" | "remove";
+
+export interface RowMenuEntry {
+  id: RowMenuChoice;
+  label: string;
+  enabled: boolean;
+  title?: string;
+}
+
+/** Said wherever Redownload is offered or asked about. */
+export const REDOWNLOAD_NOTE = "Saves as a new copy. The existing file is kept.";
+
+/** The download is on this PC, not on the paired server. */
+export function onThisPc(job: JobSummary): boolean {
+  return (job.target ?? "local") === "local";
+}
+
+/** Its address can be copied or used again: a real web or FTP link, not a provider's file or a hidden key. */
+export function hasUsableLink(job: JobSummary): boolean {
+  const url = (job.url ?? "").trim();
+  return /^(https?|ftps?):\/\//i.test(url) && job.addressHidden !== true;
+}
+
+/** Redownload as the desktop allows it: a finished, failed or stopped download with a usable link. */
+export function canRedownload(job: JobSummary): boolean {
+  return (job.state === "completed" || job.state === "failed" || job.state === "cancelled") && hasUsableLink(job) &&
+    job.appManaged !== true;
+}
+
+/** Rename is for a finished download's file. Whether the file is still there only the app can say. */
+export function canRename(job: JobSummary): boolean {
+  return job.state === "completed" && job.fileRemovedAfterExtraction !== true && job.appManaged !== true;
+}
+
+/**
+ * A stopped download the app can't simply resume: it waits for the user's choice in the app. The app says so with
+ * canResume false on a paused download (an older app always says true, and the row keeps Resume).
+ */
+export function waitsInApp(job: JobSummary): boolean {
+  return job.state === "paused" && job.canResume === false && job.isTerminal !== true;
+}
+
+/** The folder button beside Delete: a finished download on this PC. */
+export function showsFolderButton(job: JobSummary): boolean {
+  return onThisPc(job) && job.state === "completed";
+}
+
+/** The right-click menu of a row, in order. Folder actions only for this PC. */
+export function rowMenuEntries(job: JobSummary): RowMenuEntry[] {
+  const entries: RowMenuEntry[] = [];
+  if (onThisPc(job)) entries.push({ id: "reveal", label: "Open containing folder", enabled: true });
+  entries.push({ id: "copyLink", label: "Copy download link", enabled: hasUsableLink(job),
+    title: hasUsableLink(job) ? undefined : "This download has no link that can be copied." });
+  entries.push({ id: "redownload", label: "Redownload", enabled: canRedownload(job), title: REDOWNLOAD_NOTE });
+  entries.push({ id: "rename", label: "Rename…", enabled: canRename(job),
+    title: canRename(job) ? undefined : job.appManaged === true ? "This download is managed in the app." : "Only a finished download can be renamed." });
+  entries.push({ id: "remove", label: "Delete…", enabled: true });
+  return entries;
+}
+
+/** Why a new name can't be used, before asking the app (which checks again), or null. */
+export function badFileName(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "Type a file name.";
+  if (/[\\/:*?"<>|]/.test(trimmed) || trimmed === "." || trimmed === "..") return "A file name can't contain \\ / : * ? \" < > |.";
+  return null;
+}
 
 export const POPUP_JOB_LIMIT = 20;
 
@@ -83,13 +215,19 @@ export function waitsToBeStarted(job: JobSummary): boolean {
 
 /**
  * The row's buttons, two at most, from what the app says the job allows: Start for one that waits to be started
- * (U-EX-8), else Stop while it can stop, else Resume (Retry for a failed or cancelled one), then Delete.
+ * (U-EX-8), else Stop while it can stop, else Resume (Retry for a failed or cancelled one), else Open in app for one
+ * that waits for the user in the app on this PC (a server's has none: its window is not on this screen), then Delete.
+ * A finished download offers Delete only, whatever the app still does with it.
  */
-export function actionsFor(job: JobSummary): JobAction[] {
-  const actions: JobAction[] = [];
-  if (waitsToBeStarted(job)) actions.push("start");
+export function actionsFor(job: JobSummary): RowAction[] {
+  const actions: RowAction[] = [];
+  if (job.state === "completed") {
+    // Nothing to stop or resume once it is done.
+  } else if (waitsToBeStarted(job)) actions.push("start");
   else if (job.canPause) actions.push("pause");
-  else if (job.canResume && job.state !== "completed") actions.push(job.state === "failed" || job.state === "cancelled" ? "retry" : "resume");
+  else if (waitsInApp(job)) {
+    if (onThisPc(job)) actions.push("open");
+  } else if (job.canResume) actions.push(job.state === "failed" || job.state === "cancelled" ? "retry" : "resume");
   actions.push("remove");
   return actions;
 }

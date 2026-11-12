@@ -46,6 +46,13 @@ public sealed record PlatformCapabilities
     /// </summary>
     public bool SupportsCompletionActions { get; init; }
 
+    /// <summary>
+    /// EXT.R11: <c>job.reveal</c> shows a download's file in this machine's file manager. Only where the person at the
+    /// machine is the client's user: the desktop Host, never a server or a web session (the window would open on a
+    /// screen nobody asking can see).
+    /// </summary>
+    public bool SupportsReveal { get; init; }
+
     /// <summary>The hello's <c>hostKind</c> (<see cref="HostKinds"/>). Null leaves it out.</summary>
     public string? HostKind { get; init; }
 
@@ -62,6 +69,7 @@ public sealed record PlatformCapabilities
         SupportsUpdater = true,
         SupportsProgramSettings = true,
         SupportsCompletionActions = true,
+        SupportsReveal = true,
         HostKind = HostKinds.Windows,
     };
 }
@@ -79,4 +87,28 @@ public interface IHostPlatform
 
     /// <summary>Only called when <see cref="PlatformCapabilities.SupportsFolderPicker"/>.</summary>
     Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// EXT.R11: shows <paramref name="path"/> selected in the file manager, or its folder when the file is gone. The
+    /// dispatcher has checked that one of them exists. Only called when <see cref="PlatformCapabilities.SupportsReveal"/>.
+    /// </summary>
+    void RevealFile(string path) => throw new NotSupportedException("Showing files is not available here.");
+}
+
+/// <summary>The window pages <see cref="IHostPlatform.OpenUi"/> knows. Any other text opens the main window.</summary>
+public static class UiPages
+{
+    /// <summary>Options.</summary>
+    public const string Settings = "settings";
+
+    /// <summary>An update's progress window; the Host opens it itself, never for a client.</summary>
+    public const string UpdateProgress = "update-progress";
+
+    /// <summary>The page as the window's command line names it, or null for one it doesn't know.</summary>
+    public static string? Known(string? page) => page?.Trim().ToLowerInvariant() switch
+    {
+        Settings => Settings,
+        UpdateProgress => UpdateProgress,
+        _ => null,
+    };
 }

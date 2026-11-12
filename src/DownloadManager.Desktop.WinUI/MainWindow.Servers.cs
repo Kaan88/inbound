@@ -344,6 +344,7 @@ public sealed partial class MainWindow
         var old = _connection;
         if (old.Target.Id == target.Id && (target.IsLocal || old.Target.Token == target.Token)) return;
         var switchNumber = ++_switches;
+        EndTorrentWatchFor(old);
         _settingsWindow?.Close();
         _schedulerWindow?.Close();
         _statisticsWindow?.Close();

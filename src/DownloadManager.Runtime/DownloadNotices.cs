@@ -130,6 +130,10 @@ public sealed class DownloadNotices : IDisposable
                 else Tell(DownloadNoticeKind.Failed, "Download failed", FailureWords(job));
             }
 
+            // A torrent that paused because the disk is full waits for the user as a failed one would.
+            if (e.ChangeType == "paused" && job.Failure?.Kind == "diskFull")
+                Tell(DownloadNoticeKind.Failed, "Download paused", $"{job.FileName}: {job.Failure.Message}");
+
             SettleAll();
         });
     }

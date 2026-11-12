@@ -67,6 +67,21 @@ test('a redirect to a downloadable file decides by the final address', () => {
   assert.deepEqual(decision, { capture: true });
 });
 
+test('Audit 3 L12: stored settings of the wrong type fall back to the defaults, so deciding never throws', () => {
+  const damaged = { enabled: 'yes', autoIntercept: 1, notifications: null, startMode: 'soon',
+    interceptedExtensions: 'zip', excludedExtensions: ['html', 7, null, 'iso'], excludedHosts: { a: 1 }, rulesVersion: 2 };
+  const { settings } = migrateSettings(damaged);
+  assert.equal(settings.enabled, true);
+  assert.equal(settings.autoIntercept, true);
+  assert.equal(settings.notifications, true);
+  assert.equal(settings.startMode, 'now');
+  assert.deepEqual(settings.interceptedExtensions, []);
+  assert.deepEqual(settings.excludedExtensions, ['html', 'iso']);
+  assert.deepEqual(settings.excludedHosts, []);
+  assert.doesNotThrow(() => decideCapture({ url: 'https://files.test/a.zip', fileName: 'a.zip' }, settings));
+  assert.equal(decideCapture({ url: 'https://files.test/a.iso', fileName: 'a.iso' }, settings).capture, false);
+});
+
 test('a fresh install starts with the new rules and nothing to store', () => {
   const { settings, changed } = migrateSettings(undefined);
   assert.equal(changed, false);

@@ -19,6 +19,8 @@ public sealed partial class DownloadManagerService
             var today = DateOnly.FromDateTime(localNow.DateTime);
             var time = TimeOnly.FromDateTime(localNow.DateTime);
             var due = new List<(Guid Id, int QueueId, string Action, DateOnly Window, bool Timed, bool Synchronize)>();
+            // Stops that came due while their queue was idle: recorded as done, so a later start isn't stopped (M8).
+            var passedStops = new List<(Guid Id, DateOnly StopDate)>();
             lock (_sync)
             {
                 if (!_initialized || _shuttingDown) return Array.Empty<ScheduleAction>();
@@ -38,12 +40,34 @@ public sealed partial class DownloadManagerService
                     DateOnly? window = null;
                     if (time >= start && (!hasStop || overnight || time < stop) && Eligible(schedule, today)) window = today;
                     else if (overnight && time < stop && Eligible(schedule, today.AddDays(-1))) window = today.AddDays(-1);
+                    // From the stop time until midnight (or the next start, overnight): a start at host startup waits.
                     var stopDue = hasStop && (overnight ? time >= stop && time < start && Eligible(schedule, today.AddDays(-1))
                         : time >= stop && Eligible(schedule, today));
-                    if (stopDue && queue.IsRunning && schedule.LastStopDate != today)
+                    // The stop that ends a window acts once, the first time it is seen after its time (audit 2 M8): on a
+                    // queue still running it stops it, on an idle one it is only recorded, so a start by hand later that
+                    // day is not stopped by it. LastStopDate is the date the stop time fell on.
+                    DateOnly? stopDate = null;
+                    if (stopDue) stopDate = today;
+                    // Audit 2 L8: a PC asleep (or off) from before the stop time until after it, by any number of days,
+                    // still stops the run this schedule started: the stop of its last timed start never acted. Not
+                    // while a window of it is open now: that window's own stop ends the run.
+                    else if (hasStop && window is null && schedule.LastStartDate is { } started)
                     {
-                        due.Add((schedule.Id, queue.Id, "stop", today, false, false));
-                        continue;
+                        var missedStop = overnight ? started.AddDays(1) : started;
+                        if ((schedule.LastStopDate is null || schedule.LastStopDate < missedStop) &&
+                            (missedStop < today || missedStop == today && time >= stop))
+                            stopDate = missedStop;
+                    }
+                    if (stopDate is { } stopDay && schedule.LastStopDate != stopDay && (schedule.LastStopDate is null || schedule.LastStopDate < stopDay))
+                    {
+                        // A stopped queue may still have torrents seeding from before its stop time: the stop stops them
+                        // too (T2). Seeding started after the stop time (by hand) is left alone.
+                        if (queue.IsRunning || QueueSeededBeforeLocked(queue.Id, new DateTimeOffset(stopDay.ToDateTime(stop), localNow.Offset)))
+                        {
+                            due.Add((schedule.Id, queue.Id, "stop", stopDay, false, false));
+                            continue;
+                        }
+                        passedStops.Add((schedule.Id, stopDay));
                     }
                     var timed = schedule.TimedStartEnabled && window is { } day &&
                         (schedule.LastStartDate != day || schedule.RepeatEveryMinutes is { } interval &&
@@ -52,6 +76,7 @@ public sealed partial class DownloadManagerService
                         due.Add((schedule.Id, queue.Id, "start", window ?? today, timed, schedule.RepeatEveryMinutes is not null));
                 }
             }
+            if (passedStops.Count > 0) await RecordPassedStopsAsync(passedStops, cancellationToken).ConfigureAwait(false);
             var results = new List<ScheduleAction>();
             foreach (var item in due)
             {
@@ -64,7 +89,9 @@ public sealed partial class DownloadManagerService
                     ScheduleRule? schedule;
                     lock (_sync) schedule = _settings.Schedules.FirstOrDefault(candidate => candidate.Id == item.Id && candidate.Enabled && candidate.QueueId == item.QueueId);
                     if (schedule is null) continue;
-                    var reply = await QueueActionCoreAsync(new QueueActionRequest { QueueId = item.QueueId, Action = item.Action }, cancellationToken).ConfigureAwait(false);
+                    // Audit 2 M10: a start arms this run's when-done actions inside the action, before anything starts.
+                    var reply = await QueueActionCoreAsync(new QueueActionRequest { QueueId = item.QueueId, Action = item.Action }, cancellationToken,
+                        armForSchedule: item.Action == "start" ? item.Id : null).ConfigureAwait(false);
                     if (reply.Ok)
                     {
                         var previousStart = schedule.LastStartDate;
@@ -78,7 +105,7 @@ public sealed partial class DownloadManagerService
                                 if (item.Timed) schedule.LastStartDate = item.Window;
                                 schedule.LastRunAt = localNow;
                             }
-                            else schedule.LastStopDate = today;
+                            else schedule.LastStopDate = item.Window;
                             schedule.LastRunError = warning;
                         }
                         try { await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false); }
@@ -100,10 +127,196 @@ public sealed partial class DownloadManagerService
             }
             return results;
         }
-        finally { _scheduleEvaluationGate.Release(); }
+        finally
+        {
+            _scheduleEvaluationGate.Release();
+            ArmSchedulerTimer();
+        }
 
         static bool Eligible(ScheduleRule schedule, DateOnly date) => schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase)
             ? schedule.StartDate == date : MatchesDay(schedule.Days, date.DayOfWeek);
+    }
+
+    /// <summary>Saves stops that came due on an idle queue as done (audit 2 M8). Nothing else changes.</summary>
+    private async Task RecordPassedStopsAsync(List<(Guid Id, DateOnly StopDate)> stops, CancellationToken cancellationToken)
+    {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var previous = new List<(ScheduleRule Schedule, DateOnly? Before)>();
+            lock (_sync)
+            {
+                foreach (var (id, stopDate) in stops)
+                {
+                    if (_settings.Schedules.FirstOrDefault(schedule => schedule.Id == id && schedule.Enabled) is not { } schedule ||
+                        schedule.LastStopDate is { } last && last >= stopDate) continue;
+                    previous.Add((schedule, schedule.LastStopDate));
+                    schedule.LastStopDate = stopDate;
+                }
+            }
+            if (previous.Count == 0) return;
+            try { await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Not saved: seen again at the next evaluation.
+                lock (_sync) foreach (var (schedule, before) in previous) schedule.LastStopDate = before;
+                _log?.Invoke($"Could not record a passed schedule stop: {ex.Message}");
+                return;
+            }
+            SettingsChanged?.Invoke(this, _settings);
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    // Audit 2 M18: no standing 30-second tick. One timer is armed for the next instant anything can come due (a
+    // schedule's start or stop time, a synchronisation repeat, a queue retry, a startup start waiting for midnight),
+    // and none at all when nothing is pending. It is armed again after every evaluation and every settings change.
+    private ITimer? _schedulerTimer;
+    private DateTimeOffset? _schedulerWakeAt;
+    private int _schedulerTickRunning;
+
+    /// <summary>
+    /// Longest wait while anything is pending. A resume or a clock change the Host reports wakes it at once
+    /// (<see cref="NotifyClockChanged"/>); this bounds one nobody reported.
+    /// </summary>
+    private static readonly TimeSpan SchedulerLongestWait = TimeSpan.FromHours(1);
+
+    /// <summary>A retry already due that couldn't run yet is looked at again after this.</summary>
+    private static readonly TimeSpan SchedulerRecheck = TimeSpan.FromSeconds(30);
+
+    /// <summary>When the scheduler next wakes, or null when nothing is pending (then no timer is armed).</summary>
+    public DateTimeOffset? NextSchedulerWake
+    {
+        get { lock (_sync) return _schedulerWakeAt; }
+    }
+
+    private void OnSchedulerSettingsChanged(object? sender, AppSettings settings) => ArmSchedulerTimer();
+
+    private void ArmSchedulerTimer()
+    {
+        lock (_sync)
+        {
+            if (!_initialized || _shuttingDown) return;
+            var now = _timeProvider.GetUtcNow();
+            var next = NextSchedulerWakeLocked(_timeProvider.GetLocalNow());
+            if (next is { } at && at - now > SchedulerLongestWait) next = now + SchedulerLongestWait;
+            _schedulerWakeAt = next;
+            if (_schedulerCts is not { IsCancellationRequested: false }) return;
+            if (next is not { } wake)
+            {
+                _schedulerTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            var delay = wake - now;
+            if (delay < TimeSpan.FromSeconds(1)) delay = TimeSpan.FromSeconds(1);
+            _schedulerTimer ??= _timeProvider.CreateTimer(_ => _ = SchedulerTickAsync(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _schedulerTimer.Change(delay, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private int _schedulerTickAgain;
+
+    /// <summary>
+    /// The wall clock jumped: the PC resumed from sleep, or its time or time zone changed. A timer counts only time
+    /// awake, so the wake armed before could now be up to <see cref="SchedulerLongestWait"/> late. This evaluates at
+    /// once, and that evaluation arms the next wake from the new time (audit 2 M18). The Host calls it.
+    /// </summary>
+    public void NotifyClockChanged()
+    {
+        lock (_sync)
+            if (!_initialized || _shuttingDown) return;
+        _ = SchedulerTickAsync();
+    }
+
+    private async Task SchedulerTickAsync()
+    {
+        var cts = _schedulerCts;
+        if (cts is null || cts.IsCancellationRequested) return;
+        // One evaluation at a time; the one running arms the next wake when it ends, and runs once more for a wake that
+        // came while it ran (it may have read the time before the clock moved).
+        if (Interlocked.Exchange(ref _schedulerTickRunning, 1) == 1)
+        {
+            Interlocked.Exchange(ref _schedulerTickAgain, 1);
+            return;
+        }
+        try
+        {
+            do
+            {
+                Interlocked.Exchange(ref _schedulerTickAgain, 0);
+                try
+                {
+                    await EvaluateSchedulesAsync(_timeProvider.GetLocalNow(), cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
+                catch (ObjectDisposedException) { return; }
+                catch (Exception ex)
+                {
+                    _log?.Invoke($"Scheduler tick failed: {ex.Message}");
+                    ArmSchedulerTimer();
+                }
+            }
+            while (Volatile.Read(ref _schedulerTickAgain) == 1 && !cts.IsCancellationRequested);
+        }
+        finally { Interlocked.Exchange(ref _schedulerTickRunning, 0); }
+        // A wake between the last check and the line above.
+        if (Volatile.Read(ref _schedulerTickAgain) == 1 && !cts.IsCancellationRequested) _ = SchedulerTickAsync();
+    }
+
+    private void StopSchedulerTimer()
+    {
+        lock (_sync)
+        {
+            _schedulerTimer?.Dispose();
+            _schedulerTimer = null;
+            _schedulerWakeAt = null;
+        }
+        SettingsChanged -= OnSchedulerSettingsChanged;
+    }
+
+    /// <summary>The next instant something can come due, from <paramref name="localNow"/>; null when nothing is pending.</summary>
+    private DateTimeOffset? NextSchedulerWakeLocked(DateTimeOffset localNow)
+    {
+        DateTimeOffset? best = null;
+        void Consider(DateTimeOffset at)
+        {
+            if (best is null || at < best) best = at;
+        }
+
+        var zone = _timeProvider.LocalTimeZone;
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        DateTimeOffset Instant(DateOnly date, TimeOnly time)
+        {
+            var local = date.ToDateTime(time);
+            return new DateTimeOffset(local, zone.GetUtcOffset(local));
+        }
+        // A margin, so the evaluation reads a time at or past the one it waits for.
+        DateTimeOffset At(DateOnly date, TimeOnly time) => Instant(date, time).AddMilliseconds(500);
+        // Once the time itself has come (the evaluation acts on it), the next is tomorrow's, even within the margin:
+        // a timer can fire a little early by the wall clock.
+        DateTimeOffset NextAt(TimeOnly time) => Instant(today, time) > localNow ? At(today, time) : At(today.AddDays(1), time);
+
+        foreach (var schedule in _settings.Schedules.Where(schedule => schedule.Enabled))
+        {
+            if (!_settings.Queues.Any(queue => queue.Id == schedule.QueueId)) continue;
+            if (schedule.TimedStartEnabled && TryParseScheduleTime(schedule.StartTime, out var start)) Consider(NextAt(start));
+            if (TryParseScheduleTime(schedule.StopTime, out var stop)) Consider(NextAt(stop));
+            if (schedule.RepeatEveryMinutes is { } interval && schedule.LastRunAt is { } lastRun &&
+                lastRun + TimeSpan.FromMinutes(interval) is var repeat && repeat > localNow)
+                Consider(repeat);
+        }
+
+        // A start at host startup that a stop time held back goes when that stop's day ends (as the evaluation reads it).
+        if (_startupSchedulesPending.Count > 0) Consider(At(today.AddDays(1), TimeOnly.MinValue));
+
+        foreach (var runtime in _jobs.Values)
+        {
+            if (runtime.Job.QueueRetryAt is not { } retryAt || !runtime.Job.IsQueued ||
+                !_settings.Queues.Any(queue => queue.Id == runtime.Job.QueueId && queue.IsRunning)) continue;
+            Consider(retryAt > localNow ? retryAt : localNow + SchedulerRecheck);
+        }
+
+        return best;
     }
 
     private async Task ProcessQueueRetriesAsync(DateTimeOffset now, CancellationToken cancellationToken)

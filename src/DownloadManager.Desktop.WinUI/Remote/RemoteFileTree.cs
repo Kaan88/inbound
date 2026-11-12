@@ -34,6 +34,19 @@ internal sealed class RemoteFileNode
     internal int ChoosableFiles { get; set; }
     internal int ChosenFiles { get; set; }
     internal long ChosenBytes { get; set; }
+
+    /// <summary>T3: a file's priority while it is chosen (<see cref="TorrentPriorities"/>; not chosen is Skip).</summary>
+    public string Priority { get; internal set; } = TorrentPriorities.Normal;
+
+    /// <summary>T3: the chosen files under it (itself, for a file) at Low, Normal and High.</summary>
+    internal int[] PriorityCounts { get; } = new int[3];
+
+    internal static int Bucket(string priority) => priority switch
+    {
+        TorrentPriorities.Low => 0,
+        TorrentPriorities.High => 2,
+        _ => 1,
+    };
 }
 
 /// <summary>
@@ -188,10 +201,12 @@ internal sealed class RemoteFileTree
         {
             if (!node.CanChoose || (node.ChosenFiles > 0) == chosen) return;
             var change = chosen ? 1 : -1;
+            var bucket = RemoteFileNode.Bucket(node.Priority);
             for (var at = node; at is not null; at = at.Parent)
             {
                 at.ChosenFiles += change;
                 at.ChosenBytes += change * node.Size;
+                at.PriorityCounts[bucket] += change;
             }
 
             return;
@@ -199,6 +214,67 @@ internal sealed class RemoteFileTree
 
         foreach (var child in node.Children) SetChecked(child, chosen);
     }
+
+    /// <summary>
+    /// T3: a file's or a folder's priority. Skip leaves the files out; any other chooses them at that priority. What
+    /// can't be chosen stays as it is.
+    /// </summary>
+    public void SetPriority(RemoteFileNode node, string priority)
+    {
+        if (!TorrentPriorities.IsKnown(priority)) return;
+        if (node.IsFolder)
+        {
+            foreach (var child in node.Children) SetPriority(child, priority);
+            return;
+        }
+
+        if (!node.CanChoose) return;
+        if (priority == TorrentPriorities.Skip)
+        {
+            SetChecked(node, false);
+            return;
+        }
+
+        if (node.ChosenFiles > 0 && node.Priority != priority)
+        {
+            var from = RemoteFileNode.Bucket(node.Priority);
+            var to = RemoteFileNode.Bucket(priority);
+            for (var at = node; at is not null; at = at.Parent)
+            {
+                at.PriorityCounts[from]--;
+                at.PriorityCounts[to]++;
+            }
+        }
+
+        node.Priority = priority;
+        SetChecked(node, true);
+    }
+
+    /// <summary>T3: priorities by file id (a file not named stays as it is); Skip leaves a file out.</summary>
+    public void SetPriorities(IReadOnlyDictionary<string, string> priorities)
+    {
+        foreach (var file in _files)
+        {
+            if (file.FileId is { } id && priorities.TryGetValue(id, out var priority)) SetPriority(file, priority);
+        }
+    }
+
+    /// <summary>T3: a row's Priority word: a file's own (Skip when not chosen), a folder's one word, or "mixed".</summary>
+    public static string PriorityText(RemoteFileNode node)
+    {
+        if (!node.CanChoose) return string.Empty;
+        if (node.ChosenFiles == 0) return TorrentPriorities.Name(TorrentPriorities.Skip);
+        if (!node.IsFolder) return TorrentPriorities.Name(node.Priority);
+        if (node.ChosenFiles < node.ChoosableFiles) return TorrentPriorities.MixedText;
+        if (node.PriorityCounts.Count(count => count > 0) != 1) return TorrentPriorities.MixedText;
+        return TorrentPriorities.Name(node.PriorityCounts[0] > 0 ? TorrentPriorities.Low
+            : node.PriorityCounts[2] > 0 ? TorrentPriorities.High : TorrentPriorities.Normal);
+    }
+
+    /// <summary>T3: the chosen files that aren't Normal, by file id.</summary>
+    public IReadOnlyDictionary<string, string> Priorities
+        => _files.Where(file => file.ChosenFiles > 0 && file.Priority != TorrentPriorities.Normal && file.FileId is not null)
+            .ToDictionary(file => file.FileId!, file => file.Priority, StringComparer.Ordinal);
 
     public void SelectAll()
     {

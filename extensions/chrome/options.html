@@ -46,7 +46,34 @@
           <label class="check"><input type="radio" name="destinationMode" value="default" /><span>Save to the app's default folder</span></label>
           <label class="check"><input type="radio" name="destinationMode" value="ask" /><span>Ask where to save</span></label>
         </div>
-        <p class="hint indent">The default folder is the desktop app's, or the server's when downloads go to the server. "Ask where to save" asks in the extension's toolbar popup, under its icon; a small window asks instead when the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front). The folder chosen there is for that download only. The right-click menu always asks in a window.</p>
+        <p class="hint indent">The default folder is the one set below for this PC, or the server's when downloads go to the server. "Ask where to save" asks in the extension's toolbar popup, under its icon; a small window asks instead when the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front). The folder chosen there is for that download only. The right-click menu always asks in a window.</p>
+
+        <h2 class="section">Default folder for browser downloads on This PC</h2>
+        <div class="radio-group" role="radiogroup" aria-label="Default folder for browser downloads on This PC">
+          <label class="check"><input type="radio" name="browserFolderMode" value="app" /><span>The app's default folder</span></label>
+          <label class="check"><input type="radio" name="browserFolderMode" value="own" /><span>This folder</span></label>
+        </div>
+        <div class="indent">
+          <div class="destination-picker">
+            <input id="browserFolder" class="field mono" type="text" spellcheck="false" placeholder="D:\Downloads\Browser" aria-label="Default folder for browser downloads on This PC" />
+            <button id="chooseBrowserFolder" class="btn" type="button">Choose…</button>
+          </div>
+          <p class="hint">Downloads from the browser go here when they go to This PC, and the download windows call it the default folder. Downloads added in the app keep the app's default folder. The server keeps its own.</p>
+        </div>
+
+        <h2 class="section">Ask where to save starts on</h2>
+        <div class="radio-group" role="radiogroup" aria-label="Ask where to save starts on">
+          <label class="check"><input type="radio" name="askStartsOn" value="default" /><span>Default folder</span></label>
+          <label class="check"><input type="radio" name="askStartsOn" value="last" /><span>Last used folder</span></label>
+          <label class="check"><input type="radio" name="askStartsOn" value="custom" /><span>Custom folder</span></label>
+        </div>
+        <div class="indent">
+          <div class="destination-picker">
+            <input id="askStartFolder" class="field mono" type="text" spellcheck="false" placeholder="D:\Downloads\Sorting" aria-label="Custom folder to start on" />
+            <button id="chooseAskStartFolder" class="btn" type="button">Choose…</button>
+          </div>
+          <p class="hint">Where the download windows and the popup start; you can still pick any folder there. Last used remembers one folder for this PC and one for the server. Custom is a folder on this PC; the server starts on its default folder. A folder that no longer exists starts on the default folder.</p>
+        </div>
 
         <div class="form-grid compact">
           <label class="label" for="startMode">Default start</label>
@@ -100,6 +127,13 @@
           To get a code, open the server's web UI, then Settings, Sign-in and browsers, and choose Pair a browser. The code
           works once, for ten minutes.
         </p>
+        <div class="form-grid">
+          <label class="label" for="serverCustomName">Name</label>
+          <div>
+            <input id="serverCustomName" class="field" type="text" spellcheck="false" autocomplete="off" maxlength="100" placeholder="Home NAS" />
+            <p id="serverNameHint" class="hint">Shown in Send to and in the popup. Leave it empty to use the name the server gives when it is paired, or its address.</p>
+          </div>
+        </div>
         <div id="serverUnpaired">
           <div class="form-grid">
             <label class="label" for="serverAddress">Server address</label>

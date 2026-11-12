@@ -15,7 +15,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private static readonly HashSet<string> RestrictedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host", "Range", "If-Range", "Content-Length", "Transfer-Encoding",
-        "Connection", "Proxy-Connection", "Upgrade", "Expect"
+        "Connection", "Proxy-Connection", "Upgrade", "Expect",
+        // Credentials for a proxy, never for the site: with no proxy, or inside an HTTPS tunnel, a request header goes
+        // to the origin. The app's own proxy login is applied by the handler, not from the job.
+        "Proxy-Authorization",
     };
 
     private readonly EngineOptions _options;
@@ -617,7 +620,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 isRetryable: false);
         }
 
-        var responseEtag = response.Headers.ETag?.Tag;
+        var responseEtag = response.Headers.ETag?.ToString();
         var responseLastModified = response.Content.Headers.LastModified?.ToString("R");
         if (state.Bytes > 0 && ValidatorsConflict(state, responseEtag, responseLastModified))
         {
@@ -779,57 +782,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     }
 
     private static bool SiteMatches(string site, Uri uri)
-    {
-        if (string.IsNullOrWhiteSpace(site))
-        {
-            return false;
-        }
-
-        site = site.Trim();
-        string host;
-        int? port = null;
-        string path;
-        if (Uri.TryCreate(site, UriKind.Absolute, out var siteUri))
-        {
-            host = siteUri.Host;
-            port = siteUri.IsDefaultPort ? null : siteUri.Port;
-            path = siteUri.AbsolutePath;
-        }
-        else
-        {
-            var separator = site.IndexOf('/');
-            var authority = separator < 0 ? site : site[..separator];
-            path = separator < 0 ? "/" : site[separator..];
-            if (!Uri.TryCreate($"http://{authority}", UriKind.Absolute, out var authorityUri))
-            {
-                return false;
-            }
-
-            host = authorityUri.Host;
-            port = authority.Contains(':', StringComparison.Ordinal) ? authorityUri.Port : null;
-        }
-
-        if (!string.Equals(uri.Host, host, StringComparison.OrdinalIgnoreCase) &&
-            !uri.Host.EndsWith("." + host, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (port is not null && uri.Port != port.Value)
-        {
-            return false;
-        }
-
-        if (path is "" or "/")
-        {
-            return true;
-        }
-
-        var normalizedPath = path.TrimEnd('/');
-        return uri.AbsolutePath.StartsWith(normalizedPath, StringComparison.OrdinalIgnoreCase) &&
-               (uri.AbsolutePath.Length == normalizedPath.Length ||
-                uri.AbsolutePath[normalizedPath.Length] == '/');
-    }
+        => SiteLoginMatcher.Matches(site, uri, allowSubdomains: true);
 
     private static async Task<DownloadResult> ExecuteWithMediaRefreshAsync(
         Func<Task<DownloadResult>> attempt)
@@ -849,18 +802,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private static Uri MediaEntryUri(DownloadJob job)
         => new(string.IsNullOrWhiteSpace(job.ResolvedUrl) ? job.Url : job.ResolvedUrl, UriKind.Absolute);
 
-    private static bool IsHlsPlaylist(DownloadJob job)
-    {
-        if (Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
-            uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var hint = job.Description ?? string.Empty;
-        return hint.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) ||
-               hint.Contains("m3u8", StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>The address, or the content type a hand-off carried; never the user's description text.</summary>
+    private static bool IsHlsPlaylist(DownloadJob job) => StreamManifestHint.IsHls(job);
 
     private async Task<DownloadResult> ExecuteHlsAsync(
         DownloadJob job,
@@ -922,30 +865,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         Uri uri,
         CancellationToken cancellationToken)
     {
-        for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
+        var (response, finalUri) = await SendMediaRequestAsync(job, uri, null, null, cancellationToken)
+            .ConfigureAwait(false);
+        using (response)
         {
-            using var request = BuildRequest(job, uri, 0, SameAuthority(job.Url, uri));
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_options.ConnectTimeout);
-            using var response = await SendTrackedAsync(job, request, timeout.Token)
-                .ConfigureAwait(false);
             var status = (int)response.StatusCode;
-            if (status is 301 or 302 or 303 or 307 or 308)
-            {
-                var location = response.Headers.Location ??
-                               throw new DownloadEngineException(new JobFailure(
-                                   FailureKind.InvalidContent, "HLS redirect had no Location header.",
-                                   false, false, DateTimeOffset.UtcNow), isRetryable: false);
-                uri = location.IsAbsoluteUri ? location : new Uri(uri, location);
-                continue;
-            }
-
             if (status is 401 or 403 or 404 or 407 or 410)
             {
                 throw new DownloadEngineException(ClassifyHttpFailure(status, response), isRetryable: false);
             }
 
-            if (status != 200)
+            // 206 only answers the "from zero" range a resolved link always asks with.
+            if (status is not (200 or 206))
             {
                 throw new DownloadEngineException(new JobFailure(
                     FailureKind.Http,
@@ -955,21 +886,166 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     DateTimeOffset.UtcNow), isRetryable: status >= 500);
             }
 
-            var text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            if (text.Length > 4 * 1024 * 1024)
+            // Counted as it arrives: a large body must never be held whole before the size is judged.
+            if (response.Content.Headers.ContentLength is > MaxManifestBytes)
             {
-                throw new DownloadEngineException(new JobFailure(
-                    FailureKind.InvalidContent, "The HLS playlist is too large.",
-                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                throw ManifestTooLarge();
             }
 
-            return (text, uri);
+            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var memory = new MemoryStream();
+            var buffer = new byte[81_920];
+            while (true)
+            {
+                var read = await ReadMediaAsync(body, buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (memory.Length + read > MaxManifestBytes)
+                {
+                    throw ManifestTooLarge();
+                }
+
+                memory.Write(buffer, 0, read);
+            }
+
+            memory.Position = 0;
+            using var reader = new StreamReader(memory, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return (await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false), finalUri);
         }
 
-        throw new DownloadEngineException(new JobFailure(
-            FailureKind.InvalidContent, "Too many HLS playlist redirects.",
+        static DownloadEngineException ManifestTooLarge() => new(new JobFailure(
+            FailureKind.InvalidContent, "The HLS playlist is too large.",
             false, false, DateTimeOffset.UtcNow), isRetryable: false);
     }
+
+    /// <summary>The largest playlist or manifest read. Its text is held in memory, so more is refused as it arrives.</summary>
+    private const int MaxManifestBytes = 4 * 1024 * 1024;
+
+    /// <summary>The most fragments one track may have. A 24-hour stream of 2-second fragments has 43,200.</summary>
+    private const int MaxMediaSegments = 200_000;
+
+    /// <summary>The largest DASH segment index (SIDX) read into memory.</summary>
+    private const long MaxDashIndexBytes = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// One request of a playlist, manifest, key or fragment. It follows redirects itself (the handler doesn't), and for
+    /// every hop applies what <see cref="SendWithRedirectsAsync"/> applies: http and https only, the local-network
+    /// rule, credentials only to the job's own origin, and no step down to http for a resolved link. Only the headers
+    /// are waited for here, for at most the connect timeout; the body is read with <see cref="ReadMediaAsync"/>.
+    /// </summary>
+    private async Task<(HttpResponseMessage Response, Uri FinalUri)> SendMediaRequestAsync(
+        DownloadJob job,
+        Uri uri,
+        long? rangeStart,
+        long? rangeEnd,
+        CancellationToken cancellationToken)
+    {
+        var current = uri;
+        for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
+        {
+            if (current.Scheme is not ("http" or "https"))
+            {
+                throw new DownloadEngineException(
+                    new JobFailure(FailureKind.Forbidden, "The media address uses an unsupported scheme.", false, false, DateTimeOffset.UtcNow),
+                    isRetryable: false);
+            }
+
+            if ((!_options.AllowLocalNetwork || job.PublicNetworkOnly) && NetworkAddresses.IsLocalTarget(current))
+            {
+                throw new DownloadEngineException(
+                    new JobFailure(FailureKind.Forbidden, LocalNetworkRefused, false, false, DateTimeOffset.UtcNow),
+                    isRetryable: false);
+            }
+
+            using var request = BuildRequest(
+                job, current, rangeStart ?? 0, SameAuthority(job.Url, current), rangeEnd, includeValidators: false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_options.ConnectTimeout);
+            HttpResponseMessage response;
+            try
+            {
+                response = await SendTrackedAsync(job, request, timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new DownloadEngineException(
+                    new JobFailure(FailureKind.Timeout, "The connection attempt timed out.", true, true, DateTimeOffset.UtcNow),
+                    isRetryable: true);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw ToEngineException(ex);
+            }
+
+            if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect
+                or HttpStatusCode.RedirectMethod or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
+            {
+                var location = response.Headers.Location;
+                response.Dispose();
+                if (location is null)
+                {
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Http, "The redirect response has no Location header.", false, false, DateTimeOffset.UtcNow),
+                        isRetryable: false);
+                }
+
+                var next = location.IsAbsoluteUri ? location : new Uri(current, location);
+                // A resolved link holds an account key, which a plain http request would send in the open.
+                if (job.ResolvedUrl is not null && current.Scheme == Uri.UriSchemeHttps && next.Scheme == Uri.UriSchemeHttp && !next.IsLoopback)
+                {
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Http,
+                            "The media server redirected to an unencrypted address. The link holds your account key, so it wasn't followed.",
+                            false, true, DateTimeOffset.UtcNow),
+                        isRetryable: false);
+                }
+
+                current = next;
+                continue;
+            }
+
+            return (response, current);
+        }
+
+        throw new DownloadEngineException(
+            new JobFailure(FailureKind.Http, "Too many redirects.", false, false, DateTimeOffset.UtcNow),
+            isRetryable: false);
+    }
+
+    /// <summary>
+    /// One read of a media response. The read timeout applies to each read, as on the plain HTTP path, so a slow but
+    /// moving fragment of any size completes; a stall or a dropped connection is a retryable failure, not a cancel.
+    /// </summary>
+    private async Task<int> ReadMediaAsync(Stream stream, Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await stream.ReadAsync(buffer, cancellationToken)
+                .AsTask()
+                .WaitAsync(_options.ReadTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Timeout, "The connection stalled while reading.", true, true, DateTimeOffset.UtcNow),
+                isRetryable: true, inner: ex);
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException && !cancellationToken.IsCancellationRequested)
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Network, "The connection was lost while reading.", true, true, DateTimeOffset.UtcNow),
+                isRetryable: true, inner: ex);
+        }
+    }
+
+    /// <summary>What a fragment or key request may try again: a network or server fault, never a file or content one.</summary>
+    private static bool IsTransientMediaFailure(Exception ex, CancellationToken cancellationToken)
+        => !cancellationToken.IsCancellationRequested &&
+           ex is DownloadEngineException { IsRetryable: true } or HttpRequestException or TimeoutException or OperationCanceledException;
 
     private static HlsMasterSelection? SelectHlsMaster(string playlist, Uri baseUri)
     {
@@ -1010,17 +1086,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 continue;
             }
 
-            var bandwidth = 0L;
-            foreach (var attribute in line["#EXT-X-STREAM-INF:".Length..].Split(','))
-            {
-                var pair = attribute.Split('=', 2);
-                if (pair.Length == 2 && pair[0].Trim().Equals("BANDWIDTH", StringComparison.OrdinalIgnoreCase))
-                {
-                    long.TryParse(pair[1].Trim(), out bandwidth);
-                }
-            }
-
-            var audioGroup = ExtractAttribute(line, "AUDIO");
+            var streamAttributes = ParseHlsAttributes(line);
+            var bandwidth = ParseLong(streamAttributes.GetValueOrDefault("BANDWIDTH"));
+            var audioGroup = streamAttributes.GetValueOrDefault("AUDIO");
             for (var j = i + 1; j < lines.Length; j++)
             {
                 var candidate = lines[j].Trim();
@@ -1078,7 +1146,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                                   segment.Uri.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
         return await AssembleMediaSegmentsAsync(
             job,
-            media.InitUri is null ? null : new MediaSegment(media.InitUri, null, null),
+            media.Init,
             media.Segments,
             isFragmentedMp4 ? ".mp4" : ".ts",
             isFragmentedMp4 ? "video/mp4" : "video/mp2t",
@@ -1095,7 +1163,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         Uri playlistUri,
         CancellationToken cancellationToken)
     {
-        Uri? initUri = null;
+        ParsedHlsSegment? parsedInit = null;
         var parsedSegments = new List<ParsedHlsSegment>();
         var hasEndList = false;
         long mediaSequence = 0;
@@ -1188,11 +1256,38 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             if (line.StartsWith("#EXT-X-MAP:", StringComparison.OrdinalIgnoreCase))
             {
                 var uriValue = ExtractAttribute(line, "URI");
-                if (uriValue is not null && Uri.TryCreate(playlistUri, uriValue, out var mapUri))
+                if (uriValue is null || !Uri.TryCreate(playlistUri, uriValue, out var mapUri))
                 {
-                    initUri = mapUri;
+                    continue;
                 }
 
+                if (ExtractAttribute(line, "BYTERANGE") is not null)
+                {
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.InvalidContent,
+                        "HLS byte-range initialization sections are not supported yet.",
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                }
+
+                // One file holds one initialization section; a second, different one would need a second file.
+                if (parsedInit is not null)
+                {
+                    if (string.Equals(parsedInit.Uri.AbsoluteUri, mapUri.AbsoluteUri, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.InvalidContent,
+                        "HLS playlists that change their initialization section (EXT-X-MAP) are not supported.",
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                }
+
+                // A key in effect encrypts the initialization section too, and RFC 8216 then requires the key to name
+                // an IV. Without one the section can only be taken as clear, as it was before keys applied to it.
+                parsedInit = currentKeyUri is not null && currentIv is not null
+                    ? new ParsedHlsSegment(mapUri, currentKeyUri, currentIv)
+                    : new ParsedHlsSegment(mapUri, null, new byte[16]);
                 continue;
             }
 
@@ -1230,14 +1325,22 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 false, false, DateTimeOffset.UtcNow), isRetryable: false);
         }
 
+        if (parsedSegments.Count > MaxMediaSegments)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent, "The HLS media playlist has too many segments.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+
+        // By the whole address: rotating keys often differ only in the query (key?id=1, key?id=2). The checkpoint
+        // signature ignores the query on purpose (tokens rotate); this must not.
         var keyCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        var segments = new List<MediaSegment>(parsedSegments.Count);
-        foreach (var parsed in parsedSegments)
+        async Task<MediaSegment> Resolve(ParsedHlsSegment parsed)
         {
             byte[]? key = null;
             if (parsed.KeyUri is not null)
             {
-                var keyId = parsed.KeyUri.GetLeftPart(UriPartial.Path);
+                var keyId = parsed.KeyUri.AbsoluteUri;
                 if (!keyCache.TryGetValue(keyId, out key))
                 {
                     key = await DownloadHlsKeyAsync(job, parsed.KeyUri, cancellationToken)
@@ -1246,13 +1349,17 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 }
             }
 
-            segments.Add(new MediaSegment(
-                parsed.Uri,
-                key,
-                parsed.KeyUri is null ? null : parsed.Iv));
+            return new MediaSegment(parsed.Uri, key, parsed.KeyUri is null ? null : parsed.Iv);
         }
 
-        return new HlsMediaPlaylist(initUri, segments);
+        var init = parsedInit is null ? null : await Resolve(parsedInit).ConfigureAwait(false);
+        var segments = new List<MediaSegment>(parsedSegments.Count);
+        foreach (var parsed in parsedSegments)
+        {
+            segments.Add(await Resolve(parsed).ConfigureAwait(false));
+        }
+
+        return new HlsMediaPlaylist(init, segments);
     }
 
     private async Task<DownloadResult> DownloadHlsMuxedAsync(
@@ -1291,7 +1398,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                video.InitUri is null ? null : new MediaSegment(video.InitUri, null, null),
+                video.Init,
                 video.Segments,
                 videoSignature,
                 videoPath,
@@ -1302,7 +1409,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 cancellationToken).ConfigureAwait(false);
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                audio.InitUri is null ? null : new MediaSegment(audio.InitUri, null, null),
+                audio.Init,
                 audio.Segments,
                 audioSignature,
                 audioPath,
@@ -1347,6 +1454,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
 
             var finalBytes = new FileInfo(job.FinalFilePath).Length;
+            DeleteFileQuietly(videoPath);
+            DeleteFileQuietly(audioPath);
             progress?.Report(new TransferProgress(finalBytes, finalBytes, 0, TimeSpan.Zero, 0, "Completed"));
             return DownloadResult.Ok(finalBytes, finalBytes, job.FinalFilePath, null, null, "video/mp4");
         }
@@ -1366,8 +1475,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
         finally
         {
-            DeleteFileQuietly(videoPath);
-            DeleteFileQuietly(audioPath);
+            // The tracks stay with their checkpoints until the job completes or is removed (the Runtime deletes
+            // them then), so a pause, a network failure or a missing FFmpeg costs only the mux, not the download.
             DeleteFileQuietly(muxPath);
         }
     }
@@ -1424,7 +1533,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var progressState = new HlsProgressState();
+        var progressState = new HlsProgressState(job);
         try
         {
             await using (var part = new FileStream(
@@ -1454,7 +1563,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     received += await DownloadHlsSegmentAsync(
                         job, segments[i], part, received, progress, stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
-                    await part.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    await FlushToDiskAsync(part, cancellationToken).ConfigureAwait(false);
                     if (_mediaCheckpoints is not null)
                     {
                         await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
@@ -1510,10 +1619,15 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// Fetches one fragment and writes it at <paramref name="output"/>'s position, decrypting AES-128 as it arrives.
+    /// Each attempt starts again from where the fragment began: a retry after a dropped connection must replace the
+    /// bytes the failed attempt wrote, never follow them. Returns the bytes the fragment added to the file.
+    /// </summary>
     private async Task<long> DownloadHlsSegmentAsync(
         DownloadJob job,
         MediaSegment segment,
-        Stream output,
+        FileStream output,
         long alreadyReceived,
         IProgress<TransferProgress>? progress,
         Stopwatch stopwatch,
@@ -1521,8 +1635,15 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         string phase,
         CancellationToken cancellationToken)
     {
+        var fragmentStart = output.Position;
         for (var attempt = 1; ; attempt++)
         {
+            if (output.Length != fragmentStart)
+            {
+                output.SetLength(fragmentStart);
+            }
+
+            output.Position = fragmentStart;
             try
             {
                 var segmentUri = segment.Uri;
@@ -1531,76 +1652,69 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 var expectedRangeLength = rangeEnd is null
                     ? (long?)null
                     : rangeEnd.Value - rangeStart + 1;
-                using var request = BuildRequest(
-                    job, segmentUri, rangeStart, SameAuthority(job.Url, segmentUri), rangeEnd,
-                    includeValidators: false);
                 // A media job fetches one fragment at a time, so this is one connection per job under the
-                // host's cap. Taken before the timeout starts: waiting for a turn is not a slow server.
+                // host's cap. Taken before the request: waiting for a turn is not a slow server.
                 using var hostSlot = await _hostLimiter.AcquireAsync(segmentUri.Host, job.Id, yieldable: false, cancellationToken)
                     .ConfigureAwait(false);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(_options.ReadTimeout);
-                using var response = await SendTrackedAsync(job, request, timeout.Token)
-                    .ConfigureAwait(false);
-                var status = (int)response.StatusCode;
-                if (status is 401 or 403 or 404 or 407 or 410)
+                var (response, _) = await SendMediaRequestAsync(
+                    job, segmentUri, segment.RangeStart, rangeEnd, cancellationToken).ConfigureAwait(false);
+                using (response)
                 {
-                    throw new DownloadEngineException(ClassifyHttpFailure(status, response), isRetryable: false);
-                }
-
-                if (status is < 200 or >= 300)
-                {
-                    if (status >= 500 && attempt < _options.MaxAttempts)
+                    var status = (int)response.StatusCode;
+                    if (status is 401 or 403 or 404 or 407 or 410)
                     {
-                        // Not this job's connection while it only waits.
-                        hostSlot.Dispose();
-                        await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
-                            .ConfigureAwait(false);
-                        continue;
+                        throw new DownloadEngineException(ClassifyHttpFailure(status, response), isRetryable: false);
                     }
 
-                    throw new DownloadEngineException(new JobFailure(
-                        FailureKind.Http, $"HLS segment returned HTTP {status}.",
-                        status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
-                }
-
-                var buffer = new byte[_options.BufferSize];
-                var segmentBytes = 0L;
-                await using var segmentStream = await response.Content.ReadAsStreamAsync(timeout.Token)
-                    .ConfigureAwait(false);
-                if (status == 200 && rangeStart > 0)
-                {
-                    var remaining = rangeStart;
-                    while (remaining > 0)
+                    if (status is < 200 or >= 300)
                     {
-                        var read = await segmentStream.ReadAsync(
-                            buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), timeout.Token)
-                            .ConfigureAwait(false);
-                        if (read == 0)
+                        var transient = status >= 500 || status is 408 or 425 or 429;
+                        throw new DownloadEngineException(new JobFailure(
+                            FailureKind.Http, $"HLS segment returned HTTP {status}.",
+                            transient, false, DateTimeOffset.UtcNow, status), isRetryable: transient, RetryAfterOf(response));
+                    }
+
+                    var buffer = new byte[_options.BufferSize];
+                    var networkBytes = 0L;
+                    var payloadBytes = 0L;
+                    await using var segmentStream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    if (status == 200 && rangeStart > 0)
+                    {
+                        var remaining = rangeStart;
+                        while (remaining > 0)
                         {
-                            throw new DownloadEngineException(new JobFailure(
-                                FailureKind.InvalidContent,
-                                "The media server ignored the byte range and ended early.",
-                                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                            var read = await ReadMediaAsync(
+                                segmentStream, buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken)
+                                .ConfigureAwait(false);
+                            if (read == 0)
+                            {
+                                throw new DownloadEngineException(new JobFailure(
+                                    FailureKind.InvalidContent,
+                                    "The media server ignored the byte range and ended early.",
+                                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                            }
+
+                            remaining -= read;
+                            networkBytes += read;
                         }
-
-                        remaining -= read;
                     }
-                }
 
-                if (segment.Key is null)
-                {
+                    using var decrypting = segment.Key is null
+                        ? null
+                        : new HlsDecryptingWriter(output, segment.Key, segment.Iv ?? new byte[16], buffer.Length);
                     while (true)
                     {
-                        var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                        var read = await ReadMediaAsync(segmentStream, buffer, cancellationToken).ConfigureAwait(false);
                         if (read == 0)
                         {
                             break;
                         }
 
+                        networkBytes += read;
                         if (expectedRangeLength is { } wanted)
                         {
-                            var allowed = (int)Math.Min(read, wanted - segmentBytes);
+                            var allowed = (int)Math.Min(read, wanted - payloadBytes);
                             if (allowed <= 0)
                             {
                                 break;
@@ -1609,85 +1723,66 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             read = allowed;
                         }
 
-                        await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
-                            .ConfigureAwait(false);
-                        segmentBytes += read;
+                        // The job's own limit and the one all downloads share, as on the plain HTTP path.
+                        await progressState.RateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
+                        await SharedRateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
+                        if (decrypting is null)
+                        {
+                            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await decrypting.WriteAsync(buffer, read, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        payloadBytes += read;
+
+                        // Encrypted bytes reach the file a block behind, so the count never runs ahead of the final figure.
                         var now = DateTimeOffset.UtcNow;
                         if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
                         {
                             progressState.LastReport = now;
-                            var bytes = alreadyReceived + segmentBytes;
+                            var bytes = alreadyReceived + (output.Position - fragmentStart);
                             var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-                            progress?.Report(new TransferProgress(
-                                bytes, null, speed, null, 1, phase));
+                            progress?.Report(new TransferProgress(bytes, null, speed, null, 1, phase));
                         }
                     }
-                }
-                else
-                {
-                    using var encrypted = new MemoryStream();
-                    while (true)
+
+                    // A response that ends short without an error is a dropped connection too.
+                    if (expectedRangeLength is null &&
+                        response.Content.Headers.ContentLength is { } declared && networkBytes < declared)
                     {
-                        var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
-                        if (read == 0)
-                        {
-                            break;
-                        }
-
-                        if (expectedRangeLength is { } wanted)
-                        {
-                            var allowed = (int)Math.Min(read, wanted - encrypted.Length);
-                            if (allowed <= 0)
-                            {
-                                break;
-                            }
-
-                            read = allowed;
-                        }
-
-                        encrypted.Write(buffer, 0, read);
-
-                        // The segment is decrypted only once it is whole, so report while it arrives too: a long
-                        // segment would otherwise go quiet for its whole download. The count is what is surely
-                        // plaintext (padding is at most one block), so it never runs ahead of the final figure.
-                        var now = DateTimeOffset.UtcNow;
-                        if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
-                        {
-                            progressState.LastReport = now;
-                            var arrived = alreadyReceived + Math.Max(0, encrypted.Length - 16);
-                            var arrivalSpeed = arrived / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-                            progress?.Report(new TransferProgress(arrived, null, arrivalSpeed, null, 1, phase));
-                        }
+                        throw new DownloadEngineException(new JobFailure(
+                            FailureKind.Network, "The connection ended before all response bytes arrived.",
+                            true, true, DateTimeOffset.UtcNow), isRetryable: true);
                     }
 
-                    var plain = DecryptHlsSegment(
-                        encrypted.ToArray(), segment.Key, segment.Iv ?? new byte[16]);
-                    await output.WriteAsync(plain, cancellationToken).ConfigureAwait(false);
-                    segmentBytes = plain.LongLength;
+                    if (expectedRangeLength is { } wantedTotal && payloadBytes != wantedTotal)
+                    {
+                        throw new DownloadEngineException(new JobFailure(
+                            FailureKind.InvalidContent,
+                            $"The media byte range returned {payloadBytes} of {wantedTotal} bytes.",
+                            false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                    }
+
+                    if (decrypting is not null)
+                    {
+                        await decrypting.CompleteAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var segmentBytes = output.Position - fragmentStart;
                     progressState.LastReport = DateTimeOffset.UtcNow;
-                    var bytes = alreadyReceived + segmentBytes;
-                    var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-                    progress?.Report(new TransferProgress(bytes, null, speed, null, 1, phase));
+                    var total = alreadyReceived + segmentBytes;
+                    progress?.Report(new TransferProgress(
+                        total, null, total / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds), null, 1, phase));
+                    return segmentBytes;
                 }
-
-                if (segment.Key is null &&
-                    expectedRangeLength is { } wantedTotal &&
-                    segmentBytes != wantedTotal)
-                {
-                    throw new DownloadEngineException(new JobFailure(
-                        FailureKind.InvalidContent,
-                        $"The media byte range returned {segmentBytes} of {wantedTotal} bytes.",
-                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
-                }
-
-                return segmentBytes;
             }
-            catch (Exception ex) when (
-                attempt < _options.MaxAttempts &&
-                (ex is IOException or HttpRequestException or TaskCanceledException) &&
-                !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (attempt < _options.MaxAttempts && IsTransientMediaFailure(ex, cancellationToken))
             {
-                await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(
+                        RetryPolicy.Delay(attempt, _options, (ex as DownloadEngineException)?.RetryAfter), cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
     }
@@ -1701,82 +1796,165 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             try
             {
-                using var request = BuildRequest(job, keyUri, 0, SameAuthority(job.Url, keyUri));
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(_options.ReadTimeout);
-                using var response = await SendTrackedAsync(job, request, timeout.Token)
+                var (response, _) = await SendMediaRequestAsync(job, keyUri, null, null, cancellationToken)
                     .ConfigureAwait(false);
-                var status = (int)response.StatusCode;
-                if (status is 401 or 403 or 404 or 407 or 410)
+                using (response)
                 {
-                    throw new DownloadEngineException(
-                        ClassifyHttpFailure(status, response), isRetryable: false);
-                }
-
-                if (status is < 200 or >= 300)
-                {
-                    if (status >= 500 && attempt < _options.MaxAttempts)
+                    var status = (int)response.StatusCode;
+                    if (status is 401 or 403 or 404 or 407 or 410)
                     {
-                        await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
-                            .ConfigureAwait(false);
-                        continue;
+                        throw new DownloadEngineException(
+                            ClassifyHttpFailure(status, response), isRetryable: false);
                     }
 
-                    throw new DownloadEngineException(new JobFailure(
-                        FailureKind.Http, $"HLS key returned HTTP {status}.",
-                        status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
-                }
+                    if (status is < 200 or >= 300)
+                    {
+                        var transient = status >= 500 || status is 408 or 425 or 429;
+                        throw new DownloadEngineException(new JobFailure(
+                            FailureKind.Http, $"HLS key returned HTTP {status}.",
+                            transient, false, DateTimeOffset.UtcNow, status), isRetryable: transient, RetryAfterOf(response));
+                    }
 
-                var key = await response.Content.ReadAsByteArrayAsync(timeout.Token)
-                    .ConfigureAwait(false);
-                if (key.Length != 16)
-                {
-                    throw new DownloadEngineException(new JobFailure(
-                        FailureKind.InvalidContent,
-                        $"The HLS AES-128 key must be 16 bytes (got {key.Length}).",
-                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
-                }
+                    // A key is 16 bytes: anything longer is refused once a 17th byte arrives, not after it is all held.
+                    if (response.Content.Headers.ContentLength is { } declared && declared != 16)
+                    {
+                        throw InvalidKeyLength(declared);
+                    }
 
-                return key;
+                    await using var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                    var key = new byte[17];
+                    var length = 0;
+                    while (length < key.Length)
+                    {
+                        var read = await ReadMediaAsync(body, key.AsMemory(length), cancellationToken).ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        length += read;
+                    }
+
+                    if (length != 16)
+                    {
+                        throw InvalidKeyLength(length);
+                    }
+
+                    return key[..16];
+                }
             }
-            catch (Exception ex) when (
-                attempt < _options.MaxAttempts &&
-                (ex is IOException or HttpRequestException or TaskCanceledException) &&
-                !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (attempt < _options.MaxAttempts && IsTransientMediaFailure(ex, cancellationToken))
             {
-                await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                await Task.Delay(
+                        RetryPolicy.Delay(attempt, _options, (ex as DownloadEngineException)?.RetryAfter), cancellationToken)
                     .ConfigureAwait(false);
             }
         }
+
+        static DownloadEngineException InvalidKeyLength(long length) => new(new JobFailure(
+            FailureKind.InvalidContent,
+            length > 16
+                ? "The HLS AES-128 key must be 16 bytes (got more)."
+                : $"The HLS AES-128 key must be 16 bytes (got {length}).",
+            false, false, DateTimeOffset.UtcNow), isRetryable: false);
     }
 
-    private static byte[] DecryptHlsSegment(byte[] ciphertext, byte[] key, byte[] iv)
+    /// <summary>
+    /// AES-128-CBC decryption of one fragment straight into the file as the ciphertext arrives, so no fragment is
+    /// held in memory whole. Whole blocks are decrypted as they complete; the decryptor holds the last one back for the
+    /// padding, which <see cref="CompleteAsync"/> removes. Nothing is flushed on dispose: a failed attempt is
+    /// truncated away by its caller.
+    /// </summary>
+    private sealed class HlsDecryptingWriter : IDisposable
     {
-        if (key.Length != 16 || iv.Length != 16)
+        private const int Block = 16;
+        private readonly Stream _output;
+        private readonly Aes _aes;
+        private readonly ICryptoTransform _decryptor;
+        private readonly byte[] _pending = new byte[Block];
+        private readonly byte[] _plain;
+        private int _pendingCount;
+
+        public HlsDecryptingWriter(Stream output, byte[] key, byte[] iv, int maxChunk)
         {
-            throw new DownloadEngineException(new JobFailure(
-                FailureKind.InvalidContent,
-                "The HLS AES-128 key or IV has an invalid length.",
-                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+            if (key.Length != Block || iv.Length != Block)
+            {
+                throw new DownloadEngineException(new JobFailure(
+                    FailureKind.InvalidContent,
+                    "The HLS AES-128 key or IV has an invalid length.",
+                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
+            }
+
+            _output = output;
+            _aes = Aes.Create();
+            _aes.KeySize = 128;
+            _aes.Mode = CipherMode.CBC;
+            _aes.Padding = PaddingMode.PKCS7;
+            _aes.Key = key;
+            _aes.IV = iv;
+            _decryptor = _aes.CreateDecryptor();
+            _plain = new byte[maxChunk + 2 * Block];
         }
 
-        try
+        public async Task WriteAsync(byte[] data, int count, CancellationToken cancellationToken)
         {
-            using var aes = Aes.Create();
-            aes.KeySize = 128;
-            aes.Mode = CipherMode.CBC;
-            aes.Padding = PaddingMode.PKCS7;
-            aes.Key = key;
-            aes.IV = iv;
-            using var decryptor = aes.CreateDecryptor();
-            return decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+            var offset = 0;
+            if (_pendingCount > 0)
+            {
+                var take = Math.Min(Block - _pendingCount, count);
+                Buffer.BlockCopy(data, 0, _pending, _pendingCount, take);
+                _pendingCount += take;
+                offset = take;
+                if (_pendingCount < Block)
+                {
+                    return;
+                }
+
+                await EmitAsync(_decryptor.TransformBlock(_pending, 0, Block, _plain, 0), cancellationToken).ConfigureAwait(false);
+                _pendingCount = 0;
+            }
+
+            var whole = (count - offset) / Block * Block;
+            if (whole > 0)
+            {
+                await EmitAsync(_decryptor.TransformBlock(data, offset, whole, _plain, 0), cancellationToken).ConfigureAwait(false);
+                offset += whole;
+            }
+
+            _pendingCount = count - offset;
+            Buffer.BlockCopy(data, offset, _pending, 0, _pendingCount);
         }
-        catch (CryptographicException ex)
+
+        public async Task CompleteAsync(CancellationToken cancellationToken)
         {
-            throw new DownloadEngineException(new JobFailure(
-                FailureKind.InvalidContent,
-                $"HLS AES-128 decryption failed: {ex.Message}",
-                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+            byte[] last;
+            try
+            {
+                if (_pendingCount != 0)
+                {
+                    throw new CryptographicException("The ciphertext is not a whole number of blocks.");
+                }
+
+                last = _decryptor.TransformFinalBlock(_pending, 0, 0);
+            }
+            catch (CryptographicException ex)
+            {
+                throw new DownloadEngineException(new JobFailure(
+                    FailureKind.InvalidContent,
+                    $"HLS AES-128 decryption failed: {ex.Message}",
+                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
+            }
+
+            await _output.WriteAsync(last, cancellationToken).ConfigureAwait(false);
+        }
+
+        private Task EmitAsync(int count, CancellationToken cancellationToken)
+            => count == 0 ? Task.CompletedTask : _output.WriteAsync(_plain, 0, count, cancellationToken);
+
+        public void Dispose()
+        {
+            _decryptor.Dispose();
+            _aes.Dispose();
         }
     }
 
@@ -1840,23 +2018,62 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     }
 
     private static string? ExtractAttribute(string line, string name)
+        => ParseHlsAttributes(line).GetValueOrDefault(name);
+
+    /// <summary>
+    /// The attribute list of a tag line (after its first ':'), split as RFC 8216 4.2 says: NAME=value pairs separated
+    /// by commas, where a quoted value may itself hold commas and '=' (a key URI's query, CODECS="a,b"). A name is
+    /// matched whole, so IV never matches inside another attribute's value.
+    /// </summary>
+    private static Dictionary<string, string> ParseHlsAttributes(string line)
     {
-        var marker = name + "=";
-        var index = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (index < 0)
+        var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var colon = line.IndexOf(':');
+        if (colon < 0)
         {
-            return null;
+            return attributes;
         }
 
-        var value = line[(index + marker.Length)..].Trim();
-        if (value.StartsWith('"'))
+        var position = colon + 1;
+        while (position < line.Length)
         {
-            var end = value.IndexOf('"', 1);
-            return end > 0 ? value[1..end] : null;
+            var equals = line.IndexOf('=', position);
+            if (equals < 0)
+            {
+                break;
+            }
+
+            var name = line[position..equals].Trim();
+            position = equals + 1;
+            string? value;
+            if (position < line.Length && line[position] == '"')
+            {
+                var close = line.IndexOf('"', position + 1);
+                if (close < 0)
+                {
+                    break; // an unterminated quote: nothing after it can be trusted
+                }
+
+                value = line[(position + 1)..close];
+                position = close + 1;
+            }
+            else
+            {
+                var end = line.IndexOf(',', position);
+                value = line[position..(end < 0 ? line.Length : end)].Trim();
+                position = end < 0 ? line.Length : end;
+            }
+
+            if (name.Length > 0)
+            {
+                attributes.TryAdd(name, value);
+            }
+
+            var comma = line.IndexOf(',', position);
+            position = comma < 0 ? line.Length : comma + 1;
         }
 
-        var comma = value.IndexOf(',');
-        return comma >= 0 ? value[..comma] : value;
+        return attributes;
     }
 
     private static bool SameAuthority(string original, Uri current)
@@ -1866,18 +2083,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                current.GetLeftPart(UriPartial.Authority),
                StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsDashManifest(DownloadJob job)
-    {
-        if (Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
-            uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var hint = job.Description ?? string.Empty;
-        return hint.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ||
-               hint.Contains(".mpd", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsDashManifest(DownloadJob job) => StreamManifestHint.IsDash(job);
 
     private async Task<DownloadResult> ExecuteDashAsync(
         DownloadJob job,
@@ -1915,11 +2121,20 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     false, false, DateTimeOffset.UtcNow));
             }
 
-            var period = root.Elements(ns + "Period").FirstOrDefault();
+            var periods = root.Elements(ns + "Period").ToList();
+            var period = periods.FirstOrDefault();
             if (period is null)
             {
                 return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
                     FailureKind.InvalidContent, "The DASH manifest has no Period.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            // Only one Period is assembled; taking the first of several would end the file early without a word.
+            if (periods.Count > 1)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "DASH manifests with more than one Period are not supported yet.",
                     false, false, DateTimeOffset.UtcNow));
             }
 
@@ -2021,6 +2236,32 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// The end of the (only) Period in the template's timescale, counted as SegmentTimeline times are: from the
+    /// presentationTimeOffset. The Period's own duration, else the presentation's. Null when neither is given.
+    /// </summary>
+    private static long? DashPeriodEnd(XElement root, XElement period, XElement template, long timescale)
+    {
+        var text = (string?)period.Attribute("duration") ?? (string?)root.Attribute("mediaPresentationDuration");
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        TimeSpan length;
+        try
+        {
+            length = XmlConvert.ToTimeSpan(text);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+
+        var units = length.TotalSeconds * timescale + ParseLong((string?)template.Attribute("presentationTimeOffset"));
+        return units is > 0 and < 9e18 ? (long)Math.Round(units) : null;
+    }
+
     private static XElement? SelectDashRepresentation(XElement adaptation, XNamespace ns)
         => adaptation.Elements(ns + "Representation")
             .OrderByDescending(r => ParseLong((string?)r.Attribute("bandwidth")))
@@ -2086,6 +2327,11 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 return (null, "The DASH SegmentBase indexRange is invalid.");
             }
 
+            if (indexRange.Value.End - indexRange.Value.Start + 1 > MaxDashIndexBytes)
+            {
+                return (null, "The DASH SegmentBase index is too large.");
+            }
+
             byte[] indexBytes;
             try
             {
@@ -2094,8 +2340,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     new MediaSegment(baseUri, null, null, indexRange.Value.Start, indexRange.Value.End),
                     cancellationToken).ConfigureAwait(false);
             }
-            catch (DownloadEngineException ex)
+            catch (DownloadEngineException ex) when (!ex.IsRetryable)
             {
+                // A retryable fault (a stall, a dropped connection) goes up as it is, so the job can be tried again.
                 return (null, ex.Failure.Message);
             }
 
@@ -2199,8 +2446,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             long time = 0;
             var number = startNumber;
-            foreach (var s in timeline.Elements(ns + "S"))
+            var entries = timeline.Elements(ns + "S").ToList();
+            for (var entry = 0; entry < entries.Count; entry++)
             {
+                var s = entries[entry];
                 time = ParseLong((string?)s.Attribute("t"), time);
                 var step = ParseLong((string?)s.Attribute("d"));
                 if (step <= 0)
@@ -2209,6 +2458,27 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 }
 
                 var repeat = ParseLong((string?)s.Attribute("r"));
+                if (repeat < 0)
+                {
+                    // r="-1": repeat until the next entry's start, or else the end of the Period.
+                    var nextStart = entry + 1 < entries.Count
+                        ? ParseLong((string?)entries[entry + 1].Attribute("t"), -1)
+                        : -1;
+                    var end = nextStart >= 0 ? nextStart : DashPeriodEnd(root, period, template, timescale);
+                    if (end is not { } until)
+                    {
+                        return (null, "The DASH SegmentTimeline repeats to an end the manifest does not give.");
+                    }
+
+                    var span = (decimal)until - time;
+                    repeat = span <= 0 ? 0 : (long)Math.Min(MaxMediaSegments, Math.Ceiling(span / step) - 1);
+                }
+
+                if (repeat >= MaxMediaSegments - segments.Count)
+                {
+                    return (null, "The DASH manifest has too many segments.");
+                }
+
                 for (var i = 0; i <= repeat; i++)
                 {
                     var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
@@ -2242,7 +2512,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
 
             var segmentSeconds = duration / (double)timescale;
-            var count = (int)Math.Ceiling(totalDuration.TotalSeconds / Math.Max(0.001, segmentSeconds));
+            var exactCount = Math.Ceiling(totalDuration.TotalSeconds / Math.Max(0.001, segmentSeconds));
+            if (exactCount > MaxMediaSegments)
+            {
+                return (null, "The DASH manifest has too many segments.");
+            }
+
+            var count = (int)exactCount;
             for (var i = 0; i < count; i++)
             {
                 var number = startNumber + i;
@@ -2265,6 +2541,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             ComputeMediaSignature("dash", init, segments)), null);
     }
 
+    /// <summary>A DASH segment index range, read into memory. Callers bound its length by <see cref="MaxDashIndexBytes"/>.</summary>
     private async Task<byte[]> DownloadDashRangeAsync(
         DownloadJob job,
         MediaSegment segment,
@@ -2273,16 +2550,12 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         var start = segment.RangeStart ?? 0;
         var end = segment.RangeEnd;
         var expectedLength = end is null ? (long?)null : end.Value - start + 1;
-        using var request = BuildRequest(
-            job, segment.Uri, start, SameAuthority(job.Url, segment.Uri), end,
-            includeValidators: false);
         // As for HLS fragments: one at a time per job, under the host's cap.
         using var hostSlot = await _hostLimiter.AcquireAsync(segment.Uri.Host, job.Id, yieldable: false, cancellationToken)
             .ConfigureAwait(false);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_options.ReadTimeout);
-        using var response = await SendTrackedAsync(job, request, timeout.Token)
+        var (response, _) = await SendMediaRequestAsync(job, segment.Uri, segment.RangeStart, end, cancellationToken)
             .ConfigureAwait(false);
+        using var ownedResponse = response;
         var status = (int)response.StatusCode;
         if (status is 401 or 403 or 404 or 407 or 410)
         {
@@ -2297,7 +2570,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token)
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
             .ConfigureAwait(false);
         var buffer = new byte[81_920];
         if (status == 200 && start > 0)
@@ -2305,8 +2578,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             var remaining = start;
             while (remaining > 0)
             {
-                var read = await stream.ReadAsync(
-                    buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), timeout.Token)
+                var read = await ReadMediaAsync(
+                    stream, buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken)
                     .ConfigureAwait(false);
                 if (read == 0)
                 {
@@ -2320,43 +2593,26 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
         }
 
+        var limit = expectedLength ?? MaxDashIndexBytes;
         using var memory = new MemoryStream();
-        long total = 0;
-        while (true)
+        while (memory.Length < limit)
         {
-            var read = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+            var read = await ReadMediaAsync(
+                stream, buffer.AsMemory(0, (int)Math.Min(buffer.Length, limit - memory.Length)), cancellationToken)
+                .ConfigureAwait(false);
             if (read == 0)
             {
                 break;
             }
 
-            if (expectedLength is { } wanted)
-            {
-                var allowed = (int)Math.Min(read, wanted - total);
-                if (allowed <= 0)
-                {
-                    break;
-                }
-
-                memory.Write(buffer, 0, allowed);
-                total += allowed;
-                if (total >= wanted)
-                {
-                    break;
-                }
-            }
-            else
-            {
-                memory.Write(buffer, 0, read);
-                total += read;
-            }
+            memory.Write(buffer, 0, read);
         }
 
-        if (expectedLength is { } length && total != length)
+        if (expectedLength is { } length && memory.Length != length)
         {
             throw new DownloadEngineException(new JobFailure(
                 FailureKind.InvalidContent,
-                $"The DASH byte range returned {total} of {length} expected bytes.",
+                $"The DASH byte range returned {memory.Length} of {length} expected bytes.",
                 false, false, DateTimeOffset.UtcNow), isRetryable: false);
         }
 
@@ -2409,6 +2665,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         var position = headerSize;
         var version = data[position];
+        // Version/flags, reference_ID, timescale, then the two times (32 or 64 bits each), reserved and the count.
+        var fixedFields = 4 + 4 + 4 + (version == 0 ? 8 : 16) + 2 + 2;
+        if (position + fixedFields > data.Length)
+        {
+            error = "The DASH SIDX box is truncated.";
+            return false;
+        }
+
         position += 4;
         position += 4; // reference_ID
         position += 4; // timescale
@@ -2435,6 +2699,12 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         var count = (data[position] << 8) | data[position + 1];
         position += 2;
+        if (firstOffset > long.MaxValue / 2)
+        {
+            error = "The DASH SIDX first offset is out of range.";
+            return false;
+        }
+
         long next = indexEnd + 1 + (long)firstOffset;
         for (var i = 0; i < count; i++)
         {
@@ -2582,8 +2852,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
         finally
         {
-            DeleteFileQuietly(videoPath);
-            DeleteFileQuietly(audioPath);
+            // The tracks stay with their checkpoints until the job completes or is removed (the Runtime deletes
+            // them then), so a pause, a network failure or a missing FFmpeg costs only the mux, not the download.
             DeleteFileQuietly(muxPath);
         }
     }
@@ -2622,7 +2892,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var state = new HlsProgressState();
+        var state = new HlsProgressState(job);
         await using (var file = new FileStream(
                          path, received > 0 ? FileMode.Open : FileMode.Create,
                          FileAccess.Write, FileShare.Read,
@@ -2646,7 +2916,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 received += await DownloadHlsSegmentAsync(
                     job, segments[i], file, receivedBase + received,
                     progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
-                await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await FlushToDiskAsync(file, cancellationToken).ConfigureAwait(false);
                 if (_mediaCheckpoints is not null)
                 {
                     await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
@@ -2787,7 +3057,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         bool IsDefault,
         bool AutoSelect);
 
-    private sealed record HlsMediaPlaylist(Uri? InitUri, List<MediaSegment> Segments);
+    private sealed record HlsMediaPlaylist(MediaSegment? Init, List<MediaSegment> Segments)
+    {
+        public Uri? InitUri => Init?.Uri;
+    }
 
     private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
     {
@@ -3020,8 +3293,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
 
             if (!sameOrigin && (key.Equals("Cookie", StringComparison.OrdinalIgnoreCase) ||
-                               key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
-                               key.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase)))
+                               key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -3111,7 +3383,15 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         var existingBytes = checkpoint is not null && File.Exists(job.PartFilePath)
             ? new FileInfo(job.PartFilePath).Length
             : 0;
-        EnsureFreeSpace(job, plan.Total, existingBytes);
+        try
+        {
+            EnsureFreeSpace(job, plan.Total, existingBytes);
+        }
+        catch (DownloadEngineException ex)
+        {
+            // The same failure the single-stream path returns; the part and checkpoint stay for a resume.
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure, checkpoint?.CompletedBytes ?? 0, plan.Total);
+        }
 
         if (checkpoint is not null)
         {
@@ -3389,7 +3669,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             {
                 Plan = new SegmentedPlan(
                     range.Length.Value,
-                    response.Headers.ETag?.Tag,
+                    response.Headers.ETag?.ToString(),
                     response.Content.Headers.LastModified?.ToString("R"),
                     response.Content.Headers.ContentType?.ToString()),
             };
@@ -3427,8 +3707,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             {
                 if (run.Workers().Length == current.Length)
                 {
-                    // Throws the first worker's failure, as before.
-                    await all.ConfigureAwait(false);
+                    try
+                    {
+                        await all.ConfigureAwait(false);
+                    }
+                    catch when (Volatile.Read(ref run.FirstFault) is not null)
+                    {
+                        // The failure that stopped the run, not whatever its cancelled siblings threw.
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(run.FirstFault!);
+                    }
+
                     return;
                 }
 
@@ -3605,6 +3893,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                 await DownloadSegmentAsync(run, work, slot, cancellationToken).ConfigureAwait(false);
             }
+        }
+        catch (Exception ex) when (ex is SegmentFailureException or SegmentationUnsupportedException &&
+                                   !cancellationToken.IsCancellationRequested)
+        {
+            // This worker has given up for good (retries happen inside DownloadSegmentAsync), so the run
+            // fails: stop the siblings now rather than let them fetch ranges that will be thrown away.
+            Interlocked.CompareExchange(ref run.FirstFault, ex, null);
+            try { run.Cancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            throw;
         }
         finally
         {
@@ -3806,7 +4104,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             retryable: false);
                     }
 
-                    var responseEtag = response.Headers.ETag?.Tag;
+                    var responseEtag = response.Headers.ETag?.ToString();
                     var responseLastModified = response.Content.Headers.LastModified?.ToString("R");
                     if (ValidatorsConflict(job.ETag, job.LastModified, responseEtag, responseLastModified))
                     {
@@ -4271,8 +4569,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         string? responseEtag,
         string? responseLastModified)
     {
+        // Weak comparison: a validator stored before weak tags kept their "W/" (or one the server
+        // switched between weak and strong) still names the same entity.
         if (!string.IsNullOrWhiteSpace(expectedEtag) && !string.IsNullOrWhiteSpace(responseEtag) &&
-            !string.Equals(expectedEtag, responseEtag, StringComparison.Ordinal))
+            !string.Equals(OpaqueEtag(expectedEtag), OpaqueEtag(responseEtag), StringComparison.Ordinal))
         {
             return true;
         }
@@ -4284,6 +4584,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
 
         return false;
+    }
+
+    /// <summary>The entity tag without its weak marker, for a weak comparison (RFC 9110 8.8.3.2).</summary>
+    internal static string OpaqueEtag(string etag)
+    {
+        var trimmed = etag.Trim();
+        return trimmed.StartsWith("W/", StringComparison.OrdinalIgnoreCase) ? trimmed[2..] : trimmed;
     }
 
     private sealed record SegmentedPlan(
@@ -4332,6 +4639,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         public DateTimeOffset LastCheckpoint { get; set; } = DateTimeOffset.MinValue;
         public SemaphoreSlim CheckpointGate { get; } = new(1, 1);
         public CancellationTokenSource? Cancellation { get; set; }
+        /// <summary>The first failure a worker gave up on; the run reports this one, not a sibling's cancellation.</summary>
+        public Exception? FirstFault;
         public SegmentedReporter Reporter { get; set; } = null!;
         public bool FileClosed { get; set; }
         /// <summary>Whether the last flush before closing worked. If not, an older checkpoint is the honest one.</summary>
@@ -5033,7 +5342,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 return;
             }
 
-            Bytes = length;
+            // Only what the checkpoint counts is known to be flushed: bytes past it can read back as
+            // zeros after a crash, and the Runtime's truncate-to-checkpoint may not have happened.
+            Bytes = Math.Min(length, Math.Max(0, RecordedBytes));
             if (Total is > 0 && Bytes > Total)
             {
                 Bytes = Total.Value;
@@ -5066,9 +5377,12 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         public string PartPath { get; set; } = string.Empty;
     }
 
-    private sealed class HlsProgressState
+    private sealed class HlsProgressState(DownloadJob job)
     {
         public DateTimeOffset LastReport { get; set; } = DateTimeOffset.MinValue;
+
+        /// <summary>The job's own speed limit, read live as on the plain HTTP path.</summary>
+        public TransferRateLimiter RateLimiter { get; } = new(() => job.SpeedLimitBytesPerSecond);
     }
 
     private sealed record AttemptResult(bool Complete, bool RestartFromZero);

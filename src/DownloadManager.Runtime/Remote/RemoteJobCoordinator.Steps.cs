@@ -317,7 +317,8 @@ public sealed partial class RemoteJobCoordinator
                 ConsecutiveFailures = failures,
                 FailureKind = failure.Kind,
                 FailureMessage = Describe(work.Entry, failure),
-                NextCheckAt = now + wait,
+                // A refused key is refused again until it is changed (which wakes the job), Check Now, or the next start.
+                NextCheckAt = failure.Kind == RemoteFailureKind.Authentication ? null : now + wait,
             };
         }).ConfigureAwait(false);
     }
@@ -334,15 +335,14 @@ public sealed partial class RemoteJobCoordinator
         var entry = work.Entry;
         if (entry.AccountProblem() is { } accountProblem)
         {
-            // As for a job already on the provider: nothing about the job is wrong, and setting a key
-            // wakes everything. One waiting for the user's approval goes on waiting for it.
-            var later = _time.GetUtcNow() + RemoteJobRules.LongestIdlePoll;
+            // As for a job already on the provider: nothing about the job is wrong, and nothing can
+            // change until a key is set, which wakes everything. Until then it isn't looked at again.
             await UpdateAsync(record.Id, latest => latest.State is RemoteJobState.Intended or RemoteJobState.Blocked
                 ? latest with
                 {
                     FailureKind = RemoteFailureKind.Authentication,
                     FailureMessage = accountProblem,
-                    NextCheckAt = latest.ApprovalNeeded ? null : later,
+                    NextCheckAt = null,
                 }
                 : null).ConfigureAwait(false);
             return;
@@ -715,7 +715,8 @@ public sealed partial class RemoteJobCoordinator
                 {
                     FailureKind = RemoteFailureKind.Authentication,
                     FailureMessage = accountProblem,
-                    NextCheckAt = _time.GetUtcNow() + RemoteJobRules.LongestIdlePoll,
+                    // Setting a key wakes it; nothing else can.
+                    NextCheckAt = null,
                 }
                 : null).ConfigureAwait(false);
             return;
@@ -915,7 +916,8 @@ public sealed partial class RemoteJobCoordinator
                 {
                     FailureKind = RemoteFailureKind.Authentication,
                     FailureMessage = accountProblem,
-                    NextCheckAt = _time.GetUtcNow() + RemoteJobRules.LongestIdlePoll,
+                    // Setting a key wakes it; nothing else can.
+                    NextCheckAt = null,
                 }
                 : null).ConfigureAwait(false);
             return;

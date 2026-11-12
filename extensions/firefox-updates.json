@@ -3,9 +3,9 @@
     "inbound-bridge@kaan88": {
       "updates": [
         {
-          "version": "0.6.1",
-          "update_link": "https://github.com/Kaan88/inbound/releases/download/v0.6.7/inbound-bridge-0.6.1-firefox.xpi",
-          "update_hash": "sha256:ceec7e44787b0a8333df5c453a73b8c13d4fd276ac2b793bad7ea2cd5c5ec712",
+          "version": "0.6.2",
+          "update_link": "https://github.com/Kaan88/inbound/releases/download/v0.7.0/inbound-bridge-0.6.2-firefox.xpi",
+          "update_hash": "sha256:42a04c954b3d09279fc7dbfbc30f02ad71c42383578651c7987f30f5e93e8cc9",
           "applications": { "gecko": { "strict_min_version": "140.0" } }
         }
       ]

@@ -23,6 +23,7 @@ internal sealed class RemoteState : INotifyPropertyChanged
     private bool _remoteSupported;
     private bool _archivesSupported;
     private bool _uploadsOffered;
+    private bool _torrentsOffered;
     private bool _isReady;
     private bool _accountsKnown;
 
@@ -53,6 +54,9 @@ internal sealed class RemoteState : INotifyPropertyChanged
     /// (<c>POST /api/upload/...</c>). False for this PC's Host, which reads this PC's files by their path.
     /// </summary>
     public bool UploadsOffered { get => _uploadsOffered; internal set => Set(ref _uploadsOffered, value); }
+
+    /// <summary>The Host's hello lists <c>torrents</c>: it has the torrent worker and answers <c>torrent.*</c> (T1).</summary>
+    public bool TorrentsOffered { get => _torrentsOffered; internal set => Set(ref _torrentsOffered, value); }
 
     /// <summary>The first connection has been read, so the two above can be trusted.</summary>
     public bool IsReady { get => _isReady; internal set => Set(ref _isReady, value); }

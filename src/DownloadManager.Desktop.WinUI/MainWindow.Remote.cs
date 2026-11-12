@@ -48,6 +48,7 @@ public sealed partial class MainWindow
         };
         state.PropertyChanged += OnRemoteStateChanged;
         SyncRemoteEntryPoints();
+        InitializeTorrentDrop();
         InitializeAutoOpen();
     }
 
@@ -59,6 +60,8 @@ public sealed partial class MainWindow
             SyncRemoteRows();
             SyncRemoteEntryPoints();
         }
+
+        if (e.PropertyName is nameof(RemoteState.TorrentsOffered)) SyncTorrentEntryPoints();
     }
 
     private string ProviderDisplayName(string? provider)
@@ -235,9 +238,11 @@ public sealed partial class MainWindow
         var browsable = usable.Where(RemoteRules.CanBrowse).ToList();
         var torrents = usable.Any(account => account.Capabilities.Contains("torrents", StringComparer.OrdinalIgnoreCase));
         var canCheck = _remote.State.Jobs.Any(job => RemoteRules.Actions(job).CheckNow);
+        // T1: torrents downloaded here offer the same two items, with or without an account.
+        var localTorrents = LocalTorrentsApply;
 
         // This runs on every job change, and the menu may be open. It only changes when what it offers does.
-        var offers = $"{_remote.State.RemoteSupported}|{torrents}|{usable.Count}|{canCheck}|{string.Join('|', browsable.Select(account => RemoteText.ProviderName(account)))}";
+        var offers = $"{_remote.State.RemoteSupported}|{torrents}|{localTorrents}|{usable.Count}|{canCheck}|{string.Join('|', browsable.Select(account => RemoteText.ProviderName(account)))}";
         if (offers == _remoteTasksOffers) return;
         _remoteTasksOffers = offers;
         foreach (var old in _remoteTasksItems) TasksMenu.Items.Remove(old);
@@ -254,18 +259,39 @@ public sealed partial class MainWindow
             return item;
         }
 
+        if (torrents || localTorrents)
+        {
+            // An event handler: what goes wrong is logged here, as nothing above it would catch it.
+            Add("Add Magnet…", "M", async (_, _) =>
+            {
+                try
+                {
+                    await AddMagnetAsync();
+                }
+                catch (Exception ex)
+                {
+                    UiTrace.Write($"Add magnet failed: {ex.GetType().Name}");
+                }
+            });
+            Add("Import Torrent File…", "T", async (_, _) =>
+            {
+                try
+                {
+                    await ImportTorrentFilesForAnyRouteAsync();
+                }
+                catch (Exception ex)
+                {
+                    UiTrace.Write($"Import torrent file failed: {ex.GetType().Name}");
+                }
+            });
+        }
+
         // U-WL-22: the entries of a container go to a provider, so with no key the item says what it needs.
         if (usable.Count == 0)
         {
             if (_remote.State.RemoteSupported)
                 Add(RemoteText.ContainerImportItem(null), "J", (_, _) => { }, enabled: false);
             return;
-        }
-
-        if (torrents)
-        {
-            Add("Add Magnet…", "M", async (_, _) => await ShowProviderAddAsync(AddFocus.Magnet));
-            Add("Import Torrent File…", "T", async (_, _) => await ImportTorrentFilesAsync());
         }
 
         foreach (var account in browsable)
@@ -414,6 +440,7 @@ public sealed partial class MainWindow
         // A button on the row, such as the archive password key, has the focus and answers Enter itself.
         if (e.Key == Windows.System.VirtualKey.Enter && e.OriginalSource is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase) return;
         if (HandleArchiveRowKey(e)) return;
+        if (HandleTorrentPaste(e)) return;
         var jobs = SelectedRemoteJobs;
         if (jobs.Count == 0)
         {

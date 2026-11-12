@@ -13,7 +13,7 @@ import { FormGate } from "./form-gate";
 import { type OfferedTarget } from "./destination-target";
 import { fileIcon } from "./ui/icon";
 import { firstTarget, markDefaultStart, SaveForm } from "./ui/save-form";
-import type { TargetId } from "./transport";
+import { refusalText, type TargetId } from "./transport";
 
 interface AskItem {
   id: string;
@@ -253,14 +253,15 @@ export class AskPanel {
           destination: this.form.destinationToSend(),
           startMode,
           target,
-        }) as { ok?: boolean; error?: string; ack?: { accepted?: boolean; error?: string; message?: string } };
+        }) as { ok?: boolean; error?: string; ack?: { accepted?: boolean; ok?: boolean; error?: string; message?: string } };
         if (!response?.ok) {
           this.showError(response?.error || "The download could not be sent.");
           return;
         }
         if (!response.ack?.accepted) {
-          this.showError(response.ack?.error || response.ack?.message ||
-            (target === "server" ? "The Inbound server rejected this request." : "Inbound Download Manager rejected this request."));
+          // Only a refusal (ok: false) carries its reason in message; an ack's own text is never an error.
+          this.showError(refusalText(response.ack,
+            target === "server" ? "The Inbound server rejected this request." : "Inbound Download Manager rejected this request."));
           return;
         }
         // Accepted: the background took it out of the queue; the refresh below shows the next one, or the list.
@@ -291,11 +292,12 @@ export class AskPanel {
     await this.gate.pick(async () => {
       try {
         // The window starts from what is set here, not from the defaults (the target above all: its dialog opens
-        // only for This PC).
+        // only for This PC). The folder as shown: the window may start elsewhere (EXT.R10), so "the default" is
+        // not left to it.
         const draft = {
           target: this.form.target,
           fileName: this.nameInput.value.trim(),
-          destination: this.form.destinationToSend(),
+          destination: this.destinationInput.value.trim(),
         };
         const moved = await chrome.runtime.sendMessage({ type: "dm.askInWindow", id: this.currentId, pick: true, draft }) as { ok?: boolean; error?: string };
         if (!moved?.ok) {

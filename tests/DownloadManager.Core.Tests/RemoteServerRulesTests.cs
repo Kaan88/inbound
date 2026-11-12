@@ -436,6 +436,10 @@ public sealed class RemoteServerRulesTests
         Assert.Null(WindowInstance.ServerId(["--server", "..\\..\\x"]));
         Assert.Null(WindowInstance.ServerId(["--job", job.ToString()]));
 
+        // The main window finds an open progress window by the very name that window takes.
+        Assert.Equal(WindowInstance.EventName("key", false, job, null, id), WindowInstance.JobWindowName("key", job, target));
+        Assert.Equal(WindowInstance.EventName("key", false, job, null, null), WindowInstance.JobWindowName("key", job, ServerTarget.Local));
+
         var local = WindowInstance.EventName("key", update: false, job, null, null);
         var remote = WindowInstance.EventName("key", update: false, job, null, id);
         Assert.Equal($"Local\\DownloadManager.UI.Show.key.Job.{job:D}", local);

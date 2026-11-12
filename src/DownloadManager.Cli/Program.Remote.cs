@@ -671,16 +671,7 @@ internal static partial class Program
         return 0;
     }
 
-    private static async Task<T> AskAsync<T>(CliClient client, string type, object payload)
-    {
-        var reply = await client.RequestAsync(type, payload).ConfigureAwait(false);
-        if (reply.Type == MessageTypes.HostActionResult)
-        {
-            throw new InvalidOperationException(reply.GetPayload<HostActionResult>().Message ?? "The Host didn't take this command.");
-        }
-
-        return reply.GetPayload<T>();
-    }
+    private static Task<T> AskAsync<T>(CliClient client, string type, object payload) => client.AskAsync<T>(type, payload);
 
     /// <summary>A job id in full, or enough of its start to tell it from the others.</summary>
     private static async Task<Guid?> RemoteJobIdAsync(CliClient client, List<string> words, string usage)
@@ -736,7 +727,7 @@ internal static partial class Program
     /// For what goes to the screen. A provider's words can hold escape sequences, which a terminal would
     /// act on rather than show, so they could rewrite what was printed above them.
     /// </summary>
-    private static string Clean(string? text)
+    internal static string Clean(string? text)
     {
         var hidden = UrlRedactor.HideAddresses(text);
         return hidden.Any(FileNameResolver.IsDeceptiveOrControl)

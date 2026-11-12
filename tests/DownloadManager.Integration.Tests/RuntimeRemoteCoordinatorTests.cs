@@ -436,6 +436,10 @@ public sealed partial class RuntimeServiceTests
             Assert.Equal(CallerScope.OutsideJobRefused, (await web.RetryAsync(new RemoteRetryRequest { JobId = id })).Error);
             Assert.Equal(CallerScope.OutsideJobRefused, (await web.StartQueuedAsync(new RemoteJobIdRequest { JobId = id })).Error);
             Assert.Equal(CallerScope.OutsideJobRefused, (await web.SetArchivePasswordAsync(new RemoteArchivePasswordRequest { JobId = id, Password = "invented" })).Error);
+            // Report 2, M2: nor taken off the list, nor deleted on the provider for good.
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.RemoveAsync(new RemoteJobIdRequest { JobId = id })).Error);
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.DeleteRemoteAsync(new RemoteDeleteRequest { JobId = id, Confirmed = true })).Error);
+            Assert.NotNull(rig.Jobs.Find(id));
             using var pipe = new RemoteCommands(rig.Box.Registry, rig.Jobs);
             Assert.NotEqual(CallerScope.OutsideJobRefused, (await pipe.SetArchivePasswordAsync(new RemoteArchivePasswordRequest { JobId = id, Password = "invented" })).Error);
 

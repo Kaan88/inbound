@@ -205,13 +205,13 @@ public sealed partial class RuntimeServiceTests
     public async Task TheQuarantineFolderGoesOnceItIsEmpty()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        var orphan = Path.Combine(ctx.Destination, "left.bin.0123.part");
+        var orphan = Path.Combine(ctx.Destination, "left.bin.0123456789abcdef0123456789abcdef.part");
         await File.WriteAllTextAsync(orphan, "partial");
         var quarantine = Path.Combine(ctx.Destination, DownloadManagerService.OrphanQuarantineFolderName);
 
         var moved = await ctx.Service.CleanOrphanPartFilesAsync(delete: false, CancellationToken.None);
         Assert.True(moved.Ok, moved.Error);
-        var kept = Path.Combine(quarantine, "left.bin.0123.part");
+        var kept = Path.Combine(quarantine, "left.bin.0123456789abcdef0123456789abcdef.part");
         Assert.True(File.Exists(kept));
 
         // What a quarantine holds is kept for the user (P5.9): a Delete clean leaves it and its folder.

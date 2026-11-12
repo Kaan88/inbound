@@ -33,6 +33,7 @@ internal static class RemoteFileSelectionDialog
     /// <param name="load">Reads the files. Runs while the dialog is open, on its own connection.</param>
     /// <param name="laterText">Offered while the provider doesn't know the files yet, for going ahead without them. Null offers nothing.</param>
     /// <param name="laterWords">What that button does, said when there are no files to show. Null says it chooses them later.</param>
+    /// <param name="loadingText">Said while the files are read, for a list that comes from no provider (a torrent). Null names the provider.</param>
     public static async Task<RemoteFileAnswer> AskAsync(
         XamlRoot root,
         ElementTheme theme,
@@ -42,15 +43,16 @@ internal static class RemoteFileSelectionDialog
         string primaryText = "Download selected",
         string closeText = "Cancel",
         string? laterText = null,
-        string? laterWords = null)
+        string? laterWords = null,
+        string? loadingText = null)
     {
         var tree = new RemoteFileTreeView { Height = 380 };
         var busy = new ProgressRing { IsActive = true, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetName(busy, $"Asking {providerName} for the files");
+        AutomationProperties.SetName(busy, loadingText?.TrimEnd('…') ?? $"Asking {providerName} for the files");
         var status = new StatusLine("Files status");
         var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { busy, status.Text } };
         var panel = new StackPanel { Spacing = 8, MinWidth = 640, Children = { header, tree } };
-        status.Show($"Asking {providerName} for the files…");
+        status.Show(loadingText ?? $"Asking {providerName} for the files…");
 
         var dialog = new ContentDialog
         {

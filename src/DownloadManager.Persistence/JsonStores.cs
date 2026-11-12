@@ -22,6 +22,7 @@ public sealed class StoragePaths
         CorruptDirectory = Path.Combine(root, "corrupt");
         RemoteDirectory = Path.Combine(root, "remote");
         RemoteJobsDirectory = Path.Combine(RemoteDirectory, "jobs");
+        TorrentsDirectory = Path.Combine(root, "torrents");
         SettingsFile = Path.Combine(root, "settings.json");
         HistoryFile = Path.Combine(root, "history.jsonl");
     }
@@ -36,6 +37,8 @@ public sealed class StoragePaths
     public string CorruptDirectory { get; }
     public string RemoteDirectory { get; }
     public string RemoteJobsDirectory { get; }
+    /// <summary>Per torrent job: its metadata, file list and the worker's resume data. Never payload.</summary>
+    public string TorrentsDirectory { get; }
     public string SettingsFile { get; }
     public string HistoryFile { get; }
 
@@ -123,14 +126,62 @@ internal static class PersistenceJson
 
 internal static class AtomicFile
 {
-    public static async Task WriteAsync(string path, string content, CancellationToken cancellationToken)
+    /// <summary>
+    /// Deletes temporary files <see cref="WriteAsync"/> left behind when the process was killed between creating and
+    /// moving one. Only ".name.guid.tmp" files older than <paramref name="olderThan"/>, so a write in progress in
+    /// another process (the web UI bridge shares this folder) is left alone. Best effort.
+    /// </summary>
+    public static int SweepStaleTemps(string directory, TimeSpan olderThan)
+    {
+        var removed = 0;
+        try
+        {
+            if (!Directory.Exists(directory)) return 0;
+            var cutoff = DateTime.UtcNow - olderThan;
+            foreach (var file in Directory.EnumerateFiles(directory, ".*.tmp"))
+            {
+                if (!IsAtomicTemp(Path.GetFileName(file))) continue;
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) > cutoff) continue;
+                    File.Delete(file);
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Held or protected: the next start tries again.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The folder can't be listed right now.
+        }
+
+        return removed;
+    }
+
+    /// <summary>".{name}.{32 hex}.tmp", the shape <see cref="WriteAsync"/> gives its temporary files.</summary>
+    internal static bool IsAtomicTemp(string fileName)
+    {
+        if (!fileName.StartsWith('.') || !fileName.EndsWith(".tmp", StringComparison.Ordinal)) return false;
+        var stem = fileName[..^4];
+        var dot = stem.LastIndexOf('.');
+        if (dot <= 0) return false;
+        var id = stem[(dot + 1)..];
+        return id.Length == 32 && id.All(Uri.IsHexDigit);
+    }
+
+    public static Task WriteAsync(string path, string content, CancellationToken cancellationToken)
+        => WriteBytesAsync(path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content), cancellationToken);
+
+    public static async Task WriteBytesAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(path) ?? ".";
         Directory.CreateDirectory(directory);
         var temp = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content);
             await using (var stream = new FileStream(
                              temp,
                              FileMode.CreateNew,
@@ -195,7 +246,49 @@ public sealed class JsonJobStore : IJobStore
     public Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _paths.EnsureCreated();
+        var removed = 0;
+        foreach (var directory in new[]
+                 {
+                     _paths.Root, _paths.JobsDirectory, _paths.CheckpointsDirectory, _paths.MediaCheckpointsDirectory,
+                     _paths.DedupeDirectory, _paths.RemoteDirectory, _paths.RemoteJobsDirectory,
+                 })
+        {
+            removed += AtomicFile.SweepStaleTemps(directory, TimeSpan.FromMinutes(1));
+        }
+
+        if (removed > 0) _log?.Invoke($"Removed {removed} temporary file(s) left by an interrupted save.");
         return Task.CompletedTask;
+    }
+
+    private const int ReadAttempts = 4;
+
+    /// <summary>
+    /// A scanner or indexer can hold a job file for a moment; that is no reason to set the job aside.
+    /// Null when the file is gone or still can't be read, which leaves it on disk for the next start.
+    /// </summary>
+    private async Task<string?> ReadPatientlyAsync(string file, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt >= ReadAttempts)
+                {
+                    _log?.Invoke($"Could not read job '{Path.GetFileName(file)}': {ex.GetType().Name}. It stays on disk, and the next start tries again.");
+                    return null;
+                }
+
+                await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public async Task<IReadOnlyList<DownloadJob>> LoadAllAsync(CancellationToken cancellationToken = default)
@@ -205,9 +298,14 @@ public sealed class JsonJobStore : IJobStore
         foreach (var file in Directory.EnumerateFiles(_paths.JobsDirectory, "*.json"))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var json = await ReadPatientlyAsync(file, cancellationToken).ConfigureAwait(false);
+            if (json is null)
+            {
+                continue;
+            }
+
             try
             {
-                var json = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
                 var job = JsonSerializer.Deserialize<DownloadJob>(json, PersistenceJson.Options);
                 if (job is null)
                 {
@@ -228,8 +326,9 @@ public sealed class JsonJobStore : IJobStore
                 MarkLegacyPauseAsTheUsers(job, json);
                 jobs.Add(job);
             }
-            catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException)
+            catch (Exception ex) when (ex is JsonException or InvalidDataException)
             {
+                // Only content that can't be a job is set aside; a file that couldn't be read stays (above).
                 Quarantine(file);
                 _log?.Invoke($"Could not load job '{Path.GetFileName(file)}': {ex.Message}");
             }
@@ -465,7 +564,7 @@ public sealed class JsonJobStore : IJobStore
             var destination = Path.Combine(_paths.CorruptDirectory, $"{Path.GetFileName(path)}.{DateTimeOffset.UtcNow:yyyyMMddHHmmss}");
             File.Move(path, destination, overwrite: true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Keep the original in place if quarantine fails.
         }
@@ -505,8 +604,19 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
             {
                 var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
                 var checkpoint = JsonSerializer.Deserialize<DownloadCheckpoint>(json, PersistenceJson.Options);
-                if (checkpoint is null || checkpoint.JobId != jobId ||
-                    checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+                if (checkpoint is not null && checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+                {
+                    // Null would tell the transfer to start over and truncate the part; after a downgrade that costs
+                    // every partial download. Failing keeps the file and the bytes for the newer build.
+                    throw new CheckpointTooNewException(checkpoint.SchemaVersion);
+                }
+
+                if (checkpoint is null)
+                {
+                    throw new CheckpointDamagedException();
+                }
+
+                if (checkpoint.JobId != jobId)
                 {
                     return null;
                 }
@@ -515,13 +625,16 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
             }
             catch (JsonException)
             {
-                return null;
+                // Null here would truncate the part just like a missing file; atomic writes make this a damaged disk
+                // or a hand edit, which a retry won't mend. Keep the file and the bytes and say so.
+                throw new CheckpointDamagedException();
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
                 return null;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < LoadAttempts)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException &&
+                                       ex is not CheckpointUnusableException && attempt < LoadAttempts)
             {
                 await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
             }
@@ -549,6 +662,17 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
     private string PathFor(Guid jobId)
         => Path.Combine(_paths.CheckpointsDirectory, $"{jobId:N}.json");
 }
+
+/// <summary>A checkpoint written by a newer build; the part is kept for it.</summary>
+public sealed class CheckpointTooNewException(int schemaVersion)
+    : CheckpointUnusableException("This download's saved progress was written by a newer version of the app. Update the app to continue it; the downloaded part was kept.")
+{
+    public int SchemaVersion { get; } = schemaVersion;
+}
+
+/// <summary>A checkpoint whose content can't be read as one; the file and the part are kept.</summary>
+public sealed class CheckpointDamagedException()
+    : CheckpointUnusableException("This download's saved progress is damaged, so it was not started and the downloaded part was kept. To start over, delete the download and add it again.");
 
 public sealed class JsonMediaCheckpointStore : IMediaCheckpointStore
 {
@@ -658,9 +782,22 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             var json = await File.ReadAllTextAsync(_paths.SettingsFile, cancellationToken).ConfigureAwait(false);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, PersistenceJson.Options) ?? new AppSettings();
-            if (settings.SchemaVersion > AppSettings.CurrentSchemaVersion)
+            // Saved by a newer build (a downgrade). Resetting every setting would cost the user their folders, limits
+            // and logins for one version step, so the settings this build knows are kept, and the newer file is kept
+            // whole beside them in the corrupt folder. The save below writes this build's schema.
+            var fromNewerBuild = settings.SchemaVersion > AppSettings.CurrentSchemaVersion;
+            if (fromNewerBuild)
             {
-                throw new InvalidDataException($"Unsupported settings schema {settings.SchemaVersion}.");
+                try
+                {
+                    File.Copy(_paths.SettingsFile, Path.Combine(_paths.CorruptDirectory,
+                        $"settings.newer-{settings.SchemaVersion}.{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.json"), overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Without a copy, leave the newer file untouched rather than overwrite it.
+                    throw new InvalidDataException($"Unsupported settings schema {settings.SchemaVersion}.", ex);
+                }
             }
 
             // Saved by a build from before provider links were recognised. Filtering them in memory
@@ -678,10 +815,19 @@ public sealed class JsonSettingsStore : ISettingsStore
             Normalize(settings);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
-                settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
+                var password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
+                if (!string.IsNullOrEmpty(password))
+                {
+                    settings.Proxy.Password = password;
+                    // Sealed again from Password at save, so clearing the password really clears it.
+                    settings.Proxy.PasswordProtected = null;
+                }
+
+                // Otherwise (another user's or machine's blob) it stays sealed, as ProtectedUrl does, and
+                // SaveAsync keeps it until a new password is set.
             }
 
-            if (heldProviderLink || closeWindowDefaultPending)
+            if (heldProviderLink || closeWindowDefaultPending || fromNewerBuild)
             {
                 await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
@@ -714,9 +860,14 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             _paths.EnsureCreated();
             Normalize(settings);
-            settings.Proxy.PasswordProtected = string.IsNullOrEmpty(settings.Proxy.Password)
-                ? null
-                : SecretProtector.ProtectProxy(settings.Proxy.Password);
+            if (!string.IsNullOrEmpty(settings.Proxy.Password))
+            {
+                settings.Proxy.PasswordProtected = SecretProtector.ProtectProxy(settings.Proxy.Password);
+            }
+            else if (!SecretProtector.IsProtected(settings.Proxy.PasswordProtected))
+            {
+                settings.Proxy.PasswordProtected = null;
+            }
             var json = JsonSerializer.Serialize(settings, PersistenceJson.Options);
             await AtomicFile.WriteAsync(_paths.SettingsFile, json, cancellationToken).ConfigureAwait(false);
             if (!File.Exists(CloseWindowDefaultMarker))
@@ -758,7 +909,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.MaxConnectionsPerHost = Math.Clamp(settings.MaxConnectionsPerHost, 1, 64);
         settings.ConnectionProfiles ??= new List<ConnectionProfile>();
         settings.ConnectionProfiles = settings.ConnectionProfiles
-            .Where(profile => !string.IsNullOrWhiteSpace(profile.Pattern))
+            .Where(profile => profile is not null && !string.IsNullOrWhiteSpace(profile.Pattern))
             .Select(profile => new ConnectionProfile
             {
                 Pattern = profile.Pattern.Trim(),
@@ -821,6 +972,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.Theme = ThemeChoices.Normalize(settings.Theme);
         settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
         settings.CustomCategories ??= new();
+        settings.CustomCategories.RemoveAll(category => category is null);
         settings.ArchivedDownloads ??= new();
         settings.ArchivedDownloads = settings.ArchivedDownloads.Where(record => record is not null && record.Id != Guid.Empty).DistinctBy(record => record.Id).ToList();
         settings.DownloadGroups ??= new();
@@ -845,7 +997,6 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
         }
 
-        settings.CategoryFolders = categories;
         var root = settings.DefaultDownloadDirectory;
         if (!string.Equals(settings.CategoryFoldersRoot, root, StringComparison.OrdinalIgnoreCase))
         {
@@ -866,6 +1017,10 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.CategoryFoldersRoot = root;
         }
 
+        // Published once it is complete: a snapshot taken meanwhile (MapSettings) copies it, and must never see it
+        // being filled (audit 2 M19).
+        settings.CategoryFolders = categories;
+
         settings.FavoriteFolders = DownloadFolders.Normalize(settings.FavoriteFolders);
         settings.RecentDestinationDirectories = DownloadFolders.NormalizeRecent(settings.RecentDestinationDirectories);
         settings.RecentUrls ??= new List<string>();
@@ -879,9 +1034,9 @@ public sealed class JsonSettingsStore : ISettingsStore
             .Take(20)
             .ToList();
 
-        settings.SiteLogins ??= new List<SiteLogin>();
-        settings.SiteLogins.RemoveAll(login =>
-            string.IsNullOrWhiteSpace(login.Site) || string.IsNullOrWhiteSpace(login.Username));
+        // A new list rather than one changed in place (audit 2 M19).
+        settings.SiteLogins = (settings.SiteLogins ?? new List<SiteLogin>()).Where(login =>
+            login is not null && !string.IsNullOrWhiteSpace(login.Site) && !string.IsNullOrWhiteSpace(login.Username)).ToList();
         foreach (var login in settings.SiteLogins)
         {
             login.Site = login.Site.Trim();
@@ -893,16 +1048,20 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
 
         settings.Queues ??= new List<DownloadQueue>();
+        settings.Queues.RemoveAll(queue => queue is null);
         if (settings.Queues.Count == 0)
         {
-            settings.Queues.Add(new DownloadQueue
-            {
-                Id = 0,
-                Name = "Main",
-                MaxConcurrentDownloads = Math.Clamp(settings.MaxConcurrentDownloads, 1, 16),
-                IsRunning = true,
-                Order = 0,
-            });
+            settings.Queues =
+            [
+                new DownloadQueue
+                {
+                    Id = 0,
+                    Name = "Main",
+                    MaxConcurrentDownloads = Math.Clamp(settings.MaxConcurrentDownloads, 1, 16),
+                    IsRunning = true,
+                    Order = 0,
+                },
+            ];
         }
 
         var seenQueueIds = new HashSet<int>();
@@ -932,6 +1091,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
 
         settings.Schedules ??= new List<ScheduleRule>();
+        settings.Schedules.RemoveAll(schedule => schedule is null);
         foreach (var schedule in settings.Schedules)
         {
             if (!settings.Queues.Any(q => q.Id == schedule.QueueId))
@@ -953,20 +1113,19 @@ public sealed class JsonSettingsStore : ISettingsStore
             };
         }
 
-        settings.ExcludedFileExtensions ??= new List<string>();
-        settings.ExcludedHosts ??= new List<string>();
-        settings.InterceptedFileExtensions ??= new List<string>();
-        foreach (var list in new[] { settings.ExcludedFileExtensions, settings.ExcludedHosts, settings.InterceptedFileExtensions })
-        {
-            for (var i = 0; i < list.Count; i++)
-            {
-                list[i] = list[i].Trim().TrimStart('.').ToLowerInvariant();
-            }
-
-            list.RemoveAll(string.IsNullOrWhiteSpace);
-            var distinct = list.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            list.Clear();
-            list.AddRange(distinct);
-        }
+        settings.ExcludedFileExtensions = NormalizeNames(settings.ExcludedFileExtensions);
+        settings.ExcludedHosts = NormalizeNames(settings.ExcludedHosts);
+        settings.InterceptedFileExtensions = NormalizeNames(settings.InterceptedFileExtensions);
     }
+
+    /// <summary>
+    /// A new list, never the one given changed in place (audit 2 M19): the Host's settings are saved while a snapshot
+    /// of them may be read, and a list emptied and refilled here could be read empty there.
+    /// </summary>
+    private static List<string> NormalizeNames(List<string>? names) => (names ?? new List<string>())
+        .Where(name => name is not null)
+        .Select(name => name.Trim().TrimStart('.').ToLowerInvariant())
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 }

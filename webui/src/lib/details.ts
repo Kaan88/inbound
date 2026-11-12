@@ -1,7 +1,9 @@
 // The download details view and the package dialog, as the desktop window words and orders them
 // (DownloadWindow, JobDetailsPanel, PackageWindow). Pure functions only, so the tests run them without a page.
 
-import { bytes, duration, percent, siteOf, speed, stateWord, timeSpanSeconds } from './format';
+import { bytes, dateTime, duration, percent, siteOf, speed, stateWord, timeSpanSeconds } from './format';
+import { downloadedText, filesSummary, peersFigure, shortMagnet, torrentStatusText } from './torrents';
+import { uploadedText } from './torrentDetails';
 import type { ConnectionInfo, Job, JobCompletionOptions, Segment } from './types';
 
 // ---- Address -------------------------------------------------------------------------------------------------
@@ -11,13 +13,15 @@ export function hasOwnAddress(job: Pick<Job, 'isRemote' | 'url'>): boolean {
   return !job.isRemote && !job.url.toLowerCase().startsWith('remote://');
 }
 
-/** "Site" for an address that holds a key and stays on the server, otherwise "Address" (ShownAddress.Label). */
-export function addressLabel(job: Pick<Job, 'addressHidden'>): 'Site' | 'Address' {
+/** "Site" for an address that holds a key and stays on the server, "Magnet" for a torrent, otherwise "Address" (ShownAddress.Label). */
+export function addressLabel(job: Pick<Job, 'addressHidden' | 'torrent'>): 'Site' | 'Address' | 'Magnet' {
+  if (job.torrent) return 'Magnet';
   return job.addressHidden ? 'Site' : 'Address';
 }
 
-/** The address as it may be shown or copied; empty when the job has none. */
-export function shownAddress(job: Pick<Job, 'isRemote' | 'url' | 'addressHidden'>): string {
+/** The address as it may be shown or copied; empty when the job has none. A torrent's is its short magnet, never its trackers. */
+export function shownAddress(job: Pick<Job, 'isRemote' | 'url' | 'addressHidden' | 'torrent'>): string {
+  if (job.torrent) return job.torrent.infoHash ? shortMagnet(job.torrent) : '';
   if (!hasOwnAddress(job)) return '';
   if (!job.addressHidden) return job.url;
   return siteOf(job.url) || 'A direct link';
@@ -71,6 +75,7 @@ export type DetailRow = { label: string; value: string };
 
 /** Address first, then the figures in the desktop's order; always shown, with "—" for no value (D3). */
 export function detailRows(job: Job): DetailRow[] {
+  if (job.torrent) return torrentDetailRows(job);
   const complete = job.state === 'completed';
   const p = job.totalBytes && job.totalBytes > 0 ? Math.max(0, Math.min(100, (job.receivedBytes * 100) / job.totalBytes)) : 0;
   const eta = timeSpanSeconds(job.estimatedRemaining);
@@ -84,6 +89,31 @@ export function detailRows(job: Job): DetailRow[] {
   rows.push({ label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' });
   rows.push({ label: 'Time left', value: complete ? 'Complete' : duration(eta) || '—' });
   rows.push({ label: 'Resume capability', value: job.resumeSupported === true ? 'Yes' : job.resumeSupported === false ? 'No' : 'Unknown' });
+  return rows;
+}
+
+/** T1: a torrent's summary (DownloadWindow.ShowTorrent): its status, what it downloads, its peers, files and info hash. */
+export function torrentDetailRows(job: Job): DetailRow[] {
+  const torrent = job.torrent!;
+  const complete = job.state === 'completed';
+  const total = job.totalBytes && job.totalBytes > 0 ? job.totalBytes : torrent.wantedBytes;
+  const eta = timeSpanSeconds(job.estimatedRemaining);
+  const rows: DetailRow[] = [
+    { label: 'Status', value: torrentStatusText(job) ?? stateWord(job.state) },
+    { label: 'Size', value: torrent.hasMetadata && total > 0 ? bytes(total) : 'Not known yet' },
+    { label: 'Downloaded', value: downloadedText(complete ? Math.max(job.receivedBytes, total) : job.receivedBytes, total) },
+    { label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' },
+    { label: 'Time left', value: complete ? 'Complete' : duration(eta) || '—' },
+    { label: 'Peers', value: peersFigure(torrent.peers, torrent.seeds) },
+  ];
+  // T2: what it sent to other peers, once there is something to say.
+  if (torrent.seeding || (torrent.uploaded ?? 0) > 0) rows.push({ label: 'Uploaded', value: uploadedText(torrent) });
+  if (torrent.seeding) {
+    const rate = speed(torrent.uploadRate ?? 0);
+    const since = torrent.seedingSince ? `since ${dateTime(torrent.seedingSince)}` : '';
+    rows.push({ label: 'Seeding', value: [since, rate ? `↑ ${rate}` : ''].filter(Boolean).join(' · ') || 'Yes' });
+  }
+  rows.push({ label: 'Files', value: filesSummary(torrent) }, { label: 'Info hash', value: torrent.infoHash || '—' });
   return rows;
 }
 
@@ -160,6 +190,11 @@ export function mergeSegments(
   highWater: Map<number, number> = new Map(),
 ): Segment[] {
   const total = job.totalBytes ?? 0;
+  // A download that started over (fewer bytes than at the last refresh) shows its segments from where they are now,
+  // not the furthest they once got (audit 4 L21). Key -1 is no segment's start.
+  const before = highWater.get(-1);
+  if (before !== undefined && job.receivedBytes < before) highWater.clear();
+  highWater.set(-1, job.receivedBytes);
   let segments = saved.map((segment) => ({ ...segment }));
   if (segments.length === 0 && total > 0) {
     segments = [{ start: 0, end: total - 1, completed: job.receivedBytes, isComplete: job.receivedBytes >= total, fraction: job.receivedBytes / total }];
@@ -214,9 +249,18 @@ export function segmentRows(segments: Segment[], connections: ConnectionInfo[], 
   });
 }
 
+/**
+ * Whether the segments change by themselves, so the dialog reads them again each second: only while the download
+ * transfers or is about to (audit 4 M11). A paused or queued one is read once, when the dialog opens.
+ */
+export function segmentsMove(job: Pick<Job, 'isTerminal' | 'state' | 'torrent'>): boolean {
+  return pollsSegments(job) && (job.state === 'connecting' || job.state === 'downloading' || job.state === 'verifying' || job.state === 'retryWaiting');
+}
+
 /** Segment details are read while the dialog is open and the download is not in a terminal state. */
-export function pollsSegments(job: Pick<Job, 'isTerminal' | 'state'>): boolean {
-  return !job.isTerminal && job.state !== 'completed' && job.state !== 'failed' && job.state !== 'cancelled';
+export function pollsSegments(job: Pick<Job, 'isTerminal' | 'state' | 'torrent'>): boolean {
+  // A torrent has peers, not segments (T1).
+  return !job.torrent && !job.isTerminal && job.state !== 'completed' && job.state !== 'failed' && job.state !== 'cancelled';
 }
 
 // ---- Redownload (D12) ----------------------------------------------------------------------------------------

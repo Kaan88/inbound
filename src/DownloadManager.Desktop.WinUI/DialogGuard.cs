@@ -55,8 +55,12 @@ internal static class DialogGuard
         finally
         {
             Showing.Remove(root);
+            Closed?.Invoke(root);
         }
     }
+
+    /// <summary>A dialog shown through here has closed on the window <c>root</c> belongs to (UI thread).</summary>
+    public static event Action<XamlRoot>? Closed;
 
     /// <summary>True only when the dialog was shown and its primary button chosen.</summary>
     public static async Task<bool> ConfirmAsync(ContentDialog dialog) =>

@@ -271,6 +271,22 @@ public sealed class PostDownloadCommandLineTests
         Assert.Equal(@"C:\Program Files\Scanner\scan.exe", start.FileName);
         Assert.Equal(path, Assert.Single(start.ArgumentList));
     }
+
+    [Theory]
+    [InlineData(@"C:\Tools\scan.cmd")]
+    [InlineData(@"C:\Tools\scan.bat")]
+    [InlineData(@"C:\Tools\scan.exe ""%1""")]
+    [InlineData("scan.exe")]
+    [InlineData(@"\Tools\scan.exe")]
+    public void ABatchFileOrAProgramWithoutItsFullPathIsNeverStarted(string command)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // cmd.exe would read "&calc.exe&" in a file name chosen by a server as a command.
+        Assert.False(PostDownloadCommandLine.IsAllowedProgram(command));
+        var refused = Assert.Throws<ArgumentException>(() => PostDownloadCommandLine.Create(command, @"C:\Downloads\a&calc.exe&.zip"));
+        Assert.StartsWith(PostDownloadCommandLine.ProgramRefused, refused.Message);
+        Assert.True(PostDownloadCommandLine.IsAllowedProgram(@"C:\Tools\SCAN.EXE"));
+    }
 }
 
 public sealed class FileCategoriesTests

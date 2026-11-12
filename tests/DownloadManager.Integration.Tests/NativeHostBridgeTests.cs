@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DownloadManager.Contracts;
+using DownloadManager.Runtime.Ipc;
 using TestServer;
 
 namespace DownloadManager.Integration.Tests;
@@ -113,6 +114,76 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
             Assert.False(refused.GetPayload<HostActionResult>().Ok);
         }
         finally { await StopAsync(native); }
+    }
+
+    [Trait("Platform", "Windows")]
+    [Fact]
+    public async Task The_folder_window_learns_which_start_folders_exist_and_nothing_else()
+    {
+        // EXT.R10: "Ask where to save" may start on the last used or a custom folder; one that is gone falls back to
+        // the default. The extension names a few folders and the Host says which exist, as they were given.
+        await using var host = await StartHostAsync();
+        var there = Directory.CreateDirectory(Path.Combine(host.Root, "start here")).FullName;
+        File.WriteAllText(Path.Combine(there, "secret-name.txt"), "x");
+        var gone = Path.Combine(host.Root, "deleted folder");
+        var file = Path.Combine(there, "secret-name.txt");
+
+        using var native = host.StartNativeHost();
+        try
+        {
+            var reply = await AskAsync(native, MessageTypes.SettingsDownloadFolders, new
+            {
+                // The cap of four is checked in the test below, where folders past it exist.
+                candidates = new[] { there, gone, file, "relative\\folder", there, @"\\server\share", "" },
+            });
+            Assert.Equal(MessageTypes.SettingsDownloadFoldersResult, reply.Type);
+            var folders = reply.GetPayload<DownloadFoldersResult>();
+            Assert.True(folders.Ok);
+            // Only the folder that exists: not the gone one, a file or a relative path.
+            Assert.Equal([there], folders.ExistingCandidates);
+            var raw = reply.Payload!.Value.GetRawText();
+            Assert.DoesNotContain("secret-name", raw);
+            Assert.DoesNotContain("deleted folder", raw);
+
+            // Without candidates (an older extension) nothing about them is answered.
+            var plain = (await AskAsync(native, MessageTypes.SettingsDownloadFolders, new { })).GetPayload<DownloadFoldersResult>();
+            Assert.True(plain.Ok);
+            Assert.Null(plain.ExistingCandidates);
+        }
+        finally { await StopAsync(native); }
+    }
+
+    [Fact]
+    public void Start_folder_candidates_are_capped_and_skip_shares_and_device_paths()
+    {
+        var root = Directory.CreateTempSubdirectory("dm-ext-r10-").FullName;
+        try
+        {
+            var folders = Enumerable.Range(0, 6).Select(index => Directory.CreateDirectory(Path.Combine(root, $"f{index}")).FullName).ToList();
+            var message = IpcMessage.Create(MessageTypes.SettingsDownloadFolders,
+                new DownloadFoldersRequest { Candidates = [@"\\127.0.0.1\c$", "//127.0.0.1/c$", .. folders] });
+            // The first four are looked at: the two network paths are refused, two folders are left. The four folders
+            // after them exist too and are never looked at.
+            Assert.Equal(folders.Take(2), HostCommandDispatcher.ExistingFolders(message));
+            // Device paths to a folder that exists are refused; the same folder twice is answered once.
+            var device = IpcMessage.Create(MessageTypes.SettingsDownloadFolders,
+                new DownloadFoldersRequest { Candidates = [@"\\?\" + folders[0], @"\\.\" + folders[0], folders[0], folders[0]] });
+            Assert.Equal([folders[0]], HostCommandDispatcher.ExistingFolders(device));
+            Assert.Null(HostCommandDispatcher.ExistingFolders(IpcMessage.Create(MessageTypes.SettingsDownloadFolders)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void A_drive_letter_mapped_to_a_share_counts_as_another_machine()
+    {
+        var folder = Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", "Downloads");
+        Assert.True(HostCommandDispatcher.OnNetworkDrive(folder, _ => DriveType.Network));
+        Assert.True(HostCommandDispatcher.OnNetworkDrive(folder, _ => DriveType.NoRootDirectory));
+        Assert.True(HostCommandDispatcher.OnNetworkDrive(folder, _ => throw new IOException("not ready")));
+        Assert.False(HostCommandDispatcher.OnNetworkDrive(folder, _ => DriveType.Fixed));
+        Assert.False(HostCommandDispatcher.OnNetworkDrive(folder, _ => DriveType.Removable));
+        Assert.False(HostCommandDispatcher.OnNetworkDrive(folder));
     }
 
     [Trait("Platform", "Windows")]

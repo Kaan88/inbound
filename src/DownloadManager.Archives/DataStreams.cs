@@ -52,9 +52,25 @@ internal static class DataStreams
         return null;
     }
 
-    /// <summary>Marks a file as coming from a zone, without the addresses the archive's own mark may carry.</summary>
-    public static void WriteZone(string path, int zoneId) =>
-        File.WriteAllText(path + ":Zone.Identifier", "[ZoneTransfer]" + Environment.NewLine + $"ZoneId={zoneId}" + Environment.NewLine);
+    /// <summary>
+    /// Marks a file as coming from a zone, without the addresses the archive's own mark may carry. Windows refuses to
+    /// write a stream of a read-only file, and 7-Zip restores that attribute from the archive, so it is lifted for the
+    /// write and put back.
+    /// </summary>
+    public static void WriteZone(string path, int zoneId)
+    {
+        var attributes = File.GetAttributes(path);
+        var readOnly = (attributes & FileAttributes.ReadOnly) != 0;
+        if (readOnly) File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        try
+        {
+            File.WriteAllText(path + ":Zone.Identifier", "[ZoneTransfer]" + Environment.NewLine + $"ZoneId={zoneId}" + Environment.NewLine);
+        }
+        finally
+        {
+            if (readOnly) File.SetAttributes(path, attributes);
+        }
+    }
 
     public static bool HasZoneIdentifier(string path) =>
         Named(path).Any(stream => string.Equals(stream, ZoneIdentifier, StringComparison.OrdinalIgnoreCase));

@@ -8,10 +8,11 @@
   import SegmentTable from '../components/SegmentTable.svelte';
   import {
     barValue, cancelPackageText, cancelTargets, detailRows, fileToShow, mergeSegments, packageActionNotice, packageFigures, pauseTargets,
-    pollsSegments, resumeTargets, segmentRows, sortedByName, splitPath, updateRates,
+    pollsSegments, resumeTargets, segmentRows, segmentsMove, sortedByName, splitPath, updateRates,
   } from '../lib/details';
   import { bytes, percent, stateWord, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
+  import { everyWhileVisible } from '../lib/ticker';
   import type { ConnectionInfo, Job, Segment } from '../lib/types';
   import PackagePassword from './PackagePassword.svelte';
 
@@ -75,8 +76,16 @@
       rates.clear();
       void loadSegments();
     });
-    const timer = setInterval(() => void loadSegments(), 1000);
-    return () => clearInterval(timer);
+  });
+
+  // Again each second only while the file shown transfers and this tab shows (audit 4 M11); read once otherwise.
+  const moving = $derived(!!shown && segmentsMove(shown));
+  $effect(() => {
+    void connected;
+    void moving;
+    untrack(() => void loadSegments());
+    if (!moving) return;
+    return everyWhileVisible(1000, () => void loadSegments());
   });
 
   async function action(name: 'pause' | 'resume' | 'cancel') {

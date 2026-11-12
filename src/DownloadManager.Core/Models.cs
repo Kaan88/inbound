@@ -112,6 +112,13 @@ public sealed class DownloadJob
     /// Cleared when the job runs again.
     /// </summary>
     public bool PausedByUser { get; set; }
+
+    /// <summary>
+    /// The Host paused it because it was exiting (tray Exit, an update, logoff) while it ran. At the next start it goes
+    /// back to the queue when "resume unfinished downloads at start" is on, as one a kill interrupted does (audit 2 M11).
+    /// Cleared when the job runs again.
+    /// </summary>
+    public bool PausedByExit { get; set; }
     public int QueueRetryCount { get; set; }
     public DateTimeOffset? QueueRetryAt { get; set; }
 
@@ -173,9 +180,23 @@ public sealed class DownloadJob
     /// </summary>
     public bool FileRemovedAfterExtraction { get; set; }
 
+    /// <summary>
+    /// The Host found this completed download's file missing from its folder at start (moved or deleted outside the
+    /// app). The job stays completed with a note instead of becoming a failure the queue would download again (audit 2
+    /// H2). Cleared when the file is there again at a later start, or when the job runs again.
+    /// </summary>
+    public bool FileMissing { get; set; }
+
     public string? ETag { get; set; }
     public string? LastModified { get; set; }
     public string? ContentType { get; set; }
+
+    /// <summary>
+    /// The content type the browser hand-off carried when the download was added. Unlike <see cref="ContentType"/>,
+    /// which the transfer overwrites with the server's answer, nothing changes it later, so whether a download is an
+    /// HLS playlist or a DASH manifest (<see cref="StreamManifestHint"/>) is decided by the same facts on every run.
+    /// </summary>
+    public string? HandoffContentType { get; set; }
 
     public int RequestedConnections { get; set; } = 1;
     public int ActiveConnections { get; set; }
@@ -222,6 +243,8 @@ public sealed class DownloadJob
     /// <summary>The size a provider promised. A response of any other size is not this file.</summary>
     public long? ExpectedTotalBytes { get; set; }
     public RemoteSource? RemoteSource { get; set; }
+    /// <summary>Set on a torrent job (T1); null on every other job.</summary>
+    public TorrentJobInfo? Torrent { get; set; }
 
     /// <summary>
     /// A real address too sensitive for <see cref="Url"/>, which then holds a masked copy. Plaintext
@@ -294,6 +317,7 @@ public sealed class DownloadJob
     {
         var clone = (DownloadJob)MemberwiseClone();
         clone.CompletionOptions = CompletionOptions.Clone();
+        clone.Torrent = Torrent?.Clone();
         clone.MadeFolders = new List<string>(MadeFolders);
         clone.RequestHeaders = new Dictionary<string, string>(RequestHeaders, StringComparer.OrdinalIgnoreCase);
         clone.RequestHeadersProtected = new Dictionary<string, string>(RequestHeadersProtected, StringComparer.OrdinalIgnoreCase);
@@ -563,6 +587,13 @@ public sealed class AppSettings
     public const int CurrentSchemaVersion = 1;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+
+    /// <summary>
+    /// The Host's settings revision, in memory only: it grows when a queue or schedule is added or removed, and a
+    /// client sends back the one its copy came with, so a stale copy can't remove what it never saw (audit 4 H1).
+    /// </summary>
+    [JsonIgnore]
+    public long Revision { get; set; }
     public string DefaultDownloadDirectory { get; set; } = GetDefaultDownloadDirectory();
     public int MaxConcurrentDownloads { get; set; } = 3;
     public int DefaultQueueId { get; set; }
@@ -592,6 +623,48 @@ public sealed class AppSettings
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+
+    /// <summary>Options › Torrents: download torrents on this PC (T1). Off by default; the kill switch wins.</summary>
+    public bool TorrentsEnabled { get; set; }
+    /// <summary>With a provider account: where magnets and .torrent files go (<see cref="TorrentRoutes"/>).</summary>
+    public string TorrentRoute { get; set; } = TorrentRoutes.Ask;
+    /// <summary>Ask which files to download before a multi-file torrent starts.</summary>
+    public bool TorrentChooseFiles { get; set; } = true;
+    /// <summary>Open magnet links and .torrent files with this app (a per-user registration the window makes).</summary>
+    public bool TorrentHandler { get; set; }
+    /// <summary>T2: keep sharing a torrent after it finished downloading, until <see cref="TorrentSeedRatio"/> or
+    /// <see cref="TorrentSeedHours"/> is reached, whichever comes first.</summary>
+    public bool TorrentSeedAfterDownload { get; set; } = true;
+    /// <summary>Stop seeding once this much was uploaded per byte downloaded; 0 is no ratio limit.</summary>
+    public double TorrentSeedRatio { get; set; } = 1.0;
+    /// <summary>Stop seeding after this many hours; 0 is no time limit. Never both 0.</summary>
+    public double TorrentSeedHours { get; set; } = 48;
+    /// <summary>Upload cap for torrents in bytes/s; 0 is none of its own. Torrent uploads also share
+    /// <see cref="GlobalSpeedLimitBytesPerSecond"/> with every download (one budget, T2), so this only ever lowers them.</summary>
+    public long TorrentUploadLimit { get; set; }
+    /// <summary>
+    /// T2: the port the torrent engine listens on, chosen once at random from the dynamic range when torrents are first
+    /// turned on (or typed in Options), so a firewall or router rule made for it keeps working. 0: not chosen yet.
+    /// </summary>
+    public int TorrentListenPort { get; set; }
+    /// <summary>T2: ask the router to forward the torrent port (UPnP and NAT-PMP). Off by default everywhere.</summary>
+    public bool TorrentUpnp { get; set; }
+    /// <summary>T3: find peers through the DHT (no tracker needed). On by default, as before T3.</summary>
+    public bool TorrentDht { get; set; } = true;
+    /// <summary>T3: peer exchange (PEX): peers tell each other of more peers.</summary>
+    public bool TorrentPex { get; set; } = true;
+    /// <summary>T3: local peer discovery (LSD) on this network. Off by default, as before T3.</summary>
+    public bool TorrentLsd { get; set; }
+    /// <summary>T3: <c>prefer</c>, <c>require</c> or <c>off</c> (<see cref="TorrentEncryptionModes"/>).</summary>
+    public string TorrentEncryption { get; set; } = TorrentEncryptionModes.Prefer;
+    /// <summary>T3: how many finished torrents seed at once; 0 is all of them.</summary>
+    public int TorrentSeedsAtOnce { get; set; }
+    /// <summary>T3: connections per torrent; 0 is no limit of its own (the total still applies).</summary>
+    public int TorrentConnectionsPerTorrent { get; set; }
+    /// <summary>T3: connections of every torrent together; 0 is the torrent engine's own default.</summary>
+    public int TorrentMaxConnections { get; set; }
+    /// <summary>T3: peers and trackers go through the proxy of Options › Proxy (HTTP or SOCKS5 typed in there).</summary>
+    public bool TorrentUseProxy { get; set; }
 
     /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
     public string? FfmpegPath { get; set; }

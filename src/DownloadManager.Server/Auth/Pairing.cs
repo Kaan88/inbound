@@ -46,16 +46,19 @@ public sealed class Pairing(AuthStore store, TimeProvider time)
     /// <summary>One per token with something open (a WebSocket); cancelled when the token goes.</summary>
     private readonly Dictionary<string, CancellationTokenSource> _lifetimes = new(StringComparer.Ordinal);
     private string? _code;
+    private object? _codeOwner;
     private DateTimeOffset _codeExpires;
     private int _wrongTries;
 
-    public (string Code, DateTimeOffset ExpiresAt) NewCode()
+    /// <param name="owner">The signed-in session that asked for it; its sign-out ends the code (audit 3 L1).</param>
+    public (string Code, DateTimeOffset ExpiresAt) NewCode(object? owner = null)
     {
         var code = new StringBuilder(CodeLength);
         for (var i = 0; i < CodeLength; i++) code.Append(Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)]);
         lock (_gate)
         {
             _code = code.ToString();
+            _codeOwner = owner;
             _codeExpires = time.GetUtcNow() + CodeLifetime;
             _wrongTries = 0;
             return (_code, _codeExpires);
@@ -73,7 +76,22 @@ public sealed class Pairing(AuthStore store, TimeProvider time)
 
     public void CancelCode()
     {
-        lock (_gate) _code = null;
+        lock (_gate)
+        {
+            _code = null;
+            _codeOwner = null;
+        }
+    }
+
+    /// <summary>Ends the waiting code only when <paramref name="owner"/> asked for it (a sign-out, audit 3 L1).</summary>
+    public void CancelCodeOf(object owner)
+    {
+        lock (_gate)
+        {
+            if (_code is null || !ReferenceEquals(_codeOwner, owner)) return;
+            _code = null;
+            _codeOwner = null;
+        }
     }
 
     /// <summary>The new token, or null for a wrong, used or expired code. A right code is used up.</summary>

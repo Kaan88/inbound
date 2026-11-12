@@ -339,9 +339,9 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         var dispatcher = Dispatcher(service, platform);
         var session = Session();
 
-        var opened = (await AskAsync(dispatcher, session, MessageTypes.HostOpenUi, new HostActionRequest { Action = "options" })).GetPayload<HostActionResult>();
+        var opened = (await AskAsync(dispatcher, session, MessageTypes.HostOpenUi, new HostActionRequest { Action = "settings" })).GetPayload<HostActionResult>();
         Assert.True(opened.Ok);
-        Assert.Equal(["options"], platform.Opened);
+        Assert.Equal(["settings"], platform.Opened);
 
         var picked = (await AskAsync(dispatcher, session, MessageTypes.HostPickFolder, new FolderPickRequest())).GetPayload<FolderPickResult>();
         Assert.True(picked.Ok);
@@ -432,7 +432,7 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         var dispatcher = Dispatcher(service);
         var session = Session();
         var settings = service.GetSnapshot().Settings;
-        settings.PostDownloadCommand = @"C:\Tools\after.exe ""%1""";
+        settings.PostDownloadCommand = TestPaths.Native(@"C:\Tools\after.exe");
 
         var result = (await AskAsync(dispatcher, session, MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings })).GetPayload<SettingsResult>();
         Assert.True(result.Ok, result.Error);
@@ -570,7 +570,20 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         public Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken)
         {
             lock (timeline) timeline.Add("platform:pick");
-            return Task.FromResult(new FolderPickResult { Ok = true, Cancelled = true });
+            return Task.FromResult(Picks is { } path
+                ? new FolderPickResult { Ok = true, Path = path }
+                : new FolderPickResult { Ok = true, Cancelled = true });
+        }
+
+        /// <summary>The folder the dialog returns; null: the user cancels it.</summary>
+        public string? Picks { get; set; }
+
+        public List<string> Revealed { get; } = [];
+
+        public void RevealFile(string path)
+        {
+            Revealed.Add(path);
+            lock (timeline) timeline.Add("platform:reveal");
         }
     }
 

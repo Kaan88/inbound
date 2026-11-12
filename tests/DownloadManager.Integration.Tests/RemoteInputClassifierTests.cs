@@ -93,6 +93,23 @@ public sealed class RemoteInputClassifierTests : IDisposable
         Assert.Equal(Hex, Classify("magnet:?xt=urn:btih:" + ToBase32(Convert.FromHexString(Hex))).Hash);
     }
 
+    [Theory]
+    [InlineData("3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF3", "d984f67af9992f217d1c8501ab5f329e4c5aa0bb")]
+    [InlineData("3gcpm6xztexsc7i4qua2wxzstzgfvif3", "d984f67af9992f217d1c8501ab5f329e4c5aa0bb")]
+    [InlineData("AERUKZ4JVPG66AJDIVTYTK6N577NZOUY", "0123456789abcdef0123456789abcdeffedcba98")]
+    public void ABase32HashGivesTheRightBytes(string base32, string hex)
+    {
+        // Known pairs, decoded outside this code, so a fault shared with this file's encoder can't hide.
+        Assert.Equal(hex, Classify("magnet:?xt=urn:btih:" + base32).Hash);
+    }
+
+    [Theory]
+    [InlineData("3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF1")] // 1 is not a base32 digit
+    [InlineData("3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF8")]
+    [InlineData("3GCPM6XZTEXSC7I4QUA2WXZSTZGFVIF=")]
+    public void ABase32HashWithAForeignCharacterIsRefused(string base32)
+        => Assert.Null(Classify("magnet:?xt=urn:btih:" + base32).Hash);
+
     private static string ToBase32(byte[] bytes)
     {
         const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -444,5 +461,27 @@ public sealed class RemoteInputClassifierTests : IDisposable
         var bad = RemoteInputClassifier.ClassifyTorrent("not a torrent"u8.ToArray(), [Provider()]);
         Assert.Equal(RemoteInputKind.Unsupported, bad.Kind);
         Assert.Contains("not a valid .torrent", bad.Reason);
+    }
+
+    [Fact]
+    public void ACutFileListIsNotOfferedToChooseFrom()
+    {
+        // Review of audit M5: the path-text cap cuts a torrent with a ~4 KB name at about 4,090 files, under the 5,000
+        // that may be chosen from, so the first files were offered as if they were all of them.
+        var name = new string('n', TorrentMetadata.MaxNameBytes);
+        var fits = TorrentMetadata.MaxListedPathChars / (name.Length + 2);
+        Assert.True(fits < RemoteJobCoordinator.MostFilesToChooseFrom);
+        var entries = new StringBuilder("d5:filesl");
+        for (var i = 0; i < fits + 3; i++) entries.Append("d6:lengthi1e4:pathl1:xee");
+        var info = entries.Append($"e4:name{name.Length}:{name}12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae").ToString();
+        var bytes = Encoding.Latin1.GetBytes($"d4:info{info}e");
+
+        var cut = RemoteInputClassifier.ClassifyTorrent(bytes, [Provider()], withFiles: true);
+        Assert.Equal(RemoteInputKind.TorrentFile, cut.Kind);
+        Assert.Null(cut.Files);
+
+        var whole = "d5:filesld6:lengthi1e4:pathl1:aeed6:lengthi2e4:pathl1:beee4:name4:pack12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae";
+        var listed = RemoteInputClassifier.ClassifyTorrent(Encoding.Latin1.GetBytes($"d4:info{whole}e"), [Provider()], withFiles: true);
+        Assert.Equal(2, listed.Files!.Count);
     }
 }

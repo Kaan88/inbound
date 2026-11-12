@@ -52,7 +52,20 @@ public sealed class TestProxyServer : IAsyncDisposable
         Interlocked.Exchange(ref _denied, 0);
         Interlocked.Exchange(ref _challenges, 0);
         Interlocked.Exchange(ref _tunnels, 0);
+        // Left set, a later test's "authorization was present" would read this one's request.
+        _lastAuthorizationPresent = false;
+        _lastTarget = string.Empty;
     }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _portMap = new();
+
+    /// <summary>
+    /// Requests for <paramref name="from"/> are forwarded to <paramref name="to"/>. A test points a download at a port
+    /// that counts direct connections; only a request that really went through this proxy reaches the server.
+    /// </summary>
+    public void MapPort(int from, int to) => _portMap[from] = to;
+
+    private int Mapped(int port) => _portMap.TryGetValue(port, out var to) ? to : port;
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
@@ -134,7 +147,7 @@ public sealed class TestProxyServer : IAsyncDisposable
                     Interlocked.Increment(ref _tunnels);
                     var (host, port) = SplitAuthority(target);
                     using var tunnel = new TcpClient();
-                    await tunnel.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+                    await tunnel.ConnectAsync(host, Mapped(port), cancellationToken).ConfigureAwait(false);
                     await WriteAsync(stream, "HTTP/1.1 200 Connection Established\r\n\r\n", cancellationToken)
                         .ConfigureAwait(false);
                     var upstream = tunnel.GetStream();
@@ -154,7 +167,7 @@ public sealed class TestProxyServer : IAsyncDisposable
                 }
 
                 using var upstreamClient = new TcpClient();
-                await upstreamClient.ConnectAsync(uri.Host, uri.Port, cancellationToken).ConfigureAwait(false);
+                await upstreamClient.ConnectAsync(uri.Host, Mapped(uri.Port), cancellationToken).ConfigureAwait(false);
                 var upstreamStream = upstreamClient.GetStream();
 
                 var request = new StringBuilder();

@@ -11,6 +11,7 @@
     <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\DownloadManager.Tray\DownloadManager.Tray.csproj" />
     <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
     <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
   </ItemGroup>
 

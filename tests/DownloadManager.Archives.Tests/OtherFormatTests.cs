@@ -169,6 +169,21 @@ public sealed class OtherFormatTests : ExtractionTestBase
     }
 
     [RequiresSevenZipTheory]
+    [InlineData("Wrong password.zip")]
+    [InlineData("Wrong.zip")]
+    [InlineData("Wrong password.7z")]
+    [InlineData("Data Error in encrypted file.7z")]
+    public async Task AnArchiveNamedLikeAToolMessageDoesNotHideThatMessage(string name)
+    {
+        // Review of audit L22: a line that was a prefix of the archive's name was dropped as "a name made from the
+        // archive", so "Wrong password.zip" turned 7-Zip's "ERROR: Wrong password : a.txt" into an unknown failure.
+        Space.WriteStandardSource();
+        var archive = await BuildAsync(name, "right");
+
+        Assert.Equal(ExtractionFailureKind.WrongPassword, await FailureOf(Request(archive, "wrong")));
+    }
+
+    [RequiresSevenZipTheory]
     [InlineData("data.7z")]
     [InlineData("data.zip")]
     public async Task AWrongPasswordForEncryptedContentIsSaid(string name)
@@ -247,6 +262,25 @@ public sealed class OtherFormatTests : ExtractionTestBase
         var result = await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
         var file = Assert.Single(result.Files);
         Assert.Equal("line one\nline two\n", File.ReadAllText(file.FinalPath));
+    }
+
+    [RequiresSevenZipTheory]
+    [InlineData("big.bin.gz")]
+    [InlineData("big.tar.gz")]
+    public async Task AStreamThatRunsTheDiskDownIsStoppedAndNothingLands(string name)
+    {
+        // The first look (before anything is written) finds room; every later one finds the disk all but full, as a
+        // small bomb would leave it. Before, the stream was unpacked in full and nothing measured the room it took.
+        var path = Space.WriteSource("big.bin", new byte[4 * 1024 * 1024]);
+        var archive = await CompressAsync(path, "gzip", Space.Archive(name));
+        var looks = 0;
+        var options = new SevenZipExtractorOptions
+        {
+            AvailableBytes = _ => Interlocked.Increment(ref looks) == 1 ? 100L << 30 : 1024,
+        };
+
+        Assert.Equal(ExtractionFailureKind.DiskSpace, await FailureOf(Request(archive), options));
+        Assert.True(looks >= 2);
     }
 
     [RequiresSevenZipFact]

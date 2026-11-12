@@ -101,7 +101,9 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   names and file types. Every other field must be sent back as it is, or the save is refused with the names of
   the changed fields and nothing is saved; what the Host keeps itself (recent folders and addresses, packages, the
   last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
-  `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are.
+  `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are, and
+  a schedule that has any of those actions can't be changed at all (its queue, times, days, on/off); it can be removed.
+  A schedule's "open the file when done" never opens a file a web session added.
   `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
   those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
 - What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
@@ -271,7 +273,7 @@ wrong tries is 429 with `Retry-After`.
 | `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, every paired desktop app (`remoteClient`, made with the old password) is unpaired, and so is every browser extension unless `keepPairedBrowsers` is true; their WebSockets and running `/api/ipc` requests end. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
 | `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired apps (`id`, `name`, `createdAt`, `lastUsedAt`, `role`: `extension` or `remoteClient`), and revoking one, which also closes its WebSockets and ends its running `/api/ipc` requests (401). An open WebSocket counts as use on the sessions' 10-minute beat, so a desktop app that stays connected keeps a current `lastUsedAt` and isn't the first pushed out when a 51st app pairs. |
-| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, with no `Origin` header, and gets a `remoteClient` token; with an `Origin` (a page or an extension) it is 403. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role, serverName}` once, `role` always `extension`. `name` is the browser's name as sent; `serverName` is the server's own name for the extension to show (EXT.R9): `DOWNLOADMANAGER_NAME`, else the machine's name, left out when there is none or the machine's name is a Docker container id (12 or 64 hex digits). Only the pairing answer gives it, so a renamed server shows its new name after pairing again (the user's own name in the extension's Settings covers the rest). A code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, with no `Origin` header, and gets a `remoteClient` token; with an `Origin` (a page or an extension) it is 403. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
 | `DELETE /api/pair/self` | token | the app's own Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), closes its WebSockets, and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
 | `POST /api/upload/torrent` | yes, or a `remoteClient` token | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
 | `POST /api/upload/container` | yes, or a `remoteClient` token | the raw `.rsdf`, `.ccf` or `.dlc` file (16 MB at most), its file name in the `X-File-Name` header, percent-encoded (`encodeURIComponent`), so it stays out of the address and the access logs; its kind is the name's extension (400 for any other). Answers `{ok, upload}` as above, which `remote.container.preview` accepts as its `path`, with the file's `fileName` to name its packages. Too large is 413, with or without `Content-Length`; an empty body is 400. Torrents and containers are kept 1 day, at most 200 of each kind; a reference whose file has gone gets "The uploaded file is no longer there. Upload it again." |
@@ -368,6 +370,34 @@ folder dialog) and get `error` "Folder browsing is not available here." A web se
   `ok: false` with an error. The desktop Host has no roots for its own sessions; a web session there has the app's
   folders (above).
 
+### Saving settings: `settings.update`, `revision` and `settings.changed`
+
+Every client saves the whole settings object, so a copy taken a while ago could undo what happened since. The Host
+keeps three things out of a client's hands, and tells every client when the settings change:
+
+- **Run state and quota use are the Host's.** For a queue that exists, `settings.update` ignores `isRunning`,
+  `quotaWindowStart` and `quotaBytesUsed`. A queue is started and stopped with `queue.action` `start`/`stop`; a new
+  queue (one the Host doesn't have) starts as `isRunning` says, with no quota used. To start a queue's quota window
+  afresh (now, nothing used), send that queue with `resetQuota: true` (request only; snapshots leave it false). The
+  CLI's `queue quota` does this. Quota use is saved every 5 seconds while a quota queue downloads, and at exit.
+- **`revision`.** Every copy of the settings (`settings.get`, the snapshot, every `settings.result`,
+  `settings.changed`) carries the Host's `revision`, a number that grows when a queue or schedule is added or removed.
+  Send it back unchanged in `settings.update`. A queue or schedule missing from the request is then removed only if
+  the copy had it: one added after that revision is kept; one removed after it is not brought back by a copy that
+  still lists it; and a queue number the Host gave a newer queue since keeps the Host's queue. A request with no
+  `revision` (0: an older client, a settings file made by hand) removes whatever it lacks, as before. The number is
+  in memory only and starts from the clock at each Host start, so a copy from before a restart counts as having seen
+  every queue and schedule there was then. Edits to a queue or schedule the copy has still apply as sent: read the
+  latest settings (or follow `settings.changed`) before saving. Chosen over an explicit "remove these ids" list
+  because clients that remove a schedule by leaving it out keep working; categories already use the explicit form
+  (`deleteCategoryIds`). A restore from a backup is a replace, not an edit: send it with `revision` 0. The CLI's
+  `settings export` writes 0 and `settings import` sends 0 whatever the file says.
+- **`settings.changed`** (Host push, payload: the whole `SettingsDto`) goes to every session that takes events after
+  any change of the settings: a save from any client, a queue started or stopped, a quota reached, a schedule run,
+  a folder remembered by an add. A web session gets them as it is shown them. A burst shares one message (about
+  100 ms). It is additive: a client that doesn't know it ignores it, and the native host doesn't pass it to the
+  browser extension. A client should replace its copy with it, so its next save starts from the current settings.
+
 ### Downloads as every client sees them
 
 - A download whose address is hidden (`addressHidden`, a direct provider link) or that is a provider's file carries
@@ -380,6 +410,11 @@ folder dialog) and get `error` "Folder browsing is not available here." A web se
   (`start`, `intervalSeconds`, `bytesPerSecond`, oldest first, the last the second under way), the desktop's speed
   graph's own. Every session gets it, web sessions and the server's clients too, so a graph opened later starts full.
   A Host from before it answers with an error.
+- `jobs.query` answers with the snapshot (`jobs.snapshot`). Its payload is optional: `{ "limit": n }` with n above
+  zero lists only the n newest downloads (by `createdAt`, newest first; downloads created at the same moment keep the
+  list's order). Without a payload, or with no positive `limit`, every download is listed in the list's own order.
+  The extension asks for 20, so a long list cannot make an answer the browser refuses. A Host from before the limit
+  ignores it and lists everything.
 
 ## One command at a time per connection
 
@@ -656,6 +691,91 @@ This route has only been tried against a stand-in so far, not a real JDownloader
 A client that connects later reads `remote.list` and `remote.account.get`. These aren't part of
 `jobs.snapshot`.
 
+## Torrents: `torrent.*`
+
+Offered when the hello lists `torrents` (the Host has the torrent worker and `DOWNLOADMANAGER_TORRENTS` is not `off`).
+Web sessions may send them like any other command, held to the app's folders; no browser bridge (the extension's native
+host or a paired server) carries any `torrent.*` message either way (`NativeBridgePolicy`). Every request names its job
+by `jobId` except `torrent.inspect` and `torrent.add`.
+
+- T1 (`docs/plans/torrent-t1-design.md`, section 5): `torrent.inspect` → `torrent.inspectResult`, `torrent.add` →
+  `torrent.addResult`, `torrent.setFiles` → `torrent.actionResult`, `torrent.files` → `torrent.filesResult`.
+- T2, seeding: `torrent.seed` `{jobId, on}` → `torrent.actionResult` `{ok, error}`. `on` puts a completed torrent back on
+  the torrent engine to share it until the seeding limits (Options: `torrentSeedRatio`, `torrentSeedHours`, the first one
+  reached; 0 is no limit for that one, never both) or a stop; `on: false` stops it. A torrent whose download finishes
+  seeds by itself when `torrentSeedAfterDownload` is on (the default). Stop All, a queue's stop (by hand or by its
+  schedule, also when the queue itself was already stopped), its download quota (downloaded bytes only; uploads don't
+  count) and turning torrents off stop seeding too; a torrent that finishes just as it is stopped, or in a queue whose
+  quota is used up, does not start seeding. A queue's start, by hand or by its schedule, never starts seeding again.
+  A seeding job stays `completed` and takes no download slot; `job.torrent` carries `seeding`, `seedingSince`,
+  `uploaded` (bytes, the torrent's life), `ratio` (uploaded over the downloaded size) and `uploadRate`. When extraction
+  deletes a seeding torrent's archive, its seeding stops first.
+- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP and FTP downloads, torrent downloads and torrent
+  uploads together. While the torrent engine runs, the Host splits it again on each torrent progress report (at most
+  once a second; no timer of its own): a kind that used most of its share gets more, one that used less keeps what it
+  used plus a quarter, and each keeps at least a twentieth even while idle. With the engine stopped, HTTP and FTP have
+  the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
+  without an overall limit it is the only cap.
+- T2, details: `torrent.peers`, `torrent.trackers` and `torrent.pieces`, each `{jobId}`, answer `torrent.peersResult`,
+  `torrent.trackersResult` and `torrent.piecesResult` with `ok`, `error` and `running`. `running` is false when the
+  torrent is not on the torrent engine now (stopped, or finished and not seeding), or the engine is older than these
+  commands; the lists are then empty.
+  - `peers`: `address`, `port`, `client`, `flags` (any of `seed`, `incoming`, `outgoing`, `encrypted`, `utp`,
+    `interested`, `peerInterested`, `choked`, `chokedByPeer`, `snubbed`), `downloadRate`, `uploadRate`, `downloaded`,
+    `uploaded`, `progress` (0 to 1). At most 500.
+  - `trackers`: `url`, `tier`, `status` (`notContacted`, `updating`, `working`, `error`), `message`, `seeds`, `peers`
+    (-1 when the tracker did not say).
+  - `pieces`: `count`, `pieceLength`, `have`, and `ranges` (`[first, last]` pairs, inclusive) or, for a scattered
+    torrent, `bitmap` (base64, one bit per piece, piece 0 in the highest bit of the first byte).
+- T3, file priorities: `torrent.files` rows carry `priority` (`skip`, `low`, `normal`, `high`; `wanted` is false exactly
+  for `skip`). `torrent.setFiles` takes `priorities` (`[{index, priority}]`): with `fileIndexes` empty only the listed
+  files change; with `fileIndexes` the choice is made first and the priorities applied on top. A running torrent gets
+  them at once. `torrent.add` takes `priorities` too, for a torrent whose file list is known (a .torrent file; a magnet
+  is refused). Jobs saved before T3 read as `normal` (wanted) or `skip`. An older Host leaves `priority` out (read it as
+  `normal` for a wanted file) and ignores `priorities`.
+- T3, a torrent's own options: `torrent.options` `{jobId}` and `torrent.setOptions` (`TorrentOptionsDto`) answer
+  `torrent.optionsResult` `{ok, error, options, running}`. `options`: `downloadLimit`, `uploadLimit` (bytes/s; null or
+  0 = none; at most 2,147,483,647), `seedGoal` (`global`: Options' limits; `ratio` with `seedGoalValue` 0.01 to 100;
+  `hours` with `seedGoalValue` 0.1 to 8760; `never`: it does not seed once done, and `torrent.seed` on is refused),
+  `sequential` (download pieces in order). In `torrent.setOptions` a null field is left as it is. The limits apply
+  within the overall budget and the session's limits, which still split as in T2. Kept on the job; `job.torrent`
+  carries `downloadLimit`, `uploadLimit`, `seedGoal`, `seedGoalValue`, `sequential`. `torrent.add` takes `options`
+  for the start. `job.update` with `speedLimitBytesPerSecond` on a torrent is refused: "A torrent has its own download
+  and upload limits. Set them in its Options tab."
+- T3, `torrent.recheck` `{jobId}` → `torrent.actionResult`: checks the files on disk again. A torrent on the engine
+  (downloading, paused or seeding) is checked at once and `job.torrent.checking` is true while it is. An unfinished
+  torrent not on the engine is checked when it next starts (`job.torrent.recheckPending`, cleared once the engine says
+  the check is queued; an older engine leaves it set). A seeding torrent is checked without downloading anything into
+  its files; if pieces are damaged or missing, seeding stops with "Seeding stopped: the file check found damaged or
+  missing pieces". Refused, in words: no file list yet, nothing of it on disk, a finished torrent that isn't seeding
+  (start seeding it first), or while its files get their names.
+- T3, `torrent.announce` `{jobId}` → `torrent.actionResult`: asks the trackers (and the DHT when on) for peers now.
+  Refused for a torrent that isn't running (paused, queued, finished and not seeding). `torrent.trackers` rows carry
+  `nextAnnounce` (seconds; -1 when none is due).
+- T3, `torrent.details` `{jobId}` → `torrent.detailsResult`: always `source` (`magnet` or `file`), `infoHash`,
+  `addedAt`, `destinationDirectory`, `options`; while `running`, also `infoHashV2`, `private`, `pieceCount`,
+  `pieceLength`, `wasted`, `hashFailures`, `connections`, `connectionsLimit`, `distributedCopies` (-1 when not known,
+  as for a seed), `nextAnnounce` (seconds; 0 = due now, -1 while paused), `pex`, `dhtNodes` (-1 with DHT off; the sum
+  over the DHT's IPv4 and IPv6 nodes). `torrent.networkResult` carries `dhtNodes` while the engine runs.
+- T3, an older torrent program (one that answers `unknown command`): `announce`, `details` and the
+  `sequential` option answer "The torrent program in this installation is too old for that. Update the app."
+- T3, free space: `torrent.inspect` takes `destination` (null: the category folder) and answers `destination`,
+  `freeBytes` and `spaceProblem` (words, when the wanted files don't fit). `torrent.add` is refused with the same words.
+  A magnet's size is not known when it is added, so it is not checked then.
+- T3, `torrent.watch` `{on, leaseSeconds}` → `torrent.actionResult`: the client shows torrents now (a list with a
+  torrent in view, or a torrent's details). Progress comes every second while any client watches or the overall speed
+  limit is split, else every 5 seconds. A watch lasts `leaseSeconds` (default 60, 10 to 300) unless sent again, and
+  ends with `on: false` or when the client disconnects. A timer runs only while a watch is open.
+- T3, settings (`settings.get`/`settings.update`): `torrentDht` (default true), `torrentPex` (true), `torrentLsd`
+  (false), `torrentEncryption` (`prefer`, `require`, `off`), `torrentSeedsAtOnce` (0 to 1000; 0 = all),
+  `torrentConnectionsPerTorrent` (0 or 2 to 2000), `torrentMaxConnections` (0 or 10 to 20000; 0 = the torrent
+  program's default), `torrentUseProxy` (false). With `torrentUseProxy` the proxy of Options › Proxy carries peers,
+  trackers and host names: it must be typed in there as HTTP or SOCKS5 (`proxy.mode` `manual`), with its saved
+  user name and password; the system proxy, SOCKS4 and SOCKS4a are refused in words (with SOCKS4 the torrent engine
+  would look tracker names up on this PC). An HTTP proxy carries no UDP, so
+  DHT, local peers and uTP stay off while it is used. Web sessions may change `torrentSeedsAtOnce`,
+  `torrentConnectionsPerTorrent` and `torrentMaxConnections`; the other five are pipe-only (`WebSettingsRules`).
+
 ## Archive extraction: `archive.*`
 
 The browser bridge does not carry any of these, in either direction (`NativeBridgePolicy`). A reply has
@@ -722,7 +842,44 @@ to every connected client, and throttled during a run.
 
 ## The browser extension
 
-The native host passes only `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder` and
-`jobs.query` from the extension, and refuses anything else with `host.actionResult`. Nothing named
-`remote.*` or `archive.*` crosses in either direction, and neither does `groups.changed`. A snapshot
-reaches the extension without its settings. See `NativeBridgePolicy` in Contracts.
+The native host passes only `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`,
+`jobs.query`, `settings.downloadFolders`, the popup's job actions (`job.pause/resume/retry/cancel/remove`) and its
+row menu's commands (`job.reveal`, `job.update`, `job.redownload`) from the extension, and refuses anything else with
+`host.actionResult`. Each job message names exactly one download; the menu's commands carry nothing else, and
+`job.update` from the extension carries only `newFileName`. Nothing named `remote.*` or `archive.*` crosses in either
+direction, and neither does `groups.changed`. A snapshot reaches the extension without its settings. See
+`NativeBridgePolicy` in Contracts. A paired server takes the same, without `job.reveal` and with `folders.browse`.
+
+Chrome, Edge and Firefox refuse a native message over 1 MB and close the port, which would fail every request
+waiting on it. The native host never sends such a frame: a reply that is too large is replaced by `handoff.error`
+`{ errorCode: "message_too_large", error }` answering the same request (`replyTo`), so that request fails with the
+reason and the port stays open; an event that is too large is dropped and logged (`NativeBridgePolicy.FitForBrowser`).
+
+### One download's file: `job.reveal`, `job.update` `newFileName`, `job.redownload` (EXT.R11)
+
+- **`job.reveal`** `{ jobId }` shows that download's file in the file manager of the Host's machine (Explorer with the
+  file selected; on Linux the file manager's ShowItems or `xdg-open` on the folder). When the file is gone its folder
+  is opened, and when that is gone too the answer is `host.actionResult` `ok: false` "The file and its folder are
+  gone." Only the job's own path is used; no client names a path. Only where the platform can
+  (`PlatformCapabilities.SupportsReveal`: the Windows desktop Host, and the Linux desktop Host when it runs with
+  `DISPLAY` or `WAYLAND_DISPLAY`); a server and every web session get `ok: false`. The disk is checked off the
+  dispatcher's thread with a 10-second limit ("The download's folder didn't answer in time."). On Linux, when no file
+  manager answers ShowItems (gdbus fails), the folder is opened with `xdg-open`; Linux has not been tried on a real
+  desktop. No hello capability names it: the extension does not see the hello through the native host, so it reads
+  an older app's refusal ("The browser extension cannot send this message.", "Unknown message type …") as "Update
+  Inbound to use this."
+- **`job.update`** with **`newFileName`** renames a completed download's file in its own folder. The name must be a
+  bare file name (no `\ / : * ? " < > |`, not `.` or `..`, no trailing dot, not a device name such as `CON` or
+  `nul.txt`); the file must be there; another file of that name is never replaced ("The target file already
+  exists."). A name that differs only in case (`report.pdf` to `Report.pdf`) renames the file too, on Windows as
+  well. Not together with `newFilePath`. Answered with `job.actionResult` holding the job. A Host older than this
+  field ignores it and answers `ok: true` with the job unchanged, so the extension counts a rename as done only when
+  the returned job's `fileName` is the new name. A web session hears only "outside the app's folders" for a download
+  outside them, before the name is checked.
+- **`job.redownload`** `{ jobId }` adds that download again, as the desktop's Redownload does: the same address,
+  folder, name and category, `conflictPolicy: rename` (so it is saved under a new name when the file is there) and
+  `rememberDestination: false`. Refused while the download runs or waits ("Stop the current download before
+  redownloading."), for a provider's file (`remote://`) and for an address whose key is hidden. Answered with
+  `job.actionResult` holding the new download. A web session may redownload only a download inside its folders.
+  Unlike the desktop's Redownload, it does not offer to add a hoster link through the user's provider (TorBox): it
+  always downloads directly, which the desktop also allows ("Download directly").

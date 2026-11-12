@@ -32,4 +32,7 @@ public sealed class SessionRights
 
     /// <summary>Answers its <c>remote.*</c>, held to its folders. Null leaves <c>remote</c> out of the hello.</summary>
     public RemoteCommands? Remote { get; init; }
+
+    /// <summary>Answers <c>torrent.*</c> (the Host has the worker and the kill switch is off); the hello lists <c>torrents</c>.</summary>
+    public bool Torrents { get; init; }
 }

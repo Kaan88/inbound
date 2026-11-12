@@ -2,6 +2,7 @@
 // for the server a folder list in place of the desktop app's folder dialog. Shared by handoff.ts and batch.ts.
 
 import { bytes as formatBytes } from "../../../webui/src/lib/format";
+import { hostName } from "./server-name";
 import type { TargetId } from "./transport";
 import { icon } from "./ui/icon";
 import { fitPathText } from "./ui/path-field";
@@ -12,9 +13,18 @@ export interface OfferedTarget {
   label: string;
   chooser: "dialog" | "list";
   address?: string;
+  /** The server's name as shown (serverDisplayName); the address's host when missing. */
+  name?: string;
   defaultFolder: string;
   favorites: Array<{ name: string; path: string }>;
   error?: string;
+  /**
+   * EXT.R10: the default folder is the browser's own (the extension's Settings), which the app does not know, so it
+   * is sent as it is rather than as "" for "the default".
+   */
+  sendDefault?: boolean;
+  /** EXT.R10: the folder the form starts on when it is not the default ("Last used" or "Custom" in Settings). */
+  startFolder?: string;
 }
 
 /**
@@ -39,8 +49,21 @@ export function renderTargetChoice(field: HTMLElement, list: HTMLElement, target
     radio.addEventListener("change", () => { if (radio.checked) onChange(target); });
     radios.push(radio);
     const text = document.createElement("span");
-    // EXT.R8: the server by its own name ("home-server"), its full address in the tooltip.
-    text.textContent = target.id === "server" && target.address ? hostName(target.address) : target.label;
+    if (target.id === "server" && target.address) {
+      // EXT.R8, EXT.R9: the server by its name, then its host smaller ("Home NAS (192.168.1.150)"); only the host
+      // when that is all there is. The full address is in the tooltip.
+      const host = hostName(target.address);
+      const name = target.name?.trim() || host;
+      text.textContent = name;
+      if (name !== host) {
+        const address = document.createElement("span");
+        address.className = "target-address";
+        address.textContent = ` (${host})`;
+        text.append(address);
+      }
+    } else {
+      text.textContent = target.label;
+    }
     label.append(radio, text);
     if (target.address) label.title = target.address.replace(/^https?:\/\//, "");
     if (target.id === "server" && target.error) {
@@ -54,10 +77,7 @@ export function renderTargetChoice(field: HTMLElement, list: HTMLElement, target
   return selected;
 }
 
-/** A server address's host, the name the popup and the forms call it by. */
-export function hostName(address: string): string {
-  try { return new URL(address).hostname || address; } catch { return address.replace(/^https?:\/\//, ""); }
-}
+export { hostName };
 
 const targetRadios = new WeakMap<HTMLElement, HTMLInputElement[]>();
 

@@ -35,6 +35,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.WebUi.cs" Link="WinUI\RemoteClient.WebUi.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiForm.cs" Link="WinUI\WebUiForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiFirewall.cs" Link="WinUI\WebUiFirewall.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentFirewall.cs" Link="WinUI\TorrentFirewall.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="WinUI\RemoteText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="WinUI\ArchiveForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteRows.cs" Link="WinUI\RemoteRows.cs" />
@@ -42,16 +43,24 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveRows.cs" Link="WinUI\ArchiveRows.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentOpenRequests.cs" Link="WinUI\TorrentOpenRequests.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="WinUI\ContainerImport.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AutoOpen.cs" Link="WinUI\AutoOpen.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PassingLine.cs" Link="WinUI\PassingLine.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\NaturalStringComparer.cs" Link="WinUI\NaturalStringComparer.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CrashLogText.cs" Link="WinUI\CrashLogText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\JobAddress.cs" Link="WinUI\JobAddress.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentRules.cs" Link="WinUI\TorrentRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentSeedRules.cs" Link="WinUI\TorrentSeedRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentListRules.cs" Link="WinUI\TorrentListRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentDetailsRules.cs" Link="WinUI\TorrentDetailsRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentAddLines.cs" Link="WinUI\TorrentAddLines.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentControlRules.cs" Link="WinUI\TorrentControlRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SelectionCommands.cs" Link="WinUI\SelectionCommands.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ListColumns.cs" Link="WinUI\ListColumns.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DurationText.cs" Link="WinUI\DurationText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedSample.cs" Link="WinUI\SpeedSample.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedGraphModel.cs" Link="WinUI\SpeedGraphModel.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressOverviewText.cs" Link="WinUI\ProgressOverviewText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UiFormat.cs" Link="WinUI\UiFormat.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
@@ -64,6 +73,8 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellWords.cs" Link="WinUI\ShellWords.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\OptionsSettingsRebase.cs" Link="WinUI\OptionsSettingsRebase.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SchedulerFileRules.cs" Link="WinUI\SchedulerFileRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="WinUI\DpapiSecretProtector.cs" />
     <Compile Include="..\..\src\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="WinUI\AesGcmSecretProtector.cs" />
   </ItemGroup>

@@ -7,7 +7,7 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// One window per name: the first launch owns the name, and a later one asks it to show itself (or its Options) and
-/// exits. On Windows these are the two named events the app always used. Linux has no named events, so there the first
+/// exits. On Windows these are named events (show, Options, and open a queued torrent). Linux has no named events, so there the first
 /// launch listens on a Unix socket in the user's own socket folder (<see cref="UnixSockets"/>) and a later one connects
 /// and sends one byte; only this user's processes are heard.
 /// </summary>
@@ -15,14 +15,18 @@ internal sealed class ActivationSignal
 {
     private readonly EventWaitHandle _show;
     private readonly EventWaitHandle _settings;
+    private readonly EventWaitHandle _open;
     private readonly string? _socketPath;
 
-    private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, string? socketPath)
+    private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, EventWaitHandle open, string? socketPath)
     {
         _show = show;
         _settings = settings;
+        _open = open;
         _socketPath = socketPath;
     }
+
+    private static EventWaitHandle Local() => new(false, EventResetMode.AutoReset);
 
     /// <summary>Set when another launch asks this window to show itself.</summary>
     public WaitHandle Show => _show;
@@ -30,30 +34,86 @@ internal sealed class ActivationSignal
     /// <summary>Set when another launch asks for Options.</summary>
     public WaitHandle Settings => _settings;
 
+    /// <summary>Set when another launch queued a magnet or .torrent file to open (<see cref="TorrentOpenRequests"/>).</summary>
+    public WaitHandle Open => _open;
+
     public static ActivationSignal Create(string name, out bool createdNew)
     {
         if (!OperatingSystem.IsLinux())
         {
             var show = new EventWaitHandle(false, EventResetMode.AutoReset, name, out createdNew);
             var settings = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
-            return new ActivationSignal(show, settings, null);
+            var open = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Open");
+            return new ActivationSignal(show, settings, open, null);
         }
 
         UnixSockets.EnsureDirectory();
-        // The name holds a server's id and more; a short hash keeps the socket path within the 108-byte limit.
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)).AsSpan(0, 8)).ToLowerInvariant();
-        var path = Path.Combine(UnixSockets.Directory(), $"window-{hash}.sock");
-        var signal = new ActivationSignal(new EventWaitHandle(false, EventResetMode.AutoReset), new EventWaitHandle(false, EventResetMode.AutoReset), path);
+        var signal = new ActivationSignal(Local(), Local(), Local(), SocketPath(name));
         createdNew = !signal.Reachable() && signal.TryListen();
         return signal;
     }
 
+    /// <summary>
+    /// A window owns <paramref name="name"/> now (another process's progress window, say), without taking the name or
+    /// asking that window for anything.
+    /// </summary>
+    public static bool IsOwned(string name)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            if (!EventWaitHandle.TryOpenExisting(name, out var existing)) return false;
+            existing.Dispose();
+            return true;
+        }
+
+        return new ActivationSignal(Local(), Local(), Local(), SocketPath(name)).Reachable();
+    }
+
+    /// <summary>
+    /// Asks the window that owns <paramref name="name"/> to show itself, as a later launch would, without starting one.
+    /// False when no window owns it (it closed meanwhile).
+    /// </summary>
+    public static bool TryShowOwner(string name)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            if (!EventWaitHandle.TryOpenExisting(name, out var existing)) return false;
+            using (existing) existing.Set();
+            return true;
+        }
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.Connect(new UnixDomainSocketEndPoint(SocketPath(name)));
+            UnixSockets.VerifyPeer(socket);
+            socket.Send([(byte)'s']);
+            return true;
+        }
+        catch (Exception ex) when (ex is SocketException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string SocketPath(string name)
+    {
+        // The name holds a server's id and more; a short hash keeps the socket path within the 108-byte limit.
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)).AsSpan(0, 8)).ToLowerInvariant();
+        return Path.Combine(UnixSockets.Directory(), $"window-{hash}.sock");
+    }
+
     /// <summary>From a later launch: asks the running window to show itself, or its Options.</summary>
-    public void Signal(bool settings)
+    public void Signal(bool settings) => Send(settings ? _settings : _show, settings ? (byte)'o' : (byte)'s');
+
+    /// <summary>From a later launch: asks the running window to open the queued torrent requests.</summary>
+    public void SignalOpen() => Send(_open, (byte)'t');
+
+    private void Send(EventWaitHandle local, byte message)
     {
         if (_socketPath is null)
         {
-            (settings ? _settings : _show).Set();
+            local.Set();
             return;
         }
 
@@ -62,7 +122,7 @@ internal sealed class ActivationSignal
             using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             socket.Connect(new UnixDomainSocketEndPoint(_socketPath));
             UnixSockets.VerifyPeer(socket);
-            socket.Send([settings ? (byte)'o' : (byte)'s']);
+            socket.Send([message]);
         }
         catch (Exception ex) when (ex is SocketException or UnauthorizedAccessException)
         {
@@ -139,6 +199,7 @@ internal sealed class ActivationSignal
                     if (client.Receive(buffer) != 1) continue;
                     if (buffer[0] == (byte)'o') _settings.Set();
                     else if (buffer[0] == (byte)'s') _show.Set();
+                    else if (buffer[0] == (byte)'t') _open.Set();
                 }
                 catch (SocketException)
                 {

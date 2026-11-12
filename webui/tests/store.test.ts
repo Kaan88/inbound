@@ -44,14 +44,54 @@ describe('Store', () => {
     expect(store.toasts).toHaveLength(0);
   });
 
-  it('saves the whole settings object with the change, and keeps what the server answers', async () => {
-    const requests = serve((request) => reply(request, 'settings.result', { ok: true, settings: { ...(request.payload as { settings: object }).settings, maxConcurrentDownloads: 3 } }));
+  // A server that holds its own settings: settings.get answers with them, settings.update keeps what it was sent and
+  // answers with what it kept (the limit at most 4). Never an echo of the request, which would hide a stale copy.
+  function settingsServer(held: Record<string, unknown>) {
+    const server = { held };
+    const requests = serve((request) => {
+      if (request.type === 'settings.update') {
+        const sent = (request.payload as { settings: Record<string, unknown> }).settings;
+        server.held = { ...sent, maxConcurrentDownloads: Math.min(Number(sent.maxConcurrentDownloads), 4) };
+      }
+      return reply(request, 'settings.result', { ok: true, settings: server.held });
+    });
+    return { server, requests };
+  }
+
+  it('saves the change onto the settings the server holds now, and keeps what the server answers', async () => {
+    // Since this page read them: the server stopped the queue at its quota, and the desktop added a schedule.
+    const { server, requests } = settingsServer({
+      defaultDownloadDirectory: '/data', maxConcurrentDownloads: 2, downloadGroups: [],
+      queues: [{ id: 0, name: 'Main', isRunning: false, quotaBytesUsed: 500 }],
+      schedules: [{ id: 'added-elsewhere', queueId: 0 }],
+    });
     const store = new Store();
-    store.model.settings = { defaultDownloadDirectory: '/data', maxConcurrentDownloads: 2, downloadGroups: [] } as unknown as Settings;
-    expect(await store.saveSettings((s) => (s.defaultDownloadDirectory = '/other'))).toBe(true);
-    expect(requests[0].type).toBe('settings.update');
-    expect(requests[0].payload).toEqual({ settings: { defaultDownloadDirectory: '/other', maxConcurrentDownloads: 2, downloadGroups: [] } });
-    expect(store.model.settings?.maxConcurrentDownloads).toBe(3);
+    store.model.settings = {
+      defaultDownloadDirectory: '/data', maxConcurrentDownloads: 2, downloadGroups: [],
+      queues: [{ id: 0, name: 'Main', isRunning: true, quotaBytesUsed: 0 }],
+      schedules: [],
+    } as unknown as Settings;
+
+    expect(await store.saveSettings((s) => { s.defaultDownloadDirectory = '/other'; s.maxConcurrentDownloads = 9; })).toBe(true);
+
+    expect(requests.map((r) => r.type)).toEqual(['settings.get', 'settings.update']);
+    const sent = (requests[1].payload as { settings: Record<string, unknown> }).settings;
+    expect(sent.defaultDownloadDirectory).toBe('/other');
+    expect(sent.queues).toEqual([{ id: 0, name: 'Main', isRunning: false, quotaBytesUsed: 500 }]);
+    expect(sent.schedules).toEqual([{ id: 'added-elsewhere', queueId: 0 }]);
+    // What the server kept, not what was sent.
+    expect(store.model.settings?.maxConcurrentDownloads).toBe(4);
+    expect(server.held.schedules).toEqual([{ id: 'added-elsewhere', queueId: 0 }]);
+  });
+
+  it('sends nothing when the current settings cannot be read', async () => {
+    vi.useFakeTimers();
+    const requests = serve((request) => reply(request, 'host.actionResult', { ok: false, message: 'Not now.' }));
+    const store = new Store();
+    store.model.settings = { defaultDownloadDirectory: '/data', downloadGroups: [] } as unknown as Settings;
+    expect(await store.saveSettings((s) => (s.defaultDownloadDirectory = '/other'))).toBe(false);
+    expect(requests.map((r) => r.type)).toEqual(['settings.get']);
+    expect(store.toasts.map((t) => t.text)).toEqual(['Not now.']);
   });
 
   it('goes to the sign-in page when the server answers 401', async () => {

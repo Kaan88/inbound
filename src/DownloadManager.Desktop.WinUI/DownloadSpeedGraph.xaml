@@ -17,10 +17,16 @@
                     AutomationProperties.Name="Download speed history for this session" />
             <!-- The line itself, clipped to the chart, slides left between samples (see Slide). -->
             <Canvas x:Name="LineClip" Height="84" Margin="8,0" VerticalAlignment="Top" IsHitTestVisible="False">
-                <Canvas x:Name="Lines">
+                <!-- UI.B23: eases the line to a new scale (see EaseScale). -->
+                <Canvas>
                     <Canvas.RenderTransform>
-                        <TranslateTransform x:Name="SlideTransform" />
+                        <ScaleTransform x:Name="LineScale" />
                     </Canvas.RenderTransform>
+                    <Canvas x:Name="Lines">
+                        <Canvas.RenderTransform>
+                            <TranslateTransform x:Name="SlideTransform" />
+                        </Canvas.RenderTransform>
+                    </Canvas>
                 </Canvas>
             </Canvas>
             <!-- Redrawn on its own as the pointer moves, so the plot isn't. -->

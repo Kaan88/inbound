@@ -336,6 +336,8 @@ test('Download All: a folder typed before the late target list arrives is kept, 
     server.checked = true;
     await server.dispatch('change');
     assert.equal(page.el('destination').value, '/downloads');
+    // The server's free-space line asks after 250 ms. Let it ask here, or it asks the next test's page.
+    await new Promise(resolve => setTimeout(resolve, 300));
   } finally {
     page.restore();
   }

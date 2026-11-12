@@ -144,11 +144,21 @@ public sealed partial class HostCommandDispatcherTests
         Assert.NotNull(pick.GetPayload<FolderPickResult>().Error);
         var shutdown = await AskAsync(web.Dispatcher, web.Session, MessageTypes.HostShutdown, new { });
         Assert.False(shutdown.GetPayload<HostActionResult>().Ok);
-        foreach (var type in new[] { MessageTypes.UpdateCheck, MessageTypes.UpdateDownload, MessageTypes.UpdateInstall, MessageTypes.UpdateDefer })
-        {
-            var reply = await AskAsync(web.Dispatcher, web.Session, type, new { });
-            Assert.Contains("error", reply.Payload!.Value.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        }
+        // The updater's own refusal, each in its own reply type: not just any reply that mentions an error.
+        const string updatesUnavailable = "Updates are not available here.";
+        var check = await AskAsync(web.Dispatcher, web.Session, MessageTypes.UpdateCheck, new { });
+        Assert.Equal(MessageTypes.UpdateCheckResult, check.Type);
+        Assert.Equal(updatesUnavailable, check.GetPayload<UpdateCheckResult>().Error);
+        var download = await AskAsync(web.Dispatcher, web.Session, MessageTypes.UpdateDownload, new { });
+        Assert.Equal(MessageTypes.UpdateDownloadResult, download.Type);
+        Assert.Equal(updatesUnavailable, download.GetPayload<UpdateDownloadResult>().Error);
+        var install = await AskAsync(web.Dispatcher, web.Session, MessageTypes.UpdateInstall, new { });
+        Assert.Equal(MessageTypes.UpdateInstallResult, install.Type);
+        Assert.Equal(updatesUnavailable, install.GetPayload<UpdateInstallResult>().Error);
+        Assert.False(install.GetPayload<UpdateInstallResult>().Ok);
+        var defer = await AskAsync(web.Dispatcher, web.Session, MessageTypes.UpdateDefer, new { });
+        Assert.Equal(MessageTypes.SettingsResult, defer.Type);
+        Assert.Equal(updatesUnavailable, defer.GetPayload<SettingsResult>().Error);
 
         Assert.DoesNotContain(_timeline, line => line.StartsWith("platform:", StringComparison.Ordinal));
 
@@ -157,6 +167,28 @@ public sealed partial class HostCommandDispatcherTests
         await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.HostPickFolder, new FolderPickRequest());
         Assert.Contains("platform:pick", _timeline);
         Assert.Single(web.Platform.Opened);
+    }
+
+    [Fact]
+    public async Task OnlyThisUsersOwnSessionOnAPcWithAFolderDialogLearnsWhichStartFoldersExist()
+    {
+        // EXT.R10: the extension's start-folder check. A web session (or a server, which has no folder dialog) is
+        // never told which folders on this PC exist.
+        var web = await WebAsync();
+        var ask = new DownloadFoldersRequest { Candidates = [Inside, Outside] };
+
+        var pipe = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.SettingsDownloadFolders, ask)).GetPayload<DownloadFoldersResult>();
+        Assert.True(pipe.Ok);
+        Assert.Equal([Inside, Outside], pipe.ExistingCandidates);
+
+        var fromWeb = await AskAsync(web.Dispatcher, web.Session, MessageTypes.SettingsDownloadFolders, ask);
+        if (fromWeb.Type == MessageTypes.SettingsDownloadFoldersResult) Assert.Null(fromWeb.GetPayload<DownloadFoldersResult>().ExistingCandidates);
+        Assert.DoesNotContain(Outside.Replace(@"\", @"\\"), fromWeb.Payload!.Value.GetRawText());
+
+        var noDialog = Dispatcher(web.Service, new FakePlatform(new PlatformCapabilities(), _timeline));
+        var plain = (await AskAsync(noDialog, Session(), MessageTypes.SettingsDownloadFolders, ask)).GetPayload<DownloadFoldersResult>();
+        Assert.True(plain.Ok);
+        Assert.Null(plain.ExistingCandidates);
     }
 
     [Fact]
@@ -236,6 +268,21 @@ public sealed partial class HostCommandDispatcherTests
         Assert.True(allowed.Ok, allowed.Error);
         Assert.Equal(7, web.Service.GetSettings().MaxConcurrentDownloads);
 
+        // Where torrents go and whether files are chosen first are the browser's to change; turning them on is not.
+        var torrentChoices = await Save(web.Session, s => { s.TorrentRoute = TorrentRoutes.Provider; s.TorrentChooseFiles = false; });
+        Assert.True(torrentChoices.Ok, torrentChoices.Error);
+        Assert.Equal(TorrentRoutes.Provider, web.Service.GetSettings().TorrentRoute);
+        Assert.False(web.Service.GetSettings().TorrentChooseFiles);
+
+        // T2 seeding is the browser's to change too, and the Host's checks still hold for it.
+        var seeding = await Save(web.Session, s => { s.TorrentSeedAfterDownload = false; s.TorrentSeedRatio = 2.5; s.TorrentSeedHours = 0; s.TorrentUploadLimit = 512_000; });
+        Assert.True(seeding.Ok, seeding.Error);
+        var seeded = web.Service.GetSettings();
+        Assert.Equal((false, 2.5, 0d, 512_000L), (seeded.TorrentSeedAfterDownload, seeded.TorrentSeedRatio, seeded.TorrentSeedHours, seeded.TorrentUploadLimit));
+        var bothZero = await Save(web.Session, s => { s.TorrentSeedRatio = 0; s.TorrentSeedHours = 0; });
+        Assert.False(bothZero.Ok);
+        Assert.Equal(2.5, web.Service.GetSettings().TorrentSeedRatio);
+
         var refusals = new (string Name, Action<SettingsDto> Change)[]
         {
             ("defaultDownloadDirectory", s => s.DefaultDownloadDirectory = Outside),
@@ -248,6 +295,10 @@ public sealed partial class HostCommandDispatcherTests
             ("allowSystemCompletionActions", s => s.AllowSystemCompletionActions = true),
             ("updateManifestUrl", s => s.UpdateManifestUrl = "https://example.invalid/manifest.json"),
             ("launchAtStartup", s => s.LaunchAtStartup = !s.LaunchAtStartup),
+            ("torrentsEnabled", s => s.TorrentsEnabled = !s.TorrentsEnabled),
+            ("torrentHandler", s => s.TorrentHandler = !s.TorrentHandler),
+            ("torrentListenPort", s => s.TorrentListenPort = 40404),
+            ("torrentUpnp", s => s.TorrentUpnp = !s.TorrentUpnp),
         };
         foreach (var (name, change) in refusals)
         {

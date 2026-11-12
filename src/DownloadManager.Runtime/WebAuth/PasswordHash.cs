@@ -25,6 +25,7 @@ public static class PasswordHash
 {
     public const string Algorithm = "pbkdf2-sha256";
     public const int Iterations = 600_000;
+    public const int MaximumIterations = 10 * Iterations;
     public const int MinimumLength = 8;
     public const int MaximumLength = 1024;
     private const int SaltBytes = 16;
@@ -58,8 +59,10 @@ public static class PasswordHash
 
     public static async Task<bool> VerifyAsync(string? password, PasswordRecord? record, CancellationToken cancellationToken = default)
     {
-        if (password is null || record is null || record.Algorithm != Algorithm || record.Iterations < 1 ||
-            password.Length > MaximumLength)
+        // L20: only the work this version asks for, up to ten times more for a later one: fewer would make a stolen file
+        // cheap to guess against, and a huge count would tie up the two checks that may run at once.
+        if (password is null || record is null || record.Algorithm != Algorithm ||
+            record.Iterations is < Iterations or > MaximumIterations || password.Length > MaximumLength)
             return false;
         byte[] salt, expected;
         try

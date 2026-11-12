@@ -761,10 +761,13 @@ internal static partial class RemoteText
         return $"The saved {name} API key can't be read on this Windows account, so links here aren't going through {name}. Enter the key again in Options to use it.";
     }
 
-    public static string ImportSummary(int accepted, int total, int failed, string? firstError, int toReview)
+    /// <param name="skipped">Torrents not added and nothing wrong: already in the list, or torrents are off (<paramref name="skipReason"/>).</param>
+    public static string ImportSummary(int accepted, int total, int failed, string? firstError, int toReview, int skipped = 0, string? skipReason = null)
     {
         var added = $"Added {accepted} of {total} downloads{(toReview > 0 ? " directly" : string.Empty)}";
         var outcome = added + (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
+        if (skipped > 0)
+            outcome = $"{outcome.TrimEnd()} {(skipped == 1 ? "1 torrent" : $"{skipped} torrents")} skipped{(string.IsNullOrWhiteSpace(skipReason) ? "." : $": {skipReason.Trim()}")}";
         if (toReview == 0) return outcome;
         var entries = toReview == 1 ? "1 entry isn't" : $"{toReview} entries aren't";
         var them = toReview == 1 ? "it" : "them";

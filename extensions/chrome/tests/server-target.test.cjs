@@ -434,3 +434,22 @@ test('U-EX-4: the badge shows "!" only after a request to the server failed, and
     assert.equal(log.badge.at(-1), '');
   });
 });
+
+test('EXT.R11: a server download is renamed and redownloaded on the server; its folder is never opened from here', async () => {
+  const { harness } = paired(catching);
+  const job = '6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f';
+  const server = fakeServer({ 'job.update': { ok: true, job: { id: job, fileName: 'b.iso' } }, 'job.redownload': { ok: true, job: { id: 'new' } } });
+  await withServer(harness, server, async () => {
+    const renamed = await sendRuntimeMessage(harness,
+      { type: 'dm.jobCommand', command: 'rename', jobId: job, newFileName: 'b.iso', target: 'server' }, ownPage('popup.html'));
+    assert.equal(renamed.ok, true);
+    assert.deepEqual(server.of('job.update')[0].body.payload, { jobId: job, newFileName: 'b.iso' });
+    const again = await sendRuntimeMessage(harness, { type: 'dm.jobCommand', command: 'redownload', jobId: job, target: 'server' }, ownPage('popup.html'));
+    assert.equal(again.ok, true);
+    assert.deepEqual(server.of('job.redownload')[0].body.payload, { jobId: job });
+    const reveal = await sendRuntimeMessage(harness, { type: 'dm.jobCommand', command: 'reveal', jobId: job, target: 'server' }, ownPage('popup.html'));
+    assert.equal(reveal.ok, false);
+    assert.equal(server.of('job.reveal').length, 0);
+    assert.equal(harness.nativeMessages.filter(m => m.type.startsWith('job.')).length, 0, 'nothing went to this PC');
+  });
+});

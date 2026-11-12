@@ -168,7 +168,7 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>
-    /// The engine's own tests for a playlist (the URL, or a hint in the description), plus the phase it reports,
+    /// The engine's own tests for a playlist (the URL, or the hand-off's content type), plus the phase it reports,
     /// which also covers a playlist found by its content type behind a URL without the extension.
     /// </summary>
     private static bool IsStreamManifest(DownloadJob job, string phase)
@@ -190,11 +190,7 @@ public sealed partial class DownloadManagerService
             return true;
         }
 
-        var hint = job.Description ?? string.Empty;
-        return hint.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) ||
-               hint.Contains("m3u8", StringComparison.OrdinalIgnoreCase) ||
-               hint.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ||
-               hint.Contains(".mpd", StringComparison.OrdinalIgnoreCase);
+        return StreamManifestHint.HintsStream(job.HandoffContentType, job.Description);
     }
 
     private Dictionary<(int QueueId, Guid JobId), int> FileOrderLocked()

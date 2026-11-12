@@ -377,6 +377,23 @@ public sealed class NativeHostRegistrationTests
     }
 
     [Fact]
+    public void Setup_offers_the_magnet_and_torrent_association_through_the_hosts_configure_step()
+    {
+        // Owner, 2026-11-12: the association is set up by Setup. The Host registers it only with torrents on, so the task
+        // turns both on; unticked, nothing is sent and the user's choice stays.
+        var iss = Read(@"installer\DownloadManager.iss");
+        Assert.Contains("Name: \"torrenthandler\"; Description: \"Open magnet links and .torrent files with {#AppName} (turns torrents on)\"", iss);
+        var code = Code(@"installer\DownloadManager.iss", "//");
+        Assert.Matches(
+            @"if WizardIsTaskSelected\('torrenthandler'\) then\s+StartupArgument := StartupArgument \+ ' --configure-torrent-handler=enabled';\s+if not Exec\(Root \+ '\\app\\\{#HostExe\}', '--background ' \+ StartupArgument,",
+            code);
+        var host = Read(@"src\DownloadManager.Host\Program.cs");
+        Assert.Contains("\"--configure-torrent-handler=\"", host);
+        Assert.Contains("settings.TorrentsEnabled = true;", host);
+        Assert.Contains("settings.TorrentHandler = true;", host);
+    }
+
+    [Fact]
     public void Uninstall_puts_back_another_programs_chrome_key_that_an_old_uninstall_log_deletes()
     {
         // Every release up to 0.5.3 wrote Chrome's key with uninsdeletekey, and an upgrade appends to

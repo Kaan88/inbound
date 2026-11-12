@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.6.7"
+  #define AppVersion "0.7.0"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -19,6 +19,8 @@
 #define AppName "Inbound Download Manager"
 #define HostExe "DownloadManager.Host.exe"
 #define UiExe "DownloadManager.Desktop.WinUI.exe"
+; T2: the name of the torrent engine's Windows Firewall rules (TorrentFirewall.RuleName in the WinUI app).
+#define TorrentRuleName "Inbound Download Manager torrents"
 #define NativeHostName "com.kaank.downloadmanager"
 #define ExtensionId "pknddmneejadnnngffojnoecojhdfalc"
 #define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
@@ -62,6 +64,9 @@ SetupLogging=yes
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: "startup"; Description: "Start {#AppName} when I sign in to Windows"; GroupDescription: "Startup:"
+; Owner, 2026-11-12: Setup offers the magnet and .torrent association. It turns torrents on (Options > Torrents);
+; unticked, the user's earlier choice is left as it is. Another app's magnet handler is never replaced.
+Name: "torrenthandler"; Description: "Open magnet links and .torrent files with {#AppName} (turns torrents on)"; GroupDescription: "Torrents:"
 
 [Files]
 Source: "{#SourceRoot}\installer-app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -121,6 +126,10 @@ Filename: "{code:GetFirefoxExe}"; Parameters: """{app}\firefox\{#FirefoxXpiName}
 #endif
 
 [UninstallDelete]
+; An in-app update swaps app\ for a newer one (apply-update.ps1), whose new files are not in this log; named here so
+; uninstall removes them and the folder too (audit 4 M8). The same for the Firefox add-on folder.
+Type: filesandordirs; Name: "{app}\app"
+Type: filesandordirs; Name: "{app}\firefox"
 Type: files; Name: "{app}\install.json"
 Type: files; Name: "{app}\INSTALL.txt"
 ; Before 0.6.0 the window wrote its start-up trace beside its exe (now in the logs folder). Setup didn't
@@ -142,6 +151,9 @@ begin
   StringChangeEx(Result, '\', '\\', True);
   StringChangeEx(Result, '"', '\"', True);
 end;
+
+procedure SHChangeNotify(EventId: Integer; Flags: Cardinal; Item1, Item2: Integer);
+  external 'SHChangeNotify@shell32.dll stdcall';
 
 procedure WriteUtf8(const FileName, Text: String);
 begin
@@ -261,6 +273,77 @@ begin
   RegDeleteKeyIncludingSubkeys(HKCU, SubKey);
 end;
 
+// T1 step 6b: the magnet and .torrent handler the Host registers from Options > Torrents. A class key is removed only
+// when its open command starts with this install's window exe, so another app's handler (or another copy's) stays.
+function ClassPointsAtThisInstall(const SubKey: String): Boolean;
+var
+  Command: String;
+begin
+  Result := RegQueryStringValue(HKCU, SubKey + '\shell\open\command', '', Command) and
+    (Pos(Lowercase('"' + ExpandConstant('{app}\app\{#UiExe}') + '"'), Lowercase(Trim(Command))) = 1);
+end;
+
+// T2: Options > Torrents adds inbound allow rules for the torrent engine, with one Windows permission prompt.
+// Uninstall removes them when they are this install's: the rule is found by its name without elevation, and only
+// then netsh, after one prompt, deletes the rules with that name for this program and no other. A silent uninstall
+// asks nothing and leaves them.
+function TorrentFirewallRuleExists(const WorkerPath: String): Boolean;
+var
+  Policy, Rule: Variant;
+begin
+  Result := False;
+  try
+    Policy := CreateOleObject('HNetCfg.FwPolicy2');
+    Rule := Policy.Rules.Item('{#TorrentRuleName}');
+    Result := CompareText(Trim(Rule.ApplicationName), WorkerPath) = 0;
+  except
+    Result := False;
+  end;
+end;
+
+procedure RemoveTorrentFirewallRule;
+var
+  WorkerPath: String;
+  ResultCode: Integer;
+begin
+  WorkerPath := ExpandConstant('{app}\app\inbound-torrent.exe');
+  if UninstallSilent or not TorrentFirewallRuleExists(WorkerPath) then
+    exit;
+  ShellExec('runas', ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall delete rule name="{#TorrentRuleName}" dir=in program="' + WorkerPath + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure RemoveTorrentHandler;
+var
+  Value: String;
+begin
+  if ClassPointsAtThisInstall('Software\Classes\magnet') then
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\magnet');
+  if ClassPointsAtThisInstall('Software\Classes\Inbound.Magnet') then
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Inbound.Magnet');
+  if ClassPointsAtThisInstall('Software\Classes\Inbound.Torrent') then
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Inbound.Torrent');
+  // The pointers at our ProgIDs and the Default apps entry go only once no copy of them is left.
+  if not RegKeyExists(HKCU, 'Software\Classes\Inbound.Torrent') then
+  begin
+    RegDeleteValue(HKCU, 'Software\Classes\.torrent\OpenWithProgids', 'Inbound.Torrent');
+    if RegQueryStringValue(HKCU, 'Software\Classes\.torrent', '', Value) and (CompareText(Value, 'Inbound.Torrent') = 0) then
+      RegDeleteValue(HKCU, 'Software\Classes\.torrent', '');
+    RegDeleteKeyIfEmpty(HKCU, 'Software\Classes\.torrent\OpenWithProgids');
+    RegDeleteKeyIfEmpty(HKCU, 'Software\Classes\.torrent');
+  end;
+  if not RegKeyExists(HKCU, 'Software\Classes\Inbound.Torrent') and
+     not RegKeyExists(HKCU, 'Software\Classes\Inbound.Magnet') then
+  begin
+    if RegQueryStringValue(HKCU, 'Software\RegisteredApplications', '{#AppName}', Value) and
+       (CompareText(Value, 'Software\Inbound Download Manager\Capabilities') = 0) then
+      RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#AppName}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Inbound Download Manager\Capabilities');
+    RegDeleteKeyIfEmpty(HKCU, 'Software\Inbound Download Manager');
+  end;
+end;
+
 var
   // Installs upgraded from 0.5.3 or earlier: Setup appends to the existing uninstall log, and the old
   // entries still carry "uninsdeletekey" for Chrome's key. Inno Setup runs them after usUninstall, so
@@ -282,6 +365,10 @@ begin
     RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');
     RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');
     RemoveFirefoxNativeHostKey('Software\Mozilla\NativeMessagingHosts\{#NativeHostName}');
+    RemoveTorrentHandler;
+    RemoveTorrentFirewallRule;
+    // Explorer drops the icons and Open with entries at once.
+    SHChangeNotify($08000000, 0, 0, 0);
   end
   else if (CurUninstallStep = usPostUninstall) and (ForeignChromeRegistration <> '') and
           not RegValueExists(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}', '') then
@@ -332,7 +419,7 @@ begin
     '  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.' + #13#10 +
     '  Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network' + #13#10 +
     '  protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".' + #13#10 + #13#10 +
-    'The app lives in the notification area (tray). Closing the main window hides it;' + #13#10 +
+    'The app lives in the notification area (tray). Closing the main window closes only the window;' + #13#10 +
     'downloads continue. Use Exit in the tray menu to stop it.' + #13#10 + #13#10 +
     'Uninstall from Settings > Apps. Your download list and settings are kept in' + #13#10 +
     '  ' + ExpandConstant('{localappdata}\{#AppName}') + #13#10 +
@@ -342,6 +429,8 @@ begin
     StartupArgument := '--configure-sign-in-launch=enabled'
   else
     StartupArgument := '--configure-sign-in-launch=disabled';
+  if WizardIsTaskSelected('torrenthandler') then
+    StartupArgument := StartupArgument + ' --configure-torrent-handler=enabled';
   if not Exec(Root + '\app\{#HostExe}', '--background ' + StartupArgument,
               Root + '\app', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     RaiseException('Could not configure sign-in startup.');

@@ -3,7 +3,8 @@
 # (or APPIMAGETOOL names it). Output: artifacts/linux/Inbound-<version>-x86_64.AppImage
 #
 # Layout inside the AppImage:
-#   usr/lib/inbound/          inbound-host, DownloadManager.Cli, DownloadManager.NativeHost, DownloadManager.Server
+#   usr/lib/inbound/          inbound-host, DownloadManager.Cli, DownloadManager.NativeHost, DownloadManager.Server,
+#                             inbound-torrent (the torrent worker)
 #   usr/lib/inbound/desktop/  the Uno window (the Host looks for the window here)
 #   AppRun                    --native-host | --cli | --host | (nothing: Host, then the window)
 set -euo pipefail
@@ -13,6 +14,13 @@ appdir="$out/AppDir"
 lib="$appdir/usr/lib/inbound"
 config="${CONFIGURATION:-Release}"
 version="$(grep -oPm1 '(?<=<Version>)[^<]+' "$root/Directory.Build.props" 2>/dev/null || echo 0.0.0)"
+
+# T1: the native torrent worker (native/torrent-worker/Dockerfile.build), next to inbound-host, which looks for it there.
+worker="${TORRENT_WORKER:-$root/artifacts/torrent-worker/linux-x64/inbound-torrent}"
+if [ ! -f "$worker" ]; then
+  echo "The torrent worker $worker is missing. Build it with native/torrent-worker/Dockerfile.build, or set TORRENT_WORKER." >&2
+  exit 1
+fi
 
 rm -rf "$appdir"
 mkdir -p "$lib/desktop"
@@ -25,6 +33,7 @@ publish src/DownloadManager.Cli "$lib"
 publish src/DownloadManager.NativeHost "$lib"
 publish src/DownloadManager.Server "$lib"
 publish src/DownloadManager.Desktop.Uno "$lib/desktop"
+install -m 755 "$worker" "$lib/inbound-torrent"
 
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh

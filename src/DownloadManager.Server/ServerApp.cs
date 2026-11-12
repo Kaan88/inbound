@@ -85,6 +85,7 @@ public sealed class ServerApp : IAsyncDisposable
     {
         if (options.DescribeUnsafeBinding() is { } refusal) throw new ServerStartException(refusal);
         if (options.TrustProxyProblem is { } proxyProblem) throw new ServerStartException(proxyProblem);
+        if (options.TorrentPortProblem is { } portProblem) throw new ServerStartException(portProblem);
 
         var paths = new StoragePaths(Path.GetFullPath(options.DataDirectory));
         paths.EnsureCreated();
@@ -150,9 +151,13 @@ public sealed class ServerApp : IAsyncDisposable
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
             mediaCheckpoints: mediaCheckpoints,
-            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget),
+            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints),
             linkBroker: remote.Broker,
-            linkSecrets: remote.Registry)
+            linkSecrets: remote.Registry,
+            // A fixed port, so a container can publish it (T3); the tests' loopback-only listen wins when set.
+            torrentEngine: DownloadManager.Torrents.TorrentSetup.Create(paths.Root, new TorrentStore(paths), log.Info,
+                DownloadManager.Torrents.TorrentSetup.TestListenOptions() ?? new DownloadManager.Torrents.TorrentSupervisorOptions { Listen = options.TorrentListen },
+                options.FindTorrentWorker))
         {
             Roots = roots,
         };
@@ -170,6 +175,7 @@ public sealed class ServerApp : IAsyncDisposable
         remoteJobs.Roots = new PathRoots([.. options.Roots, uploads.Directory]);
         remoteJobs.DestinationRoots = roots;
         remoteJobs.ResolveReference = uploads.Resolve;
+        service.ResolveTorrentUpload = remoteJobs.ResolveUpload;
         var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info, roots: roots);
         service.DirectAddresses = remoteJobs;
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);

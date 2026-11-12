@@ -7,7 +7,7 @@
 import { bytes, duration, speed, statusText, tone } from "../../../webui/src/lib/format";
 import type { Job } from "../../../webui/src/lib/types";
 import { fileIcon, icon } from "./ui/icon";
-import { actionsFor, groupLabel, latestJobs, POPUP_JOB_LIMIT, type JobAction, type JobSummary } from "./job-list";
+import { actionsFor, groupLabel, latestJobs, POPUP_JOB_LIMIT, showsFolderButton, waitsInApp, type JobAction, type JobSummary, type RowAction } from "./job-list";
 
 export interface PopupListView {
   /** A server is paired and this PC is used too: rows come in two groups. */
@@ -20,12 +20,28 @@ export interface PopupListView {
 export interface PopupListHandlers {
   onAction: (job: JobSummary, action: JobAction) => void;
   onOpen: (job: JobSummary) => void;
+  /** EXT.R11: the folder button (Explorer with the file selected). */
+  onReveal?: (job: JobSummary) => void;
+  /** EXT.R11: the row's menu, from a right-click (at the pointer) or the Menu key / Shift+F10 (under the row). */
+  onMenu?: (job: JobSummary, row: HTMLElement, at?: { x: number; y: number }) => void;
 }
 
-const ACTION_LABELS: Record<JobAction, string> = { start: "Start", pause: "Stop", resume: "Resume", retry: "Retry", remove: "Delete" };
-const ACTION_ICONS: Record<JobAction, string> = { start: "play", pause: "pause", resume: "play", retry: "retry", remove: "trash" };
-const ACTION_TINTS: Record<JobAction, string> = {
-  start: "tint-start", pause: "tint-pause", resume: "tint-start", retry: "tint-info", remove: "tint-danger",
+/** The folder button's words (GitHub #4). */
+export const REVEAL_LABEL = "Open containing folder";
+
+/** The words of a row's "open" button: a download that waits for the user in the app. */
+export const OPEN_IN_APP_LABEL = "Open in app";
+/** The detail of such a row, after its status. */
+export const WAITS_IN_APP_NOTE = "Waiting for you in the app";
+/** The same detail for a paired server's row: the choice is made in the server's own page. */
+export const WAITS_ON_SERVER_NOTE = "Waiting for you on the server";
+
+const ACTION_LABELS: Record<RowAction, string> = {
+  start: "Start", pause: "Stop", resume: "Resume", retry: "Retry", remove: "Delete", open: OPEN_IN_APP_LABEL,
+};
+const ACTION_ICONS: Record<RowAction, string> = { start: "play", pause: "pause", resume: "play", retry: "retry", remove: "trash", open: "monitor" };
+const ACTION_TINTS: Record<RowAction, string> = {
+  start: "tint-start", pause: "tint-pause", resume: "tint-start", retry: "tint-info", remove: "tint-danger", open: "tint-neutral",
 };
 
 /** Seconds left for a download, from the Host's estimate (a TimeSpan text, ISO 8601, seconds or ticks) or its rate. */
@@ -72,6 +88,8 @@ export function rowText(job: JobSummary): { status: string; detail: string; size
     if (rate) parts.push(rate);
     const left = duration(parseEtaSeconds(job));
     if (left) parts.push(left);
+  } else if (waitsInApp(job)) {
+    parts.push(job.target === "server" ? WAITS_ON_SERVER_NOTE : WAITS_IN_APP_NOTE);
   } else if (job.failure?.message && job.state !== "cancelled") {
     // The state already says "Cancelled"; only real errors add detail.
     parts.push(job.failure.message);
@@ -112,7 +130,26 @@ function keyOf(job: JobSummary): string {
   return `${job.target ?? "local"}:${job.id}`;
 }
 
+/** EXT.R11: how long after the Menu key or a pointer press the browser's own contextmenu event belongs to it. */
+const KEYBOARD_MENU_GRACE_MS = 800;
+let keyboardMenuUntil = 0;
+let pointerDownAt = 0;
+let swallowInstalled = false;
+
+/**
+ * The Menu key's contextmenu can arrive after the row menu has taken focus, on the menu itself: the browser's menu
+ * would open over ours. One listener for the page drops it.
+ */
+function swallowKeyboardContextMenu(): void {
+  if (swallowInstalled) return;
+  swallowInstalled = true;
+  document.addEventListener("contextmenu", (event) => {
+    if (Date.now() < keyboardMenuUntil) event.preventDefault();
+  }, true);
+}
+
 function createRow(handlers: PopupListHandlers): RowParts {
+  swallowKeyboardContextMenu();
   const item = document.createElement("li");
   item.className = "job";
   item.tabIndex = 0;
@@ -150,6 +187,24 @@ function createRow(handlers: PopupListHandlers): RowParts {
   });
   item.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && event.target === item) handlers.onOpen(parts.job);
+    else if (handlers.onMenu && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
+      event.preventDefault();
+      // The browser still sends its own contextmenu for this key, after the menu has taken focus: it is swallowed.
+      keyboardMenuUntil = Date.now() + KEYBOARD_MENU_GRACE_MS;
+      handlers.onMenu(parts.job, item);
+    }
+  });
+  item.addEventListener("pointerdown", () => { pointerDownAt = Date.now(); });
+  item.addEventListener("contextmenu", (event) => {
+    if (!handlers.onMenu) return;
+    event.preventDefault();
+    if (Date.now() < keyboardMenuUntil) return;
+    // No pointer press just before: the Menu key or Shift+F10 without a keydown here, so under the row like it.
+    if (Date.now() - pointerDownAt > KEYBOARD_MENU_GRACE_MS) {
+      handlers.onMenu(parts.job, item);
+      return;
+    }
+    handlers.onMenu(parts.job, item, { x: event.clientX, y: event.clientY });
   });
   return parts;
 }
@@ -179,10 +234,11 @@ function updateRow(parts: RowParts, job: JobSummary, handlers: PopupListHandlers
   parts.fill.style.width = typeof bar === "number" ? `${(bar * 100).toFixed(1)}%` : "";
 
   const actions = actionsFor(job);
-  const signature = actions.join(",") + `|${name}`;
+  const folder = showsFolderButton(job) && !!handlers.onReveal;
+  const signature = (folder ? "reveal," : "") + actions.join(",") + `|${name}`;
   if (signature !== parts.signature) {
     parts.signature = signature;
-    parts.actions.replaceChildren(...actions.map((action) => {
+    const buttons = actions.map((action) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `btn-icon ${ACTION_TINTS[action]}`;
@@ -190,9 +246,23 @@ function updateRow(parts: RowParts, job: JobSummary, handlers: PopupListHandlers
       button.title = ACTION_LABELS[action];
       button.setAttribute("aria-label", `${ACTION_LABELS[action]} ${name}`);
       button.append(icon(ACTION_ICONS[action], 16));
-      button.addEventListener("click", () => handlers.onAction(parts.job, action));
+      // Open in app is the row's own open (the app's window), not a command to the download.
+      button.addEventListener("click", () => action === "open" ? handlers.onOpen(parts.job) : handlers.onAction(parts.job, action));
       return button;
-    }));
+    });
+    if (folder) {
+      // Left of Delete: a finished download has no other button, so the row keeps two at most.
+      const reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "btn-icon tint-neutral";
+      reveal.dataset.action = "reveal";
+      reveal.title = REVEAL_LABEL;
+      reveal.setAttribute("aria-label", `${REVEAL_LABEL} of ${name}`);
+      reveal.append(icon("folder", 16));
+      reveal.addEventListener("click", () => handlers.onReveal?.(parts.job));
+      buttons.splice(Math.max(0, buttons.length - 1), 0, reveal);
+    }
+    parts.actions.replaceChildren(...buttons);
   }
 }
 

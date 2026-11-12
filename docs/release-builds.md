@@ -7,6 +7,11 @@ application, create a GitHub release, or upload files.
 
 ## Tools needed to build
 
+Build the native torrent worker first. `scripts/publish.ps1` (and so `package.ps1` and `build-installer.ps1`) stops before
+building anything when `artifacts\torrent-worker\win-x64\inbound-torrent.exe` is missing. Build it with
+`native\torrent-worker\build-windows.cmd` (see `native/torrent-worker/README.md` for what it needs),
+or pass another copy with `-TorrentWorker <path>` to any of the three scripts.
+
 Node and npm are needed for the browser extension and now also for the web UI: `scripts/publish.ps1` runs `npm ci` (when `webui\node_modules` is missing) and `npm run build` in `webui`, then publishes `DownloadManager.Server` (the web UI bridge the
 Host starts when Options > Web UI is on) into the same app folder with `wwwroot\index.html` and `wwwroot\signin\index.html`.
 It stops with an error when either page is missing. `scripts/package.ps1` and `scripts/build-installer.ps1` publish through it,
@@ -99,7 +104,9 @@ retrying.
 ## Linux AppImage
 
 The AppImage is built on Linux x86_64 with the .NET 10 SDK and `appimagetool`: `scripts/package-appimage.sh` writes
-`artifacts/linux/Inbound-<version>-x86_64.AppImage`. Any Linux runner works; the project's own builds run on a
+`artifacts/linux/Inbound-<version>-x86_64.AppImage`. It needs the Linux torrent worker first, and stops without it:
+`docker build -f native/torrent-worker/Dockerfile.build --build-arg TARGET=x64 --output artifacts/torrent-worker/linux-x64 native/torrent-worker`,
+or set `TORRENT_WORKER` to a worker built earlier. Any Linux runner with that worker works; the project's own builds run on a
 self-hosted Forgejo Actions runner, not on GitHub. Sign it with the same key as the Windows manifest:
 
 ```sh

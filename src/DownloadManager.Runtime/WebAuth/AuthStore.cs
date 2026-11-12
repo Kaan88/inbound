@@ -86,7 +86,9 @@ public sealed class AuthStore
         if (!File.Exists(path)) return new AuthStore(path, new AuthFile());
         try
         {
-            var file = JsonSerializer.Deserialize<AuthFile>(File.ReadAllText(path, Encoding.UTF8), Json) ?? new AuthFile();
+            // JSON null is no sign-in file either: read as "no password yet" it would reopen first-time setup (L20).
+            var file = JsonSerializer.Deserialize<AuthFile>(File.ReadAllText(path, Encoding.UTF8), Json)
+                       ?? throw new JsonException("The sign-in file holds no object.");
             file.Tokens ??= [];
             return new AuthStore(path, file);
         }

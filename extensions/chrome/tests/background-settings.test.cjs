@@ -1017,6 +1017,76 @@ const zipResponse = (url, extra = {}) => ({
     { name: 'Content-Length', value: '4096' }], ...extra,
 });
 
+/** Audit 3 M4: a download Firefox starts again carries the page it came from as its referrer. */
+const REFERER = [{ name: 'Referer', value: 'https://site.test/page' }];
+
+test('Audit 3 M4 / L12: a restart Firefox refuses falls back to no referrer, then to no file name, and a failed second request is said', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  // Firefox refuses the header, then the file name ("a:b?.zip" style), and takes the plain request.
+  harness.chrome.downloads.download = async (options) => {
+    log.downloaded.push(options);
+    if (options.headers || options.filename) throw new Error('refused');
+    return 77;
+  };
+  await withBackground(harness, async () => {
+    assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/odd.zip')), { cancel: true });
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    assert.equal(log.downloaded.length, 3);
+    assert.deepEqual(log.downloaded[0].headers, REFERER);
+    assert.equal(log.downloaded[1].headers, undefined);
+    assert.equal(log.downloaded[1].filename, 'big file.zip');
+    assert.deepEqual(log.downloaded[2], { url: 'https://site.test/odd.zip', cookieStoreId: 'firefox-container-1' });
+    const notes = log.notes.length;
+
+    // The site refuses the second request: the user hears of it. A cancel by the user says nothing.
+    const changed = harness.chrome.downloads.onChanged.listeners;
+    assert.equal(changed.length, 1, 'listening only once something was started again');
+    changed[0]({ id: 77, state: { current: 'interrupted' }, error: { current: 'SERVER_FORBIDDEN' } });
+    await settle(() => log.notes.length > notes);
+    assert.match(log.notes.at(-1).message, /site refused it/);
+    changed[0]({ id: 77, state: { current: 'interrupted' } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(log.notes.length, notes + 1, 'said once');
+  });
+});
+
+test('Audit 3 M4: a restart that cannot start at all is said', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  harness.chrome.downloads.download = async (options) => { log.downloaded.push(options); throw new Error('refused'); };
+  await withBackground(harness, async () => {
+    await registered[0].listener(zipResponse('https://site.test/never.zip'));
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    assert.equal(log.downloaded.length, 3);
+    assert.match(log.notes.at(-1).message, /could not start it/);
+    // Not marked as the browser's own: a later download of it is caught as usual.
+    assert.equal(registered[0].listener(zipResponse('https://site.test/never.zip')) instanceof Promise, true);
+  });
+});
+
+test('Audit 3 L12: one page\'s responses hand over at most ten downloads a minute; the rest stay with Firefox', async () => {
+  const { harness, log, registered } = firefoxWithResponses();
+  await withBackground(harness, async () => {
+    const answers = [];
+    for (let i = 0; i < 12; i++) {
+      answers.push(registered[0].listener(zipResponse(`https://site.test/f${i}.zip`, { type: 'sub_frame' })));
+    }
+    for (let i = 0; i < 10; i++) await answerNative(harness, 'handoff.request', { accepted: true });
+    const results = await Promise.all(answers);
+    assert.equal(results.filter(result => result.cancel === true).length, 10);
+    assert.equal(results.filter(result => result.cancel === undefined).length, 2);
+    assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 10);
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
+    assert.match(status.leftInBrowser[0].reason, /many downloads at once/);
+    // Left to Firefox: onCreated does not send them either.
+    harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(70, 'f11.zip'), url: 'https://site.test/f11.zip' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 10);
+    assert.deepEqual(log.paused, []);
+  });
+});
+
 test('EXT.B5: Firefox catches a download from its response, before the Save dialog, and cancels it only once accepted', async () => {
   const { harness, log, registered } = firefoxWithResponses();
   containerCookies(harness);
@@ -1091,7 +1161,7 @@ test('EXT.B5: "ask each time" opens the folder window, and Keep in browser start
     assert.equal(shown.held, true);
 
     await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
-    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/ask.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1' }]);
+    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/ask.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1', headers: REFERER }]);
     // The download it started is Firefox's own: not caught again.
     harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(60, 'ask.zip'), url: 'https://site.test/ask.zip' });
     await new Promise(resolve => setTimeout(resolve, 30));
@@ -1115,7 +1185,7 @@ test('EXT.B5: with the app unreachable the response goes on, and a restart keeps
     const window = openHandoffPort(asked.harness, id);
     window.close();
     await settle(() => asked.log.downloaded.length);
-    assert.deepEqual(asked.log.downloaded, [{ url: 'https://site.test/work.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1' }]);
+    assert.deepEqual(asked.log.downloaded, [{ url: 'https://site.test/work.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1', headers: REFERER }]);
     // Its own request, however Firefox types it, is let through untouched.
     assert.equal(asked.registered[0].listener(zipResponse('https://site.test/work.zip')), undefined);
   });
@@ -1128,7 +1198,7 @@ test('EXT.B5: a folder window that never connects gives the download back to Fir
     await withBackground(harness, async () => {
       assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/lost.zip', { cookieStoreId: 'firefox-private' })), { cancel: true });
       await new Promise(resolve => setTimeout(resolve, 80));
-      assert.deepEqual(log.downloaded, [{ url: 'https://site.test/lost.zip', filename: 'big file.zip', incognito: true }]);
+      assert.deepEqual(log.downloaded, [{ url: 'https://site.test/lost.zip', filename: 'big file.zip', incognito: true, headers: REFERER }]);
     });
   } finally { delete global.__inboundResponseWindowConnectMs; }
 
@@ -1143,4 +1213,33 @@ test('EXT.B5: a folder window that never connects gives the download back to Fir
       assert.deepEqual(kept.log.downloaded, []);
     });
   } finally { delete global.__inboundResponseWindowConnectMs; }
+});
+
+test('Audit 3 M4 review: a restart stopped by the network is not blamed on the site, and one that saved a web page is said', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  let next = 80;
+  harness.chrome.downloads.download = async (options) => { log.downloaded.push(options); return next++; };
+  harness.chrome.downloads.search = async ({ id }) => (id === 81 ? [{ id, mime: 'text/html' }] : [{ id, mime: 'application/zip' }]);
+  await withBackground(harness, async () => {
+    for (const name of ['one.zip', 'two.zip', 'three.zip']) {
+      await registered[0].listener(zipResponse(`https://site.test/${name}`));
+      const id = decodeURIComponent(log.windows.at(-1).url.split('id=')[1]);
+      await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    }
+    const changed = harness.chrome.downloads.onChanged.listeners[0];
+    const notes = log.notes.length;
+    changed({ id: 80, state: { current: 'interrupted' }, error: { current: 'NETWORK_FAILED' } });
+    await settle(() => log.notes.length > notes);
+    assert.match(log.notes.at(-1).message, /connection failed/);
+    assert.doesNotMatch(log.notes.at(-1).message, /site refused/);
+
+    changed({ id: 81, state: { current: 'complete' } });
+    await settle(() => log.notes.length > notes + 1);
+    assert.match(log.notes.at(-1).message, /web page/);
+
+    // The file it should be: nothing to say.
+    changed({ id: 82, state: { current: 'complete' } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(log.notes.length, notes + 2);
+  });
 });

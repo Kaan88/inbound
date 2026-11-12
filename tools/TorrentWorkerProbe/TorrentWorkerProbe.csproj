@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- T0 measurements (docs/plans/native-torrent-roadmap.md gates 2 and 3): starts the native worker with N seeding
+       torrents on loopback and keeps it running, so scripts\perf-idle-sample.ps1 can sample it. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\tests\DownloadManager.Torrents.Tests\TestTorrent.cs" Link="TestTorrent.cs" />
+  </ItemGroup>
+
+</Project>

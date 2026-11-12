@@ -1338,6 +1338,14 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 return new RemoteActionResult(false, "That item is not on the list.");
             }
 
+            if (record.State == RemoteJobState.Submitting)
+            {
+                // The request is out. Forgetting the job now would leave whatever it makes on the
+                // account with nothing here that knows of it; once answered, it can be removed (and its item too).
+                var name = _providers.Find(record.Provider)?.DisplayName ?? "the provider";
+                return new RemoteActionResult(false, $"This is being sent to {name} right now. Remove it once {name} has answered.");
+            }
+
             await ForgetAsync(record).ConfigureAwait(false);
         }
         finally { _gate.Release(); }

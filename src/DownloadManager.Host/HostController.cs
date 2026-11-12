@@ -95,19 +95,22 @@ public sealed class HostController : IHostPlatform
 
         try
         {
-            var arguments = packageId is { } package ? $"--package {package:D}" :
-                jobId is { } id ? $"--job {id:D}" :
-                string.IsNullOrWhiteSpace(page) ? string.Empty : $"--page {page}";
+            // Each argument on its own, and a page only when the window knows it: the page can come from a client's
+            // host.openUi, and loose text would add arguments of its own (report 3, L2).
+            string[] arguments = packageId is { } package ? ["--package", package.ToString("D")] :
+                jobId is { } id ? ["--job", id.ToString("D")] :
+                UiPages.Known(page) is { } known ? ["--page", known] : [];
             // The tray click gave the Host the foreground; pass it on so the window comes to the front (UI.B4).
             AllowSetForegroundWindow(-1);
-            Process.Start(new ProcessStartInfo
+            var start = new ProcessStartInfo
             {
                 FileName = executable,
-                Arguments = arguments,
                 UseShellExecute = false,
                 // Not app\: what a window opens inherits this, and it would hold that folder (see Program.LeaveProgramFolder).
                 WorkingDirectory = Environment.CurrentDirectory,
-            });
+            };
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            Process.Start(start);
             _log.Info($"Opened desktop UI '{executable}'.");
         }
         catch (Exception ex)
@@ -116,6 +119,12 @@ public sealed class HostController : IHostPlatform
             MessageBox.Show($"Could not open the desktop UI:\r\n{ex.Message}",
                 "Inbound Download Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>EXT.R11: Explorer with the file selected, or the folder. A failure to start Explorer throws, and the client is told so.</summary>
+    public void RevealFile(string path)
+    {
+        using var _ = Process.Start(ShellActions.RevealFile(path));
     }
 
     public void RequestShutdown()
@@ -130,7 +139,7 @@ public sealed class HostController : IHostPlatform
     /// <summary>An exit came before there was a message loop for it to end, as a client can ask as soon as the pipe is open.</summary>
     public bool ExitWasRequested => Volatile.Read(ref _exitRequested);
 
-    private static string? FindUiExecutable()
+    internal static string? FindUiExecutable()
     {
         var candidates = new[]
         {

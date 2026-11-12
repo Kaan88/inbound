@@ -19,7 +19,8 @@ internal sealed record ListColumn(string Key, string Title, double DefaultWidth,
 /// <summary>The columns of the two lists that have headers, left to right, the same as their row templates.</summary>
 internal static class ListColumnSets
 {
-    /// <summary>The icon cell has no header. The extraction column stays away until there is an archive to talk about.</summary>
+    /// <summary>The icon cell has no header. The extraction column stays away until there is an archive to talk about, and the
+    /// torrent columns (Seeds, Peers, Up, Ratio) outside the torrent views.</summary>
     public static ListColumnLayout Downloads() => new(
         [
             new ListColumn("icon", string.Empty, 30, 30),
@@ -28,8 +29,13 @@ internal static class ListColumnSets
             new ListColumn("size", "Size", 78, 40, RightAligned: true),
             new ListColumn("status", "Status", 140, 60),
             new ListColumn("extraction", "Extraction", 140, 60),
+            // DT-6: the torrent views' own columns (TorrentListRules.ColumnKeys), away everywhere else.
+            new ListColumn("seeds", "Seeds", 52, 36, RightAligned: true),
+            new ListColumn("peers", "Peers", 52, 36, RightAligned: true),
             new ListColumn("eta", "Time left", 78, 40, RightAligned: true),
             new ListColumn("rate", "Transfer rate", 86, 40, RightAligned: true),
+            new ListColumn("up", "Up", 78, 40, SpokenTitle: "Upload rate", RightAligned: true),
+            new ListColumn("ratio", "Ratio", 52, 36, RightAligned: true),
             new ListColumn("lastTry", "Last Try Date", 116, 60),
             new ListColumn("description", "Description", 210, 60),
         ],

@@ -74,6 +74,12 @@
         <SelectorBar x:Name="Tabs" Grid.Row="1" Margin="-12,0,-12,0" SelectionChanged="Tabs_SelectionChanged">
             <SelectorBarItem x:Name="OverviewTab" Text="Overview" IsSelected="True" />
             <SelectorBarItem x:Name="ConnectionsTab" Text="Connections" />
+            <!-- T1: a torrent's files take the place of Connections, which a torrent doesn't have. -->
+            <SelectorBarItem x:Name="FilesTab" Text="Files" Visibility="Collapsed" AutomationProperties.Name="Files" />
+            <!-- T2: what a running torrent is connected to, read from the Host only while the tab shows. -->
+            <SelectorBarItem x:Name="PeersTab" Text="Peers" Visibility="Collapsed" AutomationProperties.Name="Peers" />
+            <SelectorBarItem x:Name="TrackersTab" Text="Trackers" Visibility="Collapsed" AutomationProperties.Name="Trackers" />
+            <SelectorBarItem x:Name="PiecesTab" Text="Pieces &amp; Speed" Visibility="Collapsed" AutomationProperties.Name="Pieces and speed" />
             <SelectorBarItem x:Name="OptionsTab" Text="Options" />
         </SelectorBar>
 
@@ -144,6 +150,56 @@
 
                     <local:SegmentMapBar x:Name="OverviewMap" Height="6" CornerRadius="3" Visibility="Collapsed"
                                          ToolTipService.ToolTip="Where in the file the downloaded parts are" />
+
+                    <!-- T1: what a torrent has besides the usual: how it stands, its files and its info hash. -->
+                    <!-- Each row after the first keeps its own 4 px above it, not RowSpacing: a hidden Seeding goal then leaves no gap. -->
+                    <Grid x:Name="TorrentFacts" ColumnSpacing="12" Padding="2,0" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Status" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="TorrentStatusText" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.Name="Status" />
+                        <TextBlock Grid.Row="1" Margin="0,4,0,0" Text="Files" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="TorrentFilesText" Grid.Row="1" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.Name="Files" />
+                        <TextBlock Grid.Row="2" Margin="0,4,0,0" Text="Info hash" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="InfoHashText" Grid.Row="2" Margin="0,4,0,0" Grid.Column="1" FontSize="12" FontFamily="Consolas"
+                                   TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" AutomationProperties.Name="Info hash" />
+                        <!-- DT-10: what it has sent, and the seeding goal from Options with the time to it while it seeds. -->
+                        <TextBlock Grid.Row="3" Margin="0,4,0,0" Text="Ratio" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="TorrentRatioText" Grid.Row="3" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.Name="Ratio" />
+                        <TextBlock x:Name="SeedGoalHeader" Grid.Row="4" Margin="0,4,0,0" Text="Seeding goal" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="SeedGoalText" Grid.Row="4" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextWrapping="Wrap"
+                                   AutomationProperties.Name="Seeding goal" />
+                        <!-- T3: what the Host says of the torrent (torrent.details), read while the Overview shows. -->
+                        <TextBlock x:Name="AddedHeader" Grid.Row="5" Margin="0,4,0,0" Text="Added" Style="{StaticResource KeyStyle}" Visibility="Collapsed" />
+                        <TextBlock x:Name="AddedText" Grid.Row="5" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   Visibility="Collapsed" AutomationProperties.Name="Added" />
+                        <TextBlock x:Name="PiecesHeader" Grid.Row="6" Margin="0,4,0,0" Text="Pieces" Style="{StaticResource KeyStyle}" Visibility="Collapsed" />
+                        <TextBlock x:Name="PiecesFactText" Grid.Row="6" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   Visibility="Collapsed" AutomationProperties.Name="Pieces" />
+                        <TextBlock x:Name="WastedHeader" Grid.Row="7" Margin="0,4,0,0" Text="Wasted" Style="{StaticResource KeyStyle}" Visibility="Collapsed" />
+                        <TextBlock x:Name="WastedText" Grid.Row="7" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   Visibility="Collapsed" AutomationProperties.Name="Wasted"
+                                   ToolTipService.ToolTip="Bytes downloaded twice or thrown away because a piece failed its check" />
+                        <TextBlock x:Name="PrivateHeader" Grid.Row="8" Margin="0,4,0,0" Text="Private" Style="{StaticResource KeyStyle}" Visibility="Collapsed" />
+                        <TextBlock x:Name="PrivateText" Grid.Row="8" Margin="0,4,0,0" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   Visibility="Collapsed" AutomationProperties.Name="Private" />
+                    </Grid>
 
                     <Grid x:Name="Facts" ColumnSpacing="12" RowSpacing="4" Padding="2,0">
                         <Grid.ColumnDefinitions>
@@ -223,6 +279,229 @@
                 </StackPanel>
             </Grid>
 
+            <!-- T1 Files: a torrent's files, ticked for the ones it downloads. Virtualized: a torrent can hold 100,000 files. -->
+            <Grid x:Name="FilesPage" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid x:Name="FileChoiceBar" ColumnSpacing="12" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Choose the files to download, then Start." TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Button x:Name="StartFilesButton" Grid.Column="1" Style="{StaticResource AccentButtonStyle}" Click="StartFiles_Click"
+                            Padding="16,7" AutomationProperties.Name="Start" ToolTipService.ToolTip="Download the ticked files">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE768;" FontSize="14" />
+                            <TextBlock Text="Start" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <Grid Grid.Row="1" ColumnSpacing="8" Padding="9,0,13,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="84" />
+                        <ColumnDefinition Width="64" />
+                        <ColumnDefinition x:Name="PriorityColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="1" Text="Name" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="3" Text="Progress" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="4" Text="Priority" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                </Grid>
+                <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="4">
+                    <!-- No selection in the list itself: the boxes are the choice. Arrows move and Space ticks. -->
+                    <ListView x:Name="FilesList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                              PreviewKeyDown="FilesList_PreviewKeyDown" ContextRequested="FilesList_ContextRequested"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              AutomationProperties.Name="Files in this torrent">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="84" />
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox MinWidth="0" MinHeight="0" Width="22" Height="22" Padding="0" VerticalAlignment="Center"
+                                              IsChecked="{Binding Checked, Mode=TwoWay}" IsEnabled="{Binding CanCheck}" Click="FileBox_Click"
+                                              AutomationProperties.Name="{Binding AccessibleName}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" ToolTipService.ToolTip="{Binding Name}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Size}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Progress}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="4" Text="{Binding Priority}" Visibility="{Binding PriorityVisibility}" Width="64"
+                                               FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+                <StackPanel Grid.Row="3" Spacing="4">
+                    <TextBlock x:Name="FilesNote" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    <TextBlock x:Name="FilesPriorityHint" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                               Text="Right-click a file to change its priority or skip it. A skipped file can still get a few bytes from pieces it shares with a file next to it." />
+                </StackPanel>
+            </Grid>
+
+            <!-- T2 Peers: one row per connected peer. A peer is named by its place; its address is on hover. -->
+            <Grid x:Name="PeersPage" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid ColumnSpacing="8" Padding="9,0,13,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="64" />
+                        <ColumnDefinition Width="44" />
+                        <ColumnDefinition Width="76" />
+                        <ColumnDefinition Width="76" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Peer" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="Client" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="2" Text="Flags" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="3" Text="Has" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="4" Text="Down" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="5" Text="Up" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                </Grid>
+                <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="4">
+                    <ListView x:Name="PeersList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Peers of this torrent">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent"
+                                      ToolTipService.ToolTip="{Binding Address}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="44" />
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="76" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Client}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Flags}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Has}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="4" Text="{Binding Down}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="5" Text="{Binding Up}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+                <TextBlock x:Name="PeersNote" Grid.Row="2" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                           Text="Peers see the public IP address of the computer that downloads, and it sees theirs; that is how BitTorrent works." />
+            </Grid>
+
+            <!-- T2 Trackers: what each tracker said last. What the tracker said in words is on hover. -->
+            <Grid x:Name="TrackersPage" RowSpacing="8" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid ColumnSpacing="8" Padding="9,0,13,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="100" />
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition x:Name="NextAnnounceColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Tracker" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="Status" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="2" Text="Seeds" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="3" Text="Peers" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
+                    <TextBlock Grid.Column="4" Text="Next announce" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+                <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="4">
+                    <ListView x:Name="TrackersList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Trackers of this torrent">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent"
+                                      ToolTipService.ToolTip="{Binding Message}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="56" />
+                                        <ColumnDefinition Width="56" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Tracker}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Seeds}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Peers}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                    <TextBlock Grid.Column="4" Text="{Binding NextAnnounce}" Visibility="{Binding NextAnnounceVisibility}" Width="96"
+                                               FontSize="12" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+                <TextBlock x:Name="TrackersNote" Grid.Row="2" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                           Text="A tracker's address is shown without what follows its name, where a private tracker keeps your passkey." />
+            </Grid>
+
+            <!-- T2 Pieces & Speed: which pieces the torrent has, and its speed while this tab shows. -->
+            <ScrollViewer x:Name="PiecesPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+                <StackPanel Spacing="10" Padding="0,0,12,4">
+                    <TextBlock Text="Pieces" Style="{StaticResource InboundSectionTitleStyle}" />
+                    <local:TorrentPiecesBar x:Name="PiecesBar" AutomationProperties.Name="Pieces this torrent has" />
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="{ThemeResource InboundProgressFillBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Have" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="8" Height="8" Fill="{ThemeResource InboundProgressTrackBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Missing" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        </StackPanel>
+                        <TextBlock x:Name="PiecesSummaryText" FontSize="12" Typography.NumeralAlignment="Tabular" />
+                    </StackPanel>
+                    <Border Style="{StaticResource CardStyle}" Padding="0">
+                        <local:DownloadSpeedGraph x:Name="TorrentChart" />
+                    </Border>
+                    <TextBlock x:Name="TorrentSpeedText" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock x:Name="PiecesNote" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                </StackPanel>
+            </ScrollViewer>
+
             <!-- Options: this download's speed limit, what happens when it finishes, and where it goes. -->
             <Grid x:Name="OptionsPage" RowSpacing="12" Visibility="Collapsed">
                 <Grid.RowDefinitions>
@@ -242,7 +521,55 @@
                 </Grid>
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="10" Padding="0,0,12,4">
-                        <Border Style="{StaticResource CardStyle}">
+                        <!-- T3: a torrent's own limits, seeding goal and order (torrent.options), in place of the speed limit below. -->
+                        <Border x:Name="TorrentOptionsCard" Style="{StaticResource CardStyle}" Visibility="Collapsed">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Speed limits for this torrent" Style="{StaticResource InboundSectionTitleStyle}" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <CheckBox x:Name="TorrentDownloadLimited" Content="Limit downloading to" MinWidth="170" VerticalAlignment="Center"
+                                              Click="TorrentLimit_Click" />
+                                    <NumberBox x:Name="TorrentDownloadLimit" Width="120" Minimum="1" Maximum="2097151" PlaceholderText="KB/s"
+                                               ValidationMode="Disabled" SpinButtonPlacementMode="Hidden" VerticalAlignment="Center"
+                                               AutomationProperties.Name="Download limit for this torrent in KB/s" />
+                                    <TextBlock Text="KB/s" VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <CheckBox x:Name="TorrentUploadLimited" Content="Limit uploading to" MinWidth="170" VerticalAlignment="Center"
+                                              Click="TorrentLimit_Click" />
+                                    <NumberBox x:Name="TorrentUploadLimit" Width="120" Minimum="1" Maximum="2097151" PlaceholderText="KB/s"
+                                               ValidationMode="Disabled" SpinButtonPlacementMode="Hidden" VerticalAlignment="Center"
+                                               AutomationProperties.Name="Upload limit for this torrent in KB/s" />
+                                    <TextBlock Text="KB/s" VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                </StackPanel>
+                                <TextBlock Text="Seeding" Style="{StaticResource InboundSectionTitleStyle}" Margin="0,4,0,0" />
+                                <RadioButtons x:Name="TorrentGoal" Header="Stop seeding at" SelectionChanged="TorrentGoal_SelectionChanged"
+                                              AutomationProperties.Name="Stop seeding at">
+                                    <x:String>Global goal</x:String>
+                                    <x:String>Ratio</x:String>
+                                    <x:String>Time</x:String>
+                                    <x:String>Never seed</x:String>
+                                </RadioButtons>
+                                <StackPanel x:Name="TorrentGoalValueRow" Orientation="Horizontal" Spacing="10" Margin="28,0,0,0" Visibility="Collapsed">
+                                    <NumberBox x:Name="TorrentGoalValue" Width="120" ValidationMode="Disabled" SpinButtonPlacementMode="Compact"
+                                               VerticalAlignment="Center" AutomationProperties.Name="Seeding goal" />
+                                    <TextBlock x:Name="TorrentGoalUnit" VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                </StackPanel>
+                                <TextBlock Text="Download order" Style="{StaticResource InboundSectionTitleStyle}" Margin="0,4,0,0" />
+                                <CheckBox x:Name="TorrentSequential" Content="Download in order, first piece first (to watch it while it downloads)" />
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="TorrentOptionsNote" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" AutomationProperties.LiveSetting="Polite"
+                                               Text="The total speed limit in Options › Connection covers torrents too." />
+                                    <Button x:Name="TorrentOptionsApply" Grid.Column="1" Content="Apply" Click="TorrentOptionsApply_Click"
+                                            VerticalAlignment="Center" AutomationProperties.Name="Apply this torrent's options" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="SpeedLimitCard" Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="10">
                                 <TextBlock Text="Speed limit" Style="{StaticResource InboundSectionTitleStyle}" />
                                 <!-- UI.R6: the rate holds a right edge of its own, so its units stay put as digits come and go. -->
@@ -264,7 +591,7 @@
                                            Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                             </StackPanel>
                         </Border>
-                        <Border Style="{StaticResource CardStyle}">
+                        <Border x:Name="CompletionCard" Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="When it finishes" Style="{StaticResource InboundSectionTitleStyle}" />
                                 <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
@@ -296,11 +623,16 @@
         <TextBlock x:Name="Notice" Grid.Row="3" TextWrapping="Wrap" FontSize="12"
                    Foreground="{ThemeResource InboundSecondaryTextBrush}" />
 
-        <Grid Grid.Row="4" ColumnSpacing="8">
+        <!-- A torrent's extra buttons (seeding, recheck, announce) leave the box no room beside them: it goes above them then. -->
+        <Grid x:Name="Footer" Grid.Row="4" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <CheckBox x:Name="DontShowAgain" Content="Don't show this window again" Visibility="Collapsed"
                       Click="DontShowAgain_Click" VerticalAlignment="Center" />
             <StackPanel x:Name="ActionRow" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -309,6 +641,28 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
                         <TextBlock Text="Delete" />
+                    </StackPanel>
+                </Button>
+                <!-- T2: a finished torrent starts or stops seeding here as from the list. -->
+                <Button x:Name="SeedButton" Click="Seed_Click" Visibility="Collapsed" AutomationProperties.Name="Stop seeding">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon x:Name="SeedGlyph" Glyph="&#xE898;" FontSize="14" />
+                        <TextBlock x:Name="SeedLabel" Text="Stop seeding" />
+                    </StackPanel>
+                </Button>
+                <!-- T3: check the files on disk again; ask the trackers for peers now (shown on the Trackers tab). -->
+                <Button x:Name="RecheckButton" Click="Recheck_Click" Visibility="Collapsed" AutomationProperties.Name="Force recheck"
+                        ToolTipService.ToolTip="Check this torrent's files on disk again">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE9D5;" FontSize="14" />
+                        <TextBlock Text="Force recheck" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="AnnounceButton" Click="Announce_Click" Visibility="Collapsed" AutomationProperties.Name="Announce now"
+                        ToolTipService.ToolTip="Ask the trackers for peers now">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                        <TextBlock Text="Announce now" />
                     </StackPanel>
                 </Button>
                 <!-- U-WL-15: Stop, as the toolbar and the menus say it. The partial data is kept. -->

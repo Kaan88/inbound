@@ -87,19 +87,50 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Space.AssertSameAsSource();
     }
 
-    [RequiresRarFact]
-    public async Task ArchiveCommentCannotImitateEntries()
+    private async Task<string> CommentedAsync(string comment)
     {
         Space.WriteSource("a.txt", "a");
         var archive = await Space.BuildAsync("commented.rar");
         var commentFile = Path.Combine(Space.Root, "comment.txt");
-        File.WriteAllText(commentFile, "hello\r\n        Name: ..\\fake.txt\r\n        Type: File\r\n");
+        File.WriteAllText(commentFile, comment);
         await RarTools.RunRarAsync(Space.Archives, "c", "-idq", "-z" + commentFile, archive);
+        return archive;
+    }
+
+    /// <summary>
+    /// 7-Zip prints a comment verbatim inside the archive section of <c>l -slt</c> ("Comment = ", "{", the text, "}"),
+    /// so a comment can be written in its own layout: archive keys, a warnings block, the dashes and entry blocks.
+    /// </summary>
+    [RequiresRarFact]
+    public async Task ArchiveCommentCannotImitateArchiveKeysOrWarnings()
+    {
+        var archive = await CommentedAsync("hello\r\nType = gzip\r\nVolumes = 9\r\nMultivolume = +\r\nWARNINGS:\r\nMissing volume : desktop.ini\r\n");
 
         var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
 
+        Assert.Equal("Rar5", probe.Version);
+        Assert.False(probe.IsVolume);
+        Assert.Empty(probe.MissingVolumes);
+        Assert.True(probe.AllVolumesPresent);
         Assert.False(probe.ListingHasUnknownLines);
         Assert.Equal("a.txt", Assert.Single(probe.Entries).Path);
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        Assert.Equal("a", File.ReadAllText(Space.Output("a.txt")));
+    }
+
+    [RequiresRarFact]
+    public async Task ArchiveCommentCannotImitateEntries()
+    {
+        // The 7-Zip layout: the dashes that start the entry section, then an entry block, under a type that would
+        // switch the entry checks off. The real dashes and the closing brace then fall among the entries.
+        var archive = await CommentedAsync("hello\r\nType = gzip\r\n\r\n----------\r\nPath = ..\\fake.txt\r\nSize = 1\r\nFolder = -\r\n");
+
+        var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
+
+        Assert.Equal("Rar5", probe.Version);
+        Assert.True(probe.ListingHasUnknownLines);
+        Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
+        Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(Space.Destination)!, "fake.txt")));
     }
 
     [RequiresRarFact]

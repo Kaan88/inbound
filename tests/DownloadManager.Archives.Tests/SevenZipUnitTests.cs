@@ -18,6 +18,32 @@ public sealed class SevenZipListingTests
     private const string Zip = "Path = a.zip\r\nType = zip\r\n";
 
     [Fact]
+    public void NothingFromTheCommentOnIsReadAsTheArchivesOwnKeysOrWarnings()
+    {
+        // As 7-Zip 26.04 prints a RAR's comment: verbatim between "Comment = {" and "}", after the archive's own keys.
+        var archive = "Path = c.rar\r\nType = Rar5\r\nMultivolume = -\r\nVolumes = 1\r\nComment = \r\n{\r\nhello\r\nType = gzip\r\n" +
+                      "Volumes = 9\r\nMultivolume = +\r\nERROR = Headers Error\r\nWARNINGS:\r\nMissing volume : desktop.ini\r\n}\r\n";
+
+        var listing = SevenZipListing.Parse(Listing(archive, Entry("a.txt")), backslashIsAName: false);
+
+        Assert.Equal("Rar5", listing.Type);
+        Assert.Equal("Rar5", listing.OuterType);
+        Assert.Equal(1, listing.Volumes);
+        Assert.False(listing.IsVolume);
+        Assert.Empty(listing.Problems);
+        Assert.Empty(listing.MissingVolumes);
+        Assert.Equal("a.txt", Assert.Single(listing.Entries).Path);
+    }
+
+    [Fact]
+    public void ARealProblemBeforeTheCommentStillCounts()
+    {
+        var archive = "Path = v.part1.rar\r\nType = Rar5\r\nERROR = Missing volume : v.part2.rar\r\nComment = \r\n{\r\nhi\r\n}\r\n";
+        var listing = SevenZipListing.Parse(Listing(archive, Entry("a.txt")), backslashIsAName: false);
+        Assert.Equal(["v.part2.rar"], listing.MissingVolumes);
+    }
+
+    [Fact]
     public void AZipMadeOnWindowsListsItsBackslashesAsFoldersWhere7ZipKeepsThemInNames()
     {
         var listing = SevenZipListing.Parse(Listing(Zip,

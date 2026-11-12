@@ -23,6 +23,10 @@
     <Using Include="Xunit" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\TorrentHandlerRegistration.cs" Link="TorrentHandlerRegistration.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxTorrentHandler.cs" Link="LinuxTorrentHandler.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\UpdatePostponement.cs" Link="UpdatePostponement.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\ClipboardRetrySchedule.cs" Link="ClipboardRetrySchedule.cs" />
     <Compile Include="..\DownloadManager.Archives.Tests\RarBuilder.cs" Link="RarBuilder.cs" />
     <Compile Include="..\DownloadManager.Archives.Tests\SpannedZipBuilder.cs" Link="SpannedZipBuilder.cs" />
     <Compile Include="..\DownloadManager.Containers.Tests\ContainerFixtures.cs" Link="ContainerFixtures.cs" />
@@ -35,9 +39,12 @@
     <ProjectReference Include="..\..\src\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\..\tools\TestServer\TestServer.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Containers\DownloadManager.Containers.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+    <!-- Also run as a process (from its own bin folder); referenced for its internal helpers (InternalsVisibleTo). -->
+    <ProjectReference Include="..\..\src\DownloadManager.Cli\DownloadManager.Cli.csproj" />
   </ItemGroup>
 
   <!--
@@ -47,7 +54,6 @@
   -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <ProjectReference Include="..\..\src\DownloadManager.Host\DownloadManager.Host.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
-    <ProjectReference Include="..\..\src\DownloadManager.Cli\DownloadManager.Cli.csproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="..\..\src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj" ReferenceOutputAssembly="false" Private="false" />
     <!-- D8: the web bridge the test Host starts. -->
     <ProjectReference Include="..\..\src\DownloadManager.Server\DownloadManager.Server.csproj" ReferenceOutputAssembly="false" Private="false" />

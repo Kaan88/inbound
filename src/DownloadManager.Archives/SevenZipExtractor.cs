@@ -114,6 +114,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         var destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.Destination));
         var limits = _options.Limits;
         StagingArea? staging = null;
+        var placed = false;
 
         try
         {
@@ -156,10 +157,13 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             var files = ExtractionFinalizer.MoveIntoDestination(
                 staging, content, destination, request.ConflictPolicy, request.PreserveFolders, progress, cancellationToken, request.KeepFiles);
 
+            // From here the files stand in the destination: any failure has to undo them (below), and a cancel that
+            // arrives now no longer stops the folder flush, which only makes the finished work durable.
+            placed = true;
             if (request.MakeDurable)
             {
                 var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(PathNames.Comparer);
-                flushed &= FlushAll(folders, FlushDirectory, cancellationToken);
+                flushed &= FlushAll(folders, FlushDirectory, CancellationToken.None);
             }
 
             var result = new ExtractionResult(destination, files)
@@ -190,14 +194,25 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         }
         catch (Exception exception) when (Translate(exception, request.Password) is { } translated)
         {
-            if (staging is not null) await staging.RemoveAsync();
+            await DiscardAsync(staging, placed);
             throw translated;
         }
         catch
         {
-            if (staging is not null) await staging.RemoveAsync();
+            await DiscardAsync(staging, placed);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Drops a failed attempt. Once its files were placed, removing staging alone would leave them in the destination
+    /// while the attempt reports failure, and drop the undo log with any originals Overwrite displaced; so they are undone.
+    /// </summary>
+    private static async Task DiscardAsync(StagingArea? staging, bool placed)
+    {
+        if (staging is null) return;
+        if (placed) await staging.UndoAsync();
+        else await staging.RemoveAsync();
     }
 
     /// <summary>
@@ -479,14 +494,14 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         throw MapCommonExit(run);
     }
 
-    private Task<ToolRun> ListAsync(string tool, string firstVolume, ToolPassword secret, CancellationToken cancellationToken)
+    private async Task<ToolRun> ListAsync(string tool, string firstVolume, ToolPassword secret, CancellationToken cancellationToken)
     {
         var arguments = new List<string> { "l", "-slt", "-sccUTF-8", "-bsp0", "-bse2" };
         arguments.Add(firstVolume);
 
         var perEntry = 1024L;
         var keep = Math.Clamp(_options.Limits.MaxEntries * perEntry, 1L << 20, 256L << 20);
-        return ToolProcess.RunAsync(
+        var run = await ToolProcess.RunAsync(
             new ToolInvocation(tool, arguments)
             {
                 StandardInput = secret.CopyStdinBytes(),
@@ -495,6 +510,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
                 Started = _options.ToolStarted,
             },
             cancellationToken);
+        return run with { Subject = firstVolume };
     }
 
     /// <summary>gzip, bzip2, xz and the like hold one compressed file and no names or sizes 7-Zip can be sure of.</summary>
@@ -513,9 +529,14 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         var layer = Path.Combine(staging.Folder, "layer");
         Directory.CreateDirectory(layer);
         var tarInside = ArchiveNames.IsCompressedTar(Path.GetFileName(firstVolume));
-        var run = await RunExtractAsync(tool, firstVolume, layer, ToolPassword.None, tarInside ? null : progress, cancellationToken);
+
+        // A stream's size is known only once it is unpacked, so the unpacking is watched instead: it is stopped once it
+        // passes the size limit or leaves less than the margin free, rather than filling the volume first.
+        var check = () => StreamOverflow(layer, destination);
+        var run = await RunExtractAsync(tool, firstVolume, layer, ToolPassword.None, tarInside ? null : progress, cancellationToken, check);
         if (run.ExitCode != 0) throw ExtractFailure(run, ToolPassword.None, outer.Version);
         cancellationToken.ThrowIfCancellationRequested();
+        if (check() is { } overflow) throw overflow;
 
         var written = Directory.GetFileSystemEntries(layer);
         if (written.Length != 1 || !File.Exists(written[0]) || (File.GetAttributes(written[0]) & FileAttributes.ReparsePoint) != 0)
@@ -560,7 +581,48 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         return tar with { FirstVolume = firstVolume, Version = "tar." + outer.Version.ToLowerInvariant(), VolumesRead = [firstVolume] };
     }
 
-    private Task<ToolRun> RunExtractAsync(string tool, string firstVolume, string outputFolder, ToolPassword secret, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
+    /// <summary>Why the unpacking of a compressed stream into <paramref name="layer"/> must stop, or null while it may go on.</summary>
+    private ExtractionException? StreamOverflow(string layer, string destination)
+    {
+        var limits = _options.Limits;
+        var written = 0L;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(layer, "*", SearchOption.AllDirectories)) written += LengthOf(file);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Measured again on the next look.
+        }
+
+        if (written > limits.MaxTotalBytes)
+        {
+            return new ExtractionException(ExtractionFailureKind.DiskSpace, $"The compressed file unpacks to more than the limit of {limits.MaxTotalBytes} bytes.");
+        }
+
+        if ((_options.AvailableBytes ?? ExtractionSafety.AvailableBytes)(destination) is { } free && free < limits.FreeSpaceMarginBytes)
+        {
+            return new ExtractionException(ExtractionFailureKind.DiskSpace, $"The compressed file unpacks to more than the disk has room for: {free} bytes are left.");
+        }
+
+        return null;
+    }
+
+    /// <summary>A file's length as its open handle has it: a directory listing can lag behind a file still being written.</summary>
+    private static long LengthOf(string file)
+    {
+        try
+        {
+            using var handle = File.OpenHandle(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return RandomAccess.GetLength(handle);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new FileInfo(file).Length;
+        }
+    }
+
+    private async Task<ToolRun> RunExtractAsync(string tool, string firstVolume, string outputFolder, ToolPassword secret, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken, Func<ExtractionException?>? check = null)
     {
         var reader = new PercentReader(progress);
 
@@ -570,15 +632,17 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         arguments.Add("-o" + outputFolder);
         arguments.Add(firstVolume);
 
-        return ToolProcess.RunAsync(
+        var run = await ToolProcess.RunAsync(
             new ToolInvocation(tool, arguments)
             {
                 StandardInput = secret.CopyStdinBytes(),
                 StallTimeout = _options.StallTimeout,
                 OnOutput = reader.Read,
                 Started = _options.ToolStarted,
+                Check = check,
             },
             cancellationToken);
+        return run with { Subject = firstVolume };
     }
 
     private static ExtractionException ExtractFailure(ToolRun run, ToolPassword sent, string format)
@@ -599,7 +663,9 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             return new ExtractionException(ExtractionFailureKind.WrongPassword, "The password is wrong, or the archive is damaged.");
         }
 
-        if (MissingVolume().Match(text) is { Success: true } named)
+        // The one message whose name is wanted: it names the volume to wait for. Read only from the start of an error
+        // line, where an entry's own name can't be.
+        if (MissingVolume().Match(run.Errors) is { Success: true } named)
         {
             var name = Path.GetFileName(named.Groups["name"].Value.Trim());
             return new ExtractionException(ExtractionFailureKind.MissingVolume, MissingMessage([name]), [name]);
@@ -630,7 +696,76 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
     private static bool Has(string text, string what) => text.Contains(what, StringComparison.OrdinalIgnoreCase);
 
-    private static string Text(ToolRun run) => run.Errors + "\n" + run.Output;
+    /// <summary>
+    /// What 7-Zip said, one message a line, without the names it said it about: an entry, and the archive's own name
+    /// (which the server chose), can read "Wrong password.txt" or "Cannot open encrypted archive.7z", and must never be
+    /// taken for a message. So stdout, where a listing's paths and the progress line's current name are, is not read
+    /// at all (a listing's own problems come from <see cref="SevenZipListing.Problems"/>), and of each error line only
+    /// the message is kept. 7-Zip 26.04 writes "ERROR: msg : entry", "ERROR: archive : msg", lines with only the archive
+    /// or a name taken from it ("set.7z" for "set.7z.001"), and bare messages under an "ERRORS:" heading.
+    /// </summary>
+    private static string Text(ToolRun run)
+    {
+        var archive = run.Subject;
+        var archiveName = Path.GetFileName(archive);
+        var messages = new System.Text.StringBuilder();
+        foreach (var raw in run.Errors.Split('\n'))
+        {
+            var line = raw.Trim();
+            foreach (var prefix in (ReadOnlySpan<string>)["Open ERROR: ", "Open WARNING: ", "ERROR: ", "WARNING: "])
+            {
+                if (line.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    line = line[prefix.Length..];
+                    break;
+                }
+            }
+
+            var cut = false;
+            if (archive.Length > 0 && line.StartsWith(archive + " : ", StringComparison.OrdinalIgnoreCase))
+            {
+                line = line[(archive.Length + 3)..];
+                cut = true;
+            }
+
+            var named = line.IndexOf(" : ", StringComparison.Ordinal);
+            if (named >= 0)
+            {
+                line = line[..named];
+                cut = true;
+            }
+
+            line = line.Trim();
+
+            // The archive itself, or the set name 7-Zip makes from a numbered volume ("set.7z" for "set.7z.001"). Only a
+            // line that is nothing but a name can be one: what was cut from "msg : name" is a message, so an archive
+            // called "Wrong password.rar" cannot hide 7-Zip's "Wrong password : a.txt" either.
+            if (line.Length == 0 || (!cut && (line.Equals(archive, StringComparison.OrdinalIgnoreCase) || IsSetNameOf(archiveName, line))))
+            {
+                continue;
+            }
+
+            messages.Append(line).Append('\n');
+        }
+
+        return messages.ToString();
+    }
+
+    /// <summary>True when <paramref name="line"/> is <paramref name="archiveName"/> or that name without a numbered
+    /// volume suffix (".001").</summary>
+    private static bool IsSetNameOf(string archiveName, string line)
+    {
+        if (archiveName.Length == 0) return false;
+        if (archiveName.Equals(line, StringComparison.OrdinalIgnoreCase)) return true;
+        if (archiveName.Length <= line.Length + 1 || !archiveName.StartsWith(line, StringComparison.OrdinalIgnoreCase) || archiveName[line.Length] != '.')
+            return false;
+        foreach (var c in archiveName.AsSpan(line.Length + 1))
+        {
+            if (!char.IsAsciiDigit(c)) return false;
+        }
+
+        return true;
+    }
 
     private static string MissingMessage(IReadOnlyList<string> missing) =>
         missing.Count == 0 ? "A volume of this archive is missing." : "Missing volume: " + string.Join(", ", missing.Select(ExtractionSafety.SafeForDisplay));
@@ -653,10 +788,11 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         return new ExtractionException(failure.Kind, failure.Message.Replace(password, "***", StringComparison.Ordinal), failure.MissingVolumes);
     }
 
-    [GeneratedRegex(@"^ERROR: Wrong password : ", RegexOptions.CultureInvariant | RegexOptions.Multiline)]
+    /// <summary>"ERROR: Wrong password : name", as <see cref="Text"/> leaves it.</summary>
+    [GeneratedRegex(@"^Wrong password$", RegexOptions.CultureInvariant | RegexOptions.Multiline)]
     private static partial Regex WrongPasswordLine();
 
-    [GeneratedRegex(@"Missing volume\s*:\s*(?<name>[^\r\n]+)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[ \t]*(?:ERROR: )?Missing volume\s*:\s*(?<name>[^\r\n]+)", RegexOptions.CultureInvariant | RegexOptions.Multiline)]
     private static partial Regex MissingVolume();
 
     [GeneratedRegex(@"\.(?<n>\d{3,})$", RegexOptions.CultureInvariant)]

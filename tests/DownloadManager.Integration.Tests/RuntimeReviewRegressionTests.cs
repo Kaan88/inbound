@@ -146,6 +146,32 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AFileAdoptedAfterAKillIsMarkedAsFromTheInternet()
+    {
+        const string name = "adopted-marked.bin";
+        var destination = TestFolder(out var paths);
+        var ctx = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
+        await using (ctx)
+        {
+            var added = await AddToPackage(ctx, name, null, start: "startNow", url: $"{_server.BaseAddress}/file/{name}?size=4096&seed=804");
+            await ctx.WaitFor(added.Id, job => job.State == "completed");
+            var crashed = await CrashAfterRenameAsync(ctx, added.Id);
+            // The test server is on loopback, which is never marked; the address the file came from is a public one here.
+            var jobs = new JsonJobStore(paths);
+            crashed.FinalUrl = "https://downloads.example.test/adopted-marked.bin";
+            await jobs.SaveAsync(crashed);
+            File.Delete(crashed.FinalFilePath + ":Zone.Identifier");
+            Assert.False(File.Exists(crashed.FinalFilePath + ":Zone.Identifier"));
+
+            await using var restarted = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
+            Assert.Equal("completed", restarted.Service.GetJob(added.Id)!.State);
+            var mark = await File.ReadAllTextAsync(crashed.FinalFilePath + ":Zone.Identifier");
+            Assert.Contains("ZoneId=3", mark);
+            Assert.Contains("HostUrl=https://downloads.example.test/", mark);
+        }
+    }
+
+    [Fact]
     public async Task AFileOfAnotherSizeIsNotMistakenForTheFinishedOne()
     {
         const string name = "other-size.bin";

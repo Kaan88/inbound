@@ -1,6 +1,7 @@
 // Which browser downloads the extension catches automatically, and why it leaves one alone.
 // Pure functions, so the rules can be tested without a browser.
 
+import { cleanServerName } from "./server-name";
 import { isUnsupportedUrl } from "./unsupported-sites";
 
 export type StartMode = "now" | "later";
@@ -10,6 +11,11 @@ export type DestinationMode = "default" | "ask";
 export type DefaultTarget = "local" | "server";
 /** The extension pages' theme (EXT.R8): the browser's, or always light or dark. */
 export type ThemeChoice = "system" | "light" | "dark";
+/**
+ * EXT.R10: where "Ask where to save" starts. "default": the target's default folder every time (UI.R3, the default).
+ * "last": the last folder a download was sent to from a form, per target. "custom": a folder set here, for This PC.
+ */
+export type AskStartsOn = "default" | "last" | "custom";
 
 export interface Settings {
   enabled: boolean;
@@ -28,6 +34,20 @@ export interface Settings {
   notifications: boolean;
   /** The extension pages' theme; mirrored to localStorage["inbound.theme"] for theme.js (see ui/theme.ts). */
   theme: ThemeChoice;
+  /**
+   * The user's own name for the paired server (EXT.R9, GitHub #2); "" uses the name the server gave, else its
+   * address. Kept apart from the pairing, so it can be set before pairing and pairing again never replaces it.
+   */
+  serverCustomName: string;
+  /**
+   * EXT.R10: the default folder for browser downloads on This PC. Empty: the desktop app's default folder. Automatic
+   * sends to This PC use it, and the forms call it "Default folder" for This PC. The server keeps its own default.
+   */
+  browserFolder: string;
+  /** EXT.R10: where "Ask where to save" (and the right-click and Download All windows) start. */
+  askStartsOn: AskStartsOn;
+  /** EXT.R10: the folder on This PC that "custom" starts on. */
+  askStartFolder: string;
   /** Which version of the default rules these settings were written against (see migrateSettings). */
   rulesVersion: number;
 }
@@ -70,6 +90,10 @@ export const DEFAULT_SETTINGS: Settings = {
   excludedHosts: [],
   notifications: true,
   theme: "system",
+  serverCustomName: "",
+  browserFolder: "",
+  askStartsOn: "default",
+  askStartFolder: "",
   rulesVersion: RULES_VERSION,
 };
 
@@ -90,9 +114,26 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   }
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...stored };
+  // Audit 3 L12: a stored value of the wrong type (a damaged or hand-edited store) falls back to the default, so
+  // decideCapture can't throw on it and leave every download in the browser without a word.
+  for (const key of ["enabled", "autoIntercept", "notifications"] as const) {
+    if (typeof settings[key] !== "boolean") settings[key] = DEFAULT_SETTINGS[key];
+  }
+  for (const key of ["interceptedExtensions", "excludedExtensions", "excludedHosts"] as const) {
+    const value: unknown = settings[key];
+    settings[key] = Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [...DEFAULT_SETTINGS[key]];
+  }
+  if (settings.startMode !== "later") settings.startMode = "now";
+  if (typeof settings.rulesVersion !== "number") settings.rulesVersion = DEFAULT_SETTINGS.rulesVersion;
   if (settings.destinationMode !== "ask") settings.destinationMode = "default";
   if (settings.defaultTarget !== "server") settings.defaultTarget = "local";
   if (settings.theme !== "light" && settings.theme !== "dark") settings.theme = "system";
+  settings.serverCustomName = cleanServerName(settings.serverCustomName);
+  settings.browserFolder = folderSetting(settings.browserFolder);
+  if (settings.askStartsOn !== "last" && settings.askStartsOn !== "custom") settings.askStartsOn = "default";
+  settings.askStartFolder = folderSetting(settings.askStartFolder);
   if ((stored.rulesVersion ?? 1) >= RULES_VERSION) {
     return { settings, changed: false };
   }
@@ -114,10 +155,16 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   return { settings, changed: true };
 }
 
+/** A folder setting as stored: a trimmed string, at most 4096 characters; anything else is empty. */
+export function folderSetting(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 4096) : "";
+}
+
 /** The settings a page may change, by name: a save sends only the ones its user changed (U-EX-6). */
 export const SETTING_KEYS: ReadonlyArray<keyof Settings> = [
   "enabled", "autoIntercept", "startMode", "destinationMode", "defaultTarget", "interceptedExtensions",
-  "excludedExtensions", "excludedHosts", "notifications", "theme",
+  "excludedExtensions", "excludedHosts", "notifications", "theme", "serverCustomName",
+  "browserFolder", "askStartsOn", "askStartFolder",
 ];
 
 /**

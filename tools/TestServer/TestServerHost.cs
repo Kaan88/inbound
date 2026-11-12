@@ -222,6 +222,7 @@ public sealed partial class TestServerHost : IAsyncDisposable
     private void MapEndpoints()
     {
         MapTorBoxEndpoints();
+        MapMediaEndpoints();
         _app.MapGet("/health", () => Results.Text("ok"));
 
         _app.MapGet("/update/manifest", () =>

@@ -5,6 +5,8 @@
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
 import { bytes, dateTime, duration, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
+import { filesSummary, shortMagnet, torrentReason, torrentStatusText } from './torrents';
+import { seedGoalOf, swarmCells, type SeedGoal, type SwarmCells } from './torrentList';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
 // ---- Words for a download's cells ----
@@ -38,6 +40,8 @@ export function describe(note: string | null | undefined, own: string | null | u
 
 /** The status column's words. */
 export function statusWords(job: Job): string {
+  const torrent = torrentStatusText(job);
+  if (torrent) return torrent;
   if (job.queueRetryAt) return 'Queue retry scheduled';
   const waiting = waitingText(job);
   if (waiting) return waiting;
@@ -222,15 +226,19 @@ export interface FileCommand { label: string; enabled: boolean; hidden: boolean 
  * same words as the other entries.
  */
 export function fileCommands(
-  single: Pick<Job, 'state' | 'url' | 'isRemote'> | null,
+  single: Pick<Job, 'state' | 'url' | 'isRemote' | 'torrent'> | null,
   plan: FileMenuPlan,
   files: number,
+  torrentSelected = !!single?.torrent,
 ): { move: FileCommand; redownload: FileCommand; refresh: FileCommand; category: FileCommand } {
   const providers = !!single && (single.isRemote === true || single.url.toLowerCase().startsWith('remote://'));
+  // T1: a torrent has no single address or file for these, so they are hidden for it (owner, 2026-11-11).
+  const torrent = torrentSelected;
+  const reasonFor = (reason: string | null) => reason ?? (torrent ? torrentReason : null);
   return {
-    move: { label: menuLabel('Move/Rename…', plan.openReason), enabled: plan.openReason === null && single?.state === 'completed', hidden: false },
-    redownload: { label: menuLabel('Redownload', plan.fileReason), enabled: plan.fileReason === null, hidden: false },
-    refresh: { label: menuLabel('Refresh Download Address…', plan.fileReason), enabled: plan.fileReason === null && !providers, hidden: providers },
+    move: { label: menuLabel('Move/Rename…', reasonFor(plan.openReason)), enabled: !torrent && plan.openReason === null && single?.state === 'completed', hidden: torrent },
+    redownload: { label: menuLabel('Redownload', reasonFor(plan.fileReason)), enabled: !torrent && plan.fileReason === null, hidden: torrent },
+    refresh: { label: menuLabel('Refresh Download Address…', reasonFor(plan.fileReason)), enabled: !torrent && plan.fileReason === null && !providers, hidden: providers || torrent },
     category: { label: 'Change Category…', enabled: files > 0, hidden: false },
   };
 }
@@ -333,7 +341,7 @@ export const builtInCategories: { id: string; label: string }[] = [
 
 // ---- Sorting: ListSort ----
 
-export type SortKey = 'name' | 'queue' | 'size' | 'status' | 'extraction' | 'eta' | 'rate' | 'lastTry' | 'description' | 'added';
+export type SortKey = 'name' | 'queue' | 'size' | 'status' | 'extraction' | 'eta' | 'rate' | 'lastTry' | 'description' | 'added' | 'seeds' | 'peers' | 'up' | 'ratio';
 
 export interface SortState {
   key: SortKey;
@@ -342,7 +350,7 @@ export interface SortState {
 
 export const defaultSort: SortState = { key: 'added', ascending: false };
 
-export const sortKeys: SortKey[] = ['name', 'queue', 'size', 'status', 'extraction', 'eta', 'rate', 'lastTry', 'description', 'added'];
+export const sortKeys: SortKey[] = ['name', 'queue', 'size', 'status', 'extraction', 'eta', 'rate', 'lastTry', 'description', 'added', 'seeds', 'peers', 'up', 'ratio'];
 
 /** Words and times read from the first down. Sizes, speeds and dates read from the biggest or newest. */
 export function startsAscending(key: SortKey): boolean {
@@ -412,6 +420,8 @@ export interface RowView {
   created: number;
   /** What the row says beyond its name: the failure or the address. Searched, and shown as a tooltip. */
   detail: string;
+  /** A torrent's Seeds, Peers, Up and Ratio cells, shown in the torrent views. */
+  swarm?: SwarmCells;
 }
 
 export function sortRows<T>(rows: readonly T[], view: (row: T) => RowView, sort: SortState): T[] {
@@ -426,6 +436,10 @@ export function sortRows<T>(rows: readonly T[], view: (row: T) => RowView, sort:
     case 'rate': return orderBy(rows, (r) => view(r).rate, a, (r) => view(r).rate <= 0);
     case 'lastTry': return orderBy(rows, (r) => view(r).lastTry, a);
     case 'description': return orderBy(rows, (r) => view(r).description, a, (r) => view(r).description.length === 0);
+    case 'seeds': return orderBy(rows, (r) => view(r).swarm?.seeds ?? -1, a, (r) => (view(r).swarm?.seeds ?? -1) < 0);
+    case 'peers': return orderBy(rows, (r) => view(r).swarm?.peers ?? -1, a, (r) => (view(r).swarm?.peers ?? -1) < 0);
+    case 'up': return orderBy(rows, (r) => view(r).swarm?.up ?? 0, a, (r) => (view(r).swarm?.up ?? 0) <= 0);
+    case 'ratio': return orderBy(rows, (r) => view(r).swarm?.ratio ?? 0, a, (r) => !view(r).swarm);
     default: return orderBy(rows, (r) => view(r).created, a);
   }
 }
@@ -447,6 +461,8 @@ export function hideAddresses(text: string, job: Job): string {
 }
 
 function shownAddress(job: Job): string {
+  // A torrent's url is its magnet, trackers and all: only its info hash is shown (TorrentRules.ShortMagnet).
+  if (job.torrent) return job.torrent.infoHash ? shortMagnet(job.torrent) : '';
   if (isProviderFile(job)) return '';
   return job.addressHidden ? (siteOnly(job.url) || 'A direct link') : job.url;
 }
@@ -459,31 +475,40 @@ function siteOnly(url: string): string {
   }
 }
 
-/** A download's cells, as JobViewModel.Update shows them. */
-export function jobView(job: Job, set?: ArchiveSet): RowView {
+/**
+ * A download's cells, as JobViewModel.Update shows them. A torrent's swarm cells measure a seeding one against the
+ * seeding goal of Options › Torrents (the Host's defaults when none is given).
+ */
+export function jobView(job: Job, set?: ArchiveSet, goal: SeedGoal = seedGoalOf(null), now = Date.now()): RowView {
   const total = job.totalBytes && job.totalBytes > 0 ? job.totalBytes : job.receivedBytes;
-  const rate = job.bytesPerSecond ?? 0;
+  // T2: a seeding torrent's rate is what it sends.
+  const seeding = job.torrent?.seeding === true;
+  const rate = seeding ? job.torrent?.uploadRate ?? 0 : job.bytesPerSecond ?? 0;
   const eta = timeSpanSeconds(job.estimatedRemaining);
   const p = percent(job) ?? 0;
   const note = jobNote(job);
-  const own = job.description ?? (job.pageUrl && (job.addressHidden || isProviderFile(job)) ? siteOnly(job.pageUrl) : job.pageUrl);
+  // A torrent says how many of its files it downloads, unless the user gave it words of their own.
+  const own = job.torrent && !job.description?.trim() ? filesSummary(job.torrent)
+    : job.description ?? (job.pageUrl && (job.addressHidden || isProviderFile(job)) ? siteOnly(job.pageUrl) : job.pageUrl);
   const barStates = ['downloading', 'connecting', 'retryWaiting', 'verifying', 'paused'];
   const updated = job.completedAt ?? job.updatedAt;
   const archive = set ? archiveRowView(set) : null;
+  const swarm = swarmCells(job, goal, now);
   return {
-    name: job.fileName || (job.addressHidden || isProviderFile(job) ? '' : job.url),
+    name: job.fileName || job.torrent?.name || (job.addressHidden || isProviderFile(job) || job.torrent ? '' : job.url),
     queue: queueText(job),
     queueTip: job.isQueued === false ? 'Not in a queue' : queueName(job),
     size: total > 0 ? total : 0,
     sizeText: total > 0 ? bytes(total) : '',
     status: statusWords(job),
-    statusTone: toneOf(job.state),
+    statusTone: seeding ? 'active' : toneOf(job.state),
     statusTip: job.failure?.message ?? note ?? '',
-    bar: barStates.includes(job.state) && p > 0 ? p : null,
+    // A seeding torrent's bar is its way to the seeding goal.
+    bar: swarm?.goal !== null && swarm?.goal !== undefined ? swarm.goal : barStates.includes(job.state) && p > 0 ? p : null,
     eta,
     etaText: timeLeft(eta),
     rate,
-    rateText: speedText(rate),
+    rateText: seeding ? (rate > 0 ? `↑ ${speedText(rate)}` : '') : speedText(rate),
     lastTry: ms(updated),
     lastTryText: lastTryText(updated),
     description: describe(note, own),
@@ -492,6 +517,7 @@ export function jobView(job: Job, set?: ArchiveSet): RowView {
     extractionTip: archive?.tooltip ?? '',
     created: ms(job.createdAt),
     detail: job.failure?.message ? job.failure.message : shownAddress(job),
+    swarm,
   };
 }
 
@@ -575,7 +601,7 @@ export function archiveView(set: ArchiveSet): RowView {
  */
 export function searchText(view: RowView, job?: Job): string {
   const parts = [view.name, view.status, view.extraction, view.description, view.detail, view.statusTip];
-  if (job && !job.addressHidden && !isProviderFile(job)) parts.push(job.url);
+  if (job && !job.addressHidden && !isProviderFile(job) && !job.torrent) parts.push(job.url);
   return parts.join('\n').toLocaleLowerCase();
 }
 
@@ -614,6 +640,7 @@ export const defaultEmptyText = 'No downloads in this view.\nUse Add URL or the 
 export function emptyText(view: string, providerName: string): string {
   if (view === 'remote') return `Nothing is waiting for ${providerName}.\nItems show here until their files start downloading.`;
   if (view === 'extractions') return 'No archives yet.';
+  if (view === 'torrents' || view.startsWith('torrents-')) return 'No torrents in this view.';
   return defaultEmptyText;
 }
 
@@ -823,16 +850,47 @@ export function agoText(seconds: number): string {
  * The rate of one tick: the active downloads (retrying ones included) updated in the last ten seconds. A download that has
  * gone quiet counts as 0, not unknown; a gap (null) means there is no data.
  */
-export function speedSample(jobs: readonly Job[], connected: boolean, ready: boolean, now: number): number | null {
+export function speedSample(jobs: readonly Job[], connected: boolean, ready: boolean, now: number, serverOffsetMs = 0): number | null {
   if (!connected || !ready) return null;
   let sum = 0;
+  // updatedAt is the server's clock; `now` is this browser's, which can be ahead of it (audit 4 L22).
+  const serverNow = now - serverOffsetMs;
   for (const job of jobs) {
     if (!activeStates.includes(job.state)) continue;
-    if (now - ms(job.updatedAt) > 10_000) continue;
+    if (serverNow - ms(job.updatedAt) > 10_000) continue;
     const r = job.bytesPerSecond ?? 0;
     if (Number.isFinite(r) && r > 0) sum += r;
   }
   return sum;
+}
+
+/**
+ * How far this browser's clock is ahead of the server's (negative: behind), for speedSample: the smallest gap seen
+ * between the time here and the newest updatedAt of any download. A download's update reaches the page within a moment of
+ * being made, so the smallest gap is the clocks' difference plus that moment. 0 until anything was seen.
+ */
+export class ServerClock {
+  private smallest: number | null = null;
+
+  observe(jobs: readonly Job[], now: number): void {
+    let newest = Number.NEGATIVE_INFINITY;
+    for (const job of jobs) {
+      const at = ms(job.updatedAt);
+      if (Number.isFinite(at) && at > newest) newest = at;
+    }
+    if (!Number.isFinite(newest)) return;
+    const gap = now - newest;
+    if (this.smallest === null || gap < this.smallest) this.smallest = gap;
+  }
+
+  get offsetMs(): number {
+    return this.smallest ?? 0;
+  }
+}
+
+/** Whether any download transfers, or is about to: the speed graph samples only then (audit 4 M11). */
+export function anyActive(jobs: readonly Job[]): boolean {
+  return jobs.some((job) => activeStates.includes(job.state));
 }
 
 /**

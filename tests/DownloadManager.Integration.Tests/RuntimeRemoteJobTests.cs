@@ -383,7 +383,8 @@ public sealed partial class RuntimeServiceTests
         await using var second = await ServiceContext.CreateAsync(_server, paths, destination, linkBroker: broker);
         var restored = second.Service.GetJob(id)!;
         Assert.True(restored.IsRemote);
-        Assert.True((await second.Service.ResumeAsync(id)).Ok);
+        // The exit paused it, so the restart resumes it by itself (audit 2 M11).
+        Assert.NotEqual("paused", second.Service.GetJob(id)!.State);
         var completed = await second.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         Assert.Equal(Sha256Of(706, size), await Hashing.Sha256FileAsync(completed.FinalFilePath));
         Assert.True(calls >= 2);
@@ -658,7 +659,8 @@ public sealed partial class RuntimeServiceTests
         }
 
         await using var second = await ServiceContext.CreateAsync(_server, paths, destination, handler: handler);
-        Assert.True((await second.Service.ResumeAsync(id)).Ok);
+        // The exit paused it, so the restart resumes it by itself (audit 2 M11).
+        Assert.NotEqual("paused", second.Service.GetJob(id)!.State);
         var completed = await second.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         Assert.Equal(Sha256Of(713, size), await Hashing.Sha256FileAsync(completed.FinalFilePath));
         Assert.All(handler.TokensSeen, token => Assert.Equal(LinkSecret, token));

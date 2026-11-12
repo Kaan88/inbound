@@ -213,13 +213,77 @@ export interface ListEntry {
   startMode: string;
   conflictPolicy: string;
   expectedSha256?: string;
+  /** A torrent's own part (TorrentListEntry); its url is then the magnet. */
+  torrent?: TorrentListEntry;
 }
 
-/** The list as the desktop writes it: no provider files and no masked addresses, because neither can download anything. */
-export function serializeList(jobs: Iterable<Job>): string {
+export interface TorrentListEntry {
+  infoHash: string;
+  name?: string;
+  magnet?: string;
+  /** The .torrent file (base64) when the torrent came from one and the Host still has it. */
+  data?: string;
+  /** The files chosen; absent when every file is wanted. */
+  fileIndexes?: number[];
+}
+
+/** Half a message frame (Protocol.MaxFrameBytes / 2, TorrentListPaging.cs): the most one torrent.import request carries. */
+export const TORRENT_PAGE_CHARS = 4 * 1024 * 1024;
+
+const textLength = (value?: string) => value?.length ?? 0;
+
+/** An upper bound of the characters a torrent part takes in JSON, as TorrentListPaging.SizeOf counts it. */
+function torrentPartSize(t?: TorrentListEntry): number {
+  return t ? textLength(t.data) + 6 * (textLength(t.magnet) + textLength(t.name) + textLength(t.infoHash)) + 12 * (t.fileIndexes?.length ?? 0) + 256 : 0;
+}
+
+/** An upper bound of the characters an entry takes in JSON (text may be escaped to six characters each). */
+export function listEntrySize(entry: ListEntry): number {
+  return torrentPartSize(entry.torrent) + 6 * (textLength(entry.url) + textLength(entry.fileName) + textLength(entry.destinationDirectory) +
+    textLength(entry.description) + textLength(entry.categoryId) + textLength(entry.expectedSha256)) + 512;
+}
+
+/**
+ * Torrent entries in groups that each fit one torrent.import request, in order. A .torrent too large for a request on
+ * its own is left out, and its magnet stands for it.
+ */
+export function chunkTorrentEntries(entries: ListEntry[], limit = TORRENT_PAGE_CHARS): ListEntry[][] {
+  const chunks: ListEntry[][] = [];
+  let current: ListEntry[] = [];
+  let size = 0;
+  for (const original of entries) {
+    let entry = original;
+    if (entry.torrent?.data && torrentPartSize(entry.torrent) > limit) {
+      const { data: _dropped, ...rest } = entry.torrent;
+      entry = { ...entry, torrent: rest };
+    }
+    const entrySize = listEntrySize(entry);
+    if (current.length && size + entrySize > limit) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(entry);
+    size += entrySize;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+/** An entry that is a torrent: it goes to torrent.import, not job.add. */
+export function isTorrentEntry(entry: Pick<ListEntry, 'url' | 'torrent'>): boolean {
+  return !!entry.torrent || entry.url.trim().toLowerCase().startsWith('magnet:');
+}
+
+/**
+ * The list as the desktop writes it: no provider files and no masked addresses, because neither can download anything.
+ * `torrents` is torrent.listEntries' answer by job id; a torrent missing from it is saved with its magnet only.
+ */
+export function serializeList(jobs: Iterable<Job>, torrents?: Record<string, TorrentListEntry>): string {
   const entries: ListEntry[] = [];
   for (const job of jobs) {
     if (!job.url?.trim() || job.isRemote || job.addressHidden) continue;
+    const torrent = job.torrent ? (torrents?.[job.id] ?? { infoHash: job.torrent.infoHash, name: job.torrent.name, magnet: job.url }) : undefined;
     entries.push({
       url: job.url,
       fileName: job.fileName,
@@ -231,6 +295,7 @@ export function serializeList(jobs: Iterable<Job>): string {
       startMode: job.startMode ?? 'later',
       conflictPolicy: job.conflictPolicy ?? 'rename',
       expectedSha256: job.expectedSha256,
+      ...(torrent ? { torrent } : {}),
     });
   }
 
@@ -253,9 +318,10 @@ export function parseList(text: string): ListEntry[] {
 }
 
 /** The desktop's words after an import. */
-export function importSummary(accepted: number, total: number, failed: number, firstError: string | undefined, toReview: number): string {
+export function importSummary(accepted: number, total: number, failed: number, firstError: string | undefined, toReview: number, skipped = 0, skipReason?: string): string {
   const added = `Added ${accepted} of ${total} downloads${toReview > 0 ? ' directly' : ''}`;
-  const outcome = added + (failed > 0 ? `; ${failed} failed. ${firstError ?? ''}`.trimEnd() : '.');
+  let outcome = added + (failed > 0 ? `; ${failed} failed. ${firstError ?? ''}`.trimEnd() : '.');
+  if (skipped > 0) outcome += ` ${skipped === 1 ? '1 torrent' : `${skipped} torrents`} skipped${skipReason?.trim() ? `: ${skipReason.trim()}` : '.'}`;
   if (toReview === 0) return outcome;
   const entries = toReview === 1 ? '1 entry isn\'t' : `${toReview} entries aren't`;
   const them = toReview === 1 ? 'it' : 'them';

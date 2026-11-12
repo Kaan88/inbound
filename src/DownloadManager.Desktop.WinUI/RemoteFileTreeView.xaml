@@ -7,6 +7,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid ColumnSpacing="8">
@@ -32,7 +33,7 @@
                      checks, Left and Right close and open a folder. -->
                 <ListView x:Name="RowsList" SelectionMode="None" AutomationProperties.Name="Files"
                           ItemContainerStyle="{StaticResource InboundListRowStyle}"
-                          PreviewKeyDown="RowsList_PreviewKeyDown"
+                          PreviewKeyDown="RowsList_PreviewKeyDown" ContextRequested="RowsList_ContextRequested"
                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListView.ItemContainerTransitions>
                         <TransitionCollection />
@@ -48,6 +49,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Button Width="20" Height="20" Padding="0" Background="Transparent" BorderThickness="0" IsTabStop="False"
                                         Visibility="{Binding ChevronVisibility}" Click="Chevron_Click"
@@ -68,6 +70,9 @@
                                            Visibility="{Binding ProblemVisibility}" Foreground="{ThemeResource InboundErrorTextBrush}" />
                                 <TextBlock Grid.Column="5" Text="{Binding SizeText}" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right"
                                            Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                <!-- T3: a torrent file's priority; right-click (or the menu key) changes it. -->
+                                <TextBlock Grid.Column="6" Text="{Binding PriorityText}" Visibility="{Binding PriorityVisibility}" Width="60"
+                                           Margin="8,0,0,0" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -78,5 +83,8 @@
                            AutomationProperties.Name="Files status" AutomationProperties.LiveSetting="Polite" />
             </Grid>
         </Border>
+        <TextBlock x:Name="PriorityHint" Grid.Row="2" Visibility="Collapsed" FontSize="12" TextWrapping="Wrap"
+                   Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                   Text="Right-click a file or folder to change its priority or skip it." />
     </Grid>
 </UserControl>

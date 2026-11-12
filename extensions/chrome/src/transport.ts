@@ -8,6 +8,8 @@
 // Nothing here decides what to send; background.ts does, and on any failure leaves the download in
 // the browser, whichever target it was meant for.
 
+import { cleanServerName } from "./server-name";
+
 export type TargetId = "local" | "server";
 
 export const TARGET_LABELS: Readonly<Record<TargetId, string>> = { local: "This PC", server: "Server" };
@@ -36,6 +38,20 @@ export function extractError(payload: unknown): string {
     }
   }
   return "The native host reported an error.";
+}
+
+/**
+ * Why a handoff was not accepted. A handoff.ack says it in `error` (HandoffAck has no `message`); the only reply
+ * with `message` is a bridge's refusal of the request itself (host.actionResult, `ok: false`), so that is read only
+ * in that shape. Anything else, or an empty text, gives the fallback.
+ */
+export function refusalText(ack: unknown, fallback: string): string {
+  if (ack && typeof ack === "object") {
+    const record = ack as Record<string, unknown>;
+    if (typeof record.error === "string" && record.error.trim()) return record.error;
+    if (record.ok === false && typeof record.message === "string" && record.message.trim()) return record.message;
+  }
+  return fallback;
 }
 
 /** One way to the Host. */
@@ -157,7 +173,20 @@ export class NativeTransport implements Transport {
       }
     }
 
+    // Audit 3 L9: the native host's own failure (it could not reach or start the Host, say) answers no request in
+    // particular, and the port closes after it. Every waiting request fails with its reason, not a general one.
+    if (!message.replyTo && message.type === "handoff.error") {
+      this.rejectAll(new Error(extractError(message.payload)));
+      return;
+    }
+
     this.onEvent(message);
+  }
+
+  private rejectAll(error: Error): void {
+    const waiting = [...this.pending.values()];
+    this.pending.clear();
+    for (const request of waiting) request.reject(error);
   }
 
   /**
@@ -188,10 +217,15 @@ export class NativeTransport implements Transport {
     });
   }
 
+  /**
+   * Closes the shared connection. The browser tells only the other side, so every request still waiting on it
+   * fails now (audit 3 M5): left alone, each waited out its own time limit for an answer that could not come.
+   */
   disconnect(): void {
     if (!this.port) return;
     try { this.port.disconnect(); } catch { /* ignore */ }
     this.port = null;
+    this.rejectAll(new Error("The connection to the desktop app was reset. Try again."));
   }
 }
 
@@ -208,9 +242,14 @@ export interface ServerPairing {
   token: string;
   /** The server's id for this pairing, as its web UI lists it. */
   id?: string;
+  /** This browser's name on the server ("Chrome on Windows"), not the server's. */
   name?: string;
+  /** The server's own name, from its pairing answer (EXT.R9); none for a server that gives none. */
+  serverName?: string;
   pairedAt?: number;
 }
+
+export { MAX_SERVER_NAME, cleanServerName, hostName, serverDisplayName } from "./server-name";
 
 export const SERVER_STORAGE_KEY = "server";
 
@@ -458,6 +497,7 @@ export async function pairWithServer(address: string, code: string, name: string
     token: body.token,
     id: typeof body.id === "string" ? body.id : undefined,
     name: typeof body.name === "string" ? body.name : name,
+    serverName: cleanServerName(body.serverName) || undefined,
     pairedAt: Date.now(),
   };
   await new ServerTransport(pairing, fetchImpl).send("host.ping", {}, timeoutMs);
@@ -476,6 +516,7 @@ export function readPairing(value: unknown): ServerPairing | null {
     token: record.token,
     id: typeof record.id === "string" ? record.id : undefined,
     name: typeof record.name === "string" ? record.name : undefined,
+    serverName: cleanServerName(record.serverName) || undefined,
     pairedAt: typeof record.pairedAt === "number" ? record.pairedAt : undefined,
   };
 }

@@ -1,0 +1,18 @@
+{
+  "name": "inbound-torrent-worker",
+  "version-string": "0.0.0",
+  "description": "Inbound's native torrent worker (T0). libtorrent 2.1.x, WebTorrent off.",
+  "builtin-baseline": "e54ef0fcc9a82033a61e51002552a910a5d57282",
+  "dependencies": [
+    {
+      "name": "libtorrent",
+      "default-features": false
+    },
+    "boost-json"
+  ],
+  "vcpkg-configuration": {
+    "overlay-ports": [
+      "./ports"
+    ]
+  }
+}

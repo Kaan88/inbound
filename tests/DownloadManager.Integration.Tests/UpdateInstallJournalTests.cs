@@ -159,4 +159,36 @@ public sealed class UpdateInstallJournalTests : IDisposable
         WriteResult("failed", "0.3.3", "x", "2026-11-06T01:53:20+03:00");
         Assert.NotNull(_journal.TakeUnreported(Dead));
     }
+
+    // ---- audit 3 L5 -------------------------------------------------------------------------------
+
+    [Fact]
+    public void TheHelpersStartTimeIsKeptAndAProcessWithTheSameIdButAnotherStartIsNotTheHelper()
+    {
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        var name = self.ProcessName;
+        var started = new DateTimeOffset(self.StartTime.ToUniversalTime(), TimeSpan.Zero);
+        Assert.True(UpdateInstallJournal.ProcessRunning(Environment.ProcessId, started, name));
+        Assert.True(UpdateInstallJournal.ProcessRunning(Environment.ProcessId, null, name));
+        Assert.False(UpdateInstallJournal.ProcessRunning(Environment.ProcessId, started.AddMinutes(-5), name));
+        Assert.False(UpdateInstallJournal.ProcessRunning(Environment.ProcessId, started, "not-this-program"));
+
+        _journal.MarkPending("0.3.3", Environment.ProcessId, started);
+        Assert.Contains("helperStartedAt", File.ReadAllText(Path.Combine(_directory, "install-pending.json")));
+        // Id and start match this process, so a check by both counts it as the helper still at work.
+        Assert.True(_journal.HelperStillRunning(id => UpdateInstallJournal.ProcessRunning(id, started, name)));
+        // The pending file's start time is what the default check compares (and this process is not PowerShell).
+        Assert.False(_journal.HelperStillRunning());
+    }
+
+    [Fact]
+    public void TheJournalLeavesNoTemporaryFileBehind()
+    {
+        _journal.MarkPending("0.3.3", 4242, DateTimeOffset.UtcNow);
+        Assert.False(_journal.TakeUnreported(Dead)!.Succeeded);
+        _journal.RecordSucceeded("0.3.4");
+        Assert.True(_journal.TakeUnreported(Dead)!.Succeeded);
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp*", SearchOption.AllDirectories));
+    }
 }
