@@ -884,6 +884,17 @@
                                      Visibility="Collapsed" Click="UpdateLink_Click"
                                      AutomationProperties.Name="Update available"
                                      ToolTipService.ToolTip="Check for updates and install the new version" />
+                    <!-- The latest version links to What's new in the status bar's own neutral colour; only an update
+                         waiting (UpdateLink above) is coloured as a link (owner, 2026-11-13). -->
+                    <HyperlinkButton x:Name="WhatsNewLink" FontSize="11" Padding="0" MinHeight="0" VerticalAlignment="Center"
+                                     Visibility="Collapsed" Click="UpdateLink_Click"
+                                     ToolTipService.ToolTip="What's new in this version">
+                        <HyperlinkButton.Resources>
+                            <StaticResource x:Key="HyperlinkButtonForeground" ResourceKey="InboundSecondaryTextBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                            <StaticResource x:Key="HyperlinkButtonForegroundPressed" ResourceKey="InboundSecondaryTextBrush" />
+                        </HyperlinkButton.Resources>
+                    </HyperlinkButton>
                     <TextBlock x:Name="ConnectionTail" FontSize="11" Visibility="Collapsed"
                                 Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
                 </StackPanel>

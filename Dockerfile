@@ -116,8 +116,8 @@ LABEL org.opencontainers.image.title="Inbound Download Manager" \
       org.opencontainers.image.source="https://github.com/Kaan88/inbound" \
       org.opencontainers.image.url="https://github.com/Kaan88/inbound" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${REVISION}"
-# No org.opencontainers.image.licenses: the repository names no license (Directory.Build.props says "Private use").
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="MIT"
 # The bundled 7-Zip keeps its own terms in /app/tools/7-Zip/License.txt (GNU LGPL with the unRAR restriction).
 
 ENV DOWNLOADMANAGER_DATA=/data \

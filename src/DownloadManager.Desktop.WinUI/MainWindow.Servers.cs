@@ -273,19 +273,22 @@ public sealed partial class MainWindow
         {
             words = $"{text} · ";
             tailWords = tail is null ? string.Empty : $" · {tail}";
-            if (!Equals(UpdateLink.Content, updateLink))
+            // UPD.N1: an update waiting is the coloured link; the latest version is a neutral link to What's new
+            // (owner, 2026-11-13: neutral like the rest of the status bar unless it is out of date).
+            var shown = _versionLinkUpdates ? UpdateLink : WhatsNewLink;
+            if (!Equals(shown.Content, updateLink))
             {
-                UpdateLink.Content = updateLink;
-                // UPD.N1: the same link is the update or What's new (_versionLinkUpdates).
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(UpdateLink, _versionLinkUpdates ? "Update available" : $"Version {updateLink}, what's new");
-                ToolTipService.SetToolTip(UpdateLink, _versionLinkUpdates ? "Check for updates and install the new version" : "What's new in this version");
+                shown.Content = updateLink;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(shown, _versionLinkUpdates ? "Update available" : $"Version {updateLink}, what's new");
             }
         }
 
         if (ConnectionText.Text != words) ConnectionText.Text = words;
         if (ConnectionTail.Text != tailWords) ConnectionTail.Text = tailWords;
-        var link = updateLink is null ? Visibility.Collapsed : Visibility.Visible;
-        if (UpdateLink.Visibility != link) UpdateLink.Visibility = link;
+        var update = updateLink is not null && _versionLinkUpdates ? Visibility.Visible : Visibility.Collapsed;
+        if (UpdateLink.Visibility != update) UpdateLink.Visibility = update;
+        var whatsNew = updateLink is not null && !_versionLinkUpdates ? Visibility.Visible : Visibility.Collapsed;
+        if (WhatsNewLink.Visibility != whatsNew) WhatsNewLink.Visibility = whatsNew;
         var tailShown = tailWords.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (ConnectionTail.Visibility != tailShown) ConnectionTail.Visibility = tailShown;
     }

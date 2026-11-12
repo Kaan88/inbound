@@ -7,7 +7,7 @@
     <Version>0.7.3</Version>
     <Company>Private</Company>
     <Product>Inbound Download Manager</Product>
-    <Copyright>Private use</Copyright>
+    <Copyright>Copyright (c) 2026 Kaan88. MIT License.</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
     <!-- The app is English only, so the framework's translated resources are not shipped. -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

@@ -8,7 +8,7 @@
   import { opensAddUrl } from './lib/keys';
   import type { ClassifyResult } from './lib/types';
   import { clockTime, speed } from './lib/format';
-  import { versionWords } from './lib/versionStatus';
+  import { compareVersions, versionWords } from './lib/versionStatus';
   import { countJobs, liveSpeed, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
@@ -90,6 +90,8 @@
   /** The server downloads them, or the account that also takes torrents does (MainWindow.TorrentsCanBeAdded). */
   const torrentsTaken = $derived(store.connection === 'open' && (torrentsOn || torrentProvider(store.has('remote'), store.model.accounts) !== null));
   const connected = $derived(store.connection === 'open');
+  // Neutral like the rest of the status bar; coloured only when this server is out of date (owner, 2026-11-13).
+  const versionOutdated = $derived((compareVersions(store.model.hello?.hostVersion, store.model.status?.latestVersion) ?? 0) < 0);
   const dialogOpen = () => adding !== null || document.querySelector('[role="dialog"]') !== null;
   let dropping = $state(false);
   /** Links that came with torrents: Add Links opens with them once the torrent dialog closes. */
@@ -443,11 +445,11 @@
          where the version has no room, "What's new" alone. -->
     {#if store.model.hello && changelog}
       <button class="group inline-flex shrink-0 items-center gap-1.5 hover:text-text" onclick={showWhatsNew} title="What's new in this server version">
-        <span class="hidden items-center gap-1.5 group-hover:underline sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>
+        <span class="hidden items-center gap-1.5 group-hover:underline sm:inline-flex" class:text-accent={versionOutdated}><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>
         <span class="hidden sm:inline" aria-hidden="true">·</span>
         <span class="group-hover:underline">What's new</span>
       </button>
-    {:else if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>{/if}
+    {:else if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex" class:text-accent={versionOutdated}><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>{/if}
   </footer>
 </div>
 

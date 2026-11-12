@@ -1,6 +1,7 @@
 {
   "name": "inbound-webui",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "description": "Inbound Download Manager web UI for the headless server (D2)",
   "type": "module",

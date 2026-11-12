@@ -16,7 +16,7 @@ Batched 0.1.5 source (2026-11-05): persistent independent download groups now ha
 
 Batched 0.1.5 source (2026-11-05): explicit unused-category deletion in Options and populated queue deletion with download/schedule reassignment added; source-only, consolidated verification pending. Queue moves save before old queue removal, and failed persistence restores in-memory membership for retry. Settings/category/job admission and queue membership edits share a mutation gate. No build/test run for this batch.
 
-Owner scope update (2026-11-05): FTP work is out of scope; existing backend support is retained, but no additional FTP UI or acceptance work is required. Superseded: FTP was cut in 0.7.2 (CUT.1, `docs/plans/feature-cuts.md`); an FTP address now fails with "FTP addresses aren't supported."
+Owner scope update (2026-11-05): FTP work is out of scope; existing backend support is retained, but no additional FTP UI or acceptance work is required. Superseded: FTP was cut in 0.7.2 (CUT.1, `docs/plans/feature-cuts.md`); an FTP address now fails with "FTP addresses aren't supported." Owner, 2026-11-12/13: FTP returns as a kind of remote site, with SFTP, WebDAV and cloud storage through a bundled rclone (planned, not started; `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9); FTP download addresses stay refused.
 
 Owner workflow: batch remaining implementation, then consolidated verification; no new feature-by-feature test runs. Source0.1.5 now includes Add URL Host-owned metadata preview and suggested filenames. Final cancellation-review fixes and live acceptance await consolidated validation (PROGRESS.md).
 

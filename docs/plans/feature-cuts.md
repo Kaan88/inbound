@@ -255,7 +255,7 @@ Tick what you agree to; anything ticked can be built as one cut per branch, each
 - [ ] Cut per-site connection limits (after checking the Options box is empty)
 - [x] Do the housekeeping: delete the Qt leftover folder and HookSpy, move FakeTorrentEngine to tests, move the pipe-ACL check into a test and delete HostChecks
 - [ ] Cut link container import, although the TorBox brief lists it
-- [x] Cut FTP, reversing the 2026-11-05 "backend support is retained" note (done 2026-11-12, branch cut-streams-ftp; closes Review 1 L11). Reversed again by the owner the same day: FTP returns with the Sites work (ROADMAP SITES.2), so this tick should not be merged to main as final.
+- [x] Cut FTP, reversing the 2026-11-05 "backend support is retained" note (done 2026-11-12, branch cut-streams-ftp; closes Review 1 L11). Reversed again by the owner the same day: FTP returns with the Sites work. Settled 2026-11-13 (`docs/plans/remote-sites.md`): FTP comes back only as a kind of site through rclone (ROADMAP SITES.6). FTP download addresses stay cut, the old engine code is not restored, and this tick stands for those.
 - [ ] Limit the web UI's parity rule to what a phone and the Docker server need
 - [ ] Trim the torrent extras: per-torrent options, Peers and Pieces tabs, the six extra sidebar views, the advanced network toggles (say which)
 - [ ] Trim custom sound files to the one completion-sound checkbox
