@@ -573,7 +573,7 @@ The owner asked how feasible a Qt frontend is that works and looks like the WinU
 
 ### The Qt prototype (built and run on Windows only)
 
-Branch `claude/qt-frontend-feasibility-4b88af`, in `src/DownloadManager.Desktop.Qt`. As of 2026-11-12 it is in that branch's worktree and not committed. Status `partial`: a prototype, not a product.
+Branch `claude/qt-frontend-feasibility-4b88af`, in `src/DownloadManager.Desktop.Qt`. Committed there as `f0ba3bf` (2026-11-12); not on `main`. Status `partial`: a prototype, not a product.
 
 - **Built:** the WinUI palette in dark and light (`theme.h`, from `App.xaml`); the WinUI controls it needs drawn by hand (`fluent.h`); the speed graph after `DownloadSpeedGraph` (`speedgraph.h`); Progress Details after `DownloadWindow.xaml` (`progresswindow.h`: Overview, Connections, Options, the footer actions, the finished and failed forms); the main window restyled.
 - **How it gets its words:** from the .NET helper, which links `UiFormat.cs` and `DurationText.cs` unchanged, so the Qt side only draws.
