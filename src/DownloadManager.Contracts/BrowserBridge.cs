@@ -134,4 +134,20 @@ public static class ExtensionBrowsers
     public static IReadOnlyList<string> All { get; } = [Chrome, Edge, Firefox];
 
     public static bool IsKnown(string? browser) => browser is Chrome or Edge or Firefox;
+
+    /// <summary>
+    /// UI.B31: an extension in Chrome or Edge that used the app before the native host named its browser (0.7.2), as the
+    /// Host found it in its native-host logs ("Caller=chromium"). It can't tell the two apart, so it is kept apart from
+    /// them: a window shows it on both rows as used before, and only until that browser has a sighting of its own.
+    /// </summary>
+    public const string Chromium = "chromium";
+
+    /// <summary>
+    /// UI.B31: an extension whose native host didn't name its browser (one older than 0.7.2). It only tells a window that
+    /// an extension is in use; no row shows it.
+    /// </summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>A name <see cref="HostStatusDto.ExtensionsSeen"/> may hold: one of the browsers, or <see cref="Chromium"/> or <see cref="Unknown"/>.</summary>
+    public static bool IsSighting(string? name) => IsKnown(name) || name is Chromium or Unknown;
 }

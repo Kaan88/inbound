@@ -488,19 +488,39 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.ColumnSpan="2">
                 <!-- UI.R41: once, until Not now or until any extension connects (ExtensionPromoRules). -->
-                <InfoBar x:Name="ExtensionHintBar" Severity="Informational" IsOpen="False" IsClosable="False" Margin="8,6,8,6"
-                         AutomationProperties.Name="Get the browser extension" AutomationProperties.LiveSetting="Polite">
-                    <InfoBar.ActionButton>
-                        <Button x:Name="ExtensionHintGet" Content="Get it" FontSize="12" Padding="10,2" Click="ExtensionHintGet_Click"
-                                ToolTipService.ToolTip="Shows where to get the extension for Chrome, Edge and Firefox" />
-                    </InfoBar.ActionButton>
-                    <InfoBar.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+                <!-- UI.B29: a plain bar styled as an informational InfoBar, so both buttons sit together on the right of the one
+                     line (an InfoBar puts its ActionButton inline and its Content on a row below). On a narrow window the
+                     buttons move below the words as a group (ExtensionHintBar_SizeChanged). -->
+                <Border x:Name="ExtensionHintBar" Visibility="Collapsed" Margin="8,6,8,6" Padding="12,8,8,8"
+                        Background="{ThemeResource InfoBarInformationalSeverityBackgroundBrush}"
+                        BorderBrush="{ThemeResource InfoBarBorderBrush}" BorderThickness="1"
+                        CornerRadius="{ThemeResource ControlCornerRadius}" SizeChanged="ExtensionHintBar_SizeChanged">
+                    <Grid x:Name="ExtensionHintLayout" ColumnSpacing="12" RowSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw">
+                            <FontIcon Glyph="&#xF136;" FontSize="16" Foreground="{ThemeResource InfoBarInformationalSeverityIconBackground}" />
+                            <FontIcon Glyph="&#xF13F;" FontSize="16" Foreground="{ThemeResource InfoBarInformationalSeverityIconForeground}" />
+                        </Grid>
+                        <!-- No AutomationProperties.Name here: an explicit Name would replace the title and message a screen
+                             reader reads (review of UI.B29). AnnounceExtensionHint reads them out when the bar opens. -->
+                        <TextBlock x:Name="ExtensionHintText" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <StackPanel x:Name="ExtensionHintButtons" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button x:Name="ExtensionHintGet" Content="Get it" FontSize="12" Padding="10,2" Click="ExtensionHintGet_Click"
+                                    ToolTipService.ToolTip="Shows where to get the extension for Chrome, Edge and Firefox" />
                             <Button x:Name="ExtensionHintLater" Content="Not now" FontSize="12" Padding="10,2" Click="ExtensionHintLater_Click"
-                                    ToolTipService.ToolTip="Hides this for good. Help > Get the Browser Extension has it." />
+                                    ToolTipService.ToolTip="Hides this for good. Help &gt; Get the Browser Extension has it." />
                         </StackPanel>
-                    </InfoBar.Content>
-                </InfoBar>
+                    </Grid>
+                </Border>
                 <!-- UI.R32, B's notice: what a Download from My provider added, with the way to it and back. -->
                 <InfoBar x:Name="ProviderNoticeBar" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
                          AutomationProperties.Name="Added from My provider" AutomationProperties.LiveSetting="Polite">

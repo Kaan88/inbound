@@ -1,6 +1,28 @@
 {
   "versions": [
     {
+      "version": "0.7.3",
+      "date": "2026-11-13",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Updates download faster: the update comes over several connections at once, like other downloads, and over one when the server doesn't allow that.", "tags": ["windows"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "The bar suggesting the browser extension keeps Get it and Not now together on the right of one line.", "tags": ["windows"] },
+            { "text": "Screen readers read the extension bar's title and message in full, when it appears and when you move to it.", "tags": ["windows"] },
+            { "text": "When an extension connects while the window is open, the extension bar closes at once, and an open Get the Browser Extension window or Options page shows it as connected without reopening.", "tags": ["windows"] },
+            { "text": "An extension you used before 0.7.2 is recognised from the app's own logs: Firefox shows as connected, and Chrome and Edge show as Used before when the app can't tell which of the two it was. The extension bar no longer appears for it.", "tags": ["windows"] },
+            { "text": "Starting an update download while another is still running waits for it and uses the same checked update.", "tags": ["windows"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.2",
       "date": "2026-11-13",
       "sections": [

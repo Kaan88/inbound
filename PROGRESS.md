@@ -1,5 +1,21 @@
 # Progress — session handoff
 
+### Remote sites, round 2: answers, one UI, where transfers live (owner, 2026-11-12; mockups only)
+
+- **Owner's answers, "yes to all":** uploads exist; remote delete, rename and new folder are in version one; rclone is bundled in Setup; plain FTP is allowed; the Docker image ships rclone. Recorded in ROADMAP SITES.1, SITES.5 and the owner-decisions paragraph.
+- **Owner's direction:** rclone and SFTP share one UI because the functionality is similar; the owner doubts that site transfers belong in the main downloads list and asked for mockup ideas.
+- **Done:** a third private mockup page (23 situations). One data model per kind of site (SFTP, FTP, WebDAV, rclone object store, rclone Drive) drives the same panes, menus and a "what this site can do" strip; five layouts for where transfers live (A own queue in the Sites view, B a view in the main list, C two workspaces, D own transfers window, E one summary row per site) with a comparison; uploads, conflicts, rename and new folder, folder delete with a count, permissions, plain-FTP opt-in; rclone in Setup, bundled-or-own in Options, Docker and headless sign-in.
+- **My pick, not the owner's decision:** A, with a status bar chip and tray tooltip, and a setting that turns on B. Still open: that choice, whether rclone remotes show in the sidebar by themselves, and whether an "rclone does the transfer" mode exists. The rclone size in Setup is a placeholder until measured.
+- **Not done:** no code. The page script was syntax-checked and all 23 situations were rendered for each of the five site kinds in a script; I could not look at it in a browser.
+
+### Remote sites: FTP, FTPS, SFTP, WebDAV, rclone (owner, 2026-11-12; mockups only, branch `torrent-t1`)
+
+- **Owner's words, in order:** asked how SFTP would fit and for mockups; said link-and-folder download does not fit SFTP and wanted "filezilla"-style browsing; then "ftp can be put back in along with it", wanted the mockups as an artifact with a WinUI look and more situations; then asked how WebDAV and rclone integration would fit, with many mockups.
+- **Decision (owner):** FTP returns, reversing the FTP tick in CUT.1 (it was cut earlier the same day on `cut-streams-ftp`). SFTP, WebDAV and rclone are wanted too. Recorded as ROADMAP SITES.1 to SITES.6; L6 now points there.
+- **Done:** two private clickable mockup pages in the app's WinUI palette (tokens from `App.xaml`): 16 situations for FTP, FTPS and SFTP sites, and 24 for WebDAV and rclone, each with what you see, what the Host does and the question left for the owner. Mockups only, so every item is `mockups drawn, not started`.
+- **Not done:** no code, no tests, no changes to `docs/plans/feature-cuts.md` beyond a note on the FTP line. The mockups were syntax-checked and every situation was rendered once in a script; they were not looked at in a browser by me.
+- **Open for the owner:** uploads at all; remote delete, rename and new folder in version one; bundling rclone in Setup; allowing plain FTP; rclone remotes in the sidebar by themselves; shipping rclone in the Docker image; the "rclone does the transfer" mode, which breaks the part-file rule.
+
 ### D7 looked at again: Qt prototype, Avalonia against Qt; the owner stays on Uno (2026-11-12, `claude/qt-frontend-feasibility-4b88af`)
 
 - **Decision (owner, 2026-11-12):** "we'll remain on uno." No product change.
@@ -376,6 +392,45 @@ same day: "changelogs could be smarter. desktop only stuff shown for desktop onl
 carries tags (all, windows, webui, server/docker, linux, extension, torrents, torbox); each surface shows its own and
 the shared lines and folds the rest under "N changes elsewhere".
 Owner approved the mockup (2026-11-12: "mockups are perfect. build it"). Building.
+
+### 0.7.2 release (2026-11-12)
+
+- Owner bug report on 0.7.2 (screenshot): the extension hint bar's "Not now" sits on a row below while "Get it" is beside
+  the text; "bug is the button placement, not that it appears." Recorded as ROADMAP UI.B29, not fixed (owner: "stop
+  building, just record the bug").
+- Owner on 0.7.2: Get the Browser Extension showed Firefox "Not connected yet" though its extension was updated;
+  after a Firefox restart it showed connected. The Host had recorded Firefox at 22:58:59 (`extensions-seen.json`,
+  native-host log), so the window didn't pick it up. Recorded as ROADMAP UI.B30, not investigated further.
+- Owner: the extension popup says Connected and, after closing and opening the window (no Host restart), Options shows
+  it connected too. Logs: the popup was Edge's (Chrome wasn't running; native host 23:02:12 `Browser=edge`), recorded by
+  the Host at once, so UI.B30 is confirmed (the open window doesn't update). Owner also asked why an app restart isn't
+  enough: the extension only contacts the app when its popup opens or it sends a download, so after the upgrade nothing
+  is known until then. Recorded as UI.B31 (count earlier connections, or have the extension say hello at browser start).
+- Owner request for a future release (2026-11-12): "updates should also be downloaded with segments as it can be slow
+  sometimes." Recorded as ROADMAP UPD.N2; not started.
+- Owner: "do all, have haiku do it then review. upload all the extensions, edge is still in review."
+- Haiku filled `changelog.json` 0.7.2 (dated 2026-11-13) and bumped the extension to 0.6.4; reviewed: three lines
+  dropped (one was a 0.7.1 line, two internal), tags that would have hidden general lines without torrents or a TorBox
+  account fixed. Haiku drafted `artifacts/release-notes/v0.7.2.md`; reviewed, one label fixed.
+- Full tests after the wave-3 merge: Core 2223, Engine 201, Server 192, Torrents 123, Archives 401, Containers 188,
+  TorBox 323, Tray 2, Integration 1896 passed / 2 failed, svelte-check 0, vitest 684, extension 337. The new failure,
+  `ASettingsCommandChangesOnlyItsOwnFieldAndKeepsTheQueueStateTheHostHolds`, was the test: its every-day 22:00
+  schedule was saved inside its open window after 22:00 and (as 0.7.1 intends) started the stopped queue; fixed in
+  `007e6a4` (schedules on a day three days away), 6/6 pass. The other is the known admin-share test.
+- Released v0.7.2 from squash `80b3be5` on main (binaries `0.7.2+80b3be5`): tag pushed first, release created with
+  Setup (68,306,909 bytes), zip (96,296,991), manifest.json (37 note lines, notes signed separately), public.pem (same
+  as v0.7.1), inbound-bridge-0.6.4-firefox.xpi (AMO-signed), SHA256SUMS; then main pushed. Docker run 43290924252 and
+  AppImage run 43290924249 succeeded (Inbound-0.7.2-x86_64.AppImage, manifest-linux-x64.json 0.7.2, SHA256SUMS-linux).
+  Served `releases/latest/download/manifest.json` says 0.7.2; `extensions/firefox-updates.json` on main names 0.6.4.
+- Extensions: Chrome Web Store 0.6.4 uploaded and submitted (PENDING_REVIEW; 0.6.3 is PUBLISHED). Firefox signed and
+  attached. Edge: no API keys here; `artifacts\chrome-store\inbound-bridge-0.6.4-chrome.zip` is for the owner to
+  upload in Partner Center (0.6.3 still in Edge review, owner).
+- Not done: the DietPi container stays on 0.7.1 (owner: "leave dietpi alone"); nothing in 0.7.2 was tried by hand by
+  the owner.
+- Owner, 2026-11-12: never write what was or wasn't tried or tested into release notes or the changelog; remove it
+  from earlier releases. Removed from the GitHub notes of v0.7.2 (Known issues), v0.7.1 (Known issues) and v0.7.0 (an
+  Improvements sentence, two Known issues bullets, a Linux sentence); older releases had none. `changelog.json` had none,
+  so the installer and update notes needed no rebuild. Rule added to `docs/release-builds.md`.
 
 ### 0.7.2 work, wave 3 (2026-11-12, workflow `wf_f69f245f-569`, merged at `997ed0f`)
 

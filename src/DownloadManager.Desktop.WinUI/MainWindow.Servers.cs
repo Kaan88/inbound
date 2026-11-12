@@ -109,7 +109,10 @@ public sealed partial class MainWindow
             if (connection != _local) return;
             if (_localStatus is { } local) local.ExtensionsSeen = seen;
             if (connection == _connection && _status is { } shown) shown.ExtensionsSeen = seen;
+            UiTrace.Write($"Extensions seen pushed: {string.Join(",", seen.Keys.Order(StringComparer.Ordinal))}");
             UpdateExtensionHint(false);
+            // UI.B30: an open Get the Browser Extension dialog or Options shows it too.
+            RefreshExtensionLinkPanels();
         });
         // Only this PC's Host raises it (HostConnection never does for a server).
         connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
@@ -823,6 +826,8 @@ public sealed partial class MainWindow
             }
 
             _settingsWindow.Activate();
+            // UI.B30: what Options says about the extensions is this PC's Host's word now, not when it opened.
+            _ = RefreshExtensionLinksFromHostAsync();
             return;
         }
 

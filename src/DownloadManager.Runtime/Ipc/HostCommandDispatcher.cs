@@ -39,6 +39,9 @@ public sealed partial class HostCommandDispatcher
     // Every open session with its rights, events or not, for CloseSessions. The rights also live on the session object
     // itself (_rights), so a command still being answered after its session closed keeps that session's rights.
     private readonly ConcurrentDictionary<Guid, (IClientSession Client, SessionRights Rights)> _open = new();
+
+    /// <summary>UI.B31: sessions at this PC whose hello named no browser and that have sent no extension message yet.</summary>
+    private readonly ConcurrentDictionary<Guid, byte> _unnamedSessions = new();
     private readonly ConditionalWeakTable<IClientSession, SessionRights> _rights = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _groupsGate = new();
@@ -181,9 +184,14 @@ public sealed partial class HostCommandDispatcher
         // UI.R41: the native host names its browser; only a client at this PC may say an extension came.
         // A browser seen for the first time is pushed to the sessions at this PC, so an open window drops its hint now
         // rather than at its next snapshot; web sessions never get it (forScope gives them nothing).
-        if (options?.Browser is { } browser && rights.Role == ClientRoles.Desktop && rights.Scope is null &&
-            _service.ExtensionSightings is { } sightings && sightings.Note(browser))
-            Broadcast(IpcMessage.Create(MessageTypes.ExtensionsSeen, new ExtensionsSeenDto { Seen = sightings.Snapshot() }), _ => null);
+        // A browser new or first seen today is pushed, so an open window's lists show the day (UI.B30).
+        if (options?.Browser is { } browser && rights.Role == ClientRoles.Desktop && rights.Scope is null)
+            NoteExtension(browser);
+        // UI.B31: a client at this PC that says hello as a native host older than 0.7.2 did (no snapshot, events, no browser)
+        // may be one; its first extension message says so. The window and the CLI say hello otherwise.
+        else if (options is { Snapshot: false, Events: true, Browser: null, Role: null } && rights.Scope is null &&
+                 _service.ExtensionSightings is not null)
+            _unnamedSessions[client.Id] = 0;
         // PERF.7: a client that asked for no events is never registered, so no broadcast reaches it.
         if (options?.Events ?? true) _sessions[client.Id] = client;
         // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
@@ -208,9 +216,26 @@ public sealed partial class HostCommandDispatcher
         if (options?.Snapshot ?? true) await SendSnapshotAsync(client, rights, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// UI.R41: notes that <paramref name="browser"/>'s extension reached this Host, and pushes the list to the sessions at
+    /// this PC when that changed it; web sessions never get it (forScope gives them nothing).
+    /// </summary>
+    private void NoteExtension(string browser)
+    {
+        if (_service.ExtensionSightings is { } sightings && sightings.Note(browser))
+            Broadcast(IpcMessage.Create(MessageTypes.ExtensionsSeen, new ExtensionsSeenDto { Seen = sightings.Snapshot() }), _ => null);
+    }
+
+    /// <summary>
+    /// UI.B31: only the extension sends these through a pipe session (<see cref="NativeBridgePolicy"/>): the window, the
+    /// CLI and the web bridge's browser pages never do. One from a session that named no browser is an older native host.
+    /// </summary>
+    private static bool OnlyAnExtensionSends(string? type) => type is MessageTypes.HostPing or MessageTypes.HandoffRequest;
+
     /// <summary>No more broadcasts go to this session.</summary>
     public void CloseSession(IClientSession client)
     {
+        _unnamedSessions.TryRemove(client.Id, out _);
         _sessions.TryRemove(client.Id, out _);
         _open.TryRemove(client.Id, out _);
         // T3: a client that watched torrents watches no longer.
@@ -288,6 +313,8 @@ public sealed partial class HostCommandDispatcher
         var rights = RightsOf(client);
         var caller = rights.Scope;
         var platform = rights.Capabilities;
+        if (OnlyAnExtensionSends(message.Type) && _unnamedSessions.TryRemove(client.Id, out _))
+            NoteExtension(ExtensionBrowsers.Unknown);
         try
         {
             if (await TryDispatchRemoteAsync(client, rights, message, cancellationToken).ConfigureAwait(false))

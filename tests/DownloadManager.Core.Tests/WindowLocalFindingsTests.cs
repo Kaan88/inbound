@@ -26,6 +26,23 @@ public sealed class WindowLocalFindingsTests
     }
 
     [Fact]
+    public void UI_B29_the_extension_hint_words_are_read_as_they_are_and_announced_in_full_after_layout()
+    {
+        // An explicit Name on the words would replace the title and message a screen reader reads.
+        var text = XDocument.Load(WinUiFile("MainWindow.xaml")).Descendants(Xaml + "TextBlock")
+            .First(block => (string?)block.Attribute(X + "Name") == "ExtensionHintText");
+        Assert.Null(text.Attribute("AutomationProperties.Name"));
+        Assert.Equal("Polite", (string?)text.Attribute("AutomationProperties.LiveSetting"));
+
+        var source = File.ReadAllText(WinUiFile("MainWindow.ExtensionPromo.cs"));
+        var announce = source[source.IndexOf("private void AnnounceExtensionHint()", StringComparison.Ordinal)..];
+        announce = announce[..announce.IndexOf("private void ExtensionHintBar_SizeChanged", StringComparison.Ordinal)];
+        Assert.Contains("DispatcherQueue.TryEnqueue", announce, StringComparison.Ordinal);
+        Assert.Contains("RaiseNotificationEvent", announce, StringComparison.Ordinal);
+        Assert.Contains("ExtensionPromoRules.HintTitle + \". \" + ExtensionPromoRules.HintMessage", announce, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void U_WL_8_a_filtered_list_says_what_it_shows()
     {
         Assert.Null(ShellWords.FindFilter(null, 3));

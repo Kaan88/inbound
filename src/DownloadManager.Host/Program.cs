@@ -212,7 +212,10 @@ internal static class Program
 
             service.NativeHostState = NativeHostRegistration.Read;
             // UI.R41: the native host tells which browser's extension came; the window says so.
-            service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn);
+            service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn, nativeHostLogs: paths.LogsDirectory);
+            // UI.B31: read now, off the start path, so the first window doesn't wait on the one-time look at the native host's logs.
+            var sightings = service.ExtensionSightings;
+            _ = Task.Run(() => sightings.Snapshot());
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);

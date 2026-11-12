@@ -141,7 +141,10 @@ internal static class Program
 
         service.TrayAvailable = false;
         // UI.R41: the native host tells which browser's extension came; the window says so.
-        service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn);
+        service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn, nativeHostLogs: paths.LogsDirectory);
+        // UI.B31: read now, off the start path, so the first window doesn't wait on the one-time look at the native host's logs.
+        var sightings = service.ExtensionSightings;
+        _ = Task.Run(() => sightings.Snapshot());
         var platform = new LinuxHostPlatform(service, log);
         // D8: a .torrent or container file a browser uploaded through the web bridge, by its reference.
         var bridgeLauncher = new WebBridgeLauncher(log.Warn);

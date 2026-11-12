@@ -40,6 +40,7 @@ public sealed partial class DownloadManagerService
     private const int MaxManifestBytes = 1024 * 1024;
     internal static string WindowsPowerShellPath => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
     private readonly SemaphoreSlim _updateInstallGate = new(1, 1);
+    private readonly SemaphoreSlim _updateDownloadGate = new(1, 1);
     private bool _updateInstallScheduled;
     private bool _updateQuiescing;
     public event EventHandler? UpdateShutdownRequested;
@@ -2313,6 +2314,9 @@ public sealed partial class DownloadManagerService
         Directory.CreateDirectory(directory);
         var target = Path.Combine(directory, $"installer-{check.AvailableVersion}.zip");
         ReportUpdateProgress("downloading", check.AvailableVersion, total: check.Size);
+        // One download of the package at a time: "Download" followed at once by "Install now" waits for the first,
+        // which then leaves a verified file the second takes as it is.
+        await _updateDownloadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // "Download" followed by "Install now" must not fetch it twice. The hash is from the
@@ -2327,67 +2331,15 @@ public sealed partial class DownloadManagerService
                 return new UpdateDownloadResult { Ok = true, Path = target, Size = check.Size, Sha256 = check.Sha256 };
             }
 
-            using var response = await UpdateClient.GetAsync(
-                installerUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            if (response.RequestMessage?.RequestUri is { } finalInstallerUri &&
-                finalInstallerUri.Scheme != "https" &&
-                !finalInstallerUri.IsLoopback)
+            // A part file a stopped Host left behind can't be continued (nothing records its ranges), so it goes.
+            RemoveUpdatePartFiles(directory);
+            if (await FetchUpdatePackageAsync(installerUri, target, check, cancellationToken).ConfigureAwait(false) is { } error)
             {
-                return new UpdateDownloadResult
-                {
-                    Ok = false,
-                    Error = "The installer redirected to a non-HTTPS host.",
-                };
+                DeleteFileQuietly(target);
+                return new UpdateDownloadResult { Ok = false, Error = error };
             }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return new UpdateDownloadResult
-                {
-                    Ok = false,
-                    Error = $"Installer download returned HTTP {(int)response.StatusCode}.",
-                };
-            }
-
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken)
-                             .ConfigureAwait(false))
-            await using (var destination = new FileStream(
-                             target, FileMode.Create, FileAccess.Write, FileShare.None, 81_920,
-                             FileOptions.Asynchronous | FileOptions.SequentialScan))
-            {
-                var buffer = new byte[81_920];
-                long written = 0;
-                long nextProgress = 0;
-                while (true)
-                {
-                    var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    written += read;
-                    if (written > check.Size)
-                    {
-                        destination.Close();
-                        DeleteFileQuietly(target);
-                        return new UpdateDownloadResult
-                        {
-                            Ok = false,
-                            Error = "The installer is larger than the signed size.",
-                        };
-                    }
-
-                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
-                        .ConfigureAwait(false);
-                    if (Environment.TickCount64 >= nextProgress)
-                    {
-                        ReportUpdateProgress("downloading", check.AvailableVersion, written, check.Size);
-                        nextProgress = Environment.TickCount64 + 200;
-                    }
-                }
-            }
-
+            // The final gate, whichever way the bytes came: the signed size and SHA-256.
             var length = new FileInfo(target).Length;
             ReportUpdateProgress("verifying", check.AvailableVersion, length, check.Size);
             var hash = await Hashing.Sha256FileAsync(target, cancellationToken).ConfigureAwait(false);
@@ -2413,12 +2365,131 @@ public sealed partial class DownloadManagerService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             DeleteFileQuietly(target);
+            RemoveUpdatePartFiles(directory);
             throw;
         }
         catch (Exception ex)
         {
             DeleteFileQuietly(target);
+            RemoveUpdatePartFiles(directory);
             return new UpdateDownloadResult { Ok = false, Error = ex.Message };
+        }
+        finally
+        {
+            _updateDownloadGate.Release();
+        }
+    }
+
+    /// <summary>Most connections the update download uses (UPD.N2).</summary>
+    internal const int MaxUpdateConnections = 8;
+
+    /// <summary>
+    /// UPD.N2: fetches the package into <paramref name="target"/> with the download engine, in segments when the server
+    /// answers ranges with a length, else in one stream, like any other download. The part file sits beside the target
+    /// and takes each range at its final offset, so the finished file is renamed in place. Each request starts from the
+    /// manifest's address and follows its redirect, so every range reaches the final (signed) address with a fresh link.
+    /// The engine's HTTP client takes the route the updater always took (the system proxy, not the app's), and
+    /// <see cref="UpdateDownloadGuard"/> keeps it on HTTPS and within the signed size. Returns null when the target was
+    /// written, else the error to report; throws <see cref="OperationCanceledException"/> when cancelled. None of it is a
+    /// job: it is not in the list or the job store and saves no checkpoint.
+    /// </summary>
+    private async Task<string?> FetchUpdatePackageAsync(
+        Uri installerUri, string target, UpdateCheckResult check, CancellationToken cancellationToken)
+    {
+        var size = check.Size!.Value;
+        int connections;
+        lock (_sync)
+        {
+            connections = UpdateConnections(_settings);
+        }
+
+        using var guard = new UpdateDownloadGuard(size, new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
+            ConnectTimeout = TimeSpan.FromSeconds(20),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            UseCookies = false,
+            // No proxy set: the system's, which the updater's client has always used.
+            UseProxy = true,
+        });
+        using var engine = new HttpDownloadEngine(
+            new EngineOptions { MaxAttempts = 3, MaxConnectionsPerHost = connections }, guard);
+        var job = new DownloadJob
+        {
+            Url = installerUri.AbsoluteUri,
+            FileName = Path.GetFileName(target),
+            DestinationDirectory = Path.GetDirectoryName(target)!,
+            FinalFilePath = target,
+            ConflictPolicy = ConflictPolicy.Overwrite,
+            // A response of another size is not this package; the engine checks it before writing a byte.
+            ExpectedTotalBytes = size,
+            RequestedConnections = connections,
+        };
+        job.PartFilePath = $"{target}.{job.Id:N}.part";
+        var progress = new UpdateTransferProgress(this, check.AvailableVersion, size);
+        var done = false;
+        try
+        {
+            var result = await engine.ExecuteAsync(job, null, progress, cancellationToken).ConfigureAwait(false);
+            if (result.Success)
+            {
+                done = true;
+                return null;
+            }
+
+            if (result.FinalState == DownloadState.Cancelled || cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+
+            return guard.Refusal ?? UpdateDownloadError(result.Failure);
+        }
+        finally
+        {
+            if (!done) DeleteFileQuietly(job.PartFilePath);
+        }
+    }
+
+    /// <summary>The connections an update download uses: the default per download, within the per-host limit, at most 8.</summary>
+    internal static int UpdateConnections(AppSettings settings)
+        => Math.Clamp(Math.Min(settings.DefaultConnections, settings.MaxConnectionsPerHost), 1, MaxUpdateConnections);
+
+    /// <summary>An engine failure in the words the updater has always used.</summary>
+    internal static string UpdateDownloadError(JobFailure? failure)
+    {
+        if (failure is null) return "The installer could not be downloaded.";
+        if (failure.HttpStatus is { } status and (< 200 or >= 300)) return $"Installer download returned HTTP {status}.";
+        return failure.Kind is FailureKind.RemoteChanged or FailureKind.ExpiredUrl or FailureKind.VerificationFailed or FailureKind.InvalidContent
+            ? "Installer size or SHA-256 did not match the signed manifest."
+            : failure.Message;
+    }
+
+    /// <summary>Part files of update downloads (<c>installer-&lt;version&gt;.zip.&lt;id&gt;.part</c>).</summary>
+    private static void RemoveUpdatePartFiles(string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory)) return;
+            foreach (var part in Directory.EnumerateFiles(directory, "installer-*.zip.*.part")) DeleteFileQuietly(part);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Engine progress as the updater's own: at most five times a second, never past the signed size.</summary>
+    private sealed class UpdateTransferProgress(DownloadManagerService owner, string? version, long size) : IProgress<TransferProgress>
+    {
+        private readonly object _sync = new();
+        private long _next;
+
+        public void Report(TransferProgress value)
+        {
+            lock (_sync)
+            {
+                if (Environment.TickCount64 < _next) return;
+                _next = Environment.TickCount64 + 200;
+                owner.ReportUpdateProgress("downloading", version, Math.Clamp(value.ReceivedBytes, 0, size), size);
+            }
         }
     }
 
@@ -2457,6 +2528,9 @@ public sealed partial class DownloadManagerService
             {
                 if (Path.GetFileName(package) != $"installer-{keepVersion}.zip") DeleteFileQuietly(package);
             }
+
+            // UPD.N2: what an interrupted download left. One still being written is open and stays.
+            RemoveUpdatePartFiles(directory);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }

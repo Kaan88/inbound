@@ -68,6 +68,9 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
 (the server's `changelog.get`), and the notes in the Windows app's Update available question (the update manifest's
 `notes`). The file is built into `DownloadManager.Contracts`, so the release build must contain the final text.
 
+- Never write what was or wasn't tried, tested or verified ("not tried by hand", "automatic tests only") in
+  `changelog.json` or the GitHub release notes; that belongs in PROGRESS.md only (owner, 2026-11-12). Known issues
+  list real problems.
 - Add the version at the top (newest first) with its release date (`"date": "yyyy-MM-dd"`; `null` until then) and
   sections titled `New`, `Fixes` and `Upgrade notes`. Leave known issues to the GitHub release notes.
 - One or two plain sentences per line, as the app talks (`docs/design-guidelines.md`). Plain text only: no Markdown or
@@ -121,7 +124,9 @@ files explicitly. Firefox follows `extensions/firefox-updates.json` on `main` as
 as it is there, so push in this order: the tag alone (`git push origin vX.Y.Z`, on the
 release squash commit), then create the release on that tag and upload the six
 files, then push `main`. Pushed the other way, Firefox only meets a short window of
-failed update checks (the hash rules out a wrong file) and tries again later. The manifest points at the versioned ZIP release asset. Do not
+failed update checks (the hash rules out a wrong file) and tries again later. The manifest points at the versioned ZIP release asset.
+From 0.7.3 the app fetches that asset in segments (up to 8 connections, following GitHub's redirect for each), and in
+one stream when the host answers no ranges or no length; the signed size and SHA-256 decide either way. Do not
 upload the private signing key or any staging directory. Keep using the same
 private key for all releases because installed clients trust its public key.
 

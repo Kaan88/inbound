@@ -72,4 +72,31 @@ public sealed partial class HostCommandDispatcherTests
         var status = (await AskAsync(dispatcher, window, MessageTypes.HostStatus, new { })).GetPayload<HostStatusDto>();
         Assert.Null(status.ExtensionsSeen);
     }
+
+    [Fact]
+    public async Task A_client_that_names_no_browser_counts_as_an_extension_only_when_it_sends_what_only_an_extension_sends()
+    {
+        // UI.B31: a native host older than 0.7.2 names no browser; its host.ping or handoff says it is one.
+        var service = await ServiceAsync();
+        service.ExtensionSightings = new ExtensionSightings(Path.Combine(_root, "seen"));
+        var dispatcher = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog());
+
+        var window = Session();
+        await dispatcher.OpenSessionAsync(window, null, CancellationToken.None);
+        // The window's own questions are not an extension's.
+        await AskAsync(dispatcher, window, MessageTypes.HostStatus, new { });
+        await AskAsync(dispatcher, window, MessageTypes.JobsQuery, new { });
+        await AskAsync(dispatcher, window, MessageTypes.HostPing, new { });
+        // Nor is a ping from a client that says hello as the CLI does.
+        var cli = Session();
+        await dispatcher.OpenSessionAsync(cli, new ClientHelloDto { Snapshot = false, Events = false }, CancellationToken.None);
+        await AskAsync(dispatcher, cli, MessageTypes.HostPing, new { });
+        Assert.Empty(service.ExtensionSightings.Snapshot());
+
+        var oldNativeHost = Session();
+        await dispatcher.OpenSessionAsync(oldNativeHost, new ClientHelloDto { Snapshot = false, Events = true }, CancellationToken.None);
+        await AskAsync(dispatcher, oldNativeHost, MessageTypes.HostPing, new { });
+        Assert.Equal([ExtensionBrowsers.Unknown], service.ExtensionSightings.Snapshot().Keys);
+        await window.UntilAsync(frames => frames.Any(f => f.Type == MessageTypes.ExtensionsSeen));
+    }
 }

@@ -4,7 +4,7 @@
       "updates": [
         {
           "version": "0.6.4",
-          "update_link": "https://github.com/Kaan88/inbound/releases/download/v0.7.2/inbound-bridge-0.6.4-firefox.xpi",
+          "update_link": "https://github.com/Kaan88/inbound/releases/download/v0.7.3/inbound-bridge-0.6.4-firefox.xpi",
           "update_hash": "sha256:72f72fa052aba4309b4bd7a303dfc7cdeb9e02e56317a21658f9a04c4a42f38e",
           "applications": { "gecko": { "strict_min_version": "140.0" } }
         }

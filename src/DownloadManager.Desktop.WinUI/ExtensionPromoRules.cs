@@ -24,6 +24,12 @@ internal static class ExtensionPromoRules
     public const string HintTitle = "Send downloads from your browser to Inbound";
     public const string HintMessage = "Get the Inbound extension for Chrome, Edge or Firefox, and downloads you start there come here.";
     public const string SectionHint = "The extension sends downloads you start in your browser to Inbound. Get it for each browser you use.";
+    /// <summary>UI.B29: below this width the hint bar's buttons go under its words, together, instead of beside them.</summary>
+    public const double HintOneLineMinWidth = 640;
+
+    /// <summary>UI.B31: Chrome's and Edge's rows when the Host knows one of them was used but not which.</summary>
+    public const string UsedBefore = "Used before";
+
     public const string EdgeAlso = "The Chrome Web Store copy works in Edge too; Edge then shows here as connected.";
 
     /// <summary>
@@ -41,7 +47,8 @@ internal static class ExtensionPromoRules
         IReadOnlyDictionary<string, DateTimeOffset>? seen, bool anyBrowserDownload)
     {
         if (done || !isLocal || seen is null) return new ExtensionHintDecision(false, false);
-        if (seen.Keys.Any(ExtensionBrowsers.IsKnown) || anyBrowserDownload) return new ExtensionHintDecision(false, true);
+        // UI.B31: an extension seen before its browser was named (chromium, unknown) counts too.
+        if (seen.Keys.Any(ExtensionBrowsers.IsSighting) || anyBrowserDownload) return new ExtensionHintDecision(false, true);
         if (integrationStatus == "disabled") return new ExtensionHintDecision(false, false);
         return new ExtensionHintDecision(true, false);
     }
@@ -77,6 +84,9 @@ internal static class ExtensionPromoRules
                 return new ExtensionLink(browser, name, from, url, blocked, false);
             if (seen.TryGetValue(browser, out var when))
                 return new ExtensionLink(browser, name, from, url, $"Connected · last {Day(when, culture)}", true);
+            // UI.B31: Chrome or Edge, from before the native host named its browser; which one can't be told.
+            if (browser != ExtensionBrowsers.Firefox && seen.TryGetValue(ExtensionBrowsers.Chromium, out var before))
+                return new ExtensionLink(browser, name, from, url, $"{UsedBefore} · last {Day(before, culture)}", false);
             return new ExtensionLink(browser, name, from, url, "Not connected yet", false);
         }
     }

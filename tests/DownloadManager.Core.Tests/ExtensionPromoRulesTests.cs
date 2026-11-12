@@ -122,4 +122,47 @@ public sealed class ExtensionPromoRulesTests
         // Capturing turned off is still said: it is the user's own choice in Options.
         Assert.Equal("Not connected · browser downloads are off", ExtensionPromoRules.Links(None, "disabled", canRepair: false)[0].Status);
     }
+
+    private static readonly Dictionary<string, DateTimeOffset> ChromiumBefore = new()
+    {
+        [ExtensionBrowsers.Chromium] = new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero),
+    };
+
+    [Theory]
+    [InlineData(ExtensionBrowsers.Chromium)]
+    [InlineData(ExtensionBrowsers.Unknown)]
+    public void An_extension_seen_before_its_browser_was_named_ends_the_hint(string name)
+        => Assert.Equal(new ExtensionHintDecision(false, true),
+            ExtensionPromoRules.Decide(false, true, "on", new Dictionary<string, DateTimeOffset> { [name] = DateTimeOffset.UnixEpoch }, false));
+
+    [Fact]
+    public void Chromium_shows_on_Chrome_and_Edge_as_used_before_and_not_on_Firefox()
+    {
+        var links = ExtensionPromoRules.Links(ChromiumBefore, "on", canRepair: true, CultureInfo.InvariantCulture);
+        Assert.Equal("Used before · last 11 Nov 2026", links[0].Status);
+        Assert.Equal("Used before · last 11 Nov 2026", links[1].Status);
+        Assert.False(links[0].Connected);
+        Assert.False(links[1].Connected);
+        Assert.Equal("Not connected yet", links[2].Status);
+    }
+
+    [Fact]
+    public void A_browser_with_its_own_sighting_says_connected_and_the_other_keeps_used_before()
+    {
+        var seen = new Dictionary<string, DateTimeOffset>(ChromiumBefore) { [ExtensionBrowsers.Edge] = new DateTimeOffset(2026, 11, 12, 20, 0, 0, TimeSpan.Zero) };
+        var links = ExtensionPromoRules.Links(seen, "on", canRepair: true, CultureInfo.InvariantCulture);
+        Assert.StartsWith("Used before", links[0].Status, StringComparison.Ordinal);
+        Assert.True(links[1].Connected);
+        Assert.StartsWith("Connected · last ", links[1].Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unknown_shows_on_no_row()
+        => Assert.All(ExtensionPromoRules.Links(new Dictionary<string, DateTimeOffset> { [ExtensionBrowsers.Unknown] = DateTimeOffset.UnixEpoch }, "on", canRepair: true),
+            link => Assert.Equal("Not connected yet", link.Status));
+
+    [Fact]
+    public void What_blocks_a_browser_now_comes_before_used_before_too()
+        => Assert.StartsWith("Can't reach Inbound",
+            ExtensionPromoRules.Links(ChromiumBefore, "on; the extension can't reach Inbound in Chrome", canRepair: true)[0].Status, StringComparison.Ordinal);
 }

@@ -156,6 +156,8 @@ public sealed partial class MainWindow
                 if (!connection.IsRemote) _localStatus = latest.Status;
                 // Review of UI.R41: an extension that connected since the last snapshot ends the hint here too.
                 UpdateExtensionHint(false);
+                // UI.B30: and shows in a browser list that is open now.
+                if (!connection.IsRemote) RefreshExtensionLinkPanels();
             }
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or OperationCanceledException)

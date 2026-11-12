@@ -533,7 +533,7 @@ public sealed partial class MainWindow : Window
     {
         if (_connection.IsRemote && changeType != "completed") _remoteCompletions.Saw(job.Id, job.State);
         // UI.R41: the first download the extension sends puts the hint away for good.
-        if (ExtensionHintBar.IsOpen && changeType != "removed" && ExtensionPromoRules.FromBrowser(job.Source)) UpdateExtensionHint(true);
+        if (ExtensionHintOpen && changeType != "removed" && ExtensionPromoRules.FromBrowser(job.Source)) UpdateExtensionHint(true);
         if (changeType == "removed")
         {
             if (_jobsById.Remove(job.Id, out var removed))

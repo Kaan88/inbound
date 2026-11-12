@@ -422,9 +422,17 @@ keeps three things out of a client's hands, and tells every client when the sett
   network and are listed as paired apps (`GET /api/auth/tokens`, role `extension`) instead, and from an older Host. A
   client shows no per-browser status then.
 - **`extensions.seen`** (Host push, payload `{ "seen": { "chrome": "2026-11-12T09:30:00+00:00" } }`, the whole list)
-  goes to the sessions at this PC that take events when a browser's extension reaches the Host for the first time, so
-  an open window can drop its "get the extension" hint at once. A web session never gets it. It is additive: a client
-  that doesn't know it ignores it.
+  goes to the sessions at this PC that take events when a browser's extension reaches the Host for the first time, or
+  for the first time that day (UTC, from 0.7.3), so an open window can drop its "get the extension" hint at once and
+  show the day in lists it has open. A web session never gets it. It is additive: a client that doesn't know it
+  ignores it.
+- From 0.7.3 (UI.B31) the list may also hold `chromium`: Chrome or Edge, which the Host found in its own native-host
+  logs from before the native host named its browser (`Caller=chromium` with no `Browser=` line). The Host reads the
+  logs of the last 30 days once per state folder (bounded in size) and then keeps `logsRead` in the file, which is never
+  sent. A client shows `chromium` on the Chrome and Edge rows as "Used before" unless that browser has its own entry. It
+  may also hold `unknown`: a client at this PC that said hello as a native host older than 0.7.2 did (no snapshot,
+  events, no browser) and sent `host.ping` or `handoff.request`. No row shows it. Both count as an extension in use for
+  the one-time hint. A client that knows only the three browser names ignores both.
 
 ### Downloads as every client sees them
 
