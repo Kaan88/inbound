@@ -1,8 +1,8 @@
 # Builds the Linux AppImage (x86_64) with its torrent worker and attaches it to the GitHub release of a version tag
 # (owner, 2026-11-12: GitHub builds the AppImage from now on, alongside the Docker image; ROADMAP X.6). It runs on a
-# pushed v* tag, or by hand for an existing tag. The signed update file (manifest-linux-x64.json) and SHA256SUMS-linux
-# are not made here: the update key stays off GitHub, and scripts/prepare-appimage-release.sh signs them on the
-# owner's PC from this AppImage. arm64 is not built.
+# pushed v* tag, or by hand for an existing tag. It also signs the Linux update file (manifest-linux-x64.json) with
+# the UPDATE_SIGNING_KEY repository secret (owner, 2026-11-12: "put key to github"), after checking that the key
+# matches the release's public.pem, and attaches it with SHA256SUMS-linux. arm64 is not built.
 name: AppImage
 
 on:
@@ -83,7 +83,7 @@ jobs:
           path: ${{ env.APPIMAGE }}
           retention-days: 14
 
-      - name: Attach to the release
+      - name: Wait for the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -93,5 +93,33 @@ jobs:
             echo "No release $TAG yet; waiting ($i/60)"; sleep 60
           done
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null
-          gh release upload "$TAG" "$APPIMAGE" -R "$GITHUB_REPOSITORY" --clobber
-          echo "Attached $(basename "$APPIMAGE") to $TAG. Sign the update file on the owner's PC: scripts/prepare-appimage-release.sh"
+
+      - name: Sign the Linux update file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          test -n "$UPDATE_SIGNING_KEY" || { echo "The UPDATE_SIGNING_KEY secret is missing."; exit 1; }
+          key="$RUNNER_TEMP/update-signing.pem"
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          # The key must be the one installed apps trust: its public half equals the release's public.pem.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p public.pem -D "$RUNNER_TEMP/release"
+          test "$(openssl pkey -in "$key" -pubout | tr -d '\r\n')" = "$(tr -d '\r\n' < "$RUNNER_TEMP/release/public.pem")" \
+            || { echo "The signing key does not match the release's public.pem."; exit 1; }
+          sh scripts/prepare-appimage-release.sh "${TAG#v}" "$APPIMAGE" "$key" "$GITHUB_REPOSITORY"
+          out="artifacts/release/$TAG-linux"
+          test -f "$out/manifest-linux-x64.json" && test -f "$out/SHA256SUMS-linux"
+          test ! -e "$out/public.pem"
+          cat "$out/SHA256SUMS-linux"
+          echo "SIGNED=$out" >> "$GITHUB_ENV"
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # manifest-linux-x64.json replaces any earlier one, so Linux installs are offered this version.
+          gh release upload "$TAG" "$SIGNED/$(basename "$APPIMAGE")" "$SIGNED/manifest-linux-x64.json" \
+            "$SIGNED/SHA256SUMS-linux" -R "$GITHUB_REPOSITORY" --clobber
+          echo "Attached $(basename "$APPIMAGE"), manifest-linux-x64.json and SHA256SUMS-linux to $TAG."
