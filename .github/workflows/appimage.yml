@@ -1,0 +1,97 @@
+# Builds the Linux AppImage (x86_64) with its torrent worker and attaches it to the GitHub release of a version tag
+# (owner, 2026-11-12: GitHub builds the AppImage from now on, alongside the Docker image; ROADMAP X.6). It runs on a
+# pushed v* tag, or by hand for an existing tag. The signed update file (manifest-linux-x64.json) and SHA256SUMS-linux
+# are not made here: the update key stays off GitHub, and scripts/prepare-appimage-release.sh signs them on the
+# owner's PC from this AppImage. arm64 is not built.
+name: AppImage
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build and attach to (for example v0.7.0)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appimage-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  appimage:
+    if: github.repository == 'Kaan88/inbound'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Tag is a version
+        run: |
+          case "$TAG" in v[0-9]*) ;; *) echo "Not a version tag: $TAG"; exit 1 ;; esac
+          version="$(grep -oPm1 '(?<=<Version>)[^<]+' Directory.Build.props)"
+          test "v$version" = "$TAG" || { echo "Directory.Build.props says $version, the tag is $TAG"; exit 1; }
+
+      - name: .NET SDK 10
+        run: |
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          "$HOME/.dotnet/dotnet" --version
+
+      - name: Linux torrent worker (native/torrent-worker/Dockerfile.build)
+        run: |
+          docker build -f native/torrent-worker/Dockerfile.build --build-arg TARGET=x64 \
+            --output artifacts/torrent-worker/linux-x64 native/torrent-worker
+          test -x artifacts/torrent-worker/linux-x64/inbound-torrent
+          artifacts/torrent-worker/linux-x64/inbound-torrent --version
+
+      - name: appimagetool 1.9.1 (checked against its published SHA-256)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool.AppImage" \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $RUNNER_TEMP/appimagetool.AppImage" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/appimagetool.AppImage"
+          (cd "$RUNNER_TEMP" && ./appimagetool.AppImage --appimage-extract >/dev/null)
+          echo "APPIMAGETOOL=$RUNNER_TEMP/squashfs-root/AppRun" >> "$GITHUB_ENV"
+
+      - name: Build the AppImage
+        run: |
+          bash scripts/package-appimage.sh
+          f="artifacts/linux/Inbound-${TAG#v}-x86_64.AppImage"
+          test -f "$f"
+          ls -la "$f"; sha256sum "$f"
+          echo "APPIMAGE=$f" >> "$GITHUB_ENV"
+
+      - name: Keep it as a run artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: appimage-${{ env.TAG }}
+          path: ${{ env.APPIMAGE }}
+          retention-days: 14
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # On a tag push the release is usually made by hand after the tag: wait up to an hour for it.
+          for i in $(seq 1 60); do
+            gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            echo "No release $TAG yet; waiting ($i/60)"; sleep 60
+          done
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$TAG" "$APPIMAGE" -R "$GITHUB_REPOSITORY" --clobber
+          echo "Attached $(basename "$APPIMAGE") to $TAG. Sign the update file on the owner's PC: scripts/prepare-appimage-release.sh"
