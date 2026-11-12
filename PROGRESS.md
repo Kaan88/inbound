@@ -8,6 +8,7 @@
 - **Not done:** a Linux build or run of it; a side-by-side with the WinUI window; the Avalonia-against-Qt test on the owner's KDE machine (Linux work is on hold).
 - **Uno and Wayland:** Uno has no Wayland host yet; a community pull request that adds one was open and waiting for review on 2026-11-12 (https://github.com/unoplatform/uno/pull/25503).
 - **Where it is written down:** the addendum of `docs/plans/gui-toolkits.md`; ROADMAP D7.
+- **Next, when the owner is on Linux (owner, 2026-11-12):** try the Linux window on Uno's native Wayland host, https://github.com/unoplatform/uno/pull/25503. The steps and what to check are in ROADMAP D7.W. Not started.
 
 ### T1.SETUP magnet and .torrent association in Setup (owner request, 2026-11-12)
 
