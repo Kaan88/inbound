@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+### D7 looked at again: Qt prototype, Avalonia against Qt; the owner stays on Uno (2026-11-12, `claude/qt-frontend-feasibility-4b88af`)
+
+- **Decision (owner, 2026-11-12):** "we'll remain on uno." No product change.
+- **Asked:** how feasible a Qt frontend with the WinUI look is; then a prototype "including the fanciest parts of winui like progress details"; then views on Uno, Avalonia and how to choose.
+- **Done:** a Qt 6 Widgets prototype with the WinUI palette, hand-drawn WinUI controls, the speed graph and Progress Details, built with Qt 6.9.3 and MSVC and run on Windows against an isolated Host and `tools/TestServer`. Status `partial`. It is in that branch's worktree, not committed, and not on `main`.
+- **Not done:** a Linux build or run of it; a side-by-side with the WinUI window; the Avalonia-against-Qt test on the owner's KDE machine (Linux work is on hold).
+- **Uno and Wayland:** Uno has no Wayland host yet; a community pull request that adds one was open and waiting for review on 2026-11-12 (https://github.com/unoplatform/uno/pull/25503).
+- **Where it is written down:** the addendum of `docs/plans/gui-toolkits.md`; ROADMAP D7.
+
 ### T1.SETUP magnet and .torrent association in Setup (owner request, 2026-11-12)
 
 Owner: "have torrent and magnet file association added to installer for the actual release." Status: **partial**

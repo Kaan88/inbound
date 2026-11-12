@@ -560,3 +560,56 @@ Four gaps:
 4. **The IPC section overstates the new security work.** Because of claim 11, the Linux Host IPC effort may be slightly lower than stated. That does not change the ranking.
 
 The overall answer stands: Avalonia for one native frontend, the Svelte UI in a shell as the cheapest Linux window, and WinUI kept on Windows with an AOT trial.
+
+## Addendum: Qt and Avalonia looked at again; the owner stays on Uno (2026-11-12)
+
+The owner asked how feasible a Qt frontend is that works and looks like the WinUI window ("I don't like uno on linux"), then asked for a prototype, for a view on Uno's and Avalonia's future, and for a way to choose between Avalonia and Qt. **Owner decision, 2026-11-12: "we'll remain on uno."** Nothing below changes the product. What was measured is marked as such; the rest is the session's judgement.
+
+### What was looked at
+
+- **The WinUI frontend's size (measured):** about 38,000 lines of C# and 2,000 of XAML. The Uno project adds about 390 lines, because it compiles the same sources. A large part of the C# is UI-free rule code.
+- **`codex/qt6` (read):** one commit of 2026-11-10, about 2,600 lines of Qt Widgets and a small .NET helper (`DownloadManager.Desktop.Qt.HostReader`). It covers the live list, queues, transfer details, the completion dialog, core Options and the TorBox account and catalog. It starts a helper process per command.
+- **`codex/avalonia` (read):** one commit of 2026-11-10, about 2,500 lines on Avalonia 12.1.5. It covers the main list and the My TorBox catalog, links 28 WinUI files unchanged and talks to the Host in-process. The first Avalonia prototype was stopped by the owner on 2026-11-09 ("it looks horrid, feels bad").
+
+### The Qt prototype (built and run on Windows only)
+
+Branch `claude/qt-frontend-feasibility-4b88af`, in `src/DownloadManager.Desktop.Qt`. As of 2026-11-12 it is in that branch's worktree and not committed. Status `partial`: a prototype, not a product.
+
+- **Built:** the WinUI palette in dark and light (`theme.h`, from `App.xaml`); the WinUI controls it needs drawn by hand (`fluent.h`); the speed graph after `DownloadSpeedGraph` (`speedgraph.h`); Progress Details after `DownloadWindow.xaml` (`progresswindow.h`: Overview, Connections, Options, the footer actions, the finished and failed forms); the main window restyled.
+- **How it gets its words:** from the .NET helper, which links `UiFormat.cs` and `DurationText.cs` unchanged, so the Qt side only draws.
+- **Evidence:** built with Qt 6.9.3 and MSVC, run against an isolated Host and `tools/TestServer`; a running, a finished and a failed download were looked at in dark and light through the window's own screenshots. A delegated review gave eight findings; seven were fixed.
+- **Not done or not checked:** a Linux build and run of this version; a side-by-side with the WinUI window; torrent tabs, Open with, packages, categories, Scheduler, servers, tray, single instance, accessibility. The icons are Segoe Fluent Icons code points, a Windows font, so Linux needs a symbol font of its own. There is no Mica.
+
+### Avalonia and Qt side by side
+
+| | Avalonia | Qt 6 Widgets |
+| --- | --- | --- |
+| Shared C# logic | links the WinUI rule files directly | none in C++; through a .NET helper process |
+| Matching the WinUI look | XAML styles and templates translate fairly directly | hand-written stylesheet and hand-drawn controls (shown to work in the prototype) |
+| Wayland | experimental and opt-in in 12.1; otherwise XWayland | native and mature |
+| Feel on KDE | its own Skia-drawn controls, as Uno | the toolkit KDE is built with |
+| List with expandable packages | the tree-with-columns control is paid; built by hand as WinUI does | built in |
+| Licence | MIT core | LGPL; Qt Charts is GPL, so the graph stays hand-painted |
+| Estimate in this study | 14 to 22 pw for Linux, about 4 more to replace WinUI | 20 to 35 pw |
+
+### Judgement (not measured)
+
+- **Qt:** the look is no longer the risk; Progress Details was the hardest window and came close in one pass. What remains is breadth, and the upkeep of a third frontend beside WinUI and the web UI. The helper would have to become one long-lived process first. Feel on KDE Wayland was not tested.
+- **Uno:** healthy and close to free to keep, since it compiles the WinUI sources. Linux desktop is its least-served target: X11 only, scaling set by hand under XWayland, a Linux screen reader still "planned", no built-in tray, and about 3x WinUI's CPU while visible in our own measurement of 2026-11-09.
+- **Avalonia:** the strongest cross-platform .NET desktop toolkit, and the fallback to prefer over Qt on cost. Like Uno it draws every control itself, so a newer version would not change what the owner rejected.
+
+### How to choose, if the question comes back
+
+One test on the owner's KDE Wayland machine: the Qt prototype (with a bundled symbol font) and the Avalonia prototype (restyled to the palette, native Wayland switched on) side by side for ten minutes each. Check text at the fractional scale, scrolling, menus and tooltips, resizing, a second monitor, and how it sits beside KDE's own apps.
+
+- Qt feels right and Avalonia doesn't: Qt for Linux, WinUI stays on Windows.
+- Both feel fine: Avalonia, which is cheaper and could later replace WinUI.
+- Neither: stay on Uno.
+
+The test was not run. Linux work is on hold (owner).
+
+### Uno and Wayland (looked up 2026-11-12)
+
+- **Why Uno has no Wayland today:** its Skia desktop build has hosts for Win32, X11, macOS and the Linux framebuffer, and nobody had written a Wayland one. The tracking issue has been open since 2024-07-18 with no milestone and the label "difficulty/challenging" (https://github.com/unoplatform/uno/issues/17600). Under XWayland, Uno's docs say the scale cannot be found reliably (https://platform.uno/docs/articles/features/using-skia-desktop.html).
+- **What changed:** a community pull request adds an opt-in native Wayland host, `Uno.WinUI.Runtime.Wayland`, chosen with `.UseWayland()` before `.UseX11()` in the host builder, with fractional scaling from the compositor (https://github.com/unoplatform/uno/pull/25503). Opened 2026-10-14; about 21,900 added lines in 189 files; a maintainer asked for a rebase on 2026-10-30; rebased again 2026-11-12; open and waiting for review on that day. Whether and when it is merged is not known.
+- **What we could do:** wait for a release that has it and add the one builder line; or try our window against a build of that branch on the owner's machine. Neither was done.
