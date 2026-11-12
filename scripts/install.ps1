@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.7.1",
+    [string]$Version = "0.7.2",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -75,7 +75,7 @@ if (-not $NoShortcut) {
         $shortcut.TargetPath = Join-Path $appDir "DownloadManager.Host.exe"
         $shortcut.Arguments = "--background"
         $shortcut.WorkingDirectory = $installRoot
-        $shortcut.Description = "Inbound Download Manager background host"
+        $shortcut.Description = "Inbound Download Manager background program"
         $shortcut.Save()
         Write-Host "Created Start Menu shortcut."
     }

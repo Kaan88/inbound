@@ -54,29 +54,25 @@ public sealed class TorrentFileRow : INotifyPropertyChanged
     public bool CanCheck => _canCheck;
 
     private string _priority = TorrentPriorities.Normal;
-    private bool _showPriority;
 
-    /// <summary>T3: High, Normal or Low while ticked; Skip while not.</summary>
+    /// <summary>T3: High, Normal or Low while ticked; Skip while not. Whether the column shows is the header's (UI.R42).</summary>
     public string Priority => TorrentPriorities.Name(_checked ? _priority : TorrentPriorities.Skip);
-
-    public Visibility PriorityVisibility => _showPriority ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>T3: the priority it has while ticked (never Skip).</summary>
     internal string PriorityValue => _priority;
 
-    /// <summary>T3: the file's priority (Skip keeps the one it had for when it is ticked again) and whether the column shows.</summary>
+    /// <summary>UI.R42: the file's bytes on disk so far; empty while not known.</summary>
+    public string Done => _file.Done is { } done ? UiFormat.Bytes(Math.Max(0, done)) : string.Empty;
+
+    /// <summary>T3: the file's priority (Skip keeps the one it had for when it is ticked again).</summary>
     /// <returns>True when the priority changed.</returns>
-    internal bool SetPriority(string priority, bool shown)
+    internal bool SetPriority(string priority)
     {
         var value = priority is TorrentPriorities.Skip || !TorrentPriorities.IsKnown(priority) ? _priority : priority;
-        if (value == _priority && shown == _showPriority) return false;
-        var visibilityChanged = shown != _showPriority;
-        var priorityChanged = value != _priority;
+        if (value == _priority) return false;
         _priority = value;
-        _showPriority = shown;
         Raise(nameof(Priority));
-        if (visibilityChanged) Raise(nameof(PriorityVisibility));
-        return priorityChanged;
+        return true;
     }
 
     /// <summary>T12: what the Files tab sorts this row by, as it shows now (its box may be ahead of the Host).</summary>
@@ -100,6 +96,7 @@ public sealed class TorrentFileRow : INotifyPropertyChanged
         if (checkedChanged) Raise(nameof(Checked));
         if (old.Path != file.Path) Raise(nameof(Name));
         if (old.Size != file.Size) Raise(nameof(Size));
+        if (old.Done != file.Done) Raise(nameof(Done));
         Raise(nameof(Progress));
         Raise(nameof(AccessibleName));
         if (checkedChanged) Raise(nameof(Priority));
@@ -254,8 +251,8 @@ public sealed partial class DownloadWindow : Window
             var reconnected = connected && !_connected;
             _connected = connected;
             Details.SetConnected(connected);
-            if (!connected) Notice.Text = $"Host disconnected. Reconnecting… {error}";
-            else if (Notice.Text.StartsWith("Host disconnected", StringComparison.Ordinal)) Notice.Text = string.Empty;
+            if (!connected) Notice.Text = $"Connection lost. Reconnecting… {error}";
+            else if (Notice.Text.StartsWith("Connection lost", StringComparison.Ordinal)) Notice.Text = string.Empty;
             // Back from a drop the files may have changed; a Files tab opened while the Host was away reads them now.
             if (reconnected && _isTorrent) ReloadFiles();
             // A drop ends a paused download's flat line (audit M11); the snapshot after a reconnect starts it again.
@@ -593,14 +590,14 @@ public sealed partial class DownloadWindow : Window
         var displayName = !string.IsNullOrWhiteSpace(job.FileName) ? job.FileName
             : torrent is { Name.Length: > 0 } ? torrent.Name
             : torrent is not null ? "Torrent" : "Download";
-        var stateWord = complete ? "Complete" : JobNotes.NotStartedText(job) ?? JobViewModel.ToDisplayState(job.State);
+        var stateWord = complete ? "Completed" : JobNotes.NotStartedText(job) ?? JobViewModel.ToDisplayState(job.State);
         Heading.Text = choosingFiles ? "Choose files" : TorrentSeedRules.IsSeeding(job) ? "Seeding" : stateWord;
         SetChip(StateBrush(job));
         // U-WL-16: a percentage only while it moves and the size is known, otherwise the state; named for another server.
         Title = ServerNames.ForWindow(ShellWords.ProgressTitle(job.State, complete, job.TotalBytes is > 0 ? percent : null, displayName, JobViewModel.ToDisplayState(job.State)), _connection.Target);
         FileNameText.Text = displayName;
         SubText.Text = complete ? Path.GetDirectoryName(job.FinalFilePath) ?? string.Empty
-            : paused && job.ReceivedBytes > 0 ? $"Paused · {Bytes(job.ReceivedBytes)} kept"
+            : paused && job.ReceivedBytes > 0 ? $"Stopped · {Bytes(job.ReceivedBytes)} kept"
             : failed && job.Failure is { } stopped ? $"Stopped at {stopped.OccurredAt.ToLocalTime():t}"
             : Origin(job);
 
@@ -638,7 +635,7 @@ public sealed partial class DownloadWindow : Window
         RingValue.Text = job.TotalBytes is > 0 || job.Progress is not null ? $"{percent:0}%" : Bytes(job.ReceivedBytes);
         if (failed) RingValue.Foreground = InboundTheme.Brush("InboundStatusFailedBrush", Root);
         else RingValue.ClearValue(TextBlock.ForegroundProperty);
-        RingCaption.Text = complete ? "complete" : failed || paused ? "kept" : "downloaded";
+        RingCaption.Text = complete ? "completed" : failed || paused ? "kept" : "downloaded";
         AutomationProperties.SetName(Ring, complete ? "Download complete" : $"{percent:0} percent downloaded");
 
         var rate = job.State == "downloading" && job.BytesPerSecond is > 0 ? job.BytesPerSecond.Value : 0;
@@ -739,8 +736,8 @@ public sealed partial class DownloadWindow : Window
             rate > 0 ? $"{Bytes((long)rate)}/s" : null,
             job.State == "downloading" && job.EstimatedRemaining is { } left ? TimeLeft(left) : null,
             choosingFiles ? "Choose files to download"
-                : paused && torrent is not null ? "Paused"
-                : paused ? $"Paused · resume {(job.ResumeSupported == true ? "supported" : job.ResumeSupported == false ? "not supported" : "unknown")}" : null,
+                : paused && torrent is not null ? "Stopped"
+                : paused ? $"Stopped · resume {(job.ResumeSupported == true ? "supported" : job.ResumeSupported == false ? "not supported" : "unknown")}" : null,
             failed || job.State is "queued" or "connecting" or "cancelled" ? stateWord : null,
         }.Where(part => part is not null));
         var tone = paused ? "InboundStatusWaitingBrush" : failed ? "InboundStatusFailedBrush" : null;
@@ -756,14 +753,14 @@ public sealed partial class DownloadWindow : Window
         }
         ConnectionsTab.Text = job.RequestedConnections > 0 ? $"Connections ({job.RequestedConnections})" : "Connections";
         ConnectionsNote.Visibility = job.IsTerminal ? Visibility.Visible : Visibility.Collapsed;
-        ConnectionsNote.Text = "Connections are listed while the download runs or is paused.";
+        ConnectionsNote.Text = "Connections are listed while the download runs or is stopped.";
 
         // Finished: where the file is, and for another server that it is on that computer (U-WR-1).
         var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
             : complete ? ServerNames.Completed(_connection.Target)
             : failed ? (failureMessage is null && job.CanResume ? "Retry tries the download again." : string.Empty)
             : choosingFiles ? "The file list is in. Choose the files on the Files tab, then Start."
-            : paused ? "The download is paused. Resume it or close this window."
+            : paused ? "The download is stopped. Resume it or close this window."
             : "Closing this window will not stop the download.";
         // A failure's reason is in the bar above, so the notice doesn't repeat it.
         if (_connected) Notice.Text = failureMessage is not null ? completionText : job.Failure?.Message ?? completionText;
@@ -778,8 +775,8 @@ public sealed partial class DownloadWindow : Window
             UseSpeedLimit.IsEnabled = job.CanChangeSpeedLimit;
             ApplySpeedLimitButton.IsEnabled = _connected && job.CanChangeSpeedLimit;
             SpeedLimitNotice.Text = job.CanChangeSpeedLimit
-                ? "Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
-                : "Speed limiting is available for unfinished HTTP/HTTPS and FTP file downloads. It is unavailable for HLS, DASH, and finished transfers.";
+                ? "Applies to ordinary HTTP/HTTPS file downloads."
+                : "Speed limiting is available for unfinished HTTP/HTTPS file downloads.";
             CurrentRateText.Text = job.BytesPerSecond is > 0 ? $"{Bytes((long)job.BytesPerSecond.Value)}/s" : "—";
             if (_displayedSpeedLimit != job.SpeedLimitBytesPerSecond)
             {
@@ -1173,7 +1170,7 @@ public sealed partial class DownloadWindow : Window
         if (!_connected)
         {
             row.ShowChecked(had);
-            ShowFilesNote("The Host is not connected.");
+            ShowFilesNote("Not connected.");
             return;
         }
 
@@ -1194,7 +1191,7 @@ public sealed partial class DownloadWindow : Window
             else
             {
                 row.ShowChecked(_wanted.Contains(row.Index));
-                ShowFilesNote(result.Error ?? "The Host did not change the files.");
+                ShowFilesNote(result.Error ?? "Inbound did not change the files.");
                 // A torrent that has finished, or begun to, keeps the files it has.
                 if (_job is { } job && (FilesFixed(job) || job.State == "verifying")) SetFilesReadOnly(true);
             }
@@ -1253,7 +1250,7 @@ public sealed partial class DownloadWindow : Window
                     ClearFilesNote();
                     ReloadFiles();
                 }
-                else ShowFilesNote(result.Error ?? "The Host did not take the choice.");
+                else ShowFilesNote(result.Error ?? "Inbound did not take the choice.");
             }
             finally
             {

@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
-using DownloadManager.Engine;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;

@@ -5,4 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- UPD.N1: reads changelog.json for the manifest's unsigned notes. -->
+    <ProjectReference Include="..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+  </ItemGroup>
 </Project>

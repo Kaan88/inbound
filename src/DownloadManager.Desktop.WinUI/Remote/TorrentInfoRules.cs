@@ -128,13 +128,26 @@ internal static class TorrentInfoRules
             : UiFormat.Bytes(Math.Max(0, job.ReceivedBytes));
     }
 
-    /// <summary>The download speed while it downloads ("6.1 MB/s", "0" when nothing comes), else "—".</summary>
-    public static string DownText(JobDto job)
-        => job.Torrent is not null && TorrentRules.IsActive(job) ? TorrentDetailsRules.Rate(job.BytesPerSecond ?? 0) : Dash;
+    /// <summary>A speed as the pane shows it: "6.1 MB/s", and "0 B/s" when nothing moves.</summary>
+    public static string RateText(double bytesPerSecond)
+        => double.IsFinite(bytesPerSecond) && bytesPerSecond >= 1 ? $"{UiFormat.Bytes((long)bytesPerSecond)}/s" : ZeroRate;
 
-    /// <summary>The upload speed while it runs ("640 KB/s", "0" when nothing goes), else "—".</summary>
+    /// <summary>A known zero speed ("0 B/s").</summary>
+    public static string ZeroRate => $"{UiFormat.Bytes(0)}/s";
+
+    /// <summary>
+    /// The download speed while it downloads ("6.1 MB/s", "0 B/s" when nothing comes); "0 B/s" once it is complete,
+    /// seeding or not (T7.B1: nothing is left to download); "—" otherwise (paused, queued, failed).
+    /// </summary>
+    public static string DownText(JobDto job)
+        => job.Torrent is null ? Dash
+            : TorrentRules.IsActive(job) ? RateText(job.BytesPerSecond ?? 0)
+            : job.State == "completed" ? ZeroRate
+            : Dash;
+
+    /// <summary>The upload speed while it runs ("640 KB/s", "0 B/s" when nothing goes), else "—".</summary>
     public static string UpText(JobDto job)
-        => job.Torrent is { } torrent && TorrentListRules.IsRunning(job) ? TorrentDetailsRules.Rate(torrent.UploadRate) : Dash;
+        => job.Torrent is { } torrent && TorrentListRules.IsRunning(job) ? RateText(torrent.UploadRate) : Dash;
 
     /// <summary>"12 seeds · 29 peers" (the other peers, without the seeds) while it runs, else "—".</summary>
     public static string SwarmText(JobDto job)

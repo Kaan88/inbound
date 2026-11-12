@@ -174,7 +174,7 @@ public sealed class WindowLocalFindingsTests
     }
 
     [Theory]
-    [InlineData("ftp://bad", true)]
+    [InlineData("https://bad", true)]
     [InlineData("https://example.com/", true)]
     [InlineData("https://example.com/?id=4", false)]
     [InlineData("https://example.com/file.zip", false)]
@@ -186,7 +186,7 @@ public sealed class WindowLocalFindingsTests
     {
         var good = new AddLine("https://files.example.com/a.zip") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink" } };
         Assert.Contains("From files.example.com.", RemoteText.AddLineWords(good, "TorBox").Detail);
-        var cut = new AddLine("ftp://bad") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink" } };
+        var cut = new AddLine("https://bad") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink" } };
         Assert.Contains(LinkExtractor.NoPathWords, RemoteText.AddLineWords(cut, "TorBox").Detail);
     }
 

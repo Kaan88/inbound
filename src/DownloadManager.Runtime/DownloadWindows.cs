@@ -59,8 +59,8 @@ public sealed class DownloadWindows : IDisposable
     /// <summary>
     /// EXT.R12: the browser extension sent it and shows its progress on its own toolbar icon, so the app opens no window
     /// for it, neither as it starts nor when it finishes, and the browser keeps the focus (<see cref="JobDto.QuietWindows"/>).
-    /// A package with any such file opens none either. That includes the torrent dialog for a .torrent file it turns out
-    /// to be (T10, <see cref="TorrentFileOffers.Offers"/>): EXT.R12 wins, and the finished row keeps Open as Torrent.
+    /// A package with any such file opens none either. The one exception is the torrent dialog for a .torrent file it
+    /// turns out to be (T10.B, <see cref="TorrentFileOffers.Offers"/>): that still opens, as the owner asked.
     /// </summary>
     public static bool KeptQuiet(JobDto job) => job.QuietWindows;
 

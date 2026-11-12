@@ -50,6 +50,18 @@ if (-not $NoFirefoxXpi) {
     }
 }
 
+# UPD.N1: the manifest carries this version's changelog lines as its unsigned notes (UpdateSigner --notes-from), and the
+# app's What's new shows them, so the entry must be there and dated before anything is signed (docs\release-builds.md).
+$changelogPath = Join-Path $root "src\DownloadManager.Contracts\Changelog\changelog.json"
+$changelog = [IO.File]::ReadAllText($changelogPath) | ConvertFrom-Json
+$changelogEntry = @($changelog.versions | Where-Object { $_.version -eq $Version })
+if ($changelogEntry.Count -ne 1) {
+    throw "changelog.json has no entry for $Version. Write its lines and tags first (docs\release-builds.md)."
+}
+if ($changelogEntry[0].date -notmatch '^\d{4}-\d{2}-\d{2}$') {
+    throw "The changelog.json entry for $Version has no release date (yyyy-MM-dd)."
+}
+
 foreach ($requiredPath in @($InstallerPath, $UpdatePackagePath, $PrivateKeyPath, $SignerExe)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required file not found: $requiredPath"
@@ -120,7 +132,7 @@ $manifestUrl = "https://github.com/$BuildsRepository/releases/download/v$Version
 Copy-Item -LiteralPath $installer -Destination (Join-Path $stagingDir "DownloadManagerSetup-$Version.exe")
 Copy-Item -LiteralPath $package -Destination (Join-Path $stagingDir $zipName)
 
-$signerArgs = @($stagingDir, $Version, $manifestUrl, (Join-Path $stagingDir $zipName), $privateKey, "stable")
+$signerArgs = @($stagingDir, $Version, $manifestUrl, (Join-Path $stagingDir $zipName), $privateKey, "stable", "--notes-from", $changelogPath)
 & $signer @signerArgs
 if ($LASTEXITCODE -ne 0) {
     throw "UpdateSigner failed with exit code $LASTEXITCODE. Staging files remain at $stagingDir for review."

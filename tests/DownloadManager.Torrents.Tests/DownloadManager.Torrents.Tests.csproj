@@ -22,11 +22,13 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="DownloadManager.TestSupport" />
     <Using Include="Xunit.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
+    <ProjectReference Include="..\DownloadManager.TestSupport\DownloadManager.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

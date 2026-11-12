@@ -27,7 +27,7 @@ public sealed class RuntimeArchiveStateTextTests(ArchiveFileServer fixture)
         var paused = await run.Service.PauseAsync(job.Id);
         Assert.True(paused.Ok, paused.Error);
         var held = await run.WaitForSetAsync(set => set.PausedVolumes.Contains("held.part1.rar"));
-        Assert.Equal("Paused: held.part1.rar", held.StateText);
+        Assert.Equal("Stopped: held.part1.rar", held.StateText);
         Assert.DoesNotContain("Downloading", held.StateText);
         Assert.Empty(held.QueuedVolumes);
         Assert.Empty(held.HeldVolumes);
@@ -77,7 +77,7 @@ public sealed class RuntimeArchiveStateTextTests(ArchiveFileServer fixture)
 
         await run.StartCoordinatorAsync();
         var recounted = await run.WaitForSetAsync(set => set.PausedVolumes.Contains("old.part1.rar"));
-        Assert.Equal("Paused: old.part1.rar", recounted.StateText);
+        Assert.Equal("Stopped: old.part1.rar", recounted.StateText);
     }
 
     /// <summary>UI.R23 (6): a package with a password and no archive left still says so, so its window can clear it.</summary>

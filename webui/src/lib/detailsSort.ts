@@ -6,11 +6,11 @@
 
 import { peerAddress, peerFlagsText, peerRows, trackerRowsInOrder, trackerShown, trackerStatusText, type PeerDto, type PeerRow, type TrackerDto, type TrackerRow } from './torrentDetails';
 
-export type PeerSortKey = 'peer' | 'client' | 'flags' | 'has' | 'down' | 'up';
-export type TrackerSortKey = 'tracker' | 'status' | 'seeds' | 'peers' | 'next';
+export type PeerSortKey = 'peer' | 'client' | 'flags' | 'has' | 'down' | 'up' | 'received' | 'sent';
+export type TrackerSortKey = 'tracker' | 'status' | 'seeds' | 'peers' | 'next' | 'tier' | 'message';
 
-export const peerSortKeys: readonly PeerSortKey[] = ['peer', 'client', 'flags', 'has', 'down', 'up'];
-export const trackerSortKeys: readonly TrackerSortKey[] = ['tracker', 'status', 'seeds', 'peers', 'next'];
+export const peerSortKeys: readonly PeerSortKey[] = ['peer', 'client', 'flags', 'has', 'down', 'up', 'received', 'sent'];
+export const trackerSortKeys: readonly TrackerSortKey[] = ['tracker', 'status', 'seeds', 'peers', 'next', 'tier', 'message'];
 
 /** A table's order: a column and its direction, or null for the table's own order. */
 export interface ColumnSort<K extends string> {
@@ -20,7 +20,7 @@ export interface ColumnSort<K extends string> {
 
 /** Words and times read from the first; what a peer has, speeds and counts from the most (as in the download list). */
 export function startsAscending(key: string): boolean {
-  return ['peer', 'client', 'flags', 'tracker', 'status', 'next'].includes(key);
+  return ['peer', 'client', 'flags', 'tracker', 'status', 'next', 'tier', 'message'].includes(key);
 }
 
 export function nextColumnSort<K extends string>(current: ColumnSort<K>, clicked: K): ColumnSort<K> {
@@ -76,6 +76,8 @@ export function sortedPeerRows(peers: readonly PeerDto[], sort: ColumnSort<PeerS
     case 'has': return orderBy(rows, byNumber(fraction), sort.ascending);
     case 'down': return orderBy(rows, byNumber((row) => peer(row).downloadRate), sort.ascending);
     case 'up': return orderBy(rows, byNumber((row) => peer(row).uploadRate), sort.ascending);
+    case 'received': return orderBy(rows, byNumber((row) => peer(row).downloaded ?? 0), sort.ascending);
+    case 'sent': return orderBy(rows, byNumber((row) => peer(row).uploaded ?? 0), sort.ascending);
   }
 }
 
@@ -99,6 +101,8 @@ export function sortedTrackerRows(trackers: readonly TrackerDto[], sort: ColumnS
     case 'seeds': ordered = orderBy(byTier, byNumber((tracker) => tracker.seeds), sort.ascending, (tracker) => !(tracker.seeds >= 0)); break;
     case 'peers': ordered = orderBy(byTier, byNumber((tracker) => tracker.peers), sort.ascending, (tracker) => !(tracker.peers >= 0)); break;
     case 'next': ordered = orderBy(byTier, byNumber(next), sort.ascending, (tracker) => !(next(tracker) >= 0)); break;
+    case 'tier': ordered = orderBy(byTier, byNumber((tracker) => tracker.tier), sort.ascending); break;
+    case 'message': ordered = orderBy(byTier, byText((tracker) => tracker.message?.trim() ?? ''), sort.ascending, (tracker) => !tracker.message?.trim()); break;
     default: ordered = byTier;
   }
   return trackerRowsInOrder(ordered);

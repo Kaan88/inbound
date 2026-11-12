@@ -7,6 +7,9 @@ public partial class App : Application
 {
     private const int AnyProcess = -1;
 
+    /// <summary>The Host's <c>UiPages.Updates</c>: the window doesn't reference the Runtime, so the word is kept here too.</summary>
+    internal const string UiPageUpdates = "updates";
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
 
@@ -77,6 +80,19 @@ public partial class App : Application
         UiTrace.Write($"App ctor end secondary={_secondaryInstance}");
     }
 
+    /// <summary>
+    /// UI.R40: the name the main window holds while its Check for Updates dialog is open. The Host's update progress
+    /// window (<c>--page update-progress</c>) sees it and doesn't open: the dialog shows that progress itself.
+    /// </summary>
+    internal static string UpdateDialogName()
+    {
+        var name = WindowInstance.EventName(PipeNames.CurrentUserKey(), false, null, null, null) + ".UpdateDialog";
+#if HAS_UNO
+        name += ".Uno";
+#endif
+        return name;
+    }
+
     /// <summary>The folder <see cref="TorrentOpenRequests"/> queues into: the data folder, as the window's own state.</summary>
     internal static string TorrentQueueDirectory()
     {
@@ -140,6 +156,17 @@ public partial class App : Application
         var pageIndex = Array.FindIndex(commandLine, arg => string.Equals(arg, "--page", StringComparison.OrdinalIgnoreCase));
         var openSettings = pageIndex >= 0 && pageIndex + 1 < commandLine.Length &&
             string.Equals(commandLine[pageIndex + 1], "settings", StringComparison.OrdinalIgnoreCase);
+        // UI.R40: the tray's Check for Updates… and update entries open the main window's update dialog.
+        var openUpdates = !_updateMode && pageIndex >= 0 && pageIndex + 1 < commandLine.Length &&
+            string.Equals(commandLine[pageIndex + 1], UiPageUpdates, StringComparison.OrdinalIgnoreCase);
+        // The main window's update dialog shows the progress the Host would open this window for.
+        if (_updateMode && ActivationSignal.IsOwned(UpdateDialogName()))
+        {
+            UiTrace.Write("Update progress window not opened: the update dialog shows it");
+            Exit();
+            return;
+        }
+
         // T1 step 6b: a magnet or .torrent file opened from Windows. Queued first, so whichever window takes it, this
         // launch's or the one already running, finds it in the same place.
         // T10: the Host may name several finished .torrent files in one launch, each after its own --open-torrent.
@@ -166,7 +193,8 @@ public partial class App : Application
             // This launch came from a click, so it may take the foreground; the running window may not unless
             // it is allowed to, and without this Windows leaves it behind (UI.B4).
             if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(AnyProcess);
-            _activation.Signal(openSettings);
+            if (openUpdates) _activation.SignalUpdates();
+            else _activation.Signal(openSettings);
             Exit();
             return;
         }
@@ -251,6 +279,11 @@ public partial class App : Application
             _window.RequestSettingsPage();
         }
 
+        if (openUpdates)
+        {
+            _window.RequestUpdatesDialog();
+        }
+
         if (openTorrent is not null)
         {
             _window.RequestQueuedTorrents();
@@ -265,12 +298,13 @@ public partial class App : Application
         {
             while (true)
             {
-                var activation = WaitHandle.WaitAny([_activation.Show, _activation.Settings, _activation.Open]);
+                var activation = WaitHandle.WaitAny([_activation.Show, _activation.Settings, _activation.Open, _activation.Updates]);
                 _window.DispatcherQueue.TryEnqueue(() =>
                 {
                     _window.ShowFromTray();
                     if (activation == 1) _window.RequestSettingsPage();
                     else if (activation == 2) _window.RequestQueuedTorrents();
+                    else if (activation == 3) _window.RequestUpdatesDialog();
                     else if (ShowJobRequests.Take(TorrentQueueDirectory(), DateTimeOffset.UtcNow) is { } shown) _window.RequestShowJob(shown);
                 });
             }

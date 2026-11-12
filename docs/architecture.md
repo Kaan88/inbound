@@ -37,7 +37,11 @@
 - **NativeHost** is launched by Chrome per native-messaging connection. It
   validates/forwards frames, starts Host if needed, and exits when Chrome
   disconnects. Its stdout is protocol-only.
-- **Cli** is a thin client for diagnostics and automation.
+- **Cli** is a thin client for diagnostics and automation. It has `dm torrent` (inspect, add, files, priority,
+  options, recheck, announce, details, seed, peers, trackers, pieces, network), over the same `torrent.*` messages as
+  the windows. It has no TorBox (`remote`) or archive commands (owner's cut CUT.1, narrowed by CUT.2, 2026-11-12);
+  those are handled in the window and the web UI, over the same IPC messages, which stay. `dm --help` lists what it
+  has; an unknown command gets a one-line error and exit code 2.
 
 There is deliberately no separate engine process yet: a single writer simplifies
 crash-safe persistence and lifecycle. The engine/persistence assemblies remain
@@ -101,9 +105,6 @@ queues for the per-host fair limiter, and the checkpoint format is unchanged.
   comes. A connection change never asks for or counts as a link refresh.
 - Protected (pasted provider) links follow it unless chosen by hand, clamped
   by the same cap of 16.
-- FTP downloads are one connection by design (the FTP engine has no
-  segments), so a change while one runs is a no-op and its record is left as
-  it is.
 - A single-stream run of any kind (HTTP, provider or protected) is not split
   while it runs: it started from no checkpoint with a count of one, it
   resumed a one-segment checkpoint, the server refused ranges, or the file was
@@ -203,7 +204,9 @@ recorded. Failure leaves Chrome's download intact.
   for stored site credentials.
 - Destinations are resolved by Host policy; path traversal and reserved names
   are rejected.
-- Download URLs are restricted to http/https (FTP later) and cannot address
+- Download URLs are restricted to http/https (FTP was cut in 0.7.2: an
+  ftp:// address is refused with "FTP addresses aren't supported.", and an FTP
+  download an older version left fails with it) and cannot address
   `file://`, `localhost` administrative endpoints via browser handoff.
 
 ## Replaceability checklist

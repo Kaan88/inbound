@@ -196,7 +196,7 @@ export class Store {
    * `change` may look at those current settings and answer `{ refused }` instead: nothing is sent, and the reason is
    * shown, for an edit whose subject changed or went elsewhere since the page read it.
    */
-  async saveSettings(change: (settings: Settings) => unknown, done = 'Settings saved.'): Promise<boolean> {
+  async saveSettings(change: (settings: Settings) => unknown, done = 'Options saved.'): Promise<boolean> {
     let current: Settings;
     try {
       current = await this.currentSettings();

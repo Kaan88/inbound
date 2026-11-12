@@ -40,6 +40,7 @@ internal sealed class DetailsTable
         _list = list;
         var saved = _store.Load(name);
         _layout.Import(saved.Widths);
+        _layout.ImportChoices(saved.Shown);
         if (saved.SortKey is { } key && layout.Columns.Any(column => column.HasHeader && column.Key == key))
         {
             _sortKey = key;
@@ -49,11 +50,18 @@ internal sealed class DetailsTable
         _header = new ColumnHeaderRow(layout, header, list, root, clicked =>
         {
             (_sortKey, SortAscending) = DetailsSort.Next(SortKey, SortAscending, clicked);
+            _shownSortKey = SortKey;
             _header!.ShowSort(SortKey ?? string.Empty, SortAscending);
             ResortPending = false;
             Save();
             sorted();
-        }, Save);
+        }, Save, () =>
+        {
+            // UI.R42: a column shown or hidden from the header's menu, or all reset.
+            Save();
+            SortFollows();
+        });
+        _shownSortKey = SortKey;
         _header.ShowSort(SortKey ?? string.Empty, SortAscending);
         // As the main list: the grid is as wide as the view, and never narrower than its columns, so the scroller can
         // reach the right-hand ones.
@@ -88,12 +96,21 @@ internal sealed class DetailsTable
     /// </summary>
     public bool Held => _pointerOver || KeyboardWithin();
 
-    public void SetColumnVisible(string key, bool visible)
+    /// <summary>The app's side: a column the Host has nothing for (Priority, Next announce without T3's controls) stays away.</summary>
+    public void SetAvailable(string key, bool available)
     {
-        var was = SortKey;
-        _header.SetColumnVisible(key, visible);
-        if (SortKey == was) return;
-        // The sorted column went (or came back): the arrow and the order follow, keeping the view where it is.
+        _header.SetAvailable(key, available);
+        SortFollows();
+    }
+
+    /// <summary>The sort key the list was last put in order by.</summary>
+    private string? _shownSortKey;
+
+    /// <summary>The sorted column went (or came back): the arrow and the order follow, keeping the view where it is.</summary>
+    private void SortFollows()
+    {
+        if (SortKey == _shownSortKey) return;
+        _shownSortKey = SortKey;
         _header.ShowSort(SortKey ?? string.Empty, SortAscending);
         ResortPending = false;
         Released?.Invoke();
@@ -124,5 +141,11 @@ internal sealed class DetailsTable
         return false;
     }
 
-    private void Save() => _store.Save(_name, new ListLayout { Widths = _layout.Export(), SortKey = _sortKey, SortAscending = SortAscending });
+    private void Save() => _store.Save(_name, new ListLayout
+    {
+        Widths = _layout.Export(),
+        Shown = _layout.ExportChoices(),
+        SortKey = _sortKey,
+        SortAscending = SortAscending,
+    });
 }

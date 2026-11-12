@@ -848,10 +848,17 @@ internal sealed class ProviderPanel
         _headerChrome.Child = header;
         var saved = _context.Ui;
         _columns.Import(saved.ProviderColumnWidths);
+        _columns.ImportChoices(saved.ProviderShownColumns);
         _sortKey = ListColumnSets.IsProviderSort(saved.ProviderSortKey) ? saved.ProviderSortKey : null;
         _sortAscending = saved.ProviderSortAscending;
         _header = new ColumnHeaderRow(_columns, header, _list, _root, HeaderSort_Clicked, () =>
         {
+            saved.ProviderColumnWidths = _columns.Export();
+            _context.SaveUi();
+        }, () =>
+        {
+            // UI.R42: the header's menu showed or hid a column, or reset them. The Sort button keeps naming the order.
+            saved.ProviderShownColumns = _columns.ExportChoices();
             saved.ProviderColumnWidths = _columns.Export();
             _context.SaveUi();
         });
@@ -1481,7 +1488,7 @@ internal sealed class ProviderPanel
     {
         var job = _selected is { } row ? RemoteRules.JobFor(_client.State.Jobs, row.Item) : null;
         var one = job is not null && RemoteRules.Actions(job).CheckNow ? job : null;
-        await RunAsync("Asking the Host to check…", async token =>
+        await RunAsync("Asking Inbound to check…", async token =>
         {
             var result = await _client.CheckNowAsync(one?.Id, one is null ? Provider : null, token);
             return result.Ok

@@ -29,6 +29,9 @@ internal static class Program
             return 2;
         }
 
+        _browser = BrowserBridge.CallerBrowser(args, ProcessAncestry.Names());
+        log($"Browser={_browser ?? "(unknown)"}");
+
         IpcClient? host = null;
         try
         {
@@ -36,7 +39,7 @@ internal static class Program
             if (host is null)
             {
                 await TrySendErrorAsync("host_unavailable",
-                    "The Download Manager background host is not running and could not be started.", log)
+                    "Inbound's background program is not running and could not be started.", log)
                     .ConfigureAwait(false);
                 return 3;
             }
@@ -235,7 +238,10 @@ internal static class Program
     /// thousands of downloads it is megabytes per handoff. The events stay: the extension keeps the latest jobs from them.
     /// </summary>
     private static Task<IpcClient> ConnectAsync()
-        => IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = true }, TimeSpan.FromMilliseconds(800));
+        => IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = true, Browser = _browser }, TimeSpan.FromMilliseconds(800));
+
+    /// <summary>UI.R41: the browser this bridge serves, told to the Host in the hello so the window knows an extension came.</summary>
+    private static string? _browser;
 
     private static async Task ConsumeGreetingAsync(IpcClient client)
     {

@@ -771,7 +771,7 @@ public sealed class RemoteRowTextTests
         var started = Job("localStarted");
         started.Status = "Downloading locally";
         Assert.Equal("Downloading locally", RemoteText.Item(Item(), "TorBox", started, culture: CultureInfo.InvariantCulture).Status);
-        Assert.Equal("Paused locally", RemoteText.Item(Item(), "TorBox", started, "Paused locally", CultureInfo.InvariantCulture).Status);
+        Assert.Equal("Stopped locally", RemoteText.Item(Item(), "TorBox", started, "Stopped locally", CultureInfo.InvariantCulture).Status);
     }
 
     [Fact]
@@ -797,7 +797,7 @@ public sealed class RemoteRowTextTests
         Assert.Equal("1 of 2 local downloads failed", RemoteText.LocalWords([File("completed"), File("failed")]));
         Assert.Equal("Downloading locally", RemoteText.LocalWords([File("downloading")]));
         Assert.Equal("Downloading locally, 1 of 2 done", RemoteText.LocalWords([File("completed"), File("connecting")]));
-        Assert.Equal("Paused locally", RemoteText.LocalWords([File("completed"), File("paused")]));
+        Assert.Equal("Stopped locally", RemoteText.LocalWords([File("completed"), File("paused")]));
         Assert.Equal("Waiting to download locally", RemoteText.LocalWords([File("queued"), File("paused")]));
     }
 

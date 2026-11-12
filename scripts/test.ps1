@@ -16,7 +16,8 @@ try {
         "tests\DownloadManager.Archives.Tests\DownloadManager.Archives.Tests.csproj",
         "tests\DownloadManager.Containers.Tests\DownloadManager.Containers.Tests.csproj",
         "tests\DownloadManager.Torrents.Tests\DownloadManager.Torrents.Tests.csproj",
-        "tests\DownloadManager.Server.Tests\DownloadManager.Server.Tests.csproj"
+        "tests\DownloadManager.Server.Tests\DownloadManager.Server.Tests.csproj",
+        "tests\DownloadManager.Tray.Tests\DownloadManager.Tray.Tests.csproj"
     )
 
     foreach ($project in $projects) {

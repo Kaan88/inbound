@@ -1,0 +1,123 @@
+{
+  "versions": [
+    {
+      "version": "0.7.2",
+      "date": "2026-11-13",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "After an update, a What's new window shows once what changed. Help > What's New… and the version in the status bar show it again.", "tags": ["windows"] },
+            { "text": "After the server is updated, the web UI shows once what changed. The version at the bottom of the page shows it again.", "tags": ["webui", "server", "docker"] },
+            { "text": "Check for Updates is one dialog. It shows what the new version changes, downloads and checks the update with a progress bar, then offers Install now. If something goes wrong, it says what to do next.", "tags": ["windows"] },
+            { "text": "Before installing an update, the dialog says if downloads are running. They are stopped for the update and resume when Inbound starts again, or stay stopped if you turned that off in Options.", "tags": ["windows"] },
+            { "text": "The tray's Check for Updates… and its update entries open the same dialog in the main window. If another dialog is open, it opens when that one closes.", "tags": ["windows"] },
+            { "text": "Cancelling an update download closes the dialog. The download goes on in the background, the update stays on offer, and opening the dialog again shows its progress.", "tags": ["windows"] },
+            { "text": "Add URL is one dialog. Paste or type an address and it is checked by itself; name, size, category and folder fill in below, with Start download, Download later and Cancel at the bottom.", "tags": ["windows", "linux"] },
+            { "text": "Add URL in the web UI is one dialog too, like the desktop's.", "tags": ["webui", "server", "docker"] },
+            { "text": "Several links, or a numbered address, in Add URL go on to Add Links, even when the links are one per line. A magnet or .torrent goes to the torrent dialog.", "tags": ["all"] },
+            { "text": "On another Inbound server, Open as Torrent… can now send a .torrent it downloaded to TorBox. The server adds it with its own account.", "tags": ["windows", "server", "torrents", "torbox"] },
+            { "text": "Right-click a list's column header, or press Shift+F10 or the menu key on it, to choose which columns show. Reset columns brings back the defaults. File Name always shows, and your choices are kept after a restart.", "tags": ["windows", "linux"] },
+            { "text": "Web UI: right-click the list's header, or use More > Columns, to show or hide columns, with Reset columns. Phone layout and sorting are unchanged.", "tags": ["webui", "server", "docker"] },
+            { "text": "New download list columns for torrents: Uploaded, Seeding time and Seeding goal. They are hidden until you choose them, can be sorted, and are blank for other downloads. Seeding time keeps counting while a torrent seeds. Seeds, Peers, Up and Ratio can now be shown in any view.", "tags": ["torrents", "windows", "linux", "webui"] },
+            { "text": "Progress Details: new columns you can turn on for how much was downloaded from and uploaded to each peer, each tracker's tier and last message, and each file's downloaded amount.", "tags": ["torrents", "windows", "linux", "webui"] },
+            { "text": "Help > Get the Browser Extension… and a new Browser extension section in Options > General show, for Chrome, Edge and Firefox, whether the extension has connected or what stops it, with a Get it link to its store page (Firefox: the latest release on GitHub).", "tags": ["windows"] },
+            { "text": "Until a browser extension has connected, the main window shows a slim bar over the list with Get it and Not now. It goes away as soon as an extension connects, and Not now hides it for good.", "tags": ["windows"] },
+            { "text": "Options > General and Sign-in and browsers have Get it links for the browser extension and say to pair it with this PC or server. General also shows how many browser extensions are paired and when one was last used.", "tags": ["webui", "server", "docker"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "Double-clicking a download brings its Progress Details window to the front again, also when it is already open.", "tags": ["windows"] },
+            { "text": ".torrent files downloaded from the browser open the torrent dialog in the app again, even when the extension keeps the app's other windows closed.", "tags": ["windows", "extension", "torrents"] },
+            { "text": "Open as Torrent… is no longer offered for a download outside your folders on a server, where it could only fail.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "Torrent Info shows 0 B/s instead of a dash for the download speed of a Completed or seeding torrent, and any zero speed shows as 0 B/s.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "A TorBox link that holds your account key shows only its site in Add URL.", "tags": ["all", "torbox"] },
+            { "text": "With a TorBox account, addresses on this PC or your home network (for example 192.168.x.x, localhost, nas, nas.local) download directly; TorBox is no longer asked about them.", "tags": ["all", "torbox"] },
+            { "text": "Linux: windows open inside the screen. The main window no longer opens bigger than a small screen, and a window size or place saved on a bigger screen fits the current one.", "tags": ["linux"] },
+            { "text": "Words are the same everywhere: Stop and Stopped for Pause and Paused, Resume for Download Now, Completed for Finished, Failed for Errored, and Delete for Remove from list.", "tags": ["windows", "webui", "extension"] },
+            { "text": "The app's section is now Browser downloads, with 'Accept downloads sent from your browser'; the extension's Options page is Sending.", "tags": ["windows", "webui", "extension"] },
+            { "text": "Messages say Inbound's background program instead of Host, the status bar says Connected or Not connected, and pairing hints point to Options, Sign-in and browsers.", "tags": ["windows", "webui", "extension"] },
+            { "text": "In Add URL, a user name and password are cleared when the address moves to another site. The check that runs by itself no longer sends them; Check again and Start do.", "tags": ["windows", "webui"] },
+            { "text": "Download later pressed while the address is still being checked adds the download once the check finishes.", "tags": ["windows", "webui"] },
+            { "text": "In the web UI, a magnet on a server that doesn't download torrents says so, and the Paste button keeps a pasted list as several links.", "tags": ["webui"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "Streaming playlists (HLS .m3u8 and DASH .mpd) are no longer downloaded. Adding one says \"Streaming playlists aren't downloaded; use a video downloader.\" A stream download an older version left fails with the same words. Plain .m3u lists, such as internet radio, are still saved.", "tags": ["all"] },
+            { "text": "The FFmpeg path setting is gone from Options, the web UI settings and the command line.", "tags": ["windows", "webui", "server", "linux", "docker"] },
+            { "text": "FTP addresses can no longer be added. Add URL, Add Links, list import and the command line say \"FTP addresses aren't supported.\" Add Links also says when it left FTP links out of pasted text. An FTP download an older version left fails with the same words, and the password its address held is removed.", "tags": ["all"] },
+            { "text": "The browser extension leaves streaming playlist downloads in the browser, and no longer offers to copy or redownload an old FTP download's address.", "tags": ["extension"] },
+            { "text": "Site logins saved without http:// or https:// (for example example.com) are now sent over https only, and only to that exact site, not its subdomains. Save it again with http:// in front if the site needs plain http, or write *.example.com to include its subdomains.", "tags": ["all", "windows", "webui", "server", "docker", "linux"] },
+            { "text": "The command line's TorBox (remote) and archive commands are gone; use the window or the web UI for them. dm torrent and the other commands stay.", "tags": ["windows"] },
+            { "text": "Update the browser extension to 0.6.4.", "tags": ["extension"] }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.7.1",
+      "date": "2026-11-12",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "More torrent views under Torrents: Active, Stalled, Checking, Waiting for files, Completed and Errored. Each shows only while it has torrents.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "Torrent Info pane: select one torrent to see its state, speeds, peers, ratio and trackers beside the list. Turn it on or off in the View menu.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "The bottom graph draws an upload line while a torrent downloads or seeds.", "tags": ["windows", "torrents"] },
+            { "text": "The torrent dialog always has a route picked, so you no longer choose one for every torrent.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "A torrent sent to TorBox goes straight from the torrent dialog, with its folder and the files you ticked.", "tags": ["windows", "webui", "torbox"] },
+            { "text": "A \"Cached on TorBox\" badge shows when TorBox already has a torrent, so it downloads right away.", "tags": ["windows", "webui", "torbox"] },
+            { "text": "Starting a torrent no longer opens Progress Details. For a magnet, Choose Files opens once the file list arrives.", "tags": ["windows", "torrents"] },
+            { "text": "A finished download that is a .torrent file is offered in the torrent dialog, or later with Open as Torrent… on its row.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "Torrents can go to their own folders by category: Options > Save to > Torrent folders.", "tags": ["windows", "webui", "server", "torrents"] },
+            { "text": "Links dropped or pasted on the window open Add Links.", "tags": ["windows", "webui"] },
+            { "text": "Progress Details opens much faster from the list.", "tags": ["windows"] },
+            { "text": "The Files, Peers and Trackers lists sort by a header click, and their columns resize.", "tags": ["windows", "webui", "torrents"] },
+            { "text": "Folders and files opened from the app now come to the front.", "tags": ["windows"] },
+            { "text": "The arrow keys move between a dialog's buttons.", "tags": ["windows"] },
+            { "text": "The version in the status bar says whether it is the latest, from the last update check.", "tags": ["windows", "webui"] },
+            { "text": "Per-site limits in Options are now rows, with Add and Remove buttons.", "tags": ["windows", "webui"] },
+            { "text": "When Inbound's background part stops, the list dims and says it is out of date instead of showing frozen speeds.", "tags": ["windows"] },
+            { "text": "Options warns when the saved post-download program won't run.", "tags": ["windows"] },
+            { "text": "Downloads sent from the browser no longer open app windows or a finished notice, so the browser keeps the focus.", "tags": ["extension"] },
+            { "text": "The toolbar icon shows a ring while downloads run: green, orange when paused, red when one failed.", "tags": ["extension"] },
+            { "text": "When a download finishes, the icon flashes or the popup opens, as you choose in the extension's settings.", "tags": ["extension"] },
+            { "text": "Show in app in the popup's right-click menu opens the main window at that download.", "tags": ["extension"] },
+            { "text": "The Linux AppImage is back.", "tags": ["linux"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "The speed graph no longer flashes a full-height bar or jumps its scale when a download starts.", "tags": ["windows"] },
+            { "text": "Menus never show two separator lines in a row.", "tags": ["windows"] },
+            { "text": "The Scheduler asks before closing throws away changes you haven't applied.", "tags": ["windows"] },
+            { "text": "A schedule saved during its time window acts at once, and seeding stop times are right across a daylight-saving change.", "tags": ["all"] },
+            { "text": "A finished torrent whose files are missing stays finished with a note, instead of downloading again. Paused torrents resume after a restart.", "tags": ["all", "torrents"] },
+            { "text": "Damaged saved progress of a stream download no longer restarts it from empty.", "tags": ["all"] },
+            { "text": "Setup no longer turns torrents back on when upgrading.", "tags": ["windows"] },
+            { "text": "Old logs are removed every day, and a post-download program's output is kept short.", "tags": ["all"] },
+            { "text": "A failed Move or Rename puts the file back.", "tags": ["all"] },
+            { "text": "An imported download list keeps a stream download as a stream.", "tags": ["all"] },
+            { "text": "Clearer words: Stop All in the tray, Delete in delete questions, Not started for Download later, and failures suggest what to try next.", "tags": ["windows", "webui"] },
+            { "text": "Command line: a value starting with -- can be given as --flag=value, and export stops on an error instead of saving part of the list.", "tags": ["windows"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "Torrents keep going to the folders they used before. To give them their own, set Options > Save to > Torrent folders.", "tags": ["windows", "webui", "server", "torrents"] },
+            { "text": "If the torrent route was \"Ask each time\", it now shows as This PC.", "tags": ["windows", "webui", "torbox"] },
+            { "text": "Update the browser extension to 0.6.3 for the quiet windows, the icon ring and Show in app.", "tags": ["extension"] },
+            { "text": "Linux AppImage users move from 0.6.7 to 0.7.1.", "tags": ["linux"] },
+            { "text": "Docker: ghcr.io/kaan88/inbound:0.7.1 (also :0.7 and :latest), linux/amd64.", "tags": ["docker"] }
+          ]
+        }
+      ]
+    }
+  ]
+}

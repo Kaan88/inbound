@@ -119,8 +119,8 @@ bridge's password and reads its uploads too.
 - **Also:** volumes `/data` and `/downloads`, `EXPOSE 8080`, a `HEALTHCHECK` on `/health` through bash's `/dev/tcp`
   (no curl in the image), OCI labels (source, version, revision; no license label, since the repository names
   none), `ASPNETCORE_HTTP_PORTS` cleared so only `DOWNLOADMANAGER_URLS` says where it listens. No `DOTNET_` GC
-  settings: measured, they save about 4 MiB. FFmpeg is left out (Ubuntu's package adds 425 MB); `docs/docker.md`
-  shows the two-line image that adds it.
+  settings: measured, they save about 4 MiB. No FFmpeg: stream (HLS/DASH) downloading, the only thing that used it,
+  was cut in 0.7.2.
 - **Build context:** `.dockerignore` is an allowlist (the server's projects, `webui/`, `Directory.Build.props`, the
   two scripts), with build output, `node_modules`, keys, `.env` files and anything named like credentials or secrets
   dropped inside those too.
@@ -255,7 +255,6 @@ replace the TorBox key and site logins. The server then refuses to listen on any
 | Password on 7-Zip's stdin ending in CR LF | LF only on Linux: 7-Zip for Linux keeps a CR as part of the password. | `ToolPasswordTests`, the RAR4 and 7z/zip password tests on Linux |
 | Junction checks | The same checks catch folder symlinks; the tests make a symlink where Windows makes a junction. | `StagingWalkTests.RefusesAJunction`, `FinalizerTests.AJunctionInTheDestinationIsRefused` on Linux |
 | `ToolLifetime` (job object) | The tool's process tree is killed on cancel, on dispose and when the server exits normally. | `ToolProcessTests` incl. `OffWindowsATiedToolIsKilledWhenThisProcessExits` |
-| FFmpeg path | `ffmpeg` on `PATH` (no `.exe`). | `FfmpegDiscoveryTests` |
 | Completion program check | A full path; `.exe` is only required on Windows. The server refuses completion programs anyway. | `HostCommandDispatcherTests.TheDesktopAcceptsProgramSettings` on Linux |
 | Path comparisons | `PathNames`: case-insensitive on Windows, case-sensitive elsewhere. Used for extraction staging and output sets, archive set keys, package folders, renames and the folder browser, and (review fix) for every file name the archive code compares within one folder: volume grouping (`ArchiveVolumes`), the folder view's jobs by name, set members, the header cache, the volumes and jobs a run used, missing volumes. So on Linux `Movie.part1.rar` and `movie.part1.rar` are two sets, and one's download is never tied to the other's cleanup. File extensions and categories stay case-insensitive everywhere. | `PathNamesTests`, `ExtractionSafetyTests`, `ArchiveVolumesTests.NamesThatDifferOnlyByCaseAreOneFileOnWindowsAndTwoSetsOnLinux` |
 | Free space and same-volume checks | `Volumes`: the drive on Windows; the longest matching mount point on Linux, so `/downloads` on its own volume is measured as itself. | `PathNamesTests`, `DownloadFoldersTests` |

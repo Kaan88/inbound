@@ -177,7 +177,7 @@ public sealed partial class JobDetailsPanel : UserControl
         RateValue.Text = job.BytesPerSecond is > 0 ? $"{Bytes((long)job.BytesPerSecond.Value)}/s" : "—";
         TimeLeftValue.Text = job.EstimatedRemaining is { } eta && !complete
             ? FormatDuration(eta)
-            : complete ? "Complete" : "—";
+            : complete ? "Completed" : "—";
         ResumeValue.Text = torrent ? "—" : job.ResumeSupported switch
         {
             true => "Yes",
@@ -345,7 +345,7 @@ public sealed partial class JobDetailsPanel : UserControl
             Tone(row.Speed, rate <= 0);
             // Only what the Host reports: a connection on the range, the range done, or neither.
             // It doesn't say which connection is retrying; the download's own retries show in the window.
-            row.Info.Text = segment.IsComplete ? "Done" : live.Count > 0 ? "Receiving" : paused ? "Paused" : "Waiting";
+            row.Info.Text = segment.IsComplete ? "Done" : live.Count > 0 ? "Receiving" : paused ? "Stopped" : "Waiting";
             row.Info.Foreground = InboundTheme.Brush(segment.IsComplete ? "InboundStatusDoneBrush"
                 : live.Count > 0 ? "InboundStatusActiveBrush" : paused ? "InboundStatusWaitingBrush" : "InboundSecondaryTextBrush", _root);
         }

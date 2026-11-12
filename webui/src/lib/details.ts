@@ -87,7 +87,7 @@ export function detailRows(job: Job): DetailRow[] {
     value: job.totalBytes && job.totalBytes > 0 ? `${bytes(job.receivedBytes)} (${(complete ? 100 : p).toFixed(2)}%)` : bytes(job.receivedBytes) || '0 B',
   });
   rows.push({ label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' });
-  rows.push({ label: 'Time left', value: complete ? 'Complete' : duration(eta) || '—' });
+  rows.push({ label: 'Time left', value: complete ? 'Completed' : duration(eta) || '—' });
   rows.push({ label: 'Resume capability', value: job.resumeSupported === true ? 'Yes' : job.resumeSupported === false ? 'No' : 'Unknown' });
   return rows;
 }
@@ -103,7 +103,7 @@ export function torrentDetailRows(job: Job, now = Date.now()): DetailRow[] {
     { label: 'Size', value: torrent.hasMetadata && total > 0 ? bytes(total) : 'Not known yet' },
     { label: 'Downloaded', value: downloadedText(complete ? Math.max(job.receivedBytes, total) : job.receivedBytes, total) },
     { label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' },
-    { label: 'Time left', value: complete ? 'Complete' : duration(eta) || '—' },
+    { label: 'Time left', value: complete ? 'Completed' : duration(eta) || '—' },
     { label: 'Peers', value: peersFigure(torrent.peers, torrent.seeds) },
   ];
   // T2: what it sent to other peers, once there is something to say.
@@ -175,8 +175,8 @@ export function failureLabel(job: Pick<Job, 'state' | 'failure'>): string | null
 
 // ---- Speed limiter (D1) --------------------------------------------------------------------------------------
 
-export const speedLimitHelp = 'Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control.';
-export const speedLimitUnavailable = 'Speed limiting is available for unfinished HTTP/HTTPS and FTP file downloads. It is unavailable for HLS, DASH, and finished transfers.';
+export const speedLimitHelp = 'Applies to ordinary HTTP/HTTPS file downloads.';
+export const speedLimitUnavailable = 'Speed limiting is available for unfinished HTTP/HTTPS file downloads.';
 
 /** The box's text for a limit in bytes per second: KB/s with up to two decimals, empty when off. */
 export function speedLimitText(limit: number | null | undefined): string {
@@ -268,7 +268,7 @@ export function segmentRows(segments: Segment[], connections: ConnectionInfo[], 
       percent: Math.max(0, Math.min(100, (segment.completed * 100) / length)),
       downloaded: `${bytes(segment.completed) || '0 B'} / ${bytes(length)}`,
       speed: rate > 0 ? speed(rate) : '—',
-      info: segment.isComplete ? 'Complete' : live.length > 0 ? 'Receiving data…' : 'Waiting',
+      info: segment.isComplete ? 'Done' : live.length > 0 ? 'Receiving data…' : 'Waiting',
       segment,
     };
   });
@@ -481,7 +481,7 @@ export const packagePasswordHint =
   "For extracting this package's archives. It isn't for the download or the site it came from. You can set it now, before the files have downloaded.";
 
 export const cancelPackageText =
-  'Cancel the unfinished files in this package? Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.';
+  'Cancel the unfinished files in this package? Completed files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.';
 
 /** The notice after a package action (PackageWindow.RunPackageActionAsync). */
 export function packageActionNotice(result: { ok: boolean; error?: string; failedJobs?: Record<string, string>; leftCancelled?: number }): string {

@@ -35,9 +35,9 @@ it with: the app or the server does the downloading.
 The extension reads cookie values only at that moment, not while you browse. A download is sent in one
 of these ways:
 
-- **Automatically**, while "Automatically send downloads to the desktop app" is on in Settings. It is on
+- **Automatically**, while "Automatically send downloads to the desktop app" is on in Options. It is on
   from a fresh install (versions 0.4.0 to 0.4.x started with it off; an update keeps whatever you chose),
-  and Settings opens on install with this explanation, so you can turn it off before your first download.
+  and Options opens on install with this explanation, so you can turn it off before your first download.
   Downloads that match your rules then stop in Chrome and start again in the app, and
   they leave Chrome's download list.
 - **From the right-click menu**, when you choose "Download with Inbound Download Manager" and confirm.
@@ -61,7 +61,7 @@ whether automatic sending is on or off. It reads the address and these response 
 `Content-Disposition` (the file name), the size and whether the response is compressed. From them it decides
 only whether Firefox would save the response rather than show it. For a normal page it stops there, keeps
 nothing and sends nothing. A response Firefox would save is treated like any other new download: while automatic
-sending is on, it goes through your rules, and if they say to catch it, it is sent with the details listed
+sending is on, it goes through your rules, and if they say to send it, it is sent with the details listed
 above, including the cookies for its site. Otherwise Firefox goes on as it would have. The Chrome and Edge
 versions don't do this.
 
@@ -94,7 +94,7 @@ sends the default download folder and your favorite folders. The app's other set
 cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
 else.
 
-**Asking for a folder:** if you choose "Ask each time" in Settings, a caught download waits, paused, in
+**Asking for a folder:** if you choose "Ask each time" in Options, a download waits, paused, in
 Chrome while its window is open. Its address, page address, referrer, user agent, file name, size and type
 are kept in Chrome's session storage until you choose Download or Keep in browser, or close the window.
 
@@ -102,7 +102,7 @@ The extension does not run in Incognito windows. YouTube is not supported.
 
 ## Sending to your own server (optional)
 
-In Settings, under Inbound server, you can pair the extension with an Inbound server you run, by typing its
+In Options, under Inbound server, you can pair the extension with an Inbound server you run, by typing its
 address and a one-time code from the server's web UI. Until you do, nothing below happens.
 
 - **What the extension keeps:** the server's address, the name it was paired under, and a token the server
@@ -111,7 +111,7 @@ address and a one-time code from the server's web UI. Until you do, nothing belo
   extension; anyone who can read your browser profile can read it. In Chrome and Edge the extension's
   scripts on web pages cannot read it; in Firefox they can (the extension's own script never does). Unpair deletes it from the extension
   and sends the token to the server once more, only to ask it to remove this pairing, so the token stops
-  working there too. If the server can't be reached, Settings says so: then remove the browser from the
+  working there too. If the server can't be reached, Options says so: then remove the browser from the
   web UI's Paired apps list yourself.
 - **What goes to the server:** for each download you send there (automatically, if you chose the server
   for automatic downloads, or by choosing Server in the folder window), the same details as for the
@@ -157,8 +157,8 @@ tray icon, then delete that folder.
 
 ## Who else sees anything
 
-- **The site hosting the file**, and any other site the download moves to, such as after a redirect or for
-  the parts of a video stream. The app connects directly, as your browser would have. Each site sees the
+- **The site hosting the file**, and any other site the download moves to, such as after a redirect. The app
+  connects directly, as your browser would have. Each site sees the
   address it is asked for, the user agent and your IP address. Cookies and the referrer go only to the site
   at the file's original address, and not to any other site, including after a redirect to one. If you point
   a download at another site with the app's Refresh Download Address command, its saved cookies and referrer
@@ -187,8 +187,8 @@ including the Limited Use requirements.
 
 ## Your choices
 
-In the extension's Settings you can turn automatic sending on or off, limit it to certain file types (a file
-whose name has no extension is still sent, unless it is a web page), and exclude sites. You can pause catching
+In the extension's Options you can turn automatic sending on or off, limit it to certain file types (a file
+whose name has no extension is still sent, unless it is a web page), and exclude sites. You can pause sending
 for five minutes from the toolbar popup. You can pair or unpair your own server, and choose whether automatic
 downloads go to this computer or to it. Removing the extension stops it reading or sending anything. Downloads
 already in the app stay there, keep running, and keep their saved cookies until you remove them.

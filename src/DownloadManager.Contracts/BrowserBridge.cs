@@ -49,6 +49,39 @@ public static class BrowserBridge
             string.Equals(trimmed, UnpackedExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>UI.R41: where each browser gets the extension. Chrome's and Edge's are the store listings Setup links.</summary>
+    public const string ChromeStoreUrl = "https://chromewebstore.google.com/detail/" + StoreExtensionId;
+    public const string EdgeStoreUrl = "https://microsoftedge.microsoft.com/addons/detail/" + EdgeStoreExtensionId;
+
+    /// <summary>
+    /// UI.R41: Firefox's add-on is signed by Mozilla but not listed on Firefox Add-ons (EXT.S4); it is a file on each
+    /// GitHub release (<c>inbound-bridge-&lt;version&gt;-firefox.xpi</c>), so the link is the latest release page.
+    /// </summary>
+    public const string FirefoxReleaseUrl = "https://github.com/Kaan88/inbound/releases/latest";
+
+    /// <summary>
+    /// UI.R41: which browser's extension started the native host, from its command line and the names of the programs
+    /// above it, nearest first (<c>cmd.exe</c>, <c>chrome.exe</c>, …): <see cref="ExtensionBrowsers.Chrome"/>,
+    /// <see cref="ExtensionBrowsers.Edge"/> or <see cref="ExtensionBrowsers.Firefox"/>, or null for a caller that
+    /// <see cref="TrustedCaller"/> refuses. The Chrome Web Store copy also runs in Edge, so the browser program above
+    /// decides when one is found; otherwise the listing's ID does (an unpacked build counts as Chrome).
+    /// </summary>
+    public static string? CallerBrowser(IReadOnlyList<string> arguments, IEnumerable<string> ancestors)
+    {
+        var caller = TrustedCaller(arguments);
+        if (caller is null) return null;
+        if (caller == "firefox") return ExtensionBrowsers.Firefox;
+        foreach (var ancestor in ancestors)
+        {
+            var name = Path.GetFileNameWithoutExtension(ancestor ?? string.Empty);
+            if (name.Equals("msedge", StringComparison.OrdinalIgnoreCase)) return ExtensionBrowsers.Edge;
+            if (name.Equals("chrome", StringComparison.OrdinalIgnoreCase)) return ExtensionBrowsers.Chrome;
+        }
+
+        var edgeListing = arguments.Any(a => string.Equals(a.TrimEnd('/'), EdgeStoreExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+        return edgeListing ? ExtensionBrowsers.Edge : ExtensionBrowsers.Chrome;
+    }
+
     /// <summary>
     /// Who started the native host, from its command line. Chrome and Edge pass the caller's origin
     /// (chrome-extension://id/) first; Firefox passes the path of its manifest and then the add-on ID.
@@ -86,4 +119,19 @@ public static class BrowserBridge
             ? "firefox"
             : null;
     }
+}
+
+/// <summary>
+/// UI.R41: the browsers whose extension can reach the app, as <see cref="ClientHelloDto.Browser"/> and
+/// <see cref="HostStatusDto.ExtensionsSeen"/> name them.
+/// </summary>
+public static class ExtensionBrowsers
+{
+    public const string Chrome = "chrome";
+    public const string Edge = "edge";
+    public const string Firefox = "firefox";
+
+    public static IReadOnlyList<string> All { get; } = [Chrome, Edge, Firefox];
+
+    public static bool IsKnown(string? browser) => browser is Chrome or Edge or Firefox;
 }

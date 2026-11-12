@@ -34,6 +34,26 @@ public sealed class TorrentFileJobRulesTests
         provider.IsRemote = true;
         Assert.False(TorrentRules.OpensAsTorrent(provider));
         Assert.False(TorrentRules.OpensAsTorrent(null));
+        // A server's download outside this session's folders comes without its path, and the server refuses it by id too.
+        Assert.False(TorrentRules.OpensAsTorrent(Finished(path: " ")));
+    }
+
+    [Fact]
+    public void On_another_server_only_a_rows_own_open_as_torrent_is_the_servers_file()
+    {
+        var finished = Finished();
+        JobDto[] jobs = [finished];
+        var opened = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal) { FilePath };
+        var none = new HashSet<string>();
+
+        // This PC's Host: the same path is the same file, from wherever it came.
+        Assert.Equal(finished.Id, TorrentRules.TorrentFileJobFor(jobs, FilePath, otherServer: false, none));
+        // Another server: the same path imported or opened from Explorer is a file on this PC, to be uploaded.
+        Assert.Null(TorrentRules.TorrentFileJobFor(jobs, FilePath, otherServer: true, none));
+        // That server's row's Open as Torrent: its own file.
+        Assert.Equal(finished.Id, TorrentRules.TorrentFileJobFor(jobs, " " + FilePath, otherServer: true, opened));
+        Assert.Null(TorrentRules.TorrentFileJobFor(jobs, Path.Combine(Folder, "other.torrent"), otherServer: true, opened));
+        Assert.Null(TorrentRules.TorrentFileJobFor(jobs, null, otherServer: true, opened));
     }
 
     [Fact]
@@ -94,11 +114,12 @@ public sealed class TorrentFileJobRulesTests
         Assert.False(TorrentRules.AsksAboutTorrentFile(Finished(state: "downloading"), localHost: true, openedByHand: false));
         Assert.False(TorrentRules.AsksAboutTorrentFile(Finished(), localHost: false, openedByHand: false));
         Assert.False(TorrentRules.AsksAboutTorrentFile(Finished(), localHost: true, openedByHand: true));
-        // A quiet browser download: the Host offers no dialog for it (EXT.R12 wins), so the window doesn't close or ask.
+        // T10.B: a quiet browser download gets the Host's torrent dialog too, so the same rule holds for it.
         var quiet = Finished();
         quiet.QuietWindows = true;
-        Assert.False(TorrentRules.AsksAboutTorrentFile(quiet, localHost: true, openedByHand: false));
-        Assert.False(TorrentRules.ProgressClosesForTorrentFile(quiet, localHost: true, torrentsOffered: true, off, openedByHand: false, providerTakesTorrents: true));
+        Assert.True(TorrentRules.AsksAboutTorrentFile(quiet, localHost: true, openedByHand: false));
+        Assert.True(TorrentRules.ProgressClosesForTorrentFile(quiet, localHost: true, torrentsOffered: true, off, openedByHand: false, providerTakesTorrents: true));
+        Assert.False(TorrentRules.ProgressClosesForTorrentFile(quiet, localHost: true, torrentsOffered: true, off, openedByHand: false, providerTakesTorrents: false));
 
         static RemoteAccountDto Account(bool key, bool unreadable, params string[] capabilities)
             => new() { Provider = "torbox", HasKey = key, KeyUnreadable = unreadable, Capabilities = [.. capabilities] };

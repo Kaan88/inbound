@@ -1,8 +1,7 @@
 namespace DownloadManager.Cli;
 
 /// <summary>
-/// The arguments of the commands in <see cref="Program"/> (not <c>torrent</c>, <c>archive</c> or <c>remote</c>, which
-/// read their own). A flag that takes a value takes the next argument, so that value is never read as a positional
+/// The arguments of the commands in <see cref="Program"/> (not <c>torrent</c>, which reads its own). A flag that takes a value takes the next argument, so that value is never read as a positional
 /// one: <c>dm add --dest D:\dl URL</c> adds URL, and <c>dm site add --password-env VAR site user</c> adds that site.
 /// <c>--flag=value</c> works too, and is the way to give a value that starts with "--" (<c>--description=--draft</c>).
 /// </summary>
@@ -17,17 +16,15 @@ internal static class CliArgs
     ];
 
     /// <summary>The commands whose arguments are read here.</summary>
-    public static bool ReadsArgumentsHere(string command) => command is not ("torrent" or "archive" or "remote");
+    public static bool ReadsArgumentsHere(string command) => command is not "torrent";
 
     /// <summary>
     /// The flags followed by a value for <paramref name="command"/>: <see cref="ValueFlags"/> for the commands read here,
-    /// and the lists <c>torrent</c>, <c>archive</c> and <c>remote</c> read their own arguments with.
+    /// and the list <c>torrent</c> reads its own arguments with.
     /// </summary>
     public static IReadOnlyList<string> ValueFlagsOf(string command) => command.ToLowerInvariant() switch
     {
         "torrent" => TorrentCommands.ValueFlags,
-        "archive" => ArchiveCommands.ValueOptions,
-        "remote" => Program.RemoteValueOptions,
         _ => ValueFlags,
     };
 
@@ -128,7 +125,7 @@ internal static class CliArgs
 
     /// <summary>
     /// <see cref="MissingValue(string[])"/> for <paramref name="flags"/>. Without <paramref name="nextMustBeValue"/> only
-    /// <c>--flag=</c> with nothing after it counts (torrent, archive and remote read a bare flag's value themselves).
+    /// <c>--flag=</c> with nothing after it counts (torrent reads a bare flag's value itself).
     /// </summary>
     public static string? MissingValue(string[] args, IReadOnlyList<string> flags, bool nextMustBeValue, int first = 1)
     {

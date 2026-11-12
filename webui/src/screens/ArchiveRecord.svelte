@@ -43,7 +43,7 @@
     {#if plan.password}<button class="btn" onclick={() => onpassword(plan.password ?? targetOf(set))}>Archive Password…</button>{/if}
     {#if plan.retry.length}<button class="btn" disabled={busy} onclick={retry}>{set.state === 'completed' ? 'Extract again…' : 'Retry extraction'}</button>{/if}
     {#if plan.cancel.length}<button class="btn" disabled={busy} onclick={() => run('archive.cancel', 'Extraction cancelled.')}>Cancel extraction</button>{/if}
-    {#if plan.remove.length}<button class="btn" disabled={busy} onclick={() => (asking = 'remove')}>Remove extraction record…</button>{/if}
+    {#if plan.remove.length}<button class="btn" disabled={busy} onclick={() => (asking = 'remove')}>Delete extraction record…</button>{/if}
     <button class="btn" onclick={onclose}>Close</button>
   {/snippet}
 </Dialog>
@@ -51,5 +51,5 @@
 {#if asking === 'again'}
   <Confirm title="Extract again?" message={extractAgainQuestion} primary="Extract Again" {busy} onclose={() => (asking = null)} onconfirm={() => run('archive.retry', 'Extraction asked for.')} />
 {:else if asking === 'remove'}
-  <Confirm title="Remove extraction record?" message={removeQuestion([set])} primary="Remove Record" danger {busy} onclose={() => (asking = null)} onconfirm={() => run('archive.remove', 'Taken off the list; no file was touched.', true)} />
+  <Confirm title="Delete extraction record?" message={removeQuestion([set])} primary="Delete" danger {busy} onclose={() => (asking = null)} onconfirm={() => run('archive.remove', 'Taken off the list; no file was touched.', true)} />
 {/if}

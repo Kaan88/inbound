@@ -37,8 +37,8 @@ describe('heldLeave', () => {
 
 describe('captureLabel (review 5:H4)', () => {
   it('names the box for paired browsers on a server, and as the desktop does on the Windows app', () => {
-    expect(captureLabel('windows')).toBe('Capture downloads from your browser');
-    expect(captureLabel('linux')).toBe('Capture downloads from your browser');
+    expect(captureLabel('windows')).toBe('Accept downloads sent from your browser');
+    expect(captureLabel('linux')).toBe('Accept downloads sent from your browser');
     expect(captureLabel('server')).toBe('Accept downloads from paired browsers');
     expect(captureLabel(undefined)).toBe('Accept downloads from paired browsers');
   });

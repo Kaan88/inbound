@@ -150,7 +150,7 @@ public sealed partial class MainWindow
         (TorrentListRules.CheckingTag, "Checking", "&#xE895;", "InboundIconInfoBrush", 30),
         (TorrentListRules.FilesTag, "Waiting for files", "&#xE8FD;", "InboundIconInfoBrush", 30),
         (TorrentListRules.CompletedTag, "Completed", "&#xE73E;", "InboundIconStartBrush", 30),
-        (TorrentListRules.ErroredTag, "Errored", "&#xE783;", "InboundIconDangerBrush", 30),
+        (TorrentListRules.ErroredTag, "Failed", "&#xE783;", "InboundIconDangerBrush", 30),
     ];
 
     /// <summary>The shown torrent sidebar items and their count text, by tag; empty while they are away.</summary>
@@ -283,16 +283,19 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>DT-6: Seeds, Peers, Up and Ratio take room in the torrent views only. Runs as the list is rebuilt.</summary>
+    /// <summary>
+    /// DT-6, UI.R42: the torrent views and the other views each keep their own choice of columns; the torrent views show
+    /// Seeds, Peers, Up and Ratio until chosen otherwise. Runs as the list is rebuilt, and changes something only when the
+    /// list moves between the two kinds of view.
+    /// </summary>
     private void SyncTorrentColumns()
     {
-        var show = TorrentListRules.IsTorrentView(_category);
-        if (_jobsHeader is null || JobViewModel.ShowTorrentColumns == show) return;
-        JobViewModel.ShowTorrentColumns = show;
-        foreach (var key in TorrentListRules.ColumnKeys) _jobsHeader.SetColumnVisible(key, show);
-        var fileRows = _torrentFiles.Values.SelectMany(files => files.Rows.Values.Append(files.More).Append(files.Note)).OfType<JobViewModel>();
-        foreach (var row in _jobsById.Values.Concat(_packageRows.Values).Concat(_remoteRows.Values).Concat(_archiveRows.Values).Concat(fileRows))
-            row.NotifyTorrentColumns();
+        var torrentView = TorrentListRules.IsTorrentView(_category);
+        if (_jobsHeader is null || _torrentColumnsShown == torrentView) return;
+        _torrentColumnsShown = torrentView;
+        ListColumnSets.UseDownloadsChoices(_jobColumns, torrentView, ColumnChoices(torrentView));
+        _jobsHeader.Refresh();
+        UpdateSeedClock();
     }
 
     /// <summary>The seeding goal follows the shown Host's settings; a seeding row reads its way to it again when it changes.</summary>
@@ -425,13 +428,13 @@ public sealed partial class MainWindow
             }
             else if (shown.Files is null)
             {
-                shown.Error = string.IsNullOrWhiteSpace(result.Error) ? "the Host didn't answer." : RemoteText.Failure(result.Error);
+                shown.Error = string.IsNullOrWhiteSpace(result.Error) ? "Inbound didn't answer." : RemoteText.Failure(result.Error);
             }
         }
         catch (Exception ex)
         {
             UiTrace.Write($"Torrent file list unavailable: {ex.GetType().Name}");
-            if (shown.Files is null) shown.Error ??= "the Host didn't answer.";
+            if (shown.Files is null) shown.Error ??= "Inbound didn't answer.";
         }
         finally
         {
@@ -696,7 +699,7 @@ public sealed partial class MainWindow
                     var result = await _remote.GetTorrentFilesAsync(jobId, token);
                     if (!result.Ok)
                     {
-                        return new RemoteFilesToShow([], Error: string.IsNullOrWhiteSpace(result.Error) ? "The Host didn't send the file list." : result.Error);
+                        return new RemoteFilesToShow([], Error: string.IsNullOrWhiteSpace(result.Error) ? "Inbound didn't send the file list." : result.Error);
                     }
 
                     if (result.Files.Count == 0) return new RemoteFilesToShow([], Error: "The file list isn't known yet. Try again once it is.");
@@ -722,7 +725,7 @@ public sealed partial class MainWindow
             var set = await _remote.SetTorrentFilesAsync(jobId, indexes);
             if (!set.Ok)
             {
-                await ShowMessageAsync("Choose files", string.IsNullOrWhiteSpace(set.Error) ? "The Host didn't take the choice." : RemoteText.Failure(set.Error));
+                await ShowMessageAsync("Choose files", string.IsNullOrWhiteSpace(set.Error) ? "Inbound didn't take the choice." : RemoteText.Failure(set.Error));
                 return;
             }
 

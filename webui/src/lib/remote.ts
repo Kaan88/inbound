@@ -293,7 +293,7 @@ export function localWords(files: Pick<Job, 'state'>[]): string | null {
   if (files.some((file) => ['connecting', 'downloading', 'verifying', 'assembling', 'retryWaiting'].includes(file.state))) {
     return files.length === 1 ? 'Downloading locally' : `Downloading locally, ${completed} of ${files.length} done`;
   }
-  return paused === files.length - completed ? 'Paused locally' : 'Waiting to download locally';
+  return paused === files.length - completed ? 'Stopped locally' : 'Waiting to download locally';
 }
 
 /** The local files behind a remote job: those in its package. */

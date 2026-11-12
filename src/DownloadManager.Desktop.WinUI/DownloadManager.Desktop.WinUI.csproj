@@ -39,6 +39,14 @@
     <Compile Include="..\DownloadManager.Core\Providers\ProviderLinks.cs" Link="Providers\ProviderLinks.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
+    <Compile Include="..\DownloadManager.Core\FtpAddresses.cs" Link="Providers\FtpAddresses.cs" />
+    <!-- UI.B27: an address on this PC or its network is an ordinary download, with no provider check. -->
+    <Compile Include="..\DownloadManager.Core\NetworkAddresses.cs" Link="Providers\NetworkAddresses.cs" />
+  </ItemGroup>
+
+  <!-- UPD.N1: What's new opens by itself only for an installed build, read from install.json the way the Host reads it. -->
+  <ItemGroup>
+    <Compile Include="..\DownloadManager.Core\InstalledBuild.cs" Link="InstalledBuild.cs" />
   </ItemGroup>
 
   <!-- A saved server's token is sealed for this Windows user the way the Host seals site logins (design D9). -->

@@ -119,7 +119,7 @@ internal sealed class PackageWindow : Window
         _openFolder.Visibility = Visibility.Collapsed;
         _delete.Visibility = Visibility.Collapsed;
         _delete.Margin = new Thickness(0, 0, 16, 0);
-        ToolTipService.SetToolTip(_delete, "Remove this package's files from the list and delete them");
+        ToolTipService.SetToolTip(_delete, "Delete this package's downloads and their files");
         _root.Children.Add(_header.Element);
         var overview = new StackPanel { Spacing = 12 };
         overview.Children.Add(BuildOverview());
@@ -229,7 +229,7 @@ internal sealed class PackageWindow : Window
             if (_closed) return;
             _hostConnected = connected;
             _fileDetails.SetConnected(connected);
-            _notice.Text = connected ? string.Empty : $"Host disconnected. Reconnecting… {error}";
+            _notice.Text = connected ? string.Empty : $"Connection lost. Reconnecting… {error}";
             // A drop ends the files' flat line while they wait (audit M11).
             UpdateChartTimer();
         });
@@ -786,7 +786,7 @@ internal sealed class PackageWindow : Window
             Title = "Cancel package?",
             Content = new TextBlock
             {
-                Text = "Cancel the unfinished files in this package? Finished files and partial data are kept. " +
+                Text = "Cancel the unfinished files in this package? Completed files and partial data are kept. " +
                        "Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
@@ -807,7 +807,7 @@ internal sealed class PackageWindow : Window
         else if (anyFailed && settled) _header.Chip.Set("Failed", "InboundStatusFailedBrush");
         else if (settled) _header.Chip.Set("Stopped", "InboundStatusNeutralBrush");
         else if (speed > 0 || members.Any(job => job.State is "downloading" or "connecting")) _header.Chip.Set("Downloading", "InboundStatusActiveBrush");
-        else _header.Chip.Set(members.Any(job => job.State == "queued") ? "Queued" : "Paused", "InboundStatusWaitingBrush");
+        else _header.Chip.Set(members.Any(job => job.State == "queued") ? "Queued" : "Stopped", "InboundStatusWaitingBrush");
     }
 
     /// <summary>Delete, as Progress Details has it: the package's files leave the list, and their files go too unless unticked.</summary>
@@ -840,7 +840,7 @@ internal sealed class PackageWindow : Window
             var reply = await _connection.RemoveManyAsync(ids, deleteFiles.IsChecked == true);
             if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
             {
-                _notice.Text = result.Error ?? "The Host could not delete this package.";
+                _notice.Text = result.Error ?? "Inbound could not delete this package.";
                 return;
             }
             Close();
@@ -881,8 +881,8 @@ internal sealed class PackageWindow : Window
         "downloading" => job.TotalBytes is > 0 ? $"{Percent(job.ReceivedBytes, job.TotalBytes):0}%" : "Downloading",
         "connecting" => "Connecting",
         "queued" => "Queued",
-        "paused" => "Paused",
-        "completed" => "Complete",
+        "paused" => "Stopped",
+        "completed" => "Completed",
         "failed" => "Failed",
         "cancelled" => "Cancelled",
         "retryWaiting" or "retrying" => "Retrying",

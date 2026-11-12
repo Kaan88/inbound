@@ -75,7 +75,7 @@ public sealed partial class MainWindow
 
     private void FillTorrentInfo(JobDto job)
     {
-        var stateWord = job.State == "completed" ? "Complete" : JobViewModel.ToDisplayState(job.State);
+        var stateWord = job.State == "completed" ? "Completed" : JobViewModel.ToDisplayState(job.State);
         var view = TorrentInfoRules.Describe(job, stateWord, _settings, DateTimeOffset.UtcNow, _infoV2, _infoTrackers, _remote.State.TorrentsOffered);
         Set(TorrentInfoName, view.Name);
         Set(TorrentInfoStatus, view.Status);

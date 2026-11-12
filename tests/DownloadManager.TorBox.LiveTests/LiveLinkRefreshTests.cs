@@ -102,7 +102,7 @@ public sealed class LiveLinkRefreshTests(ITestOutputHelper output)
             var broker = new SpoilingBroker(new RemoteLinkBroker(registry, log: Write));
 
             var checkpoints = new JsonCheckpointStore(paths);
-            var engine = new HttpDownloadEngine(new EngineOptions(), checkpoints: checkpoints, mediaCheckpoints: new JsonMediaCheckpointStore(paths));
+            var engine = new HttpDownloadEngine(new EngineOptions(), checkpoints: checkpoints);
             var service = new DownloadManagerService(
                 paths,
                 new JsonJobStore(paths),
@@ -111,7 +111,6 @@ public sealed class LiveLinkRefreshTests(ITestOutputHelper output)
                 engine,
                 log: Write,
                 enableSchedulerTimer: false,
-                mediaCheckpoints: new JsonMediaCheckpointStore(paths),
                 linkBroker: broker,
                 linkSecrets: registry);
             await service.InitializeAsync();

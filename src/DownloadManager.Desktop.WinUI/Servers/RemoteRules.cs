@@ -575,7 +575,7 @@ internal static class WindowInstance
 internal static class RemoteOptionsText
 {
     public const string ThisPcUnreachable =
-        "This PC's Host isn't running, so Options can't be shown. Open Inbound again to start it.";
+        "Inbound's background program isn't running on this PC, so Options can't be shown. Open Inbound again to start it.";
 
     /// <summary>Options opens anyway, with this PC's own pages: they never needed the server.</summary>
     public static string ServerUnreachable(string serverName) =>

@@ -589,7 +589,7 @@ public sealed class ServerAuth
         if (Pairing.Redeem(form.Code, form.Name) is not { } paired)
         {
             _log.Warn($"A pairing try with a wrong or expired code from {address}.");
-            return Error(StatusCodes.Status401Unauthorized, "That code is wrong, used or expired. Show a new one in the web UI (Settings, Sign-in and browsers).", ifWrong);
+            return Error(StatusCodes.Status401Unauthorized, "That code is wrong, used or expired. Show a new one in the web UI (Options, Sign-in and browsers).", ifWrong);
         }
 
         Limiter.Succeeded(address);

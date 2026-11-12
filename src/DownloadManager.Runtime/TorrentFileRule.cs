@@ -60,5 +60,5 @@ public static class TorrentFileRule
     /// <summary>The address's path (not its query) ends in .torrent.</summary>
     private static bool UrlEndsInTorrent(string? url)
         => !string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) &&
-           uri.Scheme is "http" or "https" or "ftp" && EndsInTorrent(Uri.UnescapeDataString(uri.AbsolutePath));
+           uri.Scheme is "http" or "https" && EndsInTorrent(Uri.UnescapeDataString(uri.AbsolutePath));
 }

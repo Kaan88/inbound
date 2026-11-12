@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml.Controls;
+﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -18,10 +19,11 @@ public sealed partial class MainWindow
         _jobColumns.Import(_uiState.ColumnWidths);
 
         // It stays away until there is an archive to talk about.
-        _jobColumns.SetVisible("extraction", false);
-        // DT-6: the torrent columns show in the torrent views only (SyncTorrentColumns).
-        foreach (var key in TorrentListRules.ColumnKeys) _jobColumns.SetVisible(key, false);
-        _jobsHeader = new ColumnHeaderRow(_jobColumns, JobsHeader, JobsList, RootGrid, HeaderSort_Clicked, SaveColumnWidths);
+        _jobColumns.SetAvailable("extraction", false);
+        // DT-6, UI.R42: the torrent views have choices of their own (SyncTorrentColumns puts the view's in).
+        _torrentColumnsShown = TorrentListRules.IsTorrentView(_uiState.Category);
+        ListColumnSets.UseDownloadsChoices(_jobColumns, _torrentColumnsShown, ColumnChoices(_torrentColumnsShown));
+        _jobsHeader = new ColumnHeaderRow(_jobColumns, JobsHeader, JobsList, RootGrid, HeaderSort_Clicked, SaveColumnWidths, ColumnsChosen);
         _jobsHeader.MinimumWidthChanged += width =>
         {
             DownloadListGrid.MinWidth = width;
@@ -71,8 +73,55 @@ public sealed partial class MainWindow
         SaveUiState();
     }
 
-    /// <summary>The order the list is put in; a torrent column's sort holds only where that column shows.</summary>
-    private (string Key, bool Ascending) ShownSort => TorrentListRules.ShownSort(_sortKey, _sortAscending, _category);
+    /// <summary>Whether the layout holds the torrent views' choices now (SyncTorrentColumns), not the other views'.</summary>
+    private bool _torrentColumnsShown;
+
+    /// <summary>UI.R42: the saved choices of the torrent views, or of every other view.</summary>
+    private Dictionary<string, bool> ColumnChoices(bool torrentViews) => torrentViews ? _uiState.TorrentViewColumns : _uiState.ShownColumns;
+
+    /// <summary>UI.R42: the header's menu showed or hid a column, or reset them: kept for the views of its kind, and the list sorted again.</summary>
+    private void ColumnsChosen()
+    {
+        if (_torrentColumnsShown) _uiState.TorrentViewColumns = _jobColumns.ExportChoices();
+        else _uiState.ShownColumns = _jobColumns.ExportChoices();
+        _uiState.ColumnWidths = _jobColumns.Export();
+        SaveUiState();
+        UpdateSeedClock();
+        // A sort by a column that went waits for it; one by a column that came back holds again.
+        _jobsHeader.ShowSort(_sortKey, _sortAscending);
+        RebuildVisible(sorting: true);
+    }
+
+    /// <summary>
+    /// UI.R42: reads the seeding rows' Seeding time again while the column shows (TorrentListRules.SeedClockInterval). An
+    /// idle seeding torrent gets no updates from the Host, so the cell would stand still. No timer runs otherwise.
+    /// </summary>
+    private DispatcherTimer? _seedClock;
+
+    private void UpdateSeedClock()
+    {
+        var interval = TorrentListRules.SeedClockInterval(WindowShown, _jobColumns.IsVisible("seedTime"), _jobsById.Values.Select(job => job.SeedingTime));
+        if (interval is not { } every)
+        {
+            _seedClock?.Stop();
+            return;
+        }
+
+        if (_seedClock is null)
+        {
+            _seedClock = new DispatcherTimer();
+            _seedClock.Tick += (_, _) =>
+            {
+                foreach (var row in _jobsById.Values) row.RefreshSeedTime();
+                UpdateSeedClock();
+            };
+        }
+        if (_seedClock.Interval != every) _seedClock.Interval = every;
+        if (!_seedClock.IsEnabled) _seedClock.Start();
+    }
+
+    /// <summary>The order the list is put in; a column's sort holds only where that column shows.</summary>
+    private (string Key, bool Ascending) ShownSort => ListColumnSets.ShownSort(_jobColumns, _sortKey, _sortAscending);
 
     private IEnumerable<JobViewModel> Sorted(IEnumerable<JobViewModel> rows)
     {
@@ -93,6 +142,9 @@ public sealed partial class MainWindow
         "eta" => ListSort.Order(rows, job => job.Remaining, null, ascending, job => job.Remaining is null),
         "up" => ListSort.Order(rows, job => job.UploadBytesPerSecond, null, ascending, job => job.UploadBytesPerSecond <= 0),
         "ratio" => ListSort.Order(rows, job => job.RatioValue, null, ascending, job => job.RatioValue is null),
+        "uploaded" => ListSort.Order(rows, job => job.UploadedBytes, null, ascending, job => job.UploadedBytes is null),
+        "seedTime" => ListSort.Order(rows, job => job.SeedingTime, null, ascending, job => job.SeedingTime is null),
+        "seedGoal" => ListSort.Order(rows, job => job.SeedGoalText, NaturalStringComparer.Instance, ascending, job => job.SeedGoalText.Length == 0),
         "rate" => ListSort.Order(rows, job => job.BytesPerSecond, null, ascending, job => job.BytesPerSecond <= 0),
         "lastTry" => ListSort.Order(rows, job => job.LastUpdated, null, ascending),
         "description" => ListSort.Order(rows, job => job.Description, NaturalStringComparer.Instance, ascending, job => job.Description.Length == 0),

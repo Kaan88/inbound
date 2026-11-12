@@ -255,14 +255,22 @@ public sealed class DetailsColumnTests
     public void A_hidden_last_column_hands_the_filling_to_the_last_one_that_shows()
     {
         var layout = ListColumnSets.TorrentFiles();
-        layout.SetVisible("priority", false);
-        layout.FixName(300);
-        Assert.True(layout.Size(layout.Columns.Single(column => column.Key == "progress")).Fills);
-        Assert.Equal(new ColumnSize(0, false), layout.Size(layout.Columns.Single(column => column.Key == "priority")));
+        ColumnSize Of(string key) => layout.Size(layout.Columns.Single(column => column.Key == key));
 
-        layout.SetVisible("priority", true);
-        Assert.False(layout.Size(layout.Columns.Single(column => column.Key == "progress")).Fills);
-        Assert.True(layout.Size(layout.Columns.Single(column => column.Key == "priority")).Fills);
+        // UI.R42: Downloaded, the last column, starts hidden, so Priority fills.
+        layout.FixName(300);
+        Assert.Equal(new ColumnSize(0, false), Of("done"));
+        Assert.True(Of("priority").Fills);
+
+        layout.SetAvailable("priority", false);
+        Assert.True(Of("progress").Fills);
+        Assert.Equal(new ColumnSize(0, false), Of("priority"));
+
+        layout.SetAvailable("priority", true);
+        Assert.True(layout.Choose("done", true));
+        Assert.False(Of("progress").Fills);
+        Assert.False(Of("priority").Fills);
+        Assert.True(Of("done").Fills);
     }
 }
 
@@ -290,6 +298,33 @@ public sealed class ListLayoutStoreTests : IDisposable
         Assert.True(files.SortAscending);
         Assert.Equal("down", one.Load("progress.peers").SortKey);
         Assert.Null(one.Load("progress.trackers").SortKey);
+    }
+
+    [Fact]
+    public void Chosen_columns_survive_a_restart_and_an_older_file_has_none()
+    {
+        // UI.R42: what the header's menu chose is read back by a new store (a new process) and put in a fresh layout.
+        var path = Path.Combine(_folder, "list-layout.json");
+        var chosen = ListColumnSets.TorrentPeers();
+        Assert.True(chosen.Choose("sent", true));
+        Assert.True(chosen.Choose("client", false));
+        Assert.True(new ListLayoutStore(path).Save("progress.peers", new ListLayout { Widths = chosen.Export(), Shown = chosen.ExportChoices() }));
+
+        var again = ListColumnSets.TorrentPeers();
+        again.ImportChoices(new ListLayoutStore(path).Load("progress.peers").Shown);
+        Assert.True(again.IsVisible("sent"));
+        Assert.False(again.IsVisible("client"));
+        Assert.False(again.IsVisible("received"));
+
+        // A file from before UI.R42 has no "shown": the columns as they start.
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(path, """{ "progress.trackers": { "widths": { "tracker": 250 }, "sortKey": "seeds" } }""");
+        var old = new ListLayoutStore(path).Load("progress.trackers");
+        Assert.Null(old.Shown);
+        var trackers = ListColumnSets.TorrentTrackers();
+        trackers.ImportChoices(old.Shown);
+        Assert.True(trackers.IsVisible("status"));
+        Assert.False(trackers.IsVisible("message"));
     }
 
     [Fact]

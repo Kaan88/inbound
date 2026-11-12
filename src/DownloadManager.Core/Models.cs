@@ -30,6 +30,8 @@ public enum FailureKind
     RangeUnsupported,
     RemoteChanged,
     InvalidContent,
+    // MuxingFailed, LiveStream and DrmProtected came from stream downloading, cut in 0.7.2. They stay so the job files
+    // of older versions still load.
     MuxingFailed,
     LiveStream,
     DrmProtected,
@@ -40,6 +42,11 @@ public enum FailureKind
     Unknown,
     /// <summary>The bytes all arrived and are not the file that was asked for. Retrying unattended only repeats that.</summary>
     VerificationFailed,
+    /// <summary>
+    /// Something this app no longer downloads: a streaming playlist or an FTP address (both cut in 0.7.2). Final: trying again only
+    /// repeats it, so neither Resume All nor a queue's retries take it.
+    /// </summary>
+    Unsupported,
 }
 
 public enum DownloadSource
@@ -122,7 +129,22 @@ public sealed class DownloadJob
     public int QueueRetryCount { get; set; }
     public DateTimeOffset? QueueRetryAt { get; set; }
 
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// 2 from 0.7.2. A job file is still written as 1 unless it holds a value 0.7.1 can't read (see
+    /// <see cref="SchemaVersionToWrite"/>): 0.7.1 sets an unreadable job file aside but keeps one with a newer schema.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
+
+    /// <summary>The schema 0.7.1 and older read.</summary>
+    public const int SchemaVersionOlderBuildsRead = 1;
+
+    /// <summary>
+    /// The schema this job is saved with: <see cref="CurrentSchemaVersion"/> only while it holds a value older builds can't
+    /// read (<see cref="FailureKind.Unsupported"/>, 0.7.2), so after a downgrade that job stays on disk for this build
+    /// and every other job still loads in the older one.
+    /// </summary>
+    [JsonIgnore]
+    public int SchemaVersionToWrite => Failure?.Kind == FailureKind.Unsupported ? CurrentSchemaVersion : SchemaVersionOlderBuildsRead;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -316,7 +338,7 @@ public sealed class DownloadJob
 
     [JsonIgnore]
     private bool IsPermanentContentFailure =>
-        Failure is { Kind: FailureKind.DrmProtected or FailureKind.LiveStream };
+        Failure is { Kind: FailureKind.DrmProtected or FailureKind.LiveStream or FailureKind.Unsupported };
 
     [JsonIgnore]
     public bool IsActive => State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting;
@@ -385,7 +407,10 @@ public sealed class SiteLogin
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>Host, host:port, or URL/path prefix, for example example.com/private.</summary>
+    /// <summary>
+    /// Host, host:port, or URL/path prefix, for example example.com/private. Without a scheme it is sent over
+    /// https only, to that host; *.example.com takes in subdomains; http:// allows http (SEC.L1).
+    /// </summary>
     public string Site { get; set; } = string.Empty;
 
     public string Username { get; set; } = string.Empty;
@@ -445,9 +470,6 @@ public sealed record EngineOptions
 
     /// <summary>Mutable proxy state; updated at runtime when settings change.</summary>
     public ProxySettings Proxy { get; init; } = new();
-
-    /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
-    public string? FfmpegPath { get; init; }
 }
 
 public sealed class DownloadCheckpoint
@@ -472,19 +494,6 @@ public sealed class DownloadCheckpoint
     public string? FinalizingTo { get; set; }
 
     public long CompletedBytes => Segments.Sum(s => s.Completed);
-}
-
-public sealed class MediaCheckpoint
-{
-    public const int CurrentSchemaVersion = 1;
-
-    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
-    public Guid JobId { get; set; }
-    public string Track { get; set; } = "media";
-    public string Signature { get; set; } = string.Empty;
-    public int CompletedSegments { get; set; }
-    public long CompletedBytes { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class SegmentCheckpoint
@@ -709,9 +718,6 @@ public sealed class AppSettings
     public int TorrentMaxConnections { get; set; }
     /// <summary>T3: peers and trackers go through the proxy of Options › Proxy (HTTP or SOCKS5 typed in there).</summary>
     public bool TorrentUseProxy { get; set; }
-
-    /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
-    public string? FfmpegPath { get; set; }
 
     /// <summary>Program run once after each successful download; file path is one argument.</summary>
     public string? PostDownloadCommand { get; set; }

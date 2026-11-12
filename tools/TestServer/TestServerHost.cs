@@ -18,9 +18,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _versions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, int> _dashRangeRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _expiringRanges = new();
     private readonly ConcurrentQueue<string> _slowFirstRanges = new();
     private byte[]? _updateManifest;
@@ -40,10 +37,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
     private long _siteDenied;
     private string _siteUser = "siteuser";
     private string _sitePass = "sitepass";
-    private int _hlsRotatingToken = 1;
-    private bool _hlsRotateAfterSegment = true;
-    private int _dashRotatingToken = 1;
-    private bool _dashRotateAfterSegment = true;
     private bool _lastAuthCookiePresent;
     private string _lastAuthReferer = string.Empty;
     private string _lastAuthUserAgent = string.Empty;
@@ -89,25 +82,12 @@ public sealed partial class TestServerHost : IAsyncDisposable
         Interlocked.Exchange(ref _peakFileRequests, 0);
     }
 
-    public int HlsSegmentRequests(string name) => _hlsSegmentRequests.GetValueOrDefault(name);
-
-    public int DashSegmentRequests(string name) => _dashSegmentRequests.GetValueOrDefault(name);
-
-    public int DashRangeRequests(string name) => _dashRangeRequests.GetValueOrDefault(name);
-
     public int FlakyRequests(string name) => _requestCounts.GetValueOrDefault($"flaky-{name}");
 
     public int ThrottledRequests(string name) => _requestCounts.GetValueOrDefault($"throttled-{name}");
 
     /// <summary>Range headers the expiring endpoint served, oldest first, since its stats were reset.</summary>
     public IReadOnlyList<string> ExpiringRanges() => _expiringRanges.ToArray();
-
-    public void ResetHlsStats()
-    {
-        _hlsSegmentRequests.Clear();
-        _dashSegmentRequests.Clear();
-        _dashRangeRequests.Clear();
-    }
 
     public IReadOnlyList<string> SlowFirstRanges()
         => _slowFirstRanges.ToArray();
@@ -130,13 +110,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
         _updatePackage = package;
     }
 
-    public void ResetRotatingMedia()
-    {
-        _hlsRotatingToken = 1;
-        _hlsRotateAfterSegment = true;
-        _dashRotatingToken = 1;
-        _dashRotateAfterSegment = true;
-    }
 
     public void ResetExpiringStats()
     {
@@ -167,7 +140,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
     }
 
     public string BaseAddress { get; private set; } = string.Empty;
-    public FtpServer Ftp { get; private set; } = null!;
 
     public static async Task<TestServerHost> StartAsync(
         int port = 0,
@@ -185,7 +157,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
         host.MapEndpoints();
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         host.BaseAddress = app.Urls.First().TrimEnd('/');
-        host.Ftp = await FtpServer.StartAsync(cancellationToken).ConfigureAwait(false);
         return host;
     }
 
@@ -227,7 +198,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
     private void MapEndpoints()
     {
         MapTorBoxEndpoints();
-        MapMediaEndpoints();
         _app.MapGet("/health", () => Results.Text("ok"));
 
         _app.MapGet("/update/manifest", () =>
@@ -239,19 +209,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
             _updatePackage is null
                 ? Results.NotFound()
                 : Results.Bytes(_updatePackage, "application/zip"));
-
-        _app.MapGet("/ftp/info", () => Results.Json(new
-        {
-            port = Ftp.Port,
-            user = "ftpuser",
-        }));
-
-        _app.MapGet("/ftp/stats", () => Results.Json(new
-        {
-            slowBytesServed = Ftp.BytesServed("slow.bin"),
-            slowRetr = Ftp.RetrCount("slow.bin"),
-            rest = Ftp.RestCount,
-        }));
 
         _app.MapGet("/file/{name}", async (HttpContext context, string name) =>
         {
@@ -504,12 +461,15 @@ public sealed partial class TestServerHost : IAsyncDisposable
         // The same error document on every request, so a job meets it at its first request.
         _app.MapGet("/errordoc/{name}", (HttpContext context) => WriteErrorDocumentAsync(context));
 
-        // A real file served with a text type: what a user who wants the page itself downloads.
+        // A real file served with a text type: what a user who wants the page itself downloads. ?disposition= adds an
+        // attachment name.
         _app.MapGet("/typed/{name}", async (HttpContext context, string name) =>
         {
             var content = ContentFor(name, QueryInt(context, "size", 2 * 1024 * 1024), QueryInt(context, "seed", 1));
             var range = context.Request.Headers.Range.ToString();
             context.Response.ContentType = context.Request.Query["type"].ToString();
+            var attachment = context.Request.Query["disposition"].ToString();
+            if (!string.IsNullOrEmpty(attachment)) context.Response.Headers.ContentDisposition = $"attachment; filename=\"{attachment}\"";
             if (!string.IsNullOrEmpty(context.Request.Query["encoding"]))
             {
                 context.Response.Headers.ContentEncoding = context.Request.Query["encoding"].ToString();
@@ -751,361 +711,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
         });
 
-        _app.MapGet("/hls-rotating/playlist.m3u8", () =>
-        {
-            var token = _hlsRotatingToken;
-            return Results.Text(
-                "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n" +
-                "#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n" +
-                $"#EXTINF:2.000000,\nseg0.ts?token={token}\n" +
-                $"#EXTINF:2.000000,\nseg1.ts?token={token}\n" +
-                $"#EXTINF:2.000000,\nseg2.ts?token={token}\n" +
-                "#EXT-X-ENDLIST\n",
-                "application/vnd.apple.mpegurl");
-        });
-
-        _app.MapGet("/hls-rotating/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal) ||
-                !file.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            if (QueryInt(context, "token", 0) != _hlsRotatingToken)
-            {
-                context.Response.StatusCode = 403;
-                context.Response.Headers["X-Url-Expired"] = "true";
-                await context.Response.WriteAsync("expired media token").ConfigureAwait(false);
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "hls", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            _hlsSegmentRequests.AddOrUpdate($"rotating-{file}", 1, (_, existing) => existing + 1);
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            context.Response.ContentType = "video/mp2t";
-            context.Response.ContentLength = bytes.Length;
-            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
-            if (_hlsRotateAfterSegment)
-            {
-                _hlsRotateAfterSegment = false;
-                _hlsRotatingToken++;
-            }
-        });
-
-        _app.MapGet("/hls/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "hls", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            context.Response.ContentType = file.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
-                ? "application/vnd.apple.mpegurl"
-                : "video/mp2t";
-            context.Response.ContentLength = bytes.Length;
-            if (file.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
-            {
-                _hlsSegmentRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
-            }
-
-            var throttle = QueryInt(context, "bps", 0);
-            if (throttle <= 0)
-            {
-                await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
-                return;
-            }
-
-            var buffer = new byte[16 * 1024];
-            var written = 0;
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            while (written < bytes.Length)
-            {
-                var count = Math.Min(buffer.Length, bytes.Length - written);
-                Array.Copy(bytes, written, buffer, 0, count);
-                await context.Response.Body.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted)
-                    .ConfigureAwait(false);
-                written += count;
-                var expected = written / (double)throttle;
-                var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
-                }
-            }
-        });
-
-        _app.MapGet("/hls/expected", () =>
-        {
-            var directory = Path.Combine(AppContext.BaseDirectory, "hls");
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            long length = 0;
-            foreach (var name in new[] { "seg0.ts", "seg1.ts", "seg2.ts" })
-            {
-                var bytes = File.ReadAllBytes(Path.Combine(directory, name));
-                hash.AppendData(bytes);
-                length += bytes.Length;
-            }
-
-            return Results.Json(new
-            {
-                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),
-                bytes = length,
-            });
-        });
-
-        _app.MapGet("/hls/av-expected", () =>
-        {
-            var bytes = File.ReadAllBytes(Path.Combine(
-                AppContext.BaseDirectory, "hls", "av-muxed.mp4"));
-            return Results.Json(new
-            {
-                sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
-                bytes = bytes.Length,
-            });
-        });
-
-        _app.MapGet("/hls/stats", () => Results.Json(new
-        {
-            segments = _hlsSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
-        }));
-
-        _app.MapGet("/dash-rotating/manifest.mpd", () =>
-        {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "dash", "manifest.mpd"));
-            var tokenized = source.Replace(
-                "chunk-$RepresentationID$-$Number%05d$.m4s",
-                $"chunk-$RepresentationID$-$Number%05d$.m4s?token={_dashRotatingToken}",
-                StringComparison.Ordinal);
-            return Results.Text(tokenized, "application/dash+xml");
-        });
-
-        _app.MapGet("/dash-rotating/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var isChunk = file.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase) &&
-                          file.StartsWith("chunk-", StringComparison.OrdinalIgnoreCase);
-            if (isChunk && QueryInt(context, "token", 0) != _dashRotatingToken)
-            {
-                context.Response.StatusCode = 403;
-                context.Response.Headers["X-Url-Expired"] = "true";
-                await context.Response.WriteAsync("expired media token").ConfigureAwait(false);
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "dash", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            if (isChunk)
-            {
-                _dashSegmentRequests.AddOrUpdate($"rotating-{file}", 1, (_, existing) => existing + 1);
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            context.Response.ContentType = isChunk ? "video/iso.segment" : "video/mp4";
-            context.Response.ContentLength = bytes.Length;
-            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
-            if (isChunk && _dashRotateAfterSegment)
-            {
-                _dashRotateAfterSegment = false;
-                _dashRotatingToken++;
-            }
-        });
-
-        _app.MapGet("/dash-range/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "dash-range", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(context.Request.Headers.Range))
-            {
-                _dashRangeRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
-            }
-
-            await ServeAsync(context, bytes, file, allowRanges: true,
-                throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
-        });
-
-        _app.MapGet("/dash/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "dash", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            context.Response.ContentType = file.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
-                ? "application/dash+xml"
-                : "video/mp4";
-            context.Response.ContentLength = bytes.Length;
-            if (file.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase))
-            {
-                _dashSegmentRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
-            }
-
-            var throttle = QueryInt(context, "bps", 0);
-            if (throttle <= 0)
-            {
-                await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
-                return;
-            }
-
-            var buffer = new byte[16 * 1024];
-            var written = 0;
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            while (written < bytes.Length)
-            {
-                var count = Math.Min(buffer.Length, bytes.Length - written);
-                Array.Copy(bytes, written, buffer, 0, count);
-                await context.Response.Body.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted)
-                    .ConfigureAwait(false);
-                written += count;
-                var expected = written / (double)throttle;
-                var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
-                }
-            }
-        });
-
-        _app.MapGet("/dash/stats", () => Results.Json(new
-        {
-            segments = _dashSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
-        }));
-
-        _app.MapGet("/dash/expected", () =>
-        {
-            var directory = Path.Combine(AppContext.BaseDirectory, "dash");
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            long length = 0;
-            var files = new[] { "init-0.m4s", "chunk-0-00001.m4s", "chunk-0-00002.m4s", "chunk-0-00003.m4s" };
-            foreach (var name in files)
-            {
-                var bytes = File.ReadAllBytes(Path.Combine(directory, name));
-                hash.AppendData(bytes);
-                length += bytes.Length;
-            }
-
-            return Results.Json(new
-            {
-                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),
-                bytes = length,
-            });
-        });
-
-        _app.MapGet("/dash-av/{file}", async (HttpContext context, string file) =>
-        {
-            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var path = Path.Combine(AppContext.BaseDirectory, "dash-av", file);
-            if (!File.Exists(path))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-
-            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
-            context.Response.ContentType = file.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
-                ? "application/dash+xml"
-                : file.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
-                    ? "video/mp4"
-                    : "video/iso.segment";
-            context.Response.ContentLength = bytes.Length;
-            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
-        });
-
-        _app.MapGet("/dash-av/expected", () =>
-        {
-            var path = Path.Combine(AppContext.BaseDirectory, "dash-av", "muxed.mp4");
-            var bytes = File.ReadAllBytes(path);
-            return Results.Json(new
-            {
-                sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
-                bytes = bytes.Length,
-            });
-        });
-
-        _app.MapGet("/live/playlist.m3u8", () => Results.Text(
-            "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n" +
-            "#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:2.000000,\nseg0.ts\n" +
-            "#EXTINF:2.000000,\nseg1.ts\n",
-            "application/vnd.apple.mpegurl"));
-
-        _app.MapGet("/live/manifest.mpd", () => Results.Text(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"dynamic\" " +
-            "mediaPresentationDuration=\"PT6S\"><Period><AdaptationSet contentType=\"video\">" +
-            "<Representation id=\"0\" bandwidth=\"100000\"><SegmentTemplate " +
-            "media=\"chunk-$Number$.m4s\" duration=\"2\"/></Representation>" +
-            "</AdaptationSet></Period></MPD>",
-            "application/dash+xml"));
-
-        _app.MapGet("/drm/hls.m3u8", () => Results.Text(
-            "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:2\n" +
-            "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://key\",KEYFORMAT=\"com.apple.streamingkeydelivery\",KEYFORMATVERSIONS=\"1\"\n" +
-            "#EXTINF:2.000000,\nseg0.ts\n#EXT-X-ENDLIST\n",
-            "application/vnd.apple.mpegurl"));
-
-        _app.MapGet("/drm/manifest.mpd", () => Results.Text(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" " +
-            "mediaPresentationDuration=\"PT6S\"><Period><AdaptationSet contentType=\"video\">" +
-            "<ContentProtection schemeIdUri=\"urn:mpeg:dash:mp4protection:2011\" value=\"cenc\"/>" +
-            "<ContentProtection schemeIdUri=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"/>" +
-            "<Representation id=\"0\" bandwidth=\"100000\"><SegmentTemplate " +
-            "media=\"chunk-$Number$.m4s\" duration=\"2\"/></Representation>" +
-            "</AdaptationSet></Period></MPD>",
-            "application/dash+xml"));
-
         _app.MapGet("/download-all-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";
@@ -1119,21 +724,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
                 "<a href=\"javascript:void(0)\">JavaScript</a><br>" +
                 "<a href=\"#section\">Anchor</a><br>" +
                 "<img alt=\"Image asset\" src=\"/file/all-image.png?size=65536&seed=212\"><br>" +
-                "<a href=\"/hls/master.m3u8\">HLS stream</a>" +
-                "</body></html>").ConfigureAwait(false);
-        });
-
-        _app.MapGet("/media-page", async (HttpContext context) =>
-        {
-            context.Response.ContentType = "text/html";
-            await context.Response.WriteAsync(
-                "<html><body style=\"font:16px sans-serif;padding:24px\">" +
-                "<h3>Media detection test</h3>" +
-                "<video id=\"video\" controls width=\"320\" " +
-                "src=\"/file/media-video.mp4?size=524288&seed=201\"></video>" +
-                "<audio id=\"audio\" controls " +
-                "src=\"/file/media-audio.mp3?size=262144&seed=202\"></audio>" +
-                "<p><a href=\"/hls/multi.m3u8\">HLS stream link</a></p>" +
                 "</body></html>").ConfigureAwait(false);
         });
 
@@ -1201,8 +791,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
             _content.Clear();
             _versions.Clear();
             _requestCounts.Clear();
-            _hlsSegmentRequests.Clear();
-            _dashSegmentRequests.Clear();
             ResetAuthStats();
             ResetExpiringStats();
             ResetSiteAuthStats();
@@ -1454,11 +1042,6 @@ public sealed partial class TestServerHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (Ftp is not null)
-        {
-            await Ftp.DisposeAsync().ConfigureAwait(false);
-        }
-
         await _app.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         await _app.DisposeAsync().ConfigureAwait(false);
     }

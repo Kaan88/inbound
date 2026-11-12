@@ -91,7 +91,7 @@
       await read();
       return true;
     } catch (error) {
-      notice = error instanceof Error ? error.message : 'The Host did not take the change.';
+      notice = error instanceof Error ? error.message : 'Inbound did not take the change.';
       // Refused: the tree goes back to the Host's choice.
       pending = null;
       return false;

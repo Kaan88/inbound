@@ -103,6 +103,14 @@ public sealed partial class MainWindow
             // This PC's latest is also what a shown server without a check of its own is held to.
             if (connection == _local || connection == _connection) UpdateStatusText();
         });
+        // UI.R41, review: an extension reached this PC's Host for the first time, so the hint goes now.
+        connection.ExtensionsSeenChanged += seen => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (connection != _local) return;
+            if (_localStatus is { } local) local.ExtensionsSeen = seen;
+            if (connection == _connection && _status is { } shown) shown.ExtensionsSeen = seen;
+            UpdateExtensionHint(false);
+        });
         // Only this PC's Host raises it (HostConnection never does for a server).
         connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
         {
@@ -262,7 +270,13 @@ public sealed partial class MainWindow
         {
             words = $"{text} · ";
             tailWords = tail is null ? string.Empty : $" · {tail}";
-            if (!Equals(UpdateLink.Content, updateLink)) UpdateLink.Content = updateLink;
+            if (!Equals(UpdateLink.Content, updateLink))
+            {
+                UpdateLink.Content = updateLink;
+                // UPD.N1: the same link is the update or What's new (_versionLinkUpdates).
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(UpdateLink, _versionLinkUpdates ? "Update available" : $"Version {updateLink}, what's new");
+                ToolTipService.SetToolTip(UpdateLink, _versionLinkUpdates ? "Check for updates and install the new version" : "What's new in this version");
+            }
         }
 
         if (ConnectionText.Text != words) ConnectionText.Text = words;
@@ -273,8 +287,15 @@ public sealed partial class MainWindow
         if (ConnectionTail.Visibility != tailShown) ConnectionTail.Visibility = tailShown;
     }
 
-    /// <summary>UI.R37: the status bar's "update available" link runs Help > Check for updates.</summary>
-    private void UpdateLink_Click(object sender, RoutedEventArgs e) => MenuUpdate_Click(sender, e);
+    /// <summary>
+    /// UI.R37: the status bar's "update available" link runs Help > Check for updates; UPD.N1: with no update waiting,
+    /// the version itself is the link, to What's new.
+    /// </summary>
+    private void UpdateLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (_versionLinkUpdates) _ = OpenUpdateDialogAsync();
+        else _ = ShowInstalledWhatsNewAsync();
+    }
 
     /// <summary>The switchers' menus (toolbar, status bar, Tasks > Show Downloads Of): This PC, the saved servers, Servers….</summary>
     private void FillServerMenu(IList<MenuFlyoutItemBase> items)
@@ -515,7 +536,7 @@ public sealed partial class MainWindow
     private void NoteRemoteCompletion(JobDto job)
     {
         if (!_connection.IsRemote || LocalSettings?.NotifyOnCompletion != true) return;
-        ShowPassingStatus($"Finished on {_connection.Target.Name}: {job.FileName}");
+        ShowPassingStatus($"Completed on {_connection.Target.Name}: {job.FileName}");
     }
 
     private void MenuServers_Click(object sender, RoutedEventArgs e) => _ = ShowServersDialogAsync();
@@ -645,7 +666,7 @@ public sealed partial class MainWindow
         panel.Children.Add(name);
         panel.Children.Add(address);
         panel.Children.Add(password);
-        panel.Children.Add(SettingsWindow.Hint("The password is used once, to pair this PC with the server, and isn't kept. The server lists this PC under Settings, Sign-in and browsers, where the pairing can be removed."));
+        panel.Children.Add(SettingsWindow.Hint("The password is used once, to pair this PC with the server, and isn't kept. The server lists this PC under Options, Sign-in and browsers, where the pairing can be removed."));
         panel.Children.Add(plainHttp);
         panel.Children.Add(plainHint);
         panel.Children.Add(message);
@@ -769,7 +790,7 @@ public sealed partial class MainWindow
 
         if (!told)
             await ShowMessageAsync("Servers",
-                $"{server.Name} couldn't be reached, so it still lists this PC as paired. Remove it there in the web UI (Settings, Sign-in and browsers).");
+                $"{server.Name} couldn't be reached, so it still lists this PC as paired. Remove it there in the web UI (Options, Sign-in and browsers).");
     }
 
     // ---- Options while a server is shown ------------------------------------------------------------------------------
@@ -905,6 +926,8 @@ public sealed partial class MainWindow
 
         var pages = RemoteSettingsRules.PagesFor(server.Hello?.Capabilities, hostKind);
         var mine = local.Settings;
+        // Review of UI.R41: this PC's status as just fetched; the copy kept from its last snapshot can be old while a server is shown.
+        if (local.Status is not null) _localStatus = local.Status;
         var window = new SettingsWindow { Title = $"Options — {serverName} — Inbound Download Manager" };
         OptionsWindowCreated(window);
 
@@ -920,7 +943,7 @@ public sealed partial class MainWindow
         var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = mine.LaunchAtStartup };
         var closeCompletely = new CheckBox { Content = "Close the window completely (it opens a moment slower next time)", IsChecked = mine.CloseWindowCompletely };
         var providerOpens = ProviderOpensBox();
-        var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };
+        var integration = new CheckBox { Content = "Accept downloads sent from your browser", IsChecked = mine.BrowserIntegrationEnabled };
         var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = mine.ClipboardMonitoring };
         var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = mine.ShowCompletionDialog };
         var notify = new CheckBox { Content = "Show a notification", IsChecked = mine.NotifyOnCompletion };
@@ -938,7 +961,9 @@ public sealed partial class MainWindow
             SettingsWindow.Hint("Shows this PC's downloads in the window and opens this PC's Options, with its folders, connection and the rest."),
             SettingsWindow.Section("Startup"), launch,
             SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
-            SettingsWindow.Section("Capturing downloads"), integration, clipboard,
+            SettingsWindow.Section("Browser downloads"), integration, clipboard,
+            // UI.R41: this PC's extensions; the server's pair with it from the extension's Options.
+            SettingsWindow.Section("Browser extension"), SettingsWindow.Hint(ExtensionPromoRules.SectionHint), ExtensionLinksPanel(_localStatus),
             SettingsWindow.Section($"When a download on {serverName} finishes, while this window is open"), completionDialog, notify,
             SettingsWindow.Hint($"For {serverName}, the notification is a line in this window's status bar, and no sound plays."),
             SettingsWindow.Section("Updates"), autoUpdate, updateInterval);
@@ -1150,7 +1175,7 @@ public sealed partial class MainWindow
                 localLatest.PlayCompletionSound = sound.IsChecked == true;
                 localLatest.EventSoundFiles = sounds;
                 var localResult = (await _local.UpdateSettingsAsync(localLatest)).GetPayload<SettingsResult>();
-                if (!localResult.Ok) thisPcProblem = localResult.Error ?? "This PC's Host didn't take them.";
+                if (!localResult.Ok) thisPcProblem = localResult.Error ?? "This PC didn't take them.";
                 else
                 {
                     KeepLocalSettings(localResult.Settings);
@@ -1165,7 +1190,7 @@ public sealed partial class MainWindow
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
             {
-                thisPcProblem = "This PC's Host isn't connected.";
+                thisPcProblem = "This PC isn't connected.";
             }
 
             if (thisPcProblem is not null)

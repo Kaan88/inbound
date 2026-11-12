@@ -151,7 +151,8 @@ internal readonly record struct FileSortFacts(int Index, string Path, long Size,
 internal static class TorrentDetailsSort
 {
     /// <summary>The keys whose values change as the torrent runs: a refresh sorts again by them (unless held).</summary>
-    public static bool Live(string? key) => key is "progress" or "priority" or "has" or "down" or "up" or "seeds" or "peers" or "next" or "status";
+    public static bool Live(string? key) => key is "progress" or "priority" or "has" or "down" or "up" or "seeds" or "peers" or "next" or "status"
+        or "done" or "received" or "sent" or "message";
 
     /// <summary>The files in the torrent's own order (<paramref name="rows"/> as given) or by a column.</summary>
     public static IEnumerable<T> Files<T>(IEnumerable<T> rows, Func<T, FileSortFacts> facts, string? key, bool ascending) => key switch
@@ -160,6 +161,7 @@ internal static class TorrentDetailsSort
         "size" => ListSort.Order(rows, row => facts(row).Size, null, ascending),
         "progress" => ListSort.Order(rows, row => facts(row).Progress ?? 0, null, ascending, row => facts(row).Progress is null),
         "priority" => ListSort.Order(rows, row => facts(row).PriorityRank, null, ascending),
+        "done" => ListSort.Order(rows, row => facts(row).Done ?? 0, null, ascending, row => facts(row).Done is null),
         _ => rows,
     };
 
@@ -175,6 +177,8 @@ internal static class TorrentDetailsSort
             "has" => ListSort.Order(busiest, peer => double.IsFinite(peer.Progress) ? Math.Clamp(peer.Progress, 0, 1) : 0, null, ascending),
             "down" => ListSort.Order(busiest, peer => peer.DownloadRate, null, ascending),
             "up" => ListSort.Order(busiest, peer => peer.UploadRate, null, ascending),
+            "received" => ListSort.Order(busiest, peer => peer.Downloaded, null, ascending),
+            "sent" => ListSort.Order(busiest, peer => peer.Uploaded, null, ascending),
             _ => busiest,
         };
     }
@@ -190,6 +194,8 @@ internal static class TorrentDetailsSort
             "seeds" => ListSort.Order(byTier, tracker => tracker.Seeds, null, ascending, tracker => tracker.Seeds < 0),
             "peers" => ListSort.Order(byTier, tracker => tracker.Peers, null, ascending, tracker => tracker.Peers < 0),
             "next" => ListSort.Order(byTier, tracker => tracker.NextAnnounce, null, ascending, tracker => tracker.NextAnnounce < 0),
+            "tier" => ListSort.Order(byTier, tracker => tracker.Tier, null, ascending),
+            "message" => ListSort.Order(byTier, tracker => tracker.Message.Trim(), NaturalStringComparer.Instance, ascending, tracker => string.IsNullOrWhiteSpace(tracker.Message)),
             _ => byTier,
         };
     }

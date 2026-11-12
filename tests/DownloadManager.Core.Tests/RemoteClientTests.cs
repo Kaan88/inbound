@@ -104,6 +104,76 @@ public sealed class RemoteClientTests
         Assert.Equal(0, there.Received(MessageTypes.RemoteContainerPreview) + there.Received(MessageTypes.RemoteContainerSendToJd));
     }
 
+    // T10.B2: Open as Torrent on another server's finished .torrent download, sent to its provider account. The file is
+    // the server's own, so its path goes as it is (the server reads it within its folders, as its web UI does); it is
+    // never looked for on this PC, nor uploaded.
+    [Fact]
+    public async Task AServersOwnTorrentFileGoesToItsProviderByItsPathAndOnlyWhileThatServerIsShown()
+    {
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        there.Answer(MessageTypes.RemoteAdd, MessageTypes.RemoteAddResult, new RemoteAddResultDto { Ok = true, Job = there.Job });
+        there.Answer(MessageTypes.RemoteClassify, MessageTypes.RemoteClassifyResult, new RemoteClassifyResult { Ok = true, Kind = "torrentFile" });
+        await using var client = new FakeHost().NewClient(new UiQueue());
+        // Nothing listens there: an upload would fail with "Couldn't reach".
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+        const string serverPath = "/srv/downloads/Torrents/ubuntu.torrent";
+
+        // Not one of its downloads: looked for on this PC, and refused without asking the server.
+        var refused = await client.AddAsync(new RemoteAddRequestDto { Input = serverPath }).WaitAsync(Patience);
+        Assert.False(refused.Ok);
+        Assert.Equal(0, there.Received(MessageTypes.RemoteAdd));
+
+        var mark = client.UseServerFiles([serverPath + " "]);
+        var classified = await client.ClassifyAsync(serverPath, withFiles: true).WaitAsync(Patience);
+        Assert.True(classified.Ok, classified.Error);
+        Assert.Equal(serverPath, there.LastPayload(MessageTypes.RemoteClassify)!.Value.GetProperty("text").GetString());
+        await using (var classifier = client.OpenClassifier(withFiles: true))
+        {
+            Assert.True((await classifier.ClassifyAsync(serverPath, CancellationToken.None).WaitAsync(Patience)).Ok);
+        }
+
+        var added = await client.AddAsync(new RemoteAddRequestDto { Input = serverPath, ApproveUncached = true }).WaitAsync(Patience);
+        Assert.True(added.Ok, added.Error);
+        Assert.Equal(serverPath, there.LastPayload(MessageTypes.RemoteAdd)!.Value.GetProperty("input").GetString());
+
+        // The row's add is over: the same path is a file on this PC again, looked for here (and not found).
+        var second = client.UseServerFiles([serverPath]);
+        mark.Dispose();
+        Assert.True((await client.AddAsync(new RemoteAddRequestDto { Input = serverPath, ApproveUncached = true }).WaitAsync(Patience)).Ok);
+        second.Dispose();
+        second.Dispose();
+        var afterRow = there.Received(MessageTypes.RemoteAdd);
+        Assert.False((await client.AddAsync(new RemoteAddRequestDto { Input = serverPath }).WaitAsync(Patience)).Ok);
+        Assert.Equal(afterRow, there.Received(MessageTypes.RemoteAdd));
+
+        // Another server shown (or this one again): forgotten, and a mark from before it no longer counts.
+        using var stale = client.UseServerFiles([serverPath]);
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+        var before = there.Received(MessageTypes.RemoteAdd);
+        Assert.False((await client.AddAsync(new RemoteAddRequestDto { Input = serverPath }).WaitAsync(Patience)).Ok);
+        Assert.Equal(before, there.Received(MessageTypes.RemoteAdd));
+        using var fresh = client.UseServerFiles([serverPath]);
+        stale.Dispose();
+        Assert.True((await client.AddAsync(new RemoteAddRequestDto { Input = serverPath, ApproveUncached = true }).WaitAsync(Patience)).Ok);
+    }
+
+    [Fact]
+    public async Task ThisPcsHostIgnoresServerFilesAndSendsPathsAsTheyAre()
+    {
+        var here = new FakeHost();
+        here.Answer(MessageTypes.RemoteAdd, MessageTypes.RemoteAddResult, new RemoteAddResultDto { Ok = true, Job = here.Job });
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        var path = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.torrent");
+        using var mark = client.UseServerFiles([path]);
+
+        var added = await client.AddAsync(new RemoteAddRequestDto { Input = path }).WaitAsync(Patience);
+        Assert.True(added.Ok, added.Error);
+        Assert.Equal(path, here.LastPayload(MessageTypes.RemoteAdd)!.Value.GetProperty("input").GetString());
+    }
+
     // ---- container uploads to another server: retry and a reference that has gone ----------------------
 
     private const string TokenForTests = "ibt_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

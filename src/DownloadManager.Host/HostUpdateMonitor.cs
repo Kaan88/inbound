@@ -15,7 +15,6 @@ internal sealed class HostUpdateMonitor : IDisposable
     private volatile bool _waitingForIdle;
     private Action<string, string>? _notify;
     private UpdateCheckResult? _available;
-    private string? _notifiedVersion;
     private bool _checking;
     private volatile bool _autoCheck;
     private int _intervalHours = 24;
@@ -26,7 +25,7 @@ internal sealed class HostUpdateMonitor : IDisposable
         _service = service;
         _log = log;
         _timer = new System.Threading.Timer(
-            _ => _ = CheckAsync(manual: false), null, Timeout.Infinite, Timeout.Infinite);
+            _ => _ = CheckAsync(), null, Timeout.Infinite, Timeout.Infinite);
         // M2: the retry installs the version already found; only the scheduled check fetches the manifest.
         _retryTimer = new System.Threading.Timer(
             _ => _ = RetryInstallAsync(), null, Timeout.Infinite, Timeout.Infinite);
@@ -77,7 +76,7 @@ internal sealed class HostUpdateMonitor : IDisposable
 
         try
         {
-            await InstallAsync(automatic: true).ConfigureAwait(false);
+            await InstallAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -124,7 +123,7 @@ internal sealed class HostUpdateMonitor : IDisposable
         }
         if (startCheck)
         {
-            _ = CheckAsync(manual: false);
+            _ = CheckAsync();
         }
     }
 
@@ -135,11 +134,9 @@ internal sealed class HostUpdateMonitor : IDisposable
         ApplySettings(_service.GetSettings());
         if (_autoCheck)
         {
-            _ = CheckAsync(manual: false);
+            _ = CheckAsync();
         }
     }
-
-    public void CheckNow() => _ = CheckAsync(manual: true);
 
     /// <summary>
     /// The helper records success only once this Host has survived starting, which is after the
@@ -172,10 +169,7 @@ internal sealed class HostUpdateMonitor : IDisposable
             $"Version {outcome.Version} could not be installed. You can try again from the tray or Help menu.");
     }
 
-    /// <summary>The tray's Install item; it always says why an install could not start.</summary>
-    public Task InstallAsync() => InstallAsync(automatic: false);
-
-    private async Task InstallAsync(bool automatic)
+    private async Task InstallAsync()
     {
         UpdateCheckResult? check;
         lock (_sync)
@@ -196,8 +190,8 @@ internal sealed class HostUpdateMonitor : IDisposable
             lock (_sync)
             {
                 retry = !_disposed && _autoCheck;
-                // M2: one balloon per version on the automatic path; the tray item answers every click.
-                notify = _postponement.ShouldNotify(check.AvailableVersion) || !automatic;
+                // M2: one balloon per version.
+                notify = _postponement.ShouldNotify(check.AvailableVersion);
                 if (retry)
                 {
                     _retryTimer.Change(_postponement.NextDelay(), Timeout.InfiniteTimeSpan);
@@ -224,13 +218,17 @@ internal sealed class HostUpdateMonitor : IDisposable
             _postponement.Reset();
         }
 
-        _notify?.Invoke("Installing update", $"Version {result.Version} will be installed; the Host is restarting.");
+        _notify?.Invoke("Installing update", $"Version {result.Version} will be installed; Inbound's background program is restarting.");
         _service.RequestUpdateShutdown();
     }
 
-    public async Task CheckAsync(bool manual)
+    /// <summary>
+    /// The automatic check, on the timer and at start. The tray's Check for Updates and Install update open the window's
+    /// update dialog (UI.R40), which asks the Host itself, so nothing here is manual.
+    /// </summary>
+    private async Task CheckAsync()
     {
-        if (!manual && !_autoCheck) return;
+        if (!_autoCheck) return;
         lock (_sync)
         {
             if (_checking)
@@ -255,8 +253,7 @@ internal sealed class HostUpdateMonitor : IDisposable
             }
 
             var skipped = _service.GetSettings().SkippedUpdateVersion;
-            if (!manual &&
-                string.Equals(check.AvailableVersion, skipped, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(check.AvailableVersion, skipped, StringComparison.OrdinalIgnoreCase))
             {
                 lock (_sync)
                 {
@@ -266,38 +263,17 @@ internal sealed class HostUpdateMonitor : IDisposable
                 return;
             }
 
-            if (!manual)
+            if (!_autoCheck) return;
+            lock (_sync) _available = check;
+            if (_service.UpdateBeingInstalled()) return;
+            // The tray's Install update still offers it (it opens the window's update dialog); only the automatic retry waits.
+            if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
             {
-                if (!_autoCheck) return;
-                lock (_sync) _available = check;
-                if (_service.UpdateBeingInstalled()) return;
-                // The tray still offers it; only the automatic retry waits.
-                if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
-                {
-                    _log($"Not retrying update {check.AvailableVersion} automatically yet; it failed recently.");
-                    return;
-                }
-
-                await InstallAsync(automatic: true).ConfigureAwait(false);
+                _log($"Not retrying update {check.AvailableVersion} automatically yet; it failed recently.");
                 return;
             }
 
-            lock (_sync)
-            {
-                _available = check;
-                if (!manual &&
-                    string.Equals(_notifiedVersion, check.AvailableVersion, StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-
-                _notifiedVersion = check.AvailableVersion;
-            }
-
-            _log($"Update {check.AvailableVersion} available.");
-            _notify?.Invoke(
-                "Update available",
-                $"Inbound Download Manager {check.AvailableVersion} is ready. Use the tray or Help menu to install it.");
+            await InstallAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

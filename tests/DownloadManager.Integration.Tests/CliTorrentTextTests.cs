@@ -5,7 +5,8 @@ namespace DownloadManager.Integration.Tests;
 
 /// <summary>
 /// What <c>dm torrent</c> prints for text it did not write (audit 4 L15) and for a reply that is not the result it asked
-/// for (audit 4 M12). Pure functions of the CLI, called directly.
+/// for (audit 4 M12). Pure functions of the CLI, called directly. <see cref="CliText"/> has its own tests in
+/// <c>CliTextTests</c>; <c>TorrentCommands.Printable</c> is that one.
 /// </summary>
 public sealed class CliTorrentTextTests
 {
@@ -18,17 +19,6 @@ public sealed class CliTorrentTextTests
     public void ATrackerIsShownWithoutWhatCouldBeAPasskey(string url, string shown)
     {
         Assert.Equal(shown, TorrentCommands.TrackerShown(url));
-    }
-
-    [Fact]
-    public void TextAPeerSendsLosesWhatATerminalWouldActOn()
-    {
-        var shown = TorrentCommands.Printable("qBit\u001b[2J‮torrent");
-        Assert.DoesNotContain('\u001b', shown);
-        Assert.DoesNotContain('‮', shown);
-        Assert.StartsWith("qBit", shown, StringComparison.Ordinal);
-        Assert.EndsWith("torrent", shown, StringComparison.Ordinal);
-        Assert.Equal(string.Empty, TorrentCommands.Printable(null));
     }
 
     [Fact]

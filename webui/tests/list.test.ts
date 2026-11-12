@@ -236,11 +236,11 @@ describe('deleting', () => {
   });
 
   it('keeps Delete Completed to the list', () => {
-    expect(deleteCompletedText(3)).toBe('Remove 3 completed item(s) from the list? The downloaded files will stay on disk.');
-    // Review 4:L9: seeding torrents are completed too; removing them stops seeding.
-    expect(deleteCompletedText(2, 1)).toBe('Remove 2 completed item(s) from the list? The downloaded files will stay on disk. '
-      + '1 of them is a torrent that is seeding; removing it stops seeding.');
-    expect(deleteCompletedText(2, 2)).toContain('2 of them are torrents that are seeding; removing them stops seeding.');
+    expect(deleteCompletedText(3)).toBe('Delete 3 completed download(s) from the list? The downloaded files will stay on disk.');
+    // Review 4:L9: seeding torrents are completed too; deleting them stops seeding.
+    expect(deleteCompletedText(2, 1)).toBe('Delete 2 completed download(s) from the list? The downloaded files will stay on disk. '
+      + '1 of them is a torrent that is seeding; deleting it stops seeding.');
+    expect(deleteCompletedText(2, 2)).toContain('2 of them are torrents that are seeding; deleting them stops seeding.');
   });
 });
 

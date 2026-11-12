@@ -740,7 +740,7 @@ public sealed partial class ArchiveCoordinator
         if (running.Count > 0) parts.Add($"Downloading: {Names(running)}");
         if (queued.Count > 0) parts.Add($"Waiting for download: {Names(queued)}");
         if (held.Count > 0) parts.Add($"Not started: {Names(held)}");
-        if (paused.Count > 0) parts.Add($"Paused: {Names(paused)}");
+        if (paused.Count > 0) parts.Add($"Stopped: {Names(paused)}");
         return string.Join("; ", parts);
     }
 
@@ -751,7 +751,7 @@ public sealed partial class ArchiveCoordinator
         if (running.Count > 0) parts.Add($"still downloading {Names(running)}");
         if (queued.Count > 0) parts.Add($"{Names(queued)} waiting to download");
         if (held.Count > 0) parts.Add($"{Names(held)} not started");
-        if (paused.Count > 0) parts.Add($"{Names(paused)} paused");
+        if (paused.Count > 0) parts.Add($"{Names(paused)} stopped");
         return string.Join("; ", parts);
     }
 

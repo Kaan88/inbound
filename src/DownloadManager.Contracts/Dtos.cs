@@ -88,7 +88,8 @@ public sealed class JobDto
     public string? Description { get; set; }
     public string? ExpectedSha256 { get; set; }
     /// <summary>The content type the browser hand-off gave (an HLS or DASH playlist's, say), so a saved list adds a
-    /// stream again as a stream (review 1 N6). Null when there was none; older Hosts leave it out.</summary>
+    /// stream again as a stream (review 1 N6), which then fails as one: stream downloading was cut in 0.7.2. Null when
+    /// there was none; older Hosts leave it out.</summary>
     public string? HandoffContentType { get; set; }
     public string? QueueName { get; set; }
     public string StartMode { get; set; } = "startNow";
@@ -304,6 +305,11 @@ public sealed class SettingsDto
     /// while it is on, since they would go around it. A Host whose torrent engine can't use a proxy starts no torrent then.
     /// </summary>
     public bool TorrentUseProxy { get; set; }
+    /// <summary>
+    /// Only passed through: stream downloading and this setting were cut in 0.7.2, and this Host never sets it nor reads
+    /// it. A 0.7.1 server still has it and refuses a settings update that changes it, so a window managing such a
+    /// server sends back the value that server gave. Remove when 0.7.1 servers no longer need managing.
+    /// </summary>
     public string? FfmpegPath { get; set; }
     public string? PostDownloadCommand { get; set; }
     /// <summary>
@@ -357,6 +363,20 @@ public sealed class HostStatusDto
     /// field. Changes arrive as <see cref="MessageTypes.UpdateLatest"/>.
     /// </summary>
     public string? LatestVersion { get; set; }
+
+    /// <summary>
+    /// UI.R41: the browsers whose extension has reached this Host through the native host (<see cref="ExtensionBrowsers"/>),
+    /// each with the last day it did. Empty when none has yet; null from a Host that can't know (the headless server,
+    /// whose extensions pair over the network) or one older than this field.
+    /// </summary>
+    public Dictionary<string, DateTimeOffset>? ExtensionsSeen { get; set; }
+}
+
+/// <summary>UI.R41: the payload of <see cref="MessageTypes.ExtensionsSeen"/>.</summary>
+public sealed class ExtensionsSeenDto
+{
+    /// <summary>As <see cref="HostStatusDto.ExtensionsSeen"/>, never null here.</summary>
+    public Dictionary<string, DateTimeOffset> Seen { get; set; } = new();
 }
 
 /// <summary>UI.R37: the payload of <see cref="MessageTypes.UpdateLatest"/>.</summary>
@@ -421,6 +441,12 @@ public sealed class ClientHelloDto
     /// can only ever ask for less than it would get without the field.
     /// </summary>
     public string? Role { get; set; }
+
+    /// <summary>
+    /// UI.R41: the browser whose extension this native host serves (<see cref="ExtensionBrowsers"/>), so the Host can
+    /// tell the window which extensions have reached it. Null from every other client and from an older native host.
+    /// </summary>
+    public string? Browser { get; set; }
 }
 
 public sealed class IncompatibleDto
@@ -530,7 +556,8 @@ public sealed class AddJobRequest
     public int? Connections { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
     public string? Description { get; set; }
-    /// <summary>The MIME type a browser hand-off saw. Decides whether the download is an HLS playlist or a DASH manifest; the description does not.</summary>
+    /// <summary>The MIME type a browser hand-off saw. Decides whether the download is an HLS playlist or a DASH manifest
+    /// (which fails at its start: stream downloading was cut in 0.7.2) or a .torrent file; the description does not.</summary>
     public string? ContentType { get; set; }
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }

@@ -13,9 +13,24 @@ if (args.Length == 2 && args[0] == "--generate-key")
     return 0;
 }
 
+// UPD.N1: --notes-from <changelog.json> puts that version's lines in the manifest as its unsigned "notes".
+string? changelogPath = null;
+var notesAt = Array.IndexOf(args, "--notes-from");
+if (notesAt >= 0)
+{
+    if (notesAt + 1 >= args.Length)
+    {
+        Console.Error.WriteLine("--notes-from needs the path of changelog.json.");
+        return 2;
+    }
+
+    changelogPath = args[notesAt + 1];
+    args = args.Where((_, index) => index != notesAt && index != notesAt + 1).ToArray();
+}
+
 if (args.Length is < 5 or > 7)
 {
-    Console.Error.WriteLine("usage: UpdateSigner <output-dir> <version> <installer-url> <package-file> <private-key-file> [channel] [manifest-name]");
+    Console.Error.WriteLine("usage: UpdateSigner <output-dir> <version> <installer-url> <package-file> <private-key-file> [channel] [manifest-name] [--notes-from <changelog.json>]");
     Console.Error.WriteLine("       UpdateSigner --generate-key <new-private-key-file>");
     return 2;
 }
@@ -33,6 +48,34 @@ if (manifestName != Path.GetFileName(manifestName) || !manifestName.EndsWith(".j
     Console.Error.WriteLine("manifest-name must be a plain .json file name.");
     return 2;
 }
+List<DownloadManager.Contracts.ChangelogItem>? notes = null;
+if (changelogPath is not null)
+{
+    IReadOnlyList<DownloadManager.Contracts.ChangelogVersion> changelog;
+    try
+    {
+        changelog = DownloadManager.Contracts.Changelog.Parse(await File.ReadAllTextAsync(changelogPath));
+    }
+    catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+    {
+        Console.Error.WriteLine($"{changelogPath} could not be read: {ex.Message}");
+        return 2;
+    }
+
+    if (DownloadManager.Contracts.Changelog.Find(changelog, version) is not { } entry)
+    {
+        Console.Error.WriteLine($"{changelogPath} has no entry for {version}. Write its lines first (docs\\release-builds.md).");
+        return 2;
+    }
+
+    notes = DownloadManager.Contracts.UpdateNotes.From(entry);
+    if (DownloadManager.Contracts.UpdateNotes.Problem(notes) is { } problem)
+    {
+        Console.Error.WriteLine($"The changelog lines of {version} can't go into the manifest: {problem}");
+        return 2;
+    }
+}
+
 var bytes = await File.ReadAllBytesAsync(packagePath);
 var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 Directory.CreateDirectory(outputDir);
@@ -45,6 +88,17 @@ await File.WriteAllTextAsync(Path.Combine(outputDir, "public.pem"), rsa.ExportSu
 var canonical = $"{version}\n{channel}\n{installerUrl}\n{bytes.Length}\n{sha256}";
 var signature = rsa.SignData(
     Encoding.UTF8.GetBytes(canonical), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+var camelCase = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+string? notesSignature = null;
+if (notes is not null)
+{
+    // Not in the signed text above, so older clients verify without it. It has its own signature over that text and the
+    // notes (review of 0.7.2, security-2), and clients show notes only when it verifies, as plain text.
+    var notesText = DownloadManager.Contracts.UpdateManifestVerifier.NotesCanonical(canonical, JsonSerializer.SerializeToElement(notes, camelCase))!;
+    notesSignature = Convert.ToBase64String(rsa.SignData(
+        Encoding.UTF8.GetBytes(notesText), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+}
+
 var manifest = new
 {
     version,
@@ -53,6 +107,8 @@ var manifest = new
     size = bytes.Length,
     sha256,
     signature = Convert.ToBase64String(signature),
+    notes,
+    notesSignature,
 };
 await File.WriteAllTextAsync(
     Path.Combine(outputDir, manifestName),
@@ -60,6 +116,7 @@ await File.WriteAllTextAsync(
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     }));
-Console.WriteLine($"signed {version} ({bytes.Length} bytes, {sha256})");
+Console.WriteLine($"signed {version} ({bytes.Length} bytes, {sha256})" + (notes is null ? string.Empty : $", {notes.Count} note lines"));
 return 0;

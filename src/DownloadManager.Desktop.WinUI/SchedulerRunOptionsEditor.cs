@@ -7,7 +7,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>Stages scheduler launch, synchronization and retry options for a schedule/queue.</summary>
 public sealed class SchedulerRunOptionsEditor
 {
-    private readonly CheckBox _startOnStartup = new() { Content = "Start this queue when the host starts" };
+    private readonly CheckBox _startOnStartup = new() { Content = "Start this queue when Inbound starts" };
     private readonly CheckBox _timedStart = new() { Content = "Start this queue at the scheduled time" };
     private readonly CheckBox _repeatEnabled = new() { Content = "Periodically check completed files for changes" };
     private readonly NumberBox _repeatMinutes = new()

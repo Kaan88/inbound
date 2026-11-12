@@ -390,10 +390,10 @@ function updateBadge(): void {
         : off
         ? "Inbound Download Manager: automatic sending is off"
         : paused
-          ? "Inbound Download Manager: catching is paused"
+          ? "Inbound Download Manager: sending is paused"
           : serverDown
             ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser"
-            : "Inbound Download Manager: catching downloads",
+            : "Inbound Download Manager: sending downloads",
     })?.catch?.(() => undefined);
   } catch { /* the badge is a convenience */ }
   if (paused && badgeTimer === undefined) {
@@ -418,7 +418,7 @@ async function noteLeftInBrowser(fileName: string, reason: string, quiet: boolea
 async function noteAutomaticSendingOff(fileName: string): Promise<void> {
   let shown = false;
   try { shown = (await chrome.storage.session.get(AUTO_OFF_NOTICE_KEY))[AUTO_OFF_NOTICE_KEY] === true; } catch { /* show it */ }
-  await noteLeftInBrowser(fileName, "Automatic sending is off. Turn it on in the extension's Settings.", shown);
+  await noteLeftInBrowser(fileName, "Automatic sending is off. Turn it on in the extension's Options.", shown);
   if (!shown) {
     try { await chrome.storage.session.set({ [AUTO_OFF_NOTICE_KEY]: true }); } catch { /* shown again next time */ }
   }
@@ -578,7 +578,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
   }
 
   if (Date.now() < pauseUntil) {
-    if (!pageOwned) await noteLeftInBrowser(fileName, "Catching is paused.", true);
+    if (!pageOwned) await noteLeftInBrowser(fileName, "Sending is paused.", true);
     return false;
   }
 
@@ -604,7 +604,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
   // install without site access; Chrome and Edge grant it at install, but the user can withdraw it for a
   // site (or set it to "on click"), so every browser is asked (EXT.R5).
   if (!await canReadCookiesFor(item.url)) {
-    await noteLeftInBrowser(fileName, "The extension has no access to this site, so its sign-in could not be sent. Allow site access in the extension's Settings.", false);
+    await noteLeftInBrowser(fileName, "The extension has no access to this site, so its sign-in could not be sent. Allow site access in the extension's Options.", false);
     return false;
   }
 
@@ -1878,14 +1878,14 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             .includes(sourcePage ?? "")) {
         return { ok: false, error: "Folder browsing is available from the download destination screen." };
       }
-      if (!server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
+      if (!server) return { ok: false, error: "No server is paired. Pair one in the extension's Options." };
       // The server's allowed roots decide what can be listed (folders.browse); an empty path lists them.
       const result = await server.send("folders.browse", { path: typeof message.path === "string" ? message.path : "" }, 8000);
       return result && typeof result === "object" ? result : { ok: false, error: "The server did not list that folder." };
     }
 
     case "dm.pingServer": {
-      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can do that." };
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Options can do that." };
       if (!server) return { ok: false, error: "No server is paired." };
       const result = await server.send("host.ping", {}, 5000);
       return { ok: result?.ok !== false, server: serverStatus(), error: result?.ok === false ? extractError(result) : undefined };
@@ -1893,7 +1893,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
 
     case "dm.pairServer": {
       // Only from Settings, which asked the browser for access to the server's address first, on the click.
-      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can pair a server." };
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Options can pair a server." };
       const pairing = await pairWithServer(String(message.address ?? ""), String(message.code ?? ""), pairingName(navigator.userAgent));
       await storageRestricted;
       await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: pairing });
@@ -1904,7 +1904,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.unpairServer": {
-      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can do that." };
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Options can do that." };
       // The token asks the server to remove it (DELETE /api/pair/self), briefly; it is forgotten here whatever
       // the answer. When that fails, the server's web UI lists it under Paired apps until removed there.
       const leaving = server;
@@ -2088,7 +2088,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // The popup's This PC / Server switch (owner, 2026-11-08): changes where downloads go and nothing else.
       if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
       const wanted: TargetId = message.target === "server" ? "server" : "local";
-      if (wanted === "server" && !server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
+      if (wanted === "server" && !server) return { ok: false, error: "No server is paired. Pair one in the extension's Options." };
       settings = { ...settings, defaultTarget: wanted };
       await chrome.storage.local.set({ settings });
       updateBadge();
@@ -2388,7 +2388,7 @@ async function tabInfo(tabId: number): Promise<chrome.tabs.Tab | undefined> {
 
 const NOT_A_WEB_PAGE = "Download all links works on web pages. This page has no links to collect.";
 
-const SERVER_GONE = "The server is not paired any more. Choose This PC, or pair the server again in Settings.";
+const SERVER_GONE = "The server is not paired any more. Choose This PC, or pair the server again in Options.";
 
 /**
  * A page asked for the server, but none is paired now (unpaired while the window was open). Refused rather

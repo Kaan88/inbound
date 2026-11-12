@@ -18,6 +18,9 @@ export const infoReadMs = 10_000;
 
 export const dash = '—';
 
+/** A known zero speed, as the desktop's Torrent Info says it (TorrentInfoRules.ZeroRate). */
+export const zeroRate = `${bytes(0)}/s`;
+
 /** The localStorage key of the pane's on/off choice; on unless turned off. */
 export const infoKey = 'inbound.torrentInfo';
 
@@ -145,11 +148,12 @@ export function describeInfo(job: Job, settings: Parameters<typeof goalText>[1],
   const others = Math.max(0, torrent.peers - seeds);
   return {
     name: job.fileName || torrent.name || 'Torrent',
-    status: torrentStatusText(job) ?? (job.state === 'completed' ? 'Complete' : stateWord(job.state)),
+    status: torrentStatusText(job) ?? (job.state === 'completed' ? 'Completed' : stateWord(job.state)),
     percent: infoPercent(job),
     progress: progressText(job),
-    down: downloading ? speed(job.bytesPerSecond) || '0' : dash,
-    up: running ? speed(torrent.uploadRate) || '0' : dash,
+    // T7.B1: a complete torrent, seeding or not, has nothing left to download: a real 0, not "—".
+    down: downloading ? speed(job.bytesPerSecond) || zeroRate : job.state === 'completed' ? zeroRate : dash,
+    up: running ? speed(torrent.uploadRate) || zeroRate : dash,
     swarm: running ? `${seeds === 1 ? '1 seed' : `${seeds.toLocaleString('en-US')} seeds`} · ${peersText(others)}` : dash,
     timeLeft: (downloading && duration(timeSpanSeconds(job.estimatedRemaining))) || dash,
     ratio: `${ratioText(torrent.ratio)} · uploaded ${bytes(torrent.uploaded ?? 0) || '0 B'}`,

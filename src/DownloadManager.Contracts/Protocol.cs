@@ -93,6 +93,12 @@ public static class MessageTypes
     /// when a check finds a different one; a client that doesn't know it ignores it.
     /// </summary>
     public const string UpdateLatest = "update.latest";
+    /// <summary>
+    /// UI.R41, Host push to the sessions at this PC: a browser's extension reached this Host for the first time
+    /// (<see cref="ExtensionsSeenDto"/>, the whole list), so an open window can drop its extension hint at once. Never
+    /// sent to a web session or by a Host that doesn't keep count; a client that doesn't know it ignores it.
+    /// </summary>
+    public const string ExtensionsSeen = "extensions.seen";
     public const string HostCleanOrphans = "host.cleanOrphans";
     public const string HostCleanOrphansResult = "host.cleanOrphansResult";
     public const string HostActionResult = "host.actionResult";
@@ -114,6 +120,13 @@ public static class MessageTypes
     public const string UpdateInstall = "update.install";
     public const string UpdateInstallResult = "update.installResult";
     public const string UpdateDefer = "update.defer";
+
+    /// <summary>
+    /// UPD.N1: <c>{}</c>; answered with <see cref="ChangelogResult"/>, this Host's changelog (<see cref="ChangelogDto"/>),
+    /// for a web UI's "What's new". A Host from before it answers with an error.
+    /// </summary>
+    public const string ChangelogGet = "changelog.get";
+    public const string ChangelogResult = "changelog.result";
 
     // Remote provider accounts and items. Some of these wait on the network, and commands run one
     // at a time per connection, so a frontend sends those on a connection of their own.

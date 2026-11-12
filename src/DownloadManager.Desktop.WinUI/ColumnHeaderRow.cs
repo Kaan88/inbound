@@ -31,10 +31,12 @@ internal sealed class ColumnHeaderRow
     private readonly FrameworkElement _root;
     private readonly Action<string> _sort;
     private readonly Action _saved;
+    private readonly Action? _chosen;
     private readonly ListView _list;
     private readonly HashSet<Grid> _rows = [];
     private readonly Dictionary<string, Cell> _cells = new(StringComparer.Ordinal);
     private string _sortKey = string.Empty;
+    private string? _menuOpener;
     private bool _ascending;
 
     private sealed record Cell(ListColumn Column, Button Button, FontIcon Arrow, FrameworkElement? Grip);
@@ -42,16 +44,22 @@ internal sealed class ColumnHeaderRow
     /// <param name="root">The window's root, for theme colors and for a drag's coordinates, which must not move as the list scrolls sideways.</param>
     /// <param name="sort">Called with a column's key when its header is clicked.</param>
     /// <param name="saved">Called when a change of widths is finished, to save them.</param>
-    public ColumnHeaderRow(ListColumnLayout layout, Grid header, ListView list, FrameworkElement root, Action<string> sort, Action saved)
+    /// <param name="chosen">
+    /// UI.R42: called after the header's menu showed or hid a column or reset them all (widths included), to save the
+    /// choice and put the list in the order it shows now. With none, the header has no menu.
+    /// </param>
+    public ColumnHeaderRow(ListColumnLayout layout, Grid header, ListView list, FrameworkElement root, Action<string> sort, Action saved, Action? chosen = null)
     {
         _layout = layout;
         _header = header;
         _root = root;
         _sort = sort;
         _saved = saved;
+        _chosen = chosen;
         _list = list;
         Build();
         Apply(_header);
+        if (chosen is not null) BuildMenu();
 
         // One Tab stop for the whole header, and the arrow keys move along it.
         _header.TabFocusNavigation = KeyboardNavigationMode.Once;
@@ -164,7 +172,8 @@ internal sealed class ColumnHeaderRow
             VerticalContentAlignment = VerticalAlignment.Center,
         };
         AutomationProperties.SetName(button, column.Spoken);
-        AutomationProperties.SetHelpText(button, $"Sorts the list by {column.Spoken}. Selecting it again reverses the order. Shift with the Left or Right arrow changes the column's width.");
+        AutomationProperties.SetHelpText(button, $"Sorts the list by {column.Spoken}. Selecting it again reverses the order. Shift with the Left or Right arrow changes the column's width."
+            + (_chosen is null ? string.Empty : " Shift+F10 or the menu key chooses the columns."));
         if (column.Spoken != column.Title) ToolTipService.SetToolTip(button, column.Spoken);
         button.Click += (_, _) => _sort(column.SortKey());
         button.PreviewKeyDown += (_, args) => OnHeaderKey(column, args);
@@ -278,17 +287,100 @@ internal sealed class ColumnHeaderRow
         }
     }
 
-    public void SetColumnVisible(string key, bool visible)
+    /// <summary>The app's side: a column with nothing to show (no archive yet, a Host without priorities) stays away.</summary>
+    public void SetAvailable(string key, bool available)
     {
-        if (_layout.IsVisible(key) == visible) return;
-        _layout.SetVisible(key, visible);
-        if (_cells.TryGetValue(key, out var cell))
+        if (_layout.IsAvailable(key) == available) return;
+        _layout.SetAvailable(key, available);
+        Refresh();
+    }
+
+    /// <summary>Shows and hides the header's cells and the rows' cells as the layout says now, after it changed.</summary>
+    public void Refresh()
+    {
+        foreach (var cell in _cells.Values)
         {
-            cell.Button.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            if (cell.Grip is { } grip) grip.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            var visibility = _layout.IsVisible(cell.Column.Key) ? Visibility.Visible : Visibility.Collapsed;
+            if (cell.Button.Visibility != visibility) cell.Button.Visibility = visibility;
+            if (cell.Grip is { } grip && grip.Visibility != visibility) grip.Visibility = visibility;
         }
 
         ApplyToAll();
+    }
+
+    // ---- UI.R42: the columns menu ----
+
+    /// <summary>
+    /// A right-click on the header, or Shift+F10 or the menu key on a focused header cell (a context request bubbles up from
+    /// the cell to the header), opens the list's columns with a tick on those shown, then Reset columns. It is filled as it
+    /// opens, so it always says how the list is now.
+    /// </summary>
+    private void BuildMenu()
+    {
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            // The header cell the keyboard was on, so it can move to a neighbour if the menu hides that column.
+            _menuOpener = _header.XamlRoot is { } root && FocusManager.GetFocusedElement(root) is Button focused
+                ? _cells.Values.FirstOrDefault(cell => ReferenceEquals(cell.Button, focused))?.Column.Key
+                : null;
+            FillMenu(menu);
+        };
+        menu.Closed += (_, _) => RefocusAfterMenu();
+        _header.ContextFlyout = menu;
+        // An empty stretch of the header takes the right-click too.
+        _header.Background ??= new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+
+    private void FillMenu(MenuFlyout menu)
+    {
+        menu.Items.Clear();
+        foreach (var column in _layout.MenuColumns)
+        {
+            var key = column.Key;
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = column.Spoken,
+                IsChecked = _layout.IsVisible(key),
+                IsEnabled = _layout.CanChoose(key),
+            };
+            if (!item.IsEnabled) ToolTipService.SetToolTip(item, "This column always shows.");
+            item.Click += (_, _) => Choose(key, item.IsChecked);
+            menu.Items.Add(item);
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+        var reset = new MenuFlyoutItem { Text = "Reset columns" };
+        AutomationProperties.SetHelpText(reset, "Shows the columns the list starts with, at their first widths.");
+        reset.Click += (_, _) => ResetColumns();
+        menu.Items.Add(reset);
+    }
+
+    /// <summary>
+    /// Collapsing the focused header button drops focus, and the closing menu gives it back to that hidden button. So when
+    /// the menu hid the column it was opened from, the keyboard goes on to the nearest shown header cell, after the menu
+    /// has put focus back.
+    /// </summary>
+    private void RefocusAfterMenu()
+    {
+        var opener = _menuOpener;
+        _menuOpener = null;
+        if (opener is null || _layout.IsVisible(opener)) return;
+        if (!_cells.TryGetValue(_layout.FocusAfterHiding(opener), out var next)) return;
+        _header.DispatcherQueue.TryEnqueue(() => next.Button.Focus(FocusState.Keyboard));
+    }
+
+    private void Choose(string key, bool shown)
+    {
+        if (_layout.Choose(key, shown)) Refresh();
+        _chosen?.Invoke();
+    }
+
+    private void ResetColumns()
+    {
+        _layout.ResetColumns();
+        Refresh();
+        _chosen?.Invoke();
     }
 
     /// <summary>Everything as the layout says it, for after saved widths are loaded.</summary>
@@ -332,6 +424,25 @@ internal sealed class ColumnHeaderRow
             var definition = definitions[i];
             if (definition.Width != width) definition.Width = width;
             if (definition.MinWidth != minimum) definition.MinWidth = minimum;
+        }
+
+        if (!ReferenceEquals(grid, _header)) ShowCells(grid);
+    }
+
+    /// <summary>
+    /// A row's cells in a hidden column are collapsed, not only squeezed to no width, so nothing of them shows or is read
+    /// out. Only a cell that sits in one column with a header, other than the name, is touched: the icon cell and the
+    /// name cell, which can't be hidden, keep their own visibility. These cells take their visibility from here alone.
+    /// </summary>
+    private void ShowCells(Grid row)
+    {
+        foreach (var child in row.Children)
+        {
+            if (child is not FrameworkElement cell || Grid.GetColumnSpan(cell) != 1) continue;
+            var at = Grid.GetColumn(cell);
+            if (at >= _layout.Columns.Count || _layout.Columns[at] is not { HasHeader: true } column || column.Key == _layout.NameKey) continue;
+            var visibility = _layout.IsVisible(column.Key) ? Visibility.Visible : Visibility.Collapsed;
+            if (cell.Visibility != visibility) cell.Visibility = visibility;
         }
     }
 }

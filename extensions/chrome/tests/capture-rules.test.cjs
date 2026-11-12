@@ -35,7 +35,7 @@ test('web pages and images stay in the browser by default, said in the popup onl
     const decision = decide(name);
     assert.equal(decision.capture, false, name);
     assert.equal(decision.quiet, true, name);
-    assert.match(decision.reason, /never to catch/);
+    assert.match(decision.reason, /never to (send|send from)/);
   }
   const page = decide('', { url: 'https://files.test/', mime: 'text/html; charset=utf-8' });
   assert.deepEqual(page, { capture: false, reason: 'It is a web page.', quiet: true });
@@ -53,13 +53,26 @@ test('a rule the user set is said out loud, with the reason', () => {
 
   const notListed = decide('a.flac', {}, { ...on, interceptedExtensions: ['zip'] });
   assert.equal(notListed.quiet, false);
-  assert.match(notListed.reason, /\.flac is not on your list of file types to catch/);
+  assert.match(notListed.reason, /\.flac is not on your list of file types to send/);
 });
 
 test('blob: and data: downloads are left alone without a word', () => {
   for (const url of ['blob:https://page.test/1234', 'data:text/plain;base64,aGk=']) {
     assert.deepEqual(decideCapture({ url, fileName: 'x.zip' }, on), { capture: false, reason: null, quiet: true });
   }
+});
+
+test('CUT.1: a streaming playlist stays in the browser, said out loud; a plain .m3u list is caught', () => {
+  for (const [name, extra] of [
+    ['show.m3u8', {}],
+    ['manifest.mpd', {}],
+    ['play', { mime: 'application/vnd.apple.mpegurl' }],
+    ['video', { mime: 'application/dash+xml; charset=utf-8' }],
+    ['show.mp4', { url: 'https://cdn.test/live/index.m3u8?token=1' }],
+  ]) {
+    assert.deepEqual(decide(name, extra), { capture: false, reason: 'Streaming playlists stay in the browser.', quiet: false }, name);
+  }
+  assert.deepEqual(decide('radio.m3u', { mime: 'audio/x-mpegurl' }), { capture: true });
 });
 
 test('a redirect to a downloadable file decides by the final address', () => {

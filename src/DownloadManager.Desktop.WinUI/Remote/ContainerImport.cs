@@ -309,8 +309,8 @@ internal static partial class RemoteText
         return words.ToString();
     }
 
-    public const string ContainerReadLost = "The background Host didn't answer, so this file wasn't read. Nothing was added. Try again.";
-    public const string ContainerSendLost = "The background Host didn't answer, so it isn't known whether JDownloader got this file. Look in JDownloader before trying again.";
+    public const string ContainerReadLost = "Inbound's background program didn't answer, so this file wasn't read. Nothing was added. Try again.";
+    public const string ContainerSendLost = "Inbound's background program didn't answer, so it isn't known whether JDownloader got this file. Look in JDownloader before trying again.";
 
     /// <summary>Reading a file changes nothing, so the words about having possibly gone through don't apply.</summary>
     public static string ContainerReadFailure(string error) => error is HostLost or HostTooSlow ? ContainerReadLost : error;

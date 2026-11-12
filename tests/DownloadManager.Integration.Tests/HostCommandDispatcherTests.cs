@@ -1,7 +1,6 @@
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
-using DownloadManager.Engine;
 using DownloadManager.Persistence;
 using DownloadManager.Tests.Shared;
 using DownloadManager.Runtime;
@@ -473,7 +472,6 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         foreach (var change in new Action<SettingsDto>[]
                  {
                      s => s.PostDownloadCommand = @"C:\Windows\System32\cmd.exe /c echo",
-                     s => s.FfmpegPath = @"C:\Tools\ffmpeg.exe",
                      s => s.UpdateManifestUrl = "https://example.invalid/manifest.json",
                      s => s.UpdatePublicKey = "not the key",
                      s => s.AllowSystemCompletionActions = !s.AllowSystemCompletionActions,
@@ -547,8 +545,17 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         dispatcher.BroadcastUpdateProgress(new UpdateProgressDto { Stage = "downloading" });
         Assert.Equal(["update-progress", "update-progress"], platform.Opened);
 
+        // UI.R40: the install opens it once more (the update dialog kept it shut during a download it showed itself), so
+        // it is on screen while the install closes the main window; "installing" after "staging" doesn't open a third.
+        dispatcher.BroadcastUpdateProgress(new UpdateProgressDto { Stage = "staging" });
+        dispatcher.BroadcastUpdateProgress(new UpdateProgressDto { Stage = "installing" });
+        Assert.Equal(["update-progress", "update-progress", "update-progress"], platform.Opened);
+        dispatcher.BroadcastUpdateProgress(new UpdateProgressDto { Stage = "failed" });
+        dispatcher.BroadcastUpdateProgress(new UpdateProgressDto { Stage = "installing" });
+        Assert.Equal(4, platform.Opened.Count);
+
         // Every one of them still went to the client.
-        await session.UntilAsync(frames => frames.Count(f => f.Type == MessageTypes.UpdateProgress) == 5);
+        await session.UntilAsync(frames => frames.Count(f => f.Type == MessageTypes.UpdateProgress) == 9);
 
         var headless = new FakePlatform(new PlatformCapabilities(), _timeline);
         Dispatcher(service, headless).BroadcastUpdateProgress(new UpdateProgressDto { Stage = "downloading" });

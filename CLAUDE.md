@@ -29,7 +29,7 @@ URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
 duplicate Rename/Overwrite/Fail policies, category destination rules,
 last-folder memory, JSON list export/import, completion dialog/notification/
 sound, Download All link collection/filter/selection, batch handoff,
-FTP auth/resume, post-download hooks, external CLI control, connection profiles,
+post-download hooks, external CLI control, connection profiles,
 settings transfer, installer/native-host repair, upgrade/uninstall, installer-
 only updater (check/download/install/rollback/notifications/gating), the WinUI
 scheduler, list state views, multiselect bulk actions, delete-file choice,
@@ -43,12 +43,11 @@ their response headers with blocking `webRequest`, before Firefox's own Save dia
 Extension 0.5.0 sends downloads automatically by default. Its popup lists the newest 20 downloads of the app (and
 of a paired server) and can pause, resume, retry and delete them (and the file). It can optionally pair with the user's own Inbound server. A download
 from a site the extension has no access to stays in the browser with a note (EXT.R5).
-HLS master/media assembly including AES-128 (single and rotating keys) and
-alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
-byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
-expiring segment-token refresh,
-explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
-VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
+Stream downloading (HLS/DASH, FFmpeg muxing, DRM/live checks) and FTP were cut in 0.7.2 (CUT.1, owner-ticked in
+`docs\plans\feature-cuts.md`): a playlist address or HLS/DASH response fails at start with "Streaming playlists
+aren't downloaded; use a video downloader.", and ftp:// or ftps:// is refused with "FTP addresses aren't supported."
+Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
+a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
 credential boundaries, and expired-URL refresh are verified.
 TorBox and archive extraction ship in 0.5.x. 0.6.3 adds the web UI to the Windows app (D8): Setup ships `DownloadManager.Server.exe`, which the Host runs as a bridge (`--bridge`) only while Options > Web UI is on, with browser sessions limited to the app's folders. The desktop window can manage another Inbound server and the web UI can switch hosts (D9); the web UI follows the desktop window's flows (D2c). These were built and tested automatically but not yet tried in the running app. The headless server, web UI and Docker image (ROADMAP D1–D4) ship in

@@ -8,8 +8,7 @@ namespace DownloadManager.Integration.Tests;
 /// <summary>
 /// UI.R21 "Apply to all" (owner, 2026-11-08): a changed connections-per-download reaches running provider (TorBox)
 /// downloads and protected (pasted provider) links too, within the provider's per-file cap and the per-host limit,
-/// with no link refresh asked for or counted. A running FTP download is one connection by design, so for it the
-/// change is a no-op.
+/// with no link refresh asked for or counted.
 /// </summary>
 public sealed partial class RuntimeServiceTests
 {
@@ -205,41 +204,6 @@ public sealed partial class RuntimeServiceTests
         await SetConnectionsAsync(ctx, 32);
         Assert.Equal(ProviderLinks.MaxConnections, ctx.Service.GetJob(oldCap.Id)!.RequestedConnections);
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
-    }
-
-    /// <summary>An FTP download is one connection; a change while one runs leaves it, and its record, as they are.</summary>
-    [Fact]
-    public async Task AChangedConnectionCountLeavesARunningFtpDownloadAlone()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var ftpBase = $"ftp://127.0.0.1:{_server.Ftp.Port}";
-        var settings = ctx.Service.GetSnapshot().Settings;
-        settings.DefaultConnections = 2;
-        settings.SiteLogins.Add(new SiteLoginDto { Site = ftpBase, Username = "ftpuser", Password = "ftppass" });
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-        var added = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{ftpBase}/slow.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-live-connections.bin",
-            Source = "cli",
-        });
-        Assert.True(added.Accepted, added.Error);
-        var running = await ctx.WaitFor(added.Job!.Id, j => j.State == "downloading" && j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
-        var before = running.RequestedConnections;
-        var retrievals = _server.Ftp.RetrCount("slow.bin");
-
-        await SetConnectionsAsync(ctx, 8);
-        Assert.Equal(before, ctx.Service.GetJob(added.Job.Id)!.RequestedConnections);
-
-        var done = await ctx.WaitFor(added.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(60));
-        Assert.Equal("completed", done.State);
-        Assert.Equal(before, done.RequestedConnections);
-        Assert.Equal(retrievals, _server.Ftp.RetrCount("slow.bin"));
-        Assert.Equal(
-            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
-            await Hashing.Sha256FileAsync(done.FinalFilePath));
     }
 
     /// <summary>

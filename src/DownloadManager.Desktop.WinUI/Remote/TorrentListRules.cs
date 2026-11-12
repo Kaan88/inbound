@@ -112,23 +112,12 @@ internal static class TorrentListRules
     /// <summary>Every view under Torrents, in the sidebar's order.</summary>
     public static readonly IReadOnlyList<string> SubTags = [.. MainTags, .. ExtraTags];
 
-    /// <summary>The columns only the torrent views show.</summary>
-    public static readonly IReadOnlyList<string> ColumnKeys = ["seeds", "peers", "up", "ratio"];
-
     public static bool IsSubTag(string? category) => category is not null && SubTags.Contains(category);
 
     public static bool IsExtraTag(string? category) => category is not null && ExtraTags.Contains(category);
 
     /// <summary>Torrents, or one of the views under it.</summary>
     public static bool IsTorrentView(string? category) => category == TorrentRules.SidebarTag || IsSubTag(category);
-
-    /// <summary>
-    /// The order the list is put in. A sort by Seeds, Peers, Up or Ratio holds in the torrent views only: elsewhere those
-    /// columns are hidden, so the list runs in the order of addition (newest first, as it starts) and the chosen sort
-    /// comes back with the torrent views.
-    /// </summary>
-    public static (string Key, bool Ascending) ShownSort(string key, bool ascending, string? category)
-        => ColumnKeys.Contains(key) && !IsTorrentView(category) ? ("added", false) : (key, ascending);
 
     /// <summary>
     /// Seeding: finished and shared now. Downloading: not finished, and running or waiting its turn. Stopped: everything
@@ -271,6 +260,48 @@ internal static class TorrentListRules
 
     /// <summary>The Ratio column: "0.71" for any torrent, empty for anything else.</summary>
     public static string RatioCell(JobDto job) => job.Torrent is { } torrent ? TorrentSeedRules.Ratio(torrent.Ratio) : string.Empty;
+
+    /// <summary>UI.R42: what a torrent sent to other peers over its life; null for anything else.</summary>
+    public static long? Uploaded(JobDto job) => job.Torrent is { } torrent ? Math.Max(0, torrent.Uploaded) : null;
+
+    /// <summary>UI.R42: the Uploaded column, "1.2 GB" for any torrent (also "0 B": it is known), empty for anything else.</summary>
+    public static string UploadedCell(JobDto job) => Uploaded(job) is { } bytes ? UiFormat.Bytes(bytes) : string.Empty;
+
+    /// <summary>UI.R42: how long it has been seeding this time; null while it doesn't seed or the start isn't known.</summary>
+    public static TimeSpan? SeedingTime(JobDto job, DateTimeOffset now)
+        => TorrentSeedRules.IsSeeding(job) && job.Torrent!.SeedingSince is { } since ? now - since < TimeSpan.Zero ? TimeSpan.Zero : now - since : null;
+
+    /// <summary>
+    /// UI.R42: how often the Seeding time cells are read again while they show. A torrent that seeds with nothing to send
+    /// sends no update, so without this the cell would stop where the last update left it. Every second while one has
+    /// seeded less than an hour (the cell counts seconds then), every half minute after (it counts minutes); null, so no
+    /// timer, while the window is hidden, the column doesn't show or nothing seeds.
+    /// </summary>
+    public static TimeSpan? SeedClockInterval(bool windowShown, bool columnShown, IEnumerable<TimeSpan?> seedingTimes)
+    {
+        if (!windowShown || !columnShown) return null;
+        TimeSpan? least = null;
+        foreach (var time in seedingTimes)
+        {
+            if (time is { } seeded && (least is null || seeded < least)) least = seeded;
+        }
+        if (least is null) return null;
+        return least < TimeSpan.FromHours(1) ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30);
+    }
+
+    /// <summary>
+    /// UI.R42: the Seeding goal column: "Ratio 1.00 or 48 hours", "Ratio 1.00", "48 hours", "Don't seed" for a torrent set not
+    /// to seed; empty with no goal (it seeds until stopped) and for anything that isn't a torrent.
+    /// </summary>
+    public static string GoalCell(JobDto job, SeedGoal goal)
+    {
+        if (job.Torrent is not { } torrent) return string.Empty;
+        if (torrent.SeedGoal == "never") return "Don't seed";
+        goal = goal.For(job);
+        var ratio = goal.HasRatio ? $"Ratio {TorrentSeedRules.Ratio(goal.Ratio)}" : null;
+        var hours = goal.HasHours ? Hours(goal.Hours) : null;
+        return string.Join(" or ", new[] { ratio, hours }.OfType<string>());
+    }
 
     // ---- The seeding goal ----
 

@@ -47,8 +47,8 @@ internal sealed class StatusNotifierTray : IAsyncDisposable
         new(1, "Open Inbound", "folder-download"),
         new(2, "Options", "configure"),
         new(3, null, null),
-        new(4, "Pause all", "media-playback-pause"),
-        new(5, "Resume all", "media-playback-start"),
+        new(4, "Stop All", "media-playback-pause"),
+        new(5, "Resume All", "media-playback-start"),
         new(6, null, null),
         new(7, "Exit", "application-exit"),
     ];

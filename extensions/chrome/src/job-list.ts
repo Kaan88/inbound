@@ -119,10 +119,10 @@ export function onThisPc(job: JobSummary): boolean {
   return (job.target ?? "local") === "local";
 }
 
-/** Its address can be copied or used again: a real web or FTP link, not a provider's file or a hidden key. */
+/** Its address can be copied or used again: a real web link, not a provider's file or a hidden key (FTP was cut in 0.7.2). */
 export function hasUsableLink(job: JobSummary): boolean {
   const url = (job.url ?? "").trim();
-  return /^(https?|ftps?):\/\//i.test(url) && job.addressHidden !== true;
+  return /^https?:\/\//i.test(url) && job.addressHidden !== true;
 }
 
 /** Redownload as the desktop allows it: a finished, failed or stopped download with a usable link. */
@@ -161,7 +161,7 @@ export function rowMenuEntries(job: JobSummary): RowMenuEntry[] {
     title: hasUsableLink(job) ? undefined : "This download has no link that can be copied." });
   entries.push({ id: "redownload", label: "Redownload", enabled: canRedownload(job), title: REDOWNLOAD_NOTE });
   entries.push({ id: "rename", label: "Rename…", enabled: canRename(job),
-    title: canRename(job) ? undefined : job.appManaged === true ? "This download is managed in the app." : "Only a finished download can be renamed." });
+    title: canRename(job) ? undefined : job.appManaged === true ? "This download is managed in the app." : "Only a completed download can be renamed." });
   entries.push({ id: "remove", label: "Delete…", enabled: true });
   return entries;
 }

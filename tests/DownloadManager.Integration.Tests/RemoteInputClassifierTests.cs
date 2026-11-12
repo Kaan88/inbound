@@ -1,6 +1,7 @@
 using DownloadManager.Tests.Shared;
 using System.Diagnostics;
 using System.Text;
+using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 using DownloadManager.Providers.TorBox;
 using DownloadManager.Runtime.Remote;
@@ -295,10 +296,20 @@ public sealed class RemoteInputClassifierTests : IDisposable
     [Theory]
     [InlineData("https://example.invalid/file.zip")]
     [InlineData("http://example.invalid/")]
-    [InlineData("ftp://example.invalid/file.zip")]
     [InlineData("https://example.invalid/some.torrent")]
     public void EverythingElseOnTheWebIsAnOrdinaryLink(string text)
         => Assert.Equal(RemoteInputKind.OrdinaryLink, Classify(text).Kind);
+
+    /// <summary>CUT.1: FTP was cut in 0.7.2, so an ftp:// address is said to be unsupported, with the same words as the Host's.</summary>
+    [Theory]
+    [InlineData("ftp://example.invalid/file.zip")]
+    [InlineData("ftps://example.invalid/file.zip")]
+    public void AnFtpAddressIsUnsupported(string text)
+    {
+        var result = Classify(text);
+        Assert.Equal(RemoteInputKind.Unsupported, result.Kind);
+        Assert.Equal(FtpAddresses.NotSupported, result.Reason);
+    }
 
     [Fact]
     public void WhenTheHosterListCouldNotBeFetchedTheLinkIsUndeterminedNotOrdinary()
@@ -308,6 +319,36 @@ public sealed class RemoteInputClassifierTests : IDisposable
         Assert.Equal("The list couldn't be fetched.", result.Note);
         Assert.Contains("could not be reached", result.Reason);
         Assert.Equal("mega.nz", result.DisplayHost);
+    }
+
+    /// <summary>
+    /// UI.B27: no provider can fetch from this PC or its network, so such an address is ordinary even when no list could
+    /// be fetched (which otherwise leaves a link undetermined) and even when a listed site's pattern would take it.
+    /// </summary>
+    [Theory]
+    [InlineData("http://127.0.0.1:8080/hoster/file.bin", "127.0.0.1")]
+    [InlineData("http://localhost/hoster/file.bin", "localhost")]
+    [InlineData("http://192.168.1.20/hoster/file.iso", "192.168.1.20")]
+    [InlineData("http://10.1.2.3/hoster/file.iso", "10.1.2.3")]
+    [InlineData("http://172.20.0.4/hoster/file.iso", "172.20.0.4")]
+    [InlineData("http://[::1]/hoster/file.iso", "::1")]
+    [InlineData("http://[fe80::1]/hoster/file.iso", "fe80::1")]
+    [InlineData("http://[fd00::2]/hoster/file.iso", "fd00::2")]
+    [InlineData("http://nas/hoster/file.iso", "nas")]
+    [InlineData("http://nas.local/hoster/file.iso", "nas.local")]
+    [InlineData("http://nas.lan/hoster/file.iso", "nas.lan")]
+    [InlineData("http://nas.home.arpa/hoster/file.iso", "nas.home.arpa")]
+    public void AnAddressOnThisPcOrItsNetworkIsOrdinaryWhateverTheProviderSays(string text, string host)
+    {
+        var noList = Classify(text, Provider(listProblem: "The list couldn't be fetched."));
+        Assert.Equal(RemoteInputKind.OrdinaryLink, noList.Kind);
+        Assert.False(noList.CheckIncomplete);
+        Assert.Null(noList.Note);
+        Assert.Equal(host, noList.DisplayHost);
+
+        var anything = Classify(text, Provider(hosters: [Matcher("Everything", "/hoster/")]));
+        Assert.Equal(RemoteInputKind.OrdinaryLink, anything.Kind);
+        Assert.Null(anything.HosterName);
     }
 
     [Fact]

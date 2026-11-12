@@ -69,9 +69,6 @@ public interface IDownloadEngine
     /// <summary>Replaces the in-memory site credentials used for Basic auth.</summary>
     void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins);
 
-    /// <summary>Updates the ffmpeg.exe path used for media muxing.</summary>
-    void UpdateFfmpegPath(string? path);
-
     /// <summary>Updates the cross-job per-host connection cap.</summary>
     void UpdateHostConnectionLimit(int limit)
     {
@@ -171,21 +168,6 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
         => Task.CompletedTask;
 }
 
-public sealed record MediaMuxResult(bool Success, string? Error);
-
-public interface IMediaCheckpointStore
-{
-    /// <summary>
-    /// As <see cref="IDownloadCheckpointStore.LoadAsync"/>: null starts the track over, so a file that can't be read
-    /// right now throws <see cref="IOException"/>, and a damaged or newer one <see cref="CheckpointUnusableException"/>.
-    /// </summary>
-    Task<MediaCheckpoint?> LoadAsync(Guid jobId, string track, CancellationToken cancellationToken = default);
-
-    Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default);
-
-    Task DeleteAsync(Guid jobId, string? track = null, CancellationToken cancellationToken = default);
-}
-
 public interface IFreeSpaceProvider
 {
     long? GetAvailableFreeSpace(string directory);
@@ -197,15 +179,6 @@ public sealed class DriveFreeSpaceProvider : IFreeSpaceProvider
 
     /// <summary>The volume's own mount on Linux, not the path's first part (<see cref="Volumes.RootOf"/>).</summary>
     public long? GetAvailableFreeSpace(string directory) => Volumes.AvailableBytes(directory);
-}
-
-public interface IMediaMuxer
-{
-    Task<MediaMuxResult> MuxAsync(
-        string videoPath,
-        string audioPath,
-        string outputPath,
-        CancellationToken cancellationToken);
 }
 
 public interface ISleepPrevention : IDisposable

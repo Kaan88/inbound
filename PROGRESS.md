@@ -220,6 +220,11 @@ popup (EXT.R12). Torrent rows' right-click menu shows two separators under Open 
   folder went to the Recycle Bin (everything else on the desktop is the owner's or other projects'); on the VM
   `~/inbound-check` (361 MB), `~/.uno` and the unused `inbound:0.6.3` image were removed; the `inbound` container and
   `~/inbound` stay.
+- Owner: "potential features to cut from the codebase. create a document." Written as `docs/plans/feature-cuts.md`
+  (work in progress, owner still deciding; live copy linked in the file). 92 features measured, 34 cut/trim proposals
+  each challenged. Provisional owner ticks so far: cut stream downloading (HLS/DASH, FFmpeg, DRM/live checks), the
+  housekeeping (Qt leftover folder, HookSpy, FakeTorrentEngine to tests, HostChecks' pipe-ACL check into a test),
+  cut FTP, trim the CLI's TorBox/torrent/archive commands. Nothing built; wait for the owner to finish.
 - Tests at `9e2195d` (`artifacts\check-final3`): Core 1952 passed; Server 187 passed; Integration 1809 passed, 2
   skipped, 1 failed (the known `AFolderNamedInTheSettingsInAnyFormStays(how: "share")` case). The other suites were run
   before the integration fix (Engine 229, Archives 401, Containers 188, TorBox 323, Torrents 121, vitest 621,
@@ -299,6 +304,34 @@ no release." Status: **in progress**.
     and by tracker), and torrent info shown in the main window for the selected torrent instead of only in Progress
     Details.
 
+### 0.7.1 release (2026-11-12)
+
+- **Released 2026-11-12** (owner: "make a full release of everything"; version chosen 0.7.1). Tag `v0.7.1` on the squash
+  commit `f0db518` (parent `cf8dc1a`, the local `main` with the three D7 note commits, now pushed); its tree is
+  `torrent-t1` at `b57d978` (T7 to T14, UI.B24 to B26, UI.R36, UI.R37, EXT.R12, the Fable findings fixes, and main's D7
+  notes). Binaries report `0.7.1+f0db518`. Release: https://github.com/Kaan88/inbound/releases/tag/v0.7.1
+- Assets (bytes): `DownloadManagerSetup-0.7.1.exe` 68,314,473; `download-manager-0.7.1.zip` 96,294,348 (SHA256
+  651fc8c07a810a7d667203af50845d5193799ccc538b4cf305dcb35fb40728b9); `manifest.json` 852; `public.pem` 624
+  (byte-identical to v0.7.0's); `inbound-bridge-0.6.3-firefox.xpi` 136,583 (signed by AMO, sha256 a0d80dbe36bc…);
+  `SHA256SUMS` 446; and from the AppImage workflow `Inbound-0.7.1-x86_64.AppImage` 75,082,232, `manifest-linux-x64.json`
+  838 (0.7.1, replacing the 0.6.7 one uploaded first as a fallback) and `SHA256SUMS-linux` 186.
+- Checks: every suite at `bb21908` (see the Fable fixes entry); solution, Uno linux-x64 and Host.Linux builds 0 errors;
+  Setup Medium integrity; the zip's `install.ps1` says 0.7.1; no `komodo.md` in the tree or the zip; no private key,
+  refresh token or client secret in the zip, Setup, XPI or store zip; `SHA256SUMS` matches; the Setup GitHub serves
+  has the same SHA-256. After publishing: `latest/download/manifest.json` answers 0.7.1, `latest/download/
+  manifest-linux-x64.json` answers 0.7.1 with the AppImage's size, and `main`'s `extensions/firefox-updates.json` names
+  0.6.3 at v0.7.1. The torrent worker is the 0.7.0 build (no `native/` change since).
+- GitHub Actions on the tag: Docker image run 43245177756 succeeded (`ghcr.io/kaan88/inbound:0.7.1`, `:0.7` and
+  `:latest` all sha256:868c4c725e94…); AppImage run 43245177743 succeeded (the 0.7.0 one had failed on Uno).
+- Chrome Web Store: 0.6.3 uploaded and submitted (PENDING_REVIEW); 0.6.2 is now PUBLISHED. Edge: the same zip
+  (`artifacts\chrome-store\inbound-bridge-0.6.3-chrome.zip` in the `release-071` worktree, 121,582 bytes, SHA256
+  72b16268aaf9…) is for the owner to upload in Partner Center.
+- The owner's test VM: the lasting `inbound` container now runs 0.7.1 (same ports, folders, restart policy and
+  settings; healthy; the data folder was backed up first to `~/inbound-data-before-0.7.1.tgz`); the 0.7.0 images were
+  removed. No web UI password was set before or after.
+- Not done: nothing in 0.7.1 was tried by hand after the Fable fixes; the extension 0.6.3 in a real browser; a real
+  update from an installed 0.7.0; the clean-install VM run; the AppImage and Docker image run by hand.
+
 ### 0.7.0 release (2026-11-12)
 
 - **Released 2026-11-12** (tag `v0.7.0` on the squash commit `96fe5e2`, parent `f3c4b33` on `main`; its tree is the `torrent-t1` tree at `4f003c2`; binaries `0.7.0+96fe5e2`). Seven assets: Setup, the update zip, `manifest.json`, `public.pem`, the signed Firefox add-on (0.6.2), `SHA256SUMS`, and `manifest-linux-x64.json` (0.6.7, uploaded again so Linux users stay on 0.6.7). Release: https://github.com/Kaan88/inbound/releases/tag/v0.7.0
@@ -335,7 +368,126 @@ the new `Setup_offers_the_magnet_and_torrent_association_through_the_hosts_confi
 ### UPD.N1 changelog popup (owner request, 2026-11-12)
 
 Owner: "future goal, definitely in next release. changelog popup when update is found or is done and the app is first
-opened." Status: **planned** (ROADMAP UPD.N1); not started.
+opened." Status: **planned** (ROADMAP UPD.N1); not started. Left out of 0.7.1 although it was meant for the next release; the owner noticed after
+the release (2026-11-12). Still not started.
+Owner asked for a mockup first, then build and push, for both the web UI and the desktop (2026-11-12). Mockup:
+https://claude.ai/artifact/2wqCHGkpRZmQtJdJr3WsQD (private to the owner), waiting for the owner's go-ahead. Owner,
+same day: "changelogs could be smarter. desktop only stuff shown for desktop only vice versa." So each changelog line
+carries tags (all, windows, webui, server/docker, linux, extension, torrents, torbox); each surface shows its own and
+the shared lines and folds the rest under "N changes elsewhere".
+Owner approved the mockup (2026-11-12: "mockups are perfect. build it"). Building.
+
+### 0.7.2 work, wave 3 (2026-11-12, workflow `wf_f69f245f-569`, merged at `997ed0f`)
+
+- UI.R39 (partial, tests only): `docs/glossary.md` and one name per thing (Stop/Stopped, Resume, Completed, Failed,
+  Delete, Options, "send" for the extension, "Inbound's background program" instead of Host) across the window, web UI,
+  extension, CLI and trays; no identifiers, IPC or settings keys renamed. Review: 10 of 11 findings real, fixed.
+- Review of the whole 0.7.2 diff (correctness, security, integration, UX lenses): 15 findings, 12 confirmed by a
+  skeptic, fixed on `fix-072-review` (tests only; not seen running; manifest not signed with the real key).
+- Merged build 0 errors. Full tests at `d5a1307` (before wave 3): Core 2214, Engine 200, Server 192, Torrents 123,
+  Archives 401, Containers 188, TorBox 323, Tray 2, Integration 1896/1 known share failure, vitest 678, extension 337.
+  Not rerun after the wave-3 merge.
+- Left (stopped by the usage limit, 2026-11-12): full tests after the wave-3 merge; the 0.7.2 changelog.json lines from
+  every track (saved in the workflow results) and its date; extension version bump (code changed); push.
+
+### 0.7.2 work, wave 2 (2026-11-12, workflow `wf_e1f656f8-7cd`, merged into `torrent-t1` at `d5a1307`)
+
+Eight worktrees from `db8afc1`, each built, reviewed by a separate agent and fixed. Merged; one conflict (a Core.Tests
+csproj list, both kept). Merged solution build 0 errors, 36 warnings (as before). Nothing below tried by the owner;
+most of it not seen in the running app.
+
+- CUT.2 implemented: `dm torrent` restored (CliTorrentT3Tests, CliTorrentTextTests back; CLI Integration 82/82);
+  `dm remote` and `dm archive` stay cut (unknown-command error, exit 2).
+- UI.R38 + UI.B27 (unverified): Add URL is one dialog on the desktop and in the web UI; the address is checked by
+  itself 400 ms after typing stops; Start download / Download later / Cancel; Continue goes to Add links, the torrent
+  dialog or the provider's dialog; every option of the two steps kept. Core `NetworkAddresses.IsLocalWebAddress`
+  (loopback, link-local, private LAN, single-label, .local, .lan, .home.arpa) makes those addresses go direct with no
+  provider check in every add path. Core 2108; not run in the app.
+- UI.R40 (unverified): Check for Updates is one dialog changing in place (checking, up to date / available with
+  UPD.N1 notes, downloading with Cancel, ready with an inline running-downloads warning, installing, failure with a
+  next step). Help, the status-bar link and both tray entries open it (`--page updates`). Pure `UpdateDialogFlow`, 28
+  tests. Host commands, signature check and rollback unchanged. A first round was seen with a loopback feed and a
+  throwaway key; the review fixes were not; no real install run.
+- T10.B (unverified): a quiet browser `.torrent` opens the torrent dialog again (supersedes the EXT.R12-over-T10
+  behaviour recorded for 0.7.1); other quiet windows stay closed. T10.B2 (unverified): on another server, Open as
+  Torrent to TorBox sends the server's file by path (`remote.add`) and the server uses its own account; a server
+  without an account offers no provider line (read, not tested); a row outside the session's folders is no longer
+  offered Open as Torrent. T7.B1: Torrent Info shows 0 B/s instead of "—" for a seeding or finished torrent.
+- UI.R42 (unverified): right-click (or Shift+F10 / menu key) on any list header: column check list and Reset columns,
+  File Name fixed; main list, Progress Details' Files/Peers/Trackers, the provider list and other DetailsTable lists;
+  web UI header menu and More > Columns. New hidden columns: Uploaded, Seeding time, Seeding goal (main list); Files
+  Downloaded, Peers Downloaded/Uploaded, Trackers Tier/Message. Saved in ui-state.json / list-layout.json.
+- SEC.L1 implemented (tests): a scheme-less site login goes over https to exactly that host; `*.example.com` for
+  subdomains (also https only); `http://` saved explicitly still works. No migration: a bare-host login that served an
+  http site or a subdomain must be saved again with `http://` or `*.` (those downloads fail as unauthorized until
+  then). Options > Site logins says so. Core 41 cases, Engine 13 + 4 redirect cases.
+- UI.R41 (unverified): Help > Get the Browser Extension…, Options > General > Browser extension (per browser status and
+  Get it: Chrome Web Store, Edge Add-ons, GitHub latest release for Firefox), a one-time bar over the list until an
+  extension connects (Get it / Not now). The native host now names its browser in the hello (`ClientHelloDto.Browser`),
+  the Host keeps `extensions-seen.json` and pushes `extensions.seen`. Web UI: the same links and a paired count.
+- Linux window fit (unverified, not run on Linux): Uno has no DisplayArea; new `UnoScreens` reads the X11 work area
+  and window sizes and places are cut to it (pure `WindowSizeRules`, tested); unknown screen keeps 1100x700.
+- Integration runs in the tracks: the admin-share test fails as before; one queue-retry test timed out once in a full
+  run and passed alone.
+
+### 0.7.2 work, wave 1 (2026-11-12, workflow `wf_a43133af-b55`, merged into `torrent-t1` at `db8afc1`)
+
+Five worktrees, each built, reviewed by a separate agent and fixed; merged without conflicts; merged solution build 0
+errors. Nothing tried by the owner yet.
+
+- UPD.N1 What's new (partial): one tagged `src/DownloadManager.Contracts/Changelog/changelog.json` (0.7.1 and an
+  undated 0.7.2) feeds the Windows app's What's new (once after an update; never on a fresh install or a development
+  build; an install with state but no mark counts as from 0.7.1; Help > What's New… and the status-bar version reopen
+  it), the Update available question (optional unsigned manifest `notes`, written by `UpdateSigner --notes-from`,
+  outside the signed text; at most 40 lines of 400 characters) and the web UI (IPC `changelog.get`; once per browser
+  per server; footer "What's new"). Seen running in a test window and in the built-in browser (desktop width and
+  375 px) before the review fixes; Help, status bar and Update available with notes not seen; no release run. The Linux
+  window has none (out of scope). Tests: Core 2017, Server 192, vitest 638, Integration 1858/1 known share failure.
+- UI.B28 fixed: cause reproduced (since 0.7.1 the window is built in the main window's process, which takes the
+  front back while finishing the double-click). New `WindowFront`: after the input ends, the window is watched for
+  600 ms and brought forward again (at most 3 times) unless the user clicks or switches windows. Seen in a test
+  instance with real double-clicks through UI Automation: before 3 of 3 behind; after 13 of 13 in front, reopen and
+  Enter too. Not seen: right-click/File menu entries, More details, package windows.
+- CUT.1 streams cut: HLS/DASH, FFmpeg, DRM/live checks, media checkpoints gone; a playlist fails at start with
+  "Streaming playlists aren't downloaded; use a video downloader." (new final `FailureKind.Unsupported`); plain `.m3u`
+  still saved; `ffmpegPath` dropped at the next save (`SettingsDto.FfmpegPath` kept as pass-through so a 0.7.2 window
+  can save options on a 0.7.1 server).
+- CUT.1 FTP cut: `ftp://`/`ftps://` refused everywhere with "FTP addresses aren't supported."; an old FTP job fails
+  with it, its password is removed from the job file and its checkpoint deleted (integration test). Review 1 L11 is
+  closed. Streams+FTP: 153 files, +914/-7102. Core 2009, Engine 189, Server 190, Integration 1850/1 known failure.
+  The extension changed (stream and FTP handling), so its version needs a bump before the next store upload.
+- CUT.1 CLI trim: `dm torrent`, `dm archive`, `dm remote` removed (about 1,770 lines); tests moved to the pipe. The
+  owner then kept `dm torrent` (CUT.2, wave 2 restores it).
+- CUT.1 housekeeping: HookSpy and the Qt leftover folder deleted; FakeTorrentEngine moved to
+  `tests/DownloadManager.TestSupport`; `tools/HostChecks` replaced by Integration `PipeAclTests` (fails with an
+  Everyone rule; checks owner) and `tests/DownloadManager.Tray.Tests` (tray menu, 2 tests). The older U5/L2 entries
+  below that name HostChecks now rest on those tests; the right-click on the real tray icon is manual evidence only.
+- Integration's `AFolderNamedInTheSettingsInAnyFormStays("share")` fails here on the base too (environment).
+
+### Owner requests, 2026-11-12 (after 0.7.1)
+
+- UI.B28 (bug): "double clicking a downloading file opens progress details but it drops behind the main window."
+- CUT.1: "read feature-cuts.md, and do the items I marked at the bottom." Ticked: cut stream downloading; the
+  housekeeping; cut FTP; trim the CLI's TorBox, torrent and archive commands. Not ticked (stay): Statistics, quotas,
+  file sync, per-site limits, link containers, web UI parity, torrent extras, sounds, per-download actions, script
+  install. The doc's Keep table had "CLI torrent commands"; the tick wins.
+- CLI trim narrowed (owner, 2026-11-12: "agreed"): cut the TorBox and archive commands, keep `dm torrent`.
+- Owner's answers to the waiting decisions (2026-11-12):
+  1. UI.B27: yes, Add URL skips the provider check for loopback, LAN and private host names.
+  2. T10 on another server (D9): asked again in plain words; owner chose "Make TorBox work": the server sends that
+     `.torrent` to TorBox with its own account (T10.B2).
+  3. T12 `list-layout.json` for the other windows' lists: keep.
+  4. T12 three-click header cycle: keep. Owner also asked "how do I add new items? right click don't work" (asked
+     what they meant). Answer: "columns in a list and have torrent related items if they don't exist yet": a
+     right-click column chooser on list headers, with torrent columns added where missing (UI.R42).
+  5. EXT.R12 with T10: no. The desktop app should react to a `.torrent` file from the browser even with the quiet
+     default (open the torrent dialog).
+  - From the 25 triage decisions: Add URL in one dialog (5:A1): yes, "separate url add doesn't make much sense.
+    remove"; one name per thing (5:W1b, 5:T4, 5:X1): yes; Check for Updates in one dialog (5:U1a): yes; promote the
+    extension inside the app (5:F1): yes; site logins without a scheme only over https, not http/ftp/subdomains
+    (1:N4, 1:L12): "sure". The other triage decisions stay open.
+  - "fix known bugs": the Torrent Info pane's "Down —" for a seeding torrent; the D9 "Open as Torrent" line switched to
+    TorBox failing; the Linux window opening larger than the screen (code fix only; Linux checks stay deferred).
 
 ### AUDIT.1 whole-codebase audit and fixes (2026-11-12, `torrent-t1`)
 

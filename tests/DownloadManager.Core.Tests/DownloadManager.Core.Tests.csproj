@@ -30,6 +30,9 @@
 
   <!-- The WinUI project can't be referenced from here, so its UI-free parts are compiled in. -->
   <ItemGroup>
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WhatsNewRules.cs" Link="WinUI\WhatsNewRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ExtensionPromoRules.cs" Link="WinUI\ExtensionPromoRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UpdateDialogFlow.cs" Link="WinUI\UpdateDialogFlow.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.cs" Link="WinUI\RemoteClient.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteState.cs" Link="WinUI\RemoteState.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.WebUi.cs" Link="WinUI\RemoteClient.WebUi.cs" />
@@ -43,6 +46,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveRows.cs" Link="WinUI\ArchiveRows.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddUrlRules.cs" Link="WinUI\AddUrlRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentOpenRequests.cs" Link="WinUI\TorrentOpenRequests.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ShowJobRequests.cs" Link="WinUI\ShowJobRequests.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="WinUI\ContainerImport.cs" />
@@ -80,6 +84,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressWindowSet.cs" Link="WinUI\ProgressWindowSet.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\VersionStatus.cs" Link="WinUI\VersionStatus.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowFrontRules.cs" Link="WinUI\WindowFrontRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellWords.cs" Link="WinUI\ShellWords.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\OptionsSettingsRebase.cs" Link="WinUI\OptionsSettingsRebase.cs" />

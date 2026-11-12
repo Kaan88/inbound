@@ -13,6 +13,7 @@ import {
   optionsSaid, overviewRows, priorityChanges, priorityLabel, priorityMap, priorityOf, prioritiesKnown, prioritySummary, recheckSaid, setAllWanted,
   setNodePriority, setNodeWanted, spaceProblem, wantedIndexes, wasteText, watchWanted,
 } from '../src/lib/torrentControls';
+import { trackerColumns } from '../src/lib/columns';
 import { hasTorrentControls, nextAnnounceText, torrentTabs, trackerRows } from '../src/lib/torrentDetails';
 import {
   addLines, inspected, lineSpaceProblem, lineState, spaceRechecked, newLines, picks, problem, setLinePriorities, torrentStatusText, treeFiles,
@@ -285,7 +286,9 @@ describe('Force recheck and Announce now (T3)', () => {
     expect(jobDetailsSource).toContain('Force recheck');
     expect(jobDetailsSource).toContain('Announce now');
     expect(jobDetailsSource).toContain('<TorrentOptionsPanel');
-    expect(swarmPanelSource).toContain('Next announce');
+    // UI.R42: the Trackers tab's headers come from trackerColumns.
+    expect(trackerColumns.defs.map((def) => def.title)).toContain('Next announce');
+    expect(swarmPanelSource).toContain('trackerColumns.defs');
     expect(swarmPanelSource).toContain("'torrent.announce'");
     expect(swarmPanelSource).toContain("'torrent.details'");
   });

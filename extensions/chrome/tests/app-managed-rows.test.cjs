@@ -1,6 +1,6 @@
 // Wave B (owner, 2026-11-11, "safe parity only"): rows the app manages on its own stay generic in the popup. A paused
 // download the app can't resume offers Open in app (this PC) or nothing (a paired server), never a Resume that does
-// nothing; a finished one offers no Stop; a link that is no web or FTP address is neither copied nor redownloaded.
+// nothing; a finished one offers no Stop; a link that is no web address is neither copied nor redownloaded.
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { installDom } = require('./dom-harness.cjs');
@@ -87,14 +87,14 @@ test('a finished download the app still works with is a plain finished row: no S
   } finally { page.restore(); }
 });
 
-test('only a web or FTP address counts as a link; an ordinary finished download keeps every entry', () => {
+test('only a web address counts as a link; an ordinary finished download keeps every entry', () => {
   const page = installDom('popup.html');
   try {
     const { hasUsableLink, rowMenuEntries } = page.load('job-list.ts');
-    for (const url of ['https://files.test/a.zip', 'http://files.test/a.zip', 'ftp://files.test/a.zip', 'FTPS://files.test/a.zip']) {
+    for (const url of ['https://files.test/a.zip', 'http://files.test/a.zip']) {
       assert.equal(hasUsableLink({ url }), true, url);
     }
-    for (const url of ['', 'remote://provider/1', 'urn:example:abc', 'javascript:alert(1)', 'file:///C:/a.zip', 'data:,x']) {
+    for (const url of ['', 'ftp://files.test/a.zip', 'FTPS://files.test/a.zip', 'remote://provider/1', 'urn:example:abc', 'javascript:alert(1)', 'file:///C:/a.zip', 'data:,x']) {
       assert.equal(hasUsableLink({ url }), false, url);
     }
     const done = { id: 'd', fileName: 'a.zip', state: 'completed', receivedBytes: 1, url: 'https://files.test/a.zip' };

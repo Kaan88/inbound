@@ -89,7 +89,7 @@ test('EXT.R12: the tooltip says what the icon shows, in plain words', () => {
   assert.equal(status.iconTitle(status.IDLE), null);
   assert.equal(status.iconTitle({ kind: 'downloading', progress: 0.42, count: 1 }), 'Inbound Download Manager: 1 download from the browser, 42%');
   assert.equal(status.iconTitle({ kind: 'downloading', progress: null, count: 3 }), 'Inbound Download Manager: 3 downloads from the browser');
-  assert.equal(status.iconTitle({ kind: 'paused', progress: 0.1, count: 1 }), 'Inbound Download Manager: a download is paused');
+  assert.equal(status.iconTitle({ kind: 'paused', progress: 0.1, count: 1 }), 'Inbound Download Manager: a download is stopped');
   assert.match(status.iconTitle({ kind: 'error', progress: null, count: 2 }), /2 downloads failed\. Open the popup/);
 });
 
@@ -250,7 +250,7 @@ test('EXT.R12: the icon follows the browser\'s downloads from the app\'s events,
       // Paused, then seen in the popup: the plain icon again.
       emit(harness, { eventType: 'paused', job: job({ state: 'paused' }) });
       await settle(() => icons.length > drawnBefore + 1);
-      assert.match(titles.at(-1), /a download is paused/);
+      assert.match(titles.at(-1), /a download is stopped/);
       const jobs = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
       await answerNative(harness, 'jobs.query', { jobs: [job({ state: 'paused' })] });
       await jobs;

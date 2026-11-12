@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { copyText } from '../lib/clipboard';
   import { flip } from 'svelte/animate';
   import ArchiveNoticeBar from '../components/ArchiveNoticeBar.svelte';
@@ -17,6 +18,9 @@
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
   import { listState } from '../lib/listState.svelte';
+  import {
+    choose, columnMenu, listChoicesKey, listColumns, listFirstShown, listNoRoom, listTemplate, parseChoices, phoneSortColumns, shownKeys, type ColumnChoices, type ListColumnKey,
+  } from '../lib/columns';
   import { LongPress } from '../lib/longpress';
   import { canStartQueue, canStopQueue, orderedQueues, queueStartedText, queueStateText } from '../lib/queues';
   import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
@@ -25,7 +29,7 @@
   import { foldTools } from '../lib/toolbar';
   import { buildRows, isTorrentView, selectedJobIds, viewHash, type Row, type TorrentFilesView, type ViewKey } from '../lib/views';
   import {
-    extraViewShows, knownListenPort, magnetToCopy, sortForView, sortMenuTitles, torrentCounts, torrentExtraCounts, torrentExtraViews, torrentFilters, torrentSummary,
+    extraViewShows, knownListenPort, magnetToCopy, seedClockMs, sortForColumns, sortMenuTitles, torrentCounts, torrentExtraCounts, torrentExtraViews, torrentFilters, torrentSummary,
   } from '../lib/torrentList';
   import { blocksAddressCommands, canChooseFiles, filesRefreshMs, isActive as torrentRuns, opensAsTorrent, primaryIsChooseFiles, showsFiles } from '../lib/torrents';
   import type { TorrentFilesResult } from '../lib/types';
@@ -33,6 +37,7 @@
   import { hasTorrentControls, mayRun, seedSaid, seedTargets } from '../lib/torrentDetails';
   import { announceSaid, canAnnounce, canRecheck, recheckSaid } from '../lib/torrentControls';
   import { watchTorrents } from '../lib/torrentWatch.svelte';
+  import { everyWhileVisible } from '../lib/ticker';
   import { infoJob, infoKey, infoMinWidth, infoOn, infoReserved } from '../lib/torrentInfo';
   import TorrentInfoPane from '../components/TorrentInfoPane.svelte';
   import ArchiveRecord from './ArchiveRecord.svelte';
@@ -133,10 +138,67 @@
   // The Torrents views show Seeds, Peers, Up and Ratio in place of Last Try Date (WEB-T2), and on a phone the views
   // as chips with a line of what the torrents move (WEB-T1, WEB-T3).
   const torrentCols = $derived(isTorrentView(view) && !onlyExtraction);
-  // A sort by a swarm column holds in the torrent views only; elsewhere the default (WEB-T2).
-  const shownSort = $derived(sortForView(sort, torrentCols));
 
-  const rows = $derived(buildRows(store.model, view, search, expanded, shownSort, torrentFiles));
+  // UI.R42: the header's menu (a right-click, Shift+F10 or the menu key on a header, or More > Columns) shows and hides
+  // columns. The torrent views keep their own choice, apart from every other view's, as in the Windows app. A phone keeps
+  // its own two or three lines whatever is chosen, and the Extractions view its own columns.
+  let listChoices = $state<ColumnChoices>(parseChoices(listColumns, load(listChoicesKey(false))));
+  let torrentListChoices = $state<ColumnChoices>(parseChoices(listColumns, load(listChoicesKey(true))));
+  const columnAvailable = (key: ListColumnKey) => key !== 'extraction' || showExtraction;
+  const chosenColumns = $derived(shownKeys(listColumns, torrentCols ? torrentListChoices : listChoices, columnAvailable, listFirstShown(torrentCols)));
+  const shownColumns = $derived(new Set<string>(onlyExtraction ? ['name', 'extraction', 'lastTry', 'description'] : chosenColumns));
+  // The grid's tracks below 1024 px (and beside Torrent Info) and from 1024 px; the Extractions view keeps its own.
+  const colsMd = $derived(listTemplate(chosenColumns, false));
+  const colsLg = $derived(listTemplate(chosenColumns, true));
+  const off = (key: ListColumnKey) => !shownColumns.has(key);
+
+  function chooseColumns(next: ColumnChoices) {
+    if (torrentCols) torrentListChoices = next;
+    else listChoices = next;
+    save(listChoicesKey(torrentCols), JSON.stringify(next));
+  }
+
+  function columnItems(): MenuItem[] {
+    return columnMenu(listColumns, shownColumns, columnAvailable,
+      (key, on) => chooseColumns(choose(listColumns, torrentCols ? torrentListChoices : listChoices, key, on)),
+      () => chooseColumns({}),
+      (key) => listNoRoom(key, wideRoom));
+  }
+
+  function headerMenu(event: MouseEvent) {
+    event.preventDefault();
+    if (onlyExtraction) return;
+    // From the keyboard (Shift+F10, the menu key) the event has no point: the menu opens under the header cell.
+    const box = (event.target as HTMLElement).getBoundingClientRect();
+    const keyboard = event.clientX === 0 && event.clientY === 0;
+    // Focus goes back to the header that opened it when the menu closes, as in Progress Details (review of 0.7.2, ux-2).
+    const head = event.currentTarget as HTMLElement;
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    columnsOpener = { head, button: target ?? (document.activeElement instanceof HTMLElement && head.contains(document.activeElement) ? document.activeElement : null) };
+    menuOpenedAt = Date.now();
+    menu = { x: keyboard ? box.left : event.clientX, y: keyboard ? box.bottom : event.clientY, items: columnItems(), label: 'Columns' };
+  }
+
+  let columnsOpener: { head: HTMLElement; button: HTMLElement | null } | null = null;
+
+  // UI.R42: columns are a wide window's; a phone's list is two or three lines, so More has no Columns there.
+  let columnsWide = $state(typeof window === 'undefined' || typeof window.matchMedia !== 'function' ? true : window.matchMedia('(min-width: 768px)').matches);
+  $effect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(min-width: 768px)');
+    const changed = () => (columnsWide = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
+  // A sort by a column that doesn't show here (a torrent column outside the torrent views, one hidden from the menu)
+  // waits for it; the default holds meanwhile (WEB-T2). A phone has no header, so the choices don't apply there: it
+  // sorts by the columns the list always had (phoneSortColumns).
+  const sortColumns = $derived(columnsWide ? shownColumns : phoneSortColumns(torrentCols));
+  const shownSort = $derived(sortForColumns(sort, sortColumns));
+
+  // UI.R42: a seeding torrent's Seeding time counts on while the column shows, though an idle one gets no updates.
+  let seedClock = $state(0);
+  const rows = $derived((void seedClock, buildRows(store.model, view, search, expanded, shownSort, torrentFiles)));
   const settings = $derived(store.model.settings);
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
 
@@ -166,6 +228,16 @@
     if (typeof window.matchMedia !== 'function') return;
     const query = window.matchMedia(`(min-width: ${infoMinWidth}px)`);
     const changed = () => (infoWide = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
+  // The wide columns (Description, Last Try Date, the torrent columns) show from 1024 px and not beside Torrent Info; the
+  // header's menu greys them out with "Wider window" otherwise.
+  let lgWide = $state(typeof window === 'undefined' || typeof window.matchMedia !== 'function' ? true : window.matchMedia('(min-width: 1024px)').matches);
+  $effect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(min-width: 1024px)');
+    const changed = () => (lgWide = query.matches);
     query.addEventListener('change', changed);
     return () => query.removeEventListener('change', changed);
   });
@@ -281,9 +353,9 @@
   function askRemoveRecords(sets: ArchiveSet[]) {
     if (sets.length === 0) return;
     confirm = {
-      title: 'Remove extraction record?',
+      title: 'Delete extraction record?',
       text: archiveRemoveQuestion(sets),
-      ok: 'Remove Record',
+      ok: 'Delete',
       onok: () => each(sets, 'archive.remove', (s) => ({ setId: s.id }), sets.length === 1 ? 'Extraction record removed.' : 'Extraction records removed.'),
     };
   }
@@ -430,6 +502,15 @@
   // (torrent.watch) so its progress comes every second; otherwise every 5 s. No torrent shown: nothing is sent.
   // Its room is kept while the list shows torrents, whatever is selected, so the columns don't change on each click.
   const infoRoom = $derived(infoReserved({ on: torrentInfoOn, offered: store.has('torrents'), wide: infoWide, listsTorrents: rows.some((row) => row.kind === 'job' && !!row.job.torrent) }));
+  // The header's menu greys the wide columns out with "Wider window" while they have no room (lgWide above).
+  const wideRoom = $derived(lgWide && !infoRoom);
+  // Read again on each tick too, so the clock slows to half a minute once the newest seeding passes its first hour.
+  const seedClockEvery = $derived((void seedClock, seedClockMs(wideRoom && shownColumns.has('seedTime'), Object.values(store.model.jobs))));
+  $effect(() => {
+    const every = seedClockEvery;
+    if (every === null) return;
+    return everyWhileVisible(every, () => (seedClock += 1));
+  });
   watchTorrents(() => rows.some((row) => row.kind === 'job' && !!row.job.torrent) || (!!details && !!store.model.jobs[details]?.torrent));
 
   /** T2: Start seeding or Stop seeding on every selected torrent it applies to (torrent.seed, one each). */
@@ -489,7 +570,7 @@
     if (targets.length === 0) return;
     confirm = {
       title: targets.length === 1 ? 'Cancel package?' : `Cancel ${targets.length} packages?`,
-      text: `${targets.length === 1 ? `Cancel the unfinished files in '${targets[0].view.name}'?` : 'Cancel the unfinished files in these packages?'} Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.`,
+      text: `${targets.length === 1 ? `Cancel the unfinished files in '${targets[0].view.name}'?` : 'Cancel the unfinished files in these packages?'} Completed files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.`,
       ok: 'Cancel package',
       cancel: 'Keep downloading',
       onok: () => runOnSelection('Cancel Package', { action: 'cancel' }),
@@ -583,7 +664,7 @@
     confirm = {
       title: 'Delete completed downloads?',
       text: deleteCompletedText(ids.length, allJobs.filter((job) => job.state === 'completed' && job.torrent?.seeding === true).length),
-      ok: 'Remove from list',
+      ok: 'Delete',
       // Only the list: the downloaded files stay on disk.
       onok: async () => {
         const result = await store.attempt<{ ok: boolean }>('job.remove', { jobId: ids[0], jobIds: ids, deleteFile: false });
@@ -604,11 +685,11 @@
       if (left) store.toast(left);
     };
     if (jobs.length > 0 && sets.length > 0) {
-      confirm = { title: 'Remove from list?', text: `${remoteRemoveQuestion(jobs)} ${archiveRemoveQuestion(sets)}`, ok: 'Remove from list', onok: run };
+      confirm = { title: 'Delete from the list?', text: `${remoteRemoveQuestion(jobs)} ${archiveRemoveQuestion(sets)}`, ok: 'Delete', onok: run };
     } else if (jobs.length > 0) {
-      confirm = { title: 'Remove from list?', text: remoteRemoveQuestion(jobs), ok: 'Remove from list', onok: run };
+      confirm = { title: 'Delete from the list?', text: remoteRemoveQuestion(jobs), ok: 'Delete', onok: run };
     } else if (sets.length > 0) {
-      confirm = { title: 'Remove extraction record?', text: archiveRemoveQuestion(sets), ok: 'Remove Record', onok: run };
+      confirm = { title: 'Delete extraction record?', text: archiveRemoveQuestion(sets), ok: 'Delete', onok: run };
     }
     if (left && jobs.length + sets.length === 0) store.toast(left);
   }
@@ -674,8 +755,9 @@
 
   // ---- Menus ----
 
-  // The torrent views add Seeds, Peers, Up and Ratio: below 1024 px this menu is the only way to sort by them.
-  const columnTitles = $derived(sortMenuTitles(torrentCols));
+  // The columns that show, the torrent views' Seeds, Peers, Up and Ratio among them: below 1024 px this menu is the only way
+  // to sort by a wide column.
+  const columnTitles = $derived(sortMenuTitles(sortColumns));
 
   // ---- The toolbar ----
 
@@ -707,8 +789,8 @@
     ];
     if (packageRows.length > 0) list.push({ id: 'cancelPackage', label: 'Cancel Package', icon: 'close', tone: 'text-icon-danger', title: `Cancel the unfinished files in the selected package (partial data is kept).${why}`, disabled: !connected || !canCancelPackage, run: askCancelPackage, group: 1, keep: 3 });
     list.push(
-      { id: 'delete', label: 'Delete', icon: 'trash', tone: 'text-icon-danger', title: (selectedJobs.length === 0 && removableSideRows > 0 ? 'Remove the selected rows from the list.' : 'Delete the selected download and its partial data.') + why, disabled: !connected || !canDelete, run: () => askDelete(false), group: 2, keep: 1 },
-      { id: 'deleteCompleted', label: 'Delete Completed', icon: 'sweep', tone: 'text-icon-danger', title: `Remove completed downloads from the list.${why}`, disabled: !connected || completedIds.length === 0, run: askDeleteCompleted, group: 2, keep: 4 },
+      { id: 'delete', label: 'Delete', icon: 'trash', tone: 'text-icon-danger', title: (selectedJobs.length === 0 && removableSideRows > 0 ? 'Delete the selected rows from the list.' : 'Delete the selected download and its partial data.') + why, disabled: !connected || !canDelete, run: () => askDelete(false), group: 2, keep: 1 },
+      { id: 'deleteCompleted', label: 'Delete Completed', icon: 'sweep', tone: 'text-icon-danger', title: `Delete completed downloads from the list (their files stay).${why}`, disabled: !connected || completedIds.length === 0, run: askDeleteCompleted, group: 2, keep: 4 },
       { id: 'extract', label: 'Extract', icon: 'archive', tone: 'text-icon-media', title: archivePlan.extractText, disabled: !archivePlan.canExtract, run: () => void extractSelection(), group: 3, keep: 7 },
       { id: 'archivePassword', label: 'Archive password', icon: 'key', tone: 'text-icon-pause', title: 'Set the password for the selected archive', disabled: !archivePlan.password, run: () => (passwordTarget = archivePlan.password), group: 3, keep: 7 },
       { id: 'extractDisk', label: 'Extract archive…', icon: 'archive', tone: 'text-icon-media', title: `Extract an archive that is already there.${why}`, disabled: !connected, run: () => (extractFromDisk = true), group: 3, keep: 8 },
@@ -781,6 +863,8 @@
           onselect: () => applySort(nextSort(shownSort, key)),
         })),
       },
+      // UI.R42: the same as a right-click on the list's header.
+      { label: 'Columns', hidden: !columnsWide || onlyExtraction, items: columnItems() },
       // T7: the selected torrent's facts beside the list, on a window 1440 px wide or more.
       { label: 'Torrent Info', checked: torrentInfoOn && infoWide, hidden: !store.has('torrents'), disabled: !infoWide, hint: infoWide ? undefined : 'Wider window', onselect: () => setTorrentInfo(!torrentInfoOn) },
       { separator: true },
@@ -918,8 +1002,8 @@
       { label: 'Copy Folder Path', hidden: !(onlyRecord?.state === 'completed' && onlyRecord.destination), onselect: () => void copy(onlyRecord?.destination ?? '', 'Folder path copied.') },
       { label: 'Details…', hidden: !onlyRecord, onselect: () => (archiveOpen = onlyRecord) },
       records.length > 0
-        ? { label: 'Remove Extraction Record…', hint: 'Delete', disabled: !records.some(archiveRemovable), onselect: () => void removeSideRows() }
-        : { label: 'Remove Extraction Record…', hidden: archive.remove.length === 0, onselect: () => askRemoveRecords(archive.remove) },
+        ? { label: 'Delete Extraction Record…', hint: 'Delete', disabled: !records.some(archiveRemovable), onselect: () => void removeSideRows() }
+        : { label: 'Delete Extraction Record…', hidden: archive.remove.length === 0, onselect: () => askRemoveRecords(archive.remove) },
     ];
   }
 
@@ -931,6 +1015,7 @@
 
   function openMenu(row: Row, x: number, y: number) {
     if (row.kind === 'torrentFile') return;
+    columnsOpener = null;
     if (!selected.has(row.id)) {
       selected = new Set([row.id]);
       anchor = row.id;
@@ -959,13 +1044,25 @@
 
   function toolbarMenu(event: MouseEvent, label: string, items: MenuItem[]) {
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    columnsOpener = null;
     menuOpenedAt = Date.now();
     menu = { x: box.left, y: box.bottom + 2, items, label };
   }
 
-  function closeMenu() {
+  async function closeMenu() {
     menu = null;
-    grid?.focus({ preventScroll: true });
+    const opener = columnsOpener;
+    columnsOpener = null;
+    if (!opener) {
+      grid?.focus({ preventScroll: true });
+      return;
+    }
+    // The header's menu: back to the header button it opened from, or the nearest one shown when that column was just
+    // hidden. The choice is made after the menu closes, so wait for the header to show it.
+    await tick();
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const back = opener.button?.isConnected ? opener.button : opener.head.isConnected ? opener.head.querySelector<HTMLElement>('button') : null;
+    (back ?? grid)?.focus({ preventScroll: true });
   }
 
   // ---- Keys ----
@@ -1147,28 +1244,16 @@
 <!-- T7: the list, and Torrent Info on its right on a wide window (it narrows the list's columns, never scrolls it sideways). -->
 <div class="flex items-start">
 <div class="min-w-0 flex-1">
-<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} class:torrent-cols={torrentCols} class:with-info={infoRoom} role="row">
+<!-- The header's buttons take the focus; a right-click, Shift+F10 or the menu key on one opens the columns' menu (UI.R42). -->
+<!-- svelte-ignore a11y_interactive_supports_focus -->
+<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} class:torrent-cols={torrentCols} class:with-info={infoRoom} role="row" style:--cols-md={colsMd} style:--cols-lg={colsLg} oncontextmenu={headerMenu}>
   <label class="flex items-center justify-center self-stretch"><input type="checkbox" aria-label="Select all" checked={selectableCount > 0 && selected.size === selectableCount} onchange={toggleAll} /></label>
-  {@render head('name', 'File Name', 'text-left')}
-  {#if !onlyExtraction}
-    {@render head('queue', 'Q', 'text-center')}
-    {@render head('size', 'Size', 'text-right')}
-    {@render head('status', 'Status', 'text-left')}
-  {/if}
-  {#if showExtraction}{@render head('extraction', 'Extraction', 'text-left')}{/if}
-  {#if !onlyExtraction}
-    {@render head('eta', 'Time left', 'text-right')}
-    {@render head('rate', 'Transfer rate', 'text-right')}
-  {/if}
-  {#if torrentCols}
-    {@render head('seeds', 'Seeds', 'hidden text-right lg:block wide-col')}
-    {@render head('peers', 'Peers', 'hidden text-right lg:block wide-col')}
-    {@render head('up', 'Up', 'hidden text-right lg:block wide-col')}
-    {@render head('ratio', 'Ratio', 'hidden text-right lg:block wide-col')}
-  {:else}
-    {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block wide-col')}
-  {/if}
-  {@render head('description', 'Description', 'hidden text-left lg:block wide-col')}
+  <!-- UI.R42: every column has its header; one hidden from the header's menu stays out (col-off). -->
+  {#each listColumns.defs as def (def.key)}
+    {#if def.key === 'extraction' ? showExtraction : !onlyExtraction || shownColumns.has(def.key)}
+      {@render head(def.key, def.title, `text-${def.align ?? 'left'}${def.wide ? ' hidden lg:block wide-col' : ''}${off(def.key) ? ' col-off' : ''}`)}
+    {/if}
+  {/each}
 </div>
 
 <!-- One tab stop for the whole list: the arrows move, Shift extends, Space ticks, Enter does the row's main thing. -->
@@ -1197,6 +1282,8 @@
       class:only-extraction={onlyExtraction}
       class:torrent-cols={torrentCols}
       class:with-info={infoRoom}
+      style:--cols-md={colsMd}
+      style:--cols-lg={colsLg}
       class:is-cursor={cursor === row.id}
       role="row"
       aria-selected={selected.has(row.id)}
@@ -1244,9 +1331,9 @@
         {#if row.kind !== 'torrentFile'}<button tabindex="-1" class="row-menu" aria-label="Actions for {v.name}" aria-haspopup="menu" onclick={(event) => menuButton(row, event)}><Icon name="more" size={16} /></button>{/if}
       </span>
 
-      <span class="cell-queue text-center text-muted" title={v.queueTip}>{v.queue}</span>
-      <span class="cell-size tabular text-right">{v.sizeText}</span>
-      <span class="cell-status min-w-0">
+      <span class="cell-queue text-center text-muted" class:col-off={off('queue')} title={v.queueTip}>{v.queue}</span>
+      <span class="cell-size tabular text-right" class:col-off={off('size')}>{v.sizeText}</span>
+      <span class="cell-status min-w-0" class:col-off={off('status')}>
         <span class="block truncate tone-{v.statusTone}" title={v.statusTip}>{v.status}</span>
         {#if v.bar !== null}<span class="mt-0.5 block"><ProgressBar value={v.bar} label={row.kind === 'package' ? 'Package progress' : v.swarm?.goal !== null && v.swarm?.goal !== undefined ? 'Seeding goal' : 'Progress'} /></span>{/if}
         {#if row.kind === 'remote'}
@@ -1254,7 +1341,7 @@
         {/if}
       </span>
       {#if showExtraction}
-        <span class="cell-extract truncate tone-{v.extractionTone}" title={v.extractionTip}>
+        <span class="cell-extract truncate tone-{v.extractionTone}" class:col-off={off('extraction')} title={v.extractionTip}>
           {v.extraction}
           {#if row.kind === 'job'}
             {@const set = archiveByJob.get(row.job.id)}
@@ -1266,18 +1353,19 @@
           {/if}
         </span>
       {/if}
-      <span class="cell-eta tabular text-right">{connected ? v.etaText : ''}</span>
-      <span class="cell-rate tabular text-right">{#if connected}{v.rateText}{#if v.etaText}<span class="phone-eta">{v.rateText ? ' · ' : ''}{v.etaText} left</span>{/if}{/if}</span>
-      {#if torrentCols}
-        <!-- Peers counts every connected peer, the seeds among them; Up is known while a torrent seeds. -->
-        <span class="cell-swarm tabular text-right" title="Seeds connected">{connected ? v.swarm?.seedsText ?? '' : ''}</span>
-        <span class="cell-swarm tabular text-right" title="Peers connected, seeds included">{connected ? v.swarm?.peersText ?? '' : ''}</span>
-        <span class="cell-swarm tabular text-right">{connected ? v.swarm?.upText ?? '' : ''}</span>
-        <span class="cell-swarm tabular truncate text-right" title={v.swarm?.goal !== null && v.swarm?.goal !== undefined ? 'On the way to the seeding goal of Options › Torrents' : undefined}>{v.swarm?.ratioText ?? ''}</span>
-      {:else}
-        <span class="cell-added hidden text-muted lg:block">{v.lastTryText}</span>
-      {/if}
-      <span class="cell-desc truncate text-muted" title={v.description}>{v.description}{#if row.kind === 'job' && torrentCols && v.swarm && connected}<span class="phone-swarm">{v.description ? ' · ' : ''}{v.swarm.line}</span>{/if}</span>
+      <span class="cell-eta tabular text-right" class:col-off={off('eta')}>{connected ? v.etaText : ''}</span>
+      <span class="cell-rate tabular text-right" class:col-off={off('rate')}>{#if connected}{v.rateText}{#if v.etaText}<span class="phone-eta">{v.rateText ? ' · ' : ''}{v.etaText} left</span>{/if}{/if}</span>
+      <!-- The torrent columns: blank for a row that isn't a torrent. Peers counts every connected peer, the seeds among
+           them; Up is known while a torrent seeds. UI.R42: each can be shown or hidden in any view. -->
+      <span class="cell-swarm tabular text-right" class:col-off={off('seeds')} title="Seeds connected">{connected ? v.swarm?.seedsText ?? '' : ''}</span>
+      <span class="cell-swarm tabular text-right" class:col-off={off('peers')} title="Peers connected, seeds included">{connected ? v.swarm?.peersText ?? '' : ''}</span>
+      <span class="cell-swarm tabular text-right" class:col-off={off('up')}>{connected ? v.swarm?.upText ?? '' : ''}</span>
+      <span class="cell-swarm tabular truncate text-right" class:col-off={off('ratio')} title={v.swarm?.goal !== null && v.swarm?.goal !== undefined ? 'On the way to the seeding goal of Options › Torrents' : undefined}>{v.swarm?.ratioText ?? ''}</span>
+      <span class="cell-swarm tabular text-right" class:col-off={off('uploaded')} title={v.swarm ? 'Uploaded in all' : undefined}>{v.swarm?.uploadedText ?? ''}</span>
+      <span class="cell-swarm tabular text-right" class:col-off={off('seedTime')} title={v.swarm?.seedTimeText ? 'Seeding for' : undefined}>{connected ? v.swarm?.seedTimeText ?? '' : ''}</span>
+      <span class="cell-swarm truncate" class:col-off={off('seedGoal')} title={v.swarm?.goalText || undefined}>{v.swarm?.goalText ?? ''}</span>
+      <span class="cell-added hidden text-muted lg:block" class:col-off={off('lastTry')}>{v.lastTryText}</span>
+      <span class="cell-desc truncate text-muted" class:col-off={off('description')} title={v.description}>{v.description}{#if row.kind === 'job' && torrentCols && v.swarm && connected}<span class="phone-swarm">{v.description ? ' · ' : ''}{v.swarm.line}</span>{/if}</span>
     </div>
   {:else}
     <div class="px-6 py-16 text-center text-muted">
@@ -1348,7 +1436,7 @@
     {@const known = settings && store.model.status?.orphanPartFiles ? store.model.status.orphanPartFiles : []}
     <p class="mb-2 text-[13px]">
       {known.length === 0
-        ? 'No leftover partial files were found at the last scan. The host rescans before cleaning.'
+        ? 'No leftover partial files were found at the last scan. Inbound looks again before cleaning.'
         : `${known.length} partial file(s) are not attached to any download:`}
     </p>
     {#if known.length > 0}
@@ -1472,8 +1560,9 @@
     column-gap: 10px;
     padding: 0 10px 0 4px;
   }
-  .list-grid { grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 80px 90px; height: 30px; }
-  .list-grid.with-extraction { grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 120px 80px 90px; }
+  /* UI.R42: the tracks are those of the columns that show (listTemplate): --cols-md below 1024 px and beside Torrent
+     Info, --cols-lg from 1024 px. */
+  .list-grid { grid-template-columns: var(--cols-md); height: 30px; }
   .header-cell { padding: 0; background: transparent; white-space: nowrap; font: inherit; color: inherit; text-align: inherit; }
   .header-cell:hover { text-decoration: underline; }
   .sort-mark { margin-left: 3px; font-size: 9px; color: var(--muted); }
@@ -1542,12 +1631,11 @@
   @media (min-width: 768px) {
     .list-row {
       grid-template-areas: none;
-      grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 80px 90px;
+      grid-template-columns: var(--cols-md);
       min-height: 30px;
       padding-top: 2px;
       padding-bottom: 2px;
     }
-    .list-row.with-extraction { grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 120px 80px 90px; }
     .list-row > * { grid-area: auto !important; }
     .list-row .cell-size, .list-row .cell-eta, .list-row .cell-extract, .list-row .cell-queue { display: block; }
     .list-row .cell-rate, .list-row .cell-size { font-size: inherit; color: inherit; }
@@ -1558,24 +1646,18 @@
     .list-grid.only-extraction, .list-row.only-extraction { grid-template-columns: 28px minmax(180px, 1fr) 220px; }
   }
   @media (min-width: 1024px) {
-    .list-grid, .list-row { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 80px 90px 150px minmax(120px, 1fr); }
-    .list-grid.with-extraction, .list-row.with-extraction { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 120px 80px 90px 150px minmax(120px, 1fr); }
+    .list-grid, .list-row { grid-template-columns: var(--cols-lg); }
     .list-grid.only-extraction, .list-row.only-extraction { grid-template-columns: 28px minmax(200px, 2fr) 260px 150px minmax(160px, 1.5fr); }
     .list-row .cell-desc, .list-row .cell-added, .list-row .cell-swarm { display: block; font-size: inherit; }
-    /* The torrent views: Seeds, Peers, Up and Ratio in place of Last Try Date. */
-    .list-grid.torrent-cols, .list-row.torrent-cols { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
-    .list-grid.torrent-cols.with-extraction, .list-row.torrent-cols.with-extraction { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 120px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
+  }
+  /* UI.R42: a column hidden from the header's menu. A phone keeps its own lines whatever is chosen. */
+  @media (min-width: 768px) {
+    .list-grid > :global(.col-off), .list-row > .col-off { display: none !important; }
   }
   /* T7: beside Torrent Info the list keeps the columns it has between 768 and 1023 px, so it never scrolls sideways;
      the pane shows the swarm, the ratio and the rest for the selected torrent. */
   @media (min-width: 1440px) {
-    .list-grid.with-info, .list-row.with-info, .list-grid.with-info.torrent-cols, .list-row.with-info.torrent-cols {
-      grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 80px 90px;
-    }
-    .list-grid.with-info.with-extraction, .list-row.with-info.with-extraction,
-    .list-grid.with-info.torrent-cols.with-extraction, .list-row.with-info.torrent-cols.with-extraction {
-      grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 120px 80px 90px;
-    }
+    .list-grid.with-info, .list-row.with-info { grid-template-columns: var(--cols-md); }
     .list-grid.with-info.only-extraction, .list-row.with-info.only-extraction { grid-template-columns: 28px minmax(180px, 1fr) 220px; }
     .list-grid.with-info :global(.wide-col), .list-row.with-info .cell-desc, .list-row.with-info .cell-added, .list-row.with-info .cell-swarm { display: none; }
   }

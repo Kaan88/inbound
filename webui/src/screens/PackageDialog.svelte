@@ -167,7 +167,7 @@
   {#snippet footer()}
     {#if group}
       {#if allDone}<button class="btn" onclick={copyFolder}>Copy folder path</button>{/if}
-      <button class="btn" disabled={!connected || !pauseOn || busy} onclick={() => action('pause')}>Pause all</button>
+      <button class="btn" disabled={!connected || !pauseOn || busy} onclick={() => action('pause')}>Stop all</button>
       <button class="btn" disabled={!connected || !resumeOn || busy} onclick={() => action('resume')}>Resume all</button>
       <button class="btn" disabled={!connected || !cancelOn || busy} onclick={() => (confirmCancel = true)}>Cancel package</button>
     {/if}

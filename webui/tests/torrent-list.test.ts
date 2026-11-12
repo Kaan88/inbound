@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultSort, emptyText, jobView, nextSort, sortKeys, sortRows } from '../src/lib/list';
 import { emptyModel } from '../src/lib/model';
 import {
-  becameReadyToChoose, chipCompact, goalFor, knownListenPort, sortForView, sortMenuTitles, goalPercent, goalRatioText, magnetToCopy, ratioCell, readyToChooseText, saveToText, seedGoalLine, seedGoalOf, swarmCells,
+  becameReadyToChoose, chipCompact, goalFor, knownListenPort, sortForColumns, sortMenuTitles, goalCellText, goalPercent, goalRatioText, magnetToCopy, ratioCell, readyToChooseText, saveToText, seedGoalLine, seedGoalOf, swarmCells,
   torrentCounts, torrentFilterOf, torrentSummary, waitingForChoice, waitingForChoiceText,
 } from '../src/lib/torrentList';
 import { buildRows, counts, inView, isTorrentView, parseViewKey, viewHash } from '../src/lib/views';
@@ -165,10 +165,12 @@ describe('the swarm cells of a torrent row (WEB-T2)', () => {
     expect(order('ratio')[0]).toBe('s');
   });
 
-  it('are columns in the torrent views only, in place of Last Try Date, and a line on a phone', () => {
-    expect(listScreenSource).toMatch(/head\('seeds', 'Seeds'/);
-    expect(listScreenSource).toMatch(/head\('ratio', 'Ratio'/);
-    expect(listScreenSource).toMatch(/\{#if torrentCols\}[\s\S]*cell-swarm[\s\S]*\{:else\}\s*<span class="cell-added/);
+  it('are columns in every view, shown at first in the torrent views in place of Last Try Date, and a line on a phone', () => {
+    // UI.R42: the header is built from listColumns; a column off is in the page with col-off.
+    expect(listScreenSource).toMatch(/\{#each listColumns\.defs as def \(def\.key\)\}/);
+    expect(listScreenSource).toMatch(/class="cell-swarm tabular text-right" class:col-off=\{off\('seeds'\)\}/);
+    expect(listScreenSource).toMatch(/class="cell-added hidden text-muted lg:block" class:col-off=\{off\('lastTry'\)\}/);
+    expect(listScreenSource).not.toMatch(/\{#if torrentCols\}[\s\S]*cell-swarm[\s\S]*\{:else\}\s*<span class="cell-added/);
     expect(listScreenSource).toMatch(/class="phone-swarm"/);
   });
 
@@ -176,27 +178,60 @@ describe('the swarm cells of a torrent row (WEB-T2)', () => {
     expect(listScreenSource).toMatch(/\{#if row\.kind === 'job' && torrentCols && v\.swarm && connected\}<span class="phone-swarm">/);
   });
 
-  it('are in the More > Sort by menu in the torrent views, where below 1024 px it is the only way to sort by them', () => {
-    const plainKeys = sortMenuTitles(false).map(([key]) => key);
+  it('are in the More > Sort by menu while they show, where below 1024 px it is the only way to sort by them', () => {
+    const plainKeys = sortMenuTitles(new Set(['name', 'queue', 'size', 'status', 'eta', 'rate', 'lastTry', 'description'])).map(([key]) => key);
     expect(plainKeys).not.toContain('seeds');
     expect(plainKeys).not.toContain('ratio');
-    const torrentTitles = sortMenuTitles(true);
-    expect(torrentTitles.filter(([key]) => ['seeds', 'peers', 'up', 'ratio'].includes(key))).toEqual([['seeds', 'Seeds'], ['peers', 'Peers'], ['up', 'Up'], ['ratio', 'Ratio']]);
+    expect(plainKeys.at(-1)).toBe('added');
+    const torrentTitles = sortMenuTitles(new Set(['name', 'seeds', 'peers', 'up', 'ratio', 'uploaded', 'seedTime', 'seedGoal']));
+    expect(torrentTitles).toEqual([['name', 'File Name'], ['seeds', 'Seeds'], ['peers', 'Peers'], ['up', 'Up'], ['ratio', 'Ratio'],
+      ['uploaded', 'Uploaded'], ['seedTime', 'Seeding time'], ['seedGoal', 'Seeding goal'], ['added', 'Order of addition']]);
     for (const [key] of torrentTitles) expect(sortKeys).toContain(key);
-    expect(listScreenSource).toMatch(/const columnTitles = \$derived\(sortMenuTitles\(torrentCols\)\)/);
+    expect(listScreenSource).toMatch(/const columnTitles = \$derived\(sortMenuTitles\(sortColumns\)\)/);
   });
 
-  it('sort only the torrent views; elsewhere the default holds and the menu names it', () => {
+  it('sort by a column only while it shows; otherwise the default holds and the menu names it', () => {
     const byRatio = { key: 'ratio' as const, ascending: false };
-    expect(sortForView(byRatio, true)).toEqual(byRatio);
-    expect(sortForView(byRatio, false)).toEqual(defaultSort);
+    const torrentView = new Set(['name', 'seeds', 'peers', 'up', 'ratio']);
+    const plainView = new Set(['name', 'size', 'status']);
+    expect(sortForColumns(byRatio, torrentView)).toEqual(byRatio);
+    expect(sortForColumns(byRatio, plainView)).toEqual(defaultSort);
     const byName = { key: 'name' as const, ascending: true };
-    expect(sortForView(byName, false)).toEqual(byName);
-    expect(sortMenuTitles(false).find(([key]) => key === sortForView(byRatio, false).key)?.[1]).toBe('Order of addition');
+    expect(sortForColumns(byName, plainView)).toEqual(byName);
+    // Order of addition has no column and always holds.
+    expect(sortForColumns({ key: 'added', ascending: true }, plainView)).toEqual({ key: 'added', ascending: true });
+    expect(sortMenuTitles(plainView).find(([key]) => key === sortForColumns(byRatio, plainView).key)?.[1]).toBe('Order of addition');
     // A click in All while Ratio is saved starts from the default, as if Ratio were never chosen.
-    expect(nextSort(sortForView(byRatio, false), 'size')).toEqual({ key: 'size', ascending: false });
+    expect(nextSort(sortForColumns(byRatio, plainView), 'size')).toEqual({ key: 'size', ascending: false });
+    expect(listScreenSource).toMatch(/const shownSort = \$derived\(sortForColumns\(sort, sortColumns\)\)/);
     expect(listScreenSource).toMatch(/buildRows\(store\.model, view, search, expanded, shownSort, torrentFiles\)/);
     expect(listScreenSource).toMatch(/label: `Sort by: \$\{columnTitles\.find\(\(\[key\]\) => key === shownSort\.key\)/);
+  });
+
+  it('UI.R42: say what was uploaded, how long it has seeded and its seeding goal; blank for a row that is not a torrent', () => {
+    const sent = tjob('u', 'completed', { seeding: true, uploaded: 5_000_000, seedingSince: '2026-11-11T10:30:00Z' });
+    const cells = jobView(sent, undefined, goal, now).swarm!;
+    expect(cells.uploaded).toBe(5_000_000);
+    expect(cells.seedTime).toBe(5400);
+    expect(cells.uploadedText).toMatch(/MB$/);
+    expect(cells.seedTimeText).not.toBe('');
+    expect(cells.goalText).toBe('Ratio 1.0 or 48 hours');
+    expect(jobView(paused, undefined, goal, now).swarm!.seedTimeText).toBe('');
+    expect(jobView(paused, undefined, goal, now).swarm!.seedTime).toBe(-1);
+    expect(jobView(plain).swarm).toBeUndefined();
+    expect(goalCellText({ seedGoal: 'never', seedGoalValue: null }, goal)).toBe("Don't seed");
+    expect(goalCellText({}, { ratio: 0, hours: 0 })).toBe('');
+    expect(goalCellText({}, { ratio: 0, hours: 1 })).toBe('1 hour');
+  });
+
+  it('UI.R42: sort by Uploaded, Seeding time and Seeding goal', () => {
+    const sent = tjob('u', 'completed', { seeding: true, uploaded: 5_000_000, seedingSince: '2026-11-11T10:30:00Z' });
+    const views = [paused, downloading, sent, plain].map((job) => ({ id: job.id, v: jobView(job, undefined, goal, now) }));
+    const order = (key: 'uploaded' | 'seedTime' | 'seedGoal', ascending = false) => sortRows(views, (row) => row.v, { key, ascending }).map((row) => row.id);
+    expect(order('uploaded')[0]).toBe('u');
+    expect(order('uploaded').at(-1)).toBe(plain.id);
+    expect(order('seedTime')[0]).toBe('u');
+    expect(order('seedGoal', true).at(-1)).toBe(plain.id);
   });
 });
 

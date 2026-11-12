@@ -87,11 +87,10 @@ export function stateWord(state: string): string {
     case 'retryWaiting':
     case 'retrying': return 'Retrying';
     case 'verifying': return 'Verifying';
-    case 'paused': return 'Paused';
+    case 'paused': return 'Stopped';
     case 'completed': return 'Completed';
     case 'failed': return 'Failed';
     case 'cancelled': return 'Cancelled';
-    case 'muxing': return 'Merging';
     case 'scheduled': return 'Scheduled';
     default: return state;
   }

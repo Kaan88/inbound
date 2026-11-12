@@ -69,6 +69,6 @@ internal sealed class UpdatePostponement
             : WaitsForDownloads(error)
                 ? willRetry
                     ? "Downloads are active; the update will install when they finish."
-                    : "Downloads are active; the update will not restart the Host yet."
+                    : "Downloads are active; the update will not restart Inbound's background program yet."
                 : error;
 }

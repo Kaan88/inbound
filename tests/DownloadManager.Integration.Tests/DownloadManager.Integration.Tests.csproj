@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="DownloadManager.TestSupport" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\TorrentHandlerRegistration.cs" Link="TorrentHandlerRegistration.cs" />
@@ -41,6 +42,7 @@
     <ProjectReference Include="..\..\tools\TestServer\TestServer.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Torrents\DownloadManager.Torrents.csproj" />
+    <ProjectReference Include="..\DownloadManager.TestSupport\DownloadManager.TestSupport.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Containers\DownloadManager.Containers.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />

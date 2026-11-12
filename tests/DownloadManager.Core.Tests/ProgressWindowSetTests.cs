@@ -177,7 +177,19 @@ public sealed class ProgressWindowSetTests
         Assert.DoesNotContain("WindowInstance.Arguments(", main);
         var windows = Source("MainWindow.ProgressWindows.cs");
         Assert.Contains("new DownloadWindow(id, manual: true, target, inMainWindowProcess: true)", windows);
-        Assert.Contains("new PackageWindow(id, target, jobId => OpenProgressWindow(ProgressWindowKind.Download, jobId, target))", windows);
+        Assert.Contains("new PackageWindow(id, target, jobId => OpenProgressWindow(ProgressWindowKind.Download, jobId, target, package))", windows);
+        // UI.B28: a window the user opened stays in front of the one it was opened from once the click is over,
+        // whether it opens now or was open already.
+        Assert.Contains("OpenProgressWindow(ProgressWindowKind.Download, jobId, _connection.Target, this)", windows);
+        Assert.Contains("OpenProgressWindow(ProgressWindowKind.Package, packageId, _connection.Target, this)", Source("MainWindow.xaml.cs"));
+        Assert.Contains("if (openedFrom is not null) WindowFront.KeepInFrontAfterInput(open, openedFrom);", windows);
+        Assert.Contains("if (openedFrom is not null) WindowFront.KeepInFrontAfterInput(window, openedFrom);", windows);
+        // Reopening a window many times leaves no Closed handler behind: each check removes its own.
+        var front = Source("WindowFront.cs");
+        Assert.Contains("window.Closed += onClosed;", front);
+        Assert.Contains("window.Closed -= onClosed;", front);
+        // The completion burst is nobody's click: its windows are not pulled forward again.
+        Assert.Contains("OpenProgressWindow(next.Kind, next.Id, next.Target);", windows);
         // The completion burst: one window per dispatcher turn, at low priority.
         Assert.Contains("DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,", windows);
         Assert.Contains("OpenWindowsInTurns(opens);", Source("MainWindow.Servers.cs"));

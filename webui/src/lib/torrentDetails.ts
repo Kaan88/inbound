@@ -138,6 +138,9 @@ export interface PeerRow {
   has: string;
   down: string;
   up: string;
+  /** UI.R42: what came from this peer and went to it since it connected. */
+  received: string;
+  sent: string;
 }
 
 export function ipFamily(address: string): 'IPv6' | 'IPv4' {
@@ -195,6 +198,8 @@ export function peerRows(peers: readonly PeerDto[], numbers?: Map<string, number
         has: percentText(peer.progress),
         down: speed(peer.downloadRate) || '0',
         up: speed(peer.uploadRate) || '0',
+        received: bytes(Math.max(0, peer.downloaded ?? 0)),
+        sent: bytes(Math.max(0, peer.uploaded ?? 0)),
       };
     });
 }
@@ -225,6 +230,14 @@ export interface TrackerRow {
   peers: string;
   /** "Now", "24m 0s" or "–". */
   next: string;
+  /** UI.R42: the tracker's tier, and what it said last with any address cut short. */
+  tier: string;
+  message: string;
+}
+
+/** What a tracker said, with any address in it cut before a passkey (trackerShown). */
+export function trackerMessageText(message: string | null | undefined): string {
+  return (message ?? '').trim().replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, (address) => trackerShown(address));
 }
 
 /** "Now", "24m 0s", or '' when none is planned (-1) or it isn't known. */
@@ -290,6 +303,8 @@ export function trackerRowsInOrder(trackers: readonly TrackerDto[]): TrackerRow[
       seeds: countText(tracker.seeds),
       peers: countText(tracker.peers),
       next: nextAnnounceText(tracker.nextAnnounce) || '–',
+      tier: Number.isFinite(tracker.tier) ? String(Math.max(0, tracker.tier)) : '',
+      message: trackerMessageText(tracker.message),
     };
   });
 }

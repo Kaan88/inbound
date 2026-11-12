@@ -35,7 +35,9 @@ toolkit choice see `docs/plans/gui-toolkits.md`.
 
 The commands you will use most: `job.add`, `file.metadata`, `job.pause|resume|cancel|retry|remove`,
 `jobs.pauseAll|resumeAll`, `job.update`, `job.moveToQueue`, `queue.action`, `group.action`, `settings.get|update`,
-`statistics.get`, `speed.history`, `folders.*`, `host.openUi|shutdown|pickFolder`. The full list is `MessageTypes`
+`statistics.get`, `speed.history`, `folders.*`, `host.openUi|shutdown|pickFolder`, and `changelog.get` (the Host's
+release notes for What's new; filter them with the rules of `ChangelogFilter` in `src/DownloadManager.Contracts/Changelog`,
+and expect an error from a Host older than 0.7.2). The full list is `MessageTypes`
 in `src/DownloadManager.Contracts/Protocol.cs`; the meaning of each is in
 `src/DownloadManager.Runtime/Ipc/HostCommandDispatcher.cs`.
 
@@ -45,7 +47,7 @@ The WinUI window is the reference (`CLAUDE.md`, "UI structure"). The web UI revi
 (`docs/plans/webui-desktop-review.md`) is a list of what a second frontend tends to miss. Check each:
 
 - **List:** columns File Name, Q, Size, Status, Time left, Transfer rate, Last Try Date, Description; sortable,
-  resizable, with layout remembered; packages expand; state views (Unfinished, Active, Queued, Failed, Finished)
+  resizable, with layout remembered; packages expand; state views (Unfinished, Active, Queued, Failed, Completed)
   and Queues in the sidebar; search; multiselect with bulk actions; keyboard (Delete, Shift+Delete, Ctrl+A,
   Ctrl+F, arrows).
 - **States:** `queued`, `connecting`, `downloading`, `retryWaiting`, `verifying`, `paused`, `completed`, `failed`,
@@ -62,6 +64,9 @@ The WinUI window is the reference (`CLAUDE.md`, "UI structure"). The web UI revi
 - **Queues and Scheduler:** queues, priority, schedules, quotas, completion actions, sleep prevention.
 - **Options:** the settings pages, saved with one OK/Cancel/Apply, with unsaved edits on other pages kept.
 - **Shell:** open file, open folder, reveal; tray and notifications, completion dialog and sound, updater.
+- **Browser extension:** Get it links per browser (`BrowserBridge.ChromeStoreUrl`, `EdgeStoreUrl`, `FirefoxReleaseUrl`),
+  the status from `extensionsSeen` where the Host gives it, and the one-time hint until an extension connects
+  (`extensions.seen` ends it live; see "Browser extensions seen" in `docs/ipc-protocol.md`).
 - **Providers:** TorBox and the containers/archives flows, if the Host reports `remote` and `archives`.
 - **Servers:** managing another Inbound server (see `docs/docker.md` and the sign-in flow in the protocol doc).
 - **Accessibility:** names and live regions for status changes, keyboard reachable everything.

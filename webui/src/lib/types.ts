@@ -297,7 +297,6 @@ export interface Settings {
   allowLocalNetwork: boolean;
   autoResumeUnfinishedOnStartup: boolean;
   browserIntegrationEnabled: boolean;
-  ffmpegPath?: string;
   postDownloadCommand?: string;
   /** Set by the server: why the saved program won't run (review 2:L5). */
   postDownloadCommandProblem?: string;

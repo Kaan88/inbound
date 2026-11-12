@@ -25,7 +25,7 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     {
         _server = await TestServerHost.StartAsync();
         Mock.ApiKey = Key;
-        Mock.AddHoster("Pretend", ["pretend.invalid", "127.0.0.1", "localhost"], "/hoster/");
+        Mock.AddHoster("Pretend", ["pretend.invalid"], "/hoster/");
     }
 
     public async Task DisposeAsync() => await _server.DisposeAsync();
@@ -307,7 +307,7 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Empty(Mock.Submissions);
 
         // Scenario C: an uncached hoster link, approved, submitted once, polled, started when ready.
-        var hosterLink = Mock.HosterUrl($"file/uncached.bin#{fragment}");
+        var hosterLink = Mock.PublicHosterUrl($"file/uncached.bin#{fragment}");
         var webFile = NewFile("uncached/uncached.bin", 64 * Kb, 21);
         Mock.ScriptSubmission(Md5(hosterLink), [webFile], [
             MockTorBoxState.Queued,
@@ -340,11 +340,10 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Equal(linkPassword, submitted.Password);
 
         var started = await UntilAsync(connection, c.Id, job => job.State == "localStarted", "scenario C to be ready", checkNow: true);
-        Assert.Equal("127.0.0.1", started.DisplayHost);
+        Assert.Equal("pretend.invalid", started.DisplayHost);
         await UntilProviderJobsFinishAsync(connection, 4);
         AssertSameFile(host, webFile, "uncached", "uncached.bin");
         Assert.Single(Mock.Submissions);
-        Assert.Equal(0, Mock.HosterRequests);
 
         // Scenario E: a magnet, cache checked, approved, waited for, chosen from, downloaded.
         var hash = new string('c', 40);
@@ -410,7 +409,7 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     {
         await using var host = await StartHostAsync();
         var connection = await WithKeyAsync(host);
-        var link = Mock.HosterUrl("file/survivor.bin");
+        var link = Mock.PublicHosterUrl("file/survivor.bin");
         var file = NewFile("survivor/survivor.bin", 4 * 1024 * Kb, 41);
         Mock.ScriptSubmission(Md5(link), [file], [MockTorBoxState.Downloading(0.2, eta: 5), MockTorBoxState.Ready]);
 
@@ -481,7 +480,7 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Mock.AddItem(RemoteItemKind.Torrent, "Two", [NewFile("Two/a.bin", 2 * Kb, 3)]);
         Mock.AddItem(RemoteItemKind.Torrent, "Three", [NewFile("Three/a.bin", 2 * Kb, 4)]);
         var web = Mock.AddItem(RemoteItemKind.WebDownload, "Web", [NewFile("Web/a.bin", 2 * Kb, 5)]);
-        web.OriginalUrl = Mock.HosterUrl("file/secret-original.bin#invented-original-key");
+        web.OriginalUrl = Mock.PublicHosterUrl("file/secret-original.bin#invented-original-key");
         var usenet = Mock.AddItem(RemoteItemKind.Usenet, "News", [NewFile("News/a.bin", 2 * Kb, 6)]);
 
         var page = await connection.AskAsync<RemoteItemResult>(MessageTypes.RemoteItemGet, new RemoteItemRequest { Kind = "torrents", Limit = 2 });
@@ -564,7 +563,7 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Empty((await connection.AskAsync<RemoteListResult>(MessageTypes.RemoteList, new { })).Jobs);
     }
 
-    /// <summary>Seen live: a script reading `dm remote list` hung for as long as the Host the CLI had started went on running.</summary>
+    /// <summary>Seen live: a script reading the CLI's output hung for as long as the Host the CLI had started went on running.</summary>
     [Fact]
     public async Task TheCliEndsItsOutputWhenItStartedTheHostItself()
     {
@@ -628,9 +627,10 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.True(added.Accepted, added.Error);
 
         // Checking the new address needs the hoster list, which is slow to come. The client stops waiting first.
+        // The new address is not on this PC: one that is goes direct with no provider check (UI.B27).
         Mock.Fail("GET webdl/hosters", MockFault.Delay(TimeSpan.FromSeconds(4)), times: 1);
         var gone = await host.ConnectAsync();
-        var request = new JobRefreshUrlRequest { JobId = added.Job!.Id, Url = $"{_server.BaseAddress}/file/after.bin?size=1024&seed=52" };
+        var request = new JobRefreshUrlRequest { JobId = added.Job!.Id, Url = Mock.PublicHosterUrl("after.bin") };
         _ = gone.AskAsync<JobActionResponse>(MessageTypes.JobRefreshUrl, request).ContinueWith(task => task.Exception, TaskScheduler.Default);
         await Task.Delay(500);
         await gone.DisposeAsync();
@@ -881,127 +881,107 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         }
     }
 
-    // ---- The command line ---------------------------------------------------------------------
+    // ---- dm add and a provider's links --------------------------------------------------------
+    // The CLI has no provider commands since CUT.1; what used to go through "dm remote" goes over the pipe here, as the
+    // windows send it.
 
     [Fact]
     public async Task AHosterLinkGoesThroughTheProviderWithNoChoiceAskedForAndDmAddWontTakeIt()
     {
         await using var host = await StartHostAsync();
         await using var connection = await WithKeyAsync(host);
-        var link = Mock.HosterUrl("file/cli-hoster#invented-fragment");
+        var link = Mock.PublicHosterUrl("file/cli-hoster#invented-fragment");
         var hash = Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(link))).ToLowerInvariant();
         var file = MockTorBoxFile.Of(Mock.NextFileId(), "cli-hoster/a.bin", 4 * Kb, 41);
         Mock.ScriptSubmission(hash, [file], [MockTorBoxState.CachedReady]);
         Mock.AddCached(hash);
 
-        // The command that means a direct request refuses a hoster link, and nothing reaches the hoster.
+        // The command that means a direct request refuses a hoster link, says where to add it, and adds nothing. (The link's
+        // host can't be reached, so whether the hoster was asked is shown by the empty list, not by the mock's counter.)
         var direct = await host.RunCliAsync(null, "add", link, "--dest", host.Destination);
         Assert.Equal(2, direct.ExitCode);
-        Assert.Contains("dm remote add", direct.Error);
+        Assert.Contains("app's window or the web UI", direct.Error);
+        Assert.DoesNotContain("dm remote", direct.All);
         Assert.DoesNotContain("invented-fragment", direct.All);
-        Assert.Equal(0, Mock.HosterRequests);
         var none = await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { });
         Assert.Empty(none.Jobs);
 
         // An explicit option doesn't get round that, for something known to be a hoster.
         Assert.Equal(2, (await host.RunCliAsync(null, "add", link, "--direct", "--dest", host.Destination)).ExitCode);
-        Assert.Equal(0, Mock.HosterRequests);
+        Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
 
         // Nor does asking for several at once, or by a list. Each counts as failed, in the same words.
-        var batch = await host.RunCliAsync(null, "add-batch", Mock.HosterUrl("file/cli-batch[1-2].bin"), "--direct", "--dest", host.Destination);
+        var batch = await host.RunCliAsync(null, "add-batch", Mock.PublicHosterUrl("file/cli-batch[1-2].bin"), "--direct", "--dest", host.Destination);
         Assert.Equal(1, batch.ExitCode);
-        Assert.Contains("dm remote add", batch.Error);
+        Assert.Contains("app's window or the web UI", batch.Error);
         var listFile = Path.Combine(host.Root, "list.json");
         await File.WriteAllTextAsync(listFile, JobListFile.Serialize([new JobDto { Url = link }]));
         var imported = await host.RunCliAsync(null, "import", listFile, "--direct");
         Assert.Equal(1, imported.ExitCode);
-        Assert.Contains("dm remote add", imported.Output);
+        Assert.Contains("app's window or the web UI", imported.Output);
 
         // A link to an item on the account is no more a direct download than a hoster's.
         var folder = await host.RunCliAsync(null, "add", "https://torbox.app/download?id=5&type=torrents", "--direct");
         Assert.Equal(2, folder.ExitCode);
-        Assert.Contains("dm remote add", folder.Error);
-        Assert.Equal(0, Mock.HosterRequests);
-        Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
-
-        // Other options of other commands aren't taken silently.
-        var odd = await host.RunCliAsync(link, "remote", "add", "-", "--item", "5");
-        Assert.Equal(2, odd.ExitCode);
-        Assert.Contains("--item", odd.Error);
-
-        // TB.S2: offering a link password to archives needs a link password; alone it is refused, not ignored.
-        var archivesOnly = await host.RunCliAsync(link, "remote", "add", "-", "--link-password-for-archives");
-        Assert.Equal(2, archivesOnly.ExitCode);
-        Assert.Contains("--link-password-stdin", archivesOnly.Error);
-        var retryArchivesOnly = await host.RunCliAsync(null, "remote", "retry", "1", "--link-password-for-archives");
-        Assert.Equal(2, retryArchivesOnly.ExitCode);
-        Assert.Contains("--link-password-stdin", retryArchivesOnly.Error);
+        Assert.Contains("app's window or the web UI", folder.Error);
         Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
 
         // Through the provider, with nothing chosen: when it is ready it starts.
-        var added = await host.RunCliAsync(link, "remote", "add", "-", "--dest", host.Destination);
-        Assert.True(added.ExitCode == 0, added.Error);
-        var id = added.Output.Split('\n').First(line => line.StartsWith("id:", StringComparison.Ordinal))["id:".Length..].Trim();
+        var added = await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto { Input = link, Destination = host.Destination });
+        Assert.True(added.Ok, added.Error);
+        var id = added.Job!.Id;
         await UntilProviderJobsFinishAsync(connection, 1);
-        Assert.Equal(0, Mock.HosterRequests);
         AssertSameFile(host, file, "cli-hoster", "a.bin");
 
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
-        while (!(await host.RunCliAsync(null, "remote", "list")).Output.Contains("Completed", StringComparison.Ordinal))
-        {
-            Assert.True(DateTimeOffset.UtcNow < deadline, "The job never said it was finished.");
-            await Task.Delay(100);
-        }
-
         // Added again with different wishes, it says what wasn't used.
-        var again = await host.RunCliAsync(link, "remote", "add", "-", "--dest", Path.Combine(host.Destination, "other"));
-        Assert.Equal(0, again.ExitCode);
-        Assert.Contains("Already on the list", again.Output);
-        Assert.Contains("so the folder given here wasn't used", again.Output);
-        Assert.DoesNotContain("remote select", again.Output);
-        Assert.Contains(id, again.Output);
+        var again = await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd,
+            new RemoteAddRequestDto { Input = link, Destination = Path.Combine(host.Destination, "other") });
+        Assert.True(again.Ok, again.Error);
+        Assert.True(again.Existing);
+        Assert.Equal(id, again.Job!.Id);
+        Assert.Contains("so the folder given here wasn't used", again.Note);
 
         // job.add stays what it is, a direct request, because a browser handoff is made of those.
-        var viaPipe = await connection.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest { Url = Mock.HosterUrl("file/job-add"), DestinationDirectory = host.Destination, StartMode = "later" });
+        var viaPipe = await connection.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest { Url = Mock.PublicHosterUrl("file/job-add"), DestinationDirectory = host.Destination, StartMode = "later" });
         Assert.True(viaPipe.Accepted, viaPipe.Error);
     }
 
     [Fact]
-    public async Task TheCliReadsALinkAndAPasswordFromOnePipeAsUtf8WithSpacesKept()
+    public async Task AnArchivePasswordGivenWithAnAddIsSealedAtRestWithItsSpacesKept()
     {
         await using var host = await StartHostAsync();
         await using var connection = await WithKeyAsync(host);
-        var link = Mock.HosterUrl("file/stdin-order");
+        var link = Mock.PublicHosterUrl("file/stdin-order");
         const string password = "  pä55ß жд 日本 ";
 
-        // Both lines arrive in one write, so a second reader on the pipe would find its line already gone.
-        var added = await host.RunCliAsync($"{link}\n{password}", "remote", "add", "-", "--archive-password-stdin", "--dest", host.Destination);
-        Assert.True(added.ExitCode == 0, added.Error);
-        Assert.DoesNotContain("pä55ß", added.All);
+        var added = await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd,
+            new RemoteAddRequestDto { Input = link, ArchivePassword = password, Destination = host.Destination });
+        Assert.True(added.Ok, added.Error);
 
         var saved = Directory.EnumerateFiles(Path.Combine(host.DataDirectory, "remote", "jobs"), "*.json").Single();
-        using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(saved));
+        var text = await File.ReadAllTextAsync(saved);
+        Assert.DoesNotContain("pä55ß", text);
+        using var document = System.Text.Json.JsonDocument.Parse(text);
         var sealedPassword = document.RootElement.EnumerateObject()
             .First(property => property.Name.Equals("protectedArchivePassword", StringComparison.OrdinalIgnoreCase)).Value.GetString();
         Assert.Equal(password, DownloadManager.Persistence.SecretProtector.UnprotectRemoteArchivePassword(sealedPassword));
     }
 
     [Fact]
-    public async Task WithNoListOfSitesDmAddAsksAndRemoteAddGivesTheRealCause()
+    public async Task WithNoListOfSitesDmAddAsksAndARemoteAddGivesTheRealCause()
     {
         await using var host = await StartHostAsync();
         await using var connection = await WithKeyAsync(host);
         Mock.Fail("GET webdl/hosters", MockFault.Status5xx());
         var link = "https://hoster.invalid/file/x";
 
-        var classified = await host.RunCliAsync(link, "remote", "classify", "-");
-        Assert.Equal(0, classified.ExitCode);
-        Assert.Contains("undetermined", classified.Output);
+        var classified = await connection.AskAsync<RemoteClassifyResult>(MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = link });
+        Assert.Equal("undetermined", classified.Kind);
 
-        var add = await host.RunCliAsync(link, "remote", "add", "-", "--dest", host.Destination);
-        Assert.Equal(1, add.ExitCode);
+        var add = await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto { Input = link, Destination = host.Destination });
+        Assert.False(add.Ok);
         Assert.Contains("TorBox could not be reached", add.Error);
-        Assert.DoesNotContain("ordinary", add.All);
+        Assert.DoesNotContain("ordinary", add.Error);
 
         var direct = await host.RunCliAsync(null, "add", link, "--dest", host.Destination, "--start", "later");
         Assert.Equal(2, direct.ExitCode);
@@ -1016,167 +996,23 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     public async Task WithoutAnAccountDmAddIsAsItEverWas()
     {
         await using var host = await StartHostAsync();
-        var result = await host.RunCliAsync(null, "add", Mock.HosterUrl("file/no-account"), "--dest", host.Destination, "--start", "later");
+        var result = await host.RunCliAsync(null, "add", Mock.PublicHosterUrl("file/no-account"), "--dest", host.Destination, "--start", "later");
         Assert.True(result.ExitCode == 0, result.Error);
     }
 
     [Fact]
-    public async Task TheCommandLineShowsNoEscapeSequencesAndWarnsAboutASecretOnIt()
+    public async Task AProvidersNameReachesNoClientWithAnEscapeSequence()
     {
         await using var host = await StartHostAsync();
         await using var connection = await WithKeyAsync(host);
         var file = MockTorBoxFile.Of(Mock.NextFileId(), "Pack/a.bin", 4 * Kb, 42);
         Mock.AddItem(RemoteItemKind.Torrent, "x\u001b[2K\u001b[1Afake line", [file], MockTorBoxState.Failed("bad\u001b]0;title\u0007 news"));
 
-        var browse = await host.RunCliAsync(null, "remote", "browse", "torrents");
-        Assert.Equal(0, browse.ExitCode);
-        Assert.DoesNotContain('\u001b', browse.All);
-        Assert.DoesNotContain('\u0007', browse.All);
-        Assert.Contains("fake line", browse.Output);
-
         var items = await connection.AskAsync<RemoteItemResult>(MessageTypes.RemoteItemGet, new RemoteItemRequest { Kind = "torrents", Fresh = true });
-        Assert.DoesNotContain('\u001b', Assert.Single(items.Items).Name ?? string.Empty);
-
-        var magnet = "magnet:?xt=urn:btih:" + new string('a', 40) + "&tr=invented-passkey";
-        var warned = await host.RunCliAsync(null, "remote", "classify", magnet);
-        Assert.Contains("shell history", warned.Error);
-        Assert.DoesNotContain("invented-passkey", warned.All);
-
-        var quiet = await host.RunCliAsync(magnet, "remote", "classify", "-");
-        Assert.DoesNotContain("shell history", quiet.Error);
-        Assert.Contains("magnet", quiet.Output);
-
-        var plain = await host.RunCliAsync(null, "remote", "classify", "https://example.invalid/file.zip");
-        Assert.DoesNotContain("shell history", plain.Error);
-
-        var network = await host.RunCliAsync(null, "remote", "add-torrent", @"\\attacker.invalid\share\a.torrent");
-        Assert.Equal(2, network.ExitCode);
-        Assert.Contains("network path", network.Error);
-    }
-
-    [Fact]
-    public async Task TheCommandLineDoesTheWholeJobAndPrintsNoSecret()
-    {
-        await using var host = await StartHostAsync();
-        var outputs = new List<string>();
-        async Task<CliResult> RunAsync(string? input, params string[] arguments)
-        {
-            var result = await host.RunCliAsync(input, ["remote", .. arguments]);
-            outputs.Add(result.All);
-            return result;
-        }
-
-        var before = await RunAsync(null, "status");
-        Assert.Equal(0, before.ExitCode);
-        Assert.Contains("TorBox key: not set", before.Output);
-        Assert.Contains("remote jobs: 0", before.Output);
-
-        // The command line is no place for it: refused, not echoed, not used.
-        var inArguments = await RunAsync(null, "key", "set", Key);
-        Assert.Equal(2, inArguments.ExitCode);
-        Assert.DoesNotContain(Key, inArguments.All);
-        Assert.Contains("standard input", inArguments.Error);
-        Assert.DoesNotContain("key: set", (await RunAsync(null, "status")).Output);
-
-        var empty = await RunAsync(string.Empty, "key", "set");
-        Assert.Equal(2, empty.ExitCode);
-
-        var saved = await RunAsync(Key, "key", "set");
-        Assert.True(saved.ExitCode == 0, saved.Error);
-        Assert.Contains("Key saved.", saved.Output);
-        Assert.Contains("plan: Pro", saved.Output);
-
-        var status = await RunAsync(null, "status");
-        Assert.Contains("TorBox key: set", status.Output);
-
-        var file = NewFile("Pack/a.bin", 32 * Kb, 51);
-        var second = NewFile("Pack/b.bin", 16 * Kb, 52);
-        var item = Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file, second]);
-
-        var browse = await RunAsync(null, "browse", "torrents");
-        Assert.Contains("Pack", browse.Output);
-        var files = await RunAsync(null, "browse", "torrents", "--item", item.Id.ToString());
-        Assert.Contains(file.Id.ToString(), files.Output);
-        var noSuchKind = await RunAsync(null, "browse", "movies");
-        Assert.Equal(1, noSuchKind.ExitCode);
-        Assert.Contains("torrents, webdl or usenet", noSuchKind.Error);
-
-        var link = $"https://torbox.app/download?id={item.Id}&type=torrents";
-        var classified = await RunAsync(null, "classify", link);
-        Assert.Contains("kind:     folderLink", classified.Output);
-
-        // A link can stay off the command line too.
-        var added = await RunAsync(link, "add", "-", "--dest", host.Destination);
-        Assert.True(added.ExitCode == 0, added.Error);
-        Assert.Contains("Added:", added.Output);
-        var id = added.Output.Split('\n').First(line => line.StartsWith("id:", StringComparison.Ordinal))["id:".Length..].Trim();
-
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
-        while (!(await RunAsync(null, "list")).Output.Contains("awaitingSelection", StringComparison.Ordinal))
-        {
-            Assert.True(DateTimeOffset.UtcNow < deadline, "It never got to the choice of files.");
-            await Task.Delay(100);
-        }
-
-        var listed = await RunAsync(null, "files", id[..12]);
-        Assert.Contains(Path.Combine("Pack", "a.bin"), listed.Output);
-        var chosen = await RunAsync(null, "select", id, file.Id.ToString());
-        Assert.True(chosen.ExitCode == 0, chosen.Error);
-
-        await using (var connection = await host.ConnectAsync())
-        {
-            await UntilProviderJobsFinishAsync(connection, 1);
-        }
-
-        AssertSameFile(host, file, "Pack", "a.bin");
-        Assert.False(File.Exists(Path.Combine(host.Destination, "Pack", "b.bin")));
-
-        // A magnet and a torrent file, through their own commands, wait for the same question.
-        var hash = new string('d', 40);
-        var magnet = $"magnet:?xt=urn:btih:{hash}&dn=Cli%20Magnet&tr=http%3A%2F%2Ftracker.invalid%2Finvented-cli-passkey";
-        var magnetAdded = await RunAsync(magnet, "add", "-", "--dest", host.Destination, "--select", "all");
-        Assert.True(magnetAdded.ExitCode == 0, magnetAdded.Error);
-        var magnetId = magnetAdded.Output.Split('\n').First(line => line.StartsWith("id:", StringComparison.Ordinal))["id:".Length..].Trim();
-        deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
-        while (!(await RunAsync(null, "list")).Output.Contains("Not cached on TorBox", StringComparison.Ordinal))
-        {
-            Assert.True(DateTimeOffset.UtcNow < deadline, "It never asked about the magnet.");
-            await Task.Delay(100);
-        }
-
-        var torrentPath = Path.Combine(host.Root, "invented.torrent");
-        await File.WriteAllBytesAsync(torrentPath, Encoding.ASCII.GetBytes("d4:infod6:lengthi1e4:name3:abc12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee"));
-        var torrent = await RunAsync(null, "add-torrent", torrentPath, "--dest", host.Destination, "--select", "all");
-        Assert.True(torrent.ExitCode == 0, torrent.Error);
-        Assert.Contains("name:     abc", torrent.Output);
-        Assert.Equal(1, (await RunAsync(null, "add-torrent", Path.Combine(host.Root, "missing.torrent"))).ExitCode);
-
-        // Taking one off the list here touches nothing there, and deleting there asks first.
-        Assert.Equal(0, (await RunAsync(null, "check", magnetId)).ExitCode);
-        var noSuchJob = await RunAsync(null, "remove", "not-an-id");
-        Assert.Equal(2, noSuchJob.ExitCode);
-        Assert.Contains("No remote job has that id", noSuchJob.Error);
-        Assert.Equal(2, (await RunAsync(null, "remove", id, "--delete-from-provider")).ExitCode);
-        Assert.Contains("--yes", outputs[^1]);
-        Assert.Empty(Mock.Deleted);
-        var removed = await RunAsync(null, "remove", magnetId);
-        Assert.True(removed.ExitCode == 0, removed.Error);
-        Assert.Contains("as they were", removed.Output);
-
-        var clear = await RunAsync(null, "key", "clear");
-        Assert.Equal(0, clear.ExitCode);
-        Assert.Contains("TorBox key: not set", (await RunAsync(null, "status")).Output);
-
-        await host.StopAsync();
-        foreach (var output in outputs)
-        {
-            foreach (var secret in new[] { Key, Key.Replace("-", string.Empty, StringComparison.Ordinal), magnet, "invented-cli-passkey", "tracker.invalid", "/torbox-cdn/" })
-            {
-                Assert.False(output.Contains(secret, StringComparison.Ordinal), "A secret turned up in the output of a command.");
-            }
-        }
-
-        host.AssertNowhere(Key, magnet, "invented-cli-passkey", "/torbox-cdn/");
+        var name = Assert.Single(items.Items).Name ?? string.Empty;
+        Assert.DoesNotContain('\u001b', name);
+        Assert.DoesNotContain('\u0007', name);
+        Assert.Contains("fake line", name);
     }
 
     private static async Task Eventually(Func<bool> condition)

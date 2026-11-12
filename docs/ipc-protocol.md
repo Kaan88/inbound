@@ -23,7 +23,9 @@ page gives the framing rules, the remote provider messages and the archive messa
 - A second pipe, `\\.\pipe\DownloadManager-<hash>-hello`, with the same ACL, is for clients that want less (PERF.7).
   There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool, "role":
   string }`, both bools true when left out. `role` is left out (or `desktop`) by the user at this PC; `web` asks for
-  the rights of a browser on another device (below). A role the Host doesn't offer closes the connection. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
+  the rights of a browser on another device (below). A role the Host doesn't offer closes the connection. The native
+  host also sends `browser` (`chrome`, `edge` or `firefox`: the browser whose extension started it); the Host notes it
+  only for a `desktop` session at this PC, and every other client leaves it out (UI.R41, below). The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
   broadcasts only if `events` is true; replies always come. Any other first frame closes the connection, and one on
   another protocol version gets `server.hello` and `server.incompatible`. The CLI asks for neither (a command that
   needs the list sends `jobs.query`), and the native host asks for events only. The main pipe is unchanged. A Host
@@ -52,7 +54,7 @@ installed, since the bridge serves both uploads into the Host's data folder). Th
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
 available here." A Host whose clients may not set what it runs (a network server) refuses a `settings.update` that
-changes `postDownloadCommand`, `ffmpegPath`, `updateManifestUrl`, `updatePublicKey` or
+changes `postDownloadCommand`, `updateManifestUrl`, `updatePublicKey` or
 `allowSystemCompletionActions`, and a `job.update` that sets a completion program; sending those values back
 unchanged is fine. The desktop Host can do all of these.
 
@@ -107,7 +109,7 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
   those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
 - What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
-  post-download command, the FFmpeg path, the update source, the proxy's address and user (its mode stays), the site
+  post-download command, the update source, the proxy's address and user (its mode stays), the site
   logins, the sound files and the recent addresses and folders. Sent back as shown, they are kept as they are; sent
   with another value, they are refused like any field it may not change.
 - No local network: a download added, handed off or pointed at a new address by a web session never reaches
@@ -115,7 +117,7 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   and `handoff.request`), and an address's name is resolved and checked again when the connection is made. Any
   connection that isn't to the proxy the user set is checked so. Through the proxy, the site's name is resolved on
   this PC first and refused the same way; a name only the proxy can resolve goes ahead, as does one that resolves
-  differently by the time the proxy asks. FTP is refused. A hand-off's `extensionId` is not checked and grants
+  differently by the time the proxy asks. FTP is refused, as it is for every caller ("FTP addresses aren't supported."). A hand-off's `extensionId` is not checked and grants
   nothing, and request ids are kept apart from a local client's.
 - A finished download a web session added gets the mark Windows gives files from the internet (`Zone.Identifier`,
   zone 3, with only the site's scheme and host), so SmartScreen and Office warn before it is opened. A drive without
@@ -410,6 +412,20 @@ keeps three things out of a client's hands, and tells every client when the sett
 - The desktop window holds another server to that server's own `latestVersion`; when it has none, to this PC's,
   because every Inbound build (Setup, the AppImage, the Docker image) is made from the same version tag.
 
+### Browser extensions seen (UI.R41)
+
+- The native host names its browser in `client.hello` (`browser`, above). The desktop Host (Windows and Linux) keeps the
+  last day each browser's extension reached it in `extensions-seen.json` in its state folder, written at most once per
+  browser per day.
+- The status in `jobs.snapshot` (and `host.status`) carries `extensionsSeen`: browser name to the last time it was
+  noted, `{}` when none has connected yet. It is absent (null) on the headless server, whose extensions pair over the
+  network and are listed as paired apps (`GET /api/auth/tokens`, role `extension`) instead, and from an older Host. A
+  client shows no per-browser status then.
+- **`extensions.seen`** (Host push, payload `{ "seen": { "chrome": "2026-11-12T09:30:00+00:00" } }`, the whole list)
+  goes to the sessions at this PC that take events when a browser's extension reaches the Host for the first time, so
+  an open window can drop its "get the extension" hint at once. A web session never gets it. It is additive: a client
+  that doesn't know it ignores it.
+
 ### Downloads as every client sees them
 
 - A download whose address is hidden (`addressHidden`, a direct provider link) or that is a provider's file carries
@@ -422,6 +438,14 @@ keeps three things out of a client's hands, and tells every client when the sett
   (`start`, `intervalSeconds`, `bytesPerSecond`, oldest first, the last the second under way), the desktop's speed
   graph's own. Every session gets it, web sessions and the server's clients too, so a graph opened later starts full.
   A Host from before it answers with an error.
+- `changelog.get` `{}` answers `changelog.result` (UPD.N1): the Host's release notes, `{ versions: [{ version, date,
+  sections: [{ title, items: [{ text, tags }] }] }] }`, newest first, from `changelog.json` built into Contracts. Every
+  session gets it, web sessions too; it holds nothing of the machine's. The text is plain (never markup), and `tags` say
+  where a line applies (`all`, `windows`, `webui`, `server`, `docker`, `linux`, `extension`, plus `torrents` and
+  `torbox`, a provider's id: any other tag names a provider); `ChangelogFilter` has the rules. A Host from before 0.7.2 answers with an error.
+- `update.checkResult` with `status: "updateAvailable"` may carry `notes`, `[{ text, tags }]`: the new version's lines
+  from its manifest, which are not signed. The Host keeps at most 40 lines of at most 400 characters, with known tags
+  only; clients show them as plain text. Absent when the manifest had none.
 - `jobs.query` answers with the snapshot (`jobs.snapshot`). Its payload is optional: `{ "limit": n }` with n above
   zero lists only the n newest downloads (by `createdAt`, newest first; downloads created at the same moment keep the
   list's order). Without a payload, or with no positive `limit`, every download is listed in the list's own order.
@@ -524,8 +548,9 @@ than 5,000 of them. The entries are those of `remote.files`.
 
 `job.add` never classifies. It stays an explicit direct request, because a browser handoff is made of
 those. A frontend with a hoster link has to route it through `remote.add`. `dm add`, `dm add-batch` and
-`dm import` classify each address first: a hoster or folder link is refused, and in a batch or an import it
-counts as failed. An `undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
+`dm import` classify each address first: a hoster or folder link is refused with a note to add it in the window
+or the web UI (the CLI has no provider commands), and in a batch or an import it counts as failed. An
+`undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
 prints the note, because it can go on for hours and a script shouldn't stop for it.
 
 **`queue.action` `start`** starts what waits in that queue: queued downloads, "later" ones (`startMode: later`, which a
@@ -546,7 +571,7 @@ the optional `explicitDirect`. While a usable key exists, a changed http or http
 `hosterLink` or `folderLink` gets `ok: false` with words pointing to Add Links, with or without the flag.
 So does an `unsupported` one. An `undetermined` one, or one that couldn't be classified at all, gets
 `ok: false` unless `explicitDirect` is true, which a client sends only when the user chose a direct
-request for it. The same goes for an `ordinaryLink` with `checkIncomplete`. The job's current address and any `ftp` address are always accepted, and with no usable
+request for it. The same goes for an `ordinaryLink` with `checkIncomplete`. The job's current address is always accepted and an `ftp` address never is (FTP was cut in 0.7.2), and with no usable
 key nothing is classified. `dm refresh <id> <url> --direct` sets the flag.
 
 The clipboard monitor classifies too, while a usable key exists. An ordinary or provider direct link
@@ -722,10 +747,10 @@ by `jobId` except `torrent.inspect` and `torrent.add`.
   A seeding job stays `completed` and takes no download slot; `job.torrent` carries `seeding`, `seedingSince`,
   `uploaded` (bytes, the torrent's life), `ratio` (uploaded over the downloaded size) and `uploadRate`. When extraction
   deletes a seeding torrent's archive, its seeding stops first.
-- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP and FTP downloads, torrent downloads and torrent
+- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP downloads, torrent downloads and torrent
   uploads together. While the torrent engine runs, the Host splits it again on each torrent progress report (at most
   once a second; no timer of its own): a kind that used most of its share gets more, one that used less keeps what it
-  used plus a quarter, and each keeps at least a twentieth even while idle. With the engine stopped, HTTP and FTP have
+  used plus a quarter, and each keeps at least a twentieth even while idle. With the engine stopped, HTTP downloads have
   the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
   without an overall limit it is the only cap.
 - T2, details: `torrent.peers`, `torrent.trackers` and `torrent.pieces`, each `{jobId}`, answer `torrent.peersResult`,

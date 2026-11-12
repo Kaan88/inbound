@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- UPD.N1: the release notes the window and the web UI show after an update (docs\release-builds.md). -->
+    <EmbeddedResource Include="Changelog\changelog.json" LogicalName="DownloadManager.Contracts.changelog.json" />
+  </ItemGroup>
+
 </Project>

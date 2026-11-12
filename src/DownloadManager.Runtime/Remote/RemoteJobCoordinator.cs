@@ -1,3 +1,4 @@
+using DownloadManager.Core;
 using DownloadManager.Core.Archives;
 using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
@@ -40,6 +41,12 @@ public sealed record RemoteCoordinatorOptions
     public Func<double> Jitter { get; init; } = Random.Shared.NextDouble;
     /// <summary>Takes a job's archive password once it has a package. Without one, the password stays on the job.</summary>
     public IPackagePasswordKeeper? PackagePasswords { get; init; }
+
+    /// <summary>
+    /// Tests only, where a server on this PC stands in for a site a provider lists. Everywhere else an address on this PC
+    /// or its local network is an ordinary download that no provider is asked about (UI.B27).
+    /// </summary>
+    internal bool LocalAddressesMayBeHosters { get; init; }
 }
 
 /// <summary>What a user or a frontend asked to add. Holds secrets, so it prints as nothing.</summary>
@@ -486,9 +493,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     {
         if (UploadGone(text) is { } gone) return new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = gone };
         text = Resolve(text);
-        var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
-        return first.Kind == RemoteInputKind.OrdinaryLink
-            ? RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false))
+        var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), LocalIsOrdinary);
+        // UI.B27: an address on this PC or its local network is ordinary whatever the list says, so the list isn't fetched for it.
+        return first.Kind == RemoteInputKind.OrdinaryLink && !IsLocalForProviders(text)
+            ? RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false), LocalIsOrdinary)
             : first;
     }
 
@@ -508,11 +516,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             }
 
             var input = Resolve(given);
-            var first = RemoteInputClassifier.Classify(input, plain);
-            if (first.Kind == RemoteInputKind.OrdinaryLink)
+            var first = RemoteInputClassifier.Classify(input, plain, LocalIsOrdinary);
+            if (first.Kind == RemoteInputKind.OrdinaryLink && !IsLocalForProviders(input))
             {
                 withHosters ??= await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false);
-                first = RemoteInputClassifier.Classify(input, withHosters);
+                first = RemoteInputClassifier.Classify(input, withHosters, LocalIsOrdinary);
             }
 
             answers.Add(first);
@@ -573,6 +581,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return classified;
         }
     }
+
+    private bool LocalIsOrdinary => !_options.LocalAddressesMayBeHosters;
+
+    /// <summary>UI.B27: no provider can fetch from this PC or its local network, so such an address is never asked about.</summary>
+    private bool IsLocalForProviders(string? text) => LocalIsOrdinary && NetworkAddresses.IsLocalWebAddress(text);
 
     private async Task<List<RemoteClassifierProvider>> ClassifierProvidersAsync(bool withHosters, CancellationToken cancellationToken)
     {

@@ -176,9 +176,10 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
-    public async Task A_quiet_browser_torrent_link_opens_no_torrent_dialog_and_no_window_and_keeps_open_as_torrent()
+    public async Task A_quiet_browser_torrent_link_still_opens_the_torrent_dialog_and_no_other_window()
     {
-        // EXT.R12 wins over T10: the extension's default handoff asks for no app window, so the browser keeps the focus.
+        // T10.B (owner, 2026-11-12): the extension's default handoff asks for no app window, but a .torrent file is the
+        // exception: the torrent dialog opens for it. Its progress and completion windows stay away as before.
         var service = await TorrentServiceAsync();
         var (bytes, _) = SingleFileTorrent("ubuntu.iso", 40_000);
         var server = await TorrentFileServerAsync(bytes);
@@ -190,15 +191,34 @@ public sealed partial class HostCommandDispatcherTests
         var done = await DownloadFromBrowserAsync(service, server, "", "ubuntu.torrent", TorrentFileRule.ContentType, quietWindows: true);
         Assert.Equal("completed", done.State);
         Assert.True(done.QuietWindows);
+        Assert.True(done.TorrentFileReady);
+        Assert.True(TorrentFileOffers.Offers(done, offered: true));
+        var launch = Assert.Single(await UntilAsync(() => launches.IsEmpty ? null : launches));
+        Assert.Equal([done.FinalFilePath], launch);
+        await Task.Delay(100);
+        Assert.Empty(windows);
+    }
+
+    [Fact]
+    public async Task A_quiet_browser_torrent_link_with_torrents_going_nowhere_stays_a_quiet_ordinary_file()
+    {
+        var service = await TorrentServiceAsync(enabled: false);
+        var (bytes, _) = SingleFileTorrent("ubuntu.iso", 40_000);
+        var server = await TorrentFileServerAsync(bytes);
+        var windows = new ConcurrentQueue<DownloadWindowRequest>();
+        var launches = new ConcurrentQueue<IReadOnlyList<string>>();
+        var offered = () => TorrentFileOffers.TorrentsCanGo(service, null);
+        Assert.False(offered());
+        using var decisions = new DownloadWindows(service, () => true, windows.Enqueue) { TorrentFilesOffered = offered };
+        using var offers = new TorrentFileOffers(service, offered, launches.Enqueue, wait: TimeSpan.FromMilliseconds(20));
+
+        var done = await DownloadFromBrowserAsync(service, server, "", "ubuntu.torrent", TorrentFileRule.ContentType, quietWindows: true);
+        Assert.Equal("completed", done.State);
         Assert.True(done.TorrentFileReady); // the row still offers Open as Torrent
-        Assert.False(TorrentFileOffers.Offers(done, offered: true));
+        Assert.False(TorrentFileOffers.Offers(done, offered: false));
         await Task.Delay(200);
         Assert.Empty(launches);
         Assert.Empty(windows);
-
-        // The same job without the quiet flag is offered: only QuietWindows decides it.
-        done.QuietWindows = false;
-        Assert.True(TorrentFileOffers.Offers(done, offered: true));
     }
 
     [Fact]

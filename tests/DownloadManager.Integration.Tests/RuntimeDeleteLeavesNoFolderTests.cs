@@ -254,35 +254,6 @@ public sealed partial class RuntimeServiceTests
         Assert.Empty(Entries(chosen));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task DeletingAMediaDownloadLeavesNoPartialData(bool deleteFile)
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var added = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/hls/media.m3u8",
-            DestinationDirectory = ctx.Destination,
-            FileName = "media.ts",
-            Source = "cli",
-        });
-        Assert.True(added.Accepted, added.Error);
-        var job = await ctx.WaitFor(added.Job!.Id, j => j.ReceivedBytes > 0 || j.State is "completed" or "failed");
-
-        var removed = await ctx.Service.RemoveAsync(job.Id, deleteFile);
-
-        Assert.True(removed.Ok, removed.Error);
-        var finished = removed.Job!.State == "completed";
-        if (deleteFile)
-            Assert.Empty(Entries(ctx.Destination));
-        else if (finished)
-            Assert.Equal([Path.GetFileName(removed.Job.FinalFilePath)], Entries(ctx.Destination));
-        else
-            // Stopped before it finished: its partial data is kept on purpose (remove --keep-file), and nothing else.
-            Assert.All(Entries(ctx.Destination), entry => Assert.StartsWith(Path.GetFileName(removed.Job.PartFilePath), entry));
-    }
-
     private static void CreateJunction(string link, string target)
     {
         using var process = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")

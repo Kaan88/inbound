@@ -306,11 +306,11 @@ export function deletePlan(jobs: readonly Job[]): DeletePlan {
  * seeding (review 4:L9), as TorrentSeedRules.DeleteCompletedText does on the desktop.
  */
 export function deleteCompletedText(count: number, seeding = 0): string {
-  const text = `Remove ${count} completed item(s) from the list? The downloaded files will stay on disk.`;
+  const text = `Delete ${count} completed download(s) from the list? The downloaded files will stay on disk.`;
   if (seeding <= 0) return text;
   return seeding === 1
-    ? `${text} 1 of them is a torrent that is seeding; removing it stops seeding.`
-    : `${text} ${seeding} of them are torrents that are seeding; removing them stops seeding.`;
+    ? `${text} 1 of them is a torrent that is seeding; deleting it stops seeding.`
+    : `${text} ${seeding} of them are torrents that are seeding; deleting them stops seeding.`;
 }
 
 // ---- Categories ----
@@ -350,7 +350,8 @@ export const builtInCategories: { id: string; label: string }[] = [
 
 // ---- Sorting: ListSort ----
 
-export type SortKey = 'name' | 'queue' | 'size' | 'status' | 'extraction' | 'eta' | 'rate' | 'lastTry' | 'description' | 'added' | 'seeds' | 'peers' | 'up' | 'ratio';
+export type SortKey = 'name' | 'queue' | 'size' | 'status' | 'extraction' | 'eta' | 'rate' | 'lastTry' | 'description' | 'added' | 'seeds' | 'peers' | 'up' | 'ratio'
+  | 'uploaded' | 'seedTime' | 'seedGoal';
 
 export interface SortState {
   key: SortKey;
@@ -359,11 +360,12 @@ export interface SortState {
 
 export const defaultSort: SortState = { key: 'added', ascending: false };
 
-export const sortKeys: SortKey[] = ['name', 'queue', 'size', 'status', 'extraction', 'eta', 'rate', 'lastTry', 'description', 'added', 'seeds', 'peers', 'up', 'ratio'];
+export const sortKeys: SortKey[] = ['name', 'queue', 'size', 'status', 'extraction', 'eta', 'rate', 'lastTry', 'description', 'added', 'seeds', 'peers', 'up', 'ratio',
+  'uploaded', 'seedTime', 'seedGoal'];
 
 /** Words and times read from the first down. Sizes, speeds and dates read from the biggest or newest. */
 export function startsAscending(key: SortKey): boolean {
-  return key === 'name' || key === 'queue' || key === 'status' || key === 'extraction' || key === 'eta' || key === 'description';
+  return key === 'name' || key === 'queue' || key === 'status' || key === 'extraction' || key === 'eta' || key === 'description' || key === 'seedGoal';
 }
 
 /** A click on another column starts in its usual direction, and a second click reverses it. */
@@ -462,6 +464,9 @@ export function sortRows<T>(rows: readonly T[], view: (row: T) => RowView, sort:
     case 'peers': return orderBy(rows, (r) => view(r).swarm?.peers ?? -1, a, (r) => (view(r).swarm?.peers ?? -1) < 0);
     case 'up': return orderBy(rows, (r) => view(r).swarm?.up ?? 0, a, (r) => (view(r).swarm?.up ?? 0) <= 0);
     case 'ratio': return orderBy(rows, (r) => view(r).swarm?.ratio ?? 0, a, (r) => !view(r).swarm);
+    case 'uploaded': return orderBy(rows, (r) => view(r).swarm?.uploaded ?? 0, a, (r) => !view(r).swarm);
+    case 'seedTime': return orderBy(rows, (r) => view(r).swarm?.seedTime ?? -1, a, (r) => (view(r).swarm?.seedTime ?? -1) < 0);
+    case 'seedGoal': return orderBy(rows, (r) => view(r).swarm?.goalText ?? '', a, (r) => !view(r).swarm?.goalText);
     default: return orderBy(rows, (r) => view(r).created, a);
   }
 }

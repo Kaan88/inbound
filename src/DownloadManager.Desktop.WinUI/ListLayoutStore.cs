@@ -2,10 +2,13 @@ using System.Text.Json;
 
 namespace DownloadManager.Desktop.WinUI;
 
-/// <summary>T12: a list's column widths and the order it was sorted in.</summary>
+/// <summary>T12: a list's column widths and the order it was sorted in; UI.R42: the columns chosen in its header's menu.</summary>
 internal sealed class ListLayout
 {
     public Dictionary<string, double> Widths { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>UI.R42: columns shown (true) or hidden (false) from the header's menu; one left out shows as it does at first.</summary>
+    public Dictionary<string, bool>? Shown { get; set; }
 
     /// <summary>Null keeps the list's own order.</summary>
     public string? SortKey { get; set; }

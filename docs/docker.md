@@ -7,8 +7,7 @@ What is inside:
 
 - the server on the ASP.NET Core 10 runtime image (Ubuntu 24.04), started as a non-root user;
 - the web UI as static files (no Node at run time);
-- the official 7-Zip 26.04 for Linux (`7zz`) in `/app/tools/7-Zip`, for extraction (its license is next to it);
-- no FFmpeg (see "Adding FFmpeg").
+- the official 7-Zip 26.04 for Linux (`7zz`) in `/app/tools/7-Zip`, for extraction (its license is next to it).
 
 Image: `ghcr.io/kaan88/inbound` for `linux/amd64` (arm64 is not published yet), built when a version tag is pushed
 (`.github/workflows/docker.yml`). Tags: the version (`0.6.0`), the minor line (`0.6`) and `latest` (not for a
@@ -152,19 +151,6 @@ The image checks `GET /health` every 30 seconds (`docker/healthcheck.sh`, with b
 curl). It uses the port of the first address in `DOWNLOADMANAGER_URLS`. For an `https://` address it can only check
 that the port accepts a connection; give compose a `healthcheck:` of your own for more.
 
-## Adding FFmpeg
-
-FFmpeg is needed only to join separate audio and video streams (DASH, and HLS with separate audio). It is not in the
-image because Ubuntu's `ffmpeg` package adds far more than the rest of the image (measured below). To add it, build
-a small image on top:
-
-```Dockerfile
-FROM ghcr.io/kaan88/inbound:latest
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
-```
-
-The server finds `ffmpeg` on `PATH`.
-
 ## Torrents
 
 The server downloads magnets and `.torrent` files itself when the image has the torrent engine
@@ -250,7 +236,6 @@ minute's settle, no browser connected:
 
 All are well under the 100 MB target, and the GC settings save about 4 MiB, so the image sets none. Image: 350 MB
 as `docker images` shows it, of which the ASP.NET base is 342 MB; the server and web UI add 3.1 MB and 7-Zip 2.9 MB.
-Ubuntu's `ffmpeg` with `--no-install-recommends` would add 425 MB.
 
 ## Not done in the container
 

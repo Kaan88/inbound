@@ -192,7 +192,6 @@ describe('format', () => {
 
 describe('words and glyphs shared with the browser extension (EXT.R8)', () => {
   it('names every state the extension shows', () => {
-    expect(stateWord('muxing')).toBe('Merging');
     expect(stateWord('scheduled')).toBe('Scheduled');
     expect(stateWord('retryWaiting')).toBe('Retrying');
     expect(tone('retryWaiting')).toBe('waiting');
@@ -213,7 +212,7 @@ describe('review 5 words shared with the desktop list (A8, E2)', () => {
     expect(statusText(job('a', 'queued', { startMode: 'later' }))).toBe('Not started');
     expect(jobStateWord(job('a', 'queued', { startMode: 'startNow' }))).toBe('Queued');
     expect(jobStateWord(job('a', 'queued'))).toBe('Queued');
-    expect(jobStateWord(job('a', 'paused', { startMode: 'later' }))).toBe('Paused');
+    expect(jobStateWord(job('a', 'paused', { startMode: 'later' }))).toBe('Stopped');
   });
 
   it('adds what to do next to a failure named by its HTTP code', () => {

@@ -41,12 +41,8 @@ internal sealed class ArchiveHost : IAsyncDisposable
 
     public static string HostExe => Path.Combine(RepositoryRoot, "src", "DownloadManager.Host", "bin", Configuration, "net10.0-windows", "DownloadManager.Host.exe");
 
-    public static string CliExe => Path.Combine(RepositoryRoot, "src", "DownloadManager.Cli", "bin", Configuration, "net10.0", "DownloadManager.Cli.exe");
-
     public static string? Unavailable =>
-        !File.Exists(HostExe) ? $"{HostExe} is not built."
-        : !File.Exists(CliExe) ? $"{CliExe} is not built."
-        : null;
+        !File.Exists(HostExe) ? $"{HostExe} is not built." : null;
 
     public string Root { get; }
 
@@ -151,38 +147,6 @@ internal sealed class ArchiveHost : IAsyncDisposable
 
         var seen = await RequestAsync<ArchiveListResult>(ArchiveMessageTypes.List, new { });
         throw new TimeoutException("Expected state not reached: " + string.Join("; ", seen.Sets.Select(set => set.StateText)));
-    }
-
-    /// <summary>Runs <c>dm</c> with the password, if any, on stdin alone.</summary>
-    public async Task<(int Code, string Output)> CliAsync(string? stdin, params string[] arguments)
-    {
-        var info = new ProcessStartInfo(CliExe)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in arguments) info.ArgumentList.Add(argument);
-        info.ArgumentList.Add("--no-start");
-        info.Environment["DOWNLOADMANAGER_INSTANCE"] = _instance;
-        info.Environment["DOWNLOADMANAGER_DATA"] = Data;
-        using var process = Process.Start(info)!;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        if (stdin is not null)
-        {
-            var bytes = new UTF8Encoding(false).GetBytes(stdin);
-            await process.StandardInput.BaseStream.WriteAsync(bytes);
-            await process.StandardInput.BaseStream.FlushAsync();
-        }
-
-        process.StandardInput.Close();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
-        return (process.ExitCode, await output + await errors);
     }
 
     /// <summary>What a crash does: no notice, no cleanup.</summary>
@@ -333,8 +297,12 @@ public sealed class RuntimeArchiveHostTests
         Assert.Contains("Host stopped", disk);
     }
 
+    /// <summary>
+    /// Every archive command over the pipe, as the windows send them (this used to run through <c>dm archive</c>, which
+    /// CUT.1 removed from the CLI). A password goes only in its own field and comes back in no reply.
+    /// </summary>
     [ArchiveHostFact]
-    public async Task TheCliTakesAPasswordOnlyFromStdinAndDrivesEveryCommand()
+    public async Task EveryArchiveCommandIsAnsweredOverThePipe()
     {
         await using var host = new ArchiveHost();
         await host.StartAsync();
@@ -344,65 +312,60 @@ public sealed class RuntimeArchiveHostTests
         var plain = Path.Combine(host.Downloads, "plain.rar");
         await File.WriteAllBytesAsync(plain, RarBuilder.Rar5(("plain.txt", Text)));
 
-        var status = await host.CliAsync(null, "archive", "status");
-        Assert.Equal(0, status.Code);
-        Assert.Contains("auto-extract: off", status.Output);
-        Assert.Contains("extractor: ", status.Output);
+        var status = await host.RequestAsync<ArchiveSettingsResult>(ArchiveMessageTypes.SettingsGet, new { });
+        Assert.False(status.Settings.AutoExtract);
+        Assert.False(string.IsNullOrEmpty(status.Tool.Message));
 
-        var settings = await host.CliAsync(null, "archive", "settings", "--conflict", "skip", "--auto-extract", "on", "--archives", "keep", "--preserve-folders", "on", "--destination", "next");
-        Assert.Equal(0, settings.Code);
-        Assert.Contains("conflict: skip", settings.Output);
-        Assert.Contains("auto-extract: on", settings.Output);
+        var settings = await host.RequestAsync<ArchiveSettingsResult>(ArchiveMessageTypes.SettingsSet, new ArchiveSettingsUpdate
+        {
+            ConflictPolicy = "skip", AutoExtract = true, DeleteArchives = false, PreserveFolders = true, Destination = "nextToArchive",
+        });
+        Assert.True(settings.Ok, settings.Error);
+        Assert.Equal("skip", settings.Settings.ConflictPolicy);
+        Assert.True(settings.Settings.AutoExtract);
 
-        var refused = await host.CliAsync(null, "archive", "settings", "--conflict", "sideways");
-        Assert.Equal(1, refused.Code);
+        var refused = await host.RequestAsync<ArchiveSettingsResult>(ArchiveMessageTypes.SettingsSet, new ArchiveSettingsUpdate { ConflictPolicy = "sideways" });
+        Assert.False(refused.Ok);
 
-        var noUsage = await host.CliAsync(null, "archive", "nonsense");
-        Assert.Equal(2, noUsage.Code);
-
-        var onTheCommandLine = await host.CliAsync(null, "archive", "extract", archive, "--password", "typed-here");
-        Assert.Equal(2, onTheCommandLine.Code);
-        Assert.Contains("stdin", onTheCommandLine.Output);
-        Assert.DoesNotContain("typed-here", onTheCommandLine.Output);
-
-        // Given with the request, on stdin. A password on the command line has no way in.
-        var extract = await host.CliAsync(Secret + "\r\n", "archive", "extract", archive, "--password-stdin");
-        Assert.Equal(0, extract.Code);
+        // Given with the request.
+        var extract = await host.RequestAsync<ArchiveExtractResult>(ArchiveMessageTypes.Extract, new ArchiveExtractRequest { FilePath = archive, Password = Secret });
+        Assert.True(extract.Ok, extract.Error);
         var locked = await host.WaitForSetAsync(set => set.Name == "locked" && set.State == "completed");
-        Assert.DoesNotContain(Secret, extract.Output);
 
-        var plainRun = await host.CliAsync(null, "archive", "extract", plain);
-        Assert.Equal(0, plainRun.Code);
+        var plainRun = await host.RequestAsync<ArchiveExtractResult>(ArchiveMessageTypes.Extract, new ArchiveExtractRequest { FilePath = plain });
+        Assert.True(plainRun.Ok, plainRun.Error);
         var plainSet = await host.WaitForSetAsync(set => set.Name == "plain" && set.State == "completed");
 
-        var list = await host.CliAsync(null, "archive", "list");
-        Assert.Equal(0, list.Code);
-        Assert.Contains(locked.Id.ToString(), list.Output);
-        Assert.Contains("Extraction completed", list.Output);
+        var list = await host.RequestAsync<ArchiveListResult>(ArchiveMessageTypes.List, new { });
+        Assert.Equal(2, list.Sets.Count);
+        Assert.Contains(list.Sets, set => set.Id == locked.Id && set.StateText.Contains("Extraction completed", StringComparison.Ordinal));
 
-        var json = await host.CliAsync(null, "archive", "list", "--json");
-        var parsed = JsonSerializer.Deserialize<List<ArchiveSetDto>>(json.Output, IpcJson.Options)!;
-        Assert.Equal(2, parsed.Count);
+        var password = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.SetPassword, new ArchiveSetPasswordRequest { SetId = plainSet.Id, Password = Secret });
+        Assert.True(password.Ok, password.Error);
+        var byPath = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.SetPassword,
+            new ArchiveSetPasswordRequest { FilePath = Path.Combine(host.Downloads, "advance.rar"), Password = Secret });
+        Assert.True(byPath.Ok, byPath.Error);
 
-        var password = await host.CliAsync(Secret, "archive", "password", plainSet.Id.ToString());
-        Assert.Equal(0, password.Code);
-        Assert.DoesNotContain(Secret, password.Output);
-        var byPath = await host.CliAsync(Secret, "archive", "password", "--file", Path.Combine(host.Downloads, "advance.rar"));
-        Assert.Equal(0, byPath.Code);
-
-        var retry = await host.CliAsync(null, "archive", "retry", plainSet.Id.ToString());
-        Assert.Equal(0, retry.Code);
+        var retry = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.Retry, new ArchiveActionRequest { SetId = plainSet.Id });
+        Assert.True(retry.Ok, retry.Error);
         await host.WaitForSetAsync(set => set.Name == "plain" && set is { State: "completed", Attempts: 2 });
 
-        var cancel = await host.CliAsync(null, "archive", "cancel", plainSet.Id.ToString());
-        Assert.Equal(1, cancel.Code);
+        var cancel = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.Cancel, new ArchiveActionRequest { SetId = plainSet.Id });
+        Assert.False(cancel.Ok);
 
-        var remove = await host.CliAsync(null, "archive", "remove", plainSet.Id.ToString());
-        Assert.Equal(0, remove.Code);
+        var remove = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.Remove, new ArchiveActionRequest { SetId = plainSet.Id });
+        Assert.True(remove.Ok, remove.Error);
         Assert.True(File.Exists(plain));
 
-        var ignored = await host.CliAsync(null, "archive", "extract", Path.Combine(host.Downloads, "not-a-rar.zip"));
-        Assert.Equal(1, ignored.Code);
+        var ignored = await host.RequestAsync<ArchiveExtractResult>(ArchiveMessageTypes.Extract,
+            new ArchiveExtractRequest { FilePath = Path.Combine(host.Downloads, "not-a-rar.zip") });
+        Assert.False(ignored.Ok);
+
+        // Every frame the Host sent back (the replies above and the change events), as received on the pipe.
+        var frames = host.Frames.ToList();
+        // Twelve requests above, each answered (waiting for a set may ask for the list more times).
+        Assert.True(frames.Count(frame => JsonSerializer.Deserialize<IpcMessage>(frame, IpcJson.Options)!.ReplyTo is not null) >= 12);
+        Assert.All(frames, frame => Assert.DoesNotContain(Secret, frame));
 
         await host.StopAsync();
         Assert.DoesNotContain(Secret, host.EverythingOnDisk());

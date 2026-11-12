@@ -53,14 +53,30 @@ internal static partial class Program
         }
     }
 
+    /// <summary>Every command <see cref="RunAsync"/> answers.</summary>
+    private static readonly HashSet<string> Commands = new(StringComparer.Ordinal)
+    {
+        "doctor", "add-batch", "add", "list", "status", "profile", "update", "export", "import", "open", "reveal",
+        "describe", "priority", "package", "pause", "resume", "retry", "refresh", "cancel", "remove", "pause-all",
+        "resume-all", "queue", "schedule", "site", "settings", "folders", "host", "torrent",
+    };
+
     private static async Task<int> RunAsync(string[] args)
     {
         var command = args[0].ToLowerInvariant();
         var json = args.Contains("--json", StringComparer.OrdinalIgnoreCase);
         var noStart = args.Contains("--no-start", StringComparer.OrdinalIgnoreCase);
+        // An unknown command (such as the archive and remote commands this CLI no longer has) is refused before
+        // its flags are read or the Host is started. The help is 90 lines; printed here it would scroll the error away.
+        if (!Commands.Contains(command))
+        {
+            Console.Error.WriteLine($"unknown command '{CliText.Printable(command)}'. Run \"{ProgramName} --help\" for the commands.");
+            return 2;
+        }
+
         var valueFlags = CliArgs.ValueFlagsOf(command);
         var readHere = CliArgs.ReadsArgumentsHere(command);
-        // torrent, archive and remote read a bare flag's value themselves; "--flag=" with nothing after it is refused for all.
+        // torrent reads a bare flag's value itself; "--flag=" with nothing after it is refused for all.
         if (CliArgs.MissingValue(args, valueFlags, nextMustBeValue: readHere) is { } bare)
         {
             var flag = bare.TrimEnd('=');
@@ -232,7 +248,7 @@ internal static partial class Program
                 var job = Guid.TryParse(given, out var id) ? snapshot.Jobs.FirstOrDefault(j => j.Id == id) : null;
                 if (job is null)
                 {
-                    Console.Error.WriteLine($"No download with the ID '{TorrentCommands.Printable(given)}'. \"{ProgramName} list\" shows each one's ID.");
+                    Console.Error.WriteLine($"No download with the ID '{CliText.Printable(given)}'. \"{ProgramName} list\" shows each one's ID.");
                     return 1;
                 }
 
@@ -277,7 +293,7 @@ internal static partial class Program
                         {
                             // A Host without torrents saves them as magnets; an error is not read as "no torrents"
                             // (audit 4 M12, N5): the list would be written without them and said to be exported.
-                            if (TorrentCommands.HostError(listed) is { } error)
+                            if (CliText.HostError(listed) is { } error)
                             {
                                 Console.Error.WriteLine($"export failed: {error}");
                                 return 1;
@@ -362,7 +378,7 @@ internal static partial class Program
                             skipReason ??= result.SkipReason;
                             sent += chunk.Count;
                         }
-                        else if (TorrentCommands.HostError(imported) is { } error)
+                        else if (CliText.HostError(imported) is { } error)
                         {
                             // The Host failed them with an error of its own (audit 4 M12, N5): they failed, in its words.
                             failed += torrentEntries.Count - sent;
@@ -372,7 +388,7 @@ internal static partial class Program
                         else
                         {
                             skipped += torrentEntries.Count - sent;
-                            skipReason ??= "This Host does not download torrents.";
+                            skipReason ??= "Torrents aren't available here.";
                             break;
                         }
                     }
@@ -380,10 +396,17 @@ internal static partial class Program
 
                 foreach (var entry in entries.Where(entry => !JobListFile.IsTorrent(entry)))
                 {
-                    // The schemes a download can have, and the ones dm export writes (FTP among them). The address is
-                    // shown without a user name or password it may hold.
+                    // The schemes a download can have. The address is shown without a user name or password it may
+                    // hold. An FTP address (an older version's export) is refused here: FTP was cut in 0.7.2.
+                    if (FtpAddresses.IsFtp(entry.Url))
+                    {
+                        failed++;
+                        firstError ??= FtpAddresses.NotSupported;
+                        continue;
+                    }
+
                     if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
-                        uri.Scheme is not ("http" or "https" or "ftp"))
+                        uri.Scheme is not ("http" or "https"))
                     {
                         failed++;
                         firstError ??= $"Invalid URL: {UrlRedactor.Redact(entry.Url)}";
@@ -509,9 +532,6 @@ internal static partial class Program
                 return PrintAction(reply, json);
             }
 
-            case "archive":
-                return await ArchiveCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
-
             case "torrent":
                 return await TorrentCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
 
@@ -579,8 +599,6 @@ internal static partial class Program
                 var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new { }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
-            case "remote":
-                return await RemoteAsync(client, args, json).ConfigureAwait(false);
             case "queue":
                 return await QueueAsync(client, args, json).ConfigureAwait(false);
             case "schedule":
@@ -678,8 +696,8 @@ internal static partial class Program
                 return 2;
             }
             default:
-                // The help is 90 lines; printed here it would scroll the error away.
-                Console.Error.WriteLine($"unknown command '{TorrentCommands.Printable(command)}'. Run \"{ProgramName} --help\" for the commands.");
+                // Not reached: Commands lists every case above.
+                Console.Error.WriteLine($"unknown command '{CliText.Printable(command)}'. Run \"{ProgramName} --help\" for the commands.");
                 return 2;
         }
     }
@@ -892,7 +910,7 @@ internal static partial class Program
 
             if (GetOption(args, "--password") is not null)
             {
-                // Not used, as remote key set: a command line can be read by other programs and stays in shell history.
+                // Not used: a command line can be read by other programs and stays in shell history.
                 Console.Error.WriteLine("A password is only read from standard input or --password-env, so that one was not used. Pipe it in, or run this and type it. What you just typed may be in your shell history.");
                 return 2;
             }
@@ -1120,7 +1138,7 @@ internal static partial class Program
             else
             {
                 Console.WriteLine(
-                    $"update {install.Version} scheduled; the Host is restarting and will apply it.");
+                    $"update {install.Version} scheduled; Inbound's background program is restarting and will apply it.");
                 Console.WriteLine($"  result: {install.ResultPath}");
             }
 
@@ -1855,9 +1873,6 @@ internal static partial class Program
                     case "preventsleep":
                         settings.PreventSleepWhileDownloading = ParseBool(value);
                         break;
-                    case "ffmpegpath":
-                        settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
-                        break;
                     case "postdownload":
                         settings.PostDownloadCommand =
                             string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
@@ -1916,7 +1931,7 @@ internal static partial class Program
         "defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard, usecategoryfolders, " +
         "usetorrentcategoryfolders, torrentdir, " +
         "closewindowcompletely, browserintegration, speedlimit, proxymode, proxyaddress, proxyuser, proxypass, " +
-        "allowsystemcompletionactions, preventsleep, ffmpegpath, postdownload, updatemanifest, updatekey, updatekeyfile, " +
+        "allowsystemcompletionactions, preventsleep, postdownload, updatemanifest, updatekey, updatekeyfile, " +
         "updatechannel, autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir";
 
     /// <summary>
@@ -1968,7 +1983,7 @@ internal static partial class Program
             {
                 if (!json)
                 {
-                    Console.WriteLine($"\n{(job.State == "paused" ? "paused" : "not started")}: it does not go on by itself; start it with: dm resume {job.Id:N}");
+                    Console.WriteLine($"\n{(job.State == "paused" ? "stopped" : "not started")}: it does not go on by itself; start it with: dm resume {job.Id:N}");
                 }
 
                 return 1;
@@ -2038,7 +2053,7 @@ internal static partial class Program
         "downloading" => "Downloading",
         "retryWaiting" => "Retrying",
         "verifying" => "Verifying",
-        "paused" => "Paused",
+        "paused" => "Stopped",
         "completed" => "Completed",
         "failed" => "Failed",
         "cancelled" => "Cancelled",
@@ -2104,9 +2119,8 @@ internal static partial class Program
         }
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
-        Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
+        Console.WriteLine($"computer actions:  {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
-        Console.WriteLine($"ffmpeg path:       {settings.FfmpegPath ?? "auto"}");
         Console.WriteLine($"post-download:     {settings.PostDownloadCommand ?? "none"}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
@@ -2179,20 +2193,12 @@ internal static partial class Program
               dm update check|download|install
               dm export <file.json>
               dm import <file.json> [--start now|later] [--direct] [--yes]
-              dm pause|resume|retry <job-id>
+              dm pause|resume|retry <job-id>   pause is Stop in the window
               dm priority <job-id> high|normal|low
               dm package list
               dm package pause|resume|cancel|unqueue <package-id>
               dm package queue <package-id> <queue-id>
               dm package priority <package-id> high|normal|low
-              dm archive status|list
-              dm archive extract <path> | --job ID | --package ID [--password-stdin]
-              dm archive password <set-id> | --package ID | --file PATH  (password from stdin)
-              dm archive retry|cancel|remove <set-id>
-              dm archive settings [--auto-extract on|off]
-                          [--destination next|subfolder|folder] [--folder PATH]
-                          [--preserve-folders on|off] [--conflict rename|overwrite|skip]
-                          [--archives keep|delete]
               dm torrent inspect <magnet|file.torrent> [--dest DIR]   name, files and free space
               dm torrent add <magnet|file.torrent> [--dest DIR] [--later] [--files 0,2]
                           [--priority 0=high,1=skip] [--down BYTES/S] [--up BYTES/S] [--sequential]
@@ -2205,8 +2211,8 @@ internal static partial class Program
               dm torrent peers|trackers|pieces <job-id>
               dm torrent network   the torrent port, router forwarding and incoming connections
               dm refresh <job-id> <new-url> [--direct]
-              dm cancel|remove <job-id> [--keep-file]   (deletes the downloaded file too, unless --keep-file)
-              dm pause-all | resume-all
+              dm cancel|remove <job-id> [--keep-file]   remove is Delete in the window; it deletes the file too, unless --keep-file
+              dm pause-all | resume-all   Stop All and Resume All
               dm queue list | add <name> [max] | start|stop <queue-id> | max <queue-id> <1-16>
               dm queue move <job-id> <queue-id> | quota <queue-id> <megabytes> <hours> | quota <queue-id> off
               dm schedule list|add|remove|enable|disable
@@ -2219,38 +2225,20 @@ internal static partial class Program
               | settings export <file.json> | settings import <file.json>
                           keys: defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard,
                           usecategoryfolders, closewindowcompletely, browserintegration, speedlimit, proxymode,
-                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep, ffmpegpath,
+                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep,
                           postdownload, updatemanifest, updatekey, updatekeyfile, updatechannel,
                           autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir,
                           usetorrentcategoryfolders, torrentdir (none: the same folders as other downloads)
-              dm remote status
-              dm remote key set        (reads the key from standard input, never from the command line)
-              dm remote key clear
-              dm remote classify <link>
-              dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
-                          [--start startNow|queue|later] [--select all|ask|ID,ID]
-                          [--link-password-stdin [--link-password-for-archives]] [--archive-password-stdin]
-              dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
-              dm remote list
-              dm remote files <id>
-              dm remote select <id> all|<file-id>...
-              dm remote retry <id> [--approve-uncached] [--link-password-stdin [--link-password-for-archives]]
-              dm remote check [<id>]
-              dm remote start-queued <id>
-              dm remote remove <id> [--delete-from-provider --yes]
-              dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
-              dm remote archive-password <id>   (from standard input; empty clears it)
-              dm remote container <file.rsdf|file.ccf|file.dlc> [--add ID,ID | --all] [--dest DIR]
-                          [--approve-uncached] [--queue ID] [--start startNow|queue|later]
-              dm remote container-send-jd <file.dlc|file.ccf>
-              dm host status | open [settings] | shutdown | clean-orphans [--delete]
+              dm host status | open [settings] | shutdown | clean-orphans [--delete]   Inbound's background program; open settings opens Options
               dm doctor [--no-start]
 
             Global:
               --json      Machine-readable output where supported
-              --no-start  Do not launch the background host if it is not running
+              --no-start  Do not start Inbound's background program if it is not running
               --flag=VALUE  The same as --flag VALUE for any flag that takes a value, in every command;
                             in all but torrent, also the way to give a value that starts with "--"
+
+            TorBox and archive extraction are handled in the app's window or the web UI.
             """);
     }
 }
@@ -2312,7 +2300,7 @@ internal sealed class CliClient : IAsyncDisposable
 
         if (!startHost)
         {
-            throw new HostUnavailableException("The background host is not running.");
+            throw new HostUnavailableException("Inbound's background program is not running.");
         }
 
         var host = HostLocator.FindHostExecutable()
@@ -2334,7 +2322,7 @@ internal sealed class CliClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            throw new HostUnavailableException($"Could not start the background host: {ex.Message}");
+            throw new HostUnavailableException($"Could not start Inbound's background program: {ex.Message}");
         }
 
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
@@ -2363,11 +2351,11 @@ internal sealed class CliClient : IAsyncDisposable
             }
         }
 
-        throw new HostUnavailableException("The background host did not become ready within 15 seconds.");
+        throw new HostUnavailableException("Inbound's background program did not become ready within 15 seconds.");
     }
 
     private static HostUnavailableException RunningHostPermissionDenied()
-        => new("Windows denied access to the running Host. If it was started as administrator, exit Download Manager and start it normally.");
+        => new("Windows denied access to Inbound's background program. If it was started as administrator, exit Inbound and start it normally.");
 
     private static async Task<IpcClient?> TryConnectAsync()
     {
@@ -2415,11 +2403,9 @@ internal sealed class CliClient : IAsyncDisposable
     internal static TimeSpan ReplyTimeout(string type) => type switch
     {
         MessageTypes.UpdateDownload or MessageTypes.UpdateInstall => TimeSpan.FromMinutes(30),
-        // The Host waits up to 5 minutes for the user to answer JDownloader's dialog (JDownloaderBridge); waiting longer
-        // here lets its own "no answer" come through instead of a timeout of ours at the same moment (audit 4 N3).
-        MessageTypes.RemoteContainerSendToJd => TimeSpan.FromMinutes(6),
+        // remote.classify (the provider check before an add), dm torrent and the torrent list export and import.
         _ when type.StartsWith("remote.", StringComparison.Ordinal) || type.StartsWith("torrent.", StringComparison.Ordinal) ||
-               type.StartsWith("archive.", StringComparison.Ordinal) || type == MessageTypes.UpdateCheck ||
+               type == MessageTypes.UpdateCheck ||
                type == MessageTypes.JobRefreshUrl || type == MessageTypes.JobAdd => TimeSpan.FromMinutes(5),
         _ => TimeSpan.FromMinutes(1),
     };
@@ -2433,7 +2419,7 @@ internal sealed class CliClient : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
-            throw new HostUnavailableException($"The background host did not answer within {timeout.TotalSeconds:0} seconds.");
+            throw new HostUnavailableException($"Inbound's background program did not answer within {timeout.TotalSeconds:0} seconds.");
         }
     }
 
@@ -2451,10 +2437,10 @@ internal sealed class CliClient : IAsyncDisposable
         {
             throw new HostRefusedException(reply.GetPayload<HostActionResult>()?.Message is { Length: > 0 } message
                 ? message
-                : "The Host didn't take this command.");
+                : "Inbound didn't take this command.");
         }
 
-        return reply.GetPayload<T>() ?? throw new HostRefusedException("The Host's answer was empty.");
+        return reply.GetPayload<T>() ?? throw new HostRefusedException("Inbound's answer was empty.");
     }
 
     public async Task<IpcMessage> RequestAsync<T>(string type, T payload)
@@ -2472,10 +2458,10 @@ internal sealed class CliClient : IAsyncDisposable
             }
             catch (OperationCanceledException) when (cancel.IsCancellationRequested)
             {
-                throw new HostUnavailableException($"The background host did not answer within {timeout.TotalSeconds:0} seconds.");
+                throw new HostUnavailableException($"Inbound's background program did not answer within {timeout.TotalSeconds:0} seconds.");
             }
 
-            var message = read ?? throw new HostUnavailableException("The background host closed the connection.");
+            var message = read ?? throw new HostUnavailableException("Inbound's background program closed the connection.");
             if (message.ReplyTo == request.Id)
             {
                 if (message.Type == MessageTypes.ServerIncompatible)
@@ -2498,7 +2484,7 @@ internal sealed class CliClient : IAsyncDisposable
     public async Task<SettingsDto> SettingsAsync()
     {
         var result = await AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { }).ConfigureAwait(false);
-        return result.Ok ? result.Settings : throw new HostRefusedException(result.Error ?? "The Host did not send its settings.");
+        return result.Ok ? result.Settings : throw new HostRefusedException(result.Error ?? "Inbound did not send its settings.");
     }
 
     public async ValueTask DisposeAsync() => await _client.DisposeAsync().ConfigureAwait(false);

@@ -458,7 +458,7 @@ public sealed partial class RuntimeServiceTests
         {
             var response = await ctx.Service.AddJobAsync(new AddJobRequest
             {
-                Url = $"{_server.BaseAddress}/media/hls/playlist?n=2&size=1000",
+                Url = $"{_server.BaseAddress}/typed/stream?size=1000&type=application/vnd.apple.mpegurl",
                 DestinationDirectory = ctx.Destination,
                 FileName = "stream",
                 ContentType = " application/vnd.apple.mpegurl ",
@@ -1250,138 +1250,83 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("paused", ctx.Service.GetJob(first.Job.Id)!.State);
     }
 
+    /// <summary>
+    /// CUT.1: FTP downloading was cut in 0.7.2. An ftp:// or ftps:// address is refused where it is added or pointed at,
+    /// with one clear message, and nothing is kept of it.
+    /// </summary>
     [Fact]
-    public async Task Perf6_FtpDownloadsTakeALiveSpeedLimitAndTheSharedCap()
+    public async Task FtpAddressesAreRefusedUpFront()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        var settings = ctx.Service.GetSnapshot().Settings;
-        // 128 KB at 32 KB/s is about 4 s; uncapped, loopback FTP takes milliseconds.
-        settings.GlobalSpeedLimitBytesPerSecond = 32_768;
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        foreach (var url in new[] { "ftp://127.0.0.1:2121/a.bin", "FTP://user:secret@files.example.invalid/pub/b.iso", "ftps://files.example.invalid/c.zip" })
         {
-            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-capped.bin",
-            Source = "cli",
-        });
-        Assert.True(added.Accepted, added.Error);
-        Assert.True(added.Job!.CanChangeSpeedLimit);
-        var completed = await ctx.WaitFor(added.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 2.5, 25);
-        Assert.Equal(
-            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
-            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+            var added = await ctx.Service.AddJobAsync(new AddJobRequest { Url = url, DestinationDirectory = ctx.Destination, Source = "browser" });
+            Assert.False(added.Accepted, url);
+            Assert.Equal(FtpAddresses.NotSupported, added.Error);
+            Assert.Equal("invalid_url", added.ErrorCode);
+        }
 
-        // A running FTP transfer takes its own limit live: 128 KB at 8 KB/s needs about 16 s, so lifting the
-        // limit once bytes flow must let the rest arrive well before the old limit would have.
-        settings = ctx.Service.GetSnapshot().Settings;
-        settings.GlobalSpeedLimitBytesPerSecond = null;
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-        var own = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-own-limit.bin",
-            Source = "cli",
-            SpeedLimitBytesPerSecond = 8_192,
-        });
-        Assert.True(own.Accepted, own.Error);
-        await ctx.WaitFor(own.Job!.Id, j => j.State == "downloading" && j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
-        await Task.Delay(500);
-        var before = ctx.Service.GetJob(own.Job.Id)!;
-        Assert.Equal("downloading", before.State);
-        Assert.True(before.ReceivedBytes < 96 * 1024, $"The 8 KB/s limit let {before.ReceivedBytes} bytes through.");
-
-        var lifted = System.Diagnostics.Stopwatch.StartNew();
-        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = own.Job.Id, SpeedLimitBytesPerSecond = 0 });
-        Assert.True(update.Ok, update.Error);
-        Assert.Null(update.Job!.SpeedLimitBytesPerSecond); // zero is stored as unlimited
-        var ownDone = await ctx.WaitFor(own.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
-        Assert.Equal("completed", ownDone.State);
-        Assert.True(lifted.Elapsed < TimeSpan.FromSeconds(5), $"The rest took {lifted.Elapsed} after the limit was lifted.");
-        Assert.Equal(
-            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
-            await Hashing.Sha256FileAsync(ownDone.FinalFilePath));
-    }
-
-    [Fact]
-    public async Task FtpRequiresLoginAndResumesFromPartialBytes()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var ftpBase = $"ftp://127.0.0.1:{_server.Ftp.Port}";
-
-        var denied = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{ftpBase}/auth.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-denied.bin",
-            Source = "cli",
-        });
-        var deniedJob = await ctx.WaitFor(denied.Job!.Id, j => j.State == "failed",
-            TimeSpan.FromSeconds(30));
-        Assert.Equal("unauthorized", deniedJob.Failure?.Kind);
-
-        var settings = ctx.Service.GetSnapshot().Settings;
-        settings.SiteLogins.Add(new SiteLoginDto
-        {
-            Site = ftpBase,
-            Username = "ftpuser",
-            Password = "ftppass",
-        });
-        var update = await ctx.Service.UpdateSettingsAsync(settings);
-        Assert.True(update.Ok, update.Error);
+        Assert.Empty(ctx.Service.GetSnapshot().Jobs);
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.RecentUrls, recent => recent.StartsWith("ftp", StringComparison.OrdinalIgnoreCase));
 
         var plain = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"{ftpBase}/plain.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-plain.bin",
-            Source = "cli",
+            Url = $"{_server.BaseAddress}/file/ftp-refresh.bin?size=4096&seed=5", DestinationDirectory = ctx.Destination,
+            Source = "cli", StartMode = "later",
         });
-        var plainCompleted = await ctx.WaitFor(plain.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(30));
-        Assert.Equal(65_536, plainCompleted.ReceivedBytes);
-        Assert.Equal(
-            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "plain.bin")),
-            await Hashing.Sha256FileAsync(plainCompleted.FinalFilePath));
+        var refreshed = await ctx.Service.RefreshUrlAsync(plain.Job!.Id, "ftp://127.0.0.1:2121/ftp-refresh.bin");
+        Assert.False(refreshed.Ok);
+        Assert.Equal(FtpAddresses.NotSupported, refreshed.Error);
+    }
 
-        // The FTP server is shared by the class, and another test (RuntimeLiveConnectionTests) fetches slow.bin too.
-        var servedBefore = _server.Ftp.BytesServed("slow.bin");
-        var slow = await ctx.Service.AddJobAsync(new AddJobRequest
+    /// <summary>
+    /// CUT.1 migration: an FTP download an older version left in the list (with the password in its address, as Review 1
+    /// L11 found it kept) still loads, fails with the clear message when it would start instead of crashing, and is not
+    /// started again by Resume All.
+    /// </summary>
+    [Fact]
+    public async Task AnFtpDownloadAnOlderVersionLeftFailsClearly()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        var id = Guid.NewGuid();
+        await new JsonJobStore(paths).SaveAsync(new DownloadJob
         {
-            Url = $"{ftpBase}/slow.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "ftp-slow.bin",
-            Source = "cli",
+            Id = id,
+            Url = "ftp://user:invented-password@127.0.0.1:2121/pub/old.bin",
+            FileName = "old.bin",
+            DestinationDirectory = destination,
+            FinalFilePath = Path.Combine(destination, "old.bin"),
+            PartFilePath = Path.Combine(destination, $"old.bin.{id:N}.part"),
+            State = DownloadState.Queued,
         });
-        await ctx.WaitFor(slow.Job!.Id, j => j.ReceivedBytes > 131_072, TimeSpan.FromSeconds(30));
-        Assert.True((await ctx.Service.PauseAsync(slow.Job.Id)).Ok);
-        var paused = await ctx.WaitFor(slow.Job.Id, j => j.State == "paused");
-        Assert.True(paused.ReceivedBytes > 0);
-        Assert.True(File.Exists(paused.PartFilePath));
-        var restBefore = _server.Ftp.RestCount;
 
-        Assert.True((await ctx.Service.ResumeAsync(slow.Job.Id)).Ok);
-        var resumed = await ctx.WaitFor(slow.Job.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(60));
-        Assert.Equal(524_288, resumed.ReceivedBytes);
-        Assert.Equal(
-            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
-            await Hashing.Sha256FileAsync(resumed.FinalFilePath));
-        Assert.True(_server.Ftp.RestCount > restBefore, $"REST count {_server.Ftp.RestCount}, before {restBefore}");
-        // BytesServed now counts the transfer the pause cut short too, so a full re-download would reach 1.5x.
-        var served = _server.Ftp.BytesServed("slow.bin") - servedBefore;
-        Assert.True(served < 524_288 * 3 / 2, $"served {served}");
-        // The completing RETR began past zero and sent only the rest of the file.
-        var last = _server.Ftp.Transfers("slow.bin").Last(transfer => transfer.Completed);
-        Assert.True(last.Offset > 0, "the resumed transfer started from zero");
-        Assert.True(last.Offset <= paused.ReceivedBytes, $"REST {last.Offset} past the {paused.ReceivedBytes} bytes kept");
-        Assert.Equal(524_288 - last.Offset, last.Sent);
-        // The server took REST, so a lowered limit may now requeue this job without losing its data (UI.R21).
-        Assert.True(resumed.ResumeSupported, $"ResumeSupported false; paused at {paused.ReceivedBytes}, REST {_server.Ftp.RestCount} (before {restBefore}), served {served}");
+        try
+        {
+            await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination);
+            var failed = await ctx.WaitFor(id, j => j.State == "failed", TimeSpan.FromSeconds(30));
+            Assert.Equal(FtpAddresses.NotSupported, failed.Failure?.Message);
+            Assert.Equal("unsupported", failed.Failure?.Kind);
+            // L11: the password it held in the clear is gone from the list and from the saved job.
+            Assert.Equal("ftp://user@127.0.0.1:2121/pub/old.bin", failed.Url);
+            Assert.DoesNotContain("invented-password",
+                string.Concat(Directory.GetFiles(paths.JobsDirectory, "*.json").Select(File.ReadAllText)));
+            Assert.True(failed.IsTerminal);
+            Assert.False(failed.CanResume);
+
+            await ctx.Service.ResumeAllAsync();
+            await Task.Delay(300);
+            Assert.Equal("failed", ctx.Service.GetJob(id)!.State);
+            Assert.False(File.Exists(failed.PartFilePath));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     [Fact]
@@ -1442,15 +1387,6 @@ public sealed partial class RuntimeServiceTests
         Assert.True(cleared.Ok);
         Assert.Null(cleared.Job!.SpeedLimitBytesPerSecond);
         Assert.False(cleared.Job.ShowCompletionDialog);
-        var media = await restarted.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/sample.m3u8", StartMode = "later",
-        });
-        Assert.False(media.Job!.CanChangeSpeedLimit);
-        Assert.False((await restarted.Service.UpdateJobAsync(new JobUpdateRequest
-        {
-            JobId = media.Job.Id, SpeedLimitBytesPerSecond = 1000,
-        })).Ok);
     }
 
     [Fact]
@@ -3348,6 +3284,42 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("legacy-cookie-secret", damaged.RequestHeaders["Cookie"]);
     }
 
+    /// <summary>
+    /// SEC.L1: the service hands the saved logins to the engine, which sends a login saved as a bare host over
+    /// https only. Over the loopback http server it isn't sent; saved with http:// it is.
+    /// </summary>
+    [Fact]
+    public async Task BareHostSiteLoginIsNotSentOverHttpButAnExplicitHttpOneIs()
+    {
+        _server.SetSiteCredentials("bareuser", "barepass");
+        _server.ResetSiteAuthStats();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var bareHost = new Uri(_server.BaseAddress).Authority; // 127.0.0.1:port, no scheme
+
+        async Task<JobDto> RunWithLogin(string site, string name, string state)
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.SiteLogins = [new SiteLoginDto { Id = Guid.NewGuid(), Site = site, Username = "bareuser", Password = "barepass" }];
+            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/site/secure/{name}?size=65536&seed=99",
+                DestinationDirectory = ctx.Destination, FileName = name, Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return await ctx.WaitFor(response.Job!.Id, j => j.State == state, TimeSpan.FromSeconds(30));
+        }
+
+        var denied = await RunWithLogin(bareHost, "bare-host.bin", "failed");
+        Assert.Equal("unauthorized", denied.Failure?.Kind);
+        Assert.Equal(0, _server.SiteAuthAuthorized);
+        Assert.True(_server.SiteAuthDenied > 0);
+
+        var completed = await RunWithLogin(_server.BaseAddress, "explicit-http.bin", "completed");
+        Assert.True(_server.SiteAuthAuthorized > 0);
+        Assert.Equal(65536, new FileInfo(completed.FinalFilePath).Length);
+    }
+
     [Fact]
     public async Task StoredSiteLoginAuthenticatesAndSurvivesRestart()
     {
@@ -3964,385 +3936,214 @@ public sealed partial class RuntimeServiceTests
         Assert.True(executor.LastForce);
     }
 
+    /// <summary>
+    /// CUT.1: stream downloading was cut in 0.7.2. A playlist address, a hand-off that said it was one, a description
+    /// that is only a playlist's type (a list exported by an older version) and a server that answers with a playlist
+    /// behind a plain address all fail at once with one clear message, leave no file behind, and are not retried.
+    /// </summary>
     [Fact]
-    public async Task LiveStreamsAreRejectedExplicitly()
+    public async Task StreamingPlaylistsFailWithAClearMessage()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        foreach (var (path, name) in new[]
-                 {
-                     ("/live/playlist.m3u8", "live.m3u8"),
-                     ("/live/manifest.mpd", "live.mpd"),
-                 })
+        var requests = new[]
         {
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}{path}",
-                DestinationDirectory = ctx.Destination,
-                FileName = name,
-                Source = "cli",
-            });
+            new AddJobRequest { Url = $"{_server.BaseAddress}/live/playlist.m3u8", FileName = "live.mp4" },
+            new AddJobRequest { Url = $"{_server.BaseAddress}/stream/manifest.mpd", FileName = "dash.mp4" },
+            new AddJobRequest { Url = $"{_server.BaseAddress}/file/handoff.bin?size=4096&seed=3", FileName = "handoff.mp4", ContentType = "application/vnd.apple.mpegurl" },
+            new AddJobRequest { Url = $"{_server.BaseAddress}/file/listed.bin?size=4096&seed=4", FileName = "listed.mp4", Description = "application/dash+xml" },
+            new AddJobRequest { Url = $"{_server.BaseAddress}/typed/behind.bin?size=4096&type=application/vnd.apple.mpegurl", FileName = "behind.mp4" },
+            new AddJobRequest { Url = $"{_server.BaseAddress}/typed/behind-dash.bin?size=4096&type=application/dash%2Bxml", FileName = "behind-dash.mp4", Connections = 4 },
+        };
+
+        foreach (var request in requests)
+        {
+            request.DestinationDirectory = ctx.Destination;
+            request.Source = "cli";
+            var response = await ctx.Service.AddJobAsync(request);
             Assert.True(response.Accepted, response.Error);
-            var failed = await ctx.WaitFor(response.Job!.Id, j => j.State == "failed",
-                TimeSpan.FromSeconds(30));
-            Assert.Equal("liveStream", failed.Failure?.Kind);
-            Assert.Contains("Live", failed.Failure?.Message, StringComparison.OrdinalIgnoreCase);
+            var failed = await ctx.WaitFor(response.Job!.Id, j => j.State == "failed", TimeSpan.FromSeconds(30));
+            Assert.Equal(StreamManifestHint.NotDownloadedMessage, failed.Failure?.Message);
+            Assert.Equal("unsupported", failed.Failure?.Kind);
             Assert.False(failed.Failure?.IsRetryable);
-            Assert.False(failed.Failure?.IsResumable);
-            Assert.False(failed.CanResume);
             Assert.True(failed.IsTerminal);
-            Assert.False(File.Exists(failed.FinalFilePath));
-            Assert.False(File.Exists(failed.PartFilePath));
-        }
-    }
-
-    [Fact]
-    public async Task DrmProtectedMediaIsIdentifiedAndNotBypassed()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        foreach (var (path, name) in new[]
-                 {
-                     ("/drm/hls.m3u8", "drm.m3u8"),
-                     ("/drm/manifest.mpd", "drm.mpd"),
-                 })
-        {
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}{path}",
-                DestinationDirectory = ctx.Destination,
-                FileName = name,
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            var failed = await ctx.WaitFor(response.Job!.Id, j => j.State == "failed",
-                TimeSpan.FromSeconds(30));
-            Assert.Equal("drmProtected", failed.Failure?.Kind);
-            Assert.Contains("DRM", failed.Failure?.Message);
-            Assert.False(failed.Failure?.IsRetryable);
-            Assert.False(failed.Failure?.IsResumable);
             Assert.False(failed.CanResume);
-            Assert.True(failed.IsTerminal);
-            Assert.False(File.Exists(failed.FinalFilePath));
-            Assert.False(File.Exists(failed.PartFilePath));
+            Assert.False(File.Exists(failed.FinalFilePath), request.FileName);
+            Assert.False(File.Exists(failed.PartFilePath), request.FileName);
         }
     }
 
+    /// <summary>
+    /// CUT.1 migration: a stream download an older version left half done fails with the new message when it is
+    /// resumed instead of crashing, and deleting it takes the audio and video tracks that version kept beside it.
+    /// </summary>
     [Fact]
-    public async Task HlsMasterAndMediaPlaylistsAssembleSegments()
+    public async Task AStreamDownloadAnOlderVersionLeftFailsClearlyAndItsTracksGoWithIt()
     {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
-        foreach (var playlist in new[] { "master.m3u8", "media.m3u8" })
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        var id = Guid.NewGuid();
+        var final = Path.Combine(destination, "old-stream.mp4");
+        var part = $"{final}.{id:N}.part";
+        var job = new DownloadJob
         {
-            var name = $"hls-{Path.GetFileNameWithoutExtension(playlist)}.m3u8";
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}/hls/{playlist}",
-                DestinationDirectory = ctx.Destination,
-                FileName = name,
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-                TimeSpan.FromSeconds(30));
-            Assert.EndsWith(".ts", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(expectedBytes, completed.ReceivedBytes);
-            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+            Id = id,
+            Url = $"{_server.BaseAddress}/old/master.m3u8",
+            FileName = "old-stream.mp4",
+            DestinationDirectory = destination,
+            FinalFilePath = final,
+            PartFilePath = part,
+            State = DownloadState.Paused,
+            ReceivedBytes = 300,
+        };
+        await new JsonJobStore(paths).SaveAsync(job);
+        foreach (var track in new[] { ".video", ".audio" }) await File.WriteAllTextAsync(part + track, "kept track");
+
+        try
+        {
+            await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
+            Assert.Equal("paused", ctx.Service.GetJob(id)!.State);
+            Assert.True((await ctx.Service.ResumeAsync(id)).Ok);
+            var failed = await ctx.WaitFor(id, j => j.State == "failed", TimeSpan.FromSeconds(30));
+            Assert.Equal(StreamManifestHint.NotDownloadedMessage, failed.Failure?.Message);
+
+            Assert.True((await ctx.Service.RemoveAsync(id, deleteFile: true)).Ok);
+            Assert.False(File.Exists(part + ".video"));
+            Assert.False(File.Exists(part + ".audio"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
 
+    /// <summary>
+    /// FTP was cut in 0.7.2. An FTP download an older version left still loads; at start its password leaves the job
+    /// file (Review 1 L11) and its checkpoint, which held the same address, is deleted; a resume fails clearly.
+    /// </summary>
     [Fact]
-    public async Task HlsAes128AndRotatingKeysDecryptToExpectedOutput()
+    public async Task AnFtpDownloadAnOlderVersionLeftLosesItsPasswordAndFailsClearly()
     {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
-        foreach (var playlist in new[] { "aes.m3u8", "aes-rotate.m3u8" })
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        var id = Guid.NewGuid();
+        const string secret = "pw-kept-in-the-clear";
+        var address = $"ftp://someone:{secret}@ftp.example.invalid/pub/old.bin";
+        var final = Path.Combine(destination, "old.bin");
+        await new JsonJobStore(paths).SaveAsync(new DownloadJob
         {
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}/hls/{playlist}",
-                DestinationDirectory = ctx.Destination,
-                FileName = $"hls-{Path.GetFileNameWithoutExtension(playlist)}.m3u8",
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-                TimeSpan.FromSeconds(30));
-            Assert.EndsWith(".ts", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(expectedBytes, completed.ReceivedBytes);
-            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+            Id = id,
+            Url = address,
+            FinalUrl = address,
+            ResolvedUrl = address,
+            FileName = "old.bin",
+            DestinationDirectory = destination,
+            FinalFilePath = final,
+            PartFilePath = $"{final}.{id:N}.part",
+            State = DownloadState.Paused,
+        });
+        await new JsonCheckpointStore(paths).SaveAsync(new DownloadCheckpoint { JobId = id, Url = address, Segments = [] });
+        var jobFile = Path.Combine(paths.JobsDirectory, $"{id:N}.json");
+        var checkpointFile = Path.Combine(paths.CheckpointsDirectory, $"{id:N}.json");
+        Assert.Contains(secret, await File.ReadAllTextAsync(jobFile));
+        Assert.True(File.Exists(checkpointFile));
+
+        try
+        {
+            await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
+            var loaded = ctx.Service.GetJob(id)!;
+            Assert.Equal("paused", loaded.State);
+            Assert.DoesNotContain(secret, await File.ReadAllTextAsync(jobFile));
+            Assert.Contains("someone@ftp.example.invalid", await File.ReadAllTextAsync(jobFile));
+            Assert.False(File.Exists(checkpointFile));
+
+            Assert.True((await ctx.Service.ResumeAsync(id)).Ok);
+            var failed = await ctx.WaitFor(id, j => j.State == "failed", TimeSpan.FromSeconds(30));
+            Assert.Equal(FtpAddresses.NotSupported, failed.Failure?.Message);
+            Assert.Equal("unsupported", failed.Failure?.Kind, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(secret, await File.ReadAllTextAsync(jobFile));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
 
-    [FfmpegFact]
-    public async Task HlsAlternateAudioMuxesWhenFfmpegAvailable()
+    /// <summary>A plain ".m3u" list served with the HLS type is a file the user wants, and is saved.</summary>
+    [Fact]
+    public async Task APlainM3uListServedWithThePlaylistTypeIsStillSaved()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/av-expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
         var response = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"{_server.BaseAddress}/hls/av-master.m3u8",
+            Url = $"{_server.BaseAddress}/typed/radio.m3u?size=2048&type=audio/x-mpegurl",
             DestinationDirectory = ctx.Destination,
-            FileName = "hls-av.m3u8",
+            FileName = "radio.m3u",
             Source = "cli",
         });
         Assert.True(response.Accepted, response.Error);
-        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(60));
-        Assert.Null(completed.Failure);
-        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(2048, new FileInfo(completed.FinalFilePath).Length);
     }
 
+    /// <summary>
+    /// A browser hands a plain .m3u list over as audio/x-mpegurl, and the extension catches it. The Host must save it:
+    /// by the time the job runs, the browser's own download is already cancelled.
+    /// </summary>
     [Fact]
-    public async Task DashManifestDownloadsInitAndMediaSegments()
+    public async Task APlainM3uListHandedOverWithThePlaylistTypeIsStillSaved()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
         var response = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"{_server.BaseAddress}/dash/manifest.mpd",
+            Url = $"{_server.BaseAddress}/typed/radio.m3u?size=2048&type=audio/x-mpegurl",
             DestinationDirectory = ctx.Destination,
-            FileName = "dash-test.mpd",
-            Source = "cli",
+            FileName = "radio.m3u",
+            ContentType = "audio/x-mpegurl",
+            Source = "chrome",
         });
         Assert.True(response.Accepted, response.Error);
-        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(30));
-        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(expectedBytes, completed.ReceivedBytes);
-        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(2048, new FileInfo(completed.FinalFilePath).Length);
     }
 
+    /// <summary>
+    /// A .m3u list behind an address that doesn't say .m3u, which the server names in Content-Disposition, is saved
+    /// under that name; the same type without such a name is a playlist and fails clearly.
+    /// </summary>
     [Fact]
-    public async Task DashTimelineAndSegmentListMatchExpectedOutput()
+    public async Task AM3uListTheServerNamesIsSavedButAnUnnamedPlaylistAnswerFails()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
-        foreach (var manifest in new[] { "timeline.mpd", "segmentlist.mpd" })
+        var named = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}/dash/{manifest}",
-                DestinationDirectory = ctx.Destination,
-                FileName = $"dash-{Path.GetFileNameWithoutExtension(manifest)}.mpd",
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-                TimeSpan.FromSeconds(30));
-            Assert.Null(completed.Failure);
-            Assert.Equal(expectedBytes, completed.ReceivedBytes);
-            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-        }
-    }
-
-    [Fact]
-    public async Task DashSegmentBaseAndSegmentListRangesMatchExpectedOutput()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
-        foreach (var manifest in new[] { "segmentbase.mpd", "segmentlist-range.mpd" })
-        {
-            _server.ResetHlsStats();
-            var response = await ctx.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}/dash-range/{manifest}",
-                DestinationDirectory = ctx.Destination,
-                FileName = $"dash-{Path.GetFileNameWithoutExtension(manifest)}.mpd",
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-                TimeSpan.FromSeconds(30));
-            Assert.Null(completed.Failure);
-            Assert.Equal(expectedBytes, completed.ReceivedBytes);
-            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-            Assert.True(_server.DashRangeRequests("single.mp4") >= 4,
-                $"{manifest} used {_server.DashRangeRequests("single.mp4")} range requests.");
-        }
-    }
-
-    [Fact]
-    public async Task HlsResumesAtCompletedSegmentAfterInterruption()
-    {
-        _server.ResetHlsStats();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/hls/recovery.m3u8",
+            Url = $"{_server.BaseAddress}/typed/listen?size=2048&type=audio/x-mpegurl&disposition=station.m3u",
             DestinationDirectory = ctx.Destination,
-            FileName = "hls-recovery.m3u8",
             Source = "cli",
         });
-        Assert.True(response.Accepted, response.Error);
-        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 210_000, TimeSpan.FromSeconds(30));
-        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
-        var paused = await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
-        Assert.True(paused.ReceivedBytes > 0);
-        var seg0AfterPause = _server.HlsSegmentRequests("seg0.ts");
-        var seg2AfterPause = _server.HlsSegmentRequests("seg2.ts");
+        Assert.True(named.Accepted, named.Error);
+        var saved = await ctx.WaitFor(named.Job!.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("completed", saved.State);
+        Assert.Equal("station.m3u", Path.GetFileName(saved.FinalFilePath));
 
-        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
-        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(60));
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-        Assert.Equal(1, _server.HlsSegmentRequests("seg0.ts")); // completed fragment not repeated
-        Assert.True(_server.HlsSegmentRequests("seg1.ts") >= 2 ||
-                    _server.HlsSegmentRequests("seg2.ts") >= 2);
-        Assert.True(_server.HlsSegmentRequests("seg2.ts") >= seg2AfterPause);
-        Assert.Equal(1, seg0AfterPause);
-    }
-
-    [Fact]
-    public async Task DashResumesAtCompletedSegmentAfterInterruption()
-    {
-        _server.ResetHlsStats();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        var unnamed = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"{_server.BaseAddress}/dash/recovery.mpd",
+            Url = $"{_server.BaseAddress}/typed/watch?size=2048&type=application/vnd.apple.mpegurl",
             DestinationDirectory = ctx.Destination,
-            FileName = "dash-recovery.mpd",
             Source = "cli",
         });
-        Assert.True(response.Accepted, response.Error);
-        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 184_000, TimeSpan.FromSeconds(30));
-        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
-        await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
-        var chunk1AfterPause = _server.DashSegmentRequests("chunk-0-00001.m4s");
-
-        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
-        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(60));
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-        Assert.Equal(1, _server.DashSegmentRequests("chunk-0-00001.m4s"));
-        Assert.True(_server.DashSegmentRequests("chunk-0-00002.m4s") >= 2 ||
-                    _server.DashSegmentRequests("chunk-0-00003.m4s") >= 2);
-        Assert.Equal(1, chunk1AfterPause);
-    }
-
-    [Fact]
-    public async Task HlsRefreshesExpiredSegmentTokens()
-    {
-        _server.ResetHlsStats();
-        _server.ResetRotatingMedia();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/hls-rotating/playlist.m3u8",
-            DestinationDirectory = ctx.Destination,
-            FileName = "hls-expiring.m3u8",
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(30));
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-        Assert.Equal(1, _server.HlsSegmentRequests("rotating-seg0.ts"));
-        Assert.True(_server.HlsSegmentRequests("rotating-seg1.ts") >= 1);
-    }
-
-    [Fact]
-    public async Task DashRefreshesExpiredSegmentTokens()
-    {
-        _server.ResetHlsStats();
-        _server.ResetRotatingMedia();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/dash-rotating/manifest.mpd",
-            DestinationDirectory = ctx.Destination,
-            FileName = "dash-expiring.mpd",
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(30));
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-        Assert.Equal(1, _server.DashSegmentRequests("rotating-chunk-0-00001.m4s"));
-        Assert.True(_server.DashSegmentRequests("rotating-chunk-0-00002.m4s") >= 1);
-    }
-
-    [FfmpegFact]
-    public async Task DashSeparateAudioVideoMuxesWhenFfmpegAvailable()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/dash-av/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
-
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/dash-av/manifest.mpd",
-            DestinationDirectory = ctx.Destination,
-            FileName = "dash-av.mpd",
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(60));
-        Assert.Null(completed.Failure);
-        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.True(unnamed.Accepted, unnamed.Error);
+        var failed = await ctx.WaitFor(unnamed.Job!.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("failed", failed.State);
+        Assert.Equal(StreamManifestHint.NotDownloadedMessage, failed.Failure?.Message);
     }
 
     [Fact]
@@ -4568,7 +4369,6 @@ public sealed partial class RuntimeServiceTests
         {
             IDownloadCheckpointStore checkpoints = new JsonCheckpointStore(paths);
             if (hooks?.WrapCheckpoints is { } wrapCheckpoints) checkpoints = wrapCheckpoints(checkpoints);
-            var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
             IJobStore store = new JsonJobStore(paths);
             if (hooks?.WrapJobs is { } wrapJobs) store = wrapJobs(store);
             ISettingsStore settingsStore = new JsonSettingsStore(paths);
@@ -4583,9 +4383,7 @@ public sealed partial class RuntimeServiceTests
                     AllowLocalNetwork = true,
                 },
                 handler: handler,
-                checkpoints: checkpoints,
-                mediaCheckpoints: mediaCheckpoints);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
+                checkpoints: checkpoints);
             var service = new DownloadManagerService(
                 paths,
                 store,
@@ -4596,8 +4394,6 @@ public sealed partial class RuntimeServiceTests
                 enableSchedulerTimer: false,
                 completionActions: completionActions,
                 sleepPrevention: sleepPrevention,
-                mediaCheckpoints: mediaCheckpoints,
-                ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook,
                 linkBroker: linkBroker,
                 linkSecrets: linkSecrets);
@@ -4611,7 +4407,6 @@ public sealed partial class RuntimeServiceTests
             settings.MaxConcurrentDownloads = maxConcurrent;
             settings.DefaultConnections = 1;
             settings.AutoResumeUnfinishedOnStartup = autoResume;
-            settings.FfmpegPath = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
             var update = await service.UpdateSettingsAsync(settings);
             if (!update.Ok)
             {
@@ -4662,18 +4457,3 @@ public sealed partial class RuntimeServiceTests
     }
 }
 
-/// <summary>
-/// A test that needs a real FFmpeg (DOWNLOADMANAGER_FFMPEG). Without one it shows as skipped, with the reason, rather
-/// than passing without having run.
-/// </summary>
-public sealed class FfmpegFactAttribute : FactAttribute
-{
-    public FfmpegFactAttribute()
-    {
-        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
-        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
-        {
-            Skip = "Needs FFmpeg: set DOWNLOADMANAGER_FFMPEG to ffmpeg.exe.";
-        }
-    }
-}

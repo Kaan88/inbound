@@ -86,7 +86,7 @@ function Invoke-Element($el) {
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke(); return $true }
     return $false
 }
-# Any delete confirmation: "Delete download?", "Delete 3 downloads?", "Remove extraction record?".
+# Any delete confirmation: "Delete download?", "Delete 3 downloads?", "Delete extraction record?" (UI.R39).
 function Find-DeleteDialog {
     $c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
     foreach ($t in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $c)) {
@@ -232,7 +232,7 @@ if ($file) {
 # Add dialog is modal.
 if ($add -and (Invoke-Element $add)) {
     Start-Sleep -Milliseconds 700
-    Write-Output "ADD open=$([bool](Find-ByName 'Enter new address to download')) $(Modal-Info 'Enter new address to download')"
+    Write-Output "ADD open=$([bool](Find-ByName 'Add download')) $(Modal-Info 'Add download')"
     Invoke-Element (Get-Button 'Cancel') | Out-Null
 }
 Write-Output 'UI-KEYBOARD-CHECK-DONE'

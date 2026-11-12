@@ -42,7 +42,7 @@ describe('rows and bar (D3, D11, D18, D19)', () => {
   it('shows the percent next to the byte count, Complete once finished, and the resume answer', () => {
     const rows = detailRows(job({ state: 'completed', totalBytes: 2048, receivedBytes: 2048, resumeSupported: true, estimatedRemaining: '00:00:05' }));
     expect(rows.find((r) => r.label === 'Downloaded')?.value).toBe('2.00 KB (100.00%)');
-    expect(rows.find((r) => r.label === 'Time left')?.value).toBe('Complete');
+    expect(rows.find((r) => r.label === 'Time left')?.value).toBe('Completed');
     expect(rows.find((r) => r.label === 'Resume capability')?.value).toBe('Yes');
     expect(detailRows(job({ resumeSupported: false })).at(-1)?.value).toBe('No');
   });
@@ -67,7 +67,7 @@ describe('rows and bar (D3, D11, D18, D19)', () => {
     expect(noticeText(job({ state: 'downloading' }))).toBe('Closing this window will not stop the download.');
     expect(noticeText(job({ state: 'completed', fileRemovedAfterExtraction: true }))).toBe('Archive removed after extraction, so there is no file to open.');
     expect(heading(job({ state: 'completed' }))).toBe('Download complete');
-    expect(heading(job({ state: 'paused' }))).toBe('Paused');
+    expect(heading(job({ state: 'paused' }))).toBe('Stopped');
   });
 });
 
@@ -124,7 +124,7 @@ describe('segments (D2)', () => {
     updateRates(segments, live, rates);
     const rows = segmentRows(segments, live, rates);
     expect(rows[0]).toMatchObject({ number: 1, percent: 50, downloaded: '512 B / 1.00 KB', speed: '2.00 KB/s', info: 'Receiving data…' });
-    expect(rows[1]).toMatchObject({ number: 2, percent: 100, speed: '—', info: 'Complete' });
+    expect(rows[1]).toMatchObject({ number: 2, percent: 100, speed: '—', info: 'Done' });
     const idle = segmentRows(mergeSegments([segment(0, 99, 0)], [], { totalBytes: 100, receivedBytes: 0 }), []);
     expect(idle[0].info).toBe('Waiting');
   });

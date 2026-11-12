@@ -101,7 +101,7 @@ test('U-EX-4: downloads going to a server that is down: a notice, "Not answering
   try {
     const doc = page.document;
     const notices = [...doc.querySelectorAll('#notices .notice-text')].map((item) => item.textContent);
-    assert.deepEqual(notices, ['home-server isn\'t answering. Caught downloads stay in the browser.']);
+    assert.deepEqual(notices, ['home-server isn\'t answering. Downloads you start stay in the browser.']);
     assert.equal(doc.getElementById('connection').textContent, 'Server not answering');
     assert.ok(doc.getElementById('connection').classList.contains('tone-failed'));
     assert.ok([...doc.querySelectorAll('.group-note')].some((item) => item.textContent === 'Not answering'));
@@ -118,7 +118,7 @@ test('U-EX-3, U-EX-10: with a server paired every popup action stays in the head
       assert.equal(doc.getElementById('listArea').contains(doc.getElementById(id)), false, id);
     }
     const text = doc.body.textContent;
-    assert.equal(text.match(/not caught automatically/g)?.length, 1);
+    assert.equal(text.match(/not sent automatically/g)?.length, 1);
     assert.equal(/Connected to the desktop app|go to the server/.test(text), false);
     assert.equal(doc.getElementById('connection').textContent, 'Connected');
   } finally { page.restore(); }

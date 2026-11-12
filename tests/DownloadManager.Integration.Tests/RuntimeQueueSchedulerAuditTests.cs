@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
-using DownloadManager.Engine;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using TestServer;

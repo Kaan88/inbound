@@ -15,7 +15,8 @@ public sealed class JobListEntry
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
     /// <summary>The content type the browser hand-off gave, sent again as <c>AddJobRequest.ContentType</c>, so a
-    /// stream at an address without .m3u8 or .mpd is still a stream (review 1 N6). Left out when there was none.</summary>
+    /// stream at an address without .m3u8 or .mpd is still a stream (review 1 N6), and fails as one since 0.7.2. Left out
+    /// when there was none.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? ContentType { get; set; }
     /// <summary>A torrent job's own part; null for every other download. <see cref="Url"/> is then its magnet.</summary>

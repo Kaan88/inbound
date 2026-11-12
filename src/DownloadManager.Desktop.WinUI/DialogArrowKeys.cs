@@ -94,6 +94,18 @@ internal static class DialogArrowKeys
         for (var i = 0; i < count; i++) AddContentStops(VisualTreeHelper.GetChild(element, i), stops);
     }
 
+    /// <summary>
+    /// UI.R40: one of the open dialog's footer buttons ("PrimaryButton", "SecondaryButton", "CloseButton"), or null. A
+    /// dialog whose content changes in place moves the focus to its new default button with this, since WinUI leaves
+    /// it on the button that had it.
+    /// </summary>
+    public static Button? FooterButton(ContentDialog dialog, string name)
+    {
+        var footer = new List<Button>();
+        FindFooterButtons(dialog, dialog.Content as DependencyObject, footer, depth: 20);
+        return footer.FirstOrDefault(button => button.Name == name);
+    }
+
     // The footer is in the dialog's template, outside its text, which is not walked.
     private static void FindFooterButtons(DependencyObject element, DependencyObject? content, List<Button> found, int depth)
     {

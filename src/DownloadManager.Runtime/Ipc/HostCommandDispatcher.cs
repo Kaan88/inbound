@@ -20,7 +20,7 @@ public sealed partial class HostCommandDispatcher
 {
     private const string UpdatesUnavailable = "Updates are not available here.";
     private const string ProgramSettingsUnavailable =
-        "The post-download command, FFmpeg path, update source and system completion actions can't be changed from here.";
+        "The post-download command, update source and system completion actions can't be changed from here.";
     private const string CompletionProgramUnavailable = "A completion program can't be set from here.";
     private const string CompletionActionsUnavailable =
         "What happens when a download is done (open the file, shut down, exit) can only be set in the app on this PC.";
@@ -43,6 +43,7 @@ public sealed partial class HostCommandDispatcher
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _groupsGate = new();
     private int _updateWindowOpened;
+    private int _updateInstallWindowOpened;
     private int _exiting;
     private List<DownloadGroupDto>? _lastGroups;
     private int _groupsBroadcastPending;
@@ -177,6 +178,12 @@ public sealed partial class HostCommandDispatcher
         var rights = RightsFor(options?.Role) ?? throw new ArgumentException("This Host doesn't offer that role.", nameof(options));
         _rights.AddOrUpdate(client, rights);
         _open[client.Id] = (client, rights);
+        // UI.R41: the native host names its browser; only a client at this PC may say an extension came.
+        // A browser seen for the first time is pushed to the sessions at this PC, so an open window drops its hint now
+        // rather than at its next snapshot; web sessions never get it (forScope gives them nothing).
+        if (options?.Browser is { } browser && rights.Role == ClientRoles.Desktop && rights.Scope is null &&
+            _service.ExtensionSightings is { } sightings && sightings.Note(browser))
+            Broadcast(IpcMessage.Create(MessageTypes.ExtensionsSeen, new ExtensionsSeenDto { Seen = sightings.Snapshot() }), _ => null);
         // PERF.7: a client that asked for no events is never registered, so no broadcast reaches it.
         if (options?.Events ?? true) _sessions[client.Id] = client;
         // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
@@ -326,6 +333,12 @@ public sealed partial class HostCommandDispatcher
                         await _service.CleanOrphanPartFilesAsync(cleanOrphans.Delete, cancellationToken, caller)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.ChangelogGet:
+                    // UPD.N1: this build's release notes; the same for every session, with nothing of the machine's in them.
+                    await Reply(client, message, MessageTypes.ChangelogResult,
+                        new ChangelogDto { Versions = Changelog.Embedded.ToList() }).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.StatisticsGet:
@@ -538,7 +551,7 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.JobsPauseAll:
                     await _service.PauseAllAsync(cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.HostActionResult,
-                        new HostActionResult { Ok = true, Message = "All downloads paused." }).ConfigureAwait(false);
+                        new HostActionResult { Ok = true, Message = "All downloads stopped." }).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobsResumeAll:
@@ -824,7 +837,6 @@ public sealed partial class HostCommandDispatcher
     private static bool ChangesProgramSettings(SettingsDto? requested, SettingsDto current)
         => requested is not null && (
             !SameText(requested.PostDownloadCommand, current.PostDownloadCommand) ||
-            !SameText(requested.FfmpegPath, current.FfmpegPath) ||
             !SameText(requested.UpdateManifestUrl, current.UpdateManifestUrl) ||
             !SameText(requested.UpdatePublicKey, current.UpdatePublicKey) ||
             requested.AllowSystemCompletionActions != current.AllowSystemCompletionActions);
@@ -908,11 +920,15 @@ public sealed partial class HostCommandDispatcher
         return !jobs.Distinct().Any(id => _service.HeldBy(id, caller) == false);
     }
 
-    /// <summary>What a web session is told about the Host: not where it keeps its state, nor leftovers outside its folders.</summary>
+    /// <summary>
+    /// What a web session is told about the Host: not where it keeps its state, nor leftovers outside its folders, nor which
+    /// browsers this PC uses (review of 0.7.2, security-3; the push of it is withheld from web sessions too).
+    /// </summary>
     private static HostStatusDto ForSession(HostStatusDto status, SessionRights rights)
     {
         if (rights.Scope is not { } caller) return status;
         status.StateDirectory = string.Empty;
+        status.ExtensionsSeen = null;
         status.OrphanPartFiles = status.OrphanPartFiles.Where(path => caller.Roots.Allowed(path) is not null).ToList();
         return status;
     }
@@ -957,7 +973,7 @@ public sealed partial class HostCommandDispatcher
         return JobsForScope(snapshot, caller);
     }
 
-    // The settings store trims the command and the FFmpeg path and keeps an empty one as none, so " x" and "x", and
+    // The settings store trims the command and keeps an empty one as none, so " x" and "x", and
     // "" and null, are the same setting and sending one back is no change.
     private static bool SameText(string? left, string? right)
         => string.Equals(
@@ -1120,16 +1136,24 @@ public sealed partial class HostCommandDispatcher
         => Broadcast(IpcMessage.Create(MessageTypes.UpdateLatest, new UpdateLatestDto { LatestVersion = version }));
 
     /// <summary>
-    /// An update's download opens its progress window once, where there is a window to open. A failure, a postponed
-    /// install or "up to date" lets the next download open it again.
+    /// An update's download opens its progress window once, where there is a window to open, and so does the start of
+    /// its install: that window is what stays on screen while the install closes the main window, and the main window's
+    /// update dialog keeps it shut while it shows the download itself (UI.R40). One already open is only shown again. A
+    /// failure, a postponed install or "up to date" lets the next download and install open it again.
     /// </summary>
     public void BroadcastUpdateProgress(UpdateProgressDto progress)
     {
         if (progress.Stage == "downloading" && _platform.Capabilities.SupportsOpenUi &&
             Interlocked.Exchange(ref _updateWindowOpened, 1) == 0)
             _platform.OpenUi("update-progress");
+        if (progress.Stage is "staging" or "installing" && _platform.Capabilities.SupportsOpenUi &&
+            Interlocked.Exchange(ref _updateInstallWindowOpened, 1) == 0)
+            _platform.OpenUi("update-progress");
         if (progress.Stage is "failed" or "postponed" or "upToDate")
+        {
             Interlocked.Exchange(ref _updateWindowOpened, 0);
+            Interlocked.Exchange(ref _updateInstallWindowOpened, 0);
+        }
         Broadcast(IpcMessage.Create(MessageTypes.UpdateProgress, progress));
     }
 

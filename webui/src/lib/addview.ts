@@ -27,6 +27,9 @@ export function trimLink(link: string): string {
  * Links and magnets anywhere in pasted text, in the order they appear, trailing punctuation trimmed and each once
  * (case counts: a hoster link's key is case-sensitive). Plain text that is not a link is ignored. At most 1,000.
  */
+/** FTP was cut in 0.7.2; the Host refuses an ftp address with these words (FtpAddresses.NotSupported). */
+export const ftpNotSupported = "FTP addresses aren't supported.";
+
 export function extractInputs(text: string | null | undefined): string[] {
   if (!text || !text.trim()) return [];
   const seen = new Set<string>();

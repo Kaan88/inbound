@@ -33,6 +33,6 @@ public static class MarkOfTheWeb
     /// <summary>A download from the network is marked; one from this PC itself, or with no network address, is not.</summary>
     public static bool Applies(string? address) =>
         Uri.TryCreate(address, UriKind.Absolute, out var uri)
-        && uri.Scheme is "http" or "https" or "ftp" or "ftps"
+        && uri.Scheme is "http" or "https"
         && !uri.IsLoopback;
 }

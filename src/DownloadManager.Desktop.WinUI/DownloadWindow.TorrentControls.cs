@@ -87,8 +87,8 @@ public sealed partial class DownloadWindow
         FilesPriorityHint.Visibility = controls && !FilesFixed(job) ? Visibility.Visible : Visibility.Collapsed;
         if (torrent)
         {
-            FilesTable.SetColumnVisible("priority", controls);
-            TrackersTable.SetColumnVisible("next", controls);
+            FilesTable.SetAvailable("priority", controls);
+            TrackersTable.SetAvailable("next", controls);
         }
         ShowFilePriorities();
         LoadOptionsIfWanted();
@@ -200,9 +200,8 @@ public sealed partial class DownloadWindow
 
     private void ShowFilePriorities()
     {
-        var shown = _job?.Torrent is not null && Controls;
         var changed = false;
-        foreach (var row in _fileRows) changed |= row.SetPriority(_priorities.GetValueOrDefault(row.Index, TorrentPriorities.Normal), shown);
+        foreach (var row in _fileRows) changed |= row.SetPriority(_priorities.GetValueOrDefault(row.Index, TorrentPriorities.Normal));
         // T12: a list sorted by priority follows a change of priority.
         if (changed) SortFiles(FilesSortReason.Refresh);
     }
@@ -262,7 +261,7 @@ public sealed partial class DownloadWindow
 
         if (!_connected)
         {
-            ShowFilesNote("The Host is not connected.");
+            ShowFilesNote("Not connected.");
             return;
         }
 
@@ -291,7 +290,7 @@ public sealed partial class DownloadWindow
             }
             else
             {
-                ShowFilesNote(result.Error ?? "The Host did not change the priority.");
+                ShowFilesNote(result.Error ?? "Inbound did not change the priority.");
             }
         }
         finally
@@ -451,7 +450,7 @@ public sealed partial class DownloadWindow
             }
             else
             {
-                TorrentOptionsNote.Text = string.IsNullOrWhiteSpace(result.Error) ? "The Host didn't take the options." : RemoteText.Failure(result.Error);
+                TorrentOptionsNote.Text = string.IsNullOrWhiteSpace(result.Error) ? "Inbound didn't take the options." : RemoteText.Failure(result.Error);
             }
         }
         catch (Exception ex)

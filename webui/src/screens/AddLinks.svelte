@@ -5,7 +5,7 @@
   import { conflictOptions, findExisting, packageNameFor, type ConflictPolicy } from '../lib/addflow';
   import { routeOf, showsAddress, type AddLine } from '../lib/addlines';
   import {
-    addReport, addSummary, addedWords, alreadyListed, canAdd, canSelect, chooseLaterApplies, chosen, extractInputs, patternProblem, fileChoiceFrom, filesToChoose,
+    addReport, addSummary, addedWords, alreadyListed, canAdd, canSelect, chooseLaterApplies, chosen, extractInputs, ftpNotSupported, patternProblem, fileChoiceFrom, filesToChoose,
     isFullPath, isMagnet, isUpload, lineWords, newLine, refused, removeInputs, selectAllState, toggleAll, withDefaults, type FileChoice,
   } from '../lib/addview';
   import { bytes } from '../lib/format';
@@ -136,9 +136,11 @@
   let workers = 0;
 
   function localClassify(input: string): ClassifyResult {
-    return /^(https?|ftp):\/\//i.test(input)
+    // FTP was cut in 0.7.2: an ftp link is still found, so its line can say so in the Host's words.
+    if (/^ftps?:\/\//i.test(input)) return { ok: true, kind: 'unsupported', reason: ftpNotSupported, checkIncomplete: false };
+    return /^https?:\/\//i.test(input)
       ? { ok: true, kind: 'ordinaryLink', checkIncomplete: false }
-      : { ok: true, kind: 'unsupported', reason: 'Only http, https and ftp addresses can be added without a provider account.', checkIncomplete: false };
+      : { ok: true, kind: 'unsupported', reason: 'Only http and https addresses can be added without a provider account.', checkIncomplete: false };
   }
 
   async function classify(input: string): Promise<ClassifyResult> {

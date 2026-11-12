@@ -36,7 +36,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
     {
         _server = await TestServerHost.StartAsync();
         Mock.ApiKey = Key;
-        Mock.AddHoster("Pretend", ["pretend.invalid", "127.0.0.1", "localhost"], "/hoster/");
+        Mock.AddHoster("Pretend", ["pretend.invalid"], "/hoster/");
         _scratch = Path.Combine(AppContext.BaseDirectory, "test-work", "pipe-container-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_scratch);
     }
@@ -138,12 +138,12 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         var built = await ArchiveTools.BuildRar5Async(_scratch, "locked.rar", [("inner/locked.txt", Inner)], "-hp" + ArchivePassword);
 
         // What the account and the provider's cache hold.
-        var cachedLink = Mock.HosterUrl($"file/locked.rar#{fragment}");
+        var cachedLink = Mock.PublicHosterUrl($"file/locked.rar#{fragment}");
         Mock.ScriptSubmission(Md5(cachedLink), [Volume(Mock.NextFileId(), "locked.rar/locked.rar", built["locked.rar"])], [MockTorBoxState.CachedReady]);
         Mock.AddCached(Md5(cachedLink));
 
-        var uncachedLink = Mock.HosterUrl("file/not-cached.bin");
-        var skippedLink = Mock.HosterUrl("file/left-out.bin");
+        var uncachedLink = Mock.PublicHosterUrl("file/not-cached.bin");
+        var skippedLink = Mock.PublicHosterUrl("file/left-out.bin");
 
         var hash = new string('a', 40);
         var magnet = $"magnet:?xt=urn:btih:{hash}&dn=Magnet%20Name&tr=http%3A%2F%2Ftracker.invalid%2F{passkey}";
@@ -179,7 +179,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal(5, preview.Packages[0].EntryCount);
         Assert.Equal(["hosterLink", "hosterLink", "hosterLink", "magnet", "folderLink", "unsupported", "unsupported"], preview.Entries.Select(entry => entry.Kind));
         Assert.Equal("locked.rar", preview.Entries[0].DisplayName);
-        Assert.Equal("127.0.0.1", preview.Entries[0].DisplayHost);
+        Assert.Equal("pretend.invalid", preview.Entries[0].DisplayHost);
         Assert.Contains("TorBox won't take this", preview.Entries[5].Reason);
         Assert.Contains(DownloadManager.Runtime.Remote.ContainerImportService.NotDirect, preview.Entries[5].Reason);
         Assert.DoesNotContain("normal download", preview.Entries[5].Reason);
@@ -233,9 +233,9 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal(2, Mock.Submissions.Count);
         Assert.Equal(magnet, Mock.Submissions[1].Link);
 
-        // What wasn't chosen was never sent, and no hoster was ever asked for anything.
+        // What wasn't chosen was never sent. (The hoster links' host can't be reached, so the mock's hoster counter would
+        // prove nothing here.)
         Assert.DoesNotContain(Mock.Submissions, submission => submission.Link == skippedLink || submission.Link == uncachedLink);
-        Assert.Equal(0, Mock.HosterRequests);
         Assert.Equal(0, Mock.CdnRequestsWithCredentials);
         Assert.Equal(4, (await connection.AskAsync<RemoteListResult>(MessageTypes.RemoteList, new { })).Jobs.Count);
 
@@ -288,7 +288,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         var links = new List<string>();
         foreach (var name in names)
         {
-            var link = Mock.HosterUrl($"file/{name}#invented-part-key-{name}");
+            var link = Mock.PublicHosterUrl($"file/{name}#invented-part-key-{name}");
             links.Add(link);
             Mock.AddItem(RemoteItemKind.WebDownload, name, [Volume(Mock.NextFileId(), $"{name}/{name}", built[name])]).Hash = Md5(link);
             downloads.Add(ContainerFixtures.DownloadXml(link, name));
@@ -339,23 +339,28 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         var links = new List<string>();
         foreach (var name in built.Keys)
         {
-            var link = Mock.HosterUrl($"file/{name}");
+            var link = Mock.PublicHosterUrl($"file/{name}");
             links.Add(link);
             Mock.AddItem(RemoteItemKind.WebDownload, name, [Volume(Mock.NextFileId(), $"{name}/{name}", built[name])]).Hash = Md5(link);
         }
 
-        // Through the command line, the way a person would.
+        // Everything that can be added, as the window's import adds it (this used to run through "dm remote container",
+        // which CUT.1 removed from the CLI).
         var path = WriteContainer("parts.rsdf", ContainerFixtures.Rsdf([.. links]));
-        var shown = await host.RunCliAsync(null, "remote", "container", path);
-        Assert.True(shown.ExitCode == 0, shown.Error);
-        Assert.Contains("hosterLink", shown.Output);
-        Assert.Contains("format:   rsdf", shown.Output);
-        foreach (var link in links) Assert.DoesNotContain(link, shown.All);
+        var shown = await PreviewAsync(connection, path);
+        Assert.True(shown.Ok, shown.Error);
+        Assert.Equal("rsdf", shown.Format);
+        Assert.All(shown.Entries, entry => Assert.Equal("hosterLink", entry.Kind));
+        Assert.All(shown.Entries, entry => Assert.True(entry.CanAdd, entry.Reason));
 
-        var result = await host.RunCliAsync(null, "remote", "container", path, "--all", "--dest", host.Destination);
-        Assert.True(result.ExitCode == 0, result.All);
-        Assert.Contains("added:", result.Output);
-        foreach (var link in links) Assert.DoesNotContain(link, result.All);
+        var result = await connection.AskAsync<RemoteContainerAddResult>(MessageTypes.RemoteContainerAdd, new RemoteContainerAddRequest
+        {
+            PreviewId = shown.PreviewId!.Value,
+            EntryIds = shown.Entries.Select(entry => entry.EntryId).ToList(),
+            Destination = host.Destination,
+        });
+        Assert.True(result.Ok, result.Error);
+        Assert.All(result.Outcomes, outcome => Assert.True(outcome.Ok, outcome.Error));
 
         await UntilSetAsync(connection, host, candidate => candidate.State == "completed", "the parts to come together");
         Assert.Equal(payload, await File.ReadAllBytesAsync(Path.Combine(host.Destination, "plain.bin")));
@@ -363,7 +368,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ThePipeAndTheCommandLineAnswerAMalformedFileAndNoKeyAndADlcInWords()
+    public async Task ThePipeAnswersAMalformedFileAndNoKeyAndADlcInWords()
     {
         await using var host = await StartHostAsync();
         await using var connection = await host.ConnectAsync();
@@ -402,26 +407,10 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.True(dlc.CanSendToJd);
         Assert.Contains("JDownloader", dlc.Error);
 
-        var cliDlc = await host.RunCliAsync(null, "remote", "container", dlcPath);
-        Assert.Equal(1, cliDlc.ExitCode);
-        Assert.Contains("can't be opened", cliDlc.Error);
-        Assert.Contains("container-send-jd", cliDlc.Error);
-
-        var cliNetwork = await host.RunCliAsync(null, "remote", "container", @"\\attacker.invalid\share\links.ccf");
-        Assert.Equal(2, cliNetwork.ExitCode);
-        var cliUsage = await host.RunCliAsync(null, "remote", "container");
-        Assert.Equal(2, cliUsage.ExitCode);
-        var cliBoth = await host.RunCliAsync(null, "remote", "container", dlcPath, "--all", "--add", "1");
-        Assert.Equal(2, cliBoth.ExitCode);
-        var cliNonsense = await host.RunCliAsync(null, "remote", "container", dlcPath, "--add", "one");
-        Assert.Equal(2, cliNonsense.ExitCode);
-
         // Refused before anything could reach JDownloader, whether or not it is running here.
         var wrongKind = await connection.AskAsync<RemoteContainerSendResult>(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = WriteContainer("links.rsdf", ContainerFixtures.Rsdf("https://example.invalid/a.rar")) });
         Assert.False(wrongKind.Ok);
         Assert.Equal("invalidInput", wrongKind.Status);
-        var networkSend = await host.RunCliAsync(null, "remote", "container-send-jd", @"\\attacker.invalid\share\links.dlc");
-        Assert.Equal(2, networkSend.ExitCode);
 
         await host.StopAsync();
         Assert.Equal(0, host.LastExitCode);
@@ -469,9 +458,9 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal(text, Assert.Single(received));
 
         answer = "failed";
-        var refused = await host.RunCliAsync(null, "remote", "container-send-jd", path);
-        Assert.Equal(1, refused.ExitCode);
-        Assert.Contains("did not accept", refused.Error);
+        var refused = await connection.AskAsync<RemoteContainerSendResult>(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = path });
+        Assert.False(refused.Ok);
+        Assert.Contains("did not accept", refused.Message);
 
         await standIn.StopAsync();
         var absent = await connection.AskAsync<RemoteContainerSendResult>(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = path });
@@ -538,7 +527,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal(Inner, await File.ReadAllBytesAsync(Path.Combine(host.Destination, "Told", "told.txt")));
 
         // Said by the separate command while the item is still being fetched, before any download exists.
-        var laterLink = Mock.HosterUrl("file/later.rar");
+        var laterLink = Mock.PublicHosterUrl("file/later.rar");
         Mock.ScriptSubmission(Md5(laterLink), [Volume(Mock.NextFileId(), "later.rar/later.rar", builtLater["later.rar"])], [MockTorBoxState.Queued, MockTorBoxState.Downloading(0.5, eta: 5), MockTorBoxState.Ready]);
         var third = await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto { Input = laterLink, Destination = host.Destination, ApproveUncached = true });
         Assert.True(third.Ok, third.Error);

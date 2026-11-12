@@ -75,7 +75,6 @@ internal static class Program
 
         var jobStore = new JsonJobStore(paths, log.Info);
         var checkpoints = new JsonCheckpointStore(paths);
-        var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
         var settingsStore = new JsonSettingsStore(paths);
         var engine = new HttpDownloadEngine(
             new EngineOptions
@@ -87,10 +86,7 @@ internal static class Program
                 ReadTimeout = TimeSpan.FromSeconds(90),
                 AllowLocalNetwork = true,
             },
-            checkpoints: checkpoints,
-            mediaCheckpoints: mediaCheckpoints);
-        // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
-        var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
+            checkpoints: checkpoints);
         var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
         log.Secrets = remote.Registry;
         using var notifications = new DesktopNotifications(log.Warn);
@@ -101,8 +97,6 @@ internal static class Program
             completionActions: completionExecutor,
             sleepPrevention: sleepPrevention,
             postDownloadHook: new HostPostDownloadHook(log.Info),
-            mediaCheckpoints: mediaCheckpoints,
-            ftpEngine: ftpEngine,
             linkBroker: remote.Broker,
             linkSecrets: remote.Registry,
             torrentEngine: DownloadManager.Torrents.TorrentSetup.Create(paths.Root, new TorrentStore(paths), log.Info));
@@ -146,6 +140,8 @@ internal static class Program
         }
 
         service.TrayAvailable = false;
+        // UI.R41: the native host tells which browser's extension came; the window says so.
+        service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn);
         var platform = new LinuxHostPlatform(service, log);
         // D8: a .torrent or container file a browser uploaded through the web bridge, by its reference.
         var bridgeLauncher = new WebBridgeLauncher(log.Warn);

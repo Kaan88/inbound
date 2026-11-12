@@ -16,7 +16,7 @@ Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; set
 
 ## Browser extension (Chrome, Edge, Firefox)
 
-The extension needs the desktop app, which it reaches through a per-user native-messaging host. Setup registers that host for Chrome, Edge and Firefox. Automatic sending is on from a fresh install; the extension's Settings, which open on install, can turn it off. It can also pair with your own Inbound server.
+The extension needs the desktop app, which it reaches through a per-user native-messaging host. Setup registers that host for Chrome, Edge and Firefox. Automatic sending is on from a fresh install; the extension's Options, which open on install, can turn it off. It can also pair with your own Inbound server.
 
 - **Chrome:** install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm).
 - **Edge:** install it from [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci). The Chrome Web Store listing also works in Edge.

@@ -146,7 +146,7 @@
 {/if}
 
 {#if removing}
-  <Confirm title="Remove host" message="Remove {removing.name} ({removing.origin.replace(/^https?:\/\//, '')}) from this list? Nothing changes on that host." primary="Remove" danger onconfirm={remove} onclose={() => (removing = null)} />
+  <Confirm title="Remove server" message="Remove {removing.name} ({removing.origin.replace(/^https?:\/\//, '')}) from this list? Nothing changes on that server." primary="Remove" danger onconfirm={remove} onclose={() => (removing = null)} />
 {/if}
 
 <style>

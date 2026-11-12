@@ -309,7 +309,7 @@ describe('every Options problem at once (U-WU-12)', () => {
 describe('a refusal that names settings (U-WR-14)', () => {
   it('uses the names Options shows', () => {
     expect(friendlyRefusal('These settings can only be changed in the app on this PC: browserIntegrationEnabled. Nothing was saved.'))
-      .toBe('These settings can only be changed in the app on this PC: Capture downloads from your browser. Nothing was saved.');
+      .toBe('These settings can only be changed in the app on this PC: Accept downloads sent from your browser. Nothing was saved.');
     expect(friendlyRefusal('These settings can only be changed in the app on this PC: proxy, someNewThing. Nothing was saved.'))
       .toBe('These settings can only be changed in the app on this PC: Proxy, someNewThing. Nothing was saved.');
     expect(friendlyRefusal('Something else.')).toBe('Something else.');

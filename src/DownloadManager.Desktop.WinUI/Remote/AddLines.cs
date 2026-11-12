@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -39,14 +40,14 @@ internal static partial class LinkExtractor
 {
     private static readonly char[] TrailingPunctuation = ['.', ',', ';', ')', ']', '}', '!', '?'];
 
-    [GeneratedRegex(@"(?:https?|ftp)://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"https?://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex HttpPattern();
 
     // A path counts only as a whole line, because "C:\x.torrent" inside a sentence is anyone's guess.
-    [GeneratedRegex(@"(?<link>(?:https?://|ftp://|magnet:)[^\s""'<>`]+)|^[ \t]*(?<path>(?:[a-z]:\\|\\\\)[^\r\n""<>|*?]*\.torrent)[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline)]
+    [GeneratedRegex(@"(?<link>(?:https?://|ftps?://|magnet:)[^\s""'<>`]+)|^[ \t]*(?<path>(?:[a-z]:\\|\\\\)[^\r\n""<>|*?]*\.torrent)[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline)]
     private static partial Regex InputPattern();
 
-    /// <summary>What Add Links takes with no provider to send anything to: distinct http, https and ftp links in free text.</summary>
+    /// <summary>What Add Links takes with no provider to send anything to: distinct http and https links in free text.</summary>
     public static List<string> HttpLinks(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
@@ -60,7 +61,7 @@ internal static partial class LinkExtractor
 
     /// <summary>
     /// With a provider: links, folder links and magnets anywhere in the text, and .torrent paths on a line
-    /// of their own, in the order they appear. Case counts: a hoster link's key is case-sensitive, so two
+    /// of their own, in the order they appear. An ftp link is found too, so its line can say FTP isn't supported. Case counts: a hoster link's key is case-sensitive, so two
     /// that differ only by case are two different links.
     /// </summary>
     public static List<string> Inputs(string? text)
@@ -75,7 +76,7 @@ internal static partial class LinkExtractor
             var path = match.Groups["path"];
             var input = path.Success ? path.Value : TrimLink(match.Groups["link"].Value);
             if (path.Success || IsMagnet(input)) found.Add(input);
-            else found.AddRange(ExpandNumbered(input).Where(IsDownloadableLink));
+            else found.AddRange(ExpandNumbered(input).Where(link => IsDownloadableLink(link) || FtpAddresses.IsFtp(link)));
         }
 
         return found.Distinct(StringComparer.Ordinal).ToList();
@@ -98,7 +99,7 @@ internal static partial class LinkExtractor
     }
 
     /// <summary>
-    /// U-WL-23: an address with nothing after its host names no file, and text such as "ftp://bad host" gives one
+    /// U-WL-23: an address with nothing after its host names no file, and text such as "https://bad host" gives one
     /// when a space cut it short. It is listed unticked, so it is added only when the user says so.
     /// </summary>
     public static bool HasNoPath(string input)
@@ -186,13 +187,20 @@ internal static partial class LinkExtractor
 
     public static bool IsTorrentPath(string input) => input.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && !IsMagnet(input) && !input.Contains("://", StringComparison.Ordinal);
 
-    /// <summary>An http, https or ftp address, which the desktop downloads itself (the Host accepts the same three).</summary>
+    /// <summary>An http or https address, which the desktop downloads itself (the Host accepts the same two; FTP was cut in 0.7.2).</summary>
     public static bool IsDownloadableLink(string input)
-        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "ftp";
+        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+    /// <summary>Text that holds an ftp or ftps link, so Add Links can say why it was left out.</summary>
+    public static bool HasFtpLink(string? text)
+        => !string.IsNullOrWhiteSpace(text) && FtpPattern().Matches(text).Any(match => FtpAddresses.IsFtp(TrimLink(match.Value)));
+
+    [GeneratedRegex(@"ftps?://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FtpPattern();
 
     /// <summary>
     /// An http or https address. Only these can be a provider's, and only these can be the "direct" choice for a
-    /// link that can't be told apart, so ftp never reaches either path.
+    /// link that can't be told apart.
     /// </summary>
     public static bool IsWebLink(string input)
         => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
@@ -434,6 +442,10 @@ internal sealed class AddLineSession : IDisposable
                 {
                     line.Refusal = "This isn't a magnet. Use Add Links for other links.";
                 }
+                else if (FtpAddresses.IsFtp(input))
+                {
+                    line.Refusal = FtpAddresses.NotSupported;
+                }
 
                 Default(line, raise: false);
                 if (line.IsChecking) fresh.Add(line);
@@ -616,7 +628,7 @@ internal sealed record AddLineView(
 
 internal static partial class RemoteText
 {
-    public const string ClassifyLost = "The background Host didn't answer, so this wasn't checked. Nothing was sent. Try again.";
+    public const string ClassifyLost = "Inbound's background program didn't answer, so this wasn't checked. Nothing was sent. Try again.";
 
     /// <summary>A lost classify call changed nothing, so the words about having possibly gone through don't apply.</summary>
     public static string ClassifyFailure(string error) => error is HostLost or HostTooSlow ? ClassifyLost : error;

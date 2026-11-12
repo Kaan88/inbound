@@ -79,10 +79,10 @@ public sealed class ListColumnLayoutTests
     {
         var layout = Layout();
         layout.Resize("size", 120, 80);
-        layout.SetVisible("size", false);
+        layout.SetAvailable("size", false);
         Assert.Equal(new ColumnSize(0, false), Size(layout, "size"));
         Assert.Equal(308, layout.MinimumTotal);
-        layout.SetVisible("size", true);
+        layout.SetAvailable("size", true);
         Assert.Equal(120, Size(layout, "size").Width);
     }
 
@@ -113,16 +113,199 @@ public sealed class ListColumnLayoutTests
     public void The_download_list_starts_at_the_width_it_always_had()
     {
         var layout = ListColumnSets.Downloads();
-        layout.SetVisible("extraction", false);
-        foreach (var key in TorrentListRules.ColumnKeys) layout.SetVisible(key, false);
+        layout.SetAvailable("extraction", false);
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: false, choices: null);
         Assert.Equal(1040, layout.MinimumTotal);
-        layout.SetVisible("extraction", true);
+        layout.SetAvailable("extraction", true);
         Assert.Equal(1180, layout.MinimumTotal);
 
-        // DT-6: Seeds, Peers, Up and Ratio, in the torrent views only.
-        layout.SetVisible("extraction", false);
-        foreach (var key in TorrentListRules.ColumnKeys) layout.SetVisible(key, true);
+        // DT-6: Seeds, Peers, Up and Ratio in the torrent views until chosen otherwise; UI.R42's three stay hidden there too.
+        layout.SetAvailable("extraction", false);
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: true, choices: null);
         Assert.Equal(1040 + 52 + 52 + 78 + 52, layout.MinimumTotal);
+        Assert.All(["uploaded", "seedTime", "seedGoal"], key => Assert.False(layout.IsVisible(key)));
+    }
+
+    // ---- UI.R42: the columns menu ----
+
+    [Fact]
+    public void Every_torrent_column_starts_hidden_outside_the_torrent_views()
+    {
+        var layout = ListColumnSets.Downloads();
+        foreach (var key in ListColumnSets.TorrentColumns)
+        {
+            Assert.False(layout.IsVisible(key));
+            Assert.True(layout.CanChoose(key));
+        }
+
+        Assert.All(ListColumnSets.TorrentViewColumns, key => Assert.Contains(key, ListColumnSets.TorrentColumns));
+        Assert.All(["name", "queue", "size", "status", "eta", "rate", "lastTry", "description"], key => Assert.True(layout.IsVisible(key)));
+    }
+
+    [Fact]
+    public void The_name_column_cant_be_hidden_and_a_column_with_no_header_isnt_in_the_menu()
+    {
+        var layout = ListColumnSets.Downloads();
+        Assert.False(layout.CanChoose("name"));
+        Assert.False(layout.Choose("name", false));
+        Assert.True(layout.IsVisible("name"));
+        Assert.DoesNotContain(layout.MenuColumns, column => column.Key == "icon");
+        Assert.Contains(layout.MenuColumns, column => column.Key == "name");
+
+        // A saved file can't hide it either.
+        layout.ImportChoices(new Dictionary<string, bool> { ["name"] = false, ["icon"] = false, ["gone"] = true, ["size"] = false });
+        Assert.True(layout.IsVisible("name"));
+        Assert.Equal(["size"], layout.ExportChoices().Keys);
+    }
+
+    [Fact]
+    public void A_choice_shows_or_hides_a_column_and_takes_or_gives_its_room()
+    {
+        var layout = ListColumnSets.Downloads();
+        layout.SetAvailable("extraction", false);
+        var start = layout.MinimumTotal;
+        Assert.True(layout.Choose("ratio", true));
+        Assert.True(layout.IsVisible("ratio"));
+        Assert.Equal(start + 52, layout.MinimumTotal);
+        Assert.False(layout.Choose("ratio", true));
+        Assert.True(layout.Choose("queue", false));
+        Assert.Equal(start + 52 - 30, layout.MinimumTotal);
+        Assert.Equal(new Dictionary<string, bool> { ["ratio"] = true, ["queue"] = false }, layout.ExportChoices());
+    }
+
+    [Fact]
+    public void A_column_with_nothing_to_show_stays_away_whatever_was_chosen_and_comes_back_as_chosen()
+    {
+        var layout = ListColumnSets.Downloads();
+        layout.SetAvailable("extraction", false);
+        Assert.DoesNotContain(layout.MenuColumns, column => column.Key == "extraction");
+        Assert.False(layout.Choose("extraction", true));
+        Assert.False(layout.IsVisible("extraction"));
+        layout.SetAvailable("extraction", true);
+        Assert.True(layout.IsVisible("extraction"));
+        Assert.True(layout.Choose("extraction", false));
+        layout.SetAvailable("extraction", false);
+        layout.SetAvailable("extraction", true);
+        Assert.False(layout.IsVisible("extraction"));
+    }
+
+    [Fact]
+    public void Hiding_the_focused_header_cell_moves_the_keyboard_to_the_nearest_shown_one()
+    {
+        var layout = ListColumnSets.Downloads();
+        layout.SetAvailable("extraction", false);
+        // Still shown: it stays where it is.
+        Assert.Equal("size", layout.FocusAfterHiding("size"));
+        // Size hidden: Status, to its right.
+        layout.Choose("size", false);
+        Assert.Equal("status", layout.FocusAfterHiding("size"));
+        // Description is the last: Last Try Date, to its left, past the hidden torrent columns.
+        layout.Choose("description", false);
+        Assert.Equal("lastTry", layout.FocusAfterHiding("description"));
+        // Nothing shown on either side but the name: the name, which always shows. The icon column has no header.
+        foreach (var key in new[] { "queue", "status", "eta", "rate", "lastTry" }) layout.Choose(key, false);
+        Assert.Equal("name", layout.FocusAfterHiding("queue"));
+        Assert.Equal("name", layout.FocusAfterHiding("gone"));
+    }
+
+    [Fact]
+    public void Reset_columns_puts_back_what_shows_at_first_and_the_widths()
+    {
+        var layout = ListColumnSets.Downloads();
+        layout.FixName(400);
+        layout.Resize("size", 150, 78);
+        layout.Choose("size", false);
+        layout.Choose("seeds", true);
+        layout.ResetColumns();
+        Assert.Empty(layout.Export());
+        Assert.Empty(layout.ExportChoices());
+        Assert.True(layout.IsVisible("size"));
+        Assert.False(layout.IsVisible("seeds"));
+        Assert.True(layout.Size(layout.Columns.Single(column => column.Key == "name")).Fills);
+    }
+
+    [Fact]
+    public void The_torrent_views_and_the_other_views_keep_their_own_choices()
+    {
+        var layout = ListColumnSets.Downloads();
+        var others = new Dictionary<string, bool> { ["ratio"] = true };
+        var torrents = new Dictionary<string, bool> { ["seeds"] = false, ["uploaded"] = true };
+
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: false, others);
+        Assert.True(layout.IsVisible("ratio"));
+        Assert.False(layout.IsVisible("seeds"));
+        Assert.False(layout.IsVisible("uploaded"));
+
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: true, torrents);
+        Assert.False(layout.IsVisible("seeds"));
+        Assert.True(layout.IsVisible("peers"));
+        Assert.True(layout.IsVisible("ratio"));
+        Assert.True(layout.IsVisible("uploaded"));
+
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: false, others);
+        Assert.False(layout.IsVisible("peers"));
+        Assert.False(layout.IsVisible("uploaded"));
+    }
+
+    [Theory]
+    [InlineData("seeds")]
+    [InlineData("ratio")]
+    [InlineData("uploaded")]
+    [InlineData("size")]
+    public void A_sort_holds_only_where_its_column_shows(string key)
+    {
+        var layout = ListColumnSets.Downloads();
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: true, new Dictionary<string, bool> { [key] = true });
+        Assert.Equal((key, true), ListColumnSets.ShownSort(layout, key, true));
+        layout.Choose(key, false);
+        Assert.Equal(("added", false), ListColumnSets.ShownSort(layout, key, true));
+        Assert.Equal(("added", true), ListColumnSets.ShownSort(layout, "added", true));
+    }
+
+    [Fact]
+    public void Each_list_with_a_header_has_a_name_that_shows_and_new_columns_hidden_at_first()
+    {
+        Assert.False(ListColumnSets.TorrentFiles().IsVisible("done"));
+        Assert.False(ListColumnSets.TorrentPeers().IsVisible("received"));
+        Assert.False(ListColumnSets.TorrentPeers().IsVisible("sent"));
+        Assert.False(ListColumnSets.TorrentTrackers().IsVisible("tier"));
+        Assert.False(ListColumnSets.TorrentTrackers().IsVisible("message"));
+        foreach (var layout in new[] { ListColumnSets.Downloads(), ListColumnSets.ProviderItems(), ListColumnSets.TorrentFiles(), ListColumnSets.TorrentPeers(), ListColumnSets.TorrentTrackers() })
+        {
+            Assert.False(layout.CanChoose(layout.NameKey));
+            Assert.Equal(layout.Columns.Select(column => column.Key).Distinct().Count(), layout.Columns.Count);
+        }
+    }
+
+    [Fact]
+    public void The_header_opens_the_menu_from_a_right_click_and_from_the_keyboard()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", "ColumnHeaderRow.cs"));
+        // A ContextFlyout opens on a right-click and on a context request, which Shift+F10 and the menu key raise.
+        Assert.Contains("_header.ContextFlyout = menu;", source, StringComparison.Ordinal);
+        Assert.Contains("\"Reset columns\"", source, StringComparison.Ordinal);
+        Assert.Contains("ToggleMenuFlyoutItem", source, StringComparison.Ordinal);
+
+        // Every list with a header passes the callback that gives it the menu.
+        var winUi = Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI");
+        Assert.Contains("SaveColumnWidths, ColumnsChosen)", File.ReadAllText(Path.Combine(winUi, "MainWindow.Lists.cs")), StringComparison.Ordinal);
+        Assert.Contains("ProviderShownColumns = _columns.ExportChoices()", File.ReadAllText(Path.Combine(winUi, "ProviderPanel.cs")), StringComparison.Ordinal);
+        Assert.Contains("Shown = _layout.ExportChoices()", File.ReadAllText(Path.Combine(winUi, "DetailsTable.cs")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Row_cells_take_their_visibility_from_the_header_alone()
+    {
+        // The header collapses a hidden column's cells; a binding on a cell's visibility would fight it.
+        var winUi = Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI");
+        foreach (var file in new[] { "MainWindow.xaml", "DownloadWindow.xaml" })
+        {
+            var text = File.ReadAllText(Path.Combine(winUi, file));
+            Assert.DoesNotContain("TorrentColumnsVisibility", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ExtractionColumnVisibility", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("PriorityVisibility", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("NextAnnounceVisibility", text, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

@@ -77,10 +77,10 @@ describe('a torrent row (TorrentRules)', () => {
     expect(torrentStatusText(tjob('a', 'connecting', { hasMetadata: false, peers: 1 }))).toBe('Getting file list · 1 peer');
     expect(torrentStatusText(tjob('a', 'paused', { awaitingFileChoice: true }))).toBe('Choose files to download');
     expect(torrentStatusText(tjob('a', 'paused'))).toBeNull();
-    expect(torrentStatusText({ ...tjob('a', 'paused'), failure: { kind: 'diskFull', message: 'The disk is full' } as Job['failure'] })).toBe('Paused · The disk is full');
+    expect(torrentStatusText({ ...tjob('a', 'paused'), failure: { kind: 'diskFull', message: 'The disk is full' } as Job['failure'] })).toBe('Stopped · The disk is full');
     expect(torrentStatusText(job('a', 'downloading'))).toBeNull();
     expect(statusWords(tjob('a', 'downloading'))).toBe('Downloading · 41 peers');
-    expect(statusWords(tjob('a', 'paused'))).toBe('Paused');
+    expect(statusWords(tjob('a', 'paused'))).toBe('Stopped');
   });
 
   it('summarises the files', () => {

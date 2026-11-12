@@ -110,7 +110,7 @@ test('the server notice with "ask where to save" on says the popup asks, with Th
   const page = await openPopup(statusWith({ ...down, settings: { ...data.settings, destinationMode: 'ask' } }));
   try {
     const notices = [...page.document.querySelectorAll('#notices .notice-text')].map((item) => item.textContent);
-    assert.deepEqual(notices, ['home-server isn\'t answering. When a download is caught you\'ll be asked, with This PC chosen.']);
+    assert.deepEqual(notices, ['home-server isn\'t answering. When you start a download you\'ll be asked, with This PC chosen.']);
   } finally { page.restore(); }
 });
 

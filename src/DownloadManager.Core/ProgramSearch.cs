@@ -5,7 +5,7 @@ public static class ProgramSearch
 {
     /// <summary>
     /// The full path of the first <paramref name="fileName"/> in the folders of <paramref name="path"/>, or null. The
-    /// name is taken as given: "ffmpeg.exe" on Windows, "ffmpeg" on Linux, where programs have no extension.
+    /// name is taken as given: "7z.exe" on Windows, "7z" on Linux, where programs have no extension.
     /// </summary>
     public static string? FindOnPath(string fileName, string? path)
     {

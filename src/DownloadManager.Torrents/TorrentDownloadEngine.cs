@@ -64,10 +64,6 @@ public sealed partial class TorrentDownloadEngine : ITorrentDownloadEngine, IAsy
     {
     }
 
-    public void UpdateFfmpegPath(string? path)
-    {
-    }
-
     public void UpdateSharedSpeedLimit(long? bytesPerSecond) => _ = _supervisor.SetDownloadLimitAsync(bytesPerSecond);
 
     public void UpdateListen(int port, bool upnp) => _ = _supervisor.SetListenAsync(port, upnp);

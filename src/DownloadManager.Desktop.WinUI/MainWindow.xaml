@@ -67,8 +67,8 @@
                 <MenuFlyoutItem x:Name="FileMoveRenameItem" Text="Move/Rename…" AccessKey="M" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="FileProgressItem" Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
-                <MenuFlyoutItem x:Name="FileDownloadNowItem" Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
-                <MenuFlyoutItem x:Name="FileStopItem" Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
+                <MenuFlyoutItem x:Name="FileDownloadNowItem" Text="Resume" AccessKey="U" Click="MenuResume_Click" />
+                <MenuFlyoutItem x:Name="FileStopItem" Text="Stop" AccessKey="S" Click="MenuPause_Click" />
                 <!-- T1: shown while one torrent with a known file list is selected. -->
                 <MenuFlyoutItem x:Name="FileChooseFilesItem" Text="Choose Files…" AccessKey="C" Visibility="Collapsed" Click="MenuChooseTorrentFiles_Click" />
                 <!-- T2: shown while a selected torrent is finished and not seeding, or seeds. -->
@@ -137,7 +137,9 @@
             </MenuBarItem>
 
             <MenuBarItem Title="Help" AccessKey="H">
+                <MenuFlyoutItem x:Name="WhatsNewMenuItem" Text="What's New…" AccessKey="W" Click="MenuWhatsNew_Click" />
                 <MenuFlyoutItem Text="Check for Updates…" AccessKey="U" Click="MenuUpdate_Click" />
+                <MenuFlyoutItem Text="Get the Browser Extension…" AccessKey="B" Click="MenuGetExtension_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="About Inbound Download Manager" AccessKey="A" Click="MenuAbout_Click" />
                 <MenuFlyoutItem Text="Open Diagnostics Folder" AccessKey="D" Click="MenuDiagnostics_Click" />
@@ -207,7 +209,7 @@
                         </StackPanel>
                     </Button>
                     <Button x:Name="DeleteCompletedButton" AutomationProperties.Name="Delete Completed" Style="{StaticResource InboundToolButtonStyle}" Click="MenuDeleteCompleted_Click"
-                            ToolTipService.ToolTip="Remove completed downloads from the list">
+                            ToolTipService.ToolTip="Delete completed downloads from the list (their files stay)">
                         <StackPanel>
                             <FontIcon Glyph="&#xE894;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
                             <TextBlock Text="Delete Completed" Style="{StaticResource InboundToolLabelStyle}" />
@@ -252,7 +254,7 @@
                     </Button>
                     <Button x:Name="StopQueueButton" AutomationProperties.Name="Stop Queue" Style="{StaticResource InboundToolButtonStyle}"
                             Click="StopQueueButton_Click"
-                            ToolTipService.ToolTip="Stop the selected queue and pause its downloads">
+                            ToolTipService.ToolTip="Stop the selected queue and its downloads">
                         <StackPanel>
                             <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
                             <TextBlock Text="Stop Queue" Style="{StaticResource InboundToolLabelStyle}" />
@@ -443,10 +445,10 @@
                                 <TextBlock Text="Failed" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="finished" AutomationProperties.Name="Finished" Padding="14,2,8,2">
+                        <ListBoxItem Tag="finished" AutomationProperties.Name="Completed" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
-                                <TextBlock Text="Finished" />
+                                <TextBlock Text="Completed" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="queues" AutomationProperties.Name="Queues" Padding="14,2,8,2">
@@ -484,8 +486,23 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+                <StackPanel Grid.ColumnSpan="2">
+                <!-- UI.R41: once, until Not now or until any extension connects (ExtensionPromoRules). -->
+                <InfoBar x:Name="ExtensionHintBar" Severity="Informational" IsOpen="False" IsClosable="False" Margin="8,6,8,6"
+                         AutomationProperties.Name="Get the browser extension" AutomationProperties.LiveSetting="Polite">
+                    <InfoBar.ActionButton>
+                        <Button x:Name="ExtensionHintGet" Content="Get it" FontSize="12" Padding="10,2" Click="ExtensionHintGet_Click"
+                                ToolTipService.ToolTip="Shows where to get the extension for Chrome, Edge and Firefox" />
+                    </InfoBar.ActionButton>
+                    <InfoBar.Content>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+                            <Button x:Name="ExtensionHintLater" Content="Not now" FontSize="12" Padding="10,2" Click="ExtensionHintLater_Click"
+                                    ToolTipService.ToolTip="Hides this for good. Help > Get the Browser Extension has it." />
+                        </StackPanel>
+                    </InfoBar.Content>
+                </InfoBar>
                 <!-- UI.R32, B's notice: what a Download from My provider added, with the way to it and back. -->
-                <InfoBar x:Name="ProviderNoticeBar" Grid.ColumnSpan="2" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
+                <InfoBar x:Name="ProviderNoticeBar" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
                          AutomationProperties.Name="Added from My provider" AutomationProperties.LiveSetting="Polite">
                     <InfoBar.Content>
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
@@ -495,6 +512,7 @@
                         </StackPanel>
                     </InfoBar.Content>
                 </InfoBar>
+                </StackPanel>
             <ScrollViewer x:Name="DownloadListViewport" Grid.Row="1"
                           HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
@@ -550,6 +568,9 @@
                                         <ColumnDefinition Width="86" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="52" />
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="120" />
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
@@ -599,7 +620,7 @@
                                                      Foreground="{ThemeResource InboundStatusDoneBrush}" Visibility="{Binding SeedGoalVisibility}"
                                                      ToolTipService.ToolTip="{Binding SeedGoalToolTip}" />
                                     </StackPanel>
-                                    <Grid Grid.Column="5" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
+                                    <Grid Grid.Column="5" ColumnSpacing="4" Padding="0,0,6,0"
                                           Background="Transparent" ToolTipService.ToolTip="{Binding ArchiveToolTip}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
@@ -615,11 +636,11 @@
                                             <FontIcon Glyph="&#xE8D7;" FontSize="12" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                         </Button>
                                     </Grid>
-                                    <!-- DT-6: Seeds and Peers, only in the torrent views. -->
-                                    <TextBlock Grid.Column="6" Text="{Binding SeedsText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                    <!-- DT-6: Seeds and Peers. The header shows and hides the cells of a column (UI.R42). -->
+                                    <TextBlock Grid.Column="6" Text="{Binding SeedsText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="7" Text="{Binding PeersText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                    <TextBlock Grid.Column="7" Text="{Binding PeersText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="8" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
@@ -628,16 +649,25 @@
                                     <TextBlock Grid.Column="9" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <!-- DT-6: Up and Ratio, only in the torrent views. -->
-                                    <TextBlock Grid.Column="10" Text="{Binding UpText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                    <!-- DT-6: Up and Ratio. -->
+                                    <TextBlock Grid.Column="10" Text="{Binding UpText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="11" Text="{Binding RatioText}" FontSize="11" Visibility="{Binding TorrentColumnsVisibility}"
+                                    <TextBlock Grid.Column="11" Text="{Binding RatioText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="12" Text="{Binding LastTryText}" FontSize="11"
+                                    <!-- UI.R42: Uploaded, Seeding time and Seeding goal, where chosen from the header's menu. -->
+                                    <TextBlock Grid.Column="12" Text="{Binding UploadedText}" FontSize="11"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="13" Text="{Binding Description}" FontSize="11"
+                                    <TextBlock Grid.Column="13" Text="{Binding SeedTimeText}" FontSize="11"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="14" Text="{Binding SeedGoalText}" FontSize="11" Margin="0,0,6,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="15" Text="{Binding LastTryText}" FontSize="11"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="16" Text="{Binding Description}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -824,7 +854,9 @@
                         <TextBlock x:Name="TorrentChipText" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <!-- UI.R37: the version says whether it is the latest; a newer one is a link to Check for updates. -->
+                <!-- UI.R37: the version says whether it is the latest; a newer one is a link to Check for updates.
+                     UPD.N1: with no update waiting, the version itself is the link, to What's new. -->
+
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock x:Name="ConnectionText" Text="Connecting…" FontSize="11"
                                 Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />

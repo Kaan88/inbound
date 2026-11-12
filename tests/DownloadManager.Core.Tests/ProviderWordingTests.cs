@@ -17,7 +17,7 @@ public sealed partial class ProviderWordingTests
         "src/DownloadManager.Desktop.WinUI/ContainerImportDialog.cs",
         "src/DownloadManager.Runtime/Remote",
         "src/DownloadManager.Providers.TorBox",
-        "src/DownloadManager.Cli/Program.Remote.cs",
+        "src/DownloadManager.Cli/Program.DirectAdd.cs",
     ];
 
     [GeneratedRegex("\"(?:[^\"\\\\\\r\\n]|\\\\.)*\"")]
@@ -37,8 +37,8 @@ public sealed partial class ProviderWordingTests
     [Fact]
     public void Nothing_shown_asks_for_or_mentions_an_approval()
     {
-        // The command line keeps --approve-uncached on purpose, so it isn't read here. The tray's words are.
-        var shown = Places.Where(place => !place.Contains("Cli", StringComparison.Ordinal)).Append("src/DownloadManager.Host").ToArray();
+        // The tray's words are read too.
+        var shown = Places.Append("src/DownloadManager.Host").ToArray();
 
         Assert.Empty(LiteralsMatching(Approval(), shown));
     }

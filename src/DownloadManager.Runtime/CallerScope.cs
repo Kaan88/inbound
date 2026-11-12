@@ -11,7 +11,7 @@ namespace DownloadManager.Runtime;
 /// <item>Folders: what it adds, moves or renames stays in <see cref="Roots"/>, every path is checked as text first
 /// (<see cref="PathRoots.DescribeUnsafeText"/>), and a download whose files lie outside them is read-only for it.</item>
 /// <item>Addresses: nothing it adds or points a download at reaches this PC or its local network
-/// (<see cref="DownloadJob.PublicNetworkOnly"/>), and FTP isn't offered (its data connection goes wherever the server says).</item>
+/// (<see cref="DownloadJob.PublicNetworkOnly"/>).</item>
 /// </list>
 /// </summary>
 public sealed class CallerScope(PathRoots roots)
@@ -25,8 +25,6 @@ public sealed class CallerScope(PathRoots roots)
     public const string LocalAddressRefused =
         "Downloads added from another device can't use addresses of the computer Inbound runs on or of its local network.";
 
-    public const string FtpRefused = "FTP downloads can only be added in the Inbound app on the computer it runs on.";
-
     public const string OutsideJobRefused =
         "This download's file is outside the app's folders, so it can't be changed from another device.";
 
@@ -37,7 +35,8 @@ public sealed class CallerScope(PathRoots roots)
     public static string? DescribeAddress(string? address)
     {
         if (string.IsNullOrWhiteSpace(address) || !Uri.TryCreate(address.Trim(), UriKind.Absolute, out var uri)) return null;
-        if (string.Equals(uri.Scheme, "ftp", StringComparison.OrdinalIgnoreCase)) return FtpRefused;
+        // Any other scheme (an ftp:// address, say) is refused for everyone where the address is checked.
+        if (uri.Scheme is not ("http" or "https")) return null;
         return NetworkAddresses.IsLocalTarget(uri) ? LocalAddressRefused : null;
     }
 

@@ -155,7 +155,7 @@ public static class RemoteJobRules
             return "Downloading locally";
         }
 
-        return work.Paused == work.Total - work.Completed ? "Paused locally" : "Waiting to download locally";
+        return work.Paused == work.Total - work.Completed ? "Stopped locally" : "Waiting to download locally";
     }
 
     /// <summary>The words for a job. Up to the local jobs these are about the provider's side, not local progress; after that, the package's state.</summary>

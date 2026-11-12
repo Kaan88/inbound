@@ -86,6 +86,27 @@ public sealed class CliCommandTests
         Assert.Contains("--help", unknown.Error, StringComparison.Ordinal);
         Assert.Empty(unknown.Output);
 
+        // CUT.1: the archive and TorBox (remote) commands are gone and get the same short error, before their flags are
+        // read (a "--provider=x" is not reported as an unknown flag). dm torrent stays (CUT.2).
+        foreach (var removed in new[]
+                 {
+                     new[] { "archive", "extract", "x.rar", "--password-stdin" },
+                     ["remote", "status", "--provider=torbox"],
+                 })
+        {
+            var gone = await host.RunCliAsync(null, removed);
+            Assert.Equal(2, gone.ExitCode);
+            Assert.Equal($"unknown command '{removed[0]}'. Run \"DownloadManager.Cli --help\" for the commands.", gone.Error.Trim());
+            Assert.Empty(gone.Output);
+        }
+
+        var help = await host.RunCliAsync(null, "--help");
+        Assert.Equal(0, help.ExitCode);
+        Assert.Contains("dm torrent add", help.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("dm archive", help.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("dm remote", help.Output, StringComparison.Ordinal);
+        Assert.Contains("dm settings", help.Output, StringComparison.Ordinal);
+
         // C3: a setting saved is said in one line, not followed by every setting.
         var set = await host.RunCliAsync(null, "settings", "set", "maxconcurrent", "3");
         Assert.True(set.ExitCode == 0, set.All);
@@ -250,7 +271,7 @@ public sealed class CliTextTests
     }
 
     [Fact]
-    public void TorrentArchiveAndRemoteTakeFlagEqualsValueToo()
+    public void TorrentTakesFlagEqualsValueToo()
     {
         var torrent = CliArgs.ValueFlagsOf("torrent");
         string[] add = ["torrent", "add", "x.torrent", @"--dest=D:\dl", "--later"];
@@ -263,21 +284,9 @@ public sealed class CliTextTests
         // torrent never reads a value that starts with "--", so that is refused rather than dropped.
         Assert.Equal("--dest", CliArgs.JoinedValueStartingWithDashes(["torrent", "add", "x", "--dest=--x"], torrent));
         Assert.Equal("--destination", CliArgs.UnknownJoined(["torrent", "add", "x", @"--destination=D:\dl"], torrent));
-
-        var archive = CliArgs.ValueFlagsOf("archive");
-        Assert.Equal(["archive", "extract", "--folder", @"D:\out"], CliArgs.Expand(["archive", "extract", @"--folder=D:\out"], archive));
-        Assert.Equal("--password", CliArgs.UnknownJoined(["archive", "extract", "--password=hunter2"], archive));
-
-        var remote = CliArgs.ValueFlagsOf("remote");
-        var expanded = CliArgs.Expand(["remote", "remove", "abc", "--provider=--yes"], remote);
-        Assert.False(CliArgs.HasFlag(expanded, "--yes"));
-        Assert.Equal("--yes", DownloadManager.Cli.Program.Option(expanded, "--provider"));
-    }
-
-    [Fact]
-    public void SendingToJDownloaderIsWaitedOnLongerThanTheHostWaitsForJDownloader()
-    {
-        Assert.True(CliClient.ReplyTimeout(MessageTypes.RemoteContainerSendToJd) > DownloadManager.Containers.JDownloaderBridge.DefaultAnswerTimeout);
+        // The cut commands read nothing of their own any more.
+        Assert.Same(CliArgs.ValueFlags, CliArgs.ValueFlagsOf("archive"));
+        Assert.Same(CliArgs.ValueFlags, CliArgs.ValueFlagsOf("remote"));
     }
 
     [Fact]
@@ -288,6 +297,21 @@ public sealed class CliTextTests
         Assert.Equal("somethingNew", DownloadManager.Cli.Program.StateText("somethingNew"));
         Assert.Equal(string.Empty, DownloadManager.Cli.Program.ListSizeText(new JobDto { ReceivedBytes = 0 }));
         Assert.Equal(DownloadManager.Core.FormatUtil.Bytes(1024), DownloadManager.Cli.Program.ListSizeText(new JobDto { ReceivedBytes = 0, TotalBytes = 1024 }));
+    }
+
+    [Fact]
+    public void TextTheCliDidNotWriteLosesWhatATerminalWouldActOn()
+    {
+        var shown = CliText.Printable("qBit\u001b[2J‮torrent");
+        Assert.DoesNotContain('\u001b', shown);
+        Assert.DoesNotContain('‮', shown);
+        Assert.StartsWith("qBit", shown, StringComparison.Ordinal);
+        Assert.EndsWith("torrent", shown, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, CliText.Printable(null));
+
+        var cleaned = CliText.Clean("Site\u001b[2J at https://user:pw@example.invalid/x");
+        Assert.DoesNotContain('\u001b', cleaned);
+        Assert.DoesNotContain("pw@", cleaned, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -303,9 +327,9 @@ public sealed class CliTextTests
     public void AHostErrorIsToldApartFromAHostThatDoesNotKnowTheCommand()
     {
         var error = IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "The file is in use." });
-        Assert.Equal("The file is in use.", TorrentCommands.HostError(error));
+        Assert.Equal("The file is in use.", CliText.HostError(error));
         var unknown = IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type 'torrent.import'." });
-        Assert.Null(TorrentCommands.HostError(unknown));
-        Assert.Null(TorrentCommands.HostError(IpcMessage.Create(TorrentMessageTypes.ImportResult, new TorrentImportResult { Ok = true })));
+        Assert.Null(CliText.HostError(unknown));
+        Assert.Null(CliText.HostError(IpcMessage.Create(TorrentMessageTypes.ImportResult, new TorrentImportResult { Ok = true })));
     }
 }

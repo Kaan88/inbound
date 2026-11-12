@@ -1,7 +1,8 @@
 // The single-address Add URL flow and the pieces the add dialogs share, in the desktop's rules (MainWindow.xaml.cs
-// AddButton_Click, FolderChooser.cs, JobListFile.cs). Pure functions: the tests run them without a browser.
+// MainWindow.AddUrl.cs, AddUrlRules.cs, FolderChooser.cs, JobListFile.cs). Pure functions: the tests run them without a browser.
 
-import { spaceSize } from './addview';
+import { extractInputs, spaceSize } from './addview';
+import { expandNumbered } from './batch';
 import { bytes } from './format';
 import type { FolderSpace, Job, Settings } from './types';
 
@@ -229,7 +230,7 @@ export interface ListEntry {
   startMode: string;
   conflictPolicy: string;
   expectedSha256?: string;
-  /** The content type the browser hand-off gave; sent again with job.add so a stream stays a stream. */
+  /** The content type the browser hand-off gave; sent again with job.add so a stream stays a stream (and fails as one). */
   contentType?: string;
   /** A torrent's own part (TorrentListEntry); its url is then the magnet. */
   torrent?: TorrentListEntry;
@@ -352,3 +353,109 @@ export function recentAddresses(settings: Settings | null | undefined): string[]
   const list = settings?.recentUrls;
   return Array.isArray(list) ? (list as string[]).filter((item) => typeof item === 'string' && item.trim()).slice(0, 20) : [];
 }
+
+// ---- Add URL in one dialog (UI.R38, as the desktop's AddUrlRules.cs) ----
+
+/** What the text in Add URL's address box is. */
+export type AddressKind = 'empty' | 'oneLink' | 'severalLinks' | 'torrent' | 'ftp' | 'notALink';
+
+/** address: the one address, trimmed (oneLink, torrent); links: what Add Links gets (severalLinks). */
+export interface AddressInput { kind: AddressKind; address: string; links: string[] }
+
+/** How long, in ms, the address has to stay the same before it is checked, so typing doesn't ask for every letter. */
+export const addressCheckDelay = 400;
+
+function webLink(text: string): boolean {
+  if (!/^https?:\/\//i.test(text)) return false;
+  try {
+    return ['http:', 'https:'].includes(new URL(text).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reads the address box: one http or https address is added here; a numbered address or pasted text with several links
+ * goes to Add Links; a magnet to the torrent dialog. withProvider: an account could take the input, so a magnet in pasted
+ * text counts too.
+ */
+export function readAddress(text: string | null | undefined, withProvider: boolean): AddressInput {
+  const trimmed = (text ?? '').trim();
+  if (!trimmed) return { kind: 'empty', address: '', links: [] };
+  if (/^magnet:/i.test(trimmed) && !/\s/.test(trimmed)) return { kind: 'torrent', address: trimmed, links: [trimmed] };
+  if (!/\s/.test(trimmed)) {
+    if (webLink(trimmed)) {
+      const numbered = expandNumbered(trimmed);
+      return numbered?.ok && numbered.urls.length > 1
+        ? { kind: 'severalLinks', address: trimmed, links: numbered.urls }
+        : { kind: 'oneLink', address: trimmed, links: [trimmed] };
+    }
+    if (/^ftps?:\/\//i.test(trimmed)) return { kind: 'ftp', address: trimmed, links: [] };
+  }
+
+  // Pasted text: what it holds. One link in a sentence is that link.
+  const all = extractInputs(trimmed);
+  const found = all.filter((input) => (withProvider && /^magnet:/i.test(input)) || /^https?:\/\//i.test(input));
+  if (found.length > 1) return { kind: 'severalLinks', address: trimmed, links: found };
+  if (found.length === 1 && found[0] !== trimmed) return readAddress(found[0], withProvider);
+  return all.some((input) => /^ftps?:\/\//i.test(input))
+    ? { kind: 'ftp', address: trimmed, links: [] }
+    : { kind: 'notALink', address: trimmed, links: [] };
+}
+
+/**
+ * Pasted text for the one-line address box. The browser glues the lines of a pasted list together, which would make one
+ * broken address of them, so each line break becomes a space, and readAddress still finds every link.
+ */
+export function oneLine(pasted: string | null | undefined): string {
+  return (pasted ?? '').replace(/[ \t]*[\r\n]+[ \t]*/g, ' ');
+}
+
+/** The line under the address for an input another dialog takes, which Continue opens. */
+export function handoffWords(input: AddressInput, torrentDialog: boolean): string {
+  if (input.kind === 'severalLinks') return `${input.links.length} links. Continue opens Add links, where you choose which to download.`;
+  if (input.kind === 'torrent') return torrentDialog ? 'A torrent. Continue opens the torrent dialog.' : 'A torrent. Continue opens the add dialog for it.';
+  return '';
+}
+
+/** The line under the address for a link the provider handles, which Continue opens the provider's add dialog for. */
+export function providerWords(kind: string | undefined, hosterName: string | null | undefined, provider: string): string {
+  if (kind === 'hosterLink') return `${hosterName?.trim() || 'This site'} goes through ${provider}. Continue opens the add dialog for it.`;
+  if (kind === 'folderLink') return `A link to an item on your ${provider} account. Continue opens the add dialog for it.`;
+  return `This goes through ${provider}. Continue opens the add dialog for it.`;
+}
+
+/** What to type, for text that is no address this dialog or another can take. */
+export function notALinkWords(torrents: boolean): string {
+  return torrents ? 'Enter an http or https address, or a magnet.' : 'Enter an absolute http or https URL.';
+}
+
+export const emptyInfoWords = 'Enter an address above, and its file is checked by itself.';
+
+/** A magnet on a server that doesn't download torrents and has no provider account to take it, as the desktop says. */
+export const noTorrentsWords = "This server doesn't download torrents.";
+
+/**
+ * Review of 0.7.2, security-1: the site (scheme, host and port) an address is on, lower case; null when it isn't an
+ * absolute address. A user name and password typed for one site are never sent to another.
+ */
+export function siteOfAddress(address: string | null | undefined): string | null {
+  try {
+    const url = new URL((address ?? '').trim());
+    if (!url.hostname) return null;
+    const port = url.port || (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '');
+    return `${url.protocol}//${url.hostname}:${port}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Whether an address is on another site than the one the user name and password were typed for. */
+export function leavesSite(credentialsSite: string | null, address: string): boolean {
+  return credentialsSite !== null && credentialsSite !== siteOfAddress(address);
+}
+
+export const credentialsClearedWords =
+  'This address is on another site, so the user name and password were cleared. Enter them again to use them here.';
+
+export const checkWithCredentialsWords = 'The file is checked with your user name and password only when you choose Check again.';

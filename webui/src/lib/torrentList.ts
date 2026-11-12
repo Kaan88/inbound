@@ -3,10 +3,11 @@
 // the phone's summary line and the notice when a torrent's file list is in. Nothing here touches the page, so the
 // tests call it directly. Nothing here asks the server anything: it all comes from the jobs and the settings.
 
-import { duration, speed } from './format';
+import { bytes, duration, speed } from './format';
 import { isActive, peersText, shortMagnet } from './torrents';
 import { mayRun, ratioText } from './torrentDetails';
 import { defaultSort, type SortKey, type SortState } from './list';
+import { listColumns } from './columns';
 import type { Job, Settings, Torrent } from './types';
 
 // ---- The views under Torrents ----
@@ -62,7 +63,7 @@ export const torrentExtraViews: { key: TorrentExtraView; label: string; icon: st
   { key: 'checking', label: 'Checking', icon: 'refresh' },
   { key: 'files', label: 'Waiting for files', icon: 'queue' },
   { key: 'completed', label: 'Completed', icon: 'check' },
-  { key: 'errored', label: 'Errored', icon: 'alert' },
+  { key: 'errored', label: 'Failed', icon: 'alert' },
 ];
 
 type ViewJob = Pick<Job, 'state' | 'torrent' | 'bytesPerSecond' | 'failure'> & Partial<Pick<Job, 'startedAt'>>;
@@ -194,6 +195,24 @@ export interface SwarmCells {
   goal: number | null;
   /** The phone's line under the name: "41 peers (12 seeds) · ratio 0.08". */
   line: string;
+  /** UI.R42: bytes sent over the torrent's life. */
+  uploaded: number;
+  uploadedText: string;
+  /** UI.R42: seconds it has been seeding this time; -1 while it doesn't seed or the start isn't known. */
+  seedTime: number;
+  seedTimeText: string;
+  /** UI.R42: "Ratio 1.0 or 48 hours", "Don't seed", or empty with no goal. */
+  goalText: string;
+}
+
+/** UI.R42: the Seeding goal column, as the Windows app's (TorrentListRules.GoalCell). */
+export function goalCellText(torrent: Pick<Torrent, 'seedGoal' | 'seedGoalValue'>, goal: SeedGoal): string {
+  if (torrent.seedGoal === 'never') return "Don't seed";
+  const holds = goalFor(torrent, goal);
+  const parts: string[] = [];
+  if (holds.ratio > 0) parts.push(`Ratio ${goalRatioText(holds.ratio)}`);
+  if (holds.hours > 0) parts.push(holds.hours === 1 ? '1 hour' : `${Number(holds.hours.toFixed(2))} hours`);
+  return parts.join(' or ');
 }
 
 /**
@@ -217,7 +236,11 @@ export function goalFor(torrent: { seedGoal?: string | null; seedGoalValue?: num
 export function swarmCells(job: Pick<Job, 'state' | 'torrent'>, goal: SeedGoal, now = Date.now()): SwarmCells | undefined {
   const torrent = job.torrent;
   if (!torrent) return undefined;
+  const goalWords = goalCellText(torrent, goal);
   goal = goalFor(torrent, goal);
+  const uploaded = Math.max(0, torrent.uploaded ?? 0);
+  const seeded = torrent.seeding === true ? seededHours(torrent, now) : null;
+  const seedTime = seeded === null ? -1 : Math.floor(seeded * 3600);
   const running = mayRun(job);
   const seeding = torrent.seeding === true;
   // T8: a downloading torrent sends too; its figure shows once it sends something.
@@ -237,30 +260,51 @@ export function swarmCells(job: Pick<Job, 'state' | 'torrent'>, goal: SeedGoal, 
     ratioText: ratio,
     goal: seeding && (goal.ratio > 0 || goal.hours > 0) ? goalPercent(torrent, goal, now) : null,
     line: [swarm, `ratio ${ratio}`].filter(Boolean).join(' · '),
+    uploaded,
+    uploadedText: bytes(uploaded),
+    seedTime,
+    seedTimeText: seedTime >= 0 ? duration(seedTime) : '',
+    goalText: goalWords,
   };
 }
 
-// ---- Sorting by the swarm columns ----
+/**
+ * UI.R42: how often the list reads the Seeding time cells again while that column shows, in ms. A torrent that seeds with
+ * nothing to send gets no update from the server, so the cell would stop where the last one left it. Every second while
+ * one has seeded less than an hour (the cell counts seconds), every half minute after (it counts minutes); null, so no
+ * timer, while the column doesn't show or nothing seeds. Desktop: TorrentListRules.SeedClockInterval.
+ */
+export function seedClockMs(columnShown: boolean, jobs: Iterable<Pick<Job, 'torrent'>>, now = Date.now()): number | null {
+  if (!columnShown) return null;
+  let least: number | null = null;
+  for (const job of jobs) {
+    if (job.torrent?.seeding !== true) continue;
+    const hours = seededHours(job.torrent, now);
+    if (hours !== null && (least === null || hours < least)) least = hours;
+  }
+  if (least === null) return null;
+  return least < 1 ? 1000 : 30_000;
+}
 
-/** The columns only the torrent views have. */
-export const swarmSortKeys: SortKey[] = ['seeds', 'peers', 'up', 'ratio'];
+// ---- Sorting by the columns that show ----
 
-/** The More > Sort by menu: the usual columns, and in the torrent views Seeds, Peers, Up and Ratio too. */
-export function sortMenuTitles(torrentCols: boolean): [SortKey, string][] {
-  const titles: [SortKey, string][] = [
-    ['name', 'File Name'], ['queue', 'Q'], ['size', 'Size'], ['status', 'Status'], ['extraction', 'Extraction'], ['eta', 'Time left'],
-    ['rate', 'Transfer rate'], ['lastTry', 'Last Try Date'], ['description', 'Description'], ['added', 'Order of addition'],
-  ];
-  if (!torrentCols) return titles;
-  return [...titles.slice(0, 7), ['seeds', 'Seeds'], ['peers', 'Peers'], ['up', 'Up'], ['ratio', 'Ratio'], ...titles.slice(7)];
+/**
+ * The More > Sort by menu: the columns that show, left to right (the torrent views' Seeds, Peers, Up and Ratio among them,
+ * and any column chosen from the header's menu, UI.R42), then the order of addition. Below 1024 px it is the only way to
+ * sort by a wide column.
+ */
+export function sortMenuTitles(shown: ReadonlySet<string>): [SortKey, string][] {
+  const titles = listColumns.defs.filter((def) => shown.has(def.key)).map((def): [SortKey, string] => [def.key, def.title]);
+  return [...titles, ['added', 'Order of addition']];
 }
 
 /**
- * The sort a view uses: the saved one, but a view without the swarm columns doesn't sort by one of them. It uses the
- * default there and the saved sort comes back in the torrent views.
+ * The sort a view uses: the saved one, but not by a column that doesn't show there (a torrent column outside the torrent
+ * views, one hidden from the header's menu, Extraction with no archive). It uses the default then, and the saved sort
+ * comes back with the column. Order of addition has no column and always holds.
  */
-export function sortForView(sort: SortState, torrentCols: boolean): SortState {
-  return !torrentCols && swarmSortKeys.includes(sort.key) ? defaultSort : sort;
+export function sortForColumns(sort: SortState, shown: ReadonlySet<string>): SortState {
+  return sort.key !== 'added' && !shown.has(sort.key) ? defaultSort : sort;
 }
 
 // ---- The listen port ----

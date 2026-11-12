@@ -25,7 +25,7 @@ public sealed record PlatformCapabilities
 
     /// <summary>
     /// A client may change what the Host runs or trusts: <c>settings.update</c>'s <c>postDownloadCommand</c>,
-    /// <c>ffmpegPath</c>, <c>updateManifestUrl</c>, <c>updatePublicKey</c> and <c>allowSystemCompletionActions</c>, and a
+    /// <c>updateManifestUrl</c>, <c>updatePublicKey</c> and <c>allowSystemCompletionActions</c>, and a
     /// download's completion program in <c>job.update</c>. The desktop pipe admits only the user who could start those
     /// programs anyway. A network transport's client can't be assumed to be that person, so a server leaves this off
     /// and those changes are refused; the rest of the settings still apply.
@@ -118,11 +118,15 @@ public static class UiPages
     /// <summary>An update's progress window; the Host opens it itself, never for a client.</summary>
     public const string UpdateProgress = "update-progress";
 
+    /// <summary>UI.R40: the main window's Check for Updates dialog; the tray's update entries open it, never a client.</summary>
+    public const string Updates = "updates";
+
     /// <summary>The page as the window's command line names it, or null for one it doesn't know.</summary>
     public static string? Known(string? page) => page?.Trim().ToLowerInvariant() switch
     {
         Settings => Settings,
         UpdateProgress => UpdateProgress,
+        Updates => Updates,
         _ => null,
     };
 }

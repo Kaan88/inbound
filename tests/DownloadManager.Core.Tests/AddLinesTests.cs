@@ -36,17 +36,38 @@ public sealed class AddLinesTests
         Assert.Equal(["https://a.example/x.zip"], found);
     }
 
+    /// <summary>
+    /// CUT.1: FTP was cut in 0.7.2. Plain Add Links finds no ftp link (and says why when that was all there was);
+    /// with a provider an ftp link still gets a line, which says FTP isn't supported.
+    /// </summary>
     [Fact]
-    public void FtpLinksAreFoundLikeHttpLinks()
+    public void FtpLinksAreNotDownloadableAndSaySo()
     {
-        Assert.Equal(["ftp://a.example/x.zip", "FTP://b.example/y"], LinkExtractor.HttpLinks("get ftp://a.example/x.zip, and FTP://b.example/y."));
+        Assert.Empty(LinkExtractor.HttpLinks("get ftp://a.example/x.zip, and FTP://b.example/y."));
+        Assert.True(LinkExtractor.HasFtpLink("get ftp://a.example/x.zip, and FTP://b.example/y."));
+        Assert.False(LinkExtractor.HasFtpLink("get https://a.example/x.zip"));
         Assert.Equal(["ftp://a.example/x.zip", "https://a.example/y"], LinkExtractor.Inputs("ftp://a.example/x.zip\nhttps://a.example/y"));
+
+        using var session = NewSession(new FakeClassifier());
+        session.SetTextNow("ftp://a.example/x.zip\nhttps://a.example/y");
+        var ftp = session.Lines.Single(line => line.Input.StartsWith("ftp:", StringComparison.Ordinal));
+        Assert.Equal(FtpAddresses.NotSupported, ftp.Refusal);
+        Assert.Equal(AddRoute.None, ftp.Route);
+        Assert.False(ftp.IsSelected);
+
+        // ftps too, and mixed with http links (the plain review then says the ftp ones were left out).
+        Assert.True(LinkExtractor.HasFtpLink("https://a.example/x.zip ftps://b.example/y.zip"));
+        Assert.Equal(["https://a.example/x.zip"], LinkExtractor.HttpLinks("https://a.example/x.zip ftps://b.example/y.zip"));
+        session.SetTextNow("ftps://b.example/y.zip\nhttps://a.example/y");
+        var ftps = session.Lines.Single(line => line.Input.StartsWith("ftps:", StringComparison.Ordinal));
+        Assert.Equal(FtpAddresses.NotSupported, ftps.Refusal);
+        Assert.Equal(AddRoute.None, ftps.Route);
     }
 
     [Fact]
-    public void FtpIsDownloadableButNeverAProviderOrDirectChoice()
+    public void FtpIsNeitherDownloadableNorAProviderOrDirectChoice()
     {
-        Assert.True(LinkExtractor.IsDownloadableLink("ftp://a.example/x.zip"));
+        Assert.False(LinkExtractor.IsDownloadableLink("ftp://a.example/x.zip"));
         Assert.False(LinkExtractor.IsWebLink("ftp://a.example/x.zip"));
         Assert.True(LinkExtractor.IsWebLink("https://a.example/x.zip"));
         Assert.False(LinkExtractor.IsDownloadableLink("gopher://a.example/x"));

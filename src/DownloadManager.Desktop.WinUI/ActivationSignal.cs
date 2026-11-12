@@ -7,7 +7,7 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// One window per name: the first launch owns the name, and a later one asks it to show itself (or its Options) and
-/// exits. On Windows these are named events (show, Options, and open a queued torrent). Linux has no named events, so there the first
+/// exits. On Windows these are named events (show, Options, open a queued torrent, and Check for Updates). Linux has no named events, so there the first
 /// launch listens on a Unix socket in the user's own socket folder (<see cref="UnixSockets"/>) and a later one connects
 /// and sends one byte; only this user's processes are heard.
 /// </summary>
@@ -16,15 +16,17 @@ internal sealed class ActivationSignal : IDisposable
     private readonly EventWaitHandle _show;
     private readonly EventWaitHandle _settings;
     private readonly EventWaitHandle _open;
+    private readonly EventWaitHandle _updates;
     private readonly string? _socketPath;
     private Socket? _listener;
     private EventHandler? _exitHandler;
 
-    private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, EventWaitHandle open, string? socketPath)
+    private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, EventWaitHandle open, EventWaitHandle updates, string? socketPath)
     {
         _show = show;
         _settings = settings;
         _open = open;
+        _updates = updates;
         _socketPath = socketPath;
     }
 
@@ -39,6 +41,9 @@ internal sealed class ActivationSignal : IDisposable
     /// <summary>Set when another launch queued a magnet or .torrent file to open (<see cref="TorrentOpenRequests"/>).</summary>
     public WaitHandle Open => _open;
 
+    /// <summary>Set when another launch asks for the Check for Updates dialog (UI.R40, the tray's update entries).</summary>
+    public WaitHandle Updates => _updates;
+
     public static ActivationSignal Create(string name, out bool createdNew)
     {
         if (!OperatingSystem.IsLinux())
@@ -46,11 +51,12 @@ internal sealed class ActivationSignal : IDisposable
             var show = new EventWaitHandle(false, EventResetMode.AutoReset, name, out createdNew);
             var settings = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
             var open = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Open");
-            return new ActivationSignal(show, settings, open, null);
+            var updates = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Updates");
+            return new ActivationSignal(show, settings, open, updates, null);
         }
 
         UnixSockets.EnsureDirectory();
-        var signal = new ActivationSignal(Local(), Local(), Local(), SocketPath(name));
+        var signal = new ActivationSignal(Local(), Local(), Local(), Local(), SocketPath(name));
         createdNew = !signal.Reachable() && signal.TryListen();
         return signal;
     }
@@ -68,7 +74,7 @@ internal sealed class ActivationSignal : IDisposable
             return true;
         }
 
-        return new ActivationSignal(Local(), Local(), Local(), SocketPath(name)).Reachable();
+        return new ActivationSignal(Local(), Local(), Local(), Local(), SocketPath(name)).Reachable();
     }
 
     /// <summary>
@@ -107,6 +113,9 @@ internal sealed class ActivationSignal : IDisposable
 
     /// <summary>From a later launch: asks the running window to show itself, or its Options.</summary>
     public void Signal(bool settings) => Send(settings ? _settings : _show, settings ? (byte)'o' : (byte)'s');
+
+    /// <summary>From a later launch: asks the running window to show itself with the Check for Updates dialog.</summary>
+    public void SignalUpdates() => Send(_updates, (byte)'u');
 
     /// <summary>From a later launch: asks the running window to open the queued torrent requests.</summary>
     public void SignalOpen() => Send(_open, (byte)'t');
@@ -206,6 +215,7 @@ internal sealed class ActivationSignal : IDisposable
         _show.Dispose();
         _settings.Dispose();
         _open.Dispose();
+        _updates.Dispose();
     }
 
     private void Listen(Socket listener)
@@ -233,6 +243,7 @@ internal sealed class ActivationSignal : IDisposable
                     if (buffer[0] == (byte)'o') _settings.Set();
                     else if (buffer[0] == (byte)'s') _show.Set();
                     else if (buffer[0] == (byte)'t') _open.Set();
+                    else if (buffer[0] == (byte)'u') _updates.Set();
                 }
                 catch (SocketException)
                 {

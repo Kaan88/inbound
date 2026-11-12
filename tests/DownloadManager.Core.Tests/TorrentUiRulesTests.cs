@@ -260,10 +260,10 @@ public sealed class TorrentUiRulesTests
         => Assert.Equal(expected, TorrentRules.IsNetworkOrDevicePath(input));
 
     [Theory]
-    [InlineData(MessageTypes.HostActionResult, "Unknown message type 'torrent.files'.", "This Host does not download torrents.")]
+    [InlineData(MessageTypes.HostActionResult, "Unknown message type 'torrent.files'.", "Torrents aren't available here.")]
     [InlineData(MessageTypes.HostActionResult, "The disk is full.", "The disk is full.")]
-    [InlineData(MessageTypes.HostActionResult, "", "The Host could not do that.")]
-    [InlineData("somethingElse", "The disk is full.", "This Host does not download torrents.")]
+    [InlineData(MessageTypes.HostActionResult, "", "Inbound could not do that.")]
+    [InlineData("somethingElse", "The disk is full.", "Torrents aren't available here.")]
     public void ATorrentFilesErrorReplySaysTheHostsReason(string type, string message, string expected)
         => Assert.Equal(expected, HostConnection.TorrentReplyError(IpcMessage.Create(type, new HostActionResult { Ok = false, Message = message })));
 
@@ -305,7 +305,7 @@ public sealed class TorrentUiRulesTests
         Assert.Equal((false, false, TorrentRules.OnlyLocalTorrentFiles), TorrentRules.Intake(0, 0, true, true, true));
         Assert.Equal((false, false, TorrentRules.NothingToDrop), TorrentRules.Intake(0, 0, true, false, true));
         Assert.Equal((false, false, TorrentRules.NothingOnClipboard), TorrentRules.Intake(0, 0, false, false, false));
-        Assert.Equal(["https://example.com/a.zip", "ftp://example.com/b.iso"],
+        Assert.Equal(["https://example.com/a.zip"],
             LinkExtractor.HttpLinks("see https://example.com/a.zip and ftp://example.com/b.iso, magnet:?xt=urn:btih:" + Hash));
     }
 }

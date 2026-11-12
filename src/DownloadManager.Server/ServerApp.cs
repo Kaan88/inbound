@@ -129,7 +129,6 @@ public sealed class ServerApp : IAsyncDisposable
 
         var jobStore = new JsonJobStore(paths, log.Info);
         var checkpoints = new JsonCheckpointStore(paths);
-        var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
         var settingsStore = new JsonSettingsStore(paths);
         var engine = new HttpDownloadEngine(
             new EngineOptions
@@ -141,8 +140,7 @@ public sealed class ServerApp : IAsyncDisposable
                 ReadTimeout = TimeSpan.FromSeconds(90),
                 AllowLocalNetwork = true,
             },
-            checkpoints: checkpoints,
-            mediaCheckpoints: mediaCheckpoints);
+            checkpoints: checkpoints);
         var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
         log.Secrets = remote.Registry;
 
@@ -150,8 +148,6 @@ public sealed class ServerApp : IAsyncDisposable
         // which a server's clients may not ask for (PlatformCapabilities.SupportsProgramSettings is off).
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
-            mediaCheckpoints: mediaCheckpoints,
-            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints),
             linkBroker: remote.Broker,
             linkSecrets: remote.Registry,
             // A fixed port, so a container can publish it (T3); the tests' loopback-only listen wins when set.

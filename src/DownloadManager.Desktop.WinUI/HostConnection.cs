@@ -65,6 +65,8 @@ public sealed partial class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     /// <summary>UI.R37: the newest version the connected Host's update check found changed; this PC's or a server's.</summary>
     public event Action<string?>? LatestVersionChanged;
+    /// <summary>UI.R41: this PC's Host saw a browser's extension for the first time; the whole list. Never raised for a server.</summary>
+    public event Action<Dictionary<string, DateTimeOffset>>? ExtensionsSeenChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<List<DownloadGroupDto>>? GroupsChanged;
     public event Action<ArchiveChangedDto>? ArchiveChanged;
@@ -215,9 +217,9 @@ public sealed partial class HostConnection : IAsyncDisposable
         timeout.CancelAfter(TimeSpan.FromSeconds(18));
         var request = IpcMessage.Create(MessageTypes.FileMetadata, payload);
         var reply = await SendOnOwnConnectionAsync(request, timeout.Token).ConfigureAwait(false)
-            ?? throw new IOException("The Host disconnected while reading file information.");
+            ?? throw new IOException("The connection to Inbound's background program was lost while reading file information.");
         if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
-        if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This Host does not support file information previews." };
+        if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This version of Inbound does not offer file information previews." };
         return reply.GetPayload<FileMetadataResult>();
     }
 
@@ -487,7 +489,7 @@ public sealed partial class HostConnection : IAsyncDisposable
     /// </summary>
     internal static string TorrentReplyError(IpcMessage reply)
     {
-        const string noTorrents = "This Host does not download torrents.";
+        const string noTorrents = "Torrents aren't available here.";
         if (reply.Type != MessageTypes.HostActionResult) return noTorrents;
         string? message;
         try
@@ -496,10 +498,10 @@ public sealed partial class HostConnection : IAsyncDisposable
         }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
         {
-            return "The Host could not do that.";
+            return "Inbound could not do that.";
         }
 
-        if (string.IsNullOrEmpty(message)) return "The Host could not do that.";
+        if (string.IsNullOrEmpty(message)) return "Inbound could not do that.";
         return message.StartsWith("Unknown message type", StringComparison.OrdinalIgnoreCase) ? noTorrents : message;
     }
 
@@ -574,7 +576,7 @@ public sealed partial class HostConnection : IAsyncDisposable
             return IpcMessage.Create(MessageTypes.JobActionResult, new JobActionResponse { Error = "Checking this address took too long, so it wasn't changed. Try again." });
         }
 
-        throw new IOException("The Host disconnected while changing the address.");
+        throw new IOException("The connection to Inbound's background program was lost while changing the address.");
     }
 
     /// <summary>
@@ -655,7 +657,7 @@ public sealed partial class HostConnection : IAsyncDisposable
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        var client = _client ?? throw new InvalidOperationException("The background host is not connected.");
+        var client = _client ?? throw new InvalidOperationException("Inbound's background program is not connected.");
         var request = IpcMessage.Create(type, payload);
         var completion = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.Id] = completion;
@@ -715,7 +717,7 @@ public sealed partial class HostConnection : IAsyncDisposable
                 var greeting = await client.ReadAsync(session.Token).ConfigureAwait(false);
                 if (greeting?.Type != MessageTypes.ServerHello)
                 {
-                    throw new InvalidDataException(remote ? $"{target.Name} did not answer like an Inbound server." : "The host did not send a greeting.");
+                    throw new InvalidDataException(remote ? $"{target.Name} did not answer like an Inbound server." : "Inbound's background program did not send a greeting.");
                 }
 
                 if (greeting.V != Protocol.Version)
@@ -807,11 +809,11 @@ public sealed partial class HostConnection : IAsyncDisposable
                     {
                         ConnectionChanged?.Invoke(false, remote
                             ? $"Disconnected from {target.Name}. Trying again shortly."
-                            : "The background Host has stopped. Open Download Manager again to start it.");
+                            : "Inbound's background program has stopped. Open Inbound again to start it.");
                     }
                 }
 
-                FailPending(new IOException("The connection to the background host was lost."));
+                FailPending(new IOException("The connection to Inbound's background program was lost."));
                 if (client is not null)
                 {
                     try
@@ -921,6 +923,12 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             // An unreadable one is skipped and said, like update.progress (audit L8).
             LatestVersionChanged?.Invoke(message.GetPayload<UpdateLatestDto>()?.LatestVersion);
+            return;
+        }
+        if (message.Type == MessageTypes.ExtensionsSeen)
+        {
+            // Only this PC's Host keeps count; an unreadable one is skipped and said (audit L8).
+            if (!IsRemote && message.GetPayload<ExtensionsSeenDto>()?.Seen is { } seen) ExtensionsSeenChanged?.Invoke(seen);
             return;
         }
         if (message.ReplyTo is not null && _pending.TryGetValue(message.ReplyTo, out var completion))

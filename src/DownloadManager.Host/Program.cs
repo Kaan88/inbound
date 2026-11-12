@@ -135,7 +135,6 @@ internal static class Program
             using var gcLog = GcMemoryLog.StartFromEnvironment(log.Info);
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
-            var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
                 new EngineOptions
@@ -147,12 +146,9 @@ internal static class Program
                     ReadTimeout = TimeSpan.FromSeconds(90),
                     AllowLocalNetwork = true,
                 },
-                checkpoints: checkpoints,
-                mediaCheckpoints: mediaCheckpoints);
+                checkpoints: checkpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
-            // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget, checkpoints);
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;
@@ -160,8 +156,6 @@ internal static class Program
                 paths, jobStore, checkpoints, settingsStore, engine, log.Info,
                 completionActions: completionExecutor,
                 sleepPrevention: sleepPrevention,
-                mediaCheckpoints: mediaCheckpoints,
-                ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook,
                 linkBroker: remote.Broker,
                 linkSecrets: remote.Registry,
@@ -217,6 +211,8 @@ internal static class Program
             }
 
             service.NativeHostState = NativeHostRegistration.Read;
+            // UI.R41: the native host tells which browser's extension came; the window says so.
+            service.ExtensionSightings = new ExtensionSightings(paths.Root, log.Warn);
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
@@ -273,8 +269,10 @@ internal static class Program
                 IntegrationStatus: () => BrowserIntegrationText(service),
                 ActiveCount: () => service.ActiveDownloadCount(),
                 UpdateText: () => updateMonitor.UpdateText,
-                InstallUpdate: () => _ = updateMonitor.InstallAsync(),
-                CheckForUpdates: updateMonitor.CheckNow);
+                // UI.R40: both update entries open the window's one Check for Updates dialog, which checks, shows what's
+                // new, downloads and installs; the automatic check and install stay the monitor's.
+                InstallUpdate: () => controller.OpenUi(UiPages.Updates),
+                CheckForUpdates: () => controller.OpenUi(UiPages.Updates));
 
             var icon = LoadIcon();
             var tray = new TrayApplicationContext(trayActions, icon);

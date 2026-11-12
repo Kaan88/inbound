@@ -94,7 +94,7 @@ else {
 
 if (-not $NoStart) {
     Start-Process -FilePath (Join-Path $AppDir "DownloadManager.Host.exe") -ArgumentList "--background"
-    Write-Host "Started the background host."
+    Write-Host "Started the background program."
 }
 
 Write-Host "Repair complete."

@@ -197,7 +197,11 @@ public static class RemoteInputClassifier
     /// <summary>All patterns together, for one paste. A hostile list can't hold an IPC call for long.</summary>
     private static readonly TimeSpan LongestOnPatterns = TimeSpan.FromSeconds(2);
 
-    public static RemoteInputClassification Classify(string? text, IReadOnlyList<RemoteClassifierProvider> providers)
+    /// <param name="localIsOrdinary">
+    /// UI.B27: an address on this PC or its local network (<see cref="NetworkAddresses.IsLocalWebAddress(Uri)"/>) is an
+    /// ordinary link, whatever a provider's list says. False only in tests, where a local server stands in for a hoster.
+    /// </param>
+    public static RemoteInputClassification Classify(string? text, IReadOnlyList<RemoteClassifierProvider> providers, bool localIsOrdinary = true)
     {
         var input = text?.Trim();
         if (string.IsNullOrEmpty(input))
@@ -247,9 +251,10 @@ public static class RemoteInputClassifier
 
         return uri.Scheme switch
         {
-            "http" or "https" => ClassifyWeb(input, uri, providers),
-            "ftp" => new RemoteInputClassification { Kind = RemoteInputKind.OrdinaryLink, DisplayHost = uri.IdnHost },
-            _ => Unsupported("Only http, https and ftp addresses and magnets can be added."),
+            "http" or "https" => ClassifyWeb(input, uri, providers, localIsOrdinary),
+            // FTP was cut in 0.7.2.
+            "ftp" or "ftps" => Unsupported(FtpAddresses.NotSupported),
+            _ => Unsupported("Only http and https addresses and magnets can be added."),
         };
     }
 
@@ -370,7 +375,7 @@ public static class RemoteInputClassifier
             ?? "This app has no provider for torrents, and can't download them by itself.");
     }
 
-    private static RemoteInputClassification ClassifyWeb(string input, Uri uri, IReadOnlyList<RemoteClassifierProvider> providers)
+    private static RemoteInputClassification ClassifyWeb(string input, Uri uri, IReadOnlyList<RemoteClassifierProvider> providers, bool localIsOrdinary)
     {
         var host = uri.IdnHost.ToLowerInvariant();
         foreach (var provider in providers)
@@ -411,6 +416,12 @@ public static class RemoteInputClassifier
                 DisplayHost = host,
                 Note = "This link holds an account key. It will download, with the key kept out of everything shown or saved.",
             };
+        }
+
+        // UI.B27: no provider can fetch from this PC or its local network, so nothing is matched against its list.
+        if (localIsOrdinary && NetworkAddresses.IsLocalWebAddress(uri))
+        {
+            return new RemoteInputClassification { Kind = RemoteInputKind.OrdinaryLink, DisplayHost = host };
         }
 
         string? listProblem = null;

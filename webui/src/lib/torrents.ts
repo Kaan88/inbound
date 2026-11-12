@@ -65,9 +65,13 @@ export function listedCopyFields(input: string): { input: string; fromJobId?: st
 /** T10: the words when torrents are off here (TorrentCommands.TorrentsOffText). */
 export const torrentsOffText = 'Torrents are turned off. Turn them on in Options > Torrents.';
 
-/** T10: one finished .torrent download offers Open as Torrent (TorrentRules.OpensAsTorrent). */
-export function opensAsTorrent(job: Pick<Job, 'state' | 'torrentFileReady' | 'torrent' | 'fileRemovedAfterExtraction' | 'isRemote'> | null | undefined): boolean {
-  return !!job && job.state === 'completed' && job.torrentFileReady === true && !job.torrent && !job.fileRemovedAfterExtraction && !job.isRemote;
+/**
+ * T10: one finished .torrent download offers Open as Torrent (TorrentRules.OpensAsTorrent). Not one whose path the
+ * server hides (a download outside this session's folders), which it refuses to this session anyway.
+ */
+export function opensAsTorrent(job: Pick<Job, 'state' | 'torrentFileReady' | 'torrent' | 'fileRemovedAfterExtraction' | 'isRemote' | 'finalFilePath'> | null | undefined): boolean {
+  return !!job && job.state === 'completed' && job.torrentFileReady === true && !job.torrent && !job.fileRemovedAfterExtraction && !job.isRemote &&
+    !!job.finalFilePath?.trim();
 }
 
 /**
@@ -117,7 +121,7 @@ export function torrentStatusText(job: Pick<Job, 'state' | 'torrent'> & { failur
   const torrent = job.torrent;
   if (!torrent) return null;
   if (torrent.awaitingFileChoice) return 'Choose files to download';
-  if (job.state === 'paused' && job.failure?.kind === 'diskFull') return 'Paused · The disk is full';
+  if (job.state === 'paused' && job.failure?.kind === 'diskFull') return 'Stopped · The disk is full';
   // T3: the files on disk are being checked (Force recheck, or a check before it starts).
   if (torrent.checking) return 'Checking files';
   // T2: a finished torrent shared with other peers.

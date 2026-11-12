@@ -18,7 +18,7 @@
   <div class="options-shell">
     <nav class="page-list" aria-label="Options pages">
       <a class="page-link" href="#general" data-page="general"><span data-icon="settings"></span>General</a>
-      <a class="page-link" href="#catching" data-page="catching"><span data-icon="download"></span>Catching</a>
+      <a class="page-link" href="#catching" data-page="catching"><span data-icon="download"></span>Sending</a>
       <a class="page-link" href="#server" data-page="server"><span data-icon="cloud"></span>Server</a>
       <a id="siteAccessLink" class="page-link hidden" href="#site-access" data-page="site-access"><span data-icon="lock"></span>Site access</a>
       <a class="page-link" href="#connection" data-page="connection"><span data-icon="plug"></span>Connection</a>
@@ -53,7 +53,7 @@
           <input id="openAppWindows" type="checkbox" />
           <span>Open the app's windows for browser downloads</span>
         </label>
-        <p class="hint indent">Off: the browser keeps the focus, and the extension's icon shows the progress: a green ring while downloading, orange when paused, red when one failed. On: the app opens its progress window and its finished window, as for downloads added in the app.</p>
+        <p class="hint indent">Off: the browser keeps the focus, and the extension's icon shows the progress: a green ring while downloading, orange when stopped, red when one failed. On: the app opens its progress window and its Completed window, as for downloads added in the app.</p>
         <div class="form-grid compact">
           <label class="label" for="onFinish">When one finishes</label>
           <div>
@@ -112,28 +112,28 @@
       </section>
 
       <section id="page-catching" class="settings-page hidden" data-page="catching" aria-labelledby="catchingTitle">
-        <h1 id="catchingTitle">Catching</h1>
+        <h1 id="catchingTitle">Sending</h1>
         <h2 class="section">File types</h2>
         <label class="form-row">
-          <span class="label">Catch only these file types</span>
+          <span class="label">Send only these file types</span>
           <textarea id="interceptedExtensions" class="field mono" rows="3" spellcheck="false"></textarea>
-          <span class="hint">Comma-separated. Leave it empty to catch every file type that is not on the list below; files with no file type are also caught, unless they are web pages.</span>
+          <span class="hint">Comma-separated. Leave it empty to send every file type that is not on the list below; files with no file type are also sent, unless they are web pages.</span>
         </label>
         <label class="form-row">
-          <span class="label">Never catch these file types</span>
+          <span class="label">Never send these file types</span>
           <textarea id="excludedExtensions" class="field mono" rows="3" spellcheck="false"></textarea>
         </label>
         <div><button id="resetExcluded" class="btn" type="button">Restore the default list</button></div>
         <h2 class="section">Sites</h2>
         <label class="form-row">
-          <span class="label">Never catch downloads from these sites</span>
+          <span class="label">Never send downloads from these sites</span>
           <textarea id="excludedHosts" class="field mono" rows="3" spellcheck="false"></textarea>
           <span class="hint">One per line or comma-separated.</span>
         </label>
         <p class="hint">
           To keep a single download in your browser, hold Delete while you click its link. To keep them all for a
           while, or for buttons and links inside embedded frames where holding Delete does not work, use Pause
-          catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
+          sending in the toolbar popup. The extension's script on each page checks only whether Delete is held;
           it does not record what you type.
         </p>
       </section>
@@ -142,7 +142,7 @@
         <h1 id="serverTitle">Server</h1>
         <p class="hint">
           Send downloads to your own Inbound server (the Docker or Linux version) as well as, or instead of, this PC.
-          To get a code, open the server's web UI, then Settings, Sign-in and browsers, and choose Pair a browser. The code
+          To get a code, open the server's web UI, then Options, Sign-in and browsers, and choose Pair a browser. The code
           works once, for ten minutes.
         </p>
         <div class="form-grid">
@@ -198,7 +198,7 @@
           on the Server page, and sends download details only to that app on this computer or to your server. Using the
           extension starts the app's background process if it is not running. If the app is not installed or cannot be
           reached, or it refuses a download, the download stays in your browser. Once the app has accepted one, the
-          browser's copy is gone, so pause catching first for a file from a submitted form or a link that works only once.
+          browser's copy is gone, so pause sending first for a file from a submitted form or a link that works only once.
         </p>
         <div class="button-row">
           <button id="test" class="btn" type="button">Check connection</button>

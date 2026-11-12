@@ -89,7 +89,7 @@ export function iconTitle(state: IconState): string | null {
       return `${name}: ${files(state.count)} from the browser${percent}`;
     }
     case "paused":
-      return `${name}: ${state.count === 1 ? "a download is" : `${state.count} downloads are`} paused`;
+      return `${name}: ${state.count === 1 ? "a download is" : `${state.count} downloads are`} stopped`;
     case "error":
       return `${name}: ${state.count === 1 ? "a download" : `${state.count} downloads`} failed. Open the popup to see why.`;
     default:

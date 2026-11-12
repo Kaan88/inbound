@@ -277,7 +277,7 @@ export function planFor(files: ArchiveFile[], otherSets: ArchiveSet[], packageAl
   const jobIds = archiveFiles.filter((file) => !file.set || canAskFor(file.set)).map((file) => file.jobId);
   const ownSets = listedSets.filter(canAskFor);
 
-  const reason = !connected ? 'the background Host isn\'t connected'
+  const reason = !connected ? 'Inbound\'s background program isn\'t connected'
     : files.length === 0 && sets.length === 0 ? 'select an archive download first'
     : archiveFiles.length === 0 && sets.length === 0 ? 'no archive selected'
     : jobIds.length > 0 || ownSets.length > 0 ? null

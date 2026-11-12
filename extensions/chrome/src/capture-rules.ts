@@ -225,6 +225,18 @@ export function extensionOf(value: string): string {
   return match ? match[1]!.toLowerCase() : "";
 }
 
+/**
+ * An HLS playlist or a DASH manifest, by its name or type, as the app decides it. A plain ".m3u" list (internet radio,
+ * a music playlist) is often sent with the HLS type and is still an ordinary file.
+ */
+export function isStreamPlaylist(nameOrUrl: string, mime: string | undefined): boolean {
+  const extension = extensionOf(nameOrUrl);
+  if (extension === "m3u8" || extension === "mpd") return true;
+  const type = (mime ?? "").split(";")[0]!.trim().toLowerCase();
+  if (type === "application/dash+xml") return true;
+  return type.includes("mpegurl") && extension !== "m3u";
+}
+
 export interface CandidateDownload {
   url: string;
   finalUrl?: string;
@@ -257,6 +269,11 @@ export function decideCapture(item: CandidateDownload, settings: Settings): Capt
     return { capture: false, reason: "Downloads from this site stay in the browser.", quiet: true };
   }
 
+  // The app no longer downloads streams (cut in its 0.7.2), so a playlist the browser saves stays a file there.
+  if (isStreamPlaylist(item.fileName || url, item.mime) || isStreamPlaylist(url, undefined)) {
+    return { capture: false, reason: "Streaming playlists stay in the browser.", quiet: false };
+  }
+
   const host = hostOf(url);
   if (!host) {
     return { capture: false, reason: null, quiet: true };
@@ -269,20 +286,20 @@ export function decideCapture(item: CandidateDownload, settings: Settings): Capt
     .filter((value): value is string => !!value);
   const excludedHost = settings.excludedHosts.find((pattern) => sourceHosts.some((candidate) => hostMatches(candidate, pattern)));
   if (excludedHost) {
-    return { capture: false, reason: `${excludedHost} is on your list of sites never to catch.`, quiet: false };
+    return { capture: false, reason: `${excludedHost} is on your list of sites never to send from.`, quiet: false };
   }
 
   const extension = extensionOf(item.fileName || url);
   if (extension && settings.excludedExtensions.includes(extension)) {
     return {
       capture: false,
-      reason: `.${extension} files are on your list of file types never to catch.`,
+      reason: `.${extension} files are on your list of file types never to send.`,
       quiet: DEFAULT_EXCLUDED_EXTENSIONS.includes(extension),
     };
   }
 
   if (extension && settings.interceptedExtensions.length > 0 && !settings.interceptedExtensions.includes(extension)) {
-    return { capture: false, reason: `.${extension} is not on your list of file types to catch.`, quiet: false };
+    return { capture: false, reason: `.${extension} is not on your list of file types to send.`, quiet: false };
   }
 
   if (!extension && /^text\/html/i.test(item.mime ?? "")) {

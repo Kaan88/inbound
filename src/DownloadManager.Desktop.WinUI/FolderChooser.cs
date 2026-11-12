@@ -233,7 +233,7 @@ internal static class FolderChooser
 
     private static async Task<string?> SaveAsync(List<FavoriteFolderDto> list, FrameworkElement anchor)
     {
-        if (SaveFavorites is null) return "The background host is not connected.";
+        if (SaveFavorites is null) return "Inbound's background program is not connected.";
         try
         {
             return await SaveFavorites(list);

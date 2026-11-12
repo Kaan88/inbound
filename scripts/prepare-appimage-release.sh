@@ -13,7 +13,8 @@ out="$root/artifacts/release/v$version-linux"
 mkdir -p "$out"
 cp "$appimage" "$out/$name"
 "$dotnet" run --project "$root/tools/UpdateSigner" -c Release -- "$out" "$version" \
-  "https://github.com/$repo/releases/download/v$version/$name" "$out/$name" "$key" stable manifest-linux-x64.json
+  "https://github.com/$repo/releases/download/v$version/$name" "$out/$name" "$key" stable manifest-linux-x64.json \
+  --notes-from "$root/src/DownloadManager.Contracts/Changelog/changelog.json"
 rm -f "$out/public.pem"
 (cd "$out" && sha256sum "$name" manifest-linux-x64.json > SHA256SUMS-linux)
 echo "Upload: $out/$name, $out/manifest-linux-x64.json, $out/SHA256SUMS-linux"

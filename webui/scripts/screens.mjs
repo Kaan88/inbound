@@ -199,17 +199,15 @@ async function openRowMenu(page, variant, row) {
   await page.getByRole('menu').waitFor();
 }
 
-/** Add URL for one address: the address step, then the info step, then Start download. */
+/** Add URL for one address: Enter starts it once the address is checked, or opens the provider's add dialog (UI.R38). */
 async function addOne(page, address) {
   await tool(page, 'Add URL');
   await page.fill('#url-box', address);
-  await dialog(page).getByRole('button', { name: /^(Next|Try again)$/ }).click();
-  const start = dialog(page).getByRole('button', { name: 'Start download' });
+  await page.locator('#url-box').press('Enter');
   const add = dialog(page).getByRole('button', { name: /^Add( \d+)?$/ });
-  await Promise.race([start.waitFor({ timeout: 8000 }), add.waitFor({ timeout: 8000 })]).catch(() => undefined);
-  if (await start.count()) await start.click();
-  else if (await add.count() && await add.isEnabled()) await add.click();
-  else await dialog(page).getByRole('button', { name: 'Cancel' }).first().click();
+  await Promise.race([dialog(page).waitFor({ state: 'detached', timeout: 8000 }), add.waitFor({ timeout: 8000 })]).catch(() => undefined);
+  if (await add.count() && await add.isEnabled()) await add.click();
+  else if (await dialog(page).count()) await dialog(page).getByRole('button', { name: 'Cancel' }).first().click();
   await dialog(page).waitFor({ state: 'detached', timeout: 8000 }).catch(() => undefined);
 }
 
@@ -397,15 +395,14 @@ await capture('18-add-url-info', signedIn, async (p) => {
   await app(p, '#/all');
   await tool(p, 'Add URL');
   await p.fill('#url-box', `${testServer}/file/manual.pdf?size=1048576`);
-  await dialog(p).getByRole('button', { name: 'Next' }).click();
-  await dialog(p).getByRole('button', { name: 'Start download' }).waitFor();
+  // The file is checked by itself once the address stops changing (UI.R38).
+  await dialog(p).getByRole('button', { name: 'Check again' }).waitFor();
   await p.waitForTimeout(1200);
 });
 await capture('19-add-url-duplicate', signedIn, async (p) => {
   await app(p, '#/all');
   await tool(p, 'Add URL');
   await p.fill('#url-box', `${testServer}/file/report.pdf?size=2097152`);
-  await dialog(p).getByRole('button', { name: 'Next' }).click();
   // The list is asked when Start download is pressed, as on the desktop.
   await dialog(p).getByRole('button', { name: 'Start download' }).click();
   await dialog(p).getByRole('button', { name: 'Download again' }).waitFor();
@@ -845,15 +842,14 @@ if (mockKey) {
   });
 }
 
-// U-WU-6: Add URL's second step takes the focus, so Escape still closes it.
-await step('e2e: Add URL step two has the focus and Escape closes it', async () => {
+// U-WU-6, UI.R38: Add URL is one dialog; the file is checked by itself, the focus stays in the address box, and Escape closes it.
+await step('e2e: Add URL checks the file by itself and Escape closes it', async () => {
   await app(page, '#/all');
   await tool(page, 'Add URL');
   await page.fill('#url-box', `${testServer}/file/manual.pdf?size=1048576`);
-  await page.keyboard.press('Enter');
-  await dialog(page).getByRole('button', { name: 'Start download' }).waitFor();
-  await page.waitForTimeout(300);
-  expect(await page.evaluate(() => document.activeElement?.id) === 'file-name', `the focus is on ${await page.evaluate(() => document.activeElement?.tagName)}, not File name`);
+  await dialog(page).getByRole('button', { name: 'Check again' }).waitFor();
+  expect((await page.inputValue('#file-name')) === 'manual.pdf', `the file name is ${await page.inputValue('#file-name')}, not manual.pdf`);
+  expect(await page.evaluate(() => document.activeElement?.id) === 'url-box', `the focus is on ${await page.evaluate(() => document.activeElement?.tagName)}, not the address`);
   await page.keyboard.press('Escape');
   await dialog(page).waitFor({ state: 'detached' });
 });

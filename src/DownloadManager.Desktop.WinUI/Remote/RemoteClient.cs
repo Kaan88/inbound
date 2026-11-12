@@ -80,6 +80,12 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     private ServerTarget? _uploadTarget;
     private readonly ConcurrentDictionary<string, (string Reference, DateTimeOffset At)> _uploads = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan UploadKeptFor = TimeSpan.FromMinutes(30);
+
+    // T10.B2: the shown server's own finished .torrent downloads, by the path the server gave, while a row's Open as
+    // Torrent is being added: sent as they are, for the server reads them itself (within its folders), as its web UI
+    // does. Counted, because one path can be opened twice at once; forgotten when another server is shown.
+    private readonly Dictionary<string, int> _serverFiles = new(StringComparer.Ordinal);
+    private int _serverFilesRound;
     private readonly Lock _sync = new();
 
     private TaskCompletionSource<IRemotePipe> _control = NewControlSource();
@@ -155,6 +161,8 @@ internal sealed partial class RemoteClient : IAsyncDisposable
             _remoteTarget = remote;
             _uploadTarget = uploadTarget;
             _uploads.Clear();
+            _serverFiles.Clear();
+            _serverFilesRound++;
             _parked = null;
             _remoteBackoff.Reset();
             _localBackoff.Reset();
@@ -310,6 +318,10 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         lock (_sync) target = _uploadTarget;
         if (!LinkExtractor.IsTorrentPath(text)) return (text, null);
         var path = text.Trim();
+        // T10.B2: a finished .torrent download of the shown server is that server's own file: it reads it by its path.
+        bool serverFile;
+        lock (_sync) serverFile = _serverFiles.ContainsKey(path);
+        if (target is not null && serverFile) return (path, null);
         // A network or device path is refused for this PC's Host too, before anything asks about it.
         if (TorrentRules.IsNetworkOrDevicePath(path))
             return (null, target is null ? TorrentRules.OnlyLocalTorrentFiles : TorrentPathProblem(path) ?? TorrentRules.OnlyLocalTorrentFiles);
@@ -346,6 +358,57 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
             return "Copy the .torrent file to this PC first; a file on a network share isn't sent from here.";
         return Path.IsPathFullyQualified(path) ? null : @"Type the .torrent file's full path, such as C:\Downloads\file.torrent.";
+    }
+
+    /// <summary>
+    /// T10.B2: these paths are the shown server's own finished .torrent downloads (a row's Open as Torrent), so a
+    /// classify or an add sends them as they are instead of looking for them on this PC, until the returned mark is
+    /// disposed. Only while another server is shown; the server still holds them to its folders. A file on this PC
+    /// with the same path is uploaded as usual once the mark is gone. Forgotten when another server or this PC is shown.
+    /// </summary>
+    public IDisposable UseServerFiles(IEnumerable<string> paths)
+    {
+        var marked = new List<string>();
+        int round;
+        lock (_sync)
+        {
+            round = _serverFilesRound;
+            if (_uploadTarget is null) return new ServerFileMark(this, [], round);
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                var key = path.Trim();
+                _serverFiles[key] = _serverFiles.GetValueOrDefault(key) + 1;
+                marked.Add(key);
+            }
+        }
+
+        return new ServerFileMark(this, marked, round);
+    }
+
+    private void ForgetServerFiles(IReadOnlyList<string> paths, int round)
+    {
+        lock (_sync)
+        {
+            // Another server shown meanwhile: its marks were cleared already, and these aren't its own.
+            if (round != _serverFilesRound) return;
+            foreach (var path in paths)
+            {
+                if (!_serverFiles.TryGetValue(path, out var count)) continue;
+                if (count <= 1) _serverFiles.Remove(path);
+                else _serverFiles[path] = count - 1;
+            }
+        }
+    }
+
+    private sealed class ServerFileMark(RemoteClient owner, IReadOnlyList<string> paths, int round) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0 && paths.Count > 0) owner.ForgetServerFiles(paths, round);
+        }
     }
 
     /// <summary>The same file: its path, size and time written. A changed file is uploaded again.</summary>
@@ -931,7 +994,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                 var hello = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
                 if (hello?.Type != MessageTypes.ServerHello || hello.V != Protocol.Version)
                 {
-                    throw new InvalidDataException("The Host did not send a usable greeting.");
+                    throw new InvalidDataException("Inbound's background program did not send a usable greeting.");
                 }
 
                 var capabilities = hello.GetPayload<HostHelloDto>().Capabilities;
@@ -1114,7 +1177,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     {
         foreach (var pending in _pending.Values)
         {
-            pending.TrySetException(new IOException("The connection to the Host was lost."));
+            pending.TrySetException(new IOException("The connection to Inbound's background program was lost."));
         }
 
         _pending.Clear();

@@ -141,18 +141,7 @@ public sealed partial class DownloadManagerService
             return "it is verifying or finishing its file.";
         }
 
-        if (phase.StartsWith("Muxing", StringComparison.Ordinal))
-        {
-            return "it is joining its audio and video.";
-        }
-
         if (job.ReceivedBytes == 0)
-        {
-            return null;
-        }
-
-        // Media keeps a checkpoint per fragment, whatever the server says about ranges.
-        if (IsStreamManifest(job, phase))
         {
             return null;
         }
@@ -161,36 +150,8 @@ public sealed partial class DownloadManagerService
         {
             true => null,
             false => "its server can't resume, so stopping would lose what it has.",
-            // An FTP server shows whether it takes REST only when a transfer resumes; until then stopping might
-            // lose what the job has, so a first FTP run is left alone like any other unknown.
             null => "its server hasn't said whether it can resume.",
         };
-    }
-
-    /// <summary>
-    /// The engine's own tests for a playlist (the URL, or the hand-off's content type), plus the phase it reports,
-    /// which also covers a playlist found by its content type behind a URL without the extension.
-    /// </summary>
-    private static bool IsStreamManifest(DownloadJob job, string phase)
-    {
-        if (phase.StartsWith("Downloading HLS", StringComparison.Ordinal) ||
-            phase.StartsWith("Downloading DASH", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (!Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
-        {
-            return false;
-        }
-
-        if (uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) ||
-            uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return StreamManifestHint.HintsStream(job.HandoffContentType, job.Description);
     }
 
     private Dictionary<(int QueueId, Guid JobId), int> FileOrderLocked()

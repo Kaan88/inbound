@@ -544,7 +544,7 @@ public sealed class SchedulerWindow : Window
         UpdateQueueList(SelectedQueue?.Id);
         if (_status.Text == "Loading queues…" ||
             _status.Text.StartsWith("Could not refresh queues: ", StringComparison.Ordinal) ||
-            _status.Text == "Waiting for the background Host…") _status.Text = "Ready";
+            _status.Text == "Waiting for Inbound's background program…") _status.Text = "Ready";
     }
 
     private void OnConnectionChanged(bool connected, string? error)
@@ -552,7 +552,7 @@ public sealed class SchedulerWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
-            if (!connected) _status.Text = string.IsNullOrWhiteSpace(error) ? "Waiting for the background Host…" : error;
+            if (!connected) _status.Text = string.IsNullOrWhiteSpace(error) ? "Waiting for Inbound's background program…" : error;
             else _ = RefreshAsync();
         });
     }
@@ -1180,7 +1180,7 @@ public sealed class SchedulerWindow : Window
                 var result = settingsReply.GetPayload<SettingsResult>();
                 if (settingsReply.Type != MessageTypes.SettingsResult || !result.Ok)
                 {
-                    errors.Add("Settings were not saved: " + (result.Error ?? _connection.NoReasonWords));
+                    errors.Add("Changes were not saved: " + (result.Error ?? _connection.NoReasonWords));
                     appliedQueueIds.Clear(); appliedSchedules.Clear(); removedSchedules.Clear(); newScheduleIds.Clear(); optInApplied = false;
                 }
                 else

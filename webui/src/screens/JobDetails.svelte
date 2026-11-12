@@ -481,7 +481,7 @@
 
   {#snippet footer()}
     {#if job && !removed}
-      <button class="btn" disabled={!connected || !job.canPause || working} onclick={() => run('job.pause')}>Pause</button>
+      <button class="btn" disabled={!connected || !job.canPause || working} onclick={() => run('job.pause')}>Stop</button>
       <button class="btn" disabled={!connected || !job.canResume || working} onclick={() => run('job.resume')}>Resume</button>
       {#if canStartSeeding(job)}<button class="btn" disabled={!connected || working} onclick={() => void seed(true)}>Start seeding</button>{/if}
       {#if canStopSeeding(job)}<button class="btn" disabled={!connected || working} onclick={() => void seed(false)}>Stop seeding</button>{/if}
@@ -490,7 +490,7 @@
         <button class="btn" disabled={!connected || working || !canAnnounce(job)} title="Ask the trackers for peers now" onclick={() => void announce()}>Announce now</button>
       {/if}
       {#if job.canCancel}<button class="btn" disabled={!connected || working} onclick={() => (dialog = 'cancel')}>Cancel</button>{/if}
-      <button class="btn" disabled={!connected || working} title="Remove this download and delete its file" onclick={() => (dialog = 'delete')}>Delete</button>
+      <button class="btn" disabled={!connected || working} title="Delete this download and its file" onclick={() => (dialog = 'delete')}>Delete</button>
       {#if !removed}
         <!-- T1: a torrent has no single address or file to redownload, move or rename. -->
         {#if !job.torrent}<button class="btn" disabled={!connected || working} onclick={() => void redownload()}>Redownload</button>{/if}

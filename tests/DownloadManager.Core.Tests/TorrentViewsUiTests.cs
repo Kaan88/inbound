@@ -192,5 +192,11 @@ public sealed class TorrentViewsUiTests
 
     [Fact]
     public void ASortBySwarmColumnsHoldsInTheExtraViews()
-        => Assert.Equal(("peers", true), TorrentListRules.ShownSort("peers", true, TorrentListRules.ActiveTag));
+    {
+        // Every view under Torrents is a torrent view, so it has the torrent views' columns and their sort.
+        Assert.True(TorrentListRules.IsTorrentView(TorrentListRules.ActiveTag));
+        var layout = ListColumnSets.Downloads();
+        ListColumnSets.UseDownloadsChoices(layout, TorrentListRules.IsTorrentView(TorrentListRules.ActiveTag), choices: null);
+        Assert.Equal(("peers", true), ListColumnSets.ShownSort(layout, "peers", true));
+    }
 }

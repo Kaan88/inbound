@@ -10,7 +10,7 @@ public readonly record struct SpeedShares(long Http, long TorrentDownload, long 
 public readonly record struct SpeedDemand(bool Active, double Rate);
 
 /// <summary>
-/// T2: the overall speed limit is one budget for HTTP and FTP downloads, torrent downloads and torrent uploads together.
+/// T2: the overall speed limit is one budget for HTTP downloads, torrent downloads and torrent uploads together.
 /// A kind that used most of its share wants more; one that used less keeps what it used and some room to grow; the
 /// rest is shared out evenly. Each kind keeps a small share even while idle, so one that starts can get going before
 /// the next split. The shares never add up to more than the limit (unless the limit is below 3 bytes/s).

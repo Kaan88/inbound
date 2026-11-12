@@ -187,7 +187,6 @@ internal sealed class ArchiveHarness : IAsyncDisposable
     private async Task StartServiceAsync(ArchiveCoordinatorOptions? options = null, Func<IArchiveStore, IArchiveStore>? wrapStore = null, bool useMachineTool = false, bool withCoordinator = false)
     {
         IDownloadCheckpointStore checkpoints = new JsonCheckpointStore(Paths);
-        var mediaCheckpoints = new JsonMediaCheckpointStore(Paths);
         _engine = new HttpDownloadEngine(
             new EngineOptions
             {
@@ -197,8 +196,7 @@ internal sealed class ArchiveHarness : IAsyncDisposable
                 ReadTimeout = TimeSpan.FromSeconds(15),
                 AllowLocalNetwork = true,
             },
-            checkpoints: checkpoints,
-            mediaCheckpoints: mediaCheckpoints);
+            checkpoints: checkpoints);
         Service = new DownloadManagerService(
             Paths,
             new JsonJobStore(Paths),
@@ -206,8 +204,7 @@ internal sealed class ArchiveHarness : IAsyncDisposable
             new JsonSettingsStore(Paths),
             _engine,
             log: Log.Enqueue,
-            enableSchedulerTimer: false,
-            mediaCheckpoints: mediaCheckpoints)
+            enableSchedulerTimer: false)
         {
             PackageSettleDelay = TimeSpan.Zero,
         };

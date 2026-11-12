@@ -592,7 +592,7 @@ test('a download left by a rule says why; default exclusions and blob: downloads
     await startDownload(harness, { id: 1, url: 'https://bank.test/statement.pdf', filename: 'statement.pdf' });
     assert.equal(log.notes.length, 1);
     assert.equal(log.notes[0].title, 'Left in your browser');
-    assert.match(log.notes[0].message, /statement\.pdf: bank\.test is on your list of sites never to catch/);
+    assert.match(log.notes[0].message, /statement\.pdf: bank\.test is on your list of sites never to send from/);
 
     await startDownload(harness, { id: 2, url: 'https://site.test/photo.jpg', filename: 'photo.jpg' });
     await startDownload(harness, { id: 3, url: 'blob:https://site.test/77', filename: 'made-by-page.zip' });

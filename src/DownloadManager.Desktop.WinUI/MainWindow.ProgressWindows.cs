@@ -17,18 +17,22 @@ public sealed partial class MainWindow
     private readonly Queue<(ProgressWindowKind Kind, Guid Id, ServerTarget Target)> _windowsToOpen = new();
     private bool _windowOpenQueued;
 
-    private void OpenDownloadWindow(Guid jobId) => OpenProgressWindow(ProgressWindowKind.Download, jobId, _connection.Target);
+    /// <summary>Progress Details for a download, opened from this window (a double-click, Enter, a menu).</summary>
+    private void OpenDownloadWindow(Guid jobId) => OpenProgressWindow(ProgressWindowKind.Download, jobId, _connection.Target, this);
 
     /// <summary>
     /// Shows the window already open for this download or package, or opens one here. One the Host started as a process
-    /// of its own comes to the front instead: it holds the same name.
+    /// of its own comes to the front instead: it holds the same name. <paramref name="openedFrom"/> is the window the user
+    /// opened it from, which must not keep the front once the click is over (UI.B28); null when nobody asked (a burst of
+    /// finished downloads).
     /// </summary>
-    private void OpenProgressWindow(ProgressWindowKind kind, Guid id, ServerTarget target)
+    private void OpenProgressWindow(ProgressWindowKind kind, Guid id, ServerTarget target, Window? openedFrom = null)
     {
         var key = ProgressWindowKey.For(kind, id, target);
         if (_progressWindows.Find(key) is { } open)
         {
             ShowProgressWindow(open);
+            if (openedFrom is not null) WindowFront.KeepInFrontAfterInput(open, openedFrom);
             return;
         }
 
@@ -58,8 +62,10 @@ public sealed partial class MainWindow
         Window window;
         try
         {
+            // A package's file opened from its window must stay in front of that window, as one opened here does.
+            PackageWindow? package = null;
             window = kind == ProgressWindowKind.Package
-                ? new PackageWindow(id, target, jobId => OpenProgressWindow(ProgressWindowKind.Download, jobId, target))
+                ? package = new PackageWindow(id, target, jobId => OpenProgressWindow(ProgressWindowKind.Download, jobId, target, package))
                 : new DownloadWindow(id, manual: true, target, inMainWindowProcess: true);
         }
         catch (Exception ex)
@@ -83,6 +89,7 @@ public sealed partial class MainWindow
             if (_progressWindows.Closed(key, window)) EndWindowProcess("the last progress window closed");
         };
         WindowPlacement.ActivateCascaded(window);
+        if (openedFrom is not null) WindowFront.KeepInFrontAfterInput(window, openedFrom);
     }
 
     private static void ShowProgressWindow(Window window)

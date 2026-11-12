@@ -17,8 +17,18 @@ internal sealed class UiState
     /// <summary>Widths the download list's columns were dragged to, by column. A column left out has its usual width.</summary>
     public Dictionary<string, double> ColumnWidths { get; set; } = new();
 
+    /// <summary>UI.R42: the download list's columns shown (true) or hidden (false) from its header's menu, in every view but the
+    /// torrent views. A column left out shows as it does at first.</summary>
+    public Dictionary<string, bool> ShownColumns { get; set; } = new();
+
+    /// <summary>UI.R42: the same for the torrent views, which keep their own choice.</summary>
+    public Dictionary<string, bool> TorrentViewColumns { get; set; } = new();
+
     /// <summary>The same for My provider's lists, which share one set of columns.</summary>
     public Dictionary<string, double> ProviderColumnWidths { get; set; } = new();
+
+    /// <summary>UI.R42: My provider's columns shown or hidden from the header's menu.</summary>
+    public Dictionary<string, bool> ProviderShownColumns { get; set; } = new();
 
     /// <summary>Null keeps the order the provider answers in.</summary>
     public string? ProviderSortKey { get; set; }
@@ -46,6 +56,12 @@ internal sealed class UiState
     /// the Host's settings arrive does not flash the other theme. The setting is the source.</summary>
     public string? Theme { get; set; }
     public List<Guid> ExpandedPackages { get; set; } = new();
+
+    /// <summary>UPD.N1: the installed version whose What's new was last shown or skipped; null before 0.7.2 kept it.</summary>
+    public string? WhatsNewSeen { get; set; }
+
+    /// <summary>UI.R41: the "get the extension" bar is done with: Not now was clicked, or an extension has connected.</summary>
+    public bool ExtensionHintDone { get; set; }
 }
 
 internal static class UiStateStore
@@ -69,8 +85,17 @@ internal static class UiStateStore
         }
     }
 
+    private static bool? _existedAtStart;
+
+    /// <summary>
+    /// UPD.N1: whether ui-state.json was there when this process first read it, before anything here saved one. A window
+    /// that has run before (closing it saves the layout) left one, so a start without it is a fresh install.
+    /// </summary>
+    public static bool ExistedAtStart => _existedAtStart ??= Paths.Any(File.Exists);
+
     public static UiState Load()
     {
+        _ = ExistedAtStart;
         foreach (var path in Paths)
         {
             try
@@ -98,6 +123,7 @@ internal static class UiStateStore
     /// </summary>
     public static bool Save(UiState state)
     {
+        _ = ExistedAtStart;
         Exception? last = null;
         foreach (var path in Paths)
         {

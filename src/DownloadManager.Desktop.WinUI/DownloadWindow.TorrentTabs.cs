@@ -57,7 +57,7 @@ public sealed partial class DownloadWindow
     /// <summary>A column that shows only where the Host has T3's controls (Priority, Next announce) starts hidden.</summary>
     private static ListColumnLayout Hidden(ListColumnLayout layout, string key)
     {
-        layout.SetVisible(key, false);
+        layout.SetAvailable(key, false);
         return layout;
     }
 
@@ -264,7 +264,7 @@ public sealed partial class DownloadWindow
         if (ShownTorrentTab != tab) return false;
         if (ok != true)
         {
-            var words = string.IsNullOrWhiteSpace(error) ? "The Host didn't answer." : RemoteText.Failure(error);
+            var words = string.IsNullOrWhiteSpace(error) ? "Inbound didn't answer." : RemoteText.Failure(error);
             if (tab == TorrentDetailsTab.Peers) PeersNote.Text = words;
             else if (tab == TorrentDetailsTab.Trackers) TrackersNote.Text = words;
             else
@@ -334,7 +334,7 @@ public sealed partial class DownloadWindow
         }
 
         DetailsRowSync.Sync(_trackerRows, ordered, Key, row => row.Key, () => new TorrentTrackerRow(),
-            (row, tracker, _) => row.Apply(Key(tracker), tracker, withNext: Controls));
+            (row, tracker, _) => row.Apply(Key(tracker), tracker));
         TrackersTab.Text = TorrentDetailsRules.TabTitle("Trackers", trackers.Count);
         TrackersNote.Text = trackers.Count == 0 ? "This torrent has no trackers: it finds peers through the DHT and other peers." : TrackersNoteText;
     }
@@ -373,7 +373,7 @@ public sealed partial class DownloadWindow
             if (_closed) return;
             if (!result.Ok)
                 Notice.Text = (on ? "Seeding didn't start: " : "Seeding didn't stop: ")
-                    + (string.IsNullOrWhiteSpace(result.Error) ? "the Host didn't say why." : RemoteText.Failure(result.Error));
+                    + (string.IsNullOrWhiteSpace(result.Error) ? "Inbound didn't say why." : RemoteText.Failure(result.Error));
         }
         catch (Exception ex)
         {

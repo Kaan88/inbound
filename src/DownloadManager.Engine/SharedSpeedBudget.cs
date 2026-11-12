@@ -4,7 +4,7 @@ namespace DownloadManager.Core;
 
 /// <summary>
 /// The speed cap all transfers share (UI.B5). One instance given to several engines makes the cap cover them together,
-/// so HTTP and FTP downloads draw on one budget (PERF.6). Zero means no cap.
+/// so all HTTP downloads draw on one budget. Zero means no cap.
 /// </summary>
 public sealed class SharedSpeedBudget
 {

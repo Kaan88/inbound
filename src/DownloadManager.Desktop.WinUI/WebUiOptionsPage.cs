@@ -105,7 +105,7 @@ internal sealed class WebUiOptionsPage
             _loadStatus.Text,
             _tryAgain,
             // U-WL-10: in the order they are done. The box needs a password, so the password comes first.
-            SettingsWindow.Hint("A browser on another device opens an address below and signs in with the password. From there it can add, pause and remove downloads and change speed limits and queues, within the folders Inbound already uses. It can't run programs on this PC. Nothing runs while the box is off."),
+            SettingsWindow.Hint("A browser on another device opens an address below and signs in with the password. From there it can add, stop and delete downloads and change speed limits and queues, within the folders Inbound already uses. It can't run programs on this PC. Nothing runs while the box is off."),
             SettingsWindow.Section("1. Password"),
             _passwordState.Text,
             _newPassword,
@@ -424,7 +424,7 @@ internal sealed class WebUiOptionsPage
             var ticket = await _client.OpenWebUiTicketAsync(token);
             if (!ticket.Ok || !WebUiForm.IsLocalSignInUrl(ticket.Url, status.Port))
             {
-                _openResult.Say(ticket.Error ?? "The Host sent a link this window won't open.", isProblem: true);
+                _openResult.Say(ticket.Error ?? "Inbound sent a link this window won't open.", isProblem: true);
                 return;
             }
 

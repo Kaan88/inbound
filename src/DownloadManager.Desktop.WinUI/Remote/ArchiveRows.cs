@@ -179,7 +179,7 @@ internal static partial class ArchiveText
         if (paused.Count + held.Count + queued.Count < set.DownloadingVolumes.Count) return "downloading";
 
         var words = new List<string>();
-        if (paused.Count > 0) words.Add("paused");
+        if (paused.Count > 0) words.Add("stopped");
         if (held.Count > 0) words.Add("not started");
         if (queued.Count > 0) words.Add("queued");
         return string.Join(" or ", words);
@@ -319,7 +319,7 @@ internal static partial class ArchiveRules
         var jobIds = archiveFiles.Where(file => file.Set is null || CanAskFor(file.Set)).Select(file => file.JobId).ToList();
         var ownSets = listedSets.Where(CanAskFor).ToList();
 
-        var reason = !connected ? "the background Host isn't connected"
+        var reason = !connected ? "Inbound's background program isn't connected"
             : files.Count == 0 && sets.Count == 0 ? "select an archive download first"
             : archiveFiles.Count == 0 && sets.Count == 0 ? NoArchiveReason
             : jobIds.Count > 0 || ownSets.Count > 0 ? null

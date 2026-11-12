@@ -30,7 +30,7 @@ public sealed partial class HostCommandDispatcherTests
         // The notice follows the change event, so it may come a moment after the row shows the pause.
         await UntilAsync(() =>
         {
-            lock (notices) return notices.FirstOrDefault(notice => notice is { Kind: DownloadNoticeKind.Failed, Title: "Download paused" } && notice.Message.EndsWith("The disk is full"));
+            lock (notices) return notices.FirstOrDefault(notice => notice is { Kind: DownloadNoticeKind.Failed, Title: "Download stopped" } && notice.Message.EndsWith("The disk is full"));
         });
 
         Assert.True((await service.ResumeAsync(job.Id)).Ok);

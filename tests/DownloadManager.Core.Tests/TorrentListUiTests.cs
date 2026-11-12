@@ -139,14 +139,14 @@ public sealed class TorrentListUiTests
     [Fact]
     public void TheTorrentColumnsSortAndHaveRoomInTheRowTemplate()
     {
-        foreach (var key in TorrentListRules.ColumnKeys)
+        foreach (var key in ListColumnSets.TorrentColumns)
         {
             Assert.True(ListColumnSets.IsDownloadSort(key));
-            Assert.False(ListSort.StartsAscending(key));
+            Assert.Equal(key == "seedGoal", ListSort.StartsAscending(key));
         }
 
         var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", "MainWindow.Lists.cs"));
-        Assert.All(TorrentListRules.ColumnKeys, key => Assert.Contains($"\"{key}\" => ListSort.Order", source, StringComparison.Ordinal));
+        Assert.All(ListColumnSets.TorrentColumns, key => Assert.Contains($"\"{key}\" => ListSort.Order", source, StringComparison.Ordinal));
     }
 
     // Review finding 1: a sort by a torrent column must not hold where that column is hidden, nor after a restart there.
@@ -157,12 +157,12 @@ public sealed class TorrentListUiTests
     [InlineData("ratio")]
     public void ATorrentColumnsSortHoldsOnlyInTheTorrentViews(string key)
     {
-        Assert.Equal((key, true), TorrentListRules.ShownSort(key, true, TorrentRules.SidebarTag));
-        Assert.All(TorrentListRules.SubTags, tag => Assert.Equal((key, false), TorrentListRules.ShownSort(key, false, tag)));
-        Assert.Equal(("added", false), TorrentListRules.ShownSort(key, true, "all"));
-        Assert.Equal(("added", false), TorrentListRules.ShownSort(key, true, "finished"));
-        Assert.Equal(("added", false), TorrentListRules.ShownSort(key, true, "category:video"));
-        Assert.Equal(("added", false), TorrentListRules.ShownSort(key, true, null));
+        var layout = ListColumnSets.Downloads();
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: true, choices: null);
+        Assert.Equal((key, true), ListColumnSets.ShownSort(layout, key, true));
+        Assert.Equal((key, false), ListColumnSets.ShownSort(layout, key, false));
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: false, choices: null);
+        Assert.Equal(("added", false), ListColumnSets.ShownSort(layout, key, true));
     }
 
     [Theory]
@@ -173,8 +173,65 @@ public sealed class TorrentListUiTests
     [InlineData("added", true)]
     public void EveryOtherSortHoldsEverywhere(string key, bool ascending)
     {
-        Assert.Equal((key, ascending), TorrentListRules.ShownSort(key, ascending, "all"));
-        Assert.Equal((key, ascending), TorrentListRules.ShownSort(key, ascending, TorrentListRules.SeedingTag));
+        var layout = ListColumnSets.Downloads();
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: false, choices: null);
+        Assert.Equal((key, ascending), ListColumnSets.ShownSort(layout, key, ascending));
+        ListColumnSets.UseDownloadsChoices(layout, torrentView: true, choices: null);
+        Assert.Equal((key, ascending), ListColumnSets.ShownSort(layout, key, ascending));
+    }
+
+    [Fact]
+    public void TheNewTorrentCellsAreBlankForAnythingElse()
+    {
+        Assert.Equal(string.Empty, TorrentListRules.UploadedCell(Plain()));
+        Assert.Null(TorrentListRules.Uploaded(Plain()));
+        Assert.Equal(string.Empty, TorrentListRules.GoalCell(Plain(), new SeedGoal(1, 0)));
+        Assert.Null(TorrentListRules.SeedingTime(Plain(), DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void TheSeedingGoalCellSaysTheGoalThatHolds()
+    {
+        var job = Torrent();
+        Assert.Equal($"Ratio {TorrentSeedRules.Ratio(1)} or 48 hours", TorrentListRules.GoalCell(job, new SeedGoal(1, 48)));
+        Assert.Equal("2 hours", TorrentListRules.GoalCell(job, new SeedGoal(0, 2)));
+        Assert.Equal(string.Empty, TorrentListRules.GoalCell(job, SeedGoal.None));
+        job.Torrent!.SeedGoal = "never";
+        Assert.Equal("Don't seed", TorrentListRules.GoalCell(job, new SeedGoal(1, 48)));
+        job.Torrent.SeedGoal = "ratio";
+        job.Torrent.SeedGoalValue = 3;
+        Assert.Equal($"Ratio {TorrentSeedRules.Ratio(3)}", TorrentListRules.GoalCell(job, new SeedGoal(1, 48)));
+    }
+
+    [Fact]
+    public void TheSeedingTimeCellIsReadAgainOnlyWhileItShowsAndSomethingSeeds()
+    {
+        TimeSpan?[] young = [null, TimeSpan.FromMinutes(10)];
+        TimeSpan?[] old = [TimeSpan.FromMinutes(90)];
+        Assert.Equal(TimeSpan.FromSeconds(1), TorrentListRules.SeedClockInterval(true, true, young));
+        Assert.Equal(TimeSpan.FromSeconds(30), TorrentListRules.SeedClockInterval(true, true, old));
+        Assert.Equal(TimeSpan.FromSeconds(1), TorrentListRules.SeedClockInterval(true, true, [.. old, .. young]));
+        Assert.Null(TorrentListRules.SeedClockInterval(false, true, young));
+        Assert.Null(TorrentListRules.SeedClockInterval(true, false, young));
+        Assert.Null(TorrentListRules.SeedClockInterval(true, true, [null, null]));
+        Assert.Null(TorrentListRules.SeedClockInterval(true, true, []));
+    }
+
+    [Fact]
+    public void TheSeedingTimeCountsOnlyWhileItSeeds()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seeding = Torrent("completed", seeding: true);
+        seeding.Torrent!.SeedingSince = now.AddMinutes(-90);
+        Assert.Equal(TimeSpan.FromMinutes(90), TorrentListRules.SeedingTime(seeding, now));
+        seeding.Torrent.SeedingSince = now.AddMinutes(5);
+        Assert.Equal(TimeSpan.Zero, TorrentListRules.SeedingTime(seeding, now));
+        var stopped = Torrent("completed");
+        stopped.Torrent!.SeedingSince = now.AddMinutes(-90);
+        Assert.Null(TorrentListRules.SeedingTime(stopped, now));
+        var uploaded = Torrent();
+        uploaded.Torrent!.Uploaded = 3 * 1024 * 1024;
+        Assert.Equal(UiFormat.Bytes(3 * 1024 * 1024), TorrentListRules.UploadedCell(uploaded));
     }
 
     [Fact]
@@ -182,7 +239,7 @@ public sealed class TorrentListUiTests
     {
         var winUi = Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI");
         var lists = File.ReadAllText(Path.Combine(winUi, "MainWindow.Lists.cs"));
-        Assert.Contains("TorrentListRules.ShownSort(_sortKey, _sortAscending, _category)", lists, StringComparison.Ordinal);
+        Assert.Contains("ListColumnSets.ShownSort(_jobColumns, _sortKey, _sortAscending)", lists, StringComparison.Ordinal);
         Assert.Contains("var (key, ascending) = ShownSort;", lists, StringComparison.Ordinal);
         // The switch reads only the shown key and direction, never the chosen ones.
         var switchStart = lists.IndexOf("Sorted(IEnumerable<JobViewModel> rows, string key, bool ascending) => key switch", StringComparison.Ordinal);

@@ -301,9 +301,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   app's windows for browser downloads" is on, which is off by default). The Host stores it on the job
   (`JobDto.QuietWindows`) and `DownloadWindows.KeptQuiet` then opens no progress window as it starts and no finished
   window (a package with such a file opens none either); the desktop window's own completion rule and torrent file
-  choice follow it. A link that turns out to be a `.torrent` file (T10) does not open the torrent dialog then either
-  (`TorrentFileOffers.Offers` checks `KeptQuiet`): this rule wins, and the finished row keeps Open as Torrent, which
-  Show in app leads to. The app's own "Download complete" notification and its sound stay away too
+  choice follow it. The one exception is a link that turns out to be a `.torrent` file (T10): the app still opens its
+  torrent dialog for it (T10.B, owner 2026-11-12), as for any other finished `.torrent` download, when torrents are on
+  or a provider account takes them; otherwise it stays an ordinary finished file with Open as Torrent. The app's own "Download complete" notification and its sound stay away too
   (`DownloadNotices`), for a lone download and for a package with such a file: the browser shows the finish. A
   failure is still told by the app, and so is what extraction says. An older Host ignores the field and opens its
   windows as before.
@@ -459,9 +459,9 @@ configurable window but remain keyed by `(extensionId, requestId)`.
 | GET after cross-origin redirect | **Supported with scope checks** | Cookies selected per origin; auth headers dropped cross-origin |
 | Cookie-authenticated GET | **Supported** | Cookies for the original address go with it, and only to that site; not logged |
 | Basic/Bearer-auth GET | **Conditional** | Only if header is visible and user enables header transfer |
-| POST form/file upload | **Cannot be detected** | Chrome's download API does not show the method, so it is treated like any other download. If the app accepts it, Chrome's copy is gone and the app's GET may fail. Pause catching first |
+| POST form/file upload | **Cannot be detected** | Chrome's download API does not show the method, so it is treated like any other download. If the app accepts it, Chrome's copy is gone and the app's GET may fail. Pause sending first |
 | `blob:` / `data:` generated downloads | **Unsupported → Chrome** | Not addressable by the native client |
-| DRM-protected media segments | **Unsupported** | Detection only; no decryption |
+| Streaming playlists (HLS `.m3u8`, DASH `.mpd`) | **Unsupported → browser** | Stream downloading was cut in app 0.7.2. The extension leaves a playlist download in the browser ("Streaming playlists stay in the browser."); one sent to the app another way fails at once with "Streaming playlists aren't downloaded; use a video downloader." |
 | Chrome Web Store / browser-protected URLs | **Unsupported → Chrome** | Browser policy |
 | Incognito | **Unsupported → Chrome** | Session boundary; the manifest sets `"incognito": "not_allowed"` |
 | YouTube | **Unsupported → Chrome** | Chrome Web Store policy; `src/unsupported-sites.ts` |
@@ -558,4 +558,8 @@ checkbox what it shares, so it can be turned off before the first download.
   Options (This folder, Custom folder) is confirmed in the desktop app's folder dialog on Apply.
   The headless server keeps its own roots check (web-session folder limit) instead.
 - Credentials are scoped to the destination origin and dropped on cross-origin
-  redirect unless the user configured a site login for the target.
+  redirect (another host, port or scheme, so https to http too). Saved site logins follow the
+  same rule: one is sent only to the download's own origin, never on a hop that leaves it. A
+  site login saved without a scheme (`example.com`) is sent over https only, to exactly that
+  host; `*.example.com` takes in its subdomains; one saved as `http://…` may also go over http
+  (SEC.L1).

@@ -102,14 +102,17 @@ public sealed class CliSettingsCommandTests
         var stopped = await connection.AskAsync<SettingsResult>(MessageTypes.QueueAction, new QueueActionRequest { QueueId = queue.Id, Action = "stop" });
         Assert.True(stopped.Ok, stopped.Error);
         var elsewhere = await SettingsOf(connection);
-        elsewhere.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Elsewhere", QueueId = queue.Id, StartTime = "01:00", Days = "Mon" });
+        elsewhere.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Elsewhere", QueueId = queue.Id, StartTime = "01:00", Days = DateTime.Now.AddDays(3).DayOfWeek.ToString()[..3] });
         Assert.True((await connection.AskAsync<SettingsResult>(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = elsewhere })).Ok);
 
         var set = await host.RunCliAsync(null, "settings", "set", "maxconcurrent", "4");
         Assert.True(set.ExitCode == 0, set.All);
         var profile = await host.RunCliAsync(null, "profile", "add", "example.com", "2");
         Assert.True(profile.ExitCode == 0, profile.All);
-        var schedule = await host.RunCliAsync(null, "schedule", "add", queue.Id.ToString(), "22:00", "--name", "Mine");
+        // Only on a day that is neither today nor yesterday: a schedule saved inside its open window starts its queue at
+        // once (Review 2 M1), so an every-day 22:00 started it after 22:00 and the queue check below failed.
+        var day = DateTime.Now.AddDays(3).DayOfWeek.ToString()[..3];
+        var schedule = await host.RunCliAsync(null, "schedule", "add", queue.Id.ToString(), "22:00", "--days", day, "--name", "Mine");
         Assert.True(schedule.ExitCode == 0, schedule.All);
         var mine = (await SettingsOf(connection)).Schedules.Single(s => s.Name == "Mine").Id.ToString("N")[..8];
         var disabled = await host.RunCliAsync(null, "schedule", "disable", mine);
@@ -135,11 +138,16 @@ public sealed class CliSettingsCommandTests
         Assert.Contains("not started", wait.Output, StringComparison.Ordinal);
 
         var listFile = Path.Combine(host.Root, "list.json");
-        await File.WriteAllTextAsync(listFile, JobListFile.Serialize([new JobDto { Url = "ftp://user:pw@ftp.example.invalid/pub/file.iso", DestinationDirectory = host.Destination, StartMode = "later" }]));
+        // CUT.1: an older list's FTP entry is refused with the clear message, never showing its password; the rest is added.
+        await File.WriteAllTextAsync(listFile, JobListFile.Serialize([
+            new JobDto { Url = "ftp://user:pw@ftp.example.invalid/pub/file.iso", DestinationDirectory = host.Destination, StartMode = "later" },
+            new JobDto { Url = "https://example.invalid/listed.bin", DestinationDirectory = host.Destination, StartMode = "later" },
+        ]));
         var imported = await host.RunCliAsync(null, "import", listFile, "--start", "later");
-        Assert.True(imported.ExitCode == 0, imported.All);
+        Assert.Equal(1, imported.ExitCode);
+        Assert.Contains("imported 1 of 2 downloads; 1 failed: FTP addresses aren't supported.", imported.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("user:pw", imported.All, StringComparison.Ordinal);
-        Assert.Contains((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs, job => job.Url.StartsWith("ftp://", StringComparison.Ordinal));
+        Assert.DoesNotContain((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs, job => job.Url.StartsWith("ftp://", StringComparison.Ordinal));
 
         // The export goes to its file whole: written beside it and moved into place, with nothing left beside it.
         var exportFile = Path.Combine(host.Root, "export.json");

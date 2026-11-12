@@ -32,6 +32,8 @@ describe('T10: Open as Torrent on a finished .torrent download', () => {
     expect(opensAsTorrent(job({ state: 'downloading' }))).toBe(false);
     expect(opensAsTorrent(job({ fileRemovedAfterExtraction: true }))).toBe(false);
     expect(opensAsTorrent(job({ isRemote: true }))).toBe(false);
+    // Outside this session's folders the server hides the path, and refuses the download by its id too.
+    expect(opensAsTorrent(job({ finalFilePath: '' }))).toBe(false);
     expect(opensAsTorrent(null)).toBe(false);
   });
 

@@ -15,7 +15,7 @@
   async function read() {
     if (store.connection !== 'open') {
       stats = null;
-      problem = 'Live statistics unavailable while the Host is disconnected.';
+      problem = 'Live statistics are unavailable while Inbound is not connected.';
       return;
     }
     if (reading || document.visibilityState === 'hidden') return;
@@ -72,7 +72,7 @@
           { title: 'Current activity', rows: [
             ['Active', number(stats.activeCount), ''],
             ['Queued', number(stats.queuedCount), ''],
-            ['Paused', number(stats.pausedCount), ''],
+            ['Stopped', number(stats.pausedCount), ''],
           ] },
         ]
       : [],

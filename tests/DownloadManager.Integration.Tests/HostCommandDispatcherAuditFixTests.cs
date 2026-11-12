@@ -423,6 +423,7 @@ public sealed partial class HostCommandDispatcherTests
     [InlineData(" Settings ", "settings")]
     [InlineData("", null)]
     [InlineData("update-progress", null)]
+    [InlineData("updates", null)]
     [InlineData("x --job 00000000-0000-0000-0000-000000000001 --manual", null)]
     [InlineData(@"x C:\path\file.torrent", null)]
     public async Task OnlyAPageTheWindowKnowsIsOpenedForAClient(string action, string? page)

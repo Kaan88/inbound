@@ -76,7 +76,7 @@ export function parseEtaSeconds(job: JobSummary): number | null {
 }
 
 function isActive(state: string): boolean {
-  return state === "connecting" || state === "downloading" || state === "retrying" || state === "verifying" || state === "muxing";
+  return state === "connecting" || state === "downloading" || state === "retrying" || state === "verifying";
 }
 
 /** The row's words: the status (with percent), and the detail after it (rate and time left, or the failure). */

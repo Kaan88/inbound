@@ -275,63 +275,77 @@ public sealed class PersistenceStoreTests : IDisposable
         Assert.Empty(Directory.GetFiles(_paths.CorruptDirectory));
     }
 
-    /// <summary>Audit 1, N1: a stream track's checkpoint that can't be used throws, as a download checkpoint does.</summary>
+    /// <summary>
+    /// Review of 0.7.2 (correctness-1): 0.7.1 can't read the "unsupported" failure kind and sets a file it can't read
+    /// aside, but keeps one whose schema is newer than its own (1). So a job that failed that way is written with a
+    /// newer schema and every other job keeps schema 1, which 0.7.1 still loads.
+    /// </summary>
     [Fact]
-    public async Task AMediaCheckpointFromANewerBuildFailsInsteadOfReadingAsNone()
+    public async Task AJobFailedAsUnsupportedIsWrittenWithASchemaOlderBuildsKeep()
     {
-        var store = new JsonMediaCheckpointStore(_paths);
-        var id = Guid.NewGuid();
-        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "dash-video", CompletedSegments = 3, CompletedBytes = 300 });
-        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
-        var node = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
-        var key = node.Select(pair => pair.Key).Single(name => name.Equals("schemaVersion", StringComparison.OrdinalIgnoreCase));
-        node[key] = MediaCheckpoint.CurrentSchemaVersion + 1;
-        await File.WriteAllTextAsync(path, node.ToJsonString());
+        const int SchemaOf071 = 1;
+        var store = new JsonJobStore(_paths);
+        var plain = NewJob();
+        plain.Failure = new JobFailure(FailureKind.Timeout, "slow", true, false, DateTimeOffset.UtcNow);
+        var cut = NewJob();
+        cut.Url = "https://example.test/live/master.m3u8";
+        cut.State = DownloadState.Failed;
+        cut.Failure = StreamManifestHint.NotDownloadedFailure();
+        Assert.Equal(FailureKind.Unsupported, cut.Failure.Kind);
+        await store.SaveAsync(plain);
+        await store.SaveAsync(cut);
 
-        var error = await Assert.ThrowsAsync<CheckpointTooNewException>(() => store.LoadAsync(id, "dash-video"));
-        Assert.IsAssignableFrom<CheckpointUnusableException>(error);
-        Assert.True(File.Exists(path));
-    }
-
-    [Theory]
-    [InlineData("{ \"jobId\": ")]
-    [InlineData("not json at all")]
-    [InlineData("null")]
-    public async Task ADamagedMediaCheckpointFailsInsteadOfReadingAsNone(string content)
-    {
-        var store = new JsonMediaCheckpointStore(_paths);
-        var id = Guid.NewGuid();
-        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "hls" });
-        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
-        await File.WriteAllTextAsync(path, content);
-
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.ThrowsAsync<CheckpointDamagedException>(() => store.LoadAsync(id, "hls"));
-        watch.Stop();
-        Assert.True(watch.ElapsedMilliseconds < 500, $"took {watch.ElapsedMilliseconds} ms; a damaged checkpoint was retried");
-        Assert.Equal(content, await File.ReadAllTextAsync(path));
-    }
-
-    [Fact]
-    public async Task AHeldMediaCheckpointIsReadAgainAndThrowsWhenStillHeld()
-    {
-        var store = new JsonMediaCheckpointStore(_paths);
-        var id = Guid.NewGuid();
-        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "hls", CompletedSegments = 2, CompletedBytes = 20 });
-        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
-
-        // Held throughout: not none, which would truncate the track.
-        await using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        int SchemaOf(Guid id)
         {
-            var error = await Assert.ThrowsAnyAsync<IOException>(() => store.LoadAsync(id, "hls"));
-            Assert.IsNotAssignableFrom<CheckpointUnusableException>(error);
+            using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(_paths.JobsDirectory, $"{id:N}.json")));
+            return document.RootElement.EnumerateObject().Single(p => p.Name.Equals("schemaVersion", StringComparison.OrdinalIgnoreCase)).Value.GetInt32();
         }
 
-        // Let go during the retries: read.
-        var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
-        var release = Task.Delay(150).ContinueWith(_ => holder.Dispose());
-        var loaded = await store.LoadAsync(id, "hls");
-        await release;
-        Assert.Equal(2, loaded!.CompletedSegments);
+        Assert.Equal(SchemaOf071, SchemaOf(plain.Id));
+        Assert.True(SchemaOf(cut.Id) > SchemaOf071, "0.7.1 must keep this file rather than set it aside as unreadable");
+
+        // This build reads both back.
+        var loaded = await store.LoadAllAsync();
+        Assert.Equal(2, loaded.Count);
+        Assert.Equal(FailureKind.Unsupported, loaded.Single(job => job.Id == cut.Id).Failure!.Kind);
+
+        // Once it is retried and fails some other way, it goes back to schema 1.
+        cut.Failure = new JobFailure(FailureKind.Timeout, "slow", true, false, DateTimeOffset.UtcNow);
+        await store.SaveAsync(cut);
+        Assert.Equal(SchemaOf071, SchemaOf(cut.Id));
+    }
+
+    /// <summary>
+    /// CUT.1: stream downloading was cut in 0.7.2. An older build's fragment checkpoints are removed at start, and its
+    /// stream job file and an ffmpegPath in the settings still load; the path is dropped at the next save.
+    /// </summary>
+    [Fact]
+    public async Task AnOlderStreamDownloadsStateStillLoadsAndItsCheckpointsGo()
+    {
+        var retired = Path.Combine(_root, "media-checkpoints");
+        Directory.CreateDirectory(retired);
+        await File.WriteAllTextAsync(Path.Combine(retired, Guid.NewGuid().ToString("N") + "-hls.json"), "{\"completedSegments\": 2}");
+
+        var jobs = new JsonJobStore(_paths);
+        var job = NewJob();
+        job.Url = "https://example.test/live/master.m3u8";
+        job.FileName = "master.mp4";
+        job.HandoffContentType = "application/vnd.apple.mpegurl";
+        await jobs.SaveAsync(job);
+        await jobs.InitializeAsync();
+
+        Assert.False(Directory.Exists(retired));
+        var loaded = Assert.Single(await jobs.LoadAllAsync());
+        Assert.True(StreamManifestHint.IsHls(loaded));
+
+        var settings = new JsonSettingsStore(_paths);
+        await settings.SaveAsync(new AppSettings());
+        var node = JsonNode.Parse(await File.ReadAllTextAsync(_paths.SettingsFile))!.AsObject();
+        node["ffmpegPath"] = @"C:\Tools\ffmpeg.exe";
+        await File.WriteAllTextAsync(_paths.SettingsFile, node.ToJsonString());
+
+        var read = await settings.LoadAsync();
+        await settings.SaveAsync(read);
+        Assert.DoesNotContain("ffmpeg", await File.ReadAllTextAsync(_paths.SettingsFile), StringComparison.OrdinalIgnoreCase);
     }
 }

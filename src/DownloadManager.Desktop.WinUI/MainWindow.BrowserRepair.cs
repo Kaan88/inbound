@@ -35,7 +35,7 @@ public sealed partial class MainWindow
             Title = title,
             Content = new TextBlock
             {
-                Text = $"The background Host says: {_status?.BrowserIntegration}.\n\nRepair registers Inbound with Chrome, Edge and Firefox again, so the extension can reach it. A registration that belongs to another program isn't replaced.",
+                Text = $"Inbound's background program says: {_status?.BrowserIntegration}.\n\nRepair registers Inbound with Chrome, Edge and Firefox again, so the extension can reach it. A registration that belongs to another program isn't replaced.",
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Repair",

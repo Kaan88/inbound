@@ -3,6 +3,8 @@
   import Dialog from '../components/Dialog.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
+  import ExtensionLinks from '../components/ExtensionLinks.svelte';
+  import { pairedExtensionsLine } from '../lib/extensionLinks';
   import { dateTime } from '../lib/format';
   import { newUuid } from '../lib/ids';
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
@@ -207,7 +209,7 @@
         page = 'extraction';
         return false;
       }
-      store.toast('Settings saved.');
+      store.toast('Options saved.');
       return true;
     } finally {
       saving = false;
@@ -349,6 +351,18 @@
   $effect(() => {
     if (page === 'signin') void loadSignIn();
   });
+  // UI.R41, review: General's Browser extension section says whether an extension is paired. Quietly: without the list
+  // the section shows the links alone.
+  $effect(() => {
+    if (page === 'general') void loadPairedQuietly();
+  });
+  async function loadPairedQuietly() {
+    try {
+      tokens = (await json<{ tokens: typeof tokens }>('/api/auth/tokens')).tokens;
+    } catch {
+      // No list, no line.
+    }
+  }
 
   async function changePassword() {
     try {
@@ -441,9 +455,11 @@
           </select>
           <p class="hint mt-1">This browser only.</p>
         </div>
-        {@render section('Capturing downloads')}
+        {@render section('Browser downloads')}
         <label class="flex items-center gap-2 text-[13px] {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.browserIntegration} disabled={pcOnly} /> {captureLabel(store.model.hello?.hostKind)}</label>
         {#if pcOnly}<p class="hint flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
+        {@render section('Browser extension')}
+        <ExtensionLinks hostKind={store.model.hello?.hostKind} paired={pairedExtensionsLine(tokens)} />
       </div>
     {:else if page === 'saveto'}
       <h1 class="mb-3 text-[18px] font-semibold">Save to</h1>
@@ -577,7 +593,7 @@
       </fieldset>
     {:else if page === 'logins'}
       <h1 class="mb-3 text-[18px] font-semibold">Site logins</h1>
-      <p class="hint mb-3 max-w-xl">Credentials are sealed on the server and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.</p>
+      <p class="hint mb-3 max-w-xl">Credentials are sealed on the server and used for matching downloads. Re-enter the password when changing a saved site's address or user name. A login without http:// is sent over https only. Write *.example.com to include its subdomains.</p>
       {#if pcOnly}<p class="card mb-3 flex max-w-xl items-start gap-2 bg-highlight p-3 text-[13px]"><Icon name="lock" size={15} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
       <fieldset class="contents" disabled={pcOnly}>
       <div class="grid max-w-xl gap-3">
@@ -676,7 +692,6 @@
           {store.texts.updatesNote}</p>
       </div>
       <dl class="grid max-w-xl grid-cols-[minmax(150px,auto)_1fr] gap-x-4 gap-y-2 text-[13px]">
-        <dt class="text-muted">FFmpeg</dt><dd class="break-all font-mono text-[12px]">{store.model.settings?.ffmpegPath || '(found on PATH)'}</dd>
         <dt class="text-muted">Shut down or sleep when done</dt><dd>{store.model.settings?.allowSystemCompletionActions ? 'Allowed' : 'Not allowed'}</dd>
       </dl>
     {:else if page === 'extraction'}
@@ -752,16 +767,21 @@
       {/if}
 
       <h2 class="mb-2 text-[15px] font-semibold">Paired apps</h2>
-      <p class="hint mb-3">A browser extension can send downloads here and pause, resume or delete them. It can't see your settings or logins. A desktop app can do everything a signed-in browser can, settings and logins included. Remove any you don't know.</p>
+      <p class="hint mb-3">A browser extension can send downloads here and stop, resume or delete them. It can't see your settings or logins. A desktop app can do everything a signed-in browser can, settings and logins included. Remove any you don't know.</p>
       {#if pairing}
         <div class="card mb-3 p-4 text-center">
-          <p class="mb-1 text-[13px]">In the extension's settings, choose this server and enter:</p>
+          <p class="mb-1 text-[13px]">In the extension's Options, choose this server and enter:</p>
           <p class="my-2 font-mono text-[28px] font-semibold tracking-[0.25em]" aria-label="Pairing code">{pairing.code.slice(0, 4)}&thinsp;{pairing.code.slice(4)}</p>
           <p class="hint">Works once, for {Math.floor(pairLeft / 60)}:{String(pairLeft % 60).padStart(2, '0')} more.</p>
           <button class="btn mt-2" onclick={() => { pairing = null; void fetch('/api/auth/pairing/code', { method: 'DELETE', credentials: 'same-origin' }); void loadSignIn(); }}>Done</button>
         </div>
       {:else}
         <button class="btn mb-3" onclick={pair}><Icon name="plug" size={15} class="text-icon-info" /> Pair a browser</button>
+        <!-- UI.R41: no extension yet? Where to get it, before pairing. -->
+        <details class="mb-3 max-w-xl text-[13px]">
+          <summary class="cursor-pointer text-muted">Don't have the extension yet?</summary>
+          <div class="mt-2"><ExtensionLinks hostKind={store.model.hello?.hostKind} /></div>
+        </details>
       {/if}
       <ul class="card divide-y divide-divider">
         {#each tokens as token (token.id)}

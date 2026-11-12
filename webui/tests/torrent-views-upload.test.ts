@@ -109,7 +109,7 @@ describe('T7: the extra torrent views', () => {
       expect(parseViewKey(key)).toBe(key);
       expect(isTorrentView(key)).toBe(true);
     }
-    expect(torrentExtraViews.map((view) => view.label)).toEqual(['Active', 'Stalled', 'Checking', 'Waiting for files', 'Completed', 'Errored']);
+    expect(torrentExtraViews.map((view) => view.label)).toEqual(['Active', 'Stalled', 'Checking', 'Waiting for files', 'Completed', 'Failed']);
   });
 
   it('are chips on a phone too, under the same rule as the sidebar', () => {

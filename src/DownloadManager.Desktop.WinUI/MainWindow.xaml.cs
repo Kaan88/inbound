@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -64,6 +65,7 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+        if (!WhatsNewApplies) WhatsNewMenuItem.Visibility = Visibility.Collapsed;
         // The progress, package and completion windows open on this window's screen (U-WL-4).
         WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
@@ -169,7 +171,7 @@ public sealed partial class MainWindow : Window
 
             // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
-            else AppWindow.Resize(new SizeInt32 { Width = width, Height = height });
+            else WindowLayout.ResizeRemembered(this, width, height);
             WindowPlacement.Track(this, "main");
             var icon = WindowLayout.AppIconPath;
             if (File.Exists(icon))
@@ -401,6 +403,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void UpdateSpeedTimer()
     {
+        // UI.R42: the Seeding time cells follow the same moments (a job's update, the window shown or hidden).
+        UpdateSeedClock();
         var shown = WindowShown;
         var graphSeen = shown && SpeedGraph.Visibility == Visibility.Visible;
         var cameBack = graphSeen && !SpeedGraph.IsSeen;
@@ -485,12 +489,17 @@ public sealed partial class MainWindow : Window
         UpdateStatusText();
         UpdateSpeedTimer();
         TraceFirstList(snapshot.Jobs.Count);
+        // UPD.N1: once per window start, after this PC's first snapshot.
+        if (!_connection.IsRemote && !_whatsNewDecided) MaybeOpenWhatsNewAtStart();
+        UpdateExtensionHint(snapshot.Jobs.Any(job => ExtensionPromoRules.FromBrowser(job.Source)));
 
         if (_pendingSettingsOpen)
         {
             _pendingSettingsOpen = false;
             _ = OpenOptionsAsync();
         }
+
+        OpenPendingUpdatesDialog();
 
         if (_pendingTorrentOpen)
         {
@@ -523,6 +532,8 @@ public sealed partial class MainWindow : Window
     private void ApplyJobEvent(JobDto job, string changeType)
     {
         if (_connection.IsRemote && changeType != "completed") _remoteCompletions.Saw(job.Id, job.State);
+        // UI.R41: the first download the extension sends puts the hint away for good.
+        if (ExtensionHintBar.IsOpen && changeType != "removed" && ExtensionPromoRules.FromBrowser(job.Source)) UpdateExtensionHint(true);
         if (changeType == "removed")
         {
             if (_jobsById.Remove(job.Id, out var removed))
@@ -633,7 +644,7 @@ public sealed partial class MainWindow : Window
         UpdateSpeedTimer();
         var target = _connection.Target;
         ShowConnectionWords(target.IsLocal
-            ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
+            ? connected ? "Connected" : $"Not connected{(error is null ? string.Empty : $": {error}")}"
             : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}");
         NoteShownConnection(connected, error);
         OnTorrentControlsConnection(connected);
@@ -697,7 +708,7 @@ public sealed partial class MainWindow : Window
         var sideRows = rows.Count(row => row.IsSideRow && !row.IsTorrentFile);
         var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
         DeleteButton.IsEnabled = connected && (selection.Count > 0 || removableSideRows > 0);
-        var deleteToolTip = FirstLocalRow is null && sideRows > 0 ? "Remove the selected rows from the list" : "Delete the selected download and its partial data";
+        var deleteToolTip = FirstLocalRow is null && sideRows > 0 ? "Delete the selected rows from the list" : "Delete the selected download and its partial data";
         if (deleteToolTip != _deleteToolTip) ToolTipService.SetToolTip(DeleteButton, _deleteToolTip = deleteToolTip);
         SyncFileMenu(sideRows, removableSideRows);
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
@@ -720,8 +731,8 @@ public sealed partial class MainWindow : Window
         Apply(FileMoveRenameItem, "Move/Rename…", FileMenuRules.ForTorrent(plan.OpenReason, torrent));
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
-        Apply(FileDownloadNowItem, "Download Now", plan.LocalReason, rows.Any(row => row.CanResume));
-        Apply(FileStopItem, "Stop Download", plan.LocalReason, rows.Any(row => row.CanPause));
+        Apply(FileDownloadNowItem, "Resume", plan.LocalReason, rows.Any(row => row.CanResume));
+        Apply(FileStopItem, "Stop", plan.LocalReason, rows.Any(row => row.CanPause));
         Apply(FileRedownloadItem, "Redownload", FileMenuRules.ForTorrent(plan.FileReason, torrent));
         Apply(FileDeleteItem, "Delete…", plan.RemoveReason);
         var chooseFiles = CanChooseTorrentFiles ? Visibility.Visible : Visibility.Collapsed;
@@ -779,8 +790,15 @@ public sealed partial class MainWindow : Window
             else
             {
                 var version = VersionStatus.ThisPc(host, _status?.LatestVersion);
-                ShowConnectionWords("Host connected" + (version.Text.Length == 0 ? string.Empty : $" · {version.Text}"),
-                    version.UpdateLink, ShellWords.BrowserIntegration(_status?.BrowserIntegration));
+                var integration = ShellWords.BrowserIntegration(_status?.BrowserIntegration);
+                // UPD.N1: the version is a link to What's new; with an update waiting, the update is the link instead.
+                _versionLinkUpdates = version.UpdateLink is not null;
+                if (version.UpdateLink is not null)
+                    ShowConnectionWords($"Connected · {version.Text}", version.UpdateLink, integration);
+                else if (WhatsNewApplies && version.Text.Length > 0)
+                    ShowConnectionWords("Connected", version.Text, integration);
+                else
+                    ShowConnectionWords("Connected" + (version.Text.Length == 0 ? string.Empty : $" · {version.Text}"), null, integration);
             }
         }
         RefreshTasksServerNote();
@@ -1515,7 +1533,7 @@ public sealed partial class MainWindow : Window
             Content = new TextBlock
             {
                 Text = (packages.Count == 1 ? $"Cancel the unfinished files in '{packages[0].FileName}'?" : "Cancel the unfinished files in these packages?") +
-                       " Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
+                       " Completed files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Cancel package",
@@ -1878,7 +1896,7 @@ public sealed partial class MainWindow : Window
         StopQueueButton.IsEnabled = connected && target is not null && QueueCommands.CanStop(target);
         var startTip = target is null ? "Start the selected queue" : $"Start the {target.Name} queue ({QueueCommands.State(target, jobs)})";
         if (startTip != _startQueueToolTip) ToolTipService.SetToolTip(StartQueueButton, _startQueueToolTip = startTip);
-        var stopTip = target is null ? "Stop the selected queue and pause its downloads" : $"Stop the {target.Name} queue and pause its downloads";
+        var stopTip = target is null ? "Stop the selected queue and its downloads" : $"Stop the {target.Name} queue and its downloads";
         if (stopTip != _stopQueueToolTip) ToolTipService.SetToolTip(StopQueueButton, _stopQueueToolTip = stopTip);
     }
 
@@ -1989,7 +2007,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        OpenProgressWindow(ProgressWindowKind.Package, packageId, _connection.Target);
+        OpenProgressWindow(ProgressWindowKind.Package, packageId, _connection.Target, this);
     }
 
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
@@ -2352,8 +2370,15 @@ public sealed partial class MainWindow : Window
 
         foreach (var entry in entries.Where(entry => !JobListFile.IsTorrent(entry)))
         {
+            if (FtpAddresses.IsFtp(entry.Url))
+            {
+                failed++;
+                firstError ??= FtpAddresses.NotSupported;
+                continue;
+            }
+
             if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
-                uri.Scheme is not ("http" or "https" or "ftp"))
+                uri.Scheme is not ("http" or "https"))
             {
                 failed++;
                 firstError ??= $"Invalid URL: {entry.Url}";
@@ -2494,7 +2519,7 @@ public sealed partial class MainWindow : Window
                 Text = TorrentSeedRules.DeleteCompletedText(completedRows.Select(j => j.Dto ?? new JobDto { State = "completed" }).ToList()),
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Remove from list",
+            PrimaryButtonText = "Delete",
             PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -2524,7 +2549,7 @@ public sealed partial class MainWindow : Window
     {
         var known = _status?.OrphanPartFiles ?? new List<string>();
         var text = known.Count == 0
-            ? "No leftover partial files were found at the last scan. The host rescans before cleaning."
+            ? "No leftover partial files were found at the last scan. Inbound looks again before cleaning."
             : $"{known.Count} partial file(s) are not attached to any download:\n" +
               string.Join("\n", known.Take(8)) + (known.Count > 8 ? "\n..." : string.Empty);
         // UI.R31: nothing found at the last scan offers nothing to do: a success bar and Close.
@@ -2828,138 +2853,6 @@ public sealed partial class MainWindow : Window
 
     private void ApplyTitleBarTheme(bool dark) => WindowLayout.ApplyTitleBar(this, dark);
 
-    private async void MenuUpdate_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var check = (await _local.CheckForUpdatesAsync())
-                .GetPayload<UpdateCheckResult>();
-            if (check.Status == "notInstalled")
-            {
-                await ShowMessageAsync("Check for updates",
-                    "This portable/development build does not auto-update. Install with the installer build to enable updates.");
-                return;
-            }
-
-            if (check.Status == "notConfigured")
-            {
-                await ShowMessageAsync("Check for updates",
-                    check.Error ?? "Update settings are not configured.");
-                return;
-            }
-
-            if (!check.Ok)
-            {
-                await ShowMessageAsync("Check for updates", check.Error ?? "The update check failed.");
-                return;
-            }
-
-            if (check.Status != "updateAvailable")
-            {
-                await ShowMessageAsync("Check for updates",
-                    $"You are up to date (installed {check.InstalledVersion}, latest {check.AvailableVersion}).");
-                return;
-            }
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = Content.XamlRoot,
-                RequestedTheme = RootGrid.ActualTheme,
-                Title = "Update available",
-                Content = new TextBlock
-                {
-                    // Review 5:U1b: the list's size format, not a byte count.
-                    Text = $"Installed: {check.InstalledVersion}\nAvailable: {check.AvailableVersion}" +
-                           (check.Size is > 0 and var size ? $" ({UiFormat.Bytes(size)})" : string.Empty) +
-                           "\n\nDownload the update and check it now?",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "Download",
-                CloseButtonText = "Later",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            var updateChoice = await DialogGuard.ShowAsync(dialog);
-            // Refused because another dialog is open: nothing was asked, so nothing is deferred either.
-            if (updateChoice is null) return;
-            if (updateChoice != ContentDialogResult.Primary)
-            {
-                await _local.DeferUpdateAsync(check.AvailableVersion!);
-                return;
-            }
-
-            var download = (await _local.DownloadUpdateAsync())
-                .GetPayload<UpdateDownloadResult>();
-            if (!download.Ok)
-            {
-                await ShowMessageAsync("Update download", download.Error ?? "The download failed.");
-                return;
-            }
-
-            var installDialog = new ContentDialog
-            {
-                XamlRoot = Content.XamlRoot,
-                RequestedTheme = RootGrid.ActualTheme,
-                Title = "Install update now?",
-                Content = new TextBlock
-                {
-                    // Review 5:U1b: no path or "Host" in the question; the installer's place is in the tooltip.
-                    Text = "The update is downloaded and checked.\n\n" +
-                           "Inbound stops for a moment, installs it and starts again.",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "Install now",
-                CloseButtonText = "Later",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            if (!string.IsNullOrWhiteSpace(download.Path)) ToolTipService.SetToolTip((TextBlock)installDialog.Content, $"Installer: {download.Path}");
-            var installChoice = await DialogGuard.ShowAsync(installDialog);
-            // Refused because another dialog is open: nothing was asked, so nothing is deferred either. The installer
-            // stays downloaded, and Check for updates offers it again.
-            if (installChoice is null) return;
-            if (installChoice != ContentDialogResult.Primary)
-            {
-                await _local.DeferUpdateAsync(check.AvailableVersion!);
-                return;
-            }
-
-            var install = (await _local.InstallUpdateAsync())
-                .GetPayload<UpdateInstallResult>();
-            if (!install.Ok && install.Status == "busy")
-            {
-                var forceDialog = new ContentDialog
-                {
-                    XamlRoot = Content.XamlRoot,
-                    RequestedTheme = RootGrid.ActualTheme,
-                    Title = "Downloads are active",
-                    Content = new TextBlock
-                    {
-                        Text = install.Error ?? "Active downloads would be interrupted.",
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                    PrimaryButtonText = "Install anyway",
-                    CloseButtonText = "Wait",
-                    DefaultButton = ContentDialogButton.Close,
-                };
-                if (await DialogGuard.ShowAsync(forceDialog) != ContentDialogResult.Primary)
-                {
-                    return;
-                }
-
-                install = (await _local.InstallUpdateAsync(force: true))
-                    .GetPayload<UpdateInstallResult>();
-            }
-
-            await ShowMessageAsync("Install update",
-                install.Ok
-                    ? $"Update {install.Version} scheduled. Inbound is restarting."
-                    : install.Error ?? "The update could not be scheduled.");
-        }
-        catch (Exception ex)
-        {
-            await ShowMessageAsync("Check for updates", ex.Message);
-        }
-    }
-
     private async void MenuAbout_Click(object sender, RoutedEventArgs e)
     {
         var version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
@@ -3022,7 +2915,7 @@ public sealed partial class MainWindow : Window
         var directory = _connection.IsRemote ? _localStatus?.StateDirectory : _status?.StateDirectory;
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
-            _ = ShowMessageAsync("Diagnostics", "The host state directory is not available yet.");
+            _ = ShowMessageAsync("Diagnostics", "The diagnostics folder is not available yet.");
             return;
         }
 
@@ -3033,601 +2926,6 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _ = ShowMessageAsync("Diagnostics", ex.Message);
-        }
-    }
-
-    private async void AddButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_settings is null)
-        {
-            return;
-        }
-
-        await RefreshSettingsAsync();
-        var providerAdd = await ProviderAddAppliesAsync();
-        var urlBox = new ComboBox
-        {
-            Header = "URL",
-            PlaceholderText = "https://example.com/file.zip",
-            IsEditable = true,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        // U-WL-21: an editable box draws its placeholder in the text color, so it read as a typed address.
-        DimPlaceholder(urlBox, RootGrid.ActualTheme);
-        foreach (var recent in _settings.RecentUrls.Take(20))
-        {
-            urlBox.Items.Add(recent);
-        }
-        // UI.R18: a very long link would make the list as wide as the screen. Cut it short; the tooltip has it all.
-        urlBox.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(
-            "<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
-            "<TextBlock Text='{Binding}' MaxWidth='560' TextTrimming='CharacterEllipsis' ToolTipService.ToolTip='{Binding}' /></DataTemplate>");
-        // With no recent addresses the list would open as an empty strip over the dialog.
-        urlBox.DropDownOpened += (_, _) => { if (urlBox.Items.Count == 0) urlBox.IsDropDownOpen = false; };
-        // Like other download managers, start from a link already on the clipboard.
-        try
-        {
-            var clip = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-            if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-            {
-                var text = (await clip.GetTextAsync()).Trim();
-                if (text.Length < 4096 && Uri.TryCreate(text, UriKind.Absolute, out var clipUri) &&
-                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp ||
-                     ((providerAdd || LocalTorrentsApply) && LinkExtractor.IsMagnet(text))))
-                    urlBox.Text = text;
-            }
-        }
-        catch (Exception)
-        {
-            // Clipboard access is best-effort.
-        }
-        var addressError = new StatusLine("Address error");
-        var addressPanel = new StackPanel { Spacing = 8, MinWidth = 460 };
-        addressPanel.Children.Add(urlBox);
-        addressPanel.Children.Add(addressError.Text);
-        if (!providerAdd) AddUnreadableKeyNotice(addressPanel);
-        var addressDialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            RequestedTheme = RootGrid.ActualTheme,
-            Title = ServerNames.ForWindow("Enter new address to download", _connection.Target),
-            Content = addressPanel,
-            PrimaryButtonText = "Next",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-
-        // An editable ComboBox keeps Escape for itself, even with its list closed.
-        urlBox.PreviewKeyDown += (_, args) =>
-        {
-            if (args.Key != Windows.System.VirtualKey.Escape || urlBox.IsDropDownOpen) return;
-            args.Handled = true;
-            addressDialog.Hide();
-        };
-        string url;
-        RemoteClassifyResult? addressResult = null;
-        string? addressNote = null;
-        if (providerAdd)
-        {
-            var checkedAddress = await CheckAddressAsync(addressDialog, urlBox, addressError, addressPanel);
-            switch (checkedAddress.Way)
-            {
-                case AddressWay.Cancelled:
-                    return;
-                case AddressWay.Provider when LocalTorrentsApply && TorrentRules.IsTorrentInput(checkedAddress.Input):
-                    // T1: the torrent dialog, whose lines can still go to the provider.
-                    await AddTorrentsAsync("mixed", [checkedAddress.Input.Trim()]);
-                    return;
-                case AddressWay.Provider:
-                    await ShowProviderAddAsync(AddFocus.OneAddress, [checkedAddress.Input], checkedAddress.Result);
-                    return;
-            }
-
-            url = checkedAddress.Input;
-            addressResult = checkedAddress.Result;
-            addressNote = checkedAddress.Result?.Note;
-            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
-            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
-            {
-                await ShowProviderAddAsync(AddFocus.Links, numbered);
-                return;
-            }
-        }
-        else
-        {
-            addressDialog.PrimaryButtonClick += (_, args) =>
-            {
-                // T1: a magnet or .torrent file goes on to the torrent dialog. With torrents off there it asks whether to open
-                // Options; a Host without torrents keeps the box open.
-                if (TorrentRules.IsTorrentInput(urlBox.Text))
-                {
-                    if (LocalTorrentsApply || _remote.State.TorrentsOffered) return;
-                    addressError.Say("This Host doesn't download torrents.", isProblem: true);
-                    args.Cancel = true;
-                    return;
-                }
-
-                if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
-                    candidate.Scheme is not ("http" or "https" or "ftp"))
-                {
-                    addressError.Say("Enter an absolute http, https or ftp URL.", isProblem: true);
-                    args.Cancel = true;
-                }
-            };
-            if (await DialogGuard.ShowAsync(addressDialog) != ContentDialogResult.Primary) return;
-            url = urlBox.Text.Trim();
-            if (TorrentRules.IsTorrentInput(url))
-            {
-                await AddTorrentsAsync("mixed", [url]);
-                return;
-            }
-            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
-            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
-            {
-                await ShowAddLinksAsync(numbered);
-                return;
-            }
-        }
-
-        // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
-        var urlDisplay = new TextBox { Header = addressResult?.Kind == "providerDirectLink" ? "Site" : "URL", Text = RemoteText.AddressToShow(url, addressResult), IsReadOnly = true };
-        var nameBox = new TextBox
-        {
-            Header = "File name (optional)",
-            PlaceholderText = "Resolved from the URL or server",
-        };
-        var destinationBox = new TextBox
-        {
-            Text = _settings.DefaultDownloadDirectory,
-        };
-        var browseDestination = new Button
-        {
-            Content = "Browse…",
-            VerticalAlignment = VerticalAlignment.Bottom,
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(destinationBox, "Destination folder");
-        var destinationPickerError = new TextBlock
-        {
-            Visibility = Visibility.Collapsed,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
-        };
-        browseDestination.Click += async (_, _) =>
-        {
-            browseDestination.IsEnabled = false;
-            destinationPickerError.Text = string.Empty;
-            destinationPickerError.Visibility = Visibility.Collapsed;
-            try
-            {
-                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder)
-                    destinationBox.Text = folder;
-            }
-            catch (Exception ex)
-            {
-                destinationPickerError.Text = $"Could not open the folder picker: {ex.Message}";
-                destinationPickerError.Visibility = Visibility.Visible;
-            }
-            finally
-            {
-                browseDestination.IsEnabled = true;
-            }
-        };
-        var destinationRow = new Grid { ColumnSpacing = 8 };
-        destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(browseDestination, 1);
-        destinationRow.Children.Add(destinationBox);
-        destinationRow.Children.Add(browseDestination);
-        long? knownSize = null;
-        var destinationField = FolderChooser.Attach(destinationRow, destinationBox, () => knownSize, out var refreshSpace);
-        var descriptionBox = new TextBox { Header = "Description (optional)" };
-        var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
-        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (file extension)" });
-        foreach (var category in FileCategories.Names.Append("other"))
-            categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(category[0]) + category[1..], Tag = category });
-        foreach (var category in _settings.CustomCategories)
-            categoryBox.Items.Add(new ComboBoxItem { Content = category.Name, Tag = category.Id });
-        categoryBox.SelectedIndex = 0;
-        var changingDestination = false;
-        var customDestination = false;
-        void UseCategoryFolder(bool force = false)
-        {
-            if (customDestination && !force) return;
-            var fileName = string.IsNullOrWhiteSpace(nameBox.Text) ? Uri.UnescapeDataString(new Uri(url).AbsolutePath) : nameBox.Text;
-            var category = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string
-                ?? FileCategories.For(fileName, _settings.CustomCategories);
-            var folder = _settings.UseCategoryFolders ? _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory : null;
-            if (_settings.UseCategoryFolders && string.IsNullOrWhiteSpace(folder)) _settings.CategoryFolders.TryGetValue(category, out folder);
-            changingDestination = true;
-            destinationBox.Text = string.IsNullOrWhiteSpace(folder) ? _settings.DefaultDownloadDirectory : folder;
-            changingDestination = false;
-            customDestination = false;
-        }
-        destinationBox.TextChanged += (_, _) => { if (!changingDestination) customDestination = true; };
-        nameBox.TextChanged += (_, _) => UseCategoryFolder();
-        categoryBox.SelectionChanged += (_, _) => UseCategoryFolder(force: true);
-        UseCategoryFolder();
-        var categoryName = new TextBox { Header = "New category name" };
-        var categoryExtensions = new TextBox { Header = "File extensions (optional)", PlaceholderText = "zip 7z rar" };
-        var categoryError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        ContentDialog? fileInfoDialog = null;
-        var createCategory = new Button { Content = "Create category" };
-        createCategory.Click += async (_, _) =>
-        {
-            createCategory.IsEnabled = false;
-            if (fileInfoDialog is not null) fileInfoDialog.IsPrimaryButtonEnabled = fileInfoDialog.IsSecondaryButtonEnabled = false;
-            categoryError.Visibility = Visibility.Collapsed;
-            try
-            {
-                var current = await _connection.RefreshAsync();
-                var updated = CloneSettings(current.Settings);
-                var category = new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = categoryName.Text.Trim(),
-                    DestinationDirectory = destinationBox.Text.Trim(),
-                    Extensions = categoryExtensions.Text.Split([' ', ',', ';', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList() };
-                updated.CustomCategories.Add(category);
-                var reply = await _connection.UpdateSettingsAsync(updated);
-                var result = reply.GetPayload<SettingsResult>();
-                if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Could not create category.");
-                _settings = result.Settings;
-                UpdateLimitButtons();
-                RefreshCustomCategories();
-                var option = new ComboBoxItem { Content = category.Name, Tag = category.Id };
-                categoryBox.Items.Add(option);
-                categoryBox.SelectedItem = option;
-                categoryName.Text = categoryExtensions.Text = string.Empty;
-            }
-            catch (Exception ex)
-            {
-                categoryError.Text = ex.Message;
-                categoryError.Visibility = Visibility.Visible;
-            }
-            finally
-            {
-                createCategory.IsEnabled = true;
-                if (fileInfoDialog is not null) fileInfoDialog.IsPrimaryButtonEnabled = fileInfoDialog.IsSecondaryButtonEnabled = true;
-            }
-        };
-        var categoryPanel = new StackPanel { Spacing = 8 };
-        categoryPanel.Children.Add(categoryName);
-        categoryPanel.Children.Add(categoryExtensions);
-        categoryPanel.Children.Add(new TextBlock { Text = "Create a saved category using the destination folder above. Matching extensions apply to future downloads; leave blank for manual selection. Creating it saves immediately, even if this download is cancelled.", TextWrapping = TextWrapping.Wrap });
-        categoryPanel.Children.Add(createCategory);
-        categoryPanel.Children.Add(categoryError);
-        var useAuthentication = new CheckBox { Content = "Use a user name and password for this download" };
-        var authenticationUser = new TextBox { Header = "User name", IsEnabled = false };
-        var authenticationPassword = new PasswordBox { Header = "Password", IsEnabled = false };
-        useAuthentication.Checked += (_, _) => authenticationUser.IsEnabled = authenticationPassword.IsEnabled = true;
-        useAuthentication.Unchecked += (_, _) => authenticationUser.IsEnabled = authenticationPassword.IsEnabled = false;
-        var authenticationPanel = new StackPanel { Spacing = 8 };
-        authenticationPanel.Children.Add(useAuthentication);
-        authenticationPanel.Children.Add(authenticationUser);
-        authenticationPanel.Children.Add(authenticationPassword);
-        authenticationPanel.Children.Add(new TextBlock { Text = $"HTTP Basic authentication. Credentials apply only to this download and are {PlatformText.ProtectedBy} when saved.", TextWrapping = TextWrapping.Wrap });
-        var authenticationError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
-        authenticationPanel.Children.Add(authenticationError);
-        // Review 5:A4b: the words only; whether it starts ticked is the owner's call.
-        var rememberFolder = new CheckBox { Content = "Use this folder next time too", IsChecked = true };
-        categoryBox.SelectionChanged += (_, _) => rememberFolder.Content =
-            (categoryBox.SelectedItem as ComboBoxItem)?.Tag is string
-                ? "Use this folder for this category next time too" : "Use this folder next time too";
-
-        var queueBox = new ComboBox { Header = "Queue" };
-        foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
-        {
-            queueBox.Items.Add(queue.Name);
-        }
-
-        var defaultQueueIndex = _settings.Queues
-            .OrderBy(q => q.Order)
-            .ToList()
-            .FindIndex(q => q.Id == _settings.DefaultQueueId);
-        queueBox.SelectedIndex = Math.Max(0, defaultQueueIndex);
-
-        var conflictBox = new ComboBox { Header = "If the file exists" };
-        conflictBox.Items.Add("Rename the new file");
-        conflictBox.Items.Add("Overwrite the existing file");
-        conflictBox.Items.Add("Fail the new download");
-        conflictBox.SelectedIndex = 0;
-
-        var metadataText = new TextBlock { Text = "File information has not been checked.", TextWrapping = TextWrapping.Wrap };
-        var metadataBusy = new ProgressRing { IsActive = false, Visibility = Visibility.Collapsed, Width = 18, Height = 18 };
-        var checkMetadata = new Button { Content = "Check file info" };
-        var metadataActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        metadataActions.Children.Add(checkMetadata);
-        metadataActions.Children.Add(metadataBusy);
-        var metadataGeneration = 0;
-        var metadataClosed = false;
-        // U-WR-2: the Host said it won't add this address for this PC (another device's rules), so Start would only fail.
-        string? addRefusal = null;
-        ContentDialog? addDialog = null;
-        var nameEdited = false;
-        var assigningServerName = false;
-        CancellationTokenSource? metadataCancellation = null;
-        nameBox.TextChanged += (_, _) => { if (!assigningServerName) nameEdited = true; };
-        async Task PreviewMetadataAsync()
-        {
-            metadataCancellation?.Cancel();
-            var generation = ++metadataGeneration;
-            using var cancellation = new CancellationTokenSource();
-            metadataCancellation = cancellation;
-            metadataBusy.IsActive = true;
-            metadataBusy.Visibility = Visibility.Visible;
-            checkMetadata.IsEnabled = false;
-            checkMetadata.Content = AddRules.CheckButtonText(checkedBefore: true);
-            metadataText.Text = "Checking the server… You can start without waiting.";
-            try
-            {
-                var request = new FileMetadataRequest { Url = url };
-                if (useAuthentication.IsChecked == true)
-                {
-                    if (string.IsNullOrWhiteSpace(authenticationUser.Text) || authenticationUser.Text.IndexOfAny([':', '\r', '\n']) >= 0)
-                        throw new ArgumentException("Enter a user name without colons or line breaks, then check again.");
-                    request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
-                        $"{authenticationUser.Text}:{authenticationPassword.Password}"));
-                }
-                var metadata = await _connection.ReadFileMetadataAsync(request, cancellation.Token);
-                if (metadataClosed || generation != metadataGeneration) return;
-                // The Host answered: its refusal holds only while it still gives one, so a later answer without one turns
-                // Start and Download later back on.
-                var wasRefused = addRefusal is not null;
-                addRefusal = AddRules.RefusalAfter(addRefusal, answered: true, refused: !metadata.Ok && metadata.AddRefused, metadata.Error);
-                if (addRefusal is not null)
-                {
-                    metadataText.Text = AddRules.RefusedText(addRefusal, _connection.Target);
-                    metadataText.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
-                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = false;
-                    return;
-                }
-                if (wasRefused)
-                {
-                    metadataText.ClearValue(TextBlock.ForegroundProperty);
-                    if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = true;
-                }
-                if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
-                // UI.R31: the list's size format; the exact count is in the tooltip.
-                var size = metadata.TotalBytes is { } bytes ? UiFormat.Bytes(bytes) : "Size unknown";
-                // Review 5:A2a: the type is for those who want it, beside the exact count.
-                var type = metadata.ContentType ?? "Type unknown";
-                ToolTipService.SetToolTip(metadataText, metadata.TotalBytes is { } exact ? $"{exact:N0} bytes · {type}" : type);
-                knownSize = metadata.TotalBytes;
-                refreshSpace();
-                var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
-                metadataText.Text = AddRules.FileInfoText(size, serverName, nameEdited ? nameBox.Text : serverName);
-                if (!nameEdited && serverName is not null)
-                {
-                    assigningServerName = true;
-                    nameBox.Text = serverName;
-                    assigningServerName = false;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                if (!metadataClosed && generation == metadataGeneration)
-                    metadataText.Text = "File information request timed out. You can still start the download.";
-            }
-            catch (Exception ex)
-            {
-                if (!metadataClosed && generation == metadataGeneration)
-                    metadataText.Text = $"File information unavailable: {ex.Message} You can still start the download.";
-            }
-            finally
-            {
-                if (ReferenceEquals(metadataCancellation, cancellation)) metadataCancellation = null;
-                if (!metadataClosed && generation == metadataGeneration)
-                {
-                    metadataBusy.IsActive = false;
-                    metadataBusy.Visibility = Visibility.Collapsed;
-                    checkMetadata.IsEnabled = true;
-                }
-            }
-        }
-        void MetadataCredentialsChanged()
-        {
-            metadataGeneration++;
-            metadataCancellation?.Cancel();
-            metadataBusy.IsActive = false;
-            metadataBusy.Visibility = Visibility.Collapsed;
-            checkMetadata.IsEnabled = true;
-            metadataText.Text = "Credentials changed. Check again to refresh the file info.";
-        }
-        checkMetadata.Click += async (_, _) => await PreviewMetadataAsync();
-        authenticationUser.TextChanged += (_, _) => MetadataCredentialsChanged();
-        authenticationPassword.PasswordChanged += (_, _) => MetadataCredentialsChanged();
-        useAuthentication.Checked += (_, _) => MetadataCredentialsChanged();
-        useAuthentication.Unchecked += (_, _) => MetadataCredentialsChanged();
-
-        var panel = new StackPanel { Spacing = 10 };
-        // Why the last Start didn't add it: shown here, with everything typed kept, rather than after the dialog closed.
-        var addProblem = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            Visibility = Visibility.Collapsed,
-            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(addProblem, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Assertive);
-        panel.Children.Add(addProblem);
-        panel.Children.Add(urlDisplay);
-        if (!string.IsNullOrWhiteSpace(addressNote))
-        {
-            panel.Children.Add(new TextBlock { Text = DownloadManager.Core.Providers.UrlRedactor.HideAddresses(addressNote), TextWrapping = TextWrapping.Wrap });
-        }
-
-        panel.Children.Add(metadataText);
-        panel.Children.Add(metadataActions);
-        panel.Children.Add(nameBox);
-        panel.Children.Add(categoryBox);
-        panel.Children.Add(new TextBlock { Text = "Destination folder" });
-        panel.Children.Add(destinationField);
-        panel.Children.Add(destinationPickerError);
-        panel.Children.Add(rememberFolder);
-        panel.Children.Add(new Expander { Header = "Create a category", Content = categoryPanel, HorizontalAlignment = HorizontalAlignment.Stretch });
-        panel.Children.Add(descriptionBox);
-        panel.Children.Add(new Expander { Header = "Authentication (optional)", Content = authenticationPanel,
-            HorizontalAlignment = HorizontalAlignment.Stretch });
-        var advanced = new StackPanel { Spacing = 10 };
-        advanced.Children.Add(queueBox);
-        advanced.Children.Add(conflictBox);
-        panel.Children.Add(new Expander { Header = "Queue and file conflicts", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            RequestedTheme = RootGrid.ActualTheme,
-            Title = ServerNames.ForWindow("Add download", _connection.Target),
-            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
-            PrimaryButtonText = "Start download",
-            SecondaryButtonText = "Download later",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-
-        fileInfoDialog = dialog;
-        addDialog = dialog;
-        dialog.Opened += async (_, _) =>
-        {
-            // Shown again after a failed Start: the check runs again, and its answer counts again.
-            metadataClosed = false;
-            if (addRefusal is not null) dialog.IsPrimaryButtonEnabled = dialog.IsSecondaryButtonEnabled = false;
-            await PreviewMetadataAsync();
-        };
-        dialog.Closing += (_, _) =>
-        {
-            metadataClosed = true;
-            metadataGeneration++;
-            metadataCancellation?.Cancel();
-        };
-
-        void ValidateAuthentication(ContentDialogButtonClickEventArgs args)
-        {
-            if (useAuthentication.IsChecked == true &&
-                (string.IsNullOrWhiteSpace(authenticationUser.Text) || authenticationUser.Text.IndexOfAny([':', '\r', '\n']) >= 0))
-            {
-                authenticationError.Text = "Enter a user name without colons or line breaks.";
-                authenticationError.Visibility = Visibility.Visible;
-                args.Cancel = true;
-            }
-        }
-        dialog.PrimaryButtonClick += (_, args) => ValidateAuthentication(args);
-        dialog.SecondaryButtonClick += (_, args) => ValidateAuthentication(args);
-        try
-        {
-            // U-WR-2: a Start the Host refuses shows its reason in this dialog, which opens again with all that was typed.
-            // The dialog that just closed is still on its way out for a moment, or another dialog may be open on this
-            // window, and DialogGuard refuses to show it until that one is gone; so it is tried again, and never dropped
-            // while another dialog is the reason. Only a window that stops showing dialogs at all gives up, to the
-            // status bar.
-            string? lastProblem = null;
-            var failedShows = 0;
-            while (true)
-            {
-                var (shown, problem) = await AddFromFileInfoAsync();
-                var step = AddRules.AfterShow(shown, problem, lastProblem, failedShows);
-                if (step == ReshowStep.Stop) break;
-                if (step == ReshowStep.GiveUp)
-                {
-                    ShowPassingStatus(lastProblem!);
-                    break;
-                }
-
-                if (step == ReshowStep.TryAgain)
-                {
-                    if (!DialogGuard.IsOpen(dialog.XamlRoot)) failedShows++;
-                    await Task.Delay(100);
-                    continue;
-                }
-
-                lastProblem = problem;
-                failedShows = 0;
-                addProblem.Text = problem;
-                addProblem.Visibility = Visibility.Visible;
-            }
-        }
-        finally
-        {
-            authenticationPassword.Password = string.Empty;
-        }
-
-        // Whether the dialog was shown, and the reason it wasn't added, to show in it again; null when it was added or the user stopped.
-        async Task<(bool Shown, string? Problem)> AddFromFileInfoAsync()
-        {
-            var downloadChoice = await DialogGuard.ShowAsync(dialog);
-            // Null: it couldn't be shown (another dialog was still open on this window).
-            if (downloadChoice is null) return (false, null);
-            if (downloadChoice == ContentDialogResult.None) return (true, null);
-
-            var existing = FindExistingJob(url);
-            if (existing is not null)
-            {
-                var duplicateDialog = new ContentDialog
-                {
-                    XamlRoot = Content.XamlRoot,
-                    RequestedTheme = RootGrid.ActualTheme,
-                    Title = "Download already exists",
-                    Content = new TextBlock
-                    {
-                        Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                    PrimaryButtonText = "Download again",
-                    SecondaryButtonText = "Select existing",
-                    CloseButtonText = "Cancel",
-                    DefaultButton = ContentDialogButton.Primary,
-                };
-                // The add dialog is still on its way out for a moment.
-                for (var wait = 0; wait < 40 && DialogGuard.IsOpen(dialog.XamlRoot); wait++) await Task.Delay(50);
-                var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
-                // The question couldn't be shown: what was typed comes back, with why, rather than being dropped.
-                if (duplicateResult is null)
-                    return (true, $"{existing.FileName} is already in the list for this URL. Choose Start again to decide whether to download it again.");
-                if (duplicateResult == ContentDialogResult.Secondary)
-                {
-                    JobsList.SelectedItem = existing;
-                    return (true, null);
-                }
-
-                if (duplicateResult != ContentDialogResult.Primary)
-                {
-                    return (true, null);
-                }
-            }
-
-            var request = new AddJobRequest
-            {
-                Url = url,
-                FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
-                CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
-                DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
-                StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
-                Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
-                RememberDestination = rememberFolder.IsChecked == true,
-                ConflictPolicy = conflictBox.SelectedIndex switch
-                {
-                    1 => "overwrite",
-                    2 => "fail",
-                    _ => "rename",
-                },
-                Source = "api",
-                QueueId = _settings.Queues.OrderBy(q => q.Order)
-                    .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
-            };
-
-            try
-            {
-                if (useAuthentication.IsChecked == true)
-                {
-                    request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
-                        System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
-                }
-                var reply = await _connection.AddAsync(request);
-                var add = reply.GetPayload<AddJobResponse>();
-                if (!add.Accepted) return (true, AddRules.NotAddedText(add.Error, _connection.Target));
-                await RefreshAsync();
-                return (true, null);
-            }
-            catch (Exception ex)
-            {
-                return (true, AddRules.NotAddedText(ex.Message, _connection.Target));
-            }
         }
     }
 
@@ -3736,7 +3034,7 @@ public sealed partial class MainWindow : Window
         var found = LinkExtractor.HttpLinks(pasteBox.Text);
         if (found.Count == 0)
         {
-            await ShowMessageAsync("Add links", "No http, https or ftp links were found in the pasted text.");
+            await ShowMessageAsync("Add links", LinkExtractor.HasFtpLink(pasteBox.Text) ? FtpAddresses.NotSupported : "No http or https links were found in the pasted text.");
             return;
         }
 
@@ -3773,16 +3071,18 @@ public sealed partial class MainWindow : Window
         }
         var toggleAll = new CheckBox { Content = "Select all", IsChecked = checks.All(c => c.Box.IsChecked == true) };
         toggleAll.Click += (_, _) => { foreach (var c in checks) c.Box.IsChecked = toggleAll.IsChecked == true; };
+        var reviewPanel = new StackPanel { Spacing = 8 };
+        // FTP was cut in 0.7.2: ftp links in the pasted text are left out, and this says so.
+        if (LinkExtractor.HasFtpLink(pasteBox.Text))
+            reviewPanel.Children.Add(SettingsWindow.Hint($"{FtpAddresses.NotSupported} FTP links were left out."));
+        reviewPanel.Children.Add(toggleAll);
+        reviewPanel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 420 });
         var review = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = $"Review {found.Count} link{(found.Count == 1 ? string.Empty : "s")}",
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Children = { toggleAll, new ScrollViewer { Content = list, MaxHeight = 420 } },
-            },
+            Content = reviewPanel,
             PrimaryButtonText = "Add",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -3858,10 +3158,10 @@ public sealed partial class MainWindow : Window
 
         foreach (var url in urls)
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "ftp"))
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             {
                 failed++;
-                firstError ??= "That isn't an http, https or ftp address.";
+                firstError ??= FtpAddresses.IsFtp(url) ? FtpAddresses.NotSupported : "That isn't an http or https address.";
                 continue;
             }
 
@@ -4097,7 +3397,7 @@ public sealed partial class MainWindow : Window
             destination.SelectedItem = destination.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
                 item.Tag is int id && id == _settings.DefaultQueueId);
             var deletePanel = new StackPanel { Spacing = 12 };
-            deletePanel.Children.Add(new TextBlock { Text = "Downloads and schedules will move to the selected queue. A stopped destination pauses active transfers. Downloaded files stay in their current folders. The default queue cannot be deleted.", TextWrapping = TextWrapping.Wrap });
+            deletePanel.Children.Add(new TextBlock { Text = "Downloads and schedules will move to the selected queue. A stopped destination stops active downloads. Downloaded files stay in their current folders. The default queue cannot be deleted.", TextWrapping = TextWrapping.Wrap });
             deletePanel.Children.Add(destination);
             var confirm = new ContentDialog
             {
@@ -4416,7 +3716,7 @@ public sealed partial class MainWindow : Window
             addSiteLimit.Click += (_, _) => AddSiteLimitRow(string.Empty, null);
             var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = settings.ClipboardMonitoring };
-            var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = settings.BrowserIntegrationEnabled };
+            var integration = new CheckBox { Content = "Accept downloads sent from your browser", IsChecked = settings.BrowserIntegrationEnabled };
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
@@ -4565,7 +3865,8 @@ public sealed partial class MainWindow : Window
             ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
             addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
-            var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
+            var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching downloads. Re-enter the password when changing a saved site's address or user name. " +
+                "A login without http:// is sent over https only. Write *.example.com to include its subdomains.");
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             var categoryRows = new List<UIElement>();
@@ -4668,7 +3969,9 @@ public sealed partial class MainWindow : Window
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
                 SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
-                SettingsWindow.Section("Capturing downloads"), integration, clipboard);
+                SettingsWindow.Section("Browser downloads"), integration, clipboard,
+                // UI.R41: where the extension comes from, and whether each browser's has connected.
+                SettingsWindow.Section("Browser extension"), SettingsWindow.Hint(ExtensionPromoRules.SectionHint), ExtensionLinksPanel(_status));
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
                 SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder, and so do torrents when the torrent folder is empty.") };
             saveTo.AddRange(categoryRows);
@@ -5166,13 +4469,13 @@ public sealed partial class MainWindow : Window
             TorrentMaxConnections = source.TorrentMaxConnections,
             TorrentUseProxy = source.TorrentUseProxy,
             AllowSystemCompletionActions = source.AllowSystemCompletionActions,
-            FfmpegPath = source.FfmpegPath,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
             RecentDestinationDirectories = new List<string>(source.RecentDestinationDirectories),
             FavoriteFolders = source.FavoriteFolders.Select(favorite => new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path }).ToList(),
             RecentUrls = new List<string>(source.RecentUrls),
             LastUpdateCheck = source.LastUpdateCheck,
+            FfmpegPath = source.FfmpegPath,
             PostDownloadCommand = source.PostDownloadCommand,
             PostDownloadCommandProblem = source.PostDownloadCommandProblem,
             UpdateManifestUrl = source.UpdateManifestUrl,

@@ -15,23 +15,4 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="assets\hls\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>hls\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
-    <Content Include="assets\dash\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>dash\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
-    <Content Include="assets\dash-range\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>dash-range\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
-    <Content Include="assets\dash-av\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>dash-av\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Content>
-  </ItemGroup>
-
 </Project>

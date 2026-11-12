@@ -454,7 +454,7 @@ internal static partial class RemoteText
             return files.Count == 1 ? "Downloading locally" : $"Downloading locally, {completed} of {files.Count} done";
         }
 
-        return paused == files.Count - completed ? "Paused locally" : "Waiting to download locally";
+        return paused == files.Count - completed ? "Stopped locally" : "Waiting to download locally";
     }
 
     private static string ItemStatus(RemoteItemDto item, string provider, bool failed)

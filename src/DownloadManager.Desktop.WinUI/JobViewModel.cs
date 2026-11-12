@@ -319,23 +319,27 @@ public sealed class JobViewModel : INotifyPropertyChanged
     /// <summary>The Host's seeding goal as the window last read its settings; the window sets it (MainWindow.Torrents).</summary>
     internal static SeedGoal SeedGoal { get; set; }
 
-    /// <summary>A torrent view is shown, so the Seeds, Peers, Up and Ratio cells take room.</summary>
-    internal static bool ShowTorrentColumns { get; set; }
-
-    public Visibility TorrentColumnsVisibility => ShowTorrentColumns ? Visibility.Visible : Visibility.Collapsed;
-
-    internal void NotifyTorrentColumns() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TorrentColumnsVisibility)));
-
     public string SeedsText { get => _seedsText; private set => Set(ref _seedsText, value); }
     public string PeersText { get => _peersText; private set => Set(ref _peersText, value); }
     public string UpText { get => _upText; private set => Set(ref _upText, value); }
     public string RatioText { get => _ratioText; private set => Set(ref _ratioText, value); }
+
+    // UI.R42: Uploaded, Seeding time and Seeding goal, shown where chosen from the header's menu.
+    private string _uploadedText = string.Empty;
+    private string _seedTimeText = string.Empty;
+    private string _seedGoalText = string.Empty;
+
+    public string UploadedText { get => _uploadedText; private set => Set(ref _uploadedText, value); }
+    public string SeedTimeText { get => _seedTimeText; private set => Set(ref _seedTimeText, value); }
+    public string SeedGoalText { get => _seedGoalText; private set => Set(ref _seedGoalText, value); }
 
     /// <summary>For sorting: null where the cell is blank.</summary>
     public int? SeedCount { get; private set; }
     public int? PeerCount { get; private set; }
     public double UploadBytesPerSecond { get; private set; }
     public double? RatioValue { get; private set; }
+    public long? UploadedBytes { get; private set; }
+    public TimeSpan? SeedingTime { get; private set; }
 
     /// <summary>A seeding torrent's way to its seeding goal, in a bar of its own under the status.</summary>
     public double SeedGoalPercent { get => _seedGoalPercent; private set => Set(ref _seedGoalPercent, value); }
@@ -344,7 +348,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Seeds, Peers, Up and Ratio; a seeding torrent's bar and Time left are its way to the seeding goal. Read again on
-    /// each update of the job (and when the goal changes): no timer.
+    /// each update of the job, when the goal changes, and on the seed clock while Seeding time shows (RefreshSeedTime).
     /// </summary>
     private void UpdateTorrentColumns(JobDto job)
     {
@@ -358,6 +362,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
         RatioText = TorrentListRules.RatioCell(job);
 
         var now = DateTimeOffset.UtcNow;
+        UploadedBytes = TorrentListRules.Uploaded(job);
+        UploadedText = TorrentListRules.UploadedCell(job);
+        SeedingTime = TorrentListRules.SeedingTime(job, now);
+        SeedTimeText = DurationText.TimeLeft(SeedingTime);
+        SeedGoalText = TorrentListRules.GoalCell(job, SeedGoal);
         var goal = TorrentListRules.GoalProgress(job, SeedGoal, now);
         SeedGoalPercent = goal is { } progress ? progress * 100 : 0;
         SeedGoalVisibility = goal is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -369,10 +378,16 @@ public sealed class JobViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>The seeding goal changed: a seeding row reads its way to it again.</summary>
+    /// <summary>The seeding goal changed: a seeding row reads its way to it again, and every torrent row its Seeding goal cell.</summary>
     internal void RefreshSeedGoal()
     {
-        if (!IsTorrentFile && Dto is { } job && TorrentSeedRules.IsSeeding(job)) UpdateTorrentColumns(job);
+        if (!IsTorrentFile && Dto is { Torrent: not null } job) UpdateTorrentColumns(job);
+    }
+
+    /// <summary>UI.R42: a seeding row reads its Seeding time (and its time to the goal) again; the window's seed clock calls it.</summary>
+    internal void RefreshSeedTime()
+    {
+        if (!IsTorrentFile && SeedingTime is not null && Dto is { Torrent: not null } job) UpdateTorrentColumns(job);
     }
 
     /// <summary>Opens or closes a torrent row; the window lists its file rows under it.</summary>
@@ -552,13 +567,6 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private Microsoft.UI.Xaml.Media.Brush _archiveBrush = NeutralStatus;
     private Visibility _archivePasswordVisibility = Visibility.Collapsed;
 
-    /// <summary>Whether the Host answers <c>archive.*</c>. With no extraction to speak of, the column takes no room.</summary>
-    internal static bool ShowExtractionColumn { get; set; }
-
-    public Visibility ExtractionColumnVisibility => ShowExtractionColumn ? Visibility.Visible : Visibility.Collapsed;
-
-    internal void NotifyExtractionColumn() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ExtractionColumnVisibility)));
-
     /// <summary>The state of this file's or package's archive, kept apart from <see cref="StateText"/>: a failed extraction is no failed download.</summary>
     public string ArchiveText { get => _archiveText; private set => Set(ref _archiveText, value); }
 
@@ -667,7 +675,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
             "downloading" => "Downloading",
             "retryWaiting" => "Retrying",
             "verifying" => "Verifying",
-            "paused" => "Paused",
+            "paused" => "Stopped",
             "completed" => "Completed",
             "failed" => "Failed",
             "cancelled" => "Cancelled",

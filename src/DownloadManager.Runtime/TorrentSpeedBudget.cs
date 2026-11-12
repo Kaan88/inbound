@@ -3,11 +3,11 @@ using DownloadManager.Core;
 namespace DownloadManager.Runtime;
 
 /// <summary>
-/// T2: the overall speed limit is one budget for HTTP and FTP downloads, torrent downloads and torrent uploads
+/// T2: the overall speed limit is one budget for HTTP downloads, torrent downloads and torrent uploads
 /// (<see cref="SpeedBudgetSplit"/>). It is split again only while the torrent worker runs, on events that come anyway:
 /// the worker starting or stopping, any download's progress (a torrent's comes about once a second, or every 5 seconds
 /// while no window shows torrents) and a seeding torrent's progress, at most once a second. No timer of its own; with no
-/// worker, HTTP and FTP have the whole limit and a progress report costs one lock.
+/// worker, HTTP has the whole limit and a progress report costs one lock.
 /// </summary>
 public sealed partial class DownloadManagerService
 {
@@ -83,7 +83,6 @@ public sealed partial class DownloadManagerService
                 _appliedShares = null;
                 // No overall limit: nothing to share. The torrent upload limit, when set, still caps uploads.
                 _engine.UpdateSharedSpeedLimit(null);
-                _ftpEngine?.UpdateSharedSpeedLimit(null);
                 _torrentEngine?.UpdateSpeedLimits(null, uploadCap > 0 ? uploadCap : null);
                 return;
             }
@@ -100,7 +99,7 @@ public sealed partial class DownloadManagerService
             }
             else
             {
-                // No worker: HTTP and FTP have the whole limit. The worker keeps an even split for when it starts; the
+                // No worker: HTTP has the whole limit. The worker keeps an even split for when it starts; the
                 // start itself splits again at once.
                 next = SpeedBudgetSplit.Initial(total, uploadCap);
                 httpShare = total;
@@ -111,12 +110,11 @@ public sealed partial class DownloadManagerService
             _appliedFor = (limit, uploadCap, running);
             _appliedShares = running ? next : next with { Http = total };
             _engine.UpdateSharedSpeedLimit(httpShare);
-            _ftpEngine?.UpdateSharedSpeedLimit(httpShare);
             _torrentEngine?.UpdateSpeedLimits(next.TorrentDownload, next.TorrentUpload);
         }
     }
 
-    /// <summary>What runs now and how fast: HTTP and FTP downloads, torrent downloads, and torrent uploads (while they
+    /// <summary>What runs now and how fast: HTTP downloads, torrent downloads, and torrent uploads (while they
     /// download and while they seed).</summary>
     private (SpeedDemand Http, SpeedDemand Download, SpeedDemand Upload) MeasureDemands()
     {

@@ -1006,7 +1006,7 @@ public sealed partial class RuntimeServiceTests
 
         Assert.True((await rig.Ctx.Service.PauseAsync(child.Id)).Ok);
         await rig.Ctx.WaitFor(child.Id, candidate => candidate.State == "paused", TimeSpan.FromSeconds(30));
-        Assert.Equal("Paused locally", rig.View(job.Id).Status);
+        Assert.Equal("Stopped locally", rig.View(job.Id).Status);
 
         rig.Mock.CdnBytesPerSecond = null;
         Assert.True((await rig.Ctx.Service.ResumeAsync(child.Id)).Ok);

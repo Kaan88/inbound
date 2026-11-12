@@ -37,10 +37,12 @@ internal static class TorrentRules
 
     /// <summary>
     /// T10: a finished download whose file is a .torrent file the Host can add (<see cref="JobDto.TorrentFileReady"/>):
-    /// its row offers Open as Torrent.
+    /// its row offers Open as Torrent. Not for one whose path the Host hides (a server's download outside this session's
+    /// folders): the server refuses that one to this session anyway.
     /// </summary>
     public static bool OpensAsTorrent(JobDto? job)
-        => job is { State: "completed", TorrentFileReady: true, Torrent: null, FileRemovedAfterExtraction: false, IsRemote: false };
+        => job is { State: "completed", TorrentFileReady: true, Torrent: null, FileRemovedAfterExtraction: false, IsRemote: false } &&
+           !string.IsNullOrWhiteSpace(job.FinalFilePath);
 
     /// <summary>
     /// T10: the finished .torrent download a dialog line's path is the file of, so its add carries
@@ -56,13 +58,26 @@ internal static class TorrentRules
     }
 
     /// <summary>
+    /// T10.B2: as <see cref="TorrentFileJobFor(IEnumerable{JobDto}, string?)"/>, for the window. On another server, a
+    /// path is that server's file only when it came from one of its rows' Open as Torrent (<paramref name="openedFromRows"/>):
+    /// the same text typed, imported or opened from Explorer is a file on this PC, which is uploaded, not mistaken
+    /// for the server's file that happens to have the same path.
+    /// </summary>
+    public static Guid? TorrentFileJobFor(IEnumerable<JobDto> jobs, string? input, bool otherServer, IReadOnlyCollection<string> openedFromRows)
+    {
+        if (otherServer && (input is null || !openedFromRows.Contains(input.Trim()))) return null;
+        return TorrentFileJobFor(jobs, input);
+    }
+
+    /// <summary>
     /// T10: a Progress Details window that was already open for a download that turned out to be a .torrent file closes
     /// when it finishes, as with the completion window off: this PC's Host opens the torrent dialog for it instead. Only
     /// for this PC's Host, and only where the Host offers it (TorrentFileOffers.TorrentsCanGo): torrents apply there
     /// (<see cref="Applies"/>: the Host has a torrent engine, <paramref name="torrentsOffered"/>, and they are on), or an
     /// account takes torrents (<paramref name="providerTakesTorrents"/>). Torrents turned on but unavailable (no engine,
     /// or the kill switch) don't count, as on the Host, which then opens the completion window instead. A window opened
-    /// by hand stays, and so does one for a quiet browser download, which the Host offers no dialog for (EXT.R12).
+    /// by hand stays. A quiet browser download (EXT.R12) gets the Host's dialog too (T10.B); it has no window of its own
+    /// that the Host opened.
     /// </summary>
     public static bool ProgressClosesForTorrentFile(JobDto job, bool localHost, bool torrentsOffered, SettingsDto? settings, bool openedByHand,
         bool providerTakesTorrents = false)
@@ -71,10 +86,10 @@ internal static class TorrentRules
     /// <summary>
     /// T10: whether a finishing .torrent download makes the Progress Details window ask the Host once whether an account
     /// takes torrents (torrents not applying here), so it closes on the same rule as the Host's offer
-    /// (TorrentFileOffers.Offers, which also leaves out a quiet browser download).
+    /// (TorrentFileOffers.Offers, which offers a quiet browser download too, T10.B).
     /// </summary>
     public static bool AsksAboutTorrentFile(JobDto job, bool localHost, bool openedByHand)
-        => !openedByHand && localHost && job.State == "completed" && job.TorrentFileReady && job.Torrent is null && !job.QuietWindows;
+        => !openedByHand && localHost && job.State == "completed" && job.TorrentFileReady && job.Torrent is null;
 
     /// <summary>An account with a usable key that takes torrents (MainWindow.TorrentProviderAccount, the Host's TorrentsCanGo).</summary>
     public static bool ProviderTakesTorrents(IEnumerable<RemoteAccountDto> accounts)
@@ -102,7 +117,7 @@ internal static class TorrentRules
         return inputs;
     }
 
-    public const string TorrentFilesStayOnThisPc = "Finished .torrent downloads stay in this PC's list. Open them there with Open as Torrent.";
+    public const string TorrentFilesStayOnThisPc = "Completed .torrent downloads stay in this PC's list. Open them there with Open as Torrent.";
 
     /// <summary>A magnet or a .torrent file's path, the inputs the torrent dialog takes.</summary>
     public static bool IsTorrentInput(string? text)
@@ -140,7 +155,7 @@ internal static class TorrentRules
     {
         if (job.Torrent is not { } torrent) return null;
         if (torrent.AwaitingFileChoice) return "Choose files to download";
-        if (job.State == "paused" && job.Failure?.Kind == "diskFull") return "Paused · The disk is full";
+        if (job.State == "paused" && job.Failure?.Kind == "diskFull") return "Stopped · The disk is full";
         // T2: a finished torrent that seeds says so, with its ratio; one that doesn't stays "Complete".
         if (TorrentSeedRules.StatusText(job) is { } seeding) return seeding;
         if (!IsActive(job)) return null;
@@ -301,7 +316,7 @@ internal static class TorrentRules
 
     /// <summary>
     /// Where a drop or a paste goes: magnets and .torrent files to the torrent dialog while torrents can be added,
-    /// http, https and ftp links to Add Links (after the torrent dialog when there are both). Null when nothing goes
+    /// http and https links to Add Links (after the torrent dialog when there are both). Null when nothing goes
     /// anywhere, with the words to show. The web UI's intakeStep (webui torrentIntake.ts) by the same rule.
     /// </summary>
     public static (bool Torrents, bool Links, string? Problem) Intake(int torrents, int links, bool torrentsCanBeAdded, bool offThisPc, bool dropped)

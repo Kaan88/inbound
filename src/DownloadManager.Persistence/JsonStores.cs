@@ -15,7 +15,6 @@ public sealed class StoragePaths
         Root = root;
         JobsDirectory = Path.Combine(root, "jobs");
         CheckpointsDirectory = Path.Combine(root, "checkpoints");
-        MediaCheckpointsDirectory = Path.Combine(root, "media-checkpoints");
         PartialsDirectory = Path.Combine(root, "partial");
         DedupeDirectory = Path.Combine(root, "dedupe");
         LogsDirectory = Path.Combine(root, "logs");
@@ -30,7 +29,6 @@ public sealed class StoragePaths
     public string Root { get; }
     public string JobsDirectory { get; }
     public string CheckpointsDirectory { get; }
-    public string MediaCheckpointsDirectory { get; }
     public string PartialsDirectory { get; }
     public string DedupeDirectory { get; }
     public string LogsDirectory { get; }
@@ -96,7 +94,6 @@ public sealed class StoragePaths
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(JobsDirectory);
         Directory.CreateDirectory(CheckpointsDirectory);
-        Directory.CreateDirectory(MediaCheckpointsDirectory);
         Directory.CreateDirectory(PartialsDirectory);
         Directory.CreateDirectory(DedupeDirectory);
         Directory.CreateDirectory(LogsDirectory);
@@ -250,7 +247,7 @@ public sealed class JsonJobStore : IJobStore
         // Every folder of the state root that an atomic write saves into (the web sign-in files live in the root).
         foreach (var directory in new[]
                  {
-                     _paths.Root, _paths.JobsDirectory, _paths.CheckpointsDirectory, _paths.MediaCheckpointsDirectory,
+                     _paths.Root, _paths.JobsDirectory, _paths.CheckpointsDirectory,
                      _paths.DedupeDirectory, _paths.RemoteDirectory, _paths.RemoteJobsDirectory, _paths.TorrentsDirectory,
                      Path.Combine(_paths.Root, "archive"), Path.Combine(_paths.Root, "archive", "sets"),
                      Path.Combine(_paths.Root, "archive", "packages"), Path.Combine(_paths.Root, "updates"),
@@ -260,7 +257,27 @@ public sealed class JsonJobStore : IJobStore
         }
 
         if (removed > 0) _log?.Invoke($"Removed {removed} temporary file(s) left by an interrupted save.");
+        RemoveRetiredStreamCheckpoints();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Stream (HLS/DASH) downloading was cut in 0.7.2, and with it the fragment checkpoints an older build kept in
+    /// "media-checkpoints". Nothing reads them any more, so the folder goes. Best effort: a held file stays for the next start.
+    /// </summary>
+    private void RemoveRetiredStreamCheckpoints()
+    {
+        var directory = Path.Combine(_paths.Root, "media-checkpoints");
+        if (!Directory.Exists(directory)) return;
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+            _log?.Invoke("Removed the stream download checkpoints an older version left.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not remove the old stream download checkpoints yet: {ex.Message}");
+        }
     }
 
     private const int ReadAttempts = 4;
@@ -384,6 +401,7 @@ public sealed class JsonJobStore : IJobStore
         // Protect a detached snapshot; the engine continues using plaintext in
         // memory, and a failed write cannot mutate its live request headers.
         var stored = job.Clone();
+        stored.SchemaVersion = stored.SchemaVersionToWrite;
         stored.RequestHeadersProtected.Clear();
         foreach (var (name, value) in stored.RequestHeaders.ToList())
         {
@@ -680,110 +698,6 @@ public sealed class CheckpointTooNewException(int schemaVersion)
 public sealed class CheckpointDamagedException()
     : CheckpointUnusableException("This download's saved progress is damaged, so it was not started and the downloaded part was kept. To start over, delete the download and add it again.");
 
-public sealed class JsonMediaCheckpointStore : IMediaCheckpointStore
-{
-    private const int LoadAttempts = 4;
-
-    private readonly StoragePaths _paths;
-
-    public JsonMediaCheckpointStore(StoragePaths paths)
-    {
-        _paths = paths;
-    }
-
-    public async Task<MediaCheckpoint?> LoadAsync(
-        Guid jobId,
-        string track,
-        CancellationToken cancellationToken = default)
-    {
-        var path = PathFor(jobId, track);
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        // As for a download checkpoint (JsonCheckpointStore.LoadAsync): null tells the engine to start the track over,
-        // which truncates a track that may hold gigabytes, so only a missing file or another job's or track's is none.
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-                var checkpoint = JsonSerializer.Deserialize<MediaCheckpoint>(json, PersistenceJson.Options);
-                if (checkpoint is null)
-                {
-                    throw new CheckpointDamagedException();
-                }
-
-                if (checkpoint.SchemaVersion > MediaCheckpoint.CurrentSchemaVersion)
-                {
-                    throw new CheckpointTooNewException(checkpoint.SchemaVersion);
-                }
-
-                return checkpoint.JobId == jobId && string.Equals(checkpoint.Track, track, StringComparison.Ordinal)
-                    ? checkpoint
-                    : null;
-            }
-            catch (JsonException)
-            {
-                throw new CheckpointDamagedException();
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                return null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException &&
-                                       ex is not CheckpointUnusableException && attempt < LoadAttempts)
-            {
-                await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
-            }
-        }
-    }
-
-    public async Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default)
-    {
-        _paths.EnsureCreated();
-        checkpoint.SchemaVersion = MediaCheckpoint.CurrentSchemaVersion;
-        checkpoint.UpdatedAt = DateTimeOffset.UtcNow;
-        var json = JsonSerializer.Serialize(checkpoint, PersistenceJson.Options);
-        await AtomicFile.WriteAsync(PathFor(checkpoint.JobId, checkpoint.Track), json, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    public Task DeleteAsync(Guid jobId, string? track = null, CancellationToken cancellationToken = default)
-    {
-        var directory = _paths.MediaCheckpointsDirectory;
-        if (!Directory.Exists(directory))
-        {
-            return Task.CompletedTask;
-        }
-
-        var pattern = track is null ? $"{jobId:N}-*.json" : Path.GetFileName(PathFor(jobId, track));
-        foreach (var file in Directory.EnumerateFiles(directory, pattern))
-        {
-            try
-            {
-                File.Delete(file);
-            }
-            catch (IOException)
-            {
-                // best effort
-            }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private string PathFor(Guid jobId, string track)
-        => Path.Combine(_paths.MediaCheckpointsDirectory, $"{jobId:N}-{SafeTrack(track)}.json");
-
-    private static string SafeTrack(string track)
-    {
-        var clean = new string(track.Where(char.IsLetterOrDigit).ToArray());
-        return clean.Length == 0 ? "media" : clean;
-    }
-}
-
 public sealed class JsonSettingsStore : ISettingsStore
 {
     private readonly StoragePaths _paths;
@@ -988,9 +902,6 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.Proxy.Username = string.IsNullOrWhiteSpace(settings.Proxy.Username)
             ? null
             : settings.Proxy.Username.Trim();
-        settings.FfmpegPath = string.IsNullOrWhiteSpace(settings.FfmpegPath)
-            ? null
-            : settings.FfmpegPath.Trim();
         settings.PostDownloadCommand = string.IsNullOrWhiteSpace(settings.PostDownloadCommand)
             ? null
             : settings.PostDownloadCommand.Trim();
@@ -1085,7 +996,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.RecentUrls = settings.RecentUrls
             .Where(value => !string.IsNullOrWhiteSpace(value) &&
                             Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-                            uri.Scheme is "http" or "https" or "ftp" &&
+                            uri.Scheme is "http" or "https" &&
                             !ProviderLinks.IsProviderLink(value))
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)

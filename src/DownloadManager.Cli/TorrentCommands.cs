@@ -21,8 +21,8 @@ internal static class TorrentCommands
                torrent network
         """;
 
-    private const string NotOffered = "Torrents aren't available on this Host.";
-    private const string NotOfferedOrOlder = "This Host can't do that: torrents aren't available there, or its app is older than this command.";
+    private const string NotOffered = "Torrents aren't available here.";
+    private const string NotOfferedOrOlder = "Inbound can't do that here: torrents aren't available, or the app is older than this command.";
     private const string NotRunning = "not running: the torrent is stopped, or finished and not seeding";
 
     /// <summary>The flags that take a value (their value is not a positional argument).</summary>
@@ -206,11 +206,7 @@ internal static class TorrentCommands
     }
 
     /// <summary>Text from a peer or a tracker, with what a terminal would act on (escape sequences, bidi marks) made spaces.</summary>
-    internal static string Printable(string? text)
-        => string.IsNullOrEmpty(text) ? string.Empty
-            : text.Any(DownloadManager.Core.FileNameResolver.IsDeceptiveOrControl)
-                ? new string(text.Select(c => DownloadManager.Core.FileNameResolver.IsDeceptiveOrControl(c) ? ' ' : c).ToArray())
-                : text;
+    internal static string Printable(string? text) => CliText.Printable(text);
 
     /// <summary>
     /// A tracker's address without what could be a passkey, as the app shows it: the query is left out, and a path
@@ -557,20 +553,8 @@ internal static class TorrentCommands
     internal static string NotDone(IpcMessage reply, string fallback)
         => HostError(reply) is { } error ? "failed: " + error : fallback;
 
-    /// <summary>
-    /// The Host's own error in a reply that is not the expected result, made printable; null for a Host that doesn't
-    /// know the command ("Unknown message type", an older Host or one without torrents) or a reply that isn't an error.
-    /// </summary>
-    internal static string? HostError(IpcMessage reply)
-    {
-        if (reply.Type != MessageTypes.HostActionResult) return null;
-        string? message;
-        try { message = reply.GetPayload<HostActionResult>()?.Message; }
-        catch (JsonException) { return null; }
-        return string.IsNullOrWhiteSpace(message) || message.StartsWith("Unknown message type", StringComparison.Ordinal)
-            ? null
-            : Printable(message);
-    }
+    /// <summary>The Host's own error in a reply that is not the expected result: see <see cref="CliText.HostError"/>.</summary>
+    internal static string? HostError(IpcMessage reply) => CliText.HostError(reply);
 
     private static string Endpoint(string address, int port) => address.Contains(':') ? $"[{address}]:{port}" : $"{address}:{port}";
 

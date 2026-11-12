@@ -36,7 +36,7 @@ export const views: { key: ViewKey; label: string }[] = [
   { key: 'active', label: 'Active' },
   { key: 'queued', label: 'Queued' },
   { key: 'failed', label: 'Failed' },
-  { key: 'finished', label: 'Finished' },
+  { key: 'finished', label: 'Completed' },
 ];
 
 /** What a hash like `#/cat/music` or `#/active` names; null when it is not a list view. */

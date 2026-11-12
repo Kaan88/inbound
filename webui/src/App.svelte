@@ -26,6 +26,8 @@
   import TorrentAdd from './screens/TorrentAdd.svelte';
   import { chipText, hereName, jobInput, openAsTorrentStep, sidebarShows, torrentProvider, torrentsApply, torrentsOffText } from './lib/torrents';
   import Confirm from './components/Confirm.svelte';
+  import WhatsNew from './components/WhatsNew.svelte';
+  import { between, decideSeen, displayDate, hadWebState, recordSeen, filterChangelog, findVersion, readChangelog, type ChangelogVersion, type WhatsNewView } from './lib/whatsNew';
   import type { Job } from './lib/types';
   import { chipCompact, extraViewShows, torrentExtraViews, torrentFilters, waitingForChoice, waitingForChoiceText } from './lib/torrentList';
   import { dragMayHoldTorrents, intake, intakeStep, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
@@ -83,7 +85,7 @@
   }
 
   // ---- T3: magnets and .torrent files pasted (Ctrl+V) or dropped anywhere on the page, as in the Windows app ----
-  // Review 5:A6: http, https and ftp links pasted or dropped the same way go to Add Links.
+  // Review 5:A6: http and https links pasted or dropped the same way go to Add Links (an ftp link too, whose line says it isn't supported).
 
   /** The server downloads them, or the account that also takes torrents does (MainWindow.TorrentsCanBeAdded). */
   const torrentsTaken = $derived(store.connection === 'open' && (torrentsOn || torrentProvider(store.has('remote'), store.model.accounts) !== null));
@@ -240,6 +242,76 @@
   const choosing = $derived(waitingForChoice(Object.values(store.model.jobs)));
 
 
+  // ---- UPD.N1: What's new, once per browser per server after the server's version changed, and from the footer ----
+
+  let changelog = $state<ChangelogVersion[] | null>(null);
+  let whatsNew = $state<{ version: string; subtitle: string; view: WhatsNewView } | null>(null);
+  /** The server version the page last looked at, so a reconnect to the same server asks nothing again. */
+  let whatsNewFor: string | null = null;
+  const whatsNewFeatures = () => ({
+    torrents: torrentsOn,
+    providers: store.model.accounts.filter((account) => account.hasKey).map((account) => account.provider.toLowerCase()),
+  });
+
+  function storage(): Storage | null {
+    try {
+      return localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  // Whether this browser kept web UI choices before this page loaded (an upgrade from before the mark, UPD.N1).
+  const webStateBefore = hadWebState(storage());
+
+  async function checkWhatsNew(version: string) {
+    whatsNewFor = version;
+    try {
+      changelog = readChangelog(await store.ask('changelog.get', {}));
+    } catch {
+      // A server from before What's new answers with an error: there is nothing to show.
+      changelog = null;
+      return;
+    }
+    // Decided without writing: the mark is kept only once the notes are on screen, or when there is nothing to show.
+    const decision = decideSeen(storage(), location.origin, version, webStateBefore);
+    if (!decision.open) {
+      if (decision.record) recordSeen(storage(), location.origin, decision.record);
+      return;
+    }
+    // Provider lines show only with an account, which comes a moment after the snapshot.
+    await new Promise((resolve) => setTimeout(resolve, store.has('remote') && store.model.accounts.length === 0 ? 1500 : 0));
+    const view = filterChangelog(between(changelog, decision.after, version), whatsNewFeatures());
+    if (!view.versions.length) {
+      recordSeen(storage(), location.origin, version);
+      return;
+    }
+    // Another dialog is open: not kept, so the next visit shows the notes.
+    if (dialogOpen()) return;
+    if (!recordSeen(storage(), location.origin, version)) return;
+    const from = decision.afterKnown ? decision.after : `${decision.after} or earlier`;
+    whatsNew = { version, subtitle: `This server was updated from ${from}`, view };
+  }
+
+  $effect(() => {
+    const version = store.model.hello?.hostVersion;
+    if (store.connection === 'open' && version && store.model.settings && version !== whatsNewFor) void checkWhatsNew(version);
+  });
+
+  /** The footer's What's new: this server version's notes. */
+  function showWhatsNew() {
+    const version = store.model.hello?.hostVersion;
+    if (!version || !changelog) return;
+    const entry = findVersion(changelog, version);
+    const view = filterChangelog(entry ? [entry] : [], whatsNewFeatures());
+    if (!entry || !view.versions.length) {
+      store.toast(`There are no notes about the web UI for ${version}.`);
+      return;
+    }
+    const date = displayDate(entry.date);
+    whatsNew = { version, subtitle: date ? `Released ${date}` : '', view };
+  }
+
   const themes: { key: Theme; icon: string; label: string }[] = [
     { key: 'system', icon: 'monitor', label: 'Follow the system' },
     { key: 'light', icon: 'sun', label: 'Light' },
@@ -317,7 +389,7 @@
       {@render link(viewHash('active'), 'active', 'play', 'Active', count.active, 1)}
       {@render link(viewHash('queued'), 'queued', 'pause', 'Queued', count.queued, 1)}
       {@render link(viewHash('failed'), 'failed', 'alert', 'Failed', count.failed, 1)}
-      {@render link(viewHash('finished'), 'finished', 'check', 'Finished', count.finished)}
+      {@render link(viewHash('finished'), 'finished', 'check', 'Completed', count.finished)}
       {#if showTorrents}
         {@render link(viewHash('torrents'), 'torrents', 'swarm', 'Torrents', count.torrents, 0, choosing, waitingForChoiceText(choosing))}
         {#each torrentFilters as filter (filter.key)}
@@ -367,7 +439,15 @@
     <span class="tabular shrink-0">{totalSpeed === null ? '' : speed(totalSpeed)}</span>
     <span class="flex-1"></span>
     {#if torrentChip}<a href={viewHash('torrents')} class="inline-flex shrink-0 items-center gap-1 hover:text-text" title="Show the torrents"><Icon name="swarm" size={13} /><span class="hidden sm:inline">{torrentChip}</span><span class="sm:hidden">{torrentChipShort}</span></a>{/if}
-    {#if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>{/if}
+    <!-- UPD.N1: the version text is the link to this server version's notes ("Server 0.7.2 · What's new"); on a phone,
+         where the version has no room, "What's new" alone. -->
+    {#if store.model.hello && changelog}
+      <button class="group inline-flex shrink-0 items-center gap-1.5 hover:text-text" onclick={showWhatsNew} title="What's new in this server version">
+        <span class="hidden items-center gap-1.5 group-hover:underline sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>
+        <span class="hidden sm:inline" aria-hidden="true">·</span>
+        <span class="group-hover:underline">What's new</span>
+      </button>
+    {:else if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>{/if}
   </footer>
 </div>
 
@@ -377,12 +457,16 @@
   </div>
 {/if}
 
+{#if whatsNew}
+  <WhatsNew version={whatsNew.version} subtitle={whatsNew.subtitle} view={whatsNew.view} onclose={() => (whatsNew = null)} />
+{/if}
 {#if torrentsOff}
   <Confirm title="Open as torrent" message={torrentsOffText} primary="Open Options" onclose={() => (torrentsOff = false)}
     onconfirm={() => { torrentsOff = false; location.hash = '#/settings'; }} />
 {/if}
 {#if adding?.kind === 'url'}
   <AddUrl onclose={() => (adding = null)} onprovider={(input, result) => (adding = { kind: 'many', mode: 'links', seed: [{ input, result }] })}
+    onlinks={(links) => (adding = { kind: 'many', mode: 'links', inputs: links.map((input) => ({ input })) })}
     ontorrent={torrentsOn ? (magnets) => (adding = { kind: 'torrent', mode: 'magnet', initial: magnets.map((input) => ({ input })) }) : undefined} />
 {:else if adding?.kind === 'many'}
   <AddLinks mode={adding.mode} seed={adding.seed} inputs={adding.inputs} onclose={closeAdding} />

@@ -57,7 +57,7 @@ public sealed class StatisticsWindow : Window
         AddSection(root, "Current activity",
             ("active", "Active"),
             ("queued", "Queued"),
-            ("paused", "Paused"));
+            ("paused", "Stopped"));
 
         var note = InboundUi.Secondary("Recorded data measures saved download progress, not network-interface traffic. Removed entries stay in the statistics.");
         note.Margin = new Thickness(0, 0, 0, 4);
@@ -189,8 +189,8 @@ public sealed class StatisticsWindow : Window
             else
             {
                 ClearValues();
-                _captured.Text = "Live statistics unavailable while the Host is disconnected.";
-                _notice.Text = string.IsNullOrWhiteSpace(message) ? "Waiting for the background Host…" : message;
+                _captured.Text = "Live statistics are unavailable while Inbound is not connected.";
+                _notice.Text = string.IsNullOrWhiteSpace(message) ? "Waiting for Inbound's background program…" : message;
             }
         });
     }

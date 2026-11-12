@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using DownloadManager.Contracts;
-using Microsoft.UI.Xaml;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -18,8 +17,16 @@ public sealed class TorrentPeerRow : INotifyPropertyChanged
     private string _has = string.Empty;
     private string _down = string.Empty;
     private string _up = string.Empty;
+    private string _received = string.Empty;
+    private string _sent = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>UI.R42: what came from this peer since it connected.</summary>
+    public string Received { get => _received; private set => Set(ref _received, value, nameof(Received)); }
+
+    /// <summary>UI.R42: what went to this peer since it connected.</summary>
+    public string Sent { get => _sent; private set => Set(ref _sent, value, nameof(Sent)); }
 
     internal string Key { get; private set; } = string.Empty;
 
@@ -48,6 +55,8 @@ public sealed class TorrentPeerRow : INotifyPropertyChanged
         Has = TorrentDetailsRules.Has(peer.Progress);
         Down = TorrentDetailsRules.Rate(peer.DownloadRate);
         Up = TorrentDetailsRules.Rate(peer.UploadRate);
+        Received = UiFormat.Bytes(Math.Max(0, peer.Downloaded));
+        Sent = UiFormat.Bytes(Math.Max(0, peer.Uploaded));
     }
 
     private void Set(ref string field, string value, string name)
@@ -86,34 +95,30 @@ public sealed class TorrentTrackerRow : INotifyPropertyChanged
     public string Message { get => _message; private set => Set(ref _message, value, nameof(Message)); }
 
     private string _nextAnnounce = string.Empty;
-    private Visibility _nextAnnounceVisibility = Visibility.Collapsed;
+    private string _tier = string.Empty;
+    private string _said = string.Empty;
 
-    /// <summary>T3: "24 min", "now" or "—".</summary>
+    /// <summary>T3: "24 min", "now" or "—". The column shows only where the Host says it (the header's, UI.R42).</summary>
     public string NextAnnounce { get => _nextAnnounce; private set => Set(ref _nextAnnounce, value, nameof(NextAnnounce)); }
 
-    public Visibility NextAnnounceVisibility
-    {
-        get => _nextAnnounceVisibility;
-        private set
-        {
-            if (_nextAnnounceVisibility == value) return;
-            _nextAnnounceVisibility = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NextAnnounceVisibility)));
-        }
-    }
+    /// <summary>UI.R42: the tracker's tier, as the Host numbers them.</summary>
+    public string Tier { get => _tier; private set => Set(ref _tier, value, nameof(Tier)); }
 
-    /// <param name="withNext">T3: the Host says when each tracker is asked next.</param>
-    internal void Apply(string key, TorrentTrackerDto tracker, bool withNext = false)
+    /// <summary>UI.R42: the Message column: what the tracker said last, without addresses; empty when it said nothing.</summary>
+    public string Said { get => _said; private set => Set(ref _said, value, nameof(Said)); }
+
+    internal void Apply(string key, TorrentTrackerDto tracker)
     {
         Key = key;
         NextAnnounce = TorrentControlRules.AnnounceIn(tracker.NextAnnounce);
-        NextAnnounceVisibility = withNext ? Visibility.Visible : Visibility.Collapsed;
         Tracker = TorrentDetailsRules.TrackerShown(tracker.Url);
         Status = TorrentDetailsRules.TrackerStatus(tracker.Status);
         Seeds = TorrentDetailsRules.Count(tracker.Seeds);
         Peers = TorrentDetailsRules.Count(tracker.Peers);
+        Tier = Math.Max(0, tracker.Tier).ToString(System.Globalization.CultureInfo.CurrentCulture);
         // A tracker's own words can hold its address; addresses are taken out.
-        Message = string.IsNullOrWhiteSpace(tracker.Message) ? Status : RemoteText.Failure(tracker.Message);
+        Said = string.IsNullOrWhiteSpace(tracker.Message) ? string.Empty : RemoteText.Failure(tracker.Message);
+        Message = Said.Length == 0 ? Status : Said;
     }
 
     private void Set(ref string field, string value, string name)

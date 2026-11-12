@@ -119,11 +119,11 @@ public sealed class ArchiveRowsTests
     {
         Assert.Equal("Waiting: part3 missing", ArchiveText.Set(Set("waiting", change: s => s.MissingVolumes = ["movie.part3.rar"])).Text);
         Assert.Equal("Waiting: part2, part3 downloading", ArchiveText.Set(Set("waiting", change: s => s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"])).Text);
-        Assert.Equal("Waiting: part2 paused", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar"]; s.PausedVolumes = ["movie.part2.rar"]; })).Text);
-        Assert.Equal("Waiting: part2, part3 paused or queued", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.PausedVolumes = ["movie.part2.rar"]; s.QueuedVolumes = ["movie.part3.rar"]; })).Text);
+        Assert.Equal("Waiting: part2 stopped", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar"]; s.PausedVolumes = ["movie.part2.rar"]; })).Text);
+        Assert.Equal("Waiting: part2, part3 stopped or queued", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.PausedVolumes = ["movie.part2.rar"]; s.QueuedVolumes = ["movie.part3.rar"]; })).Text);
         Assert.Equal("Waiting: part2, part3 queued", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.QueuedVolumes = ["movie.part2.rar", "movie.part3.rar"]; })).Text);
         Assert.Equal("Waiting: part2 not started", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar"]; s.HeldVolumes = ["movie.part2.rar"]; })).Text);
-        Assert.Equal("Waiting: part2, part3 paused or not started", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.PausedVolumes = ["movie.part2.rar"]; s.HeldVolumes = ["movie.part3.rar"]; })).Text);
+        Assert.Equal("Waiting: part2, part3 stopped or not started", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.PausedVolumes = ["movie.part2.rar"]; s.HeldVolumes = ["movie.part3.rar"]; })).Text);
         Assert.Equal("Waiting: part2, part3 downloading", ArchiveText.Set(Set("waiting", change: s => { s.DownloadingVolumes = ["movie.part2.rar", "movie.part3.rar"]; s.PausedVolumes = ["movie.part2.rar"]; })).Text);
         Assert.Equal("Waiting: .r02 didn't download", ArchiveText.Set(Set("waiting", change: s => s.FailedVolumes = ["movie.r02"])).Text);
         Assert.Equal("Waiting: 3 parts missing", ArchiveText.Set(Set("waiting", change: s => s.MissingVolumes = ["a.part1.rar", "a.part2.rar", "a.part3.rar"])).Text);
@@ -277,7 +277,7 @@ public sealed class ArchiveRowsTests
     {
         Assert.Equal("Extract (select an archive download first)", ArchiveRules.Plan([], [], null, true).ExtractText);
         Assert.Equal("Extract (no archive selected)", ArchiveRules.Plan([File("a.mp4")], [], null, true).ExtractText);
-        Assert.Equal("Extract (the background Host isn't connected)", ArchiveRules.Plan([File("a.rar")], [], null, false).ExtractText);
+        Assert.Equal("Extract (Inbound's background program isn't connected)", ArchiveRules.Plan([File("a.rar")], [], null, false).ExtractText);
         Assert.Equal("Extract (already extracted)", ArchiveRules.Plan([File("a.rar", Set("completed"))], [], null, true).ExtractText);
         Assert.Equal("Extract (already extracting)", ArchiveRules.Plan([File("a.rar", Set("extracting"))], [], null, true).ExtractText);
         Assert.Equal("Extract (already waiting to extract)", ArchiveRules.Plan([File("a.rar", Set("waiting"))], [], null, true).ExtractText);

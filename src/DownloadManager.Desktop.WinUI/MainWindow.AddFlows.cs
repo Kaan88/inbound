@@ -1,4 +1,5 @@
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -21,7 +22,7 @@ public sealed partial class MainWindow
     private enum AddressWay
     {
         Cancelled,
-        /// <summary>Today's Add URL dialog: an ordinary link, or the user's explicit choice for one nobody could classify.</summary>
+        /// <summary>An ordinary download: an ordinary link, or the user's explicit choice for one nobody could classify.</summary>
         Direct,
         Provider,
     }
@@ -48,6 +49,8 @@ public sealed partial class MainWindow
     /// </summary>
     private async Task<CheckedAddress> CheckGivenAddressAsync(string title, string input)
     {
+        // UI.B27: an address on this PC or its local network is an ordinary download; no provider is asked about it.
+        if (NetworkAddresses.IsLocalWebAddress(input)) return new CheckedAddress(AddressWay.Direct, input, null);
         while (true)
         {
             ShowPassingStatus("Checking this address…");
@@ -107,126 +110,6 @@ public sealed partial class MainWindow
         var accounts = _remote.State.Accounts;
         var account = accounts.FirstOrDefault(RemoteRules.HasUsableKey) ?? accounts.FirstOrDefault();
         return account is null ? "the provider" : RemoteText.ProviderName(account);
-    }
-
-    /// <summary>
-    /// Add URL's first step when a provider could take the address: stays open until the Host has said
-    /// what it is. Something it can't classify stays here too, with a retry and an explicit way past.
-    /// </summary>
-    private async Task<CheckedAddress> CheckAddressAsync(ContentDialog dialog, ComboBox urlBox, StatusLine error, StackPanel panel)
-    {
-        var provider = ProviderWordForAdding();
-        urlBox.PlaceholderText = "https://example.com/file.zip, or a magnet";
-        var busy = new ProgressRing { IsActive = false, Width = 16, Height = 16, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetName(busy, "Checking this address");
-        var status = new StatusLine("Address status");
-        var direct = new CheckBox { Content = $"Download directly, not through {provider}", Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(direct, $"Download directly, not through {provider}");
-        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { busy, status.Text } });
-        panel.Children.Add(direct);
-        status.Text.MaxWidth = 440;
-
-        using var closing = new CancellationTokenSource();
-        var outcome = new CheckedAddress(AddressWay.Cancelled, string.Empty, null);
-        string? checkedText = null;
-        RemoteClassifyResult? checkedResult = null;
-        var running = false;
-
-        void ShowCantTell(string words)
-        {
-            var web = LinkExtractor.IsWebLink(urlBox.Text.Trim());
-            status.Show(web ? $"{words} So it isn't treated as an ordinary link unless you say so." : words, isProblem: true);
-            dialog.PrimaryButtonText = "Try again";
-            direct.Visibility = web ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        direct.Click += (_, _) => dialog.PrimaryButtonText = direct.IsChecked == true ? "Next" : "Try again";
-
-        async Task CheckAsync(string text)
-        {
-            running = true;
-            busy.IsActive = true;
-            busy.Visibility = Visibility.Visible;
-            error.Show(string.Empty);
-            status.Show("Checking this address…");
-            direct.Visibility = Visibility.Collapsed;
-            direct.IsChecked = false;
-            dialog.IsPrimaryButtonEnabled = false;
-            try
-            {
-                // What it says goes on to the add dialog, which may offer its files.
-                var result = await _remote.ClassifyAsync(text, closing.Token, withFiles: true);
-                checkedText = text;
-                checkedResult = result;
-                var name = string.IsNullOrWhiteSpace(result.ProviderName) ? provider : result.ProviderName;
-                if (!result.Ok)
-                {
-                    ShowCantTell(RemoteText.Failure(result.Error));
-                    return;
-                }
-
-                switch (result.Kind)
-                {
-                    case "ordinaryLink" or "providerDirectLink":
-                        outcome = new CheckedAddress(AddressWay.Direct, text, result);
-                        dialog.Hide();
-                        break;
-                    case "folderLink" or "magnet" or "torrentFile" or "hosterLink":
-                        outcome = new CheckedAddress(AddressWay.Provider, text, result);
-                        dialog.Hide();
-                        break;
-                    case "undetermined":
-                        ShowCantTell(RemoteText.Failure(result.Reason, null, name));
-                        break;
-                    default:
-                        status.Show(string.IsNullOrWhiteSpace(result.Reason) ? "This app can't use this." : UrlRedactor.HideAddresses(result.Reason), isProblem: true);
-                        dialog.PrimaryButtonText = "Next";
-                        break;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // The dialog closed first, and there is nothing left to show it in.
-            }
-            finally
-            {
-                running = false;
-                if (!closing.IsCancellationRequested)
-                {
-                    busy.IsActive = false;
-                    busy.Visibility = Visibility.Collapsed;
-                    dialog.IsPrimaryButtonEnabled = true;
-                }
-            }
-        }
-
-        dialog.PrimaryButtonClick += (sender, args) =>
-        {
-            // Kept open: only an answer from the Host decides where this goes.
-            args.Cancel = true;
-            if (running) return;
-            var text = urlBox.Text.Trim();
-            if (direct.Visibility == Visibility.Visible && direct.IsChecked == true && text == checkedText)
-            {
-                outcome = new CheckedAddress(AddressWay.Direct, text, checkedResult);
-                dialog.Hide();
-                return;
-            }
-
-            if (!LinkExtractor.IsDownloadableLink(text) && !LinkExtractor.IsMagnet(text) && !LinkExtractor.IsTorrentPath(text))
-            {
-                error.Say("Enter an http, https or ftp address, a magnet, or the full path of a .torrent file.", isProblem: true);
-                return;
-            }
-
-            _ = CheckAsync(text);
-        };
-
-        // Shows nothing while another dialog is already open over this window.
-        await ShowDialogAsync(dialog);
-
-        closing.Cancel();
-        return outcome;
     }
 
     /// <summary>The add dialog for this way in, and everything that follows from what it was told. False when it could not open.</summary>

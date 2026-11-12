@@ -147,13 +147,13 @@ function renderNotices(): void {
     const pauseLeft = status.pauseUntil && status.pauseUntil > Date.now() ? status.pauseUntil - Date.now() : 0;
     if (!automatic) {
       bars.push(notice({
-        glyph: "alert", tint: "tint-pause", text: "Downloads are not caught automatically.",
+        glyph: "alert", tint: "tint-pause", text: "Downloads are not sent automatically.",
         action: { label: "Turn on", run: () => void openOptions("general") },
       }));
     } else if (pauseLeft > 0) {
       bars.push(notice({
         glyph: "pause", tint: "tint-pause",
-        text: `Catching paused, ${Math.ceil(pauseLeft / 60000)} min left. Downloads stay in the browser.`,
+        text: `Sending paused, ${Math.ceil(pauseLeft / 60000)} min left. Downloads stay in the browser.`,
         action: { label: "Resume now", run: () => void togglePause() },
       }));
     }
@@ -163,8 +163,8 @@ function renderNotices(): void {
       // With "ask where to save" a caught download is asked about, and the form then starts on This PC (U-EX-11).
       const asks = status.settings?.destinationMode === "ask" && !status.localMissing;
       const after = !goesThere ? "" : asks
-        ? " When a download is caught you'll be asked, with This PC chosen."
-        : " Caught downloads stay in the browser.";
+        ? " When you start a download you'll be asked, with This PC chosen."
+        : " Downloads you start stay in the browser.";
       bars.push(notice({
         glyph: "cloud", tint: "tint-danger",
         text: `${serverName(status.server)} isn't answering.${after}`,
@@ -348,10 +348,10 @@ function renderStatusBar(): void {
   if (paired) {
     const target = status.automaticTarget === "server" ? serverName(status.server) : "This PC";
     switcher.replaceChildren(`Send to: ${target}`, icon("chevron-up", 12));
-    switcher.title = "Where caught downloads go";
+    switcher.title = "Where sent downloads go";
   }
   const visible = jobs.length;
-  const active = jobs.filter((job) => ["downloading", "connecting", "verifying", "retrying", "muxing"].includes(job.state)).length;
+  const active = jobs.filter((job) => ["downloading", "connecting", "verifying", "retrying"].includes(job.state)).length;
   const queued = jobs.filter((job) => job.state === "queued").length;
   counts.textContent = visible === 0 ? "" : [
     `${visible} download${visible === 1 ? "" : "s"}`,
@@ -379,9 +379,9 @@ function renderHeader(): void {
   const paused = !!status?.pauseUntil && status.pauseUntil > Date.now();
   pauseButton.replaceChildren(icon(paused ? "play" : "pause", 16));
   pauseButton.className = `btn-icon ${paused ? "tint-start" : "tint-pause"}`;
-  const label = paused ? "Resume catching" : "Pause catching";
+  const label = paused ? "Resume sending" : "Pause sending";
   pauseButton.setAttribute("aria-label", label);
-  pauseButton.title = paused ? "Resume catching now" : "Let the browser keep downloads for 5 minutes";
+  pauseButton.title = paused ? "Resume sending now" : "Let the browser keep downloads for 5 minutes";
   const openApp = byId<HTMLButtonElement>("openApp");
   const web = serverOnly();
   openApp.title = web ? "Open web UI" : "Open Inbound";
@@ -546,8 +546,8 @@ async function togglePause(): Promise<void> {
   clearError();
   const paused = !!status?.pauseUntil && status.pauseUntil > Date.now();
   const result = await send({ type: "dm.pauseCatching", cancel: paused });
-  if (result && !result.ok) showError(result.error || "Could not change download catching.");
-  else if (result) say(paused ? "Catching resumed" : "Catching paused for 5 minutes");
+  if (result && !result.ok) showError(result.error || "Could not change download sending.");
+  else if (result) say(paused ? "Sending resumed" : "Sending paused for 5 minutes");
   await refresh();
 }
 

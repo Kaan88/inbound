@@ -46,7 +46,12 @@
     <Compile Include="..\DownloadManager.Core\Providers\ProviderLinks.cs" Link="Providers\ProviderLinks.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
+    <Compile Include="..\DownloadManager.Core\FtpAddresses.cs" Link="Providers\FtpAddresses.cs" />
+    <!-- UI.B27: an address on this PC or its network is an ordinary download, with no provider check. -->
+    <Compile Include="..\DownloadManager.Core\NetworkAddresses.cs" Link="Providers\NetworkAddresses.cs" />
     <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
+    <!-- UPD.N1: the window's What's new reads install.json; it is Windows-only for now, and turned off on Linux. -->
+    <Compile Include="..\DownloadManager.Core\InstalledBuild.cs" Link="InstalledBuild.cs" />
     <!-- Linux: a saved server's token is sealed with the Host's own key (its key file, or the desktop keyring). -->
     <Compile Include="..\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="Servers\AesGcmSecretProtector.cs" />
     <Compile Include="..\DownloadManager.Host.Linux\SecretServiceKeyStore.cs" Link="Servers\SecretServiceKeyStore.cs" />

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { speed } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import {
@@ -12,6 +12,10 @@
     type ColumnSort, type PeerSortKey, type TrackerSortKey,
   } from '../lib/detailsSort';
   import type { Job } from '../lib/types';
+  import {
+    choose, columnMenu, parseChoices, peerColumns, shownKeys, sortWhileShown, trackerColumns, type ColumnChoices, type ColumnSet,
+  } from '../lib/columns';
+  import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
 
   // A torrent's Peers, Trackers or Pieces & Speed tab (T2, c-torrent-details.html). It asks the server only while it is
   // shown, the page is visible and the torrent may run, every 2 s; otherwise no timer runs at all.
@@ -117,6 +121,52 @@
   }
   let peerSort = $state<ColumnSort<PeerSortKey>>(parseColumnSort(load('inbound.peerSort'), peerSortKeys));
   let trackerSort = $state<ColumnSort<TrackerSortKey>>(parseColumnSort(load('inbound.trackerSort'), trackerSortKeys));
+
+  // UI.R42: a right-click on a table's header (or Shift+F10, the menu key) chooses its columns; kept in this browser.
+  let peerChoices = $state<ColumnChoices>(parseChoices(peerColumns, load('inbound.columns.peers')));
+  let trackerChoices = $state<ColumnChoices>(parseChoices(trackerColumns, load('inbound.columns.trackers')));
+  const peerCols = $derived(new Set<string>(shownKeys(peerColumns, peerChoices)));
+  const trackerCols = $derived(new Set<string>(shownKeys(trackerColumns, trackerChoices)));
+  // A sort by a column that is hidden now waits for it: the table keeps its own order meanwhile.
+  const peerOrder = $derived(sortWhileShown(peerSort, peerCols));
+  const trackerOrder = $derived(sortWhileShown(trackerSort, trackerCols));
+  let columnsMenu = $state<{ x: number; y: number; items: MenuItem[]; label: string } | null>(null);
+  let columnsOpener: { head: HTMLElement; button: HTMLElement | null } | null = null;
+
+  async function closeColumns() {
+    columnsMenu = null;
+    const opener = columnsOpener;
+    columnsOpener = null;
+    if (!opener) return;
+    // The choice is made after the menu closes: wait for the table to show it.
+    await tick();
+    // A click elsewhere put focus there already: leave it.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const back = opener.button?.isConnected ? opener.button : opener.head.isConnected ? opener.head.querySelector<HTMLElement>('button') : null;
+    back?.focus({ preventScroll: true });
+  }
+
+  function openColumns<K extends string>(event: MouseEvent, set: ColumnSet<K>, shown: ReadonlySet<string>, storeKey: string, setChoices: (choices: ColumnChoices) => void, current: () => ColumnChoices) {
+    event.preventDefault();
+    // From the keyboard the event has no point: the menu opens under the header instead.
+    const head = event.currentTarget as HTMLElement;
+    const box = head.getBoundingClientRect();
+    const keyboard = event.clientX === 0 && event.clientY === 0;
+    // Focus goes back where it was when the menu closes: the header button that opened it, or the table's first one when
+    // that column was just hidden.
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    columnsOpener = { head, button: target ?? (document.activeElement instanceof HTMLElement && head.contains(document.activeElement) ? document.activeElement : null) };
+    const keep = (next: ColumnChoices) => {
+      setChoices(next);
+      save(storeKey, JSON.stringify(next));
+    };
+    columnsMenu = {
+      x: keyboard ? box.left : event.clientX,
+      y: keyboard ? box.bottom : event.clientY,
+      label: 'Columns',
+      items: columnMenu(set, shown, () => true, (key, on) => keep(choose(set, current(), key, on)), () => keep({})),
+    };
+  }
   let holding = $state(false);
   // A table that goes (no peers left, the torrent stopped, another tab) takes the pointer's leave with it: let go then,
   // or later rows would keep held places until the pointer came back.
@@ -140,26 +190,26 @@
   let shownPeers: string[] = [];
   let shownTrackers: string[] = [];
   const peerList = $derived.by(() => {
-    const sorted = sortedPeerRows(peers, peerSort, numbersOf(job.id));
+    const sorted = sortedPeerRows(peers, peerOrder, numbersOf(job.id));
     const list = holding ? heldOrder(shownPeers, sorted, (row) => row.key) : sorted;
     shownPeers = list.map((row) => row.key);
     return list;
   });
   const trackerList = $derived.by(() => {
-    const sorted = sortedTrackerRows(trackers, trackerSort);
+    const sorted = sortedTrackerRows(trackers, trackerOrder);
     const list = holding ? heldOrder(shownTrackers, sorted, (row) => row.key) : sorted;
     shownTrackers = list.map((row) => row.key);
     return list;
   });
   function sortPeers(key: PeerSortKey) {
-    const next = nextColumnSort(peerSort, key);
+    const next = nextColumnSort(peerOrder, key);
     // A click shows the new order at once, pointer or not.
     shownPeers = sortedPeerRows(peers, next, numbersOf(job.id)).map((row) => row.key);
     peerSort = next;
     save('inbound.peerSort', JSON.stringify(next));
   }
   function sortTrackers(key: TrackerSortKey) {
-    const next = nextColumnSort(trackerSort, key);
+    const next = nextColumnSort(trackerOrder, key);
     shownTrackers = sortedTrackerRows(trackers, next).map((row) => row.key);
     trackerSort = next;
     save('inbound.trackerSort', JSON.stringify(next));
@@ -170,14 +220,14 @@
 </script>
 
 {#snippet peerHead(key: PeerSortKey, label: string, cls: string)}
-  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(peerSort, key)}>
-    <button class="header-cell" onclick={() => sortPeers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(peerSort, key)}</span></button>
+  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(peerOrder, key)}>
+    <button class="header-cell" onclick={() => sortPeers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(peerOrder, key)}</span></button>
   </th>
 {/snippet}
 
 {#snippet trackerHead(key: TrackerSortKey, label: string, cls: string)}
-  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(trackerSort, key)}>
-    <button class="header-cell" onclick={() => sortTrackers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(trackerSort, key)}</span></button>
+  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(trackerOrder, key)}>
+    <button class="header-cell" onclick={() => sortTrackers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(trackerOrder, key)}</span></button>
   </th>
 {/snippet}
 
@@ -196,21 +246,25 @@
       <p class="text-muted">{peersCount(peerList.length)}</p>
       <div class="max-h-72 overflow-auto rounded border border-divider" role="region" aria-label="Peers" onpointerenter={() => (holding = true)} onpointerleave={() => (holding = false)}>
         <table class="w-full min-w-[520px] text-left text-[12.5px]">
-          <thead class="sticky top-0 bg-chrome text-muted">
+          <thead class="sticky top-0 bg-chrome text-muted"
+                 oncontextmenu={(event) => openColumns(event, peerColumns, peerCols, 'inbound.columns.peers', (next) => (peerChoices = next), () => peerChoices)}>
             <tr>
-              {@render peerHead('peer', 'Peer', '')}{@render peerHead('client', 'Client', '')}{@render peerHead('flags', 'Connection', '')}
-              {@render peerHead('has', 'Has', 'text-right')}{@render peerHead('down', 'Down', 'text-right')}{@render peerHead('up', 'Up', 'text-right')}
+              {#each peerColumns.defs as column (column.key)}
+                {#if peerCols.has(column.key)}{@render peerHead(column.key, column.title, column.align === 'right' ? 'text-right' : '')}{/if}
+              {/each}
             </tr>
           </thead>
           <tbody>
             {#each peerList as peer (peer.key)}
               <tr class="border-t border-divider">
                 <td class="px-2 py-1 whitespace-nowrap" title={peer.address}>{peer.label}</td>
-                <td class="max-w-40 truncate px-2 py-1" title={peer.client}>{peer.client}</td>
-                <td class="px-2 py-1 whitespace-nowrap text-muted">{peer.flags}</td>
-                <td class="tabular px-2 py-1 text-right">{peer.has}</td>
-                <td class="tabular px-2 py-1 text-right whitespace-nowrap">{peer.down}</td>
-                <td class="tabular px-2 py-1 text-right whitespace-nowrap">{peer.up}</td>
+                {#if peerCols.has('client')}<td class="max-w-40 truncate px-2 py-1" title={peer.client}>{peer.client}</td>{/if}
+                {#if peerCols.has('flags')}<td class="px-2 py-1 whitespace-nowrap text-muted">{peer.flags}</td>{/if}
+                {#if peerCols.has('has')}<td class="tabular px-2 py-1 text-right">{peer.has}</td>{/if}
+                {#if peerCols.has('down')}<td class="tabular px-2 py-1 text-right whitespace-nowrap">{peer.down}</td>{/if}
+                {#if peerCols.has('up')}<td class="tabular px-2 py-1 text-right whitespace-nowrap">{peer.up}</td>{/if}
+                {#if peerCols.has('received')}<td class="tabular px-2 py-1 text-right whitespace-nowrap text-muted">{peer.received}</td>{/if}
+                {#if peerCols.has('sent')}<td class="tabular px-2 py-1 text-right whitespace-nowrap text-muted">{peer.sent}</td>{/if}
               </tr>
             {/each}
           </tbody>
@@ -226,20 +280,24 @@
     {:else}
       <div class="max-h-72 overflow-auto rounded border border-divider" role="region" aria-label="Trackers" onpointerenter={() => (holding = true)} onpointerleave={() => (holding = false)}>
         <table class="w-full min-w-[520px] text-left text-[12.5px]">
-          <thead class="sticky top-0 bg-chrome text-muted">
+          <thead class="sticky top-0 bg-chrome text-muted"
+                 oncontextmenu={(event) => openColumns(event, trackerColumns, trackerCols, 'inbound.columns.trackers', (next) => (trackerChoices = next), () => trackerChoices)}>
             <tr>
-              {@render trackerHead('tracker', 'Tracker', '')}{@render trackerHead('status', 'Status', '')}{@render trackerHead('seeds', 'Seeds', 'text-right')}
-              {@render trackerHead('peers', 'Peers', 'text-right')}{@render trackerHead('next', 'Next announce', 'text-right')}
+              {#each trackerColumns.defs as column (column.key)}
+                {#if trackerCols.has(column.key)}{@render trackerHead(column.key, column.title, column.align === 'right' ? 'text-right' : '')}{/if}
+              {/each}
             </tr>
           </thead>
           <tbody>
             {#each trackerList as tracker (tracker.key)}
               <tr class="border-t border-divider">
                 <td class="max-w-64 truncate px-2 py-1 font-mono text-[12px]" title={tracker.url}>{tracker.url}</td>
-                <td class="px-2 py-1 {tracker.failed ? 'text-error' : ''}">{tracker.status}</td>
-                <td class="tabular px-2 py-1 text-right">{tracker.seeds}</td>
-                <td class="tabular px-2 py-1 text-right">{tracker.peers}</td>
-                <td class="tabular px-2 py-1 text-right whitespace-nowrap">{tracker.next}</td>
+                {#if trackerCols.has('status')}<td class="px-2 py-1 {tracker.failed ? 'text-error' : ''}">{tracker.status}</td>{/if}
+                {#if trackerCols.has('seeds')}<td class="tabular px-2 py-1 text-right">{tracker.seeds}</td>{/if}
+                {#if trackerCols.has('peers')}<td class="tabular px-2 py-1 text-right">{tracker.peers}</td>{/if}
+                {#if trackerCols.has('next')}<td class="tabular px-2 py-1 text-right whitespace-nowrap">{tracker.next}</td>{/if}
+                {#if trackerCols.has('tier')}<td class="tabular px-2 py-1 text-right text-muted">{tracker.tier}</td>{/if}
+                {#if trackerCols.has('message')}<td class="max-w-64 truncate px-2 py-1 text-muted" title={tracker.message}>{tracker.message}</td>{/if}
               </tr>
             {/each}
           </tbody>
@@ -282,6 +340,10 @@
     {/if}
   {/if}
 </div>
+
+{#if columnsMenu}
+  <ContextMenu items={columnsMenu.items} x={columnsMenu.x} y={columnsMenu.y} label={columnsMenu.label} onclose={closeColumns} />
+{/if}
 
 <style>
   /* The download list's headers (ListScreen): a plain button that sorts, with the arrow after its words. */

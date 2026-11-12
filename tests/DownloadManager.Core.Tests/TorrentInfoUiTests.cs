@@ -229,12 +229,32 @@ public sealed class TorrentInfoUiTests : IDisposable
         Assert.Equal("Seeding · ratio 0.50", view.Status);
         Assert.Equal(100, view.Percent);
         Assert.Equal($"100% · {UiFormat.Bytes(1024 * 1024)}", view.Progress);
-        Assert.Equal(TorrentInfoRules.Dash, view.Down);
+        // T7.B1: nothing is left to download, which is a real 0, not "—".
+        Assert.Equal($"{UiFormat.Bytes(0)}/s", view.Down);
         Assert.Equal($"{UiFormat.Bytes(1024)}/s", view.Up);
         Assert.Equal(TorrentInfoRules.Dash, view.TimeLeft);
         Assert.StartsWith("0.50 · uploaded", view.Ratio);
         Assert.NotNull(view.Goal);
         Assert.Equal("1 of 1 working", view.Trackers);
+    }
+
+    // T7.B1: "—" only where the speed isn't known; a known zero is "0 B/s".
+    [Fact]
+    public void AKnownZeroSpeedIsZeroBytesASecondAndOnlyAnUnknownOneIsADash()
+    {
+        Assert.Equal("0 B/s", TorrentInfoRules.ZeroRate);
+        // Seeding with nothing going out at the moment: both are 0 B/s.
+        var idleSeed = TorrentInfoRules.Describe(Torrent("completed", seeding: true, rate: 0, upRate: 0), "Complete", null, Now, null, null, true);
+        Assert.Equal(["0 B/s", "0 B/s"], new[] { idleSeed.Down, idleSeed.Up });
+        // Complete and not seeding: nothing comes (0 B/s); it doesn't run, so its upload isn't known.
+        var finished = TorrentInfoRules.Describe(Torrent("completed", rate: 0), "Complete", null, Now, null, null, true);
+        Assert.Equal(["0 B/s", TorrentInfoRules.Dash], new[] { finished.Down, finished.Up });
+        // Downloading with nothing coming in at the moment.
+        var stalled = TorrentInfoRules.Describe(Torrent(rate: 0, upRate: 0), "Downloading", null, Now, null, null, true);
+        Assert.Equal(["0 B/s", "0 B/s"], new[] { stalled.Down, stalled.Up });
+        // Stopped or queued before it finished: not known.
+        foreach (var state in new[] { "paused", "queued", "failed" })
+            Assert.Equal(TorrentInfoRules.Dash, TorrentInfoRules.DownText(Torrent(state)));
     }
 
     [Fact]

@@ -1,7 +1,6 @@
 using System.Reflection;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
-using DownloadManager.Engine;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Archives;
@@ -221,6 +220,24 @@ public sealed partial class HostCommandDispatcherTests
         Assert.NotEqual(string.Empty, (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.HostStatus, new { })).GetPayload<HostStatusDto>().StateDirectory);
     }
 
+    /// <summary>Review of 0.7.2, security-3: which browsers this PC uses, and when, is for sessions at this PC only.</summary>
+    [Fact]
+    public async Task AWebSessionIsNotToldWhichBrowsersThisPcUses()
+    {
+        var web = await WebAsync();
+        var seen = Path.Combine(_root, "seen");
+        Directory.CreateDirectory(seen);
+        web.Service.ExtensionSightings = new ExtensionSightings(seen);
+        Assert.True(web.Service.ExtensionSightings.Note("chrome"));
+
+        var status = await AskAsync(web.Dispatcher, web.Session, MessageTypes.HostStatus, new { });
+        Assert.Null(status.GetPayload<HostStatusDto>().ExtensionsSeen);
+        var query = await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobsQuery, new { });
+        Assert.Null(query.GetPayload<SnapshotDto>().Status.ExtensionsSeen);
+        var local = await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.HostStatus, new { });
+        Assert.Contains("chrome", local.GetPayload<HostStatusDto>().ExtensionsSeen!.Keys);
+    }
+
     [Fact]
     public async Task AWebSessionCantTurnOnWhatAFinishedDownloadDoesOnThisPc()
     {
@@ -317,7 +334,6 @@ public sealed partial class HostCommandDispatcherTests
             ("proxy", s => s.Proxy = new ProxyDto { Mode = "http", Address = "203.0.113.1:8080" }),
             ("allowLocalNetwork", s => s.AllowLocalNetwork = !s.AllowLocalNetwork),
             ("postDownloadCommand", s => s.PostDownloadCommand = "cmd.exe /c echo"),
-            ("ffmpegPath", s => s.FfmpegPath = @"C:\Windows\System32\cmd.exe"),
             ("allowSystemCompletionActions", s => s.AllowSystemCompletionActions = true),
             ("updateManifestUrl", s => s.UpdateManifestUrl = "https://example.invalid/manifest.json"),
             ("launchAtStartup", s => s.LaunchAtStartup = !s.LaunchAtStartup),
@@ -591,7 +607,8 @@ public sealed partial class HostCommandDispatcherTests
         var web = await WebAsync();
         var add = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobAdd, Later("ftp://203.0.113.10/a.bin", Inside))).GetPayload<AddJobResponse>();
         Assert.False(add.Accepted);
-        Assert.Equal(CallerScope.FtpRefused, add.Error);
+        // CUT.1: refused for everyone now, with the same words.
+        Assert.Equal(FtpAddresses.NotSupported, add.Error);
     }
 
     [Fact]

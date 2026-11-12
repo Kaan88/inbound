@@ -8,7 +8,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>
 /// T1 step 5, the ways a torrent comes in: Tasks › Add Magnet… / Import Torrent File…, Add URL, drag and drop and Ctrl+V
 /// on the list all lead to <see cref="TorrentAddDialog"/>. With torrents off, the provider's own flow takes them as
-/// before when an account can. Review 5:A6: http, https and ftp links dropped or pasted the same way go to Add Links.
+/// before when an account can. Review 5:A6: http and https links dropped or pasted the same way go to Add Links.
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -293,7 +293,7 @@ public sealed partial class MainWindow
             if (_remote.State.TorrentsOffered && await ConfirmAsync("Add torrents", TorrentsOffText, "Open Options"))
                 await OpenOptionsAsync();
             else if (!_remote.State.TorrentsOffered)
-                await ShowMessageAsync("Add torrents", "This Host doesn't download torrents.");
+                await ShowMessageAsync("Add torrents", "Torrents aren't available here.");
             return false;
         }
 
@@ -325,9 +325,16 @@ public sealed partial class MainWindow
         return false;
     }
 
-    /// <summary>T10: the finished .torrent download this dialog line's path is the file of, or null.</summary>
+    /// <summary>
+    /// T10: the finished .torrent download this dialog line's path is the file of, or null. On another server only for a
+    /// path one of its rows' Open as Torrent is adding (<see cref="_openedServerRows"/>, T10.B2).
+    /// </summary>
     private Guid? TorrentFileJobFor(string input)
-        => TorrentRules.TorrentFileJobFor(_jobsById.Values.Select(row => row.Dto).OfType<JobDto>(), input);
+        => TorrentRules.TorrentFileJobFor(_jobsById.Values.Select(row => row.Dto).OfType<JobDto>(), input, _connection.IsRemote, _openedServerRows.Keys);
+
+    // T10.B2: paths of the shown server's rows whose Open as Torrent is being added, counted. Only these are the server's
+    // own files; the same path from anywhere else is a file on this PC. UI thread only.
+    private readonly Dictionary<string, int> _openedServerRows = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     /// <summary>
     /// T10: finished .torrent downloads whose torrent turned out to be in the list already: each is sent as an add from
@@ -371,7 +378,26 @@ public sealed partial class MainWindow
     private async Task OpenAsTorrentAsync()
     {
         if (SelectedJob?.Dto is not { } job || !TorrentRules.OpensAsTorrent(job)) return;
-        await AddTorrentsAsync("torrentFiles", [job.FinalFilePath]);
+        var path = job.FinalFilePath.Trim();
+        if (!_connection.IsRemote)
+        {
+            await AddTorrentsAsync("torrentFiles", [path]);
+            return;
+        }
+
+        // T10.B2: on another server the file is the server's own: it is read there by the download's id (This PC) or by
+        // its path (the provider, with the server's own account, as its web UI does), never looked for on this PC.
+        _openedServerRows[path] = _openedServerRows.GetValueOrDefault(path) + 1;
+        try
+        {
+            using var mark = _remote.UseServerFiles([path]);
+            await AddTorrentsAsync("torrentFiles", [path]);
+        }
+        finally
+        {
+            if (_openedServerRows.TryGetValue(path, out var count) && count > 1) _openedServerRows[path] = count - 1;
+            else _openedServerRows.Remove(path);
+        }
     }
 
     /// <summary>A job already on the list: selected and in view, on All Downloads if this view or the search hides it.</summary>

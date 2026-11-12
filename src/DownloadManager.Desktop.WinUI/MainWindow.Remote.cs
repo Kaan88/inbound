@@ -369,7 +369,7 @@ public sealed partial class MainWindow
         // TB.S1: named for the provider when the menu opens.
         _menuRemoteStartQueued = CreateContextItem("Start Now", async (_, _) => await StartQueuedAsync(SelectedRemoteJobs));
         _menuRemoteDequeue = CreateContextItem("Remove from Queue…", async (_, _) => await RemoveFromProviderQueueAsync(SelectedRemoteJobs));
-        _menuRemoteRemove = CreateContextItem("Remove from List…", async (_, _) => await RemoveRemoteAsync(SelectedRemoteJobs));
+        _menuRemoteRemove = CreateContextItem("Delete…", async (_, _) => await RemoveRemoteAsync(SelectedRemoteJobs));
         _menuRemoteRemove.KeyboardAcceleratorTextOverride = "Del";
         _remoteContextSeparator = new MenuFlyoutSeparator();
         MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteStartQueued, _menuRemoteDequeue, _menuRemoteRemove, _remoteContextSeparator];
@@ -668,7 +668,7 @@ public sealed partial class MainWindow
 
     private async Task RemoveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)
     {
-        if (jobs.Count == 0 || !await ConfirmAsync("Remove from list?", RemoteText.RemoveQuestion(jobs), "Remove from list")) return;
+        if (jobs.Count == 0 || !await ConfirmAsync("Delete from the list?", RemoteText.RemoveQuestion(jobs), "Delete")) return;
         await RemoveRemoteConfirmedAsync(jobs);
     }
 
@@ -682,7 +682,7 @@ public sealed partial class MainWindow
 
         if (jobs.Count > 0 && sets.Count > 0)
         {
-            if (await ConfirmAsync("Remove from list?", $"{RemoteText.RemoveQuestion(jobs)} {ArchiveText.RemoveQuestion(sets)}", "Remove from list"))
+            if (await ConfirmAsync("Delete from the list?", $"{RemoteText.RemoveQuestion(jobs)} {ArchiveText.RemoveQuestion(sets)}", "Delete"))
             {
                 await RemoveRemoteConfirmedAsync(jobs);
                 await RemoveArchiveRecordsConfirmedAsync(sets);
@@ -709,7 +709,7 @@ public sealed partial class MainWindow
             if (!result.Ok) problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Remove from list", string.Join(Environment.NewLine, problems));
+        if (problems.Count > 0) await ShowMessageAsync("Delete", string.Join(Environment.NewLine, problems));
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primary)

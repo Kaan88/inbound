@@ -123,7 +123,7 @@ public sealed partial class MainWindow
         Cancel = CreateContextItem("Cancel Extraction", async (_, _) => await CancelArchivesAsync(CurrentArchivePlan().Cancel)),
         OpenFolder = CreateContextItem("Open Extracted Folder", async (_, _) => await OpenExtractedFoldersAsync(CurrentArchivePlan().OpenFolders)),
         OpenArchiveFolder = CreateContextItem("Open Archive Folder", async (_, _) => await OpenExtractedFoldersAsync(CurrentArchivePlan().ArchiveFolders)),
-        Remove = CreateContextItem("Remove Extraction Record…", async (_, _) => await RemoveArchiveRecordsAsync(CurrentArchivePlan().Remove)),
+        Remove = CreateContextItem("Delete Extraction Record…", async (_, _) => await RemoveArchiveRecordsAsync(CurrentArchivePlan().Remove)),
     };
 
     // ---- Entry points ------------------------------------------------------------------------------
@@ -135,10 +135,8 @@ public sealed partial class MainWindow
     private void SyncExtractionColumn()
     {
         var show = _remote.State.ArchivesSupported && _remote.State.ArchiveSets.Count > 0;
-        _jobsHeader.SetColumnVisible("extraction", show);
-        if (JobViewModel.ShowExtractionColumn == show) return;
-        JobViewModel.ShowExtractionColumn = show;
-        foreach (var row in _jobsById.Values.Concat(_packageRows.Values).Concat(_remoteRows.Values).Concat(_archiveRows.Values)) row.NotifyExtractionColumn();
+        // The header shows and hides the column's cells in every row (UI.R42), so the rows need no word of it.
+        _jobsHeader.SetAvailable("extraction", show);
     }
 
     private void SyncArchiveEntryPoints()
@@ -560,12 +558,12 @@ public sealed partial class MainWindow
 
     private async Task RemoveArchiveRecordsAsync(IReadOnlyList<ArchiveSetDto> sets)
     {
-        if (sets.Count == 0 || !await ConfirmAsync("Remove extraction record?", ArchiveText.RemoveQuestion(sets), "Remove Record")) return;
+        if (sets.Count == 0 || !await ConfirmAsync("Delete extraction record?", ArchiveText.RemoveQuestion(sets), "Delete")) return;
         await RemoveArchiveRecordsConfirmedAsync(sets);
     }
 
     private Task RemoveArchiveRecordsConfirmedAsync(IReadOnlyList<ArchiveSetDto> sets)
-        => RunOnSetsAsync("Remove extraction record", sets, _remote.RemoveArchiveAsync);
+        => RunOnSetsAsync("Delete extraction record", sets, _remote.RemoveArchiveAsync);
 
     private async Task RunOnSetsAsync(string title, IReadOnlyList<ArchiveSetDto> sets, Func<Guid, CancellationToken, Task<ArchiveActionResult>> action)
     {

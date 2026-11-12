@@ -19,6 +19,8 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
 
     private Task<SandboxHost> StartHostAsync() => SandboxHost.StartAsync(_server.TorBox.ApiBase);
 
+    private const string ExtensionSightingsFileName = DownloadManager.Runtime.ExtensionSightings.FileName;
+
     // ---- Who may start the bridge ---------------------------------------------------------------
 
     [Theory]
@@ -76,9 +78,36 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
         {
             var reply = await AskAsync(native, MessageTypes.HostPing, new { });
             Assert.True(reply.GetPayload<HostActionResult>().Ok);
+
+            // UI.R41: the window learns that Firefox's extension came (the native host names its browser in the hello).
+            await using var window = await host.ConnectAsync();
+            var status = await window.AskAsync<HostStatusDto>(MessageTypes.HostStatus, new { });
+            Assert.NotNull(status.ExtensionsSeen);
+            Assert.Equal([ExtensionBrowsers.Firefox], status.ExtensionsSeen!.Keys);
+            Assert.Single(Directory.EnumerateFiles(host.DataDirectory, ExtensionSightingsFileName, SearchOption.AllDirectories));
         }
         finally { await StopAsync(native); }
     }
+
+    [Theory]
+    // The Chrome Web Store copy: the browser program above decides, through cmd.exe as Chrome and Edge start it.
+    [InlineData("chrome", new[] { "cmd.exe", "chrome.exe" }, "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/", "--parent-window=0")]
+    [InlineData("edge", new[] { "cmd.exe", "msedge.exe", "explorer.exe" }, "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/", "--parent-window=0")]
+    [InlineData("edge", new[] { "MSEDGE.EXE" }, "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/")]
+    // No browser above (a test, or the lookup failed): the listing's ID decides.
+    [InlineData("chrome", new string[0], "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/")]
+    [InlineData("edge", new string[0], "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/")]
+    [InlineData("edge", new[] { "cmd.exe", "brave.exe" }, "chrome-extension://ifoagddcenmjpbklkhghbdmgplldcdci/")]
+    [InlineData("chrome", new string[0], "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/")]
+    [InlineData("firefox", new[] { "chrome.exe" }, @"C:\x\com.kaank.downloadmanager.firefox.json", "inbound-bridge@kaan88")]
+    public void The_native_host_names_the_browser_its_extension_runs_in(string expected, string[] ancestors, params string[] arguments) =>
+        Assert.Equal(expected, BrowserBridge.CallerBrowser(arguments, ancestors));
+
+    [Theory]
+    [InlineData("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/")]
+    [InlineData(@"C:\x\manifest.json", "someone-else@example.com")]
+    public void A_refused_caller_names_no_browser(params string[] arguments) =>
+        Assert.Null(BrowserBridge.CallerBrowser(arguments, ["chrome.exe"]));
 
     // ---- What the popup and the folder window may ask --------------------------------------------
 

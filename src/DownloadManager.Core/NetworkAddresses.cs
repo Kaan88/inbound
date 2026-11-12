@@ -28,6 +28,29 @@ public static class NetworkAddresses
         return IPAddress.TryParse(host.Trim('[', ']'), out var address) && IsLocal(address);
     }
 
+    /// <summary>
+    /// UI.B27: an http or https address that only this PC or its local network can reach, by its text alone: what
+    /// <see cref="IsLocalTarget"/> says (loopback, private, link-local and unique-local ranges, <c>localhost</c>,
+    /// <c>.local</c>), a name of one label (<c>nas</c>), and names under <c>.lan</c> and <c>.home.arpa</c>. No service
+    /// on the internet can fetch from one, so adding one never asks a provider about it: it is an ordinary download.
+    /// False for anything that isn't an absolute http or https address.
+    /// </summary>
+    public static bool IsLocalWebAddress(string? text)
+        => Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) && IsLocalWebAddress(uri);
+
+    /// <inheritdoc cref="IsLocalWebAddress(string?)"/>
+    public static bool IsLocalWebAddress(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri || uri.Scheme is not ("http" or "https")) return false;
+        if (IsLocalTarget(uri)) return true;
+        if (uri.HostNameType != UriHostNameType.Dns) return false;
+        var host = uri.IdnHost.TrimEnd('.');
+        return !host.Contains('.') ||
+               host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase) ||
+               host.Equals("home.arpa", StringComparison.OrdinalIgnoreCase) ||
+               host.EndsWith(".home.arpa", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Whether this address is not on the public internet.</summary>
     public static bool IsLocal(IPAddress address)
     {

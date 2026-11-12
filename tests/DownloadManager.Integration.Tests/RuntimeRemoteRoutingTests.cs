@@ -457,14 +457,15 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task RefreshTakesAnFtpAddressWithoutAskingAnything()
+    public async Task RefreshRefusesAnFtpAddressWithoutAskingAnything()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
         var job = await StoppedJob(rig);
 
         var refreshed = await rig.Ctx.Service.RefreshUrlAsync(job.Id, "ftp://127.0.0.1:9/nothing-here.bin");
 
-        Assert.True(refreshed.Ok, refreshed.Error);
+        Assert.False(refreshed.Ok);
+        Assert.Equal(FtpAddresses.NotSupported, refreshed.Error);
         Assert.Equal(0, rig.Mock.Calls(HosterList));
     }
 

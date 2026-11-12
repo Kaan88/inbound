@@ -144,24 +144,96 @@ public sealed class EngineAuditFixTests(TestServerFixture fixture) : IDisposable
     }
 
     [Theory]
-    [InlineData("example.test", true)]
-    [InlineData("example.test:8080", true)]
-    [InlineData("example.test:8080/files", true)]
-    [InlineData("http://example.test:8080", true)]
-    [InlineData("example.test:9090", false)]
-    [InlineData("https://example.test:8080", false)]
-    public async Task SiteLoginMatchesHostPortFormsAndHonoursTheScheme(string site, bool sent)
+    // SEC.L1: a login saved without a scheme goes over https only, to exactly that host.
+    [InlineData("example.test", "https://example.test:8080/files/a.bin", true)]
+    [InlineData("example.test", "http://example.test:8080/files/a.bin", false)]
+    [InlineData("example.test", "https://sub.example.test:8080/files/a.bin", false)]
+    [InlineData("example.test:8080", "https://example.test:8080/files/a.bin", true)]
+    [InlineData("example.test:8080", "http://example.test:8080/files/a.bin", false)]
+    [InlineData("example.test:8080/files", "https://example.test:8080/files/a.bin", true)]
+    [InlineData("example.test:9090", "https://example.test:8080/files/a.bin", false)]
+    // Only an explicit *. reaches subdomains, and still over https only.
+    [InlineData("*.example.test", "https://sub.example.test:8080/files/a.bin", true)]
+    [InlineData("*.example.test", "http://sub.example.test:8080/files/a.bin", false)]
+    // A login saved with http:// is the user's choice: it keeps working over http, for that host only.
+    [InlineData("http://example.test:8080", "http://example.test:8080/files/a.bin", true)]
+    [InlineData("http://example.test", "http://example.test:8080/files/a.bin", true)]
+    [InlineData("http://example.test", "http://sub.example.test:8080/files/a.bin", false)]
+    [InlineData("https://example.test:8080", "http://example.test:8080/files/a.bin", false)]
+    public async Task SiteLoginMatchesHostPortFormsAndHonoursTheScheme(string site, string url, bool sent)
     {
         var content = TestContent.Generate(905, 4096);
         using var handler = new StubFileHandler(content);
         using var engine = new HttpDownloadEngine(Options(), handler);
         engine.UpdateSiteLogins([new SiteLoginCredential(site, "user", "pass")]);
-        var job = Job("http://example.test:8080/files/a.bin", "site-" + Guid.NewGuid().ToString("N") + ".bin");
+        var job = Job(url, "site-" + Guid.NewGuid().ToString("N") + ".bin");
 
         var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
 
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal(sent, handler.AuthorizationSent.Any(value => value.StartsWith("Basic ", StringComparison.Ordinal)));
+        if (!sent) Assert.Empty(handler.AuthorizationSent);
+    }
+
+    /// <summary>
+    /// SEC.L1: a site login never follows a redirect that leaves the host or drops to http. In every case a saved
+    /// login would match the redirect target on its own (a second login for the other host, *. for the subdomain,
+    /// http:// for the http address), so only the engine's same-origin boundary keeps it off the hop.
+    /// </summary>
+    [Theory]
+    [InlineData("example.test|other.test", "https://example.test/a.bin", "https://other.test/a.bin")]
+    [InlineData("*.example.test", "https://example.test/a.bin", "https://cdn.example.test/a.bin")]
+    [InlineData("example.test|http://example.test", "https://example.test/a.bin", "http://example.test/a.bin")]
+    [InlineData("http://example.test", "https://example.test/a.bin", "http://example.test/a.bin")]
+    public async Task SiteLoginStaysOffARedirectThatLeavesTheHostOrDropsToHttp(string sites, string url, string target)
+    {
+        var logins = sites.Split('|').Select(site => new SiteLoginCredential(site, "user", "pass")).ToList();
+        Assert.Contains(logins, login => SiteLoginMatcher.Matches(login.Site, new Uri(target)));
+        var content = TestContent.Generate(906, 4096);
+        using var handler = new RedirectingLoginHandler(content, new Uri(url), new Uri(target));
+        using var engine = new HttpDownloadEngine(Options(), handler);
+        engine.UpdateSiteLogins(logins);
+        var job = Job(url, "redirect-" + Guid.NewGuid().ToString("N") + ".bin");
+
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        var first = handler.Requests.Where(r => r.Uri == new Uri(url)).ToList();
+        var hops = handler.Requests.Where(r => r.Uri == new Uri(target)).ToList();
+        Assert.NotEmpty(first);
+        Assert.NotEmpty(hops);
+        // The first host gets the login; the redirect target never does.
+        Assert.All(first, r => Assert.StartsWith("Basic ", r.Authorization));
+        Assert.All(hops, r => Assert.Null(r.Authorization));
+    }
+
+    /// <summary>Redirects one address to another, serves the body there, and records what each request carried.</summary>
+    private sealed class RedirectingLoginHandler(byte[] content, Uri from, Uri to) : HttpMessageHandler
+    {
+        public ConcurrentQueue<(Uri Uri, string? Authorization)> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Enqueue((request.RequestUri!, request.Headers.Authorization?.ToString()));
+            HttpResponseMessage response;
+            if (request.RequestUri == from)
+            {
+                response = new HttpResponseMessage(HttpStatusCode.Redirect);
+                response.Headers.Location = to;
+            }
+            else if (request.RequestUri == to)
+            {
+                response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) };
+                response.Content.Headers.ContentLength = content.Length;
+            }
+            else
+            {
+                response = new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            response.RequestMessage = request;
+            return Task.FromResult(response);
+        }
     }
 
     private sealed class FixedFreeSpace(long available) : IFreeSpaceProvider

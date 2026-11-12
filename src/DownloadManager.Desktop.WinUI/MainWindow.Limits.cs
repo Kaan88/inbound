@@ -141,11 +141,21 @@ public sealed partial class MainWindow
     {
         try
         {
-            var latest = await _connection.RefreshAsync();
+            var connection = _connection;
+            var latest = await connection.RefreshAsync();
             if (latest.Settings is not null)
             {
                 _settings = latest.Settings;
                 UpdateLimitButtons();
+            }
+
+            // UI.R41: Options shows which extensions have connected, so it needs the Host's status as it is now.
+            if (latest.Status is not null && connection == _connection)
+            {
+                _status = latest.Status;
+                if (!connection.IsRemote) _localStatus = latest.Status;
+                // Review of UI.R41: an extension that connected since the last snapshot ends the hint here too.
+                UpdateExtensionHint(false);
             }
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or OperationCanceledException)

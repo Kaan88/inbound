@@ -128,7 +128,8 @@ public sealed class JobListFileTests
         Assert.DoesNotContain("contentType", JobListFile.Serialize(jobs));
     }
 
-    /// <summary>Review 1 N6: a stream the browser handed off at an address without .m3u8 or .mpd stays a stream.</summary>
+    /// <summary>Review 1 N6: a stream the browser handed off at an address without .m3u8 or .mpd stays a stream, which
+    /// since 0.7.2 fails at its start with a clear message instead of being saved as a file.</summary>
     [Fact]
     public void KeepsTheHandOffContentTypeSoAStreamIsAddedAsOneAgain()
     {

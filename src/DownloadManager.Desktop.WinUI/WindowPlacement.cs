@@ -39,12 +39,15 @@ internal static class WindowPlacement
             if (restoreSize && saved.Width >= 200 && saved.Height >= 150)
             {
 #if HAS_UNO
-                // Uno has no MoveAndResize, and before the window is shown it keeps only the first size it is given.
+                // Uno has no MoveAndResize, and before the window is shown it keeps only the first size it is given. A
+                // placement saved on a bigger screen is cut down to this one and moved onto it.
                 void Restore(object sender, WindowActivatedEventArgs args)
                 {
                     window.Activated -= Restore;
-                    appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
-                    appWindow.Resize(new SizeInt32 { Width = saved.Width, Height = saved.Height });
+                    var probe = Probe(saved);
+                    var (x, y, size) = WindowSizeRules.OnScreen(saved.X, saved.Y, saved.Width, saved.Height, UnoScreens.WorkArea(probe.X, probe.Y));
+                    appWindow.Move(new PointInt32 { X = x, Y = y });
+                    appWindow.Resize(new SizeInt32 { Width = size.Width, Height = size.Height });
                 }
                 window.Activated += Restore;
 #else
@@ -52,7 +55,18 @@ internal static class WindowPlacement
 #endif
             }
             else
+            {
+#if HAS_UNO
+                // A place saved on a bigger screen is moved onto this one.
+                var probe = Probe(saved);
+                var (x, y) = UnoScreens.WorkArea(probe.X, probe.Y) is { } work
+                    ? WindowSizeRules.KeptInside(saved.X, saved.Y, new PixelSize(appWindow.Size.Width, appWindow.Size.Height), work.X, work.Y, work.Width, work.Height)
+                    : (saved.X, saved.Y);
+                appWindow.Move(new PointInt32 { X = x, Y = y });
+#else
                 appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
+#endif
+            }
             if (restoreSize && saved.Maximized && appWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         }
 
@@ -154,14 +168,18 @@ internal static class WindowPlacement
         return [];
     }
 
+    /// <summary>A point in the title bar of a placed window: what tells which display it is on.</summary>
+    private static PointInt32 Probe(Placement placement)
+        => new() { X = placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), Y = placement.Y + 16 };
+
     /// <summary>True when the title-bar area is on a display that is connected now.</summary>
     private static bool IsVisible(Placement placement)
     {
 #if HAS_UNO
-        // Uno has no DisplayArea lookups (they throw); the window manager keeps a window on a screen there.
+        // Uno has no DisplayArea lookups (they throw); a place off this screen is moved onto it in Track.
         return true;
 #endif
-        var probe = new PointInt32 { X = placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), Y = placement.Y + 16 };
+        var probe = Probe(placement);
         var area = DisplayArea.GetFromPoint(probe, DisplayAreaFallback.None);
         if (area is null) return false;
         var work = area.WorkArea;

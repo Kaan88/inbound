@@ -173,10 +173,15 @@ public sealed partial class RuntimeServiceTests
         public List<RemoteNotice> Told { get; } = [];
         private RemoteNotices? _notices;
 
-        public static async Task<RemoteRig> CreateAsync(TestServerHost server, string? key = MockKey, int connections = 2, bool loops = false, RemoteCoordinatorOptions? options = null)
+        /// <param name="loopbackHosters">
+        /// This test server stands in for the listed sites, so its loopback address is matched against the list. False
+        /// for the rule everywhere else (UI.B27): an address on this PC is ordinary and nobody is asked about it.
+        /// </param>
+        public static async Task<RemoteRig> CreateAsync(TestServerHost server, string? key = MockKey, int connections = 2, bool loops = false, RemoteCoordinatorOptions? options = null,
+            bool loopbackHosters = true)
         {
             var box = await TorBoxRig.CreateAsync(server, key: key, connections: connections);
-            var rig = new RemoteRig(server, box) { Options = options ?? new RemoteCoordinatorOptions() };
+            var rig = new RemoteRig(server, box) { Options = (options ?? new RemoteCoordinatorOptions()) with { LocalAddressesMayBeHosters = loopbackHosters } };
             rig.Mock.AddHoster("Pretend", ["pretend.invalid", "127.0.0.1", "localhost"], "/hoster/");
             rig.Mock.AddHoster("Pretend Down", ["down.invalid", "127.0.0.1", "localhost"], "/hoster-down/", available: false, note: "Down for maintenance");
             rig.Jobs = rig.NewCoordinator(loops);
@@ -459,6 +464,27 @@ public sealed partial class RuntimeServiceTests
         {
             Directory.Delete(outside, recursive: true);
         }
+    }
+
+    // T10.B2: the desktop window showing another server sends that server's own finished .torrent download by its path,
+    // as the server's web UI does; the server reads it within the caller's folders and sends it with its own account.
+    [Fact]
+    public async Task ACallersTorrentFileInsideItsFoldersGoesToTheProviderByItsPath()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (bytes, infoHash) = Torrent();
+        var path = Path.Combine(rig.Destination, "finished.torrent");
+        await File.WriteAllBytesAsync(path, bytes);
+        rig.Mock.ScriptTorrentUpload(bytes, infoHash);
+        var roots = new PathRoots([rig.Destination]);
+        using var web = new RemoteCommands(rig.Box.Registry, rig.Jobs, roots: roots, jobRoots: roots);
+
+        var classify = await web.ClassifyAsync(new RemoteClassifyRequest { Text = path, WithFiles = true });
+        Assert.Equal("torrentFile", classify.Kind);
+        var add = await web.AddAsync(new RemoteAddRequestDto { Input = path, Destination = rig.Destination, ApproveUncached = true });
+        Assert.True(add.Ok, add.Error);
+        await rig.RunAsync();
+        Assert.Equal(bytes.Length, Assert.Single(rig.Mock.Submissions).FileBytes);
     }
 
     [Fact]
@@ -2010,6 +2036,51 @@ public sealed partial class RuntimeServiceTests
         rig.Time.Advance(TimeSpan.FromMinutes(2));
         await rig.Jobs.ClassifyAsync(link);
         Assert.Equal(2, rig.Mock.Calls("GET webdl/hosters"));
+    }
+
+    /// <summary>
+    /// UI.B27: with an account, an address on this PC or its local network is an ordinary download. The provider's list
+    /// isn't fetched for it, so a provider that can't be reached doesn't stop it, and every way of adding (Add URL and the
+    /// web UI ask <c>remote.classify</c>, a copied link and a changed address go through the coordinator too) says so.
+    /// </summary>
+    [Fact]
+    public async Task AnAddressOnThisPcOrItsNetworkIsAddedDirectlyWithNoProviderCheck()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server, loopbackHosters: false);
+        rig.Mock.Fail("GET webdl/hosters", MockFault.Status5xx());
+        string[] local =
+        [
+            rig.HosterLink("on-this-pc"),
+            "http://localhost:9/hoster/file.bin",
+            "http://192.168.1.20/hoster/file.iso",
+            "http://[fe80::1]/hoster/file.iso",
+            "http://nas/hoster/file.iso",
+            "http://nas.home.arpa/hoster/file.iso",
+        ];
+
+        foreach (var link in local)
+        {
+            var classified = await rig.Jobs.ClassifyAsync(link);
+            Assert.Equal(RemoteInputKind.OrdinaryLink, classified.Kind);
+            Assert.False(classified.CheckIncomplete);
+            Assert.Null(await rig.Jobs.WhyNotDirectAsync(link, explicitDirect: false));
+        }
+
+        Assert.All(await rig.Jobs.ClassifyAllAsync(local), classified => Assert.Equal(RemoteInputKind.OrdinaryLink, classified.Kind));
+        Assert.Equal(0, rig.Mock.Calls("GET webdl/hosters"));
+
+        // A public address is still checked, and with the provider out of reach it can't be called ordinary.
+        var classifiedPublic = await rig.Jobs.ClassifyAsync(rig.Mock.PublicHosterUrl("file/public"));
+        Assert.Equal(RemoteInputKind.Undetermined, classifiedPublic.Kind);
+        Assert.Equal(1, rig.Mock.Calls("GET webdl/hosters"));
+
+        // A copied link on this PC is added and started as an ordinary download.
+        var outcome = await (await CopiedLinksFor(rig)).AddAsync($"{_server.BaseAddress}/file/copied-local.bin?size=2048&seed=811");
+        Assert.Equal("Clipboard download added", outcome.Title);
+        Assert.Null(outcome.Problem);
+        Assert.Single(rig.Ctx.Service.GetSnapshot().Jobs);
+        Assert.Empty(rig.Jobs.List());
+        Assert.Equal(1, rig.Mock.Calls("GET webdl/hosters"));
     }
 
     [Fact]

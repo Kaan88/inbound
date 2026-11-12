@@ -548,6 +548,14 @@ public sealed partial class MockTorBox
     /// <summary>An address on this server standing in for a file on a hoster the provider lists.</summary>
     public string HosterUrl(string path) => $"{_baseAddress()}/hoster/{path}";
 
+    /// <summary>
+    /// As <see cref="HosterUrl"/>, on <c>pretend.invalid</c>, a name that never resolves (RFC 6761), for a Host started as
+    /// in real use: there an address on this PC or its local network is an ordinary download that no provider is asked
+    /// about (UI.B27), so a hoster can't stand on loopback. A direct request for one fails on the name, before anything is
+    /// sent, so <see cref="HosterRequests"/> can't see it; the tests that use it check the jobs instead.
+    /// </summary>
+    public string PublicHosterUrl(string path) => $"http://pretend.invalid:{new Uri(_baseAddress()).Port}/hoster/{path}";
+
     /// <summary>Links issued so far, oldest first.</summary>
     public IReadOnlyList<MockCdnLink> IssuedLinks
     {

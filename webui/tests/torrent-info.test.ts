@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { bytes } from '../src/lib/format';
 import {
   dash, describeInfo, detailsDue, detailsKey, folderText, hashText, infoJob, infoMinWidth, infoOn, infoPercent, infoReadKey, infoReadMs, infoReserved, infoSeen,
-  progressText, trackersDue, trackersText,
+  progressText, trackersDue, trackersText, zeroRate,
 } from '../src/lib/torrentInfo';
 import type { Job, Settings, Torrent } from '../src/lib/types';
 
@@ -147,7 +147,7 @@ describe('what Torrent Info says (T7)', () => {
 
   it('gives a paused torrent no live figures', () => {
     const view = describeInfo(tjob('paused'), settings, null, null, true);
-    expect(view.status).toBe('Paused');
+    expect(view.status).toBe('Stopped');
     expect([view.down, view.up, view.swarm, view.timeLeft]).toEqual([dash, dash, dash, dash]);
     expect(view.trackers).toBe('Shown while the torrent runs');
   });
@@ -156,15 +156,27 @@ describe('what Torrent Info says (T7)', () => {
     const view = describeInfo(tjob('completed', { seeding: true }, { receivedBytes: 4096 }), settings, null, [{ status: 'working' }], true);
     expect(view.status).toBe('Seeding · ratio 0.50');
     expect(view.progress).toBe(`100% · ${bytes(4096)}`);
-    expect(view.down).toBe(dash);
+    // T7.B1: nothing is left to download, which is a real 0, not "—".
+    expect(view.down).toBe('0 B/s');
     expect(view.up).toBe(`${bytes(1024)}/s`);
     expect(view.timeLeft).toBe(dash);
     expect(view.goal).toContain('ratio 2');
     expect(view.trackers).toBe('1 of 1 working');
   });
 
+  it('says 0 B/s for a known zero speed and "—" only when it is not known (T7.B1)', () => {
+    expect(zeroRate).toBe('0 B/s');
+    const idle = describeInfo(tjob('completed', { seeding: true, uploadRate: 0 }, { bytesPerSecond: 0 }), settings, null, null, true);
+    expect([idle.down, idle.up]).toEqual(['0 B/s', '0 B/s']);
+    const finished = describeInfo(tjob('completed', {}, { bytesPerSecond: 0 }), settings, null, null, true);
+    expect([finished.down, finished.up]).toEqual(['0 B/s', dash]);
+    const stalled = describeInfo(tjob('downloading', { uploadRate: 0 }, { bytesPerSecond: 0 }), settings, null, null, true);
+    expect([stalled.down, stalled.up]).toEqual(['0 B/s', '0 B/s']);
+    for (const state of ['paused', 'queued', 'failed']) expect(describeInfo(tjob(state), settings, null, null, true).down).toBe(dash);
+  });
+
   it('says Complete for a finished torrent that does not seed', () => {
-    expect(describeInfo(tjob('completed'), settings, null, null, true).status).toBe('Complete');
+    expect(describeInfo(tjob('completed'), settings, null, null, true).status).toBe('Completed');
   });
 
   it('says a magnet is getting its file list', () => {

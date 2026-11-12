@@ -41,6 +41,83 @@ internal static class WindowSizeRules
         => (Math.Clamp(x, workX, Math.Max(workX, workX + workWidth - size.Width)),
             Math.Clamp(y, workY, Math.Max(workY, workY + workHeight - size.Height)));
 
+    // ---- Screens the window toolkit can't measure (Uno on Linux) ----
+
+    /// <summary>
+    /// The most a window is made when its screen's size is unknown: inside a 1280 x 800 screen, and still in a
+    /// 1366 x 768 one with a panel and a title bar.
+    /// </summary>
+    public const int UnknownScreenWidth = 1100, UnknownScreenHeight = 700;
+
+    /// <summary>
+    /// The work area of the monitor a window opens on: the one holding <paramref name="x"/>, <paramref name="y"/> (a
+    /// remembered place or the mouse), else the primary one, else the first. The desktop's own work area (X11's
+    /// <c>_NET_WORKAREA</c>, one rectangle over every monitor, less the panels) cuts it down where they meet. Null when
+    /// nothing is known. All in the same screen pixels.
+    /// </summary>
+    public static ScreenRect? WorkAreaFor(IReadOnlyList<ScreenRect> monitors, int primary, ScreenRect? desktopWorkArea, int? x, int? y)
+    {
+        ScreenRect? monitor = null;
+        if (x is { } px && y is { } py)
+        {
+            foreach (var candidate in monitors)
+            {
+                if (Usable(candidate) && candidate.Contains(px, py)) { monitor = candidate; break; }
+            }
+        }
+
+        if (monitor is null && primary >= 0 && primary < monitors.Count && Usable(monitors[primary])) monitor = monitors[primary];
+        monitor ??= monitors.Where(Usable).Select(m => (ScreenRect?)m).FirstOrDefault();
+        var desktop = desktopWorkArea is { } d && Usable(d) ? d : (ScreenRect?)null;
+        if (monitor is not { } screen) return desktop;
+        if (desktop is not { } work) return screen;
+
+        var left = Math.Max(screen.X, work.X);
+        var top = Math.Max(screen.Y, work.Y);
+        var right = Math.Min(screen.X + screen.Width, work.X + work.Width);
+        var bottom = Math.Min(screen.Y + screen.Height, work.Y + work.Height);
+        // A work area that misses this monitor says nothing about it.
+        return right - left > 0 && bottom - top > 0 ? new ScreenRect(left, top, right - left, bottom - top) : screen;
+    }
+
+    /// <summary>
+    /// A size asked for in DIPs, as screen pixels at <paramref name="scale"/> pixels for each DIP (1 when the scale is
+    /// unknown or below 1), then fitted by <see cref="FitOnScreen(int, int, ScreenRect?)"/>. For Uno, whose
+    /// <c>AppWindow</c> sizes and places are screen pixels, as on Windows.
+    /// </summary>
+    public static PixelSize FitOnScreen(double widthDip, double heightDip, double scale, ScreenRect? workArea)
+    {
+        var factor = double.IsFinite(scale) && scale >= 1 ? scale : 1;
+        return FitOnScreen((int)Math.Ceiling(widthDip * factor), (int)Math.Ceiling(heightDip * factor), workArea);
+    }
+
+    /// <summary>
+    /// A size no bigger than the work area less <see cref="ScreenMargin"/> (or <see cref="UnknownScreenWidth"/> by
+    /// <see cref="UnknownScreenHeight"/> when the screen is unknown); never made bigger.
+    /// </summary>
+    public static PixelSize FitOnScreen(int width, int height, ScreenRect? workArea)
+    {
+        var (mostWidth, mostHeight) = workArea is { } area && Usable(area)
+            ? (Math.Max(Smallest, area.Width - ScreenMargin), Math.Max(Smallest, area.Height - ScreenMargin))
+            : (UnknownScreenWidth, UnknownScreenHeight);
+        return new PixelSize(Math.Max(Smallest, Math.Min(width, mostWidth)), Math.Max(Smallest, Math.Min(height, mostHeight)));
+    }
+
+    /// <summary>
+    /// A remembered place and size (perhaps from a bigger screen) made to fit <paramref name="workArea"/>: the size cut down
+    /// by <see cref="FitOnScreen"/>, then the window moved left and up as far as needed to be all inside. An unknown
+    /// work area keeps the place, which the window manager keeps on a screen.
+    /// </summary>
+    public static (int X, int Y, PixelSize Size) OnScreen(int x, int y, int width, int height, ScreenRect? workArea)
+    {
+        var size = FitOnScreen(width, height, workArea);
+        if (workArea is not { } area || !Usable(area)) return (x, y, size);
+        var (left, top) = KeptInside(x, y, size, area.X, area.Y, area.Width, area.Height);
+        return (left, top, size);
+    }
+
+    private static bool Usable(ScreenRect rect) => rect.Width > 0 && rect.Height > 0;
+
     // ---- Progress Details ----
 
     /// <summary>Progress Details for an ordinary download (DIPs), as it opened before T13.</summary>

@@ -129,7 +129,8 @@ public sealed class WinUiSourceRulesTests
             }
         }
 
-        Assert.True(checkedCount >= 2);
+        // UI.R40: Check for Updates is one dialog now, with one place that puts the update off.
+        Assert.True(checkedCount >= 1);
         Assert.Empty(unguarded);
     }
 

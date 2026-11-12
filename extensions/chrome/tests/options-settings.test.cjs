@@ -107,7 +107,7 @@ test('an invalid entry selects its page and blocks OK', async () => {
     assert.deepEqual(saves, []);
     assert.deepEqual(page.removedTabs, []);
     assert.equal(doc.getElementById('page-catching').classList.contains('hidden'), false);
-    assert.match(doc.getElementById('saveResult').textContent, /"tar\.gz" in Never catch these file types/);
+    assert.match(doc.getElementById('saveResult').textContent, /"tar\.gz" in Never send these file types/);
   } finally { page.restore(); }
 });
 

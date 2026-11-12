@@ -9,7 +9,7 @@ import type { ClassifyResult } from './types';
 
 // ---- Ctrl+V and drops on the page ----
 
-// Review 5:A6: http, https and ftp links go to Add Links, so the words name them too.
+// Review 5:A6: http and https links go to Add Links, so the words name them too.
 export const noTorrentsOnClipboard = 'The clipboard holds no link, magnet link or .torrent file.';
 export const onlyTorrentsDrop = 'Only links, magnet links and .torrent files can be dropped here.';
 
@@ -44,7 +44,7 @@ export function torrentFilesIn<T extends { name: string }>(files: Iterable<T> | 
 }
 
 /**
- * What the page found: the magnets in the text, the .torrent files and the http, https and ftp links (review 5:A6), or
+ * What the page found: the magnets in the text, the .torrent files and the links (review 5:A6; an ftp link's line says it isn't supported), or
  * the words to say when there are none.
  */
 export function intake<T extends { name: string }>(text: string | null | undefined, files: Iterable<T> | null | undefined, dropped: boolean):

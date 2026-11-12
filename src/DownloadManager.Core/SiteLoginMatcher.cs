@@ -2,62 +2,67 @@ namespace DownloadManager.Core;
 
 /// <summary>
 /// Decides whether a saved <see cref="SiteLogin.Site"/> applies to a request address. The site is a host,
-/// host:port, host/path prefix, or a full http(s)/ftp(s) URL. Shared by the HTTP and FTP engines.
+/// host:port, host/path prefix, or a full http(s) URL; the host may start with <c>*.</c> to take in its subdomains.
 /// </summary>
+/// <remarks>
+/// SEC.L1 (review 1 N4/L12): a site saved without a scheme is sent over https only, to exactly that host. A site
+/// saved with http:// is the user's explicit choice and is sent over http or https to that host. Subdomains match
+/// only when the site says so with <c>*.example.com</c>, which also takes in example.com itself.
+/// </remarks>
 public static class SiteLoginMatcher
 {
     private static readonly HashSet<string> SiteSchemes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "http", "https", "ftp", "ftps",
+        "http", "https",
     };
 
-    /// <param name="allowSubdomains">True when a login for example.com also applies to a.example.com.</param>
-    public static bool Matches(string? site, Uri uri, bool allowSubdomains)
+    public static bool Matches(string? site, Uri uri)
     {
-        if (string.IsNullOrWhiteSpace(site)) return false;
+        // Logins are only ever sent over http or https (FTP was cut in 0.7.2).
+        if (string.IsNullOrWhiteSpace(site) || uri.Scheme is not ("http" or "https")) return false;
         site = site.Trim();
 
         string? scheme = null;
-        string host;
-        int? port = null;
-        string path;
-        // "example.test:8080" parses as an absolute URI with the scheme "example.test", so only a
-        // scheme this app downloads over counts as one; anything else is host[:port][/path].
-        if (Uri.TryCreate(site, UriKind.Absolute, out var siteUri) && SiteSchemes.Contains(siteUri.Scheme) &&
-            site.Contains("://", StringComparison.Ordinal))
+        var rest = site;
+        var schemeEnd = site.IndexOf("://", StringComparison.Ordinal);
+        // Text before "://" is a scheme only when it holds no '/', '?', '#' or ':'; otherwise the "://" sits in the
+        // path or query of a scheme-less site ("example.com/get?u=https://x") and the whole site is host[:port][/path].
+        if (schemeEnd > 0 && site.AsSpan(0, schemeEnd).IndexOfAny("/?#:") < 0)
         {
-            scheme = siteUri.Scheme;
-            host = siteUri.Host;
-            port = siteUri.IsDefaultPort ? null : siteUri.Port;
-            path = siteUri.AbsolutePath;
-        }
-        else
-        {
-            var separator = site.IndexOf('/');
-            var authority = separator < 0 ? site : site[..separator];
-            path = separator < 0 ? "/" : site[separator..];
-            if (authority.Length == 0 ||
-                !Uri.TryCreate($"http://{authority}", UriKind.Absolute, out var authorityUri))
-            {
-                return false;
-            }
-
-            host = authorityUri.Host;
-            port = authority.Contains(':', StringComparison.Ordinal) ? authorityUri.Port : null;
+            scheme = site[..schemeEnd];
+            // Only a scheme this app downloads over counts; a login saved as ftp://… or the like never matches.
+            if (!SiteSchemes.Contains(scheme)) return false;
+            rest = site[(schemeEnd + 3)..];
         }
 
-        // A login saved for a scheme is sent over that scheme only, or over its secure form
-        // (http to https, ftp to ftps); never from https down to http.
-        if (scheme is not null && !string.Equals(scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(scheme + "s", uri.Scheme, StringComparison.OrdinalIgnoreCase))
+        var queryStart = rest.IndexOfAny(['?', '#']);
+        if (queryStart >= 0) rest = rest[..queryStart];
+        var separator = rest.IndexOf('/');
+        var authority = separator < 0 ? rest : rest[..separator];
+        var path = separator < 0 ? "/" : rest[separator..];
+        var wildcard = authority.StartsWith("*.", StringComparison.Ordinal);
+        if (wildcard) authority = authority[2..];
+        if (authority.Length == 0 || authority.Contains('*', StringComparison.Ordinal) ||
+            !Uri.TryCreate($"{scheme ?? "https"}://{authority}", UriKind.Absolute, out var authorityUri))
         {
             return false;
         }
 
+        var host = authorityUri.Host;
+        int? port = HasExplicitPort(authority) ? authorityUri.Port : null;
+
+        // No scheme: https only. http://: http or its secure form. https://: https only.
+        var schemeAllowed = scheme is null
+            ? uri.Scheme == "https"
+            : string.Equals(scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+              (string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase) && uri.Scheme == "https");
+        if (!schemeAllowed) return false;
+
         var hostMatches = string.Equals(uri.Host, host, StringComparison.OrdinalIgnoreCase) ||
-                          (allowSubdomains && uri.Host.EndsWith("." + host, StringComparison.OrdinalIgnoreCase));
+                          (wildcard && uri.Host.EndsWith("." + host, StringComparison.OrdinalIgnoreCase));
         if (!hostMatches) return false;
 
+        // A port is checked only when the site names one.
         if (port is not null && uri.Port != port.Value) return false;
 
         if (path is "" or "/") return true;
@@ -66,5 +71,12 @@ public static class SiteLoginMatcher
         return uri.AbsolutePath.StartsWith(normalizedPath, StringComparison.OrdinalIgnoreCase) &&
                (uri.AbsolutePath.Length == normalizedPath.Length ||
                 uri.AbsolutePath[normalizedPath.Length] == '/');
+    }
+
+    private static bool HasExplicitPort(string authority)
+    {
+        // "[::1]:8080" or "host:8080"; the colons inside an IPv6 literal are not a port.
+        var close = authority.LastIndexOf(']');
+        return authority.IndexOf(':', close + 1) >= 0;
     }
 }

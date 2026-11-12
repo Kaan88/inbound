@@ -114,7 +114,7 @@ describe('items on the account', () => {
     expect(localWords([{ state: 'downloading' }])).toBe('Downloading locally');
     expect(localWords([{ state: 'downloading' }, { state: 'completed' }, { state: 'queued' }])).toBe('Downloading locally, 1 of 3 done');
     expect(localWords([{ state: 'failed' }, { state: 'completed' }])).toBe('1 of 2 local downloads failed');
-    expect(localWords([{ state: 'paused' }, { state: 'completed' }])).toBe('Paused locally');
+    expect(localWords([{ state: 'paused' }, { state: 'completed' }])).toBe('Stopped locally');
     expect(localWords([{ state: 'queued' }])).toBe('Waiting to download locally');
   });
 
@@ -288,7 +288,7 @@ describe('archives', () => {
     expect(planFor([rar], [], null).canExtract).toBe(true);
     expect(planFor([{ ...rar, fileName: 'a.mkv' }], [], null).extractText).toBe('Extract (no archive selected)');
     expect(planFor([], [], null).extractText).toBe('Extract (select an archive download first)');
-    expect(planFor([rar], [], null, false).extractText).toBe('Extract (the background Host isn\'t connected)');
+    expect(planFor([rar], [], null, false).extractText).toBe('Extract (Inbound\'s background program isn\'t connected)');
     expect(planFor([{ ...rar, set: set({ state: 'completed' }) }], [], null).extractText).toBe('Extract (already extracted)');
     expect(planFor([{ ...rar, set: set({ state: 'extracting' }) }], [], null).extractText).toBe('Extract (already extracting)');
     expect(planFor([{ ...rar, set: set({ needsPassword: true }) }], [], null).extractText).toBe('Extract (enter the archive\'s password first)');

@@ -514,7 +514,7 @@ export function torrentSaveToPlaceholder(
  * downloads, so it says that.
  */
 export function captureLabel(hostKind: string | null | undefined): string {
-  return hostKind === 'windows' || hostKind === 'linux' ? 'Capture downloads from your browser' : 'Accept downloads from paired browsers';
+  return hostKind === 'windows' || hostKind === 'linux' ? 'Accept downloads sent from your browser' : 'Accept downloads from paired browsers';
 }
 
 /** The settings' names as Options writes them, for a server refusal that names fields (U-WR-14). */
@@ -525,7 +525,7 @@ const settingLabels: Record<string, string> = {
   favoriteFolders: 'Favorite folders',
   proxy: 'Proxy',
   siteLogins: 'Site logins',
-  browserIntegrationEnabled: 'Capture downloads from your browser',
+  browserIntegrationEnabled: 'Accept downloads sent from your browser',
   allowLocalNetwork: 'Allow downloads from addresses on the local network',
   clipboardMonitoring: 'Add links I copy to the download list',
   launchAtStartup: 'Start with Windows',
@@ -533,9 +533,9 @@ const settingLabels: Record<string, string> = {
   playCompletionSound: 'Completion sound',
   showCompletionDialog: 'Completion window',
   preventSleepWhileDownloading: 'Prevent sleep while downloading',
-  excludedFileExtensions: 'File types not captured',
-  excludedHosts: 'Sites not captured',
-  interceptedFileExtensions: 'File types captured',
+  excludedFileExtensions: 'File types not sent',
+  excludedHosts: 'Sites not sent from',
+  interceptedFileExtensions: 'File types sent',
   closeWindowCompletely: 'Closing the window',
   theme: 'Theme',
   torrentsEnabled: 'Download torrents',

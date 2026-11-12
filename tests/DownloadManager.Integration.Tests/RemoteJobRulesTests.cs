@@ -130,7 +130,7 @@ public sealed class RemoteJobRulesTests
     [InlineData(3, 3, 0, 0, 0, "Completed")]
     [InlineData(3, 1, 1, 0, 1, "1 of 3 local downloads failed")]
     [InlineData(3, 1, 0, 1, 1, "Downloading locally")]
-    [InlineData(3, 1, 0, 2, 0, "Paused locally")]
+    [InlineData(3, 1, 0, 2, 0, "Stopped locally")]
     [InlineData(3, 0, 0, 1, 0, "Waiting to download locally")]
     public void ALocalStartedJobGoesByWhatItsDownloadsAreDoing(int total, int completed, int failed, int paused, int active, string expected)
     {

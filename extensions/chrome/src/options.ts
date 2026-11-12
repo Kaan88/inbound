@@ -96,12 +96,12 @@ export function invalidFolder(values: Pick<FormValues, "browserFolder" | "askSta
 /** Entries the rules could never match, with the page they are on, or null (an invalid entry blocks OK and Apply). */
 export function invalidEntry(values: Pick<FormValues, "interceptedExtensions" | "excludedExtensions" | "excludedHosts">):
   { page: PageId; message: string } | null {
-  for (const [list, name] of [[values.interceptedExtensions, "Catch only these file types"], [values.excludedExtensions, "Never catch these file types"]] as const) {
+  for (const [list, name] of [[values.interceptedExtensions, "Send only these file types"], [values.excludedExtensions, "Never send these file types"]] as const) {
     const bad = list.find((item) => !/^[a-z0-9]{1,10}$/.test(item));
     if (bad) return { page: "catching", message: `"${bad}" in ${name} is not a file type: use letters and digits only, such as zip.` };
   }
   const badHost = values.excludedHosts.find((item) => !/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?$/.test(item));
-  if (badHost) return { page: "catching", message: `"${badHost}" in Never catch downloads from these sites is not a site name, such as example.com.` };
+  if (badHost) return { page: "catching", message: `"${badHost}" in Never send downloads from these sites is not a site name, such as example.com.` };
   return null;
 }
 

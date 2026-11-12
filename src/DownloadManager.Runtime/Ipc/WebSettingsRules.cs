@@ -91,7 +91,6 @@ public static class WebSettingsRules
         nameof(SettingsDto.TorrentLsd),
         nameof(SettingsDto.TorrentEncryption),
         nameof(SettingsDto.TorrentUseProxy),
-        nameof(SettingsDto.FfmpegPath),
         nameof(SettingsDto.PostDownloadCommand),
         nameof(SettingsDto.UpdateManifestUrl),
         nameof(SettingsDto.UpdatePublicKey),
@@ -112,6 +111,8 @@ public static class WebSettingsRules
         nameof(SettingsDto.DownloadGroups),
         // Worked out by the Host from the saved program (review 2:L5).
         nameof(SettingsDto.PostDownloadCommandProblem),
+        // Cut in 0.7.2 and only passed through for 0.7.1 servers; this Host never has a value.
+        nameof(SettingsDto.FfmpegPath),
     ];
 
     public const string ScheduleActionsRefused =
@@ -143,7 +144,6 @@ public static class WebSettingsRules
     [
         nameof(SettingsDto.PostDownloadCommand),
         nameof(SettingsDto.PostDownloadCommandProblem),
-        nameof(SettingsDto.FfmpegPath),
         nameof(SettingsDto.UpdateManifestUrl),
         nameof(SettingsDto.Proxy),
         nameof(SettingsDto.SiteLogins),
@@ -158,7 +158,6 @@ public static class WebSettingsRules
         var copy = JsonSerializer.Deserialize<SettingsDto>(JsonSerializer.SerializeToElement(settings, IpcJson.Options), IpcJson.Options)!;
         copy.PostDownloadCommand = null;
         copy.PostDownloadCommandProblem = null;
-        copy.FfmpegPath = null;
         copy.UpdateManifestUrl = null;
         copy.Proxy = new ProxyDto { Mode = settings.Proxy?.Mode ?? "none" };
         copy.SiteLogins = [];

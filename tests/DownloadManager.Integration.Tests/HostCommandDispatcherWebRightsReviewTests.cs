@@ -5,7 +5,6 @@ using System.Text;
 using DownloadManager.Containers.Tests;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
-using DownloadManager.Engine;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Archives;
@@ -164,7 +163,6 @@ public sealed partial class HostCommandDispatcherTests
         var web = await WebAsync();
         var settings = web.Service.GetSettings();
         settings.PostDownloadCommand = @"C:\Tools\scan.exe";
-        settings.FfmpegPath = @"C:\Tools\ffmpeg.exe";
         settings.UpdateManifestUrl = "https://updates.example.invalid/manifest.json";
         settings.Proxy = new ProxyDto { Mode = "manual", Address = "203.0.113.5:3128", Username = "proxy-user", Password = "invented-proxy-password" };
         settings.SiteLogins = [new SiteLoginDto { Id = Guid.NewGuid(), Site = "files.example.invalid", Username = "site-user", Password = "invented-site-password" }];
@@ -176,7 +174,6 @@ public sealed partial class HostCommandDispatcherTests
         void AssertHidden(SettingsDto shown)
         {
             Assert.Null(shown.PostDownloadCommand);
-            Assert.Null(shown.FfmpegPath);
             Assert.Null(shown.UpdateManifestUrl);
             Assert.Equal("manual", shown.Proxy.Mode);
             Assert.Null(shown.Proxy.Address);
@@ -204,7 +201,6 @@ public sealed partial class HostCommandDispatcherTests
         var kept = web.Service.GetSettings();
         Assert.Equal(6, kept.MaxConcurrentDownloads);
         Assert.Equal(settings.PostDownloadCommand, kept.PostDownloadCommand);
-        Assert.Equal(settings.FfmpegPath, kept.FfmpegPath);
         Assert.Equal("203.0.113.5:3128", kept.Proxy.Address);
         Assert.True(kept.Proxy.HasPassword);
         Assert.Equal("site-user", Assert.Single(kept.SiteLogins).Username);
@@ -485,7 +481,7 @@ public sealed partial class HostCommandDispatcherTests
     [Theory]
     [InlineData("https://example.com/a.zip", true)]
     [InlineData("http://203.0.113.10/a.zip", true)]
-    [InlineData("ftp://files.example.com/a.zip", true)]
+    [InlineData("ftp://files.example.com/a.zip", false)]
     [InlineData("http://127.0.0.1:8080/a.zip", false)]
     [InlineData("http://localhost/a.zip", false)]
     [InlineData("http://[::1]/a.zip", false)]

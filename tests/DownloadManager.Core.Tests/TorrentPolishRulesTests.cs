@@ -21,7 +21,7 @@ public sealed class TorrentPolishRulesTests
     [Fact]
     public void ATorrentPausedOnAFullDiskSaysSo()
     {
-        Assert.Equal("Paused · The disk is full", TorrentRules.StatusText(Torrent(failure: new FailureDto { Kind = "diskFull", Message = "The disk is full" })));
+        Assert.Equal("Stopped · The disk is full", TorrentRules.StatusText(Torrent(failure: new FailureDto { Kind = "diskFull", Message = "The disk is full" })));
         Assert.Null(TorrentRules.StatusText(Torrent()));
     }
 

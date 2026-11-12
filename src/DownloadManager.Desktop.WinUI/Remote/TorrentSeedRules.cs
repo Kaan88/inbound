@@ -87,13 +87,13 @@ internal static class TorrentSeedRules
     /// </summary>
     public static string DeleteCompletedText(IReadOnlyCollection<JobDto> completed)
     {
-        var text = $"Remove {completed.Count} completed item(s) from the list? The downloaded files will stay on disk.";
+        var text = $"Delete {completed.Count} completed download(s) from the list? The downloaded files will stay on disk.";
         var seeding = completed.Count(IsSeeding);
         return seeding switch
         {
             0 => text,
-            1 => $"{text} 1 of them is a torrent that is seeding; removing it stops seeding.",
-            _ => $"{text} {seeding} of them are torrents that are seeding; removing them stops seeding.",
+            1 => $"{text} 1 of them is a torrent that is seeding; deleting it stops seeding.",
+            _ => $"{text} {seeding} of them are torrents that are seeding; deleting them stops seeding.",
         };
     }
 
@@ -122,7 +122,7 @@ internal static class TorrentSeedRules
     /// <summary>What the status bar says after Start seeding or Stop seeding went to the Host.</summary>
     public static string Said(bool on, string? name, int done, int failed, string? firstError)
     {
-        var reason = string.IsNullOrWhiteSpace(firstError) ? "the Host didn't say why." : firstError.Trim();
+        var reason = string.IsNullOrWhiteSpace(firstError) ? "Inbound didn't say why." : firstError.Trim();
         if (failed == 0)
         {
             if (done == 1 && name is { Length: > 0 }) return on ? $"{name}: seeding." : $"{name}: seeding stopped.";

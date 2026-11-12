@@ -6,6 +6,8 @@
     disabled?: boolean;
     /** A tick: a choice among several, or a switch. */
     checked?: boolean;
+    /** The tick turns this one thing on or off by itself (a checkbox), not one choice of several (a radio). */
+    toggle?: boolean;
     separator?: boolean;
     hidden?: boolean;
     /** The key that does the same, written the way the desktop writes it. */
@@ -128,7 +130,7 @@
           type="button"
           class="menu-entry flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover focus:bg-hover focus:outline-none disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           style="padding-left: {12 + depth * 16}px"
-          role={item.checked !== undefined ? 'menuitemradio' : 'menuitem'}
+          role={item.checked === undefined ? 'menuitem' : item.toggle ? 'menuitemcheckbox' : 'menuitemradio'}
           aria-checked={item.checked}
           aria-haspopup={item.items ? 'menu' : undefined}
           aria-expanded={item.items ? openSub === path || (openSub?.startsWith(path + '.') ?? false) : undefined}

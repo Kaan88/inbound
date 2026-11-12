@@ -37,7 +37,7 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
     {
         _server = await TestServerHost.StartAsync();
         Mock.ApiKey = Key;
-        Mock.AddHoster("Pretend", ["pretend.invalid", "127.0.0.1", "localhost"], "/hoster/");
+        Mock.AddHoster("Pretend", ["pretend.invalid"], "/hoster/");
     }
 
     public async Task DisposeAsync() => await _server.DisposeAsync();
@@ -197,7 +197,7 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
     {
         await using var host = await StartHostAsync();
         var connection = await WithKeyAsync(host);
-        var link = Mock.HosterUrl("file/answered.bin");
+        var link = Mock.PublicHosterUrl("file/answered.bin");
         var file = NewFile("answered.bin/answered.bin", 192 * Kb, 52);
         Mock.ScriptSubmission(Md5(link), [file], [MockTorBoxState.Downloading(0.5, eta: 5), MockTorBoxState.Ready]);
         Mock.Fail(CreateWeb, MockFault.AcceptThenDelay(TimeSpan.FromMinutes(5)), times: 1);
@@ -238,7 +238,7 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
     {
         await using var host = await StartHostAsync();
         var connection = await WithKeyAsync(host);
-        var link = Mock.HosterUrl("file/polled.bin");
+        var link = Mock.PublicHosterUrl("file/polled.bin");
         var file = NewFile("polled.bin/polled.bin", 160 * Kb, 53);
         Mock.ScriptSubmission(Md5(link), [file], [.. Enumerable.Repeat(MockTorBoxState.Downloading(0.4, eta: 5), 4), MockTorBoxState.Ready]);
 

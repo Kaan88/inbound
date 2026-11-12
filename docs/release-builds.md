@@ -61,6 +61,35 @@ Submit the zip from `scripts/package-extension-store.ps1` in Partner Center. The
 (Microsoft's Edge Add-ons API can only update an existing product; keep any API credentials in environment
 variables or a file outside the repository).
 
+## Changelog: What's new (UPD.N1)
+
+Before building a release, write its lines in `src/DownloadManager.Contracts/Changelog/changelog.json`. That one file
+feeds What's new in the Windows app (opened once after an update, and from Help > What's New…), What's new in the web UI
+(the server's `changelog.get`), and the notes in the Windows app's Update available question (the update manifest's
+`notes`). The file is built into `DownloadManager.Contracts`, so the release build must contain the final text.
+
+- Add the version at the top (newest first) with its release date (`"date": "yyyy-MM-dd"`; `null` until then) and
+  sections titled `New`, `Fixes` and `Upgrade notes`. Leave known issues to the GitHub release notes.
+- One or two plain sentences per line, as the app talks (`docs/design-guidelines.md`). Plain text only: no Markdown or
+  HTML, which would show as typed. At most 400 characters a line and 40 lines a version, since the manifest carries no
+  more.
+- Tag each line with where it applies: `windows` (the Windows app), `webui` (the browser web UI), `server` and `docker`
+  (the headless server), `linux` (the Linux app; shown nowhere yet), `extension` (the browser extension), or `all`.
+  Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
+  about the TorBox account (shown only with an account set). The Windows app shows `windows` and `all` lines; the web UI
+  `webui`, `server`, `docker` and `all`. The rest is folded under "N changes in the web UI and the browser extension".
+- `dotnet test tests\DownloadManager.Core.Tests -c Release --filter ChangelogTests` checks the file: it parses, versions
+  go newest first, every tag is known and each version fits a manifest.
+
+`prepare-release.ps1` stops when the version has no dated entry, and passes the file to `UpdateSigner --notes-from`,
+which writes the version's lines into `manifest.json` as `notes`. They are outside the signed text, so apps from before
+0.7.2 still verify the manifest. They have their own signature, `notesSignature`, over the signed text and the notes, made
+with the same key; the app shows notes only when it verifies, reads them with limits and shows them as plain text. UpdateSigner reads
+`changelog.json` with the Contracts library, so rebuild it after pulling (`dotnet build tools\UpdateSigner -c Release`).
+`prepare-appimage-release.sh` passes the same file for `manifest-linux-x64.json`.
+
+## Preparing the release assets
+
 For version `X.Y.Z`, prepare from the already-built artifacts:
 
 ```powershell

@@ -34,8 +34,6 @@ public sealed partial class DownloadManagerService
     private readonly ICompletionActionExecutor _completionActions;
     private readonly IPostDownloadHook _postDownloadHook;
     private readonly ISleepPrevention _sleepPrevention;
-    private readonly IMediaCheckpointStore? _mediaCheckpoints;
-    private readonly IDownloadEngine? _ftpEngine;
     private readonly IRemoteLinkBroker? _linkBroker;
     private readonly IRemoteSecretMatcher? _linkSecrets;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
@@ -126,8 +124,6 @@ public sealed partial class DownloadManagerService
         bool enableSchedulerTimer = true,
         ICompletionActionExecutor? completionActions = null,
         ISleepPrevention? sleepPrevention = null,
-        IMediaCheckpointStore? mediaCheckpoints = null,
-        IDownloadEngine? ftpEngine = null,
         IPostDownloadHook? postDownloadHook = null,
         IRemoteLinkBroker? linkBroker = null,
         IRemoteSecretMatcher? linkSecrets = null,
@@ -143,8 +139,6 @@ public sealed partial class DownloadManagerService
         _enableSchedulerTimer = enableSchedulerTimer;
         _completionActions = completionActions ?? NullCompletionActionExecutor.Instance;
         _sleepPrevention = sleepPrevention ?? NullSleepPrevention.Instance;
-        _mediaCheckpoints = mediaCheckpoints;
-        _ftpEngine = ftpEngine;
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
         _linkBroker = linkBroker;
         _linkSecrets = linkSecrets;
@@ -182,6 +176,12 @@ public sealed partial class DownloadManagerService
     public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
 
     /// <summary>
+    /// UI.R41: which browsers' extensions have reached this Host, for <see cref="HostStatusDto.ExtensionsSeen"/>. Set by a
+    /// desktop Host, whose extensions come through the native host; null on the server, whose status then says null.
+    /// </summary>
+    public ExtensionSightings? ExtensionSightings { get; set; }
+
+    /// <summary>
     /// Where downloads may be written, for a Host whose clients are not the machine's user (the server's
     /// <c>DOWNLOADMANAGER_ROOTS</c>). Every add, move and folder setting is held to these, whatever the client asked for or
     /// a setting says, so a client can't make the server write outside them. Null (the desktop Host) allows any folder.
@@ -196,17 +196,13 @@ public sealed partial class DownloadManagerService
         _settings.Revision = StartingRevision(_timeProvider);
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
-        _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
-        // One budget for HTTP, FTP and torrents (T2); the Host gives HTTP and FTP one limiter (PERF.6).
+        // One budget for HTTP and torrents (T2).
         ApplySpeedLimitsAndRate(_settings);
         ApplyTorrentSeedSettings(_settings);
         ApplyTorrentPeerSettings(_settings);
         await ChooseTorrentPortAsync(cancellationToken).ConfigureAwait(false);
         _torrentEngine?.UpdateListen(_settings.TorrentListenPort, _settings.TorrentUpnp);
-        _ftpEngine?.UpdateProxy(_settings.Proxy);
-        _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
-        _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
 
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
@@ -225,6 +221,7 @@ public sealed partial class DownloadManagerService
         foreach (var runtime in _jobs.Values)
         {
             var changed = await ReconcileAsync(runtime, cancellationToken).ConfigureAwait(false);
+            changed |= await ForgetFtpPasswordAsync(runtime.Job).ConfigureAwait(false);
             // Queue policy is authoritative; a crash between settings and job
             // writes must not leave the denormalized display name stale.
             var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId);
@@ -259,6 +256,28 @@ public sealed partial class DownloadManagerService
         Schedule();
         StartSchedulerLoop();
         ResumeSeedingAfterStart();
+    }
+
+    /// <summary>FTP was cut in 0.7.2 (CUT.1). Final: the same address is refused every time, so neither Resume All nor a queue's retries take it.</summary>
+    private static JobFailure FtpFailure()
+        => new(FailureKind.Unsupported, FtpAddresses.NotSupported, false, false, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// An FTP download an older version left keeps its address without the password it held in the clear
+    /// (Review 1 L11), and its checkpoint, which held the same address, goes: nothing can resume it.
+    /// </summary>
+    private async Task<bool> ForgetFtpPasswordAsync(DownloadJob job)
+    {
+        if (!FtpAddresses.IsFtp(job.Url)) return false;
+        await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
+        var url = FtpAddresses.WithoutPassword(job.Url)!;
+        var finalUrl = FtpAddresses.WithoutPassword(job.FinalUrl);
+        var resolvedUrl = FtpAddresses.WithoutPassword(job.ResolvedUrl);
+        if (url == job.Url && finalUrl == job.FinalUrl && resolvedUrl == job.ResolvedUrl) return false;
+        job.Url = url;
+        job.FinalUrl = finalUrl;
+        job.ResolvedUrl = resolvedUrl;
+        return true;
     }
 
     /// <summary>
@@ -1617,7 +1636,6 @@ public sealed partial class DownloadManagerService
             TorrentConnectionsPerTorrent = settings.TorrentConnectionsPerTorrent,
             TorrentMaxConnections = settings.TorrentMaxConnections,
             TorrentUseProxy = settings.TorrentUseProxy,
-            FfmpegPath = settings.FfmpegPath,
             PostDownloadCommand = settings.PostDownloadCommand,
             UpdateManifestUrl = settings.UpdateManifestUrl,
             UpdatePublicKey = settings.UpdatePublicKey,
@@ -1770,15 +1788,11 @@ public sealed partial class DownloadManagerService
             }
         }
 
-        // PERF.6 and T2: one budget for HTTP, FTP and torrents, applied once the new settings are in force, so a split
+        // T2: one budget for HTTP and torrents, applied once the new settings are in force, so a split
         // made on a torrent's progress reads them too.
         ApplySpeedLimitsAndRate(next);
         _engine.UpdateProxy(next.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(next));
-        _engine.UpdateFfmpegPath(next.FfmpegPath);
-        _ftpEngine?.UpdateProxy(next.Proxy);
-        _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(next));
-        _ftpEngine?.UpdateFfmpegPath(next.FfmpegPath);
         UpdateSleepPrevention();
         foreach (var runtime in reconnected)
         {
@@ -2195,6 +2209,9 @@ public sealed partial class DownloadManagerService
                 InstallerUrl = manifest.InstallerUrl,
                 Size = manifest.Size,
                 Sha256 = manifest.Sha256,
+                // UPD.N1: only notes their own signature covers (review of 0.7.2, security-2), read through the checks of
+                // UpdateNotes and shown as plain text.
+                Notes = UpdateManifestVerifier.VerifiedNotes(manifest, _settings.UpdatePublicKey),
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -3026,7 +3043,7 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = TorrentSpeedLimitRefused };
             if (request.SpeedLimitBytesPerSecond is not null &&
                 (runtime.Job.IsTerminal || !SupportsLiveSpeedLimit(runtime.Job)))
-                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS and FTP file downloads." };
+                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS file downloads." };
             if (request.SpeedLimitBytesPerSecond is not null)
                 runtime.Job.SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond;
             if (request.ShowCompletionDialog is not null)
@@ -3416,7 +3433,7 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse
                     {
                         Ok = false,
-                        Error = "Pause or stop the download before refreshing its address.",
+                        Error = "Stop the download before refreshing its address.",
                         Job = Map(runtime.Job),
                     };
                 }
@@ -3819,8 +3836,9 @@ public sealed partial class DownloadManagerService
         return true;
     }
 
-    /// <summary>The tracks the engine keeps beside a stream's part file (<c>.part.video</c>, <c>.part.audio</c>,
-    /// <c>.part.mux.mp4</c>); they belong to whatever that part file belongs to.</summary>
+    /// <summary>The tracks a stream download of a version before 0.7.2 kept beside its part file (<c>.part.video</c>,
+    /// <c>.part.audio</c>, <c>.part.mux.mp4</c>); they belong to whatever that part file belongs to, and are still
+    /// found and deleted with it.</summary>
     private static readonly string[] PartTrackSuffixes = [".video", ".audio", ".mux.mp4"];
 
     /// <summary>The part file a track file goes with, or <paramref name="path"/> itself.</summary>
@@ -3883,7 +3901,7 @@ public sealed partial class DownloadManagerService
 
             try
             {
-                // Review 1 N3: a stream's kept tracks too, which a pause or a failed mux leaves beside its part file.
+                // Review 1 N3: the tracks a stream download of a version before 0.7.2 kept beside its part file too.
                 var found = Directory.EnumerateFiles(directory, "*.part", SearchOption.TopDirectoryOnly)
                     .Concat(PartTrackSuffixes.SelectMany(suffix =>
                         Directory.EnumerateFiles(directory, "*.part" + suffix, SearchOption.TopDirectoryOnly)));
@@ -4580,15 +4598,10 @@ public sealed partial class DownloadManagerService
             }
             else
             {
-                var engine = job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase)
-                    ? _ftpEngine
-                    : _engine;
-                if (engine is null)
-                {
-                    throw new InvalidOperationException("FTP support is not configured.");
-                }
-
-                result = await ExecuteWithLinksAsync(runtime, engine, progress, cts.Token).ConfigureAwait(false);
+                // FTP was cut in 0.7.2: an FTP download an older version left in the list fails clearly here.
+                result = FtpAddresses.IsFtp(job.Url)
+                    ? DownloadResult.Fail(DownloadState.Failed, FtpFailure(), job.ReceivedBytes, job.TotalBytes)
+                    : await ExecuteWithLinksAsync(runtime, _engine, progress, cts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -5203,6 +5216,7 @@ public sealed partial class DownloadManagerService
     {
         await DeleteTorrentPayloadAsync(job, includeFinal).ConfigureAwait(false);
         DeleteFileQuietly(job.PartFilePath);
+        // The tracks a stream download of a version before 0.7.2 kept beside its part file.
         DeleteFileQuietly(job.PartFilePath + ".video");
         DeleteFileQuietly(job.PartFilePath + ".audio");
         DeleteFileQuietly(job.PartFilePath + ".mux.mp4");
@@ -5216,10 +5230,6 @@ public sealed partial class DownloadManagerService
         // A transfer still winding down can be replacing this file, which Windows refuses to
         // delete meanwhile. The runner deletes it again when it ends, and a stray one is harmless.
         await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
-        if (_mediaCheckpoints is not null)
-        {
-            await _mediaCheckpoints.DeleteAsync(job.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
     }
 
     /// <summary>Whether a download's default count could differ between the two settings (UI.R21).</summary>
@@ -5231,14 +5241,11 @@ public sealed partial class DownloadManagerService
 
     /// <summary>
     /// Running downloads whose count a changed default may follow (UI.R21): the user's own HTTP downloads, provider
-    /// jobs and protected (pasted provider) links. Not FTP: an FTP download is one connection by design
-    /// (the FTP engine has no segments), so for a running one the change is a
-    /// no-op and its record is left as it is.
+    /// jobs and protected (pasted provider) links.
     /// </summary>
     private static bool IsRunningForConnections(JobRuntime runtime) =>
         (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
-        !runtime.PauseRequested && !runtime.CancelRequested && runtime.Job.Torrent is null &&
-        !runtime.Job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
+        !runtime.PauseRequested && !runtime.CancelRequested && runtime.Job.Torrent is null;
 
     /// <summary>
     /// Waiting, never begun, not a provider job: a new default connection count can still apply to it. A provider
@@ -5425,9 +5432,15 @@ public sealed partial class DownloadManagerService
             return false;
         }
 
-        if (parsed.Scheme is not ("http" or "https" or "ftp"))
+        if (FtpAddresses.IsFtp(parsed))
         {
-            error = "Only http, https, and ftp URLs are supported.";
+            error = FtpAddresses.NotSupported;
+            return false;
+        }
+
+        if (parsed.Scheme is not ("http" or "https"))
+        {
+            error = "Only http and https URLs are supported.";
             return false;
         }
 
@@ -5522,20 +5535,14 @@ public sealed partial class DownloadManagerService
             BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
             LatestVersion = CurrentLatestVersionLocked(),
+            ExtensionsSeen = ExtensionSightings?.Snapshot(),
         };
     }
 
     private static bool SupportsLiveSpeedLimit(DownloadJob job)
         => job.RemoteSource is not null ||
-           // PERF.6: the FTP engine reads the download's own limit as it goes, like the HTTP one.
-           (Uri.TryCreate(job.Url, UriKind.Absolute, out var ftp) && ftp.Scheme == "ftp") ||
            Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
-           uri.Scheme is "http" or "https" &&
-           !uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
-           !uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase) &&
-           !job.FileName.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
-           !job.FileName.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase) &&
-           !StreamManifestHint.HintsStream(job.HandoffContentType, job.Description);
+           uri.Scheme is "http" or "https";
 
     /// <summary>
     /// What every client is told about a download. For one whose address is hidden (a direct provider link) or that is
@@ -5716,7 +5723,6 @@ public sealed partial class DownloadManagerService
             TorrentConnectionsPerTorrent = settings.TorrentConnectionsPerTorrent,
             TorrentMaxConnections = settings.TorrentMaxConnections,
             TorrentUseProxy = settings.TorrentUseProxy,
-            FfmpegPath = settings.FfmpegPath,
             PostDownloadCommand = settings.PostDownloadCommand,
             // Review 2:L5: a program kept from before the .exe rule is refused when it would run; Options says so.
             PostDownloadCommandProblem = string.IsNullOrWhiteSpace(settings.PostDownloadCommand) ||

@@ -149,14 +149,14 @@
       <button class="btn" disabled={busy} onclick={() => act('remote.startQueued', {}, 'Started. Checking now…')}>Start Now on {provider}</button>
       <button class="btn" disabled={busy} onclick={() => (asking = 'dequeue')}>Remove from {provider}'s Queue…</button>
     {/if}
-    <button class="btn" disabled={busy} onclick={() => (asking = 'remove')}>Remove from list…</button>
+    <button class="btn" disabled={busy} onclick={() => (asking = 'remove')}>Delete…</button>
     {#if canDeleteFromProvider(remote)}<button class="btn-danger" disabled={busy} onclick={() => (asking = 'delete')}>Delete from {provider}…</button>{/if}
     <button class="btn" onclick={onclose}>Close</button>
   {/snippet}
 </Dialog>
 
 {#if asking === 'remove'}
-  <Confirm title="Remove from list?" message={removeQuestion([remote])} primary="Remove from list" {busy} onclose={() => (asking = null)} onconfirm={() => act('remote.remove', {}, 'Taken off the list. Nothing was deleted at the provider.')} />
+  <Confirm title="Delete from the list?" message={removeQuestion([remote])} primary="Delete" {busy} onclose={() => (asking = null)} onconfirm={() => act('remote.remove', {}, 'Taken off the list. Nothing was deleted at the provider.')} />
 {:else if asking === 'dequeue'}
   <Confirm title="Remove from {provider}'s queue?" message={dequeueQuestion([remote])} primary="Remove from queue" danger {busy} onclose={() => (asking = null)} onconfirm={() => act('remote.deleteRemote', { confirmed: true }, `Taken out of ${provider}'s queue.`)} />
 {:else if asking === 'delete'}

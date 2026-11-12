@@ -283,40 +283,6 @@ public sealed partial class RuntimeServiceTests
 public sealed partial class RuntimeServiceTests
 {
     [Fact]
-    public async Task AnAes128SegmentReportsWhileItArrives()
-    {
-        // The first segment comes at 48 KiB/s (about 3.7 s). It is decrypted only once whole, so before the fix the
-        // job sat at 0 bytes, and the speed history read 0 after two seconds, while it was still downloading.
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        using var expectedJson = System.Text.Json.JsonDocument.Parse(
-            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
-        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/hls/aes-slow.m3u8",
-            DestinationDirectory = ctx.Destination,
-            FileName = "hls-aes-slow.m3u8",
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        var firstSegment = new FileInfo(Path.Combine(AppContext.BaseDirectory, "hls", "aes0.ts")).Length;
-
-        var partway = await ctx.WaitFor(response.Job!.Id,
-            j => j.ReceivedBytes > 0 && j.ReceivedBytes < firstSegment / 2, TimeSpan.FromSeconds(20));
-        Assert.True(partway.BytesPerSecond > 0);
-        await ctx.WaitFor(response.Job.Id, j => j.ReceivedBytes > firstSegment * 3 / 4 || j.State == "completed",
-            TimeSpan.FromSeconds(20));
-        var history = ctx.Service.GetSpeedHistory().BytesPerSecond;
-        // The last whole seconds were all inside the slow segment's download.
-        Assert.All(history.SkipLast(1).TakeLast(2), value => Assert.True(value > 0, $"history {string.Join(",", history)}"));
-
-        var completed = await ctx.WaitFor(response.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
-        Assert.Equal("completed", completed.State);
-        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-    }
-
-    [Fact]
     public async Task APausedDownloadLeavesTheTotalWhileAnotherRuns()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

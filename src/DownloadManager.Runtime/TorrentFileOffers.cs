@@ -13,9 +13,9 @@ namespace DownloadManager.Runtime;
 /// so nothing runs while nothing finishes. Only where the torrent can go somewhere (<c>offered</c>: torrents on, or an
 /// account that takes them), and only for a download someone at this PC asked for
 /// (<see cref="DownloadWindows.OpensWindows"/>); the rest stay ordinary finished downloads with Open as Torrent.
-/// A download the browser extension asked to keep quiet (<see cref="DownloadWindows.KeptQuiet"/>, EXT.R12) is not
-/// offered either: EXT.R12 wins over T10, so the browser keeps the focus and the finished .torrent stays a row with
-/// Open as Torrent, which the extension's Show in app leads to.
+/// A download the browser extension asked to keep quiet (<see cref="DownloadWindows.KeptQuiet"/>, EXT.R12) is offered
+/// too (T10.B, owner 2026-11-12: "have the desktop app react to torrent files"): a .torrent file from the browser is
+/// the one exception to the quiet rule, which keeps every other window away.
 /// </summary>
 public sealed class TorrentFileOffers : IDisposable
 {
@@ -70,10 +70,12 @@ public sealed class TorrentFileOffers : IDisposable
         => service.TorrentsOn ||
            providers?.All.Any(provider => provider.Capabilities.HasFlag(RemoteCapabilities.Torrents) && provider.Account?.HasKey == true) == true;
 
-    /// <summary>Whether this finished download is offered as a torrent here. Never for a quiet browser download (EXT.R12).</summary>
+    /// <summary>
+    /// Whether this finished download is offered as a torrent here. A quiet browser download is too (T10.B): the torrent
+    /// dialog is the one window EXT.R12 doesn't keep away.
+    /// </summary>
     public static bool Offers(JobDto job, bool offered)
-        => offered && job.State == "completed" && job.TorrentFileReady && job.Torrent is null && DownloadWindows.OpensWindows(job) &&
-           !DownloadWindows.KeptQuiet(job);
+        => offered && job.State == "completed" && job.TorrentFileReady && job.Torrent is null && DownloadWindows.OpensWindows(job);
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)
     {

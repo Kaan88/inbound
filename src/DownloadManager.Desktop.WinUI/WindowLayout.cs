@@ -15,6 +15,19 @@ internal static class WindowLayout
 
     public static void ResizeForDpi(Window window, double width, double height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
 
+    /// <summary>
+    /// Gives a window a size it had before, in pixels: on Windows exactly that, as before; on Uno no bigger than the
+    /// screen it opens on, as the size may come from a bigger one.
+    /// </summary>
+    public static void ResizeRemembered(Window window, int width, int height)
+    {
+#if HAS_UNO
+        var fit = WindowSizeRules.FitOnScreen(width, height, UnoScreens.WorkArea());
+        (width, height) = (fit.Width, fit.Height);
+#endif
+        window.AppWindow.Resize(new SizeInt32 { Width = width, Height = height });
+    }
+
     /// <summary>How small the user can drag the window, and how small a remembered size can come back. Set it before restoring one.</summary>
     public static void SetMinimumSize(Window window, double width, double height)
     {
@@ -38,8 +51,13 @@ internal static class WindowLayout
     private static SizeInt32 ScaledToFit(Window window, double width, double height)
     {
 #if HAS_UNO
-        // Uno has no DisplayArea.GetFromWindowId and scales the window itself.
-        return new SizeInt32 { Width = (int)Math.Ceiling(width), Height = (int)Math.Ceiling(height) };
+        // Uno has no DisplayArea.GetFromWindowId. Its AppWindow sizes and places are screen pixels, as on Windows (checked in
+        // the Uno 6.7 source: X11WindowWrapper.Resize/Move hand them to XResizeWindow/XMoveWindow unchanged, and the
+        // content is laid out at pixels over RawPixelsPerViewPixel), so DIPs are scaled here. The screen comes from
+        // UnoScreens, in pixels; an unknown one keeps the window to a size most screens hold (the Linux window opened
+        // bigger than the screen under Xvfb).
+        var fit = WindowSizeRules.FitOnScreen(width, height, UnoScreens.Scale(), UnoScreens.WorkArea());
+        return new SizeInt32 { Width = fit.Width, Height = fit.Height };
 #endif
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96d;
@@ -69,8 +87,13 @@ internal static class WindowLayout
     public static void KeepInside(Window window)
     {
 #if HAS_UNO
-        // Uno has no DisplayArea lookups (they throw); the window manager keeps a window on a screen there.
-        return;
+        // Uno has no DisplayArea lookups (they throw); UnoScreens asks the X server (or Win32) instead.
+        var unoWindow = window.AppWindow;
+        var now = unoWindow.Position;
+        if (UnoScreens.WorkArea(now.X, now.Y) is not { } work) return;
+        var (left, top) = WindowSizeRules.KeptInside(now.X, now.Y, new PixelSize(unoWindow.Size.Width, unoWindow.Size.Height),
+            work.X, work.Y, work.Width, work.Height);
+        if (left != now.X || top != now.Y) unoWindow.Move(new PointInt32 { X = left, Y = top });
 #else
         var appWindow = window.AppWindow;
         var area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary).WorkArea;

@@ -3,6 +3,10 @@
 How the WinUI frontend should look and behave. The goal is a dense
 utility that looks the same in dark and light mode. Follow these rules when adding windows or controls.
 
+Words: every label, message and tooltip uses the names in [`glossary.md`](glossary.md) (UI.R39): Stop and Stopped,
+Resume, Completed, Failed, Delete, Options, server, This PC, "send" for the browser extension, and so on. The
+same names go into the web UI, the extension and the CLI's help.
+
 ## 1. One palette, defined once
 
 All colors come from the theme dictionaries in `App.xaml`. Never hard-code
