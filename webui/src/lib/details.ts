@@ -1,8 +1,8 @@
 // The download details view and the package dialog, as the desktop window words and orders them
 // (DownloadWindow, JobDetailsPanel, PackageWindow). Pure functions only, so the tests run them without a page.
 
-import { bytes, dateTime, duration, percent, siteOf, speed, stateWord, timeSpanSeconds } from './format';
-import { downloadedText, filesSummary, peersFigure, shortMagnet, torrentStatusText } from './torrents';
+import { bytes, dateTime, duration, jobStateWord, percent, siteOf, speed, stateWord, timeSpanSeconds } from './format';
+import { downloadedText, fileListWaitNote, filesSummary, peersFigure, shortMagnet, torrentStatusText } from './torrents';
 import { uploadedText } from './torrentDetails';
 import type { ConnectionInfo, Job, JobCompletionOptions, Segment } from './types';
 
@@ -80,7 +80,7 @@ export function detailRows(job: Job): DetailRow[] {
   const p = job.totalBytes && job.totalBytes > 0 ? Math.max(0, Math.min(100, (job.receivedBytes * 100) / job.totalBytes)) : 0;
   const eta = timeSpanSeconds(job.estimatedRemaining);
   const rows: DetailRow[] = [];
-  rows.push({ label: 'Status', value: stateWord(job.state) });
+  rows.push({ label: 'Status', value: jobStateWord(job) });
   rows.push({ label: 'File size', value: job.totalBytes !== undefined && job.totalBytes !== null && job.totalBytes >= 0 ? bytes(job.totalBytes) : 'Unknown' });
   rows.push({
     label: 'Downloaded',
@@ -93,7 +93,7 @@ export function detailRows(job: Job): DetailRow[] {
 }
 
 /** T1: a torrent's summary (DownloadWindow.ShowTorrent): its status, what it downloads, its peers, files and info hash. */
-export function torrentDetailRows(job: Job): DetailRow[] {
+export function torrentDetailRows(job: Job, now = Date.now()): DetailRow[] {
   const torrent = job.torrent!;
   const complete = job.state === 'completed';
   const total = job.totalBytes && job.totalBytes > 0 ? job.totalBytes : torrent.wantedBytes;
@@ -113,7 +113,7 @@ export function torrentDetailRows(job: Job): DetailRow[] {
     const since = torrent.seedingSince ? `since ${dateTime(torrent.seedingSince)}` : '';
     rows.push({ label: 'Seeding', value: [since, rate ? `↑ ${rate}` : ''].filter(Boolean).join(' · ') || 'Yes' });
   }
-  rows.push({ label: 'Files', value: filesSummary(torrent) }, { label: 'Info hash', value: torrent.infoHash || '—' });
+  rows.push({ label: 'Files', value: fileListWaitNote(job, now) ?? filesSummary(torrent) }, { label: 'Info hash', value: torrent.infoHash || '—' });
   return rows;
 }
 
@@ -123,8 +123,8 @@ export function completedSize(job: Pick<Job, 'receivedBytes'>): string {
 }
 
 /** The window's heading: "Download complete", or the state. */
-export function heading(job: Pick<Job, 'state'>): string {
-  return job.state === 'completed' ? 'Download complete' : stateWord(job.state);
+export function heading(job: Pick<Job, 'state' | 'startMode'>): string {
+  return job.state === 'completed' ? 'Download complete' : jobStateWord(job);
 }
 
 const removedWords = 'Archive removed after extraction';
@@ -134,9 +134,34 @@ export function noFileText(note: string | null | undefined): string {
   return `${note && note.trim() ? note.trim().replace(/\.+$/, '') : removedWords}, so there is no file to open.`;
 }
 
+/**
+ * What to do about a failure the server names only by its HTTP code (desktop JobNotes.NextStep, review 5:E2). Null when
+ * there is nothing to suggest or the server's words already say it. A provider's file gets no step: the app asks the
+ * provider for a fresh link itself.
+ */
+export function failureNextStep(job: Pick<Job, 'failure' | 'url' | 'isRemote' | 'torrent'>): string | null {
+  const failure = job.failure;
+  if (!failure) return null;
+  const provider = job.isRemote === true || job.url.toLowerCase().startsWith('remote://');
+  const status = failure.httpStatus ?? 0;
+  if ((failure.kind === 'unauthorized' || failure.kind === 'forbidden') && (status === 401 || status === 403))
+    return 'The site may want you signed in: add a login in Options > Site logins, or download it from the browser.';
+  if (failure.kind === 'notFound' && status === 404 && !provider && !job.torrent) return 'The link may have expired: try Refresh Download Address.';
+  if (failure.kind === 'http' && status >= 500 && status < 600) return 'The site had a problem. Try again later.';
+  return null;
+}
+
+/** The failure's words, with what to do next while the download has failed (desktop JobNotes.FailureMessage). */
+export function failureText(job: Pick<Job, 'state' | 'failure' | 'url' | 'isRemote' | 'torrent'>): string {
+  const message = job.failure?.message?.trim() ?? '';
+  if (!message) return '';
+  const step = job.state === 'failed' ? failureNextStep(job) : null;
+  return step ? `${message} ${step}` : message;
+}
+
 /** The line under the figures: the failure when there is one, otherwise a hint about the state (D18). */
-export function noticeText(job: Pick<Job, 'state' | 'failure' | 'fileRemovedAfterExtraction' | 'statusNote'>): string {
-  if (job.failure?.message) return job.failure.message;
+export function noticeText(job: Pick<Job, 'state' | 'failure' | 'fileRemovedAfterExtraction' | 'statusNote' | 'url' | 'isRemote' | 'torrent'>): string {
+  if (job.failure?.message) return failureText(job);
   if (job.state === 'completed') return job.fileRemovedAfterExtraction ? noFileText(job.statusNote) : 'The file has been saved. Choose an action below.';
   if (job.state === 'paused') return 'The download is paused. Resume it or close this window.';
   return 'Closing this window will not stop the download.';
@@ -329,7 +354,7 @@ export function categoryOf(job: Pick<Job, 'categoryId' | 'categoryIsAutomatic'>)
 export type ProgramMode = 'global' | 'none' | 'run';
 
 export const systemActions: { id: string; label: string }[] = [
-  { id: 'none', label: 'No system action' },
+  { id: 'none', label: 'No computer action' },
   { id: 'exit', label: 'Exit application' },
   { id: 'shutdown', label: 'Shut down' },
   { id: 'restart', label: 'Restart' },
@@ -356,8 +381,8 @@ export function completionFrom(
 ): { ok: true; options: JobCompletionOptions } | { ok: false; error: string } {
   const path = mode === 'global' ? null : mode === 'none' ? '' : programPath.trim();
   if (mode === 'run' && !/^([a-zA-Z]:[\\/]|\\\\|\/).+\.exe$/i.test(path ?? '')) return { ok: false, error: 'Choose an absolute path to an existing .exe file.' };
-  if (!systemActions.some((a) => a.id === systemAction)) return { ok: false, error: 'Choose a valid system action.' };
-  if (systemAction !== 'none' && !systemActionsAllowed) return { ok: false, error: 'Enable system completion actions in Scheduler settings before choosing a system action.' };
+  if (!systemActions.some((a) => a.id === systemAction)) return { ok: false, error: 'Choose a valid computer action.' };
+  if (systemAction !== 'none' && !systemActionsAllowed) return { ok: false, error: 'Allow computer actions in the Scheduler before choosing one.' };
   return { ok: true, options: { programPath: path, openFile, systemAction, forceSystemAction: canForce(systemAction) && force } };
 }
 

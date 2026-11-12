@@ -24,7 +24,7 @@ interface ServerStatus {
 
 type FormValues = Pick<Settings, "enabled" | "autoIntercept" | "notifications" | "startMode" | "destinationMode" |
   "defaultTarget" | "interceptedExtensions" | "excludedExtensions" | "excludedHosts" | "theme" | "serverCustomName" |
-  "browserFolder" | "askStartsOn" | "askStartFolder">;
+  "browserFolder" | "askStartsOn" | "askStartFolder" | "openAppWindows" | "onFinish">;
 
 export const PAGES = ["general", "catching", "server", "site-access", "connection", "about"] as const;
 export type PageId = typeof PAGES[number];
@@ -152,7 +152,14 @@ function collect(): FormValues {
     askStartsOn: askStartsOnValue(),
     // Kept while another choice is made, so switching back to Custom finds it.
     askStartFolder: byId<HTMLInputElement>("askStartFolder").value.trim(),
+    openAppWindows: byId<HTMLInputElement>("openAppWindows").checked,
+    onFinish: finishActionValue(),
   };
+}
+
+function finishActionValue(): Settings["onFinish"] {
+  const value = byId<HTMLSelectElement>("onFinish").value;
+  return value === "popup" || value === "nothing" ? value : "flash";
 }
 
 function same(a: unknown, b: unknown): boolean {
@@ -203,13 +210,15 @@ function fillField(key: keyof FormValues, settings: Settings): void {
       }
       break;
     case "askStartFolder": byId<HTMLInputElement>("askStartFolder").value = settings.askStartFolder ?? ""; break;
+    case "openAppWindows": byId<HTMLInputElement>("openAppWindows").checked = settings.openAppWindows === true; break;
+    case "onFinish": byId<HTMLSelectElement>("onFinish").value = settings.onFinish ?? "flash"; break;
   }
   renderFolderFields();
 }
 
 const FORM_KEYS: Array<keyof FormValues> = ["enabled", "autoIntercept", "notifications", "startMode", "destinationMode",
   "defaultTarget", "interceptedExtensions", "excludedExtensions", "excludedHosts", "theme", "serverCustomName",
-  "browserFolder", "askStartsOn", "askStartFolder"];
+  "browserFolder", "askStartsOn", "askStartFolder", "openAppWindows", "onFinish"];
 
 function fill(settings: Settings): void {
   for (const key of FORM_KEYS) fillField(key, settings);

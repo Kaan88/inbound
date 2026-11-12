@@ -286,11 +286,16 @@ public sealed partial class MainWindow
             });
         }
 
-        // U-WL-22: the entries of a container go to a provider, so with no key the item says what it needs.
+        // U-WL-22: the entries of a container go to a provider, so with no key the item says what it needs. Review 5:P1:
+        // it stays enabled, because a dimmed item shows no tooltip; choosing it explains and offers Options.
         if (usable.Count == 0)
         {
             if (_remote.State.RemoteSupported)
-                Add(RemoteText.ContainerImportItem(null), "J", (_, _) => { }, enabled: false);
+                Add(RemoteText.ContainerImportItem(null), "J", async (_, _) =>
+                {
+                    if (await ConfirmAsync("Import link container", RemoteText.ContainerImportHelp(null), "Open Options"))
+                        await OpenOptionsAsync();
+                });
             return;
         }
 
@@ -300,7 +305,10 @@ public sealed partial class MainWindow
             Add($"Browse My {RemoteText.ProviderName(account)}…", "B", (_, _) => OpenProviderWindow(account.Provider));
         }
 
-        if (browsable.Count > 0) Add($"{RemoteText.ProviderName(browsable[0])} Hosters…", "H", (_, _) => HosterWindow.Show(_remote));
+        // Review 5:P1: "Hoster" is another community's word, so the item says what it lists.
+        if (browsable.Count > 0)
+            ToolTipService.SetToolTip(Add($"{RemoteText.ProviderName(browsable[0])} Hosters…", "H", (_, _) => HosterWindow.Show(_remote)),
+                RemoteText.HostersHelp(RemoteText.ProviderName(browsable[0])));
 
         var import = Add(RemoteText.ContainerImportItem(RemoteText.ProviderName(usable[0])), "J", async (_, _) => await ImportJdContainerAsync());
         ToolTipService.SetToolTip(import, RemoteText.ContainerImportHelp(RemoteText.ProviderName(usable[0])));

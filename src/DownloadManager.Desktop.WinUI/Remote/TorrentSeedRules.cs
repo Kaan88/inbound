@@ -80,6 +80,23 @@ internal static class TorrentSeedRules
         return double.IsFinite(rate) && rate >= 1 ? $"{UiFormat.Bytes((long)rate)}/s up" : string.Empty;
     }
 
+    /// <summary>
+    /// Delete Completed's question for the <paramref name="completed"/> downloads it removes. A seeding torrent is
+    /// completed too, so it goes with them; the question says that stops it seeding (review 4:L9). The web UI's
+    /// deleteCompletedText says the same.
+    /// </summary>
+    public static string DeleteCompletedText(IReadOnlyCollection<JobDto> completed)
+    {
+        var text = $"Remove {completed.Count} completed item(s) from the list? The downloaded files will stay on disk.";
+        var seeding = completed.Count(IsSeeding);
+        return seeding switch
+        {
+            0 => text,
+            1 => $"{text} 1 of them is a torrent that is seeding; removing it stops seeding.",
+            _ => $"{text} {seeding} of them are torrents that are seeding; removing them stops seeding.",
+        };
+    }
+
     // ---- Start seeding and Stop seeding ----
 
     /// <summary>A finished torrent that doesn't seed now: Start seeding acts on it. The Host refuses one whose files

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cacheChecked, cacheQuery, cacheText, dragMayHoldTorrents, intake, isEditableTarget, noTorrentsOnClipboard, onlyTorrentsDrop, pageTakes,
+  cacheBadge, cacheChecked, cacheQuery, cacheReason, cacheText, isCachedWords, dragMayHoldTorrents, intake, intakeStep, isEditableTarget, noTorrentsOnClipboard, onlyTorrentsDrop, pageTakes,
   startCacheChecks, torrentFilesIn, uploadTorrent,
 } from '../src/lib/torrentIntake';
 import { addLines, inspected, newLines, removeLine, setRoute, type TorrentLines } from '../src/lib/torrents';
@@ -51,10 +51,21 @@ describe('Ctrl+V and drops on the page', () => {
   });
 
   it('says what was wrong when nothing fits, in the Windows words', () => {
-    expect(intake('https://example.com/file.zip', [], false).empty).toBe(noTorrentsOnClipboard);
+    expect(intake('just words', [], false).empty).toBe(noTorrentsOnClipboard);
     expect(intake('', [{ name: 'x.iso' }], true).empty).toBe(onlyTorrentsDrop);
-    expect(noTorrentsOnClipboard).toBe('The clipboard holds no magnet link or .torrent file.');
-    expect(onlyTorrentsDrop).toBe('Only magnet links and .torrent files can be dropped here.');
+    expect(noTorrentsOnClipboard).toBe('The clipboard holds no link, magnet link or .torrent file.');
+    expect(onlyTorrentsDrop).toBe('Only links, magnet links and .torrent files can be dropped here.');
+  });
+
+  // Review 5:A6: ordinary links dropped or pasted on the page go to Add Links, as in the Windows app.
+  it('takes http, https and ftp links for Add Links, with torrents on or off', () => {
+    const found = intake(`https://example.com/a.zip and ftp://example.com/b.iso ${magnet}`, [], false);
+    expect(found.links).toEqual(['https://example.com/a.zip', 'ftp://example.com/b.iso']);
+    expect(found.magnets).toEqual([magnet]);
+    expect(found.empty).toBeNull();
+    expect(intakeStep(0, 2, false)).toEqual({ torrents: false, links: true, problem: null });
+    expect(intakeStep(1, 1, true)).toEqual({ torrents: true, links: true, problem: null });
+    expect(intakeStep(1, 0, false).problem).toBe('Torrents are turned off. Turn them on in Options > Torrents.');
   });
 
   it('uploads a .torrent file and keeps only the reference and its name', async () => {
@@ -121,6 +132,35 @@ describe('the TorBox cache check of the torrent dialog', () => {
     expect(cacheText(cacheChecked(states, 'a', null).a, 'TorBox')).toBe("Couldn't check TorBox");
     expect(cacheText(undefined, 'TorBox')).toBe('');
     expect(cacheText('cached', null)).toBe('');
+  });
+
+  it('shows the answer as a badge next to the provider choice (T9 W3)', () => {
+    expect(cacheBadge('cached', 'TorBox')).toEqual({ kind: 'cached', text: 'Cached on TorBox', note: 'TorBox has it, so it downloads right away', tip: null });
+    expect(cacheBadge('notCached', 'TorBox')).toEqual({ kind: 'notCached', text: 'Not cached on TorBox', note: '', tip: null });
+    expect(cacheBadge('checking', 'TorBox')).toEqual({ kind: 'checking', text: 'Checking TorBox…', note: '', tip: null });
+    expect(cacheBadge('unknown', 'TorBox', 'TorBox refused the API key.')).toEqual({ kind: 'unknown', text: "Couldn't check TorBox", note: '', tip: 'TorBox refused the API key.' });
+    expect(cacheBadge('unknown', 'TorBox')?.tip).toBe("TorBox didn't answer the check.");
+    expect(cacheBadge(undefined, 'TorBox')).toBeNull();
+    expect(cacheBadge('cached', null)).toBeNull();
+  });
+
+  it('keeps why a check could not say, for the badge tooltip', () => {
+    expect(cacheReason({ ok: true, cached: true }, 'TorBox')).toBeNull();
+    expect(cacheReason({ ok: true, cached: false }, 'TorBox')).toBeNull();
+    expect(cacheReason({ ok: false, error: 'TorBox could not be reached.' }, 'TorBox')).toBe('TorBox could not be reached.');
+    expect(cacheReason(null, 'TorBox', 'The connection closed.')).toBe('The connection closed.');
+    expect(cacheReason({ ok: true }, 'TorBox')).toBe("TorBox didn't say whether it has it.");
+    expect(cacheReason(null, 'TorBox')).toBeNull();
+    // Addresses never show, as on the desktop.
+    expect(cacheReason({ ok: false, error: 'No answer for magnet:?xt=urn:btih:abc&tr=udp://t' }, 'TorBox')).toBe('No answer for an address');
+    expect(cacheReason(null, 'TorBox', 'Failed https://api.example/x?k=1')).toBe('Failed an address');
+  });
+
+  it('shows a cached status as the same badge', () => {
+    expect(isCachedWords('Cached on TorBox')).toBe(true);
+    expect(isCachedWords('Ready to download')).toBe(false);
+    expect(isCachedWords('Not cached on TorBox')).toBe(false);
+    expect(isCachedWords(undefined)).toBe(false);
   });
 
   it('drops a line that went, and an answer for it changes nothing', () => {

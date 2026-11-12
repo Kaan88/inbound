@@ -64,6 +64,7 @@ public sealed partial class MainWindow
         // Its changes are posted to this thread (RemoteClient), so this follows the shown Host's capability.
         _remote.State.PropertyChanged += OnTorrentStateChanged;
         InitializeTorrentControls();
+        InitializeTorrentInfo();
         // A file list that came in while another dialog was open, or while the window was hidden, gets its turn once
         // that dialog closes or the window shows again; no torrent update may follow to bring it.
         DialogGuard.Closed += OnDialogClosedForFileChoice;
@@ -143,13 +144,20 @@ public sealed partial class MainWindow
         (TorrentListRules.DownloadingTag, "Downloading", "&#xE896;", "InboundIconInfoBrush", 30),
         (TorrentListRules.SeedingTag, "Seeding", "&#xE898;", "InboundIconStartBrush", 30),
         (TorrentListRules.StoppedTag, "Stopped", "&#xE769;", "InboundIconPauseBrush", 30),
+        // T7: shown only while they hold a torrent (TorrentListRules.ViewShows).
+        (TorrentListRules.ActiveTag, "Active", "&#xE945;", "InboundIconInfoBrush", 30),
+        (TorrentListRules.StalledTag, "Stalled", "&#xE916;", "InboundIconPauseBrush", 30),
+        (TorrentListRules.CheckingTag, "Checking", "&#xE895;", "InboundIconInfoBrush", 30),
+        (TorrentListRules.FilesTag, "Waiting for files", "&#xE8FD;", "InboundIconInfoBrush", 30),
+        (TorrentListRules.CompletedTag, "Completed", "&#xE73E;", "InboundIconStartBrush", 30),
+        (TorrentListRules.ErroredTag, "Errored", "&#xE783;", "InboundIconDangerBrush", 30),
     ];
 
     /// <summary>The shown torrent sidebar items and their count text, by tag; empty while they are away.</summary>
     private readonly Dictionary<string, (ListBoxItem Item, TextBlock Count)> _torrentSidebar = new(StringComparer.Ordinal);
 
-    /// <summary>The counts the sidebar shows, so an update that changes none touches nothing.</summary>
-    private TorrentCounts? _torrentCountsShown;
+    /// <summary>The counts the sidebar shows and the view they were shown for, so an update that changes none touches nothing.</summary>
+    private (TorrentCounts Main, TorrentExtraCounts Extra, string Category, string? Pending)? _torrentCountsShown;
 
     /// <summary>Top-level Torrents after Finished, before Extractions and Queues, with Downloading, Seeding and Stopped under it.</summary>
     private void SyncTorrentSidebar(bool show)
@@ -171,19 +179,11 @@ public sealed partial class MainWindow
             var at = items.FindIndex(existing => existing.Tag as string == ArchiveSetsTag);
             if (at < 0) at = items.FindIndex(existing => existing.Tag is "queues");
             if (at < 0) at = CategoryList.Items.Count;
+            // T7: the extra views come in with their first torrent (UpdateTorrentCounts).
             foreach (var (tag, title, glyph, brush, indent) in TorrentSidebarItems)
             {
-                var (content, count) = TorrentSidebarContent(glyph, brush, title);
-                var added = new ListBoxItem
-                {
-                    Tag = tag,
-                    Padding = new Thickness(indent, 2, 8, 2),
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    Content = content,
-                };
-                AutomationProperties.SetName(added, title);
-                _torrentSidebar[tag] = (added, count);
-                CategoryList.Items.Insert(at++, added);
+                if (TorrentListRules.IsExtraTag(tag)) continue;
+                CategoryList.Items.Insert(at++, NewTorrentSidebarItem(tag, title, glyph, brush, indent));
             }
         }
         finally
@@ -192,6 +192,56 @@ public sealed partial class MainWindow
         }
 
         UpdateTorrentCounts();
+    }
+
+    private ListBoxItem NewTorrentSidebarItem(string tag, string title, string glyph, string brush, double indent)
+    {
+        var (content, count) = TorrentSidebarContent(glyph, brush, title);
+        var added = new ListBoxItem
+        {
+            Tag = tag,
+            Padding = new Thickness(indent, 2, 8, 2),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = content,
+        };
+        AutomationProperties.SetName(added, title);
+        _torrentSidebar[tag] = (added, count);
+        return added;
+    }
+
+    /// <summary>
+    /// T7: adds or takes away an extra view under Torrents as it fills or empties (never the one shown). It goes in
+    /// after the torrent view before it in <see cref="TorrentSidebarItems"/>' order.
+    /// </summary>
+    private void SyncExtraTorrentView(string tag, string title, string glyph, string brush, double indent, bool show)
+    {
+        var present = _torrentSidebar.TryGetValue(tag, out var shown);
+        if (show == present) return;
+        _refreshingCategories = true;
+        try
+        {
+            if (!show)
+            {
+                if (ReferenceEquals(CategoryList.SelectedItem, shown.Item)) return;
+                CategoryList.Items.Remove(shown.Item);
+                _torrentSidebar.Remove(tag);
+                return;
+            }
+
+            var at = -1;
+            foreach (var (earlier, _, _, _, _) in TorrentSidebarItems)
+            {
+                if (earlier == tag) break;
+                if (_torrentSidebar.TryGetValue(earlier, out var before)) at = CategoryList.Items.IndexOf(before.Item);
+            }
+
+            if (at < 0) return; // Torrents itself is away
+            CategoryList.Items.Insert(at + 1, NewTorrentSidebarItem(tag, title, glyph, brush, indent));
+        }
+        finally
+        {
+            _refreshingCategories = false;
+        }
     }
 
     /// <summary>Built from XAML, as the sidebar's own glyphs are, so its brushes follow the theme. The count sits at the right.</summary>
@@ -209,17 +259,25 @@ public sealed partial class MainWindow
         return (content, (TextBlock)content.Children[1]);
     }
 
-    /// <summary>DT-5: how many torrents each torrent view holds, as the list changes. Nothing runs for it otherwise.</summary>
+    /// <summary>
+    /// DT-5: how many torrents each torrent view holds, as the list changes or another view is chosen. Nothing runs for
+    /// it otherwise. T7: an extra view comes and goes with its count.
+    /// </summary>
     private void UpdateTorrentCounts()
     {
         if (_torrentSidebar.Count == 0) return;
-        var counts = TorrentListRules.Count(_jobsById.Values.Where(row => row.IsTorrent).Select(row => row.Dto).OfType<JobDto>());
-        if (_torrentCountsShown == counts) return;
-        _torrentCountsShown = counts;
-        foreach (var (tag, title, _, _, _) in TorrentSidebarItems)
+        var torrents = _jobsById.Values.Where(row => row.IsTorrent).Select(row => row.Dto).OfType<JobDto>().ToList();
+        var counts = TorrentListRules.Count(torrents);
+        var extra = TorrentListRules.CountExtras(torrents);
+        var key = (counts, extra, _category, _pendingTorrentCategory);
+        if (_torrentCountsShown == key) return;
+        _torrentCountsShown = key;
+        foreach (var (tag, title, glyph, brush, indent) in TorrentSidebarItems)
         {
+            var count = TorrentListRules.IsExtraTag(tag) ? extra.Of(tag) : counts.Of(tag);
+            if (TorrentListRules.IsExtraTag(tag))
+                SyncExtraTorrentView(tag, title, glyph, brush, indent, TorrentListRules.ViewShows(tag, count, _category, _pendingTorrentCategory));
             if (!_torrentSidebar.TryGetValue(tag, out var shown)) continue;
-            var count = counts.Of(tag);
             shown.Count.Text = TorrentListRules.CountText(count);
             AutomationProperties.SetName(shown.Item, TorrentListRules.SpokenItem(title, count));
         }
@@ -250,6 +308,7 @@ public sealed partial class MainWindow
     private void UpdateTorrentChip()
     {
         UpdateTorrentCounts();
+        SyncUploadGraph();
         // T3: and the DHT nodes while this window watches running torrents.
         SyncTorrentWatch();
         var text = TorrentControlRules.ChipText(TorrentRules.ChipText(_jobsById.Values.Select(row => row.Dto).OfType<JobDto>()), _dhtWords);
@@ -489,6 +548,13 @@ public sealed partial class MainWindow
             _menuCopyMagnet.Text = TorrentListRules.CopyItemText(jobs.Count);
         }
 
+        if (_menuOpenAsTorrent is not null)
+        {
+            // T10: one finished .torrent download.
+            var opens = selection.Count == 1 && TorrentRules.OpensAsTorrent(selection[0].Dto);
+            _menuOpenAsTorrent.Visibility = opens ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         SyncTorrentControlItems();
         if (_menuChooseFiles is null) return;
         var canChoose = CanChooseTorrentFiles;
@@ -499,6 +565,8 @@ public sealed partial class MainWindow
             ? Microsoft.UI.Text.FontWeights.SemiBold
             : Microsoft.UI.Text.FontWeights.Normal;
     }
+
+    private MenuFlyoutItem? _menuOpenAsTorrent;
 
     // ---- Seeding (T2) ---------------------------------------------------------------------------------
 
@@ -685,7 +753,8 @@ public sealed partial class MainWindow
         var waiting = false;
         bool Open(Guid jobId)
         {
-            var open = TryProgressWindow(() => ActivationSignal.IsOwned(ProgressWindowName(jobId)));
+            // T11: one opened here first, then one the Host started as a process of its own.
+            var open = InProcessDownloadWindow(jobId) is not null || TryProgressWindow(() => ActivationSignal.IsOwned(ProgressWindowName(jobId)));
             if (open) _progressWindowSeen.Add(jobId);
             return open;
         }
@@ -707,9 +776,7 @@ public sealed partial class MainWindow
                    Coming) is { } found)
         {
             // Shown there: asked, once. A window that closed in between leaves the choice to the dialog here.
-            // The progress window is another process: without this Windows leaves it behind this one.
-            if (found.Place == FileChoicePlace.ProgressWindow) App.AllowAnyForeground();
-            if (found.Place == FileChoicePlace.ProgressWindow && TryProgressWindow(() => ActivationSignal.TryShowOwner(ProgressWindowName(found.JobId))))
+            if (found.Place == FileChoicePlace.ProgressWindow && ShowFileChoiceWindow(found.JobId))
             {
                 _fileChoiceAsked.Add(found.JobId);
                 continue;
@@ -749,14 +816,20 @@ public sealed partial class MainWindow
         }
     }
 
-    private string ProgressWindowName(Guid jobId)
+    private string ProgressWindowName(Guid jobId) => ProgressWindowEventName(ProgressWindowKind.Download, jobId, _connection.Target);
+
+    /// <summary>Brings the download's progress window to the front on its Files tab: one opened here, or the Host's.</summary>
+    private bool ShowFileChoiceWindow(Guid jobId)
     {
-        var name = WindowInstance.JobWindowName(PipeNames.CurrentUserKey(), jobId, _connection.Target);
-#if HAS_UNO
-        // The prototype's windows take their own names (App).
-        name += ".Uno";
-#endif
-        return name;
+        if (InProcessDownloadWindow(jobId) is { } window)
+        {
+            ShowProgressWindow(window);
+            return true;
+        }
+
+        // The progress window is another process: without this Windows leaves it behind this one.
+        App.AllowAnyForeground();
+        return TryProgressWindow(() => ActivationSignal.TryShowOwner(ProgressWindowName(jobId)));
     }
 
     private void OpenFileChoiceDialog(Guid jobId)

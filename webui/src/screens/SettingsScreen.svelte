@@ -7,8 +7,8 @@
   import { newUuid } from '../lib/ids';
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
-    mergeEditedSettings, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
-    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
+    mergeEditedSettings, archiveChanges, captureLabel, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
+    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, torrentFoldersHint, torrentSameFolders, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
   } from '../lib/settingsRules';
   import { hostKindOf } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
@@ -442,7 +442,7 @@
           <p class="hint mt-1">This browser only.</p>
         </div>
         {@render section('Capturing downloads')}
-        <label class="flex items-center gap-2 text-[13px] {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.browserIntegration} disabled={pcOnly} /> Capture downloads from your browser</label>
+        <label class="flex items-center gap-2 text-[13px] {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.browserIntegration} disabled={pcOnly} /> {captureLabel(store.model.hello?.hostKind)}</label>
         {#if pcOnly}<p class="hint flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
       </div>
     {:else if page === 'saveto'}
@@ -452,10 +452,17 @@
         <FolderField id="set-folder" label="Default download folder" bind:value={form.defaultDownloadDirectory} disabled={pcOnly} hint="New downloads go here unless you choose another folder." />
         {@render section('Folders by category')}
         <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.useCategoryFolders} /> Save downloads to a folder for their category</label>
-        <p class="hint">Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.</p>
+        <p class="hint">Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder, and so do torrents when the torrent folder is empty.</p>
         {#each categoryNames as name (name)}
           <FolderField id="cat-{name}" label={categoryLabel(name)} bind:value={form.categoryFolders[name]} placeholder="Use the default folder" disabled={pcOnly || !form.useCategoryFolders} />
         {/each}
+
+        {#if form.useTorrentCategoryFolders !== null}
+          {@render section('Torrent folders')}
+          <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.useTorrentCategoryFolders} /> Save torrents to a folder for their category</label>
+          <FolderField id="set-torrent-folder" label="Torrent folder" bind:value={form.torrentFolder} placeholder={torrentSameFolders} disabled={pcOnly} />
+          <p class="hint">{torrentFoldersHint}</p>
+        {/if}
 
         {#if form.customCategories.length > 0}
           {@render section('Custom categories')}
@@ -504,6 +511,8 @@
         <div>
           <label class="label" for="set-post">Run this program after each download</label>
           <input id="set-post" class="field font-mono" readonly value={store.model.settings?.postDownloadCommand || ''} placeholder="(nothing)" />
+          <p class="hint mt-1">It gets the finished file's full path as its only argument.</p>
+          {#if store.model.settings?.postDownloadCommandProblem}<p class="hint mt-1 text-error">{store.model.settings.postDownloadCommandProblem}</p>{/if}
           <p class="hint mt-1 flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {store.texts.postProgramNote}</p>
         </div>
       </div>
@@ -517,8 +526,19 @@
         <p class="hint sm:col-span-2">Leave the speed limit empty for unlimited.</p>
         <div class="sm:col-span-2">
           {@render section('Per-site limits')}
-          <label class="label mt-2" for="set-profiles">One host pattern=maximum connections per line</label>
-          <textarea id="set-profiles" class="field h-24 font-mono" aria-invalid={invalid('set-profiles')} bind:value={form.profiles} placeholder="*.example.com=2" spellcheck="false"></textarea>
+          <p class="hint mt-1">Most connections a download may open to these sites. *.example.com covers its subdomains.</p>
+          <div class="mt-2 grid gap-2">
+            {#each form.profiles as row, i (row.key)}
+              <div class="flex items-end gap-2">
+                <div class="min-w-0 flex-1"><label class="label" for="profile-site-{row.key}">Site</label><input id="profile-site-{row.key}" class="field" aria-invalid={invalid(`profile-site-${row.key}`)} bind:value={row.pattern} placeholder="example.com or *.example.com" spellcheck="false" /></div>
+                <div class="w-28"><label class="label" for="profile-max-{row.key}">Connections</label><input id="profile-max-{row.key}" class="field" type="number" min="1" max="32" aria-invalid={invalid(`profile-max-${row.key}`)} bind:value={row.max} /></div>
+                <button class="btn-danger" type="button" aria-label="Remove this per-site limit" onclick={() => form?.profiles.splice(i, 1)}>Remove</button>
+              </div>
+            {:else}
+              <p class="hint">No per-site limits yet.</p>
+            {/each}
+            <div><button id="profile-add" class="btn" type="button" onclick={() => form?.profiles.push({ key: nextRowKey(), pattern: '', max: null })}><Icon name="add" size={15} class="text-icon-info" /> Add per-site limit</button></div>
+          </div>
         </div>
         <label class="flex items-center gap-2 text-[13px] sm:col-span-2 {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.allowLocalNetwork} disabled={pcOnly} /> Allow downloads from addresses on the local network</label>
         {#if pcOnly}<p class="hint flex items-start gap-1.5 sm:col-span-2"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
@@ -586,7 +606,7 @@
           {#if torrentAccount}
             <div role="radiogroup" aria-label="Magnets and .torrent files go to">
               <p class="label">Magnets and .torrent files go to</p>
-              {#each [['ask', 'Ask each time'], ['thisPc', pcOnly ? 'This PC' : 'This server'], ['provider', providerNameOf(torrentAccount)]] as [value, label] (value)}
+              {#each [['thisPc', pcOnly ? 'This PC' : 'This server'], ['provider', providerNameOf(torrentAccount)]] as [value, label] (value)}
                 <label class="flex items-center gap-2 text-[13px]"><input type="radio" name="torrent-route" value={value} bind:group={form.torrentRoute} /> {label}</label>
               {/each}
             </div>

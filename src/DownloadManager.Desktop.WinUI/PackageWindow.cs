@@ -21,9 +21,10 @@ internal sealed class PackageWindow : Window
 {
     private readonly Guid _packageId;
     private readonly HostConnection _connection;
+    private readonly Action<Guid>? _openFileWindow;
 
-    // Archive state comes over the connection above. The Host has eight pipe instances for every client on
-    // the machine, and each of these windows is a process of its own, so a second connection here adds up.
+    // Archive state comes over the connection above: each of these windows has a connection of its own (a process of
+    // its own when the Host opened it), so a second connection here adds up.
     private readonly RemoteState _archives = new();
     private readonly Dictionary<Guid, JobDto> _jobs = [];
     private readonly Dictionary<Guid, Row> _rows = [];
@@ -96,11 +97,14 @@ internal sealed class PackageWindow : Window
     private sealed record Row(ListViewItem Item, Guid JobId, TextBlock Name, TextBlock Status, ProgressBar Bar, TextBlock Size);
 
     /// <param name="target">The Host the package is on: this PC, or a saved server (<c>--server</c>).</param>
-    public PackageWindow(Guid packageId, ServerTarget? target = null)
+    /// <param name="openFileWindow">T11: set when the main window opened this one in its own process; a file's
+    /// Progress Details then opens there too. Null: this window is a process of its own, and so is a file's window.
+    /// Such a window also closes itself when this PC's Host exits, and leaves <see cref="ShownServer"/> alone.</param>
+    public PackageWindow(Guid packageId, ServerTarget? target = null, Action<Guid>? openFileWindow = null)
     {
         _packageId = packageId;
         _connection = new HostConnection(target);
-        ShownServer.Target = _connection.Target;
+        _openFileWindow = openFileWindow;
         AppTheme.Track(_root);
         Title = ServerNames.ForWindow("Package Progress — Inbound Download Manager", _connection.Target);
         // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
@@ -186,13 +190,18 @@ internal sealed class PackageWindow : Window
             _archives.Apply(change);
         });
 
-        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
+        // A window of its own process ends it; one in the main window's process closes, and the main window ends the process.
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_openFileWindow is null) Application.Current.Exit();
+            else if (!_closed) Close();
+        });
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
-            if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
-            // Another server's theme is its own; this window keeps this PC's.
-            if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
+            // Another server's theme is its own; this window keeps this PC's. In the main window's process that window
+            // follows it for every window (T11).
+            if (!_connection.IsRemote && _openFileWindow is null) AppTheme.FollowSettings(snapshot.Settings);
             _jobs.Clear();
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
@@ -300,7 +309,7 @@ internal sealed class PackageWindow : Window
         if (_closed) return;
         var now = at ?? DateTimeOffset.UtcNow;
         var rates = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id])
-            .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now));
+            .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, _connection.Clock.ServerNow(now)));
         _chart.AddSample(now, SpeedSample.Total(_hostConnected, rates.ToList()));
     }
 
@@ -810,7 +819,7 @@ internal sealed class PackageWindow : Window
         var body = new StackPanel { Spacing = 10 };
         body.Children.Add(new TextBlock
         {
-            Text = $"Remove the {ids.Count} file(s) of this package from the list?",
+            Text = $"Delete the {ids.Count} file(s) of this package from the list?",
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(deleteFiles);
@@ -844,6 +853,12 @@ internal sealed class PackageWindow : Window
 
     private void OpenFileWindow(Guid jobId)
     {
+        if (_openFileWindow is { } open)
+        {
+            open(jobId);
+            return;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("job", jobId, _connection.Target, manual: true)) { UseShellExecute = false });
@@ -857,7 +872,7 @@ internal sealed class PackageWindow : Window
         var folder = _members.Select(id => _jobs.TryGetValue(id, out var job) ? Path.GetDirectoryName(job.FinalFilePath) : null)
             .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
         if (folder is null) { _notice.Text = "The download folder was not found."; return; }
-        try { Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true }); }
+        try { ShellActions.Start(ShellActions.OpenFolder(folder))?.Dispose(); }
         catch (Exception ex) { _notice.Text = $"Could not open the folder: {ex.Message}"; }
     }
 

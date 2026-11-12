@@ -31,6 +31,7 @@ internal sealed class ColumnHeaderRow
     private readonly FrameworkElement _root;
     private readonly Action<string> _sort;
     private readonly Action _saved;
+    private readonly ListView _list;
     private readonly HashSet<Grid> _rows = [];
     private readonly Dictionary<string, Cell> _cells = new(StringComparer.Ordinal);
     private string _sortKey = string.Empty;
@@ -48,6 +49,7 @@ internal sealed class ColumnHeaderRow
         _root = root;
         _sort = sort;
         _saved = saved;
+        _list = list;
         Build();
         Apply(_header);
 
@@ -293,8 +295,29 @@ internal sealed class ColumnHeaderRow
     public void ApplyToAll()
     {
         Apply(_header);
+        TakeRealized();
         foreach (var row in _rows) Apply(row);
         MinimumWidthChanged?.Invoke(_layout.MinimumTotal);
+    }
+
+    /// <summary>
+    /// Review 5:L1: every row the list holds now, tracked or not. A recycled row can be unloaded without a later Loaded
+    /// (U-WL-5), which leaves it out of <see cref="_rows"/> while it is on screen; the Extraction column then appeared
+    /// in the header and in new rows but not in that one. Only the realized rows are walked (a screenful and a few more).
+    /// </summary>
+    private void TakeRealized()
+    {
+        if (_list.ItemsPanelRoot is not { } panel) return;
+        foreach (var child in panel.Children)
+        {
+            if (child is not ListViewItem item) continue;
+#if HAS_UNO
+            var row = UnoListRows.Root(item);
+#else
+            var row = item.ContentTemplateRoot as Grid;
+#endif
+            if (row is not null && !_rows.Contains(row)) Take(row);
+        }
     }
 
     private void Apply(Grid grid)

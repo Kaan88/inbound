@@ -22,8 +22,14 @@ export interface Job {
   state: string;
   createdAt: string;
   updatedAt: string;
+  /** When it first started; absent before then (and from a client that leaves it out). */
+  startedAt?: string;
+  /** Review 5:T3: when the latest run started (startedAt is the first start ever). An older server leaves it out. */
+  runStartedAt?: string;
   completedAt?: string;
   fileRemovedAfterExtraction?: boolean;
+  /** T10: a finished .torrent file the server can add as a torrent (torrent.add with fromJobId). An older server leaves it out. */
+  torrentFileReady?: boolean;
   statusNote?: string;
   requestedConnections?: number;
   activeConnections?: number;
@@ -55,6 +61,8 @@ export interface Job {
   startMode?: string;
   conflictPolicy?: string;
   expectedSha256?: string;
+  /** The content type the browser hand-off gave; a saved list keeps it (JobDto.HandoffContentType). */
+  handoffContentType?: string;
   // D-items: the details view.
   resumeSupported?: boolean | null;
   speedLimitBytesPerSecond?: number | null;
@@ -86,7 +94,7 @@ export interface Torrent {
   uploaded?: number;
   /** Uploaded against the downloaded (wanted) size. */
   ratio?: number;
-  /** Bytes per second sent now, while it seeds. */
+  /** Bytes per second sent now, while it downloads or seeds. */
   uploadRate?: number;
   /** T3: `magnet` or `file`. Older servers leave the T3 fields out. */
   source?: string;
@@ -291,6 +299,8 @@ export interface Settings {
   browserIntegrationEnabled: boolean;
   ffmpegPath?: string;
   postDownloadCommand?: string;
+  /** Set by the server: why the saved program won't run (review 2:L5). */
+  postDownloadCommandProblem?: string;
   updateManifestUrl?: string;
   updatePublicKey?: string;
   allowSystemCompletionActions: boolean;
@@ -302,6 +312,10 @@ export interface Settings {
   /** `ask`, `thisPc` or `provider`. */
   torrentRoute?: string;
   torrentChooseFiles?: boolean;
+  /** T14: torrents go to a folder for their category, apart from `useCategoryFolders`. Missing from a server before T14. */
+  useTorrentCategoryFolders?: boolean;
+  /** T14: the torrent folder; empty for the same folders as other downloads. Changed only on that PC. */
+  torrentCategoryFoldersRoot?: string;
   torrentHandler?: boolean;
   /** T2: the torrent listen port (0 before one is chosen) and the router request; changed only on that PC. */
   torrentListenPort?: number;
@@ -342,6 +356,8 @@ export interface HostStatus {
   queuedDownloads: number;
   totalJobs: number;
   lastError?: string;
+  /** UI.R37: the newest version the server's own update check found; absent when it hasn't one (or is older). */
+  latestVersion?: string | null;
 }
 
 export interface Snapshot {
@@ -545,6 +561,8 @@ export interface SpeedHistoryResult {
   start: string;
   intervalSeconds: number;
   bytesPerSecond: number[];
+  /** T8: the torrents' upload for the same seconds. Older servers leave it out, as does one whose torrents sent nothing yet. */
+  uploadBytesPerSecond?: number[] | null;
 }
 
 /** remote.container.preview: what a container holds, without its links. */

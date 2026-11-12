@@ -40,7 +40,7 @@ internal static class WindowCascade
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsIconic(nint window);
 
-    // Marks the main window, so the app's other processes can find it among their windows (U-WL-4).
+    // Marks the main window, so the app's progress windows find it among its windows, in its process or another (U-WL-4, T11).
     private const string MainWindowMark = "DownloadManager.MainWindow";
 
     [StructLayout(LayoutKind.Sequential)]
@@ -117,13 +117,12 @@ internal static class WindowCascade
         }
     }
 
-    /// <summary>The shown, not minimized, main window of this app's other processes, if there is one.</summary>
+    /// <summary>The shown, not minimized, main window of this app, if there is one: in this process (T11) or another.</summary>
     private static ScreenRect? MainWindowBounds(nint own)
     {
         // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
         if (!OperatingSystem.IsWindows()) return null;
-        var ids = OtherProcessIds();
-        if (ids.Count == 0) return null;
+        var ids = AppProcessIds();
         ScreenRect? found = null;
         EnumWindows((handle, _) =>
         {
@@ -139,27 +138,28 @@ internal static class WindowCascade
         return found;
     }
 
-    private static HashSet<uint> OtherProcessIds()
+    /// <summary>
+    /// This process and the app's others. T11: the main window opens progress windows in its own process, so its windows
+    /// count too; the window being placed is left out by its handle.
+    /// </summary>
+    private static HashSet<uint> AppProcessIds()
     {
         // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
         if (!OperatingSystem.IsWindows()) return [];
-        var current = Process.GetCurrentProcess();
-        var ids = new HashSet<uint>();
+        using var current = Process.GetCurrentProcess();
+        var ids = new HashSet<uint> { (uint)current.Id };
         foreach (var process in Process.GetProcessesByName(current.ProcessName))
         {
-            using (process)
-            {
-                if (process.Id != current.Id) ids.Add((uint)process.Id);
-            }
+            using (process) ids.Add((uint)process.Id);
         }
 
         return ids;
     }
 
-    /// <summary>The top-left corners of the visible top-level windows of this app's other processes (same program).</summary>
+    /// <summary>The top-left corners of the app's other visible top-level windows, in this process or another (same program).</summary>
     private static List<(int X, int Y)> OtherWindowCorners(nint own)
     {
-        var ids = OtherProcessIds();
+        var ids = AppProcessIds();
         var corners = new List<(int X, int Y)>();
         if (ids.Count == 0) return corners;
         EnumWindows((handle, _) =>

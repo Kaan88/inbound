@@ -17,9 +17,9 @@ test('EXT.R11: the menu offers folder, link, redownload, rename and delete, each
     const { rowMenuEntries, showsFolderButton } = page.load('job-list.ts');
     const shape = (job) => rowMenuEntries(job).map((entry) => `${entry.id}:${entry.enabled ? 'on' : 'off'}`);
 
-    assert.deepEqual(shape(finished()), ['reveal:on', 'copyLink:on', 'redownload:on', 'rename:on', 'remove:on']);
+    assert.deepEqual(shape(finished()), ['show:on', 'reveal:on', 'copyLink:on', 'redownload:on', 'rename:on', 'remove:on']);
     assert.deepEqual(rowMenuEntries(finished()).map((entry) => entry.label),
-      ['Open containing folder', 'Copy download link', 'Redownload', 'Rename…', 'Delete…']);
+      ['Show in app', 'Open containing folder', 'Copy download link', 'Redownload', 'Rename…', 'Delete…']);
     assert.match(rowMenuEntries(finished()).find((entry) => entry.id === 'redownload').title, /new copy/);
     // Not built: Open file (owner question).
     assert.equal(rowMenuEntries(finished()).some((entry) => /open file/i.test(entry.label)), false);
@@ -28,14 +28,14 @@ test('EXT.R11: the menu offers folder, link, redownload, rename and delete, each
     assert.deepEqual(shape(finished({ target: 'server' })), ['copyLink:on', 'redownload:on', 'rename:on', 'remove:on']);
     // Unfinished: no rename, no redownload while it runs or waits.
     for (const state of ['downloading', 'paused', 'queued', 'connecting']) {
-      assert.deepEqual(shape(finished({ state })), ['reveal:on', 'copyLink:on', 'redownload:off', 'rename:off', 'remove:on'], state);
+      assert.deepEqual(shape(finished({ state })), ['show:on', 'reveal:on', 'copyLink:on', 'redownload:off', 'rename:off', 'remove:on'], state);
     }
-    assert.deepEqual(shape(finished({ state: 'failed' })), ['reveal:on', 'copyLink:on', 'redownload:on', 'rename:off', 'remove:on']);
+    assert.deepEqual(shape(finished({ state: 'failed' })), ['show:on', 'reveal:on', 'copyLink:on', 'redownload:on', 'rename:off', 'remove:on']);
     // A provider's file and a hidden key: nothing to copy or send again.
-    assert.deepEqual(shape(finished({ url: 'remote://torbox/torrents/1/2' })), ['reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
-    assert.deepEqual(shape(finished({ addressHidden: true })), ['reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
-    assert.deepEqual(shape(finished({ url: undefined })), ['reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
-    assert.deepEqual(shape(finished({ fileRemovedAfterExtraction: true })), ['reveal:on', 'copyLink:on', 'redownload:on', 'rename:off', 'remove:on']);
+    assert.deepEqual(shape(finished({ url: 'remote://torbox/torrents/1/2' })), ['show:on', 'reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
+    assert.deepEqual(shape(finished({ addressHidden: true })), ['show:on', 'reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
+    assert.deepEqual(shape(finished({ url: undefined })), ['show:on', 'reveal:on', 'copyLink:off', 'redownload:off', 'rename:on', 'remove:on']);
+    assert.deepEqual(shape(finished({ fileRemovedAfterExtraction: true })), ['show:on', 'reveal:on', 'copyLink:on', 'redownload:on', 'rename:off', 'remove:on']);
 
     assert.equal(showsFolderButton(finished()), true);
     assert.equal(showsFolderButton(finished({ target: undefined })), true);
@@ -191,7 +191,7 @@ test('EXT.R11: the popup\'s menu sends reveal, redownload and rename for one dow
     const commands = () => page.sent.filter((message) => message.type === 'dm.jobCommand');
 
     let items = menuFor(page, 'report.pdf');
-    assert.deepEqual(Object.keys(items), ['Open containing folder', 'Copy download link', 'Redownload', 'Rename…', 'Delete…']);
+    assert.deepEqual(Object.keys(items), ['Show in app', 'Open containing folder', 'Copy download link', 'Redownload', 'Rename…', 'Delete…']);
     assert.match(items.Redownload.title, /new copy/);
     items['Open containing folder'].click();
     await flush();

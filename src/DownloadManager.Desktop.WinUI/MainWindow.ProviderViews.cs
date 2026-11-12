@@ -167,6 +167,7 @@ public sealed partial class MainWindow
         ProviderNoticeBar.IsOpen = false;
         SelectSidebarQuietly(RemoteBrowseTag + panel.Provider);
         UpdateProviderButton();
+        SyncTorrentInfo();
         panel.SetShown(AppWindow.IsVisible);
     }
 
@@ -188,6 +189,7 @@ public sealed partial class MainWindow
         if (_providerPanel is { } panel && !ProviderSplit.IsPaneOpen) panel.SetShown(false);
         if (selectCategory) SelectSidebarQuietly(_category);
         UpdateProviderButton();
+        SyncTorrentInfo();
     }
 
     private void SelectSidebarQuietly(string tag)

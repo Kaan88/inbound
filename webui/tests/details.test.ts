@@ -240,8 +240,8 @@ describe('categories and completion options (D7, D8)', () => {
     expect(completionFrom('run', 'C:\\Tools\\run.exe', false, 'shutdown', true, true)).toMatchObject({ ok: true, options: { programPath: 'C:\\Tools\\run.exe', systemAction: 'shutdown', forceSystemAction: true } });
     expect(completionFrom('run', 'run.exe', false, 'none', false, false)).toEqual({ ok: false, error: 'Choose an absolute path to an existing .exe file.' });
     expect(completionFrom('run', 'C:\\x.txt', false, 'none', false, false).ok).toBe(false);
-    expect(completionFrom('global', '', false, 'restart', false, false)).toEqual({ ok: false, error: 'Enable system completion actions in Scheduler settings before choosing a system action.' });
-    expect(completionFrom('global', '', false, 'explode', false, true)).toEqual({ ok: false, error: 'Choose a valid system action.' });
+    expect(completionFrom('global', '', false, 'restart', false, false)).toEqual({ ok: false, error: 'Allow computer actions in the Scheduler before choosing one.' });
+    expect(completionFrom('global', '', false, 'explode', false, true)).toEqual({ ok: false, error: 'Choose a valid computer action.' });
     // Force only counts for the actions that can be forced.
     expect(completionFrom('global', '', false, 'exit', true, true)).toMatchObject({ options: { forceSystemAction: false } });
   });

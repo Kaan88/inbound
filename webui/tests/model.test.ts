@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cantTell, kindWord, linesOf, routeOf, showsAddress, type AddLine } from '../src/lib/addlines';
-import { bytes, duration, percent, stateWord, statusText, timeSpanSeconds, tone } from '../src/lib/format';
+import { failureNextStep, failureText } from '../src/lib/details';
+import { bytes, duration, jobStateWord, percent, stateWord, statusText, timeSpanSeconds, tone } from '../src/lib/format';
 import { fileKindIcon, iconPaths } from '../src/lib/icons';
 import { apply, emptyModel, hasCapability } from '../src/lib/model';
 import type { Envelope } from '../src/lib/protocol';
@@ -203,5 +204,31 @@ describe('words and glyphs shared with the browser extension (EXT.R8)', () => {
     expect(fileKindIcon('installer-2.4.1.EXE')).toBe('program');
     expect(fileKindIcon('notes')).toBe('file');
     for (const name of ['disc', 'archive-file', 'program', 'document', 'music', 'video', 'image', 'file']) expect(iconPaths[name]).toBeTruthy();
+  });
+});
+
+describe('review 5 words shared with the desktop list (A8, E2)', () => {
+  it('says Not started for a download added with Download later, and Queued for one waiting for a slot', () => {
+    expect(jobStateWord(job('a', 'queued', { startMode: 'later' }))).toBe('Not started');
+    expect(statusText(job('a', 'queued', { startMode: 'later' }))).toBe('Not started');
+    expect(jobStateWord(job('a', 'queued', { startMode: 'startNow' }))).toBe('Queued');
+    expect(jobStateWord(job('a', 'queued'))).toBe('Queued');
+    expect(jobStateWord(job('a', 'paused', { startMode: 'later' }))).toBe('Paused');
+  });
+
+  it('adds what to do next to a failure named by its HTTP code', () => {
+    const failed = (kind: string, httpStatus: number | undefined, extra: Partial<Job> = {}) =>
+      job('a', 'failed', { failure: { kind, httpStatus, message: `The server returned HTTP ${httpStatus}.` }, ...extra });
+    expect(failureText(failed('forbidden', 403))).toBe('The server returned HTTP 403. The site may want you signed in: add a login in Options > Site logins, or download it from the browser.');
+    expect(failureText(failed('unauthorized', 401))).toContain('Options > Site logins');
+    expect(failureNextStep(failed('unauthorized', 407))).toBeNull();
+    expect(failureText(failed('notFound', 404))).toBe('The server returned HTTP 404. The link may have expired: try Refresh Download Address.');
+    expect(failureNextStep(failed('notFound', 404, { url: 'remote://torbox/1/2' }))).toBeNull();
+    // An FTP 550 is notFound with no HTTP code, and Refresh Download Address doesn't fit an FTP path.
+    expect(failureNextStep(failed('notFound', undefined))).toBeNull();
+    expect(failureText(failed('http', 503))).toBe('The server returned HTTP 503. The site had a problem. Try again later.');
+    expect(failureNextStep(failed('http', 400))).toBeNull();
+    // Only a failed download gets the step; a failure kept while it retries is its words alone.
+    expect(failureText({ ...failed('forbidden', 403), state: 'retryWaiting' })).toBe('The server returned HTTP 403.');
   });
 });

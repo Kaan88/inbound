@@ -11,6 +11,7 @@
   import { bytes } from '../lib/format';
   import { submitsOnEnter } from '../lib/keys';
   import { store } from '../lib/store.svelte';
+  import { torrentFileJobOf } from '../lib/torrents';
   import type { ClassifyResult, RemoteFile } from '../lib/types';
 
   // Add links, Add magnet, Import torrent file and the review of an imported list: the desktop's one dialog for
@@ -18,7 +19,7 @@
   // folder or magnet link only ever goes to the provider; an ordinary link goes straight to a download.
   type Mode = 'links' | 'magnet' | 'torrent' | 'imported';
   // inputs: magnets and uploaded .torrent files (by reference) the torrent dialog sent to the provider (T1); each is asked about here.
-  let { mode = 'links', seed = [], inputs = [], onclose }: { mode?: Mode; seed?: { input: string; result: ClassifyResult }[]; inputs?: { input: string; label?: string }[]; onclose: () => void } = $props();
+  let { mode = 'links', seed = [], inputs = [], onclose }: { mode?: Mode; seed?: { input: string; result: ClassifyResult }[]; inputs?: { input: string; label?: string; fromJobId?: string }[]; onclose: () => void } = $props();
 
   interface Passwords { has: boolean; archive: string; site: string; same: boolean }
 
@@ -332,7 +333,7 @@
             url: line.input, destinationDirectory: folder || undefined, rememberDestination: remember, startMode, queueId, conflictPolicy: conflict,
             source: 'web', packageKey: key, packageName: name,
           });
-          if (!result.accepted) throw new Error(result.error ?? 'The server rejected the request.');
+          if (!result.accepted) throw new Error(result.error ?? "The server didn't add it and didn't say why. Try again.");
           accepted++;
           if (result.duplicate) duplicates++;
           firstJob ??= result.job?.id;
@@ -389,6 +390,9 @@
       try {
         const result = await store.ask<RemoteAdded>('remote.add', payload);
         handled.push(line.input);
+        // T10: the provider read the finished .torrent download's file as it was added, so that download and its file go.
+        const finished = torrentFileJobOf(inputs, line.input);
+        if (finished) await store.attempt('job.remove', { jobId: finished, jobIds: [finished], deleteFile: true });
         if (result.existing) problems.push(alreadyListed(words.name, result.note));
         else if (result.job) { sent++; jobs.push(result.job.id); }
       } catch (error) {

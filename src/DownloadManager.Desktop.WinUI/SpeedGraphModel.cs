@@ -212,3 +212,213 @@ internal static class SpeedGraphPoints
         return points;
     }
 }
+
+/// <summary>
+/// UI.B26: what one drawing of the speed graph shows, and the scale that fits it. A drawing lasts until the next sample:
+/// its line slides left meanwhile, so its right edge moves from "now" to "now" plus <see cref="Reveal"/> (a second, the
+/// sampling step) and, should the next sample be late, on to where the slide stops. The scale is fitted to the line up to
+/// the reveal. Past it the line follows its real points, so a late sample doesn't make the end jump, but never higher
+/// than the figure the scale was fitted to, so nothing shows above it or is clipped to the top. Before, the scale was
+/// fitted to every sample, including ones the line would show only seconds later (each point is drawn late, UI.B23), so
+/// the top grew while the line still lay at zero.
+/// </summary>
+internal static class SpeedGraphDrawing
+{
+    /// <summary>How far a drawing's right edge moves before the next sample is due: samples come once a second.</summary>
+    public static readonly TimeSpan Reveal = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// The line a drawing shows (a null rate breaks it): <paramref name="points"/> up to <paramref name="end"/> (where the
+    /// slide stops), with every figure past <paramref name="reveal"/> held to at most <paramref name="cap"/> (the figure
+    /// the scale was fitted to). Where the points stop short of the end (samples came late), the last figure carries on
+    /// flat while <paramref name="newestKnown"/>.
+    /// </summary>
+    public static List<SpeedGraphPoints.Point> Line(IReadOnlyList<SpeedGraphPoints.Point> points, DateTimeOffset reveal, DateTimeOffset end, double cap, bool newestKnown)
+    {
+        // The real line up to the end.
+        var raw = new List<SpeedGraphPoints.Point>();
+        foreach (var point in points)
+        {
+            if (point.At <= end)
+            {
+                raw.Add(point);
+                continue;
+            }
+            if (point.Rate is { } next && raw.Count > 0 && raw[^1].Rate is { } before)
+                raw.Add(new SpeedGraphPoints.Point(end, Between(raw[^1].At, before, point.At, next, end)));
+            break;
+        }
+        if (newestKnown && raw.Count > 0 && raw[^1].Rate is { } last && raw[^1].At < end && (points.Count == 0 || points[^1].At <= end))
+            raw.Add(new SpeedGraphPoints.Point(end, last));
+
+        // Past the reveal, held to the cap: where a segment crosses it, a point on it.
+        var line = new List<SpeedGraphPoints.Point>();
+        for (var i = 0; i < raw.Count; i++)
+        {
+            var point = raw[i];
+            if (point.At <= reveal || point.Rate is not { } rate)
+            {
+                line.Add(point);
+                continue;
+            }
+            if (i > 0 && raw[i - 1].Rate is { } previous && raw[i - 1].At < point.At)
+            {
+                var from = raw[i - 1].At;
+                var startAt = from < reveal ? reveal : from;
+                var startValue = Between(from, previous, point.At, rate, startAt);
+                // At the reveal only when the line is already held there (a crossing point lies on the real segment).
+                if (startAt > from && startValue >= cap && Math.Max(startValue, rate) > cap) line.Add(new SpeedGraphPoints.Point(startAt, Math.Min(startValue, cap)));
+                if ((startValue - cap) * (rate - cap) < 0)
+                {
+                    var share = (cap - startValue) / (rate - startValue);
+                    line.Add(new SpeedGraphPoints.Point(startAt + (point.At - startAt) * share, cap));
+                }
+            }
+            line.Add(point with { Rate = Math.Min(rate, cap) });
+        }
+        return line;
+    }
+
+    private static double Between(DateTimeOffset fromAt, double from, DateTimeOffset toAt, double to, DateTimeOffset at)
+    {
+        var span = (toAt - fromAt).TotalSeconds;
+        var share = span <= 0 ? 1 : Math.Clamp((at - fromAt).TotalSeconds / span, 0, 1);
+        return from + (to - from) * share;
+    }
+
+    /// <summary>One series for <see cref="Draw"/>: its samples (oldest first) and whether its newest figure is known.</summary>
+    public readonly record struct Series(IEnumerable<(DateTimeOffset Time, double? Rate)> Samples, bool NewestKnown);
+
+    /// <summary>
+    /// The lines a drawing shows when its newest sample is at <paramref name="now"/> (one per series, in order) and the
+    /// figures its scale works from. One scale for all the lines (T8), fitted to the highest each shows from
+    /// <paramref name="start"/> up to the reveal.
+    /// </summary>
+    public static (List<List<SpeedGraphPoints.Point>> Lines, Peaks Peaks) Draw(IReadOnlyList<Series> series, DateTimeOffset start, DateTimeOffset now, int bucketSeconds)
+    {
+        var reveal = now + Reveal;
+        var built = series.Select(item => SpeedGraphPoints.Build(item.Samples, now, bucketSeconds)).ToList();
+        var fitted = built.Select(points => Peak(points, start, reveal)).DefaultIfEmpty(0).Max();
+        var lines = built.Select((points, i) => Line(points, reveal, now + SpeedGraphPoints.MaxSlide, fitted, series[i].NewestKnown)).ToList();
+        return (lines, PeaksOf(lines, start, now));
+    }
+
+    /// <summary>
+    /// True when the hover can pick the sample at <paramref name="time"/>: its point (all of its bucket's points) is drawn
+    /// by the reveal of the drawing whose newest sample is <paramref name="latest"/>, so its figure is within the scale.
+    /// </summary>
+    public static bool IsInScale(DateTimeOffset time, DateTimeOffset latest, int bucketSeconds)
+    {
+        if (!SpeedGraphPoints.IsFinished(time, latest, bucketSeconds)) return false;
+        var lastPoint = SpeedGraphPoints.ShownAt(time, bucketSeconds) + (bucketSeconds <= 1 ? TimeSpan.Zero : TimeSpan.FromSeconds(bucketSeconds / 4d));
+        return lastPoint <= latest + Reveal;
+    }
+
+    /// <summary>The line's figure at <paramref name="at"/>: null outside it or in a gap.</summary>
+    public static double? ValueAt(IReadOnlyList<SpeedGraphPoints.Point> line, DateTimeOffset at)
+    {
+        for (var i = 0; i < line.Count; i++)
+        {
+            if (line[i].At < at) continue;
+            if (line[i].Rate is not { } rate) return null;
+            if (line[i].At == at) return rate;
+            if (i == 0 || line[i - 1].Rate is not { } previous) return null;
+            var span = (line[i].At - line[i - 1].At).TotalSeconds;
+            return previous + (rate - previous) * ((at - line[i - 1].At).TotalSeconds / span);
+        }
+        return null;
+    }
+
+    /// <summary>The highest figure the line shows between <paramref name="from"/> and <paramref name="to"/>; 0 for none.</summary>
+    public static double Peak(IReadOnlyList<SpeedGraphPoints.Point> line, DateTimeOffset from, DateTimeOffset to)
+    {
+        var peak = Math.Max(ValueAt(line, from) ?? 0, ValueAt(line, to) ?? 0);
+        foreach (var point in line)
+            if (point.At > from && point.At < to && point.Rate is { } rate && rate > peak) peak = rate;
+        return peak;
+    }
+
+    /// <summary>
+    /// The figures a drawing's scale works from, over all its lines: <see cref="Shown"/>, the highest it shows (left edge
+    /// to the reveal; past it the line is held to that figure); <see cref="Before"/>, the highest in view as it begins (what the last drawing ended on);
+    /// <see cref="WhileEasing"/>, the highest in view while the line eases to a new scale.
+    /// </summary>
+    public readonly record struct Peaks(double Shown, double Before, double WhileEasing);
+
+    public static Peaks PeaksOf(IEnumerable<IReadOnlyList<SpeedGraphPoints.Point>> lines, DateTimeOffset start, DateTimeOffset now)
+    {
+        double shown = 0, before = 0, easing = 0;
+        foreach (var line in lines)
+        {
+            shown = Math.Max(shown, Peak(line, start, now + Reveal));
+            before = Math.Max(before, Peak(line, start, now));
+            easing = Math.Max(easing, Peak(line, start, now + SpeedGraphEase.Duration));
+        }
+        return new Peaks(shown, before, easing);
+    }
+}
+
+/// <summary>
+/// UI.B26: how the line eases to a new scale. It is redrawn against the new top and stretched (a transform) to look as
+/// it did, then eased back over <see cref="Duration"/>. The transform stretches the stroke too, so the stretch is kept
+/// small (a flat zero line stretched 4,096 times was the full-height bar of the recording), it is skipped when the line
+/// showed nothing above zero (there is nothing to carry over), and it never takes what comes into view past the top.
+/// </summary>
+internal static class SpeedGraphEase
+{
+    public static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>The most the line (and its stroke) is stretched or squeezed. Neighbouring steps are at most 2.5 apart.</summary>
+    public const double MaxStretch = 2.5;
+
+    /// <summary>
+    /// The stretch the ease starts from (1: none). <paramref name="before"/> is the highest figure in view as the new
+    /// drawing begins, <paramref name="whileEasing"/> the highest in view while it eases.
+    /// </summary>
+    public static double From(double previousTop, double top, double before, double whileEasing)
+    {
+        if (previousTop <= 0 || top <= 0 || previousTop == top || before <= 0) return 1;
+        var stretch = top / previousTop;
+        // Shrinking: the line is squeezed to its old height and rises into place, never past the top.
+        if (stretch < 1) return Math.Max(stretch, 1 / MaxStretch);
+        // Growing: at its start the ease draws figures as high as the old scale did; nothing in view may go past the top.
+        stretch = Math.Min(stretch, MaxStretch);
+        if (whileEasing > 0) stretch = Math.Min(stretch, top / whileEasing);
+        return Math.Max(1, stretch);
+    }
+
+    /// <summary>The stretch <paramref name="elapsed"/> into an ease from <paramref name="from"/> (the cubic ease-out the control runs).</summary>
+    public static double At(double from, TimeSpan elapsed)
+    {
+        var t = Math.Clamp(elapsed / Duration, 0, 1);
+        return from + (1 - from) * (1 - Math.Pow(1 - t, 3));
+    }
+}
+
+/// <summary>
+/// T8: the speed graph's upload rules: its names while the upload line shows (the heading, the plot's and the toggle's
+/// spoken names say "and upload" then), and when the Host's upload hour can be placed.
+/// </summary>
+internal static class SpeedGraphUpload
+{
+    /// <summary>The heading the main window's graph has in its XAML.</summary>
+    public const string DownloadHeading = "Download speed";
+
+    /// <summary>The words on the bar: "Download speed" becomes "Download and upload speed" while upload shows.</summary>
+    public static string Heading(string heading, bool showUpload)
+        => showUpload && heading == DownloadHeading ? "Download and upload speed" : heading;
+
+    /// <summary>The plot's spoken name.</summary>
+    public static string PlotName(string heading, bool showUpload) => $"{Heading(heading, showUpload)} history";
+
+    /// <summary>
+    /// Whether the Host's upload hour can be placed beside its download hour: the same number of seconds from the same
+    /// start. A Host before T8 sends none; then the graph keeps its own upload samples, which carry their own times.
+    /// </summary>
+    public static bool UploadLinesUp(IReadOnlyList<long> download, IReadOnlyList<long>? upload)
+        => upload is { Count: > 0 } && upload.Count == download.Count;
+
+    /// <summary>The toggle's spoken name and tooltip.</summary>
+    public static string Toggle(bool expanded, bool showUpload)
+        => $"{(expanded ? "Hide" : "Show")} {(showUpload ? "download and upload" : "download")} speed graph";
+}

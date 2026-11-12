@@ -115,6 +115,8 @@
                 <MenuFlyoutItem Text="Statistics…" AccessKey="S" Click="MenuStatistics_Click" />
                 <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" AccessKey="G" IsChecked="True" Click="MenuSpeedGraph_Click" />
                 <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" AccessKey="C" Click="MenuHideCategories_Click" />
+                <ToggleMenuFlyoutItem x:Name="TorrentInfoMenuItem" Text="Torrent Info" AccessKey="I" IsChecked="True" Click="MenuTorrentInfo_Click"
+                                      ToolTipService.ToolTip="The selected torrent's facts beside the list, when the window is wide enough for its columns" />
                 <MenuFlyoutSubItem Text="Arrange Files" AccessKey="A">
                     <MenuFlyoutItem Text="By Order of Addition" AccessKey="A" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" AccessKey="N" Tag="name" Click="MenuSort_Click" />
@@ -214,7 +216,7 @@
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                     <Button x:Name="OptionsButton" AutomationProperties.Name="Options"
                             Style="{StaticResource InboundToolButtonStyle}" Click="MenuOptions_Click"
-                            ToolTipService.ToolTip="Open Download Manager settings">
+                            ToolTipService.ToolTip="Open Inbound's options">
                         <StackPanel>
                             <FontIcon Glyph="&#xE713;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                             <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />
@@ -472,13 +474,18 @@
                                                   DoubleTapped="ProviderDrawerGrip_DoubleTapped" />
                     </Grid>
                 </SplitView.Pane>
-            <Grid x:Name="ListArea">
+            <Grid x:Name="ListArea" SizeChanged="ListArea_SizeChanged">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
+                <!-- T7: the list, and the Torrent Info pane on its right (outside the list's sideways scroller). -->
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <!-- UI.R32, B's notice: what a Download from My provider added, with the way to it and back. -->
-                <InfoBar x:Name="ProviderNoticeBar" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
+                <InfoBar x:Name="ProviderNoticeBar" Grid.ColumnSpan="2" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
                          AutomationProperties.Name="Added from My provider" AutomationProperties.LiveSetting="Polite">
                     <InfoBar.Content>
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
@@ -527,7 +534,7 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent"
+                                <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="{Binding RowHighlight}"
                                       BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="{Binding RowBorder}"
                                       ToolTipService.ToolTip="{Binding RowToolTip}">
                                     <Grid.ColumnDefinitions>
@@ -665,8 +672,117 @@
                         CornerRadius="3" Opacity="0.45"
                         Background="{ThemeResource InboundSecondaryTextBrush}" />
             </Grid>
+            <!-- T7: Torrent Info (View > Torrent Info): the facts of the one selected torrent. Collapsed for anything else. -->
+            <Border x:Name="TorrentInfoPane" Grid.Row="1" Grid.Column="1" Width="320" Visibility="Collapsed"
+                    Background="{ThemeResource InboundSurfaceBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="1,0,0,0"
+                    AutomationProperties.Name="Torrent info">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="27" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1"
+                          Padding="10,0,2,0" ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Torrent Info" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Width="24" Height="22" Padding="0" MinWidth="0" MinHeight="0" BorderThickness="0"
+                                Background="Transparent" VerticalAlignment="Center" Click="TorrentInfoHide_Click"
+                                ToolTipService.ToolTip="Hide Torrent Info. The View menu shows it again." AutomationProperties.Name="Hide Torrent Info">
+                            <FontIcon Glyph="&#xE711;" FontSize="10" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        </Button>
+                    </Grid>
+                    <ScrollViewer Grid.Row="1" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Padding="12,10,12,12" Spacing="10">
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="TorrentInfoName" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" MaxLines="3"
+                                           TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" />
+                                <TextBlock x:Name="TorrentInfoStatus" FontSize="12" TextWrapping="Wrap" />
+                                <ProgressBar x:Name="TorrentInfoBar" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,2,0,0"
+                                             AutomationProperties.Name="Downloaded" />
+                                <TextBlock x:Name="TorrentInfoProgress" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Grid ColumnSpacing="10" RowSpacing="5">
+                                <Grid.Resources>
+                                    <Style x:Key="InfoLabel" TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="11" />
+                                        <Setter Property="Foreground" Value="{ThemeResource InboundSecondaryTextBrush}" />
+                                        <Setter Property="Margin" Value="0,1,0,0" />
+                                    </Style>
+                                    <Style x:Key="InfoValue" TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="12" />
+                                        <Setter Property="TextWrapping" Value="Wrap" />
+                                    </Style>
+                                </Grid.Resources>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="Down" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" x:Name="TorrentInfoDown" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="1" Text="Up" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TorrentInfoUp" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="2" Text="Connected" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="TorrentInfoSwarm" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="3" Text="Time left" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="TorrentInfoTimeLeft" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="4" Text="Ratio" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="TorrentInfoRatio" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="5" x:Name="TorrentInfoGoalLabel" Text="Seeding goal" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="5" Grid.Column="1" x:Name="TorrentInfoGoal" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="6" Text="Trackers" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="6" Grid.Column="1" x:Name="TorrentInfoTrackers" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="7" Text="Save to" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="7" Grid.Column="1" x:Name="TorrentInfoFolder" Style="{StaticResource InfoValue}" IsTextSelectionEnabled="True" />
+                                <TextBlock Grid.Row="8" Text="Added" Style="{StaticResource InfoLabel}" />
+                                <TextBlock Grid.Row="8" Grid.Column="1" x:Name="TorrentInfoAdded" Style="{StaticResource InfoValue}" />
+                                <TextBlock Grid.Row="9" Text="Info hash" Style="{StaticResource InfoLabel}" />
+                                <Grid Grid.Row="9" Grid.Column="1" ColumnSpacing="4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="TorrentInfoHash" Style="{StaticResource InfoValue}" FontFamily="Consolas" IsTextSelectionEnabled="True" />
+                                    <Button x:Name="TorrentInfoCopyHash" Grid.Column="1" Width="24" Height="22" Padding="0" MinWidth="0" MinHeight="0" BorderThickness="0"
+                                            Background="Transparent" VerticalAlignment="Top" Click="TorrentInfoCopyHash_Click"
+                                            ToolTipService.ToolTip="Copy the info hash" AutomationProperties.Name="Copy the info hash">
+                                        <FontIcon Glyph="&#xE8C8;" FontSize="12" Foreground="{ThemeResource InboundIconNeutralBrush}" />
+                                    </Button>
+                                </Grid>
+                            </Grid>
+                            <!-- Commands the row menu has too. -->
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="TorrentInfoOpenFolder" Content="Open Folder" FontSize="12" Padding="10,3" Click="TorrentInfoOpenFolder_Click" />
+                                    <Button x:Name="TorrentInfoCopyMagnet" Content="Copy Magnet Link" FontSize="12" Padding="10,3" Click="MenuCopyMagnet_Click" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="TorrentInfoRecheck" Content="Force Recheck" FontSize="12" Padding="10,3" Visibility="Collapsed"
+                                            Click="MenuRecheck_Click" ToolTipService.ToolTip="Check the torrent's files on disk again" />
+                                    <Button x:Name="TorrentInfoMore" Content="More details…" FontSize="12" Padding="10,3" Click="MenuProgressDetails_Click"
+                                            ToolTipService.ToolTip="Open Progress Details: files, peers, trackers, pieces and options" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
                 <!-- UI.R32, A: the sidebar's My provider entry shows the panel here, in place of the list. -->
-                <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Visibility="Collapsed" />
+                <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
             </Grid>
             </SplitView>
         </Grid>
@@ -708,8 +824,17 @@
                         <TextBlock x:Name="TorrentChipText" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <TextBlock x:Name="ConnectionText" Grid.Column="3" Text="Connecting…" FontSize="11"
-                            Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+                <!-- UI.R37: the version says whether it is the latest; a newer one is a link to Check for updates. -->
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="ConnectionText" Text="Connecting…" FontSize="11"
+                                Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+                    <HyperlinkButton x:Name="UpdateLink" FontSize="11" Padding="0" MinHeight="0" VerticalAlignment="Center"
+                                     Visibility="Collapsed" Click="UpdateLink_Click"
+                                     AutomationProperties.Name="Update available"
+                                     ToolTipService.ToolTip="Check for updates and install the new version" />
+                    <TextBlock x:Name="ConnectionTail" FontSize="11" Visibility="Collapsed"
+                                Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+                </StackPanel>
                 <!-- U-WL-9: a browser registration that is broken or missing can be put right from here. -->
                 <Button x:Name="RepairBrowserButton" Grid.Column="4" Content="Repair…" FontSize="11" Padding="8,0" MinHeight="0" Height="19"
                         VerticalAlignment="Center" Visibility="Collapsed" Click="RepairBrowser_Click"

@@ -48,7 +48,7 @@ public sealed partial class UpdateWindow : Window
                 }
                 else
                 {
-                    StatusText.Text = "Waiting for Download Manager to reconnect…";
+                    StatusText.Text = "Waiting for Inbound to reconnect…";
                     DetailText.Text = error ?? string.Empty;
                 }
                 return;

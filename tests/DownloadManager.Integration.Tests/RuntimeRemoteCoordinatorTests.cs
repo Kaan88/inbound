@@ -123,6 +123,8 @@ public sealed partial class RuntimeServiceTests
 
         public string DefaultDownloadDirectory => inner.DefaultDownloadDirectory;
 
+        public string TorrentDownloadDirectory(string? torrentName) => inner.TorrentDownloadDirectory(torrentName);
+
         public RemoteLocalSummary? GetLocalSummary(Guid packageId) => inner.GetLocalSummary(packageId);
 
         public int? CountLocalJobs(Guid remoteJobId) => inner.CountLocalJobs(remoteJobId);
@@ -669,16 +671,29 @@ public sealed partial class RuntimeServiceTests
         Assert.Empty(rig.Mock.IssuedLinks);
     }
 
-    [Fact]
-    public async Task WithNoDestinationTheFilesGoToTheDefaultFolder()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WithNoDestinationTheFilesGoToTheDefaultFolder(bool torrentFolder)
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
+        // T14: a torrent goes to the torrent folder (a new install's is Torrents under the download folder); with none,
+        // to the same folders as other downloads.
+        if (!torrentFolder)
+        {
+            var settings = rig.Ctx.Service.GetSnapshot().Settings;
+            Assert.Equal(Path.Combine(rig.Destination, "Torrents"), settings.TorrentCategoryFoldersRoot);
+            settings.TorrentCategoryFoldersRoot = string.Empty;
+            Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        }
+
         var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 32 * Kb, 1);
         var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
         var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents", Selection = RemoteSelectionMode.All });
         Assert.Null(added.Job!.Destination);
         await rig.RunAsync();
-        await rig.AssertCompletedAsync(file, "Pack", "a.bin");
+        if (torrentFolder) await rig.AssertCompletedAsync(file, "Torrents", "Pack", "a.bin");
+        else await rig.AssertCompletedAsync(file, "Pack", "a.bin");
     }
 
     [Theory]
@@ -1395,6 +1410,33 @@ public sealed partial class RuntimeServiceTests
         Assert.Null(rig.View(job.Id).FailureMessage);
     }
 
+    /// <summary>Review 2 L8: a job a refused key held is looked at again once the account answers, so a refusal that was
+    /// only for a moment doesn't hold it until a restart.</summary>
+    [Fact]
+    public async Task AJobHeldByARefusedKeyIsLookedAtAgainOnceTheAccountAnswers()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (link, _, _) = rig.ScriptHoster("held", MockTorBoxState.Downloading(), MockTorBoxState.Downloading(), MockTorBoxState.Ready);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, ApprovedUncached = true, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.Waiting, rig.View(job.Id).State);
+
+        rig.Mock.Fail("GET webdl/mylist", MockFault.Error("BAD_TOKEN", "The key is bad."), times: 1);
+        await rig.AdvanceAsync(1000);
+        var held = rig.View(job.Id);
+        Assert.Equal(RemoteFailureKind.Authentication, held.FailureKind);
+        Assert.Null(held.NextCheckAt);
+
+        // Another job on the account reads its list, and the key is accepted again.
+        var (other, _, _) = rig.ScriptHoster("other", MockTorBoxState.Downloading(), MockTorBoxState.Ready);
+        await rig.AddAsync(new RemoteAddRequest { Input = other, ApprovedUncached = true, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+        await rig.AdvanceAsync(1000);
+        var woken = rig.View(job.Id);
+        Assert.NotEqual(RemoteFailureKind.Authentication, woken.FailureKind);
+        Assert.NotEqual(RemoteJobState.Failed, woken.State);
+    }
+
     [Fact]
     public async Task RetryAfterIsBelievedOnA429AndHoldsTheWholeAccountEvenAgainstCheckNow()
     {
@@ -1522,6 +1564,53 @@ public sealed partial class RuntimeServiceTests
         Assert.True(Assert.Single(rig.Mock.Submissions).OnlyIfCached);
         Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
         await rig.AssertCompletedAsync(file, "cached", "a.bin");
+    }
+
+    [Fact]
+    public async Task T14_WithNoTorrentFolderACategorisedProviderTorrentStaysInTheDownloadFolder()
+    {
+        // An upgraded install: no torrent folder, both category switches on, a Video folder set. Before T14 a provider's
+        // torrent with no folder went to the download folder, and it still does.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var settings = rig.Ctx.Service.GetSnapshot().Settings;
+        settings.TorrentCategoryFoldersRoot = string.Empty;
+        settings.UseCategoryFolders = true;
+        settings.UseTorrentCategoryFolders = true;
+        settings.CategoryFolders["video"] = Path.Combine(rig.Destination, "Video");
+        Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Show.mkv", 32 * Kb, 1);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Show.mkv", [file]);
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents", Selection = RemoteSelectionMode.All });
+        Assert.Null(added.Job!.Destination);
+        await rig.RunAsync();
+        var child = Assert.Single(rig.Children());
+        Assert.Equal(Path.GetFullPath(rig.Destination), Path.GetDirectoryName(child.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task T14_AProvidersTorrentWithNoFolderGoesToTheTorrentFolders()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var settings = rig.Ctx.Service.GetSnapshot().Settings;
+        var torrents = Path.Combine(rig.Destination, "Torrent folder");
+        settings.TorrentCategoryFoldersRoot = torrents;
+        settings.UseTorrentCategoryFolders = true;
+        Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var hash = new string('c', 40);
+        rig.Mock.AddCached(hash);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Film.mkv", 32 * Kb, 34);
+        rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.CachedReady]);
+
+        // No folder named, as a torrent sent to the provider with Save to empty.
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, Selection = RemoteSelectionMode.All });
+        Assert.True(added.Error is null, added.Error);
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(added.Job!.Id).State);
+        var child = Assert.Single(rig.Children());
+        // Under the torrent folder (the provider's item name has no category here, so the folder itself), not the download folder.
+        Assert.Equal(Path.Combine(torrents, "Film.mkv"), child.FinalFilePath);
     }
 
     [Fact]

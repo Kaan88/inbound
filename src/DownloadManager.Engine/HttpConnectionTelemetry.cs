@@ -24,11 +24,12 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
                 isRetryable: false);
         }
 
-        var connection = new LiveConnection(this, job.Id, request);
+        var client = AcquireClient(job);
+        var connection = new LiveConnection(this, job.Id, request, client);
         _connections[connection.Id] = connection;
         try
         {
-            var response = await CurrentClient(job).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             connection.Headers(response);
             response.Content = new TrackedContent(response.Content, connection);
             return response;
@@ -39,6 +40,8 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
     private sealed class LiveConnection : IDisposable
     {
         private readonly HttpDownloadEngine _owner;
+        private readonly HttpClient _client;
+        private int _disposed;
         private readonly object _sync = new();
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private readonly Queue<(double Seconds, long Bytes)> _history = new();
@@ -54,9 +57,9 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
         public Guid Id { get; } = Guid.NewGuid();
         public Guid JobId { get; }
 
-        public LiveConnection(HttpDownloadEngine owner, Guid jobId, HttpRequestMessage request)
+        public LiveConnection(HttpDownloadEngine owner, Guid jobId, HttpRequestMessage request, HttpClient client)
         {
-            _owner = owner; JobId = jobId;
+            _owner = owner; JobId = jobId; _client = client;
             // Host and port only. Never expose request paths, user info, tokens or headers.
             _host = request.RequestUri?.Authority ?? string.Empty;
             var range = request.Headers.Range?.Ranges.FirstOrDefault();
@@ -89,7 +92,13 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
                 return new ConnectionTelemetry(Id, _host, _state, _start, _end, _bytes, rate, _status, _version, _started);
             }
         }
-        public void Dispose() => _owner._connections.TryRemove(Id, out _);
+        // The content and its stream both end the connection; the client is let go once.
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _owner._connections.TryRemove(Id, out _);
+            _owner.ReleaseClient(_client);
+        }
     }
 
     private sealed class TrackedContent : HttpContent

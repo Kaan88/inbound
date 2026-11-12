@@ -16,6 +16,7 @@
   --text: #1a1a1a;
   --muted: #666666;
   --progress: #1f6fc5;
+  --upload: #b35c00;
   --track: #e2e2e2;
   --error: #c42b1c;
   --highlight: #dce9f7;
@@ -55,6 +56,7 @@
     --text: #f2f2f2;
     --muted: #a3a3a3;
     --progress: #4aa3f0;
+    --upload: #f0a35e;
     --track: #383838;
     --error: #f07a7a;
     --highlight: #2b3a4f;
@@ -86,6 +88,7 @@
   --text: #f2f2f2;
   --muted: #a3a3a3;
   --progress: #4aa3f0;
+  --upload: #f0a35e;
   --track: #383838;
   --error: #f07a7a;
   --highlight: #2b3a4f;

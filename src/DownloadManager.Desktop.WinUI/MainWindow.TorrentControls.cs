@@ -51,6 +51,7 @@ public sealed partial class MainWindow
     {
         _torrentWatch?.Reset();
         _dhtWords = null;
+        ForgetTorrentInfoReads();
         if (!connected) return;
         var connection = _connection;
         _ = ProbeTorrentControlsAsync(connection);
@@ -64,13 +65,16 @@ public sealed partial class MainWindow
         UpdateButtons();
     }
 
-    /// <summary>Watches while this window shows, isn't minimized, and lists a torrent that downloads or seeds.</summary>
+    /// <summary>
+    /// Watches while this window shows, isn't minimized, and lists a torrent that downloads or seeds, or the Torrent Info
+    /// pane is seen with one (T7).
+    /// </summary>
     private void SyncTorrentWatch()
     {
         if (_torrentWatch is null) return;
         var watches = TorrentControlRules.Watches(AppWindow.IsVisible,
             AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized },
-            _connection.IsConnected, TorrentControls, _visibleJobs.Select(row => row.Dto));
+            _connection.IsConnected, TorrentControls, _visibleJobs.Select(row => row.Dto).Append(TorrentInfoWatches ? InfoJob : null));
         var was = _torrentWatch.IsWatching;
         _torrentWatch.Sync(watches);
         if (watches && !was) _ = ReadDhtAsync();

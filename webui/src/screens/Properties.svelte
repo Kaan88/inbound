@@ -116,13 +116,13 @@
       {#if actionsAllowed}
         <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={openFile} /> Open the downloaded file when complete</label>
       <div>
-        <label class="label" for="prop-system">System action</label>
+        <label class="label" for="prop-system">Computer action</label>
         <select id="prop-system" class="field" bind:value={systemAction}>
           {#each systemActions as action (action.id)}<option value={action.id}>{action.label}</option>{/each}
         </select>
-        <p class="hint mt-1">{settings?.allowSystemCompletionActions ? 'A system action runs only when no other downloads are unfinished.' : 'Enable system completion actions in Scheduler settings to use this option.'}</p>
+        <p class="hint mt-1">{settings?.allowSystemCompletionActions ? 'A computer action runs only when no other downloads are unfinished.' : 'Allow computer actions in the Scheduler to use this option.'}</p>
       </div>
-      <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={force} disabled={!canForce(systemAction) || finished} /> Force the system action</label>
+      <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={force} disabled={!canForce(systemAction) || finished} /> Force the computer action</label>
       {/if}
     </fieldset>
     {/if}

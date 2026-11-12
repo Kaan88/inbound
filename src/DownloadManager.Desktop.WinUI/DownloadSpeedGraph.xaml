@@ -29,6 +29,21 @@
                     </Canvas>
                 </Canvas>
             </Canvas>
+            <!-- T8: which line is which, while the upload line shows. At the top left, just right of the scale's figures, so
+                 the newest part of the lines (the right end) stays in view, as in the web UI. Under the hover label. -->
+            <Border x:Name="Legend" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="70,3,0,0"
+                    Padding="6,1" CornerRadius="3" Background="{ThemeResource InboundSurfaceBrush}" IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Rectangle Width="10" Height="2" VerticalAlignment="Center" Fill="{ThemeResource InboundProgressFillBrush}" />
+                        <TextBlock Text="Download" FontSize="10" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Rectangle Width="10" Height="2" VerticalAlignment="Center" Fill="{ThemeResource InboundUploadBrush}" />
+                        <TextBlock Text="Upload" FontSize="10" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
             <!-- Redrawn on its own as the pointer moves, so the plot isn't. -->
             <Canvas x:Name="Hover" Height="84" Margin="8,0" VerticalAlignment="Top" IsHitTestVisible="False" />
         </Grid>
@@ -53,6 +68,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <FontIcon Glyph="&#xE70D;" FontSize="9" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"
                               Foreground="{ThemeResource InboundSecondaryTextBrush}">
@@ -70,6 +86,14 @@
                                    Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                         <TextBlock Text="   ·   Peak " FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                         <TextBlock x:Name="SummaryPeak" FontSize="11" MinWidth="64" TextAlignment="Right"
+                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
+                    <!-- T8: the torrents' upload now, while a torrent downloads or seeds. -->
+                    <StackPanel x:Name="UploadSummary" Grid.Column="3" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                        <Rectangle Width="10" Height="2" VerticalAlignment="Center" Fill="{ThemeResource InboundUploadBrush}" />
+                        <TextBlock Text="Upload" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        <TextBlock x:Name="UploadCurrent" FontSize="11" MinWidth="64" TextAlignment="Right"
                                    Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                     </StackPanel>
                 </Grid>

@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.7.0"
+  #define AppVersion "0.7.1"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -66,7 +66,10 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "startup"; Description: "Start {#AppName} when I sign in to Windows"; GroupDescription: "Startup:"
 ; Owner, 2026-11-12: Setup offers the magnet and .torrent association. It turns torrents on (Options > Torrents);
 ; unticked, the user's earlier choice is left as it is. Another app's magnet handler is never replaced.
-Name: "torrenthandler"; Description: "Open magnet links and .torrent files with {#AppName} (turns torrents on)"; GroupDescription: "Torrents:"
+; checkedonce: ticked on a first install only, so an upgrade does not turn torrents back on over the user's
+; choice in Options (review 2026-11-12). An interactive upgrade unticks it on the task page (CurPageChanged); a silent
+; upgrade applies it only when /TASKS names it (TorrentTaskApplies).
+Name: "torrenthandler"; Description: "Open magnet links and .torrent files with {#AppName} (turns torrents on)"; GroupDescription: "Torrents:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceRoot}\installer-app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -229,9 +232,13 @@ begin
     Result := ResultCode = 0;
 end;
 
+var
+  WasInstalled: Boolean;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  WasInstalled := DirExists(ExpandConstant('{app}\app'));
   ExtractTemporaryFile('stop-for-setup.ps1');
   if not StopRunningInstance(ExpandConstant('{tmp}\stop-for-setup.ps1'), ExpandConstant('{app}\app')) then
     Result := '{#AppName} is still running and could not be closed. Exit it from the tray icon, then run Setup again.';
@@ -375,6 +382,42 @@ begin
     RegWriteStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}', '', ForeignChromeRegistration);
 end;
 
+var
+  TorrentTaskReset: Boolean;
+
+// An interactive upgrade shows the association unticked, whatever an earlier Setup chose: Inno Setup's UsePreviousTasks
+// would tick it again, and ticking it turns torrents on over the user's choice in Options. Ticking it is the user's
+// choice each time (review 2026-11-12). Done once, so going Back and Next keeps what the user ticked.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpSelectTasks) and not TorrentTaskReset then
+  begin
+    TorrentTaskReset := True;
+    if DirExists(ExpandConstant('{app}\app')) then
+      WizardSelectTasks('!torrenthandler');
+  end;
+end;
+
+// A silent upgrade shows no task page, and Inno Setup reselects the tasks of the previous run, so a ticked
+// association from an earlier Setup would turn torrents back on after the user turned them off in Options.
+// It is applied then only when the command line names it (/TASKS= or /MERGETASKS=).
+function TorrentTaskApplies(): Boolean;
+var
+  I: Integer;
+  Param: String;
+begin
+  Result := WizardIsTaskSelected('torrenthandler');
+  if not Result or not WasInstalled or not WizardSilent then
+    exit;
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    Param := Lowercase(ParamStr(I));
+    if ((Pos('/tasks=', Param) = 1) or (Pos('/mergetasks=', Param) = 1)) and (Pos('torrenthandler', Param) > 0) then
+      Result := True;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Root, ManifestDir, StartupArgument: String;
@@ -429,11 +472,17 @@ begin
     StartupArgument := '--configure-sign-in-launch=enabled'
   else
     StartupArgument := '--configure-sign-in-launch=disabled';
-  if WizardIsTaskSelected('torrenthandler') then
+  if TorrentTaskApplies() then
     StartupArgument := StartupArgument + ' --configure-torrent-handler=enabled';
   if not Exec(Root + '\app\{#HostExe}', '--background ' + StartupArgument,
               Root + '\app', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    RaiseException('Could not configure sign-in startup.');
+    RaiseException('Could not apply the startup and torrent choices.');
+  // 1: a Host started while files were copied (sign-in launch, the window) holds the profile, and a configuring
+  // Host never writes settings behind it. Close it the way PrepareToInstall does and try once more.
+  if (ResultCode = 1) and StopRunningInstance(Root + '\stop-for-setup.ps1', Root + '\app') then
+    if not Exec(Root + '\app\{#HostExe}', '--background ' + StartupArgument,
+                Root + '\app', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Could not apply the startup and torrent choices.');
   if ResultCode <> 0 then
-    RaiseException('Could not configure sign-in startup. Exit {#AppName} and run Setup again.');
+    RaiseException('Could not apply the startup and torrent choices. Exit {#AppName} and run Setup again.');
 end;

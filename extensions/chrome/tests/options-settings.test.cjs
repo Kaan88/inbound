@@ -28,7 +28,7 @@ test('U-EX-5: one box for automatic sending: on only with both keys on, and chan
   try {
     const box = doc.getElementById('autoSend');
     assert.equal(box.checked, false, 'off while either key is off');
-    assert.equal(doc.querySelectorAll('input[type=checkbox]').length, 2, 'automatic sending and notifications only');
+    assert.equal(doc.querySelectorAll('input[type=checkbox]').length, 3, "automatic sending, notifications and the app's windows only");
     box.checked = true;
     box.dispatchEvent(new page.window.Event('change', { bubbles: true }));
     doc.getElementById('apply').click();

@@ -18,6 +18,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
+  import { pruneMenu } from '../lib/menu';
 
   // A menu at a point (a right-click, a long press) or under a button. Arrow keys move, Enter picks, Escape closes.
   let { items, x, y, onclose, label = 'Actions' }: { items: MenuItem[]; x: number; y: number; onclose: () => void; label?: string } = $props();
@@ -27,12 +28,11 @@
   let left = $state(0);
   let top = $state(0);
 
-  const visible = $derived(prune(items));
+  const visible = $derived(pruneMenu(items));
 
+  // No separator first, last or twice in a row, whatever was hidden around it (UI.B25).
   function prune(list: MenuItem[]): MenuItem[] {
-    const kept = list.filter((item) => !item.hidden);
-    // No separator first, last or twice in a row.
-    return kept.filter((item, index) => !item.separator || (index > 0 && index < kept.length - 1 && !kept[index - 1].separator));
+    return pruneMenu(list);
   }
 
   $effect(() => {

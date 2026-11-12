@@ -68,13 +68,13 @@
 
 <div class="relative min-w-0" data-host-switcher>
   <!-- A server glyph, not the theme's monitor (U-WU-19); the host's name shows on a phone too. -->
-  <button bind:this={toggle} class="btn h-8 min-w-0 gap-1.5 px-2" aria-expanded={open} aria-haspopup="true" aria-controls="host-list" aria-label="Host: {hereName}. Switch to another host" title="Switch to another host" onclick={() => (open = !open)}>
+  <button bind:this={toggle} class="btn h-8 min-w-0 gap-1.5 px-2" aria-expanded={open} aria-haspopup="true" aria-controls="host-list" aria-label="Showing downloads of {hereName}. Switch to another server" title="Switch to another server" onclick={() => (open = !open)}>
     <Icon name="server" size={15} class="shrink-0 text-icon-neutral" />
     <span class="max-w-20 truncate sm:max-w-40">{hereName}</span>
     <Icon name="up" size={12} class="shrink-0 {open ? '' : 'rotate-180'}" />
   </button>
   {#if open}
-    <div id="host-list" role="group" aria-label="Hosts" class="card absolute right-0 z-40 mt-1 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden py-1 shadow-lg">
+    <div id="host-list" role="group" aria-label="Servers" class="card absolute right-0 z-40 mt-1 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden py-1 shadow-lg">
       {#if came.back}
         <a class="host-entry flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-hover" href={jump(came.back.origin)} title="Go back to {came.back.name}'s own web UI">
           <Icon name="chevron-left" size={14} class="shrink-0" />
@@ -87,7 +87,7 @@
       {/if}
       <div class="flex items-center gap-2 bg-selected px-3 py-1.5 text-[13px]" aria-current="true">
         <div class="min-w-0 flex-1">
-          <div class="font-semibold">This host{came.selfName ? ` (${came.selfName})` : ''}</div>
+          <div class="font-semibold">This server{came.selfName ? ` (${came.selfName})` : ''}</div>
           <div class="truncate text-[12px] text-muted">{location.host}</div>
         </div>
         <Icon name="check" size={14} class="shrink-0" />
@@ -117,14 +117,14 @@
         {#if came.offered.length > 1}<button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-hover" onclick={() => keep(came.offered)}><Icon name="add" size={14} /> Add all {came.offered.length} to this list</button>{/if}
       {/if}
       <div class="my-1 border-t border-divider"></div>
-      <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-hover" onclick={startAdd}><Icon name="add" size={14} /> Add a host…</button>
-      <p class="hint px-3 pb-1">This list is kept in this browser for this address. Going to another host takes its names and addresses along, never a password, so that host can offer the way back.</p>
+      <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-hover" onclick={startAdd}><Icon name="add" size={14} /> Add a server…</button>
+      <p class="hint px-3 pb-1">This list is kept in this browser for this address. Going to another server takes its names and addresses along, never a password, so that server can offer the way back.</p>
     </div>
   {/if}
 </div>
 
 {#if editing}
-  <Dialog title={editing.id ? 'Edit host' : 'Add a host'} onclose={() => (editing = null)}>
+  <Dialog title={editing.id ? 'Edit server' : 'Add a server'} onclose={() => (editing = null)}>
     <form id="host-form" class="grid gap-3" onsubmit={(event) => { event.preventDefault(); save(); }}>
       <div>
         <label class="label" for="host-name">Name</label>
@@ -133,7 +133,7 @@
       <div>
         <label class="label" for="host-address">Address</label>
         <input id="host-address" class="field font-mono" bind:value={editing.address} placeholder="http://192.168.1.20:8080" autocomplete="off" spellcheck="false" data-autofocus />
-        <p class="hint mt-1">This opens that host's own web UI in this tab, and you sign in there. Only the names and addresses in this list go with it.</p>
+        <p class="hint mt-1">This opens that server's own web UI in this tab, and you sign in there. Only the names and addresses in this list go with it.</p>
       </div>
       {#if warnClear}<p class="hint" role="note">{cleartextNote}</p>{/if}
       {#if problem}<p class="text-[13px] text-error" role="alert">{problem}</p>{/if}

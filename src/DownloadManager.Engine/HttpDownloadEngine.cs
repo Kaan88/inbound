@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -30,6 +31,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private readonly bool _ownsClient;
     private readonly object _clientSync = new();
     private readonly List<HttpClient> _retiredClients = new();
+    // Requests (from send until their response is disposed) under way on each client; guarded by _clientSync.
+    private readonly Dictionary<HttpClient, int> _clientUsers = new(ReferenceEqualityComparer.Instance);
     private readonly object _siteLoginSync = new();
     private List<SiteLoginCredential> _siteLogins = new();
     private readonly IMediaMuxer _muxer;
@@ -212,11 +215,71 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             var previous = _client;
             _client = CreateDefaultClient();
-            _retiredClients.Add(previous);
+            RetireClient(previous);
             if (_publicOnlyClient is { } publicOnly)
             {
                 _publicOnlyClient = null;
-                _retiredClients.Add(publicOnly);
+                RetireClient(publicOnly);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A client the proxy change replaced. Disposed now when nothing runs on it, or else when its last request ends
+    /// (<see cref="ReleaseClient"/>), so a transfer started before the change keeps its connection but the old handler
+    /// and its pool don't live for the rest of the Host's life. Called under <see cref="_clientSync"/>.
+    /// </summary>
+    private void RetireClient(HttpClient client)
+    {
+        if (_clientUsers.ContainsKey(client))
+        {
+            _retiredClients.Add(client);
+        }
+        else
+        {
+            client.Dispose();
+        }
+    }
+
+    /// <summary>The client for a request of <paramref name="job"/>, counted as in use until <see cref="ReleaseClient"/>.</summary>
+    private HttpClient AcquireClient(DownloadJob job)
+    {
+        lock (_clientSync)
+        {
+            // Under the same lock as a proxy change, so the client can't be retired and disposed in between.
+            var client = CurrentClient(job);
+            _clientUsers[client] = _clientUsers.GetValueOrDefault(client) + 1;
+            return client;
+        }
+    }
+
+    private void ReleaseClient(HttpClient client)
+    {
+        lock (_clientSync)
+        {
+            var users = _clientUsers.GetValueOrDefault(client) - 1;
+            if (users > 0)
+            {
+                _clientUsers[client] = users;
+                return;
+            }
+
+            _clientUsers.Remove(client);
+            if (_retiredClients.Remove(client))
+            {
+                client.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Clients replaced by a proxy change that still carry a request. For tests.</summary>
+    internal int RetiredClientCount
+    {
+        get
+        {
+            lock (_clientSync)
+            {
+                return _retiredClients.Count;
             }
         }
     }
@@ -313,7 +376,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 : job.DestinationDirectory;
             job.FileName = FileNameResolver.Sanitize(job.FileName);
             job.FinalFilePath = FileNameResolver.ResolveUniquePath(directory, job.FileName, job.ConflictPolicy);
-            job.PartFilePath = job.FinalFilePath + ".part";
+            // The "<final>.<jobId>.part" convention, so the orphan scan knows it as this job's.
+            job.PartFilePath = $"{job.FinalFilePath}.{job.Id:N}.part";
         }
 
         var directoryName = Path.GetDirectoryName(job.PartFilePath);
@@ -1019,12 +1083,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     /// One read of a media response. The read timeout applies to each read, as on the plain HTTP path, so a slow but
     /// moving fragment of any size completes; a stall or a dropped connection is a retryable failure, not a cancel.
     /// </summary>
-    private async Task<int> ReadMediaAsync(Stream stream, Memory<byte> buffer, CancellationToken cancellationToken)
+    private async Task<int> ReadMediaAsync(
+        Stream stream, Memory<byte> buffer, CancellationToken cancellationToken, RentedBuffer? rented = null)
     {
+        Task<int>? read = null;
         try
         {
-            return await stream.ReadAsync(buffer, cancellationToken)
-                .AsTask()
+            read = stream.ReadAsync(buffer, cancellationToken).AsTask();
+            return await read
                 .WaitAsync(_options.ReadTimeout, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1039,6 +1105,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             throw new DownloadEngineException(
                 new JobFailure(FailureKind.Network, "The connection was lost while reading.", true, true, DateTimeOffset.UtcNow),
                 isRetryable: true, inner: ex);
+        }
+        finally
+        {
+            if (read is { IsCompleted: false }) rented?.Abandon();
         }
     }
 
@@ -1508,34 +1578,34 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         var completedSegments = 0;
         var received = 0L;
-        if (_mediaCheckpoints is not null)
-        {
-            var existing = await _mediaCheckpoints.LoadAsync(job.Id, checkpointTrack, cancellationToken)
-                .ConfigureAwait(false);
-            if (existing is not null)
-            {
-                var partLength = File.Exists(job.PartFilePath)
-                    ? new FileInfo(job.PartFilePath).Length
-                    : -1;
-                if (string.Equals(existing.Signature, checkpointSignature, StringComparison.Ordinal) &&
-                    partLength >= existing.CompletedBytes &&
-                    existing.CompletedBytes >= 0)
-                {
-                    completedSegments = Math.Min(existing.CompletedSegments, segments.Count);
-                    received = existing.CompletedBytes;
-                }
-                else
-                {
-                    await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-        }
-
         var stopwatch = Stopwatch.StartNew();
         var progressState = new HlsProgressState(job);
         try
         {
+            if (_mediaCheckpoints is not null)
+            {
+                var existing = await LoadMediaCheckpointAsync(job.Id, checkpointTrack, cancellationToken)
+                    .ConfigureAwait(false);
+                if (existing is not null)
+                {
+                    var partLength = File.Exists(job.PartFilePath)
+                        ? new FileInfo(job.PartFilePath).Length
+                        : -1;
+                    if (string.Equals(existing.Signature, checkpointSignature, StringComparison.Ordinal) &&
+                        partLength >= existing.CompletedBytes &&
+                        existing.CompletedBytes >= 0)
+                    {
+                        completedSegments = Math.Min(existing.CompletedSegments, segments.Count);
+                        received = existing.CompletedBytes;
+                    }
+                    else
+                    {
+                        await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
+
             await using (var part = new FileStream(
                              job.PartFilePath,
                              received > 0 ? FileMode.Open : FileMode.Create,
@@ -1558,26 +1628,26 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         .ConfigureAwait(false);
                 }
 
-                for (var i = completedSegments; i < segments.Count; i++)
+                var saved = new MediaProgress(job, part, checkpointTrack, checkpointSignature, completedSegments, received);
+                try
                 {
-                    received += await DownloadHlsSegmentAsync(
-                        job, segments[i], part, received, progress, stopwatch, progressState, phase, cancellationToken)
-                        .ConfigureAwait(false);
-                    await FlushToDiskAsync(part, cancellationToken).ConfigureAwait(false);
-                    if (_mediaCheckpoints is not null)
+                    for (var i = completedSegments; i < segments.Count; i++)
                     {
-                        await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
-                        {
-                            JobId = job.Id,
-                            Track = checkpointTrack,
-                            Signature = checkpointSignature,
-                            CompletedSegments = i + 1,
-                            CompletedBytes = received,
-                        }, cancellationToken).ConfigureAwait(false);
+                        received += await DownloadHlsSegmentAsync(
+                            job, segments[i], part, received, progress, stopwatch, progressState, phase, cancellationToken)
+                            .ConfigureAwait(false);
+                        await SaveMediaProgressAsync(saved, i + 1, received, force: false, cancellationToken)
+                            .ConfigureAwait(false);
                     }
+                }
+                finally
+                {
+                    await SaveStoppedMediaProgressAsync(saved).ConfigureAwait(false);
                 }
             }
 
+            // A stop that came with the last fragment is still a stop: the file is not completed under it.
+            cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(job.ExpectedSha256))
             {
                 var actual = await Hashing.Sha256FileAsync(job.PartFilePath, cancellationToken).ConfigureAwait(false);
@@ -1674,7 +1744,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             transient, false, DateTimeOffset.UtcNow, status), isRetryable: transient, RetryAfterOf(response));
                     }
 
-                    var buffer = new byte[_options.BufferSize];
+                    // Pooled: a fresh 128 KB array per fragment is a large-object allocation thousands of times a stream.
+                    var bufferSize = _options.BufferSize;
+                    using var rented = new RentedBuffer(bufferSize);
+                    var buffer = rented.Array;
                     var networkBytes = 0L;
                     var payloadBytes = 0L;
                     await using var segmentStream = await response.Content.ReadAsStreamAsync(cancellationToken)
@@ -1685,7 +1758,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         while (remaining > 0)
                         {
                             var read = await ReadMediaAsync(
-                                segmentStream, buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken)
+                                segmentStream, buffer.AsMemory(0, (int)Math.Min(bufferSize, remaining)), cancellationToken, rented)
                                 .ConfigureAwait(false);
                             if (read == 0)
                             {
@@ -1702,10 +1775,11 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                     using var decrypting = segment.Key is null
                         ? null
-                        : new HlsDecryptingWriter(output, segment.Key, segment.Iv ?? new byte[16], buffer.Length);
+                        : new HlsDecryptingWriter(output, segment.Key, segment.Iv ?? new byte[16], bufferSize);
                     while (true)
                     {
-                        var read = await ReadMediaAsync(segmentStream, buffer, cancellationToken).ConfigureAwait(false);
+                        var read = await ReadMediaAsync(segmentStream, buffer.AsMemory(0, bufferSize), cancellationToken, rented)
+                            .ConfigureAwait(false);
                         if (read == 0)
                         {
                             break;
@@ -1893,7 +1967,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             _aes.Key = key;
             _aes.IV = iv;
             _decryptor = _aes.CreateDecryptor();
-            _plain = new byte[maxChunk + 2 * Block];
+            _plain = ArrayPool<byte>.Shared.Rent(maxChunk + 2 * Block);
         }
 
         public async Task WriteAsync(byte[] data, int count, CancellationToken cancellationToken)
@@ -1955,6 +2029,25 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             _decryptor.Dispose();
             _aes.Dispose();
+            ArrayPool<byte>.Shared.Return(_plain);
+        }
+    }
+
+    /// <summary>
+    /// A fragment attempt's read buffer from the shared pool, given back when the attempt ends. Not when a read was
+    /// left running (a stall or a cancel): that read can still write into it, so the array is left to the collector.
+    /// </summary>
+    private sealed class RentedBuffer(int size) : IDisposable
+    {
+        private bool _abandoned;
+
+        public byte[] Array { get; } = ArrayPool<byte>.Shared.Rent(size);
+
+        public void Abandon() => _abandoned = true;
+
+        public void Dispose()
+        {
+            if (!_abandoned) ArrayPool<byte>.Shared.Return(Array);
         }
     }
 
@@ -2874,7 +2967,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         var received = 0L;
         if (_mediaCheckpoints is not null)
         {
-            var existing = await _mediaCheckpoints.LoadAsync(job.Id, checkpointTrack, cancellationToken)
+            var existing = await LoadMediaCheckpointAsync(job.Id, checkpointTrack, cancellationToken)
                 .ConfigureAwait(false);
             var length = File.Exists(path) ? new FileInfo(path).Length : -1;
             if (existing is not null &&
@@ -2911,27 +3004,118 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
             }
 
-            for (var i = completedSegments; i < segments.Count; i++)
+            var saved = new MediaProgress(job, file, checkpointTrack, signature, completedSegments, received);
+            try
             {
-                received += await DownloadHlsSegmentAsync(
-                    job, segments[i], file, receivedBase + received,
-                    progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
-                await FlushToDiskAsync(file, cancellationToken).ConfigureAwait(false);
-                if (_mediaCheckpoints is not null)
+                for (var i = completedSegments; i < segments.Count; i++)
                 {
-                    await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
-                    {
-                        JobId = job.Id,
-                        Track = checkpointTrack,
-                        Signature = signature,
-                        CompletedSegments = i + 1,
-                        CompletedBytes = received,
-                    }, cancellationToken).ConfigureAwait(false);
+                    received += await DownloadHlsSegmentAsync(
+                        job, segments[i], file, receivedBase + received,
+                        progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
+                    await SaveMediaProgressAsync(saved, i + 1, received, force: false, cancellationToken)
+                        .ConfigureAwait(false);
                 }
+            }
+            finally
+            {
+                await SaveStoppedMediaProgressAsync(saved).ConfigureAwait(false);
             }
         }
 
+        // A stop that came with the last fragment: nothing after the loop checks the token, so the two-track
+        // callers would mux with it cancelled and end the run as a failed mux instead of Cancelled.
+        cancellationToken.ThrowIfCancellationRequested();
         return received;
+    }
+
+    /// <summary>
+    /// A stream track's saved progress. One that exists but can't be used fails the run and leaves the track as it is:
+    /// read as none, it would have the track recreated empty and every fragment fetched again (audit 1, N1).
+    /// </summary>
+    private async Task<MediaCheckpoint?> LoadMediaCheckpointAsync(Guid jobId, string track, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _mediaCheckpoints!.LoadAsync(jobId, track, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CheckpointUnusableException ex)
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Unknown, ex.Message, false, true, DateTimeOffset.UtcNow),
+                isRetryable: false, inner: ex);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Unknown,
+                    "This download's saved progress couldn't be read just now, so it was not started. Nothing was lost. Resume it to try again.",
+                    true, true, DateTimeOffset.UtcNow),
+                isRetryable: true, inner: ex);
+        }
+    }
+
+    /// <summary>What a track has finished and what it has made durable; fragments after the durable point are fetched again after a kill.</summary>
+    private sealed class MediaProgress(DownloadJob job, FileStream file, string track, string signature, int segments, long bytes)
+    {
+        public DownloadJob Job { get; } = job;
+        public FileStream File { get; } = file;
+        public string Track { get; } = track;
+        public string Signature { get; } = signature;
+        public int SavedSegments { get; set; } = segments;
+        public long SavedBytes { get; set; } = bytes;
+        public DateTimeOffset SavedAt { get; set; } = DateTimeOffset.UtcNow;
+        public int DoneSegments { get; set; } = segments;
+        public long DoneBytes { get; set; } = bytes;
+    }
+
+    /// <summary>
+    /// Records a finished fragment, and flushes the track and saves its checkpoint on the plain HTTP path's interval
+    /// (time or bytes), not after every fragment: a two-hour stream of 2-second fragments is 3,600 of them (audit 1, N5).
+    /// </summary>
+    private async Task SaveMediaProgressAsync(MediaProgress saved, int segments, long bytes, bool force, CancellationToken cancellationToken)
+    {
+        saved.DoneSegments = segments;
+        saved.DoneBytes = bytes;
+        if (_mediaCheckpoints is null || segments <= saved.SavedSegments)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (!force && now - saved.SavedAt < _options.CheckpointInterval && bytes - saved.SavedBytes < CheckpointEveryBytes)
+        {
+            return;
+        }
+
+        await FlushToDiskAsync(saved.File, cancellationToken).ConfigureAwait(false);
+        await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
+        {
+            JobId = saved.Job.Id,
+            Track = saved.Track,
+            Signature = saved.Signature,
+            CompletedSegments = segments,
+            CompletedBytes = bytes,
+        }, cancellationToken).ConfigureAwait(false);
+        saved.SavedSegments = segments;
+        saved.SavedBytes = bytes;
+        saved.SavedAt = now;
+    }
+
+    /// <summary>
+    /// At the end of a track's loop, however it ended: the fragments finished since the last save are kept, as the
+    /// HTTP path's stopped checkpoint keeps its bytes. Best effort, so the failure that ended the loop is the one reported.
+    /// </summary>
+    private async Task SaveStoppedMediaProgressAsync(MediaProgress saved)
+    {
+        try
+        {
+            await SaveMediaProgressAsync(saved, saved.DoneSegments, saved.DoneBytes, force: true, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+            // The next run fetches those fragments again.
+        }
     }
 
     private static void DeleteFileQuietly(string path)
@@ -3671,7 +3855,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     range.Length.Value,
                     response.Headers.ETag?.ToString(),
                     response.Content.Headers.LastModified?.ToString("R"),
-                    response.Content.Headers.ContentType?.ToString()),
+                    response.Content.Headers.ContentType?.ToString(),
+                    response.RequestMessage?.RequestUri?.Host),
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -4593,11 +4778,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         return trimmed.StartsWith("W/", StringComparison.OrdinalIgnoreCase) ? trimmed[2..] : trimmed;
     }
 
+    /// <param name="LandingHost">Where the probe's redirects ended: the host the workers' connections go to.</param>
     private sealed record SegmentedPlan(
         long Total,
         string? ETag,
         string? LastModified,
-        string? ContentType);
+        string? ContentType,
+        string? LandingHost = null);
 
     /// <summary>A plan; a failure; or neither, when the server simply won't do ranged requests.</summary>
     private sealed record SegmentedProbe
@@ -4622,7 +4809,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             File = file;
             Segments = segments;
             RateLimiter = new TransferRateLimiter(() => job.SpeedLimitBytesPerSecond);
-            Host = HostOf(job);
+            // The per-host cap is about the server that carries the bytes: after a redirect to a CDN, that one.
+            Host = string.IsNullOrEmpty(plan.LandingHost) ? HostOf(job) : plan.LandingHost;
         }
 
         public DownloadJob Job { get; }

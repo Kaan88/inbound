@@ -191,6 +191,27 @@ public sealed partial class RuntimeServiceTests
         Assert.True(File.Exists(other));
     }
 
+    /// <summary>Review 1 N3: a stream's kept tracks are part files too; a job's own stay, a lost one's go.</summary>
+    [Fact]
+    public async Task CleanOrphansTakesAStreamsLeftTracksButNotAJobsOwn()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var kept = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/kept.bin?size=65536&seed=830",
+            DestinationDirectory = ctx.Destination, FileName = "kept.bin", Source = "cli", StartMode = "later",
+        });
+        var lost = Path.Combine(ctx.Destination, $"lost.mp4.{Guid.NewGuid():N}.part");
+        string[] lostTracks = [lost + ".video", lost + ".audio", lost + ".mux.mp4"];
+        string[] keptTracks = [kept.Job!.PartFilePath + ".video", kept.Job.PartFilePath + ".audio", kept.Job.PartFilePath + ".mux.mp4"];
+        foreach (var path in lostTracks.Concat(keptTracks)) await File.WriteAllTextAsync(path, "track");
+
+        var cleaned = await ctx.Service.CleanOrphanPartFilesAsync(delete: true, CancellationToken.None);
+        Assert.True(cleaned.Ok, cleaned.Error);
+        Assert.All(lostTracks, path => Assert.False(File.Exists(path), path));
+        Assert.All(keptTracks, path => Assert.True(File.Exists(path), path));
+    }
+
     // ----- audit 2 M12: a removal that gave up waiting -----
 
     [Fact]
@@ -503,9 +524,10 @@ public sealed partial class RuntimeServiceTests
 
             await WaitUntil(() => service.GetSettings().Queues.Single(queue => queue.Id == 1).IsRunning,
                 "the schedule to start the queue", TimeSpan.FromSeconds(20));
-            // Then it waits for the next instant, no sooner than the next stop or start (at most an hour).
-            var next = service.NextSchedulerWake!.Value;
-            Assert.True(next - time.GetUtcNow() > TimeSpan.FromMinutes(59), next.ToString("O"));
+            // Then it waits for the next instant, no sooner than the next stop or start (at most an hour). The queue is
+            // running before the evaluation that started it has armed the next wake, so this waits for that.
+            await WaitUntil(() => service.NextSchedulerWake is { } next && next - time.GetUtcNow() > TimeSpan.FromMinutes(59),
+                "the next wake an hour on", TimeSpan.FromSeconds(10));
         }
         finally
         {

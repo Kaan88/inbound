@@ -48,6 +48,15 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
 
     public void OpenPackage(Guid packageId) => LaunchUi(["--package", packageId.ToString("D")]);
 
+    /// <summary>T10: the torrent dialog for finished .torrent downloads, through the window's <c>--open-torrent</c>. Not yet tried on Linux.</summary>
+    public void OpenTorrentFiles(IReadOnlyList<string> paths)
+    {
+        foreach (var launch in TorrentFileOffers.Launches(paths)) LaunchUi(TorrentFileOffers.Arguments(launch));
+    }
+
+    /// <summary>EXT.R12: the main window, at this download.</summary>
+    public void ShowJob(Guid jobId) => LaunchUi([UiArguments.ShowJob, jobId.ToString("D")]);
+
     /// <summary>Whether this Host runs in a desktop session (X11 or Wayland), where a file manager can be shown.</summary>
     internal static bool HasDesktopSession() =>
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) ||

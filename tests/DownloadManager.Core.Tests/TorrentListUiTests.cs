@@ -258,7 +258,7 @@ public sealed class TorrentListUiTests
         job.Torrent.SeedGoal = "never";
         Assert.Null(TorrentListRules.GoalProgress(job, options, Now));
         Assert.Null(TorrentListRules.TimeToGoal(job, options, Now));
-        Assert.StartsWith("Never stops", TorrentListRules.GoalLine(job, Settings(1, 48), Now));
+        Assert.Equal("Don't seed (this torrent's own option)", TorrentListRules.GoalLine(job, Settings(1, 48), Now));
         job.Torrent.SeedGoal = "global";
         Assert.Equal(1, TorrentListRules.GoalProgress(job, options, Now));
     }

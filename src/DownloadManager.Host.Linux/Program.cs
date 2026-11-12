@@ -234,6 +234,8 @@ internal static class Program
             log.Info("Torrent notice: ready to choose files");
             notifications.Notify(notice.Title, notice.Message);
         }, log.Warn);
+        // T10: a finished .torrent download goes to the torrent dialog where torrents can go somewhere.
+        Func<bool> torrentFilesOffered = () => TorrentFileOffers.TorrentsCanGo(service, remoteStarted ? remote.Registry : null);
         using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
         {
             _ = Task.Run(() =>
@@ -241,7 +243,9 @@ internal static class Program
                 if (window.IsPackage) platform.OpenPackage(window.Id);
                 else platform.OpenDownload(window.Id);
             });
-        }, log.Warn);
+        }, log.Warn) { TorrentFilesOffered = torrentFilesOffered };
+        using var torrentFileOffers = new TorrentFileOffers(service, torrentFilesOffered,
+            paths => _ = Task.Run(() => platform.OpenTorrentFiles(paths)), log: log.Warn);
 
         // Ctrl+C in a terminal, SIGTERM from the session ending or systemd: stop as an exit from the window would.
         using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, Stop);

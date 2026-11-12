@@ -49,7 +49,7 @@ public sealed partial class DownloadManagerService
             dto = Map(runtime.Job);
         }
 
-        JobChanged?.Invoke(this, new JobChangeEventArgs(dto, "progress"));
+        AnnounceJobChange(dto, "progress");
     }
 
     /// <summary>Requeues what the current limits leave over, then saves and announces each one.</summary>

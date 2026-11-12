@@ -2,13 +2,16 @@
 // torrent dialog's lines. The rules and words are the Windows app's (MainWindow.TorrentAdd, TorrentAddLines), so the two
 // read alike. Nothing here touches the page, so the tests call it directly.
 
-import { lineState, magnetsIn, type TorrentLines } from './torrents';
+import { extractInputs } from './addview';
+import { isJobInput, lineState, magnetsIn, torrentsOffText, type TorrentLines } from './torrents';
+import { hideAddresses } from './remote';
 import type { ClassifyResult } from './types';
 
 // ---- Ctrl+V and drops on the page ----
 
-export const noTorrentsOnClipboard = 'The clipboard holds no magnet link or .torrent file.';
-export const onlyTorrentsDrop = 'Only magnet links and .torrent files can be dropped here.';
+// Review 5:A6: http, https and ftp links go to Add Links, so the words name them too.
+export const noTorrentsOnClipboard = 'The clipboard holds no link, magnet link or .torrent file.';
+export const onlyTorrentsDrop = 'Only links, magnet links and .torrent files can be dropped here.';
 
 /** Where a paste is the field's own: a text box, a list box or anything editable. */
 export function isEditableTarget(target: { tagName?: string; isContentEditable?: boolean; type?: string } | null | undefined): boolean {
@@ -21,7 +24,7 @@ export function isEditableTarget(target: { tagName?: string; isContentEditable?:
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'range', 'color', 'image'].includes((target.type ?? 'text').toLowerCase());
 }
 
-/** The page takes a paste or a drop: torrents can be added, no dialog is open, and it isn't typed into a field. */
+/** The page takes a paste or a drop: it is connected, no dialog is open, and it isn't typed into a field. */
 export function pageTakes(canAdd: boolean, dialogOpen: boolean, editable = false): boolean {
   return canAdd && !dialogOpen && !editable;
 }
@@ -40,13 +43,28 @@ export function torrentFilesIn<T extends { name: string }>(files: Iterable<T> | 
   return files ? [...files].filter((file) => isTorrentFileName(file.name)) : [];
 }
 
-/** What the page found: the magnets in the text and the .torrent files, or the words to say when there are none. */
+/**
+ * What the page found: the magnets in the text, the .torrent files and the http, https and ftp links (review 5:A6), or
+ * the words to say when there are none.
+ */
 export function intake<T extends { name: string }>(text: string | null | undefined, files: Iterable<T> | null | undefined, dropped: boolean):
-  { magnets: string[]; files: T[]; empty: string | null } {
+  { magnets: string[]; files: T[]; links: string[]; empty: string | null } {
   const magnets = magnetsIn(text);
   const torrents = torrentFilesIn(files);
-  const empty = magnets.length + torrents.length > 0 ? null : dropped ? onlyTorrentsDrop : noTorrentsOnClipboard;
-  return { magnets, files: torrents, empty };
+  const links = extractInputs(text).filter((input) => !/^magnet:/i.test(input));
+  const empty = magnets.length + torrents.length + links.length > 0 ? null : dropped ? onlyTorrentsDrop : noTorrentsOnClipboard;
+  return { magnets, files: torrents, links, empty };
+}
+
+/**
+ * Where a paste or a drop goes (TorrentRules.Intake on the desktop): magnets and .torrent files to the torrent dialog
+ * while torrents can be added, links to Add Links (after the torrent dialog when there are both). A problem instead
+ * when nothing goes anywhere.
+ */
+export function intakeStep(torrents: number, links: number, torrentsCanBeAdded: boolean): { torrents: boolean; links: boolean; problem: string | null } {
+  const takeTorrents = torrents > 0 && torrentsCanBeAdded;
+  if (takeTorrents || links > 0) return { torrents: takeTorrents, links: links > 0, problem: null };
+  return { torrents: false, links: false, problem: torrents > 0 ? torrentsOffText : onlyTorrentsDrop };
 }
 
 /** Sends a .torrent file to the server (POST /api/upload/torrent); its reference, never its path there. */
@@ -84,7 +102,8 @@ export function startCacheChecks(lines: TorrentLines, states: CacheStates): { st
   const start: { input: string; query: string }[] = [];
   if (!lines.providerName) return { states: next, start };
   for (const line of lines.lines) {
-    if (next[line.input] || lineState(line) !== 'ready') continue;
+    // T10: a finished download's .torrent file is added on the server only, so the provider isn't asked.
+    if (next[line.input] || lineState(line) !== 'ready' || isJobInput(line.input)) continue;
     const query = cacheQuery(line.result?.infoHash);
     if (query) {
       next[line.input] = 'checking';
@@ -112,4 +131,50 @@ export function cacheText(state: CacheState | undefined, providerName: string | 
     case 'notCached': return `Not cached on ${providerName}`;
     case 'unknown': return `Couldn't check ${providerName}`;
   }
+}
+
+// ---- T9 W3: the cache answer as a badge next to the provider choice (the desktop's CacheBadge) ----
+
+/** `cached` is a filled accent badge, `notCached` and `checking` a neutral outline, `unknown` a muted one with the reason as its tooltip. */
+export type CacheBadgeKind = 'cached' | 'notCached' | 'checking' | 'unknown';
+
+export interface CacheBadge {
+  kind: CacheBadgeKind;
+  text: string;
+  /** The short line under it; '' for none. */
+  note: string;
+  /** Why it couldn't be checked; null otherwise. */
+  tip: string | null;
+}
+
+/** The badge for a line's cache state, or null when nothing was asked. */
+export function cacheBadge(state: CacheState | undefined, providerName: string | null, reason?: string | null): CacheBadge | null {
+  if (!providerName || !state) return null;
+  switch (state) {
+    case 'cached': return cachedBadge(providerName);
+    case 'notCached': return { kind: 'notCached', text: `Not cached on ${providerName}`, note: '', tip: null };
+    case 'checking': return { kind: 'checking', text: `Checking ${providerName}…`, note: '', tip: null };
+    case 'unknown': return { kind: 'unknown', text: `Couldn't check ${providerName}`, note: '', tip: reason?.trim() || `${providerName} didn't answer the check.` };
+  }
+}
+
+/** "Cached on TorBox", with what that means for this add. */
+export function cachedBadge(providerName: string): CacheBadge {
+  return { kind: 'cached', text: `Cached on ${providerName}`, note: `${providerName} has it, so it downloads right away`, tip: null };
+}
+
+/** Why a check couldn't say, for the badge's tooltip; null when it did say, or nothing is known. */
+export function cacheReason(result: Pick<ClassifyResult, 'ok' | 'cached' | 'error'> | null, providerName: string | null, failure?: string | null): string | null {
+  if (result?.ok && typeof result.cached === 'boolean') return null;
+  // Addresses never show (the classify query is the magnet itself), as the desktop's RemoteText.Failure.
+  const error = hideAddresses(result?.error).trim();
+  if (error) return error;
+  const thrown = hideAddresses(failure).trim();
+  if (thrown) return thrown;
+  return result?.ok && providerName ? `${providerName} didn't say whether it has it.` : null;
+}
+
+/** A provider item's status says it is cached ("Cached on TorBox"): shown as the same filled badge where it stands alone. */
+export function isCachedWords(status: string | null | undefined): boolean {
+  return !!status && status.startsWith('Cached on ');
 }

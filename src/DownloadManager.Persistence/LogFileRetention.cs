@@ -4,7 +4,7 @@ namespace DownloadManager.Persistence;
 
 /// <summary>
 /// Keeps the daily log files (<c>&lt;prefix&gt;-yyyyMMdd.log</c>) from growing without end: files older than
-/// <see cref="KeepDays"/> are deleted when a logger starts, and one day's file stops at <see cref="MaxDailyBytes"/>
+/// <see cref="KeepDays"/> are deleted when a logger starts and when its date changes, and one day's file stops at <see cref="MaxDailyBytes"/>
 /// with a closing line that says so.
 /// </summary>
 public static class LogFileRetention

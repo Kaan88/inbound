@@ -27,6 +27,7 @@ public sealed partial class MainWindow
 
     private void QueueCompletionWindow(Guid jobId)
     {
+        if (!_progressWindows.OpensCompletionWindows) return;
         _finishedBurst.Add(jobId);
         if (_burstTimer is null)
         {
@@ -44,15 +45,23 @@ public sealed partial class MainWindow
     {
         var finished = _finishedBurst.ToList();
         _finishedBurst.Clear();
+        if (!_progressWindows.OpensCompletionWindows) return;
         var plan = CompletionBurst.Plan(finished, id => PackageOf(id) is { } package
             ? (package.Id, CompletionBurst.Settled(PackageMembers(package).Select(member => member.State).ToList()))
             : null);
+        var opens = new List<(ProgressWindowKind, Guid, ServerTarget)>();
         foreach (var window in plan)
         {
             if (_connection.IsRemote && !_remoteCompletions.MayOpenWindow(DateTimeOffset.UtcNow)) break;
-            if (window.IsPackage) OpenPackageWindow(window.Id);
-            else OpenDownloadWindow(window.Id);
+            // Decided now, for the server shown now: the windows open in later turns (T11). A package of one is an
+            // ordinary row on the list, so it gets an ordinary file's window.
+            var only = window.IsPackage ? ProgressDetailRules.OnlyFile(_groups.FirstOrDefault(group => group.Id == window.Id), _jobsById.ContainsKey) : null;
+            opens.Add(window.IsPackage && only is null
+                ? (ProgressWindowKind.Package, window.Id, _connection.Target)
+                : (ProgressWindowKind.Download, only ?? window.Id, _connection.Target));
         }
+
+        OpenWindowsInTurns(opens);
     }
 
     /// <summary>This PC's settings, whichever server is shown.</summary>
@@ -85,6 +94,14 @@ public sealed partial class MainWindow
         connection.ConnectionChanged += (connected, error) => DispatcherQueue.TryEnqueue(() =>
         {
             if (connection == _connection) ApplyConnection(connected, error);
+        });
+        // UI.R37: an update check on this PC or the shown server found another latest version.
+        connection.LatestVersionChanged += latest => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (connection == _local && _localStatus is { } local) local.LatestVersion = latest;
+            if (connection == _connection && _status is { } shown) shown.LatestVersion = latest;
+            // This PC's latest is also what a shown server without a check of its own is held to.
+            if (connection == _local || connection == _connection) UpdateStatusText();
         });
         // Only this PC's Host raises it (HostConnection never does for a server).
         connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
@@ -166,7 +183,14 @@ public sealed partial class MainWindow
         ServerBannerButton.Visibility = banner.ActionText is null ? Visibility.Collapsed : Visibility.Visible;
         ServerBannerButton.Content = banner.ActionText ?? string.Empty;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ServerBannerButton, banner.ActionText is null ? string.Empty : $"{banner.ActionText.TrimEnd('…')} {_connection.Target.Name}");
+        ServerBannerBack.Visibility = _connection.Target.IsLocal ? Visibility.Collapsed : Visibility.Visible;
         JobsList.Opacity = banner.Stale ? 0.5 : 1;
+        // Review 5:E1: rows from before the connection went say nothing of a speed or time left that isn't known now.
+        if (banner.Stale)
+        {
+            foreach (var row in _visibleJobs.Concat(_jobsById.Values).Distinct()) row.ShowNotCurrent();
+            UpdateStatusText();
+        }
         UpdateEmptyText();
     }
 
@@ -182,7 +206,7 @@ public sealed partial class MainWindow
                 var now = target.Id is { } id ? _servers.Target(id) ?? target : target;
                 _shownConnectionError = null;
                 _connection.Retarget(now);
-                ConnectionText.Text = $"Connecting to {now.Name}…";
+                ShowConnectionWords($"Connecting to {now.Name}…");
                 UpdateServerBanner();
                 break;
             case ServerBannerAction.PairAgain:
@@ -196,6 +220,62 @@ public sealed partial class MainWindow
 
     private IReadOnlyList<ServerChoice> ServerChoices() => ServerSwitch.Choices(_servers.Load(), _connection.Target.Id);
 
+    /// <summary>
+    /// UI.R37: the shown server's name in the switchers' menus, with "0.6.3 (not latest)" after it when it is known to be
+    /// older than the latest. Only the shown one's version is known.
+    /// </summary>
+    private string ServerMenuText(ServerChoice choice)
+        => choice.IsCurrent && _connection.IsRemote && _graphConnected && VersionStatus.ServerNote(_status?.HostVersion, ShownServerLatest) is { } note
+            ? $"{choice.Name} · {note}"
+            : choice.Name;
+
+    // UI.R37: the shown server's note the Tasks > Show Downloads Of submenu was last filled with. That submenu has no
+    // Opening event of its own, so it is filled again when the note changes (snapshot, connection, latest version).
+    private string? _tasksServerNote;
+
+    private void RefreshTasksServerNote()
+    {
+        var note = _connection.IsRemote && _graphConnected ? VersionStatus.ServerNote(_status?.HostVersion, ShownServerLatest) : null;
+        if (note == _tasksServerNote) return;
+        _tasksServerNote = note;
+        FillServerMenu(TasksServersItem.Items);
+    }
+
+    /// <summary>UI.R37: the latest version the shown server is held to (<see cref="VersionStatus.LatestFor"/>).</summary>
+    private string? ShownServerLatest
+        => VersionStatus.LatestFor(_status?.LatestVersion, _connection.Hello?.HostKind, _localStatus?.LatestVersion);
+
+    /// <summary>
+    /// The connection words at the right of the status bar (UI.R37): <paramref name="text"/>, then a link to the update
+    /// when there is one, then <paramref name="tail"/>.
+    /// </summary>
+    private void ShowConnectionWords(string text, string? updateLink = null, string? tail = null)
+    {
+        string words;
+        string tailWords;
+        if (updateLink is null)
+        {
+            words = tail is null ? text : $"{text} · {tail}";
+            tailWords = string.Empty;
+        }
+        else
+        {
+            words = $"{text} · ";
+            tailWords = tail is null ? string.Empty : $" · {tail}";
+            if (!Equals(UpdateLink.Content, updateLink)) UpdateLink.Content = updateLink;
+        }
+
+        if (ConnectionText.Text != words) ConnectionText.Text = words;
+        if (ConnectionTail.Text != tailWords) ConnectionTail.Text = tailWords;
+        var link = updateLink is null ? Visibility.Collapsed : Visibility.Visible;
+        if (UpdateLink.Visibility != link) UpdateLink.Visibility = link;
+        var tailShown = tailWords.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (ConnectionTail.Visibility != tailShown) ConnectionTail.Visibility = tailShown;
+    }
+
+    /// <summary>UI.R37: the status bar's "update available" link runs Help > Check for updates.</summary>
+    private void UpdateLink_Click(object sender, RoutedEventArgs e) => MenuUpdate_Click(sender, e);
+
     /// <summary>The switchers' menus (toolbar, status bar, Tasks > Show Downloads Of): This PC, the saved servers, Servers….</summary>
     private void FillServerMenu(IList<MenuFlyoutItemBase> items)
     {
@@ -204,7 +284,7 @@ public sealed partial class MainWindow
         {
             var item = new ToggleMenuFlyoutItem
             {
-                Text = choice.Name,
+                Text = ServerMenuText(choice),
                 IsChecked = choice.IsCurrent,
                 KeyboardAcceleratorTextOverride = choice.ShortcutText ?? string.Empty,
             };
@@ -321,6 +401,7 @@ public sealed partial class MainWindow
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ServerSwitcher, help);
         Title = ServerSwitch.TitleFor(target);
         FillServerMenu(TasksServersItem.Items);
+        _tasksServerNote = _connection.IsRemote && _graphConnected ? VersionStatus.ServerNote(_status?.HostVersion, ShownServerLatest) : null;
         UpdateServerBanner();
     }
 
@@ -381,7 +462,7 @@ public sealed partial class MainWindow
         _shownEverConnected = _connection.IsConnected;
         _shownConnectionError = null;
         UpdateServerSwitchers();
-        ConnectionText.Text = target.IsLocal ? "Connecting…" : $"Connecting to {target.Name}…";
+        ShowConnectionWords(target.IsLocal ? "Connecting…" : $"Connecting to {target.Name}…");
         RebuildVisible();
         UpdateStatusText();
         UpdateButtons();
@@ -506,6 +587,7 @@ public sealed partial class MainWindow
             edit.Click += (_, _) => Pick("edit");
             remove.Click += (_, _) => Pick("remove");
             show.Click += (_, _) => Pick("show");
+            DialogArrowKeys.Add(dialog);
             await dialog.ShowAsync();
 
             switch (action)
@@ -598,6 +680,7 @@ public sealed partial class MainWindow
                 deferral.Complete();
             }
         };
+        DialogArrowKeys.Add(dialog);
         await dialog.ShowAsync();
         password.Password = string.Empty;
         if (!paired || existing is null || _connection.Target.Id != existing.Id) return;
@@ -835,10 +918,10 @@ public sealed partial class MainWindow
             SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, mine.Theme))),
         };
         var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = mine.LaunchAtStartup };
-        var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = mine.CloseWindowCompletely };
+        var closeCompletely = new CheckBox { Content = "Close the window completely (it opens a moment slower next time)", IsChecked = mine.CloseWindowCompletely };
         var providerOpens = ProviderOpensBox();
         var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };
-        var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = mine.ClipboardMonitoring };
+        var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = mine.ClipboardMonitoring };
         var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = mine.ShowCompletionDialog };
         var notify = new CheckBox { Content = "Show a notification", IsChecked = mine.NotifyOnCompletion };
         var autoUpdate = new CheckBox { Content = "Check for and install updates automatically while no downloads are running", IsChecked = mine.AutoCheckUpdates };
@@ -877,7 +960,7 @@ public sealed partial class MainWindow
         }
 
         TextBox? directory = null;
-        CheckBox? useCategoryFolders = null;
+        CheckBox? useCategoryFolders = null, useTorrentCategoryFolders = null;
         NumberBox? maxConcurrent = null, connections = null, speedLimit = null;
         CheckBox? autoResume = null;
         TextBox? postDownload = null;
@@ -891,6 +974,12 @@ public sealed partial class MainWindow
                 serverControls.Add(SettingsWindow.Section("Save to"));
                 serverControls.Add(row);
                 serverControls.Add(useCategoryFolders);
+                // T14: a server from before the torrent folders sends no switch; the torrent folder stays in its web UI.
+                if (theirs.UseTorrentCategoryFolders is { } torrentOn)
+                {
+                    useTorrentCategoryFolders = new CheckBox { Content = "Save torrents to a folder for their category", IsChecked = torrentOn };
+                    serverControls.Add(useTorrentCategoryFolders);
+                }
             }
 
             maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", theirs.MaxConcurrentDownloads, 1, 16);
@@ -914,6 +1003,14 @@ public sealed partial class MainWindow
                 postDownload = new TextBox { Header = $"Run this program on {serverName} after each download (optional)", Text = theirs.PostDownloadCommand ?? string.Empty };
                 serverControls.Add(SettingsWindow.Section("When a download finishes"));
                 serverControls.Add(postDownload);
+                serverControls.Add(SettingsWindow.Hint(ShellWords.PostDownloadProgramGets));
+                // Review 2:L5: a program that server keeps but refuses to start (its own rule, so its own words).
+                if (theirs.PostDownloadCommandProblem is { } problem)
+                {
+                    var note = SettingsWindow.Hint(problem);
+                    note.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
+                    serverControls.Add(note);
+                }
             }
         }
 
@@ -1006,6 +1103,7 @@ public sealed partial class MainWindow
             var edited = CloneSettings(serverAtSave);
             if (directory is not null) edited.DefaultDownloadDirectory = directory.Text.Trim();
             if (useCategoryFolders is not null) edited.UseCategoryFolders = useCategoryFolders.IsChecked == true;
+            if (useTorrentCategoryFolders is not null) edited.UseTorrentCategoryFolders = useTorrentCategoryFolders.IsChecked == true;
             edited.MaxConcurrentDownloads = max;
             edited.DefaultConnections = connectionsValue;
             edited.GlobalSpeedLimitBytesPerSecond = limit;

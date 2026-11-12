@@ -19,6 +19,15 @@ internal sealed record RemoteFileAnswer(RemoteFileChoice? Choice, bool Later, bo
 /// </summary>
 internal static class RemoteFileSelectionDialog
 {
+    /// <summary>The tree's height in a window with room for it (DIPs), as before T13.</summary>
+    private const double MostTreeHeight = 380;
+
+    /// <summary>The least the tree gets before the content scrolls instead.</summary>
+    private const double LeastTreeHeight = 160;
+
+    /// <summary>The status line above the tree and the gap to it.</summary>
+    private const double AboveTree = 40;
+
     /// <param name="load">Reads the files. Runs while the dialog is open, on its own connection.</param>
     /// <returns>The choice, or null when it was cancelled or nothing could be chosen.</returns>
     public static async Task<RemoteFileChoice?> ShowAsync(
@@ -46,7 +55,7 @@ internal static class RemoteFileSelectionDialog
         string? laterWords = null,
         string? loadingText = null)
     {
-        var tree = new RemoteFileTreeView { Height = 380 };
+        var tree = new RemoteFileTreeView { Height = MostTreeHeight };
         var busy = new ProgressRing { IsActive = true, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(busy, loadingText?.TrimEnd('…') ?? $"Asking {providerName} for the files");
         var status = new StatusLine("Files status");
@@ -59,7 +68,9 @@ internal static class RemoteFileSelectionDialog
             XamlRoot = root,
             RequestedTheme = theme,
             Title = title,
-            Content = panel,
+            // T13: the tree is as tall as the window lets it be, and the content scrolls before the buttons go out of sight.
+            Content = DialogLayout.ScrollingContent(panel, root, fitted: most =>
+                tree.Height = WindowSizeRules.DialogListHeight(most, AboveTree, LeastTreeHeight, MostTreeHeight)),
             PrimaryButtonText = primaryText,
             CloseButtonText = closeText,
             DefaultButton = ContentDialogButton.Primary,

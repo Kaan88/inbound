@@ -27,8 +27,8 @@
     <div><label class="label" for="qe-name">Queue name</label><input id="qe-name" class="field" maxlength="80" bind:value={form.name} /></div>
     <div><label class="label" for="qe-max">Download files at the same time (1–16)</label><input id="qe-max" class="field" inputmode="numeric" bind:value={form.max} /></div>
     <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.quotaEnabled} /> Enable download limit</label>
-    <div><label class="label" for="qe-mb">Download no more than (MB; max 10,485,760)</label><input id="qe-mb" class="field" inputmode="decimal" bind:value={form.quotaMb} disabled={!form.quotaEnabled} /></div>
-    <div><label class="label" for="qe-hours">Every (hours; 1–8,760)</label><input id="qe-hours" class="field" inputmode="numeric" bind:value={form.quotaHours} disabled={!form.quotaEnabled} /></div>
+    <div><label class="label" for="qe-mb">Download no more than (MB)</label><input id="qe-mb" class="field" inputmode="decimal" bind:value={form.quotaMb} disabled={!form.quotaEnabled} /></div>
+    <div><label class="label" for="qe-hours">Every (hours)</label><input id="qe-hours" class="field" inputmode="numeric" bind:value={form.quotaHours} disabled={!form.quotaEnabled} /></div>
     {#if queue}<p class="hint">Saving changes the limits only. How much of the quota is used, and when it starts again, stay as they are.</p>{/if}
     {#if error}<p class="text-[13px] tone-failed" role="alert">{error}</p>{/if}
   </form>

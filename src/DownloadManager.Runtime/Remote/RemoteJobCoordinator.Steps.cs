@@ -26,6 +26,9 @@ public sealed partial class RemoteJobCoordinator
         public Dictionary<RemoteItemKind, int> DuePolls { get; } = [];
         public bool RateLimited { get; set; }
 
+        /// <summary>The account answered a list read, so its key is accepted (review 2 L8).</summary>
+        public bool AccountAnswered { get; private set; }
+
         public async Task<(List<RemoteItem> Items, bool Complete)> ListAsync(IRemoteCatalog catalog, RemoteItemKind kind, CancellationToken cancellationToken)
         {
             if (_lists.TryGetValue(kind, out var cached))
@@ -38,6 +41,7 @@ public sealed partial class RemoteJobCoordinator
             for (var page = 0; page < options.MostListPages; page++)
             {
                 var read = await catalog.ListAsync(kind, page * options.ListPageSize, options.ListPageSize, fresh: true, cancellationToken).ConfigureAwait(false);
+                AccountAnswered = true;
                 items.AddRange(read);
                 if (read.Count < options.ListPageSize)
                 {
@@ -61,6 +65,7 @@ public sealed partial class RemoteJobCoordinator
             for (var page = 0; page < options.MostListPages; page++)
             {
                 var read = await queue.ListQueuedAsync(kind, page * options.ListPageSize, options.ListPageSize, fresh: true, cancellationToken).ConfigureAwait(false);
+                AccountAnswered = true;
                 items.AddRange(read);
                 if (read.Count < options.ListPageSize)
                 {
@@ -169,6 +174,10 @@ public sealed partial class RemoteJobCoordinator
                         break;
                     }
                 }
+
+                // Review 2 L8: the account answered, so a refusal of its key that held a job was not for good; those
+                // jobs are looked at again in the next round.
+                if (pass.AccountAnswered) await WakeHeldByRefusedKeyAsync(work.Entry.Id, due.Select(record => record.Id).ToHashSet()).ConfigureAwait(false);
             }
 
             return NextDue(work);
@@ -176,6 +185,30 @@ public sealed partial class RemoteJobCoordinator
         finally
         {
             Volatile.Write(ref work.PassRunning, 0);
+        }
+    }
+
+    /// <summary>Jobs a refused key held (no next check) on an account that has since answered are due again.</summary>
+    private async Task WakeHeldByRefusedKeyAsync(string providerId, HashSet<Guid> steppedNow)
+    {
+        List<Guid> held;
+        lock (_sync)
+        {
+            held = _records.Values
+                .Where(record => record.Provider == providerId && record.FailureKind == RemoteFailureKind.Authentication &&
+                                 record.NextCheckAt is null && !record.HeldForApproval && !record.ApprovalNeeded &&
+                                 RemoteJobRules.IsPolled(record.State) &&
+                                 // Refused in this very pass: the key is refused for it still, and waking it would ask again at once.
+                                 !steppedNow.Contains(record.Id))
+                .Select(record => record.Id)
+                .ToList();
+        }
+
+        foreach (var id in held)
+        {
+            await UpdateAsync(id, record => record is { FailureKind: RemoteFailureKind.Authentication, NextCheckAt: null }
+                ? record with { NextCheckAt = _time.GetUtcNow() }
+                : null).ConfigureAwait(false);
         }
     }
 
@@ -1092,7 +1125,9 @@ public sealed partial class RemoteJobCoordinator
     private async Task CreateChildrenAsync(AccountWork work, RemoteJobRecord record, RemoteItem item, CancellationToken cancellationToken)
     {
         var entry = work.Entry;
-        var destination = record.Destination ?? _host.DefaultDownloadDirectory;
+        // T14: a torrent goes to the torrent folders, like one downloaded on this PC.
+        var destination = record.Destination ??
+                          (record.Kind == RemoteItemKind.Torrent ? _host.TorrentDownloadDirectory(item.Name) : _host.DefaultDownloadDirectory);
         var plan = RemoteChildPlanner.Build(record, item, entry.DisplayName, entry.TransferPolicy.MaxConnectionsPerFile, destination);
         if (plan.Requests.Count == 0)
         {

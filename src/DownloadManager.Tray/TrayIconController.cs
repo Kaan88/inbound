@@ -69,7 +69,7 @@ public sealed class TrayIconController : IDisposable
         open.Font = new Font(open.Font, FontStyle.Bold);
         _menu.Items.Add(open);
 
-        _pauseItem = new ToolStripMenuItem("Pause All", null, (_, _) => _actions.PauseAll());
+        _pauseItem = new ToolStripMenuItem("Stop All", null, (_, _) => _actions.PauseAll());
         _resumeItem = new ToolStripMenuItem("Resume All", null, (_, _) => _actions.ResumeAll());
         _menu.Items.Add(_pauseItem);
         _menu.Items.Add(_resumeItem);

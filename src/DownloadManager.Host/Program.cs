@@ -360,6 +360,8 @@ internal static class Program
                 log.Info("Torrent notice: ready to choose files");
                 tray.Notify(notice.Title, notice.Message);
             }, log.Warn);
+            // T10: a finished .torrent download goes to the torrent dialog where torrents can go somewhere.
+            Func<bool> torrentFilesOffered = () => TorrentFileOffers.TorrentsCanGo(service, remoteStarted ? remote.Registry : null);
             using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
             {
                 // Process launch has no WinForms affinity. Keep it off the engine's event path
@@ -369,7 +371,9 @@ internal static class Program
                     if (window.IsPackage) controller.OpenPackage(window.Id);
                     else controller.OpenDownload(window.Id);
                 });
-            }, log.Warn);
+            }, log.Warn) { TorrentFilesOffered = torrentFilesOffered };
+            using var torrentFileOffers = new TorrentFileOffers(service, torrentFilesOffered,
+                paths => _ = Task.Run(() => controller.OpenTorrentFiles(paths)), log: log.Warn);
             service.JobChanged += (_, e) =>
             {
                 var current = currentSettings;

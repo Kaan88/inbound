@@ -19,7 +19,7 @@ public sealed partial class HostCommandDispatcherTests
     private TorrentWorkerSupervisor? _torrentSupervisor;
 
     private async Task<DownloadManagerService> TorrentServiceAsync(bool enabled = true, int filesPerTorrent = 1, Task? holdSeedAdds = null, string? singleFileName = null,
-        IReadOnlySet<string>? lacks = null, Action<AppSettings>? settings = null, bool ignoresAddRecheck = false)
+        IReadOnlySet<string>? lacks = null, Action<AppSettings>? settings = null, bool ignoresAddRecheck = false, TimeProvider? timeProvider = null)
     {
         var saved = new AppSettings { TorrentsEnabled = enabled };
         settings?.Invoke(saved);
@@ -36,7 +36,7 @@ public sealed partial class HostCommandDispatcherTests
         _torrentSupervisor = supervisor;
         var torrents = new TorrentDownloadEngine(supervisor, new TorrentStore(_paths));
         _service = new DownloadManagerService(_paths, store, checkpoints, new JsonSettingsStore(_paths), _engine,
-            enableSchedulerTimer: false, torrentEngine: torrents);
+            enableSchedulerTimer: false, torrentEngine: torrents, timeProvider: timeProvider);
         // A web session's torrent has its host names looked up (report 2, M3); here none resolves, with no network call.
         _service.TorrentHostResolver = (_, _) => Task.FromResult(Array.Empty<System.Net.IPAddress>());
         await _service.InitializeAsync();

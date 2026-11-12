@@ -27,6 +27,12 @@ internal static class ShownServer
     public static bool IsRemote => !_target.IsLocal;
 
     /// <summary>
+    /// T11: whether a window's download is on another server. A progress window in the main window's process knows its
+    /// own Host and says so; it never sets <see cref="Target"/>, which stays the main window's. Null: the shown server.
+    /// </summary>
+    public static bool IsRemoteFor(bool? ownRemote) => ownRemote ?? IsRemote;
+
+    /// <summary>
     /// What the shown server said that tells its paths apart: its <c>hostKind</c> (saved when it was paired, then from
     /// its hello) and its default download folder (from its settings). A null or empty value keeps what was known.
     /// </summary>
@@ -82,10 +88,11 @@ internal static class RemoteDataRules
     /// events while it is open (nothing alerts while it is closed), and whether it does is this PC's setting alone: a
     /// server's per-download choice is that server's, not this PC's. A CLI add on this PC is the one case the window
     /// opens it for this PC's Host, with the download's own choice first, as before. For another server
-    /// <see cref="RemoteCompletionGate"/> decides as well.
+    /// <see cref="RemoteCompletionGate"/> decides as well. A download the browser extension asked to keep quiet
+    /// (<paramref name="quietWindows"/>, EXT.R12) opens none: the browser shows that it finished.
     /// </summary>
-    public static bool WindowOpensCompletion(bool remote, string? source, bool? jobShowsDialog, bool settingShowsDialog) =>
-        remote ? settingShowsDialog : source == "cli" && (jobShowsDialog ?? settingShowsDialog);
+    public static bool WindowOpensCompletion(bool remote, string? source, bool? jobShowsDialog, bool settingShowsDialog, bool quietWindows = false) =>
+        !quietWindows && (remote ? settingShowsDialog : source == "cli" && (jobShowsDialog ?? settingShowsDialog));
 
     /// <summary>
     /// Whether a completion program typed for a download on another server can be sent there. Only the text is looked
@@ -549,8 +556,19 @@ internal static class WindowInstance
     /// The activation event of a download's progress window for <paramref name="target"/>: the name that window takes
     /// when it is opened with <see cref="Arguments"/>, so another process can tell whether it is open.
     /// </summary>
-    public static string JobWindowName(string userKey, Guid job, ServerTarget target) =>
-        EventName(userKey, update: false, job, package: null, ServerId(Arguments("job", job, target).Split(' ')));
+    public static string JobWindowName(string userKey, Guid job, ServerTarget target) => WindowName(userKey, package: false, job, target);
+
+    /// <summary>
+    /// The activation event of a download's or a package's window for <paramref name="target"/>, as that window takes it
+    /// when opened with <see cref="Arguments"/>, or in the main window's process (T11).
+    /// </summary>
+    public static string WindowName(string userKey, bool package, Guid id, ServerTarget target)
+    {
+        var serverId = ServerId(Arguments(package ? "package" : "job", id, target).Split(' '));
+        return package
+            ? EventName(userKey, update: false, job: null, package: id, serverId)
+            : EventName(userKey, update: false, job: id, package: null, serverId);
+    }
 }
 
 /// <summary>The words of Options while another server is shown (U-WR-4, U-WR-6, U-WR-13).</summary>
@@ -588,9 +606,31 @@ internal static class AddRules
     public static string RefusedText(string reason, ServerTarget target) =>
         $"{reason.Trim()} So this address can't be added to {target.Name}; Start download and Download later are off.";
 
-    /// <summary>After Start: shown in the dialog, which opens again with everything that was typed.</summary>
-    public static string NotAddedText(string? error, ServerTarget target) =>
-        $"Not added{(target.IsLocal ? string.Empty : $" to {target.Name}")}: {(string.IsNullOrWhiteSpace(error) ? "the Host rejected the request." : error.Trim())} Change what is needed and try again, or Cancel.";
+    /// <summary>
+    /// After Start: shown in the dialog, which opens again with everything that was typed. With no reason it says who
+    /// gave none and what to do next, as <see cref="ShellWords.NoReason"/> does (review 5:E4).
+    /// </summary>
+    public static string NotAddedText(string? error, ServerTarget target)
+    {
+        var to = target.IsLocal ? string.Empty : $" to {target.Name}";
+        if (!string.IsNullOrWhiteSpace(error)) return $"Not added{to}: {error.Trim()} Change what is needed and try again, or Cancel.";
+        return target.IsLocal
+            ? "Not added: Inbound didn't say why. Try again, or Cancel; if it keeps happening, Help > Open Diagnostics Folder has the log."
+            : $"Not added{to}: {target.Name} didn't say why. Try again, or Cancel.";
+    }
+
+    /// <summary>
+    /// Review 5:A2a: what the file check found, as the add dialog writes it: the size alone, and the server's name for the
+    /// file only when the File name box says something else (the box takes the server's name until the user types one).
+    /// </summary>
+    public static string FileInfoText(string size, string? serverName, string? nameInBox) =>
+        serverName is null || string.IsNullOrWhiteSpace(nameInBox) ||
+        string.Equals(nameInBox.Trim(), serverName.Trim(), StringComparison.OrdinalIgnoreCase)
+            ? size
+            : $"{size}\nThe server names it {serverName}";
+
+    /// <summary>Review 5:A2a: the check button's words; once a check has run it can only check again.</summary>
+    public static string CheckButtonText(bool checkedBefore) => checkedBefore ? "Check again" : "Check file info";
 
     /// <summary>How often a dialog that couldn't be shown again is tried again, a tenth of a second apart, before its
     /// reason goes to the status bar instead.</summary>

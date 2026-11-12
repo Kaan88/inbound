@@ -177,6 +177,81 @@ public sealed class SpeedHistoryTests
         history.Report(Guid.NewGuid(), double.PositiveInfinity, T0.AddSeconds(1));
         Assert.All(history.Read(T0.AddSeconds(1)).BytesPerSecond, value => Assert.Equal(0, value));
     }
+
+    // ---- T8: the torrents' upload beside the total ----
+
+    [Fact]
+    public void UploadIsLeftOutUntilATorrentSendsSomething()
+    {
+        var history = new SpeedHistory(T0);
+        history.Report(Guid.NewGuid(), 1000, T0.AddSeconds(1));
+        Assert.Null(history.Read(T0.AddSeconds(2)).UploadBytesPerSecond);
+        // A torrent that reports 0 still counts: the list is there, all zeros.
+        history.ReportUpload(Guid.NewGuid(), 0, T0.AddSeconds(3));
+        var read = history.Read(T0.AddSeconds(3));
+        Assert.Equal(read.BytesPerSecond.Count, read.UploadBytesPerSecond!.Count);
+        Assert.All(read.UploadBytesPerSecond, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public void UploadsAddUpBesideTheDownloadsWithTheSameStart()
+    {
+        var history = new SpeedHistory(T0);
+        var seeding = Guid.NewGuid();
+        var downloading = Guid.NewGuid();
+        for (var s = 1; s <= 3; s++)
+        {
+            history.ReportUpload(seeding, 2000, T0.AddSeconds(s));
+            history.ReportUpload(downloading, 500, T0.AddSeconds(s).AddMilliseconds(300));
+            history.Report(downloading, 9000, T0.AddSeconds(s).AddMilliseconds(300));
+        }
+
+        var read = history.Read(T0.AddSeconds(3));
+        Assert.Equal(T0, read.Start);
+        Assert.Equal(new long[] { 0, 9000, 9000, 9000 }, read.BytesPerSecond);
+        Assert.Equal(new long[] { 0, 2500, 2500, 2500 }, read.UploadBytesPerSecond!);
+        // One download's own figures carry no upload list.
+        Assert.Null(history.Read(downloading, T0.AddSeconds(3))!.UploadBytesPerSecond);
+    }
+
+    [Fact]
+    public void AnUploadFigureHoldsAcrossTheWorkersSlowPaceThenDropsToZero()
+    {
+        // While no window watches torrents the worker reports every 5 seconds; the figure holds across that.
+        var history = new SpeedHistory(T0);
+        var torrent = Guid.NewGuid();
+        history.ReportUpload(torrent, 1000, T0.AddSeconds(1));
+        history.ReportUpload(torrent, 1000, T0.AddSeconds(6));
+        var values = history.Read(T0.AddSeconds(16)).UploadBytesPerSecond!;
+        Assert.Equal(new long[] { 0, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 0, 0, 0, 0 }, values);
+        Assert.Equal(6, SpeedHistory.UploadHoldSeconds);
+    }
+
+    [Fact]
+    public void StoppingAnUploadEndsItsShareAndLeavesTheDownloadAlone()
+    {
+        var history = new SpeedHistory(T0);
+        var torrent = Guid.NewGuid();
+        history.Report(torrent, 4000, T0.AddSeconds(1));
+        history.ReportUpload(torrent, 1000, T0.AddSeconds(1));
+        history.UploadStopped(torrent, T0.AddSeconds(2));
+        var read = history.Read(T0.AddSeconds(3));
+        Assert.Equal(new long[] { 0, 1000, 0, 0 }, read.UploadBytesPerSecond!);
+        Assert.Equal(new long[] { 0, 4000, 4000, 4000 }, read.BytesPerSecond);
+        // Stopping one that never sent changes nothing and adds no list.
+        var quiet = new SpeedHistory(T0);
+        quiet.UploadStopped(Guid.NewGuid(), T0.AddSeconds(1));
+        Assert.Null(quiet.Read(T0.AddSeconds(1)).UploadBytesPerSecond);
+    }
+
+    [Fact]
+    public void NonsenseUploadRatesCountAsZero()
+    {
+        var history = new SpeedHistory(T0);
+        history.ReportUpload(Guid.NewGuid(), double.NaN, T0.AddSeconds(1));
+        history.ReportUpload(Guid.NewGuid(), -5, T0.AddSeconds(1));
+        Assert.All(history.Read(T0.AddSeconds(1)).UploadBytesPerSecond!, value => Assert.Equal(0, value));
+    }
 }
 
 /// <summary>UI.R24 through the service.</summary>

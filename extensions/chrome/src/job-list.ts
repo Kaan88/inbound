@@ -16,6 +16,10 @@ export interface JobSummary {
   canPause?: boolean;
   canResume?: boolean;
   isTerminal?: boolean;
+  /** Where it came from, as the app names it ("chromeAuto" and "chromeContextMenu" are this browser's). */
+  source?: string;
+  /** The extension that sent it, as the Host recorded it (a web caller's carries "web:"); absent from an older app. */
+  ownerExtensionId?: string | null;
   /** How the download was added: "startNow", "queue" or "later" (the Host's StartMode). */
   startMode?: string;
   /** The address it was added from. A provider's file has a remote:// one, which is no link. */
@@ -50,9 +54,11 @@ export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
  * EXT.R11: the right-click menu's commands, each on one download, as the native host's allow-list names them. Rename
  * is job.update with a new file name only; reveal goes to this PC only.
  */
-export type JobCommand = "reveal" | "rename" | "redownload";
+export type JobCommand = "reveal" | "rename" | "redownload" | "show";
 
 export const JOB_COMMAND_MESSAGES: Record<JobCommand, string> = {
+  // EXT.R12: the app's main window at this download (host.openUi with its id; an older app opens the window only).
+  show: "host.openUi",
   reveal: "job.reveal",
   rename: "job.update",
   redownload: "job.redownload",
@@ -96,7 +102,7 @@ export function jobCommandOutcome(command: JobCommand, result: any, options: { n
 }
 
 /** What the row menu offers (GitHub #4). "Open file" is not offered: the browser would make the app start a file. */
-export type RowMenuChoice = "reveal" | "copyLink" | "redownload" | "rename" | "remove";
+export type RowMenuChoice = "show" | "reveal" | "copyLink" | "redownload" | "rename" | "remove";
 
 export interface RowMenuEntry {
   id: RowMenuChoice;
@@ -143,9 +149,13 @@ export function showsFolderButton(job: JobSummary): boolean {
   return onThisPc(job) && job.state === "completed";
 }
 
-/** The right-click menu of a row, in order. Folder actions only for this PC. */
+/**
+ * The right-click menu of a row, in order. "Show in app" and the folder only for this PC: a server's downloads have no
+ * app window on this screen (its web page is the row's own click).
+ */
 export function rowMenuEntries(job: JobSummary): RowMenuEntry[] {
   const entries: RowMenuEntry[] = [];
+  if (onThisPc(job)) entries.push({ id: "show", label: "Show in app", enabled: true });
   if (onThisPc(job)) entries.push({ id: "reveal", label: "Open containing folder", enabled: true });
   entries.push({ id: "copyLink", label: "Copy download link", enabled: hasUsableLink(job),
     title: hasUsableLink(job) ? undefined : "This download has no link that can be copied." });

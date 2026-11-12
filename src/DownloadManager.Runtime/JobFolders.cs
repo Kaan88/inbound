@@ -53,6 +53,14 @@ public sealed partial class DownloadManagerService
         lock (_sync) return runtime.Starting || runtime.Runner is { IsCompleted: false };
     }
 
+    /// <summary>Tests only: whether the job's run (or its wind-down after a stop) is still going.</summary>
+    internal bool IsRunningForTesting(Guid id)
+    {
+        JobRuntime? runtime;
+        lock (_sync) _jobs.TryGetValue(id, out runtime);
+        return runtime is not null && IsRunning(runtime);
+    }
+
     /// <summary>Adds folders to the job's record, once each. Call under <see cref="_sync"/>.</summary>
     private static bool RecordMadeFoldersLocked(DownloadJob job, IEnumerable<string> folders)
     {
@@ -225,6 +233,8 @@ public sealed partial class DownloadManagerService
             _settings.DefaultDownloadDirectory,
             _settings.LastDestinationDirectory,
             _settings.CategoryFoldersRoot,
+            _settings.TorrentCategoryFoldersRoot,
+            .. TorrentCategoryFoldersLocked(),
             .. _settings.CategoryFolders.Values,
             .. _settings.CustomCategories.Select(category => category.DestinationDirectory),
             .. _settings.FavoriteFolders.Select(favorite => favorite.Path),
@@ -234,6 +244,17 @@ public sealed partial class DownloadManagerService
         ];
         return named.Select(Normalized).Where(path => path is not null).Select(path => path!)
             .Distinct(PathNames.Comparer).ToList();
+    }
+
+    /// <summary>T14: each category's folder under the torrent folder, kept like the other category folders.</summary>
+    private IEnumerable<string> TorrentCategoryFoldersLocked()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.TorrentCategoryFoldersRoot)) yield break;
+        var ids = TorrentFolderRules.BuiltInFolders.Select(item => item.Id).Concat(_settings.CustomCategories.Select(category => category.Id));
+        foreach (var id in ids)
+        {
+            if (TorrentFolderRules.SubfolderName(_settings, id) is { } name) yield return Path.Combine(_settings.TorrentCategoryFoldersRoot, name);
+        }
     }
 
     /// <summary>The extraction folder the user chose (set by the archive coordinator), kept like the download folders.</summary>

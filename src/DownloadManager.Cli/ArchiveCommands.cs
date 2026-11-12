@@ -19,7 +19,7 @@ internal static class ArchiveCommands
 
     private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
 
-    private static readonly string[] ValueOptions =
+    internal static readonly string[] ValueOptions =
     [
         "--job", "--package", "--file", "--destination", "--folder", "--preserve-folders", "--conflict", "--archives", "--auto-extract",
     ];
@@ -294,15 +294,34 @@ internal static class ArchiveCommands
 
     private static string? Option(string[] args, string name) => OptionValues(args, name).FirstOrDefault();
 
+    /// <summary>The value after each <paramref name="name"/> where a flag goes; another flag's value is skipped.</summary>
     private static IEnumerable<string> OptionValues(string[] args, string name)
     {
         for (var index = 0; index < args.Length - 1; index++)
         {
-            if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase)) yield return args[index + 1];
+            if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return args[index + 1];
+                index++;
+            }
+            else if (ValueOptions.Contains(args[index], StringComparer.OrdinalIgnoreCase))
+            {
+                index++;
+            }
         }
     }
 
-    private static bool HasFlag(string[] args, string name) => args.Contains(name, StringComparer.OrdinalIgnoreCase);
+    /// <summary>Whether the bare flag was given; a value (<c>--folder=--overwrite</c>) is not read as one.</summary>
+    private static bool HasFlag(string[] args, string name)
+    {
+        for (var index = 0; index < args.Length; index++)
+        {
+            if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+            if (ValueOptions.Contains(args[index], StringComparer.OrdinalIgnoreCase)) index++;
+        }
+
+        return false;
+    }
 
     private static bool TryOnOff(string[] args, string name, out bool? value)
     {

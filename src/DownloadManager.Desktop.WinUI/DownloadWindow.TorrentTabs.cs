@@ -36,6 +36,41 @@ public sealed partial class DownloadWindow
     private (string State, bool Seeding)? _notRunningFor;
     private bool _seedBusy;
 
+    // T12: the tabs' headers, built the first time a torrent shows (an ordinary download never needs them).
+    private DetailsTable? _filesTable;
+    private DetailsTable? _peersTable;
+    private DetailsTable? _trackersTable;
+
+    /// <summary>The last list each tab read, to sort again when the pointer leaves a held list or a header is clicked.</summary>
+    private IReadOnlyList<TorrentPeerDto> _lastPeers = [];
+    private IReadOnlyList<TorrentTrackerDto> _lastTrackers = [];
+
+    private DetailsTable FilesTable => _filesTable ??= MakeTable("progress.files", Hidden(ListColumnSets.TorrentFiles(), "priority"), FilesHeader, FilesList, FilesGrid, FilesSideways, FilesCard,
+        () => SortFiles(FilesSortReason.Clicked), () => SortFiles(FilesSortReason.Released));
+
+    private DetailsTable PeersTable => _peersTable ??= MakeTable("progress.peers", ListColumnSets.TorrentPeers(), PeersHeader, PeersList, PeersGrid, PeersSideways, PeersCard,
+        () => { if (_lastPeers.Count > 0) ShowPeers(_lastPeers, sorting: true); });
+
+    private DetailsTable TrackersTable => _trackersTable ??= MakeTable("progress.trackers", Hidden(ListColumnSets.TorrentTrackers(), "next"), TrackersHeader, TrackersList,
+        TrackersGrid, TrackersSideways, TrackersCard, () => { if (_lastTrackers.Count > 0) ShowTrackers(_lastTrackers, sorting: true); });
+
+    /// <summary>A column that shows only where the Host has T3's controls (Priority, Next announce) starts hidden.</summary>
+    private static ListColumnLayout Hidden(ListColumnLayout layout, string key)
+    {
+        layout.SetVisible(key, false);
+        return layout;
+    }
+
+    /// <param name="sorted">After a header click.</param>
+    /// <param name="released">When a held list lets go with a re-sort waiting; <paramref name="sorted"/> when not given.</param>
+    private DetailsTable MakeTable(string name, ListColumnLayout layout, Grid header, ListView list, Grid listGrid, ScrollViewer sideways,
+        FrameworkElement card, Action sorted, Action? released = null)
+    {
+        var table = new DetailsTable(name, layout, header, list, listGrid, sideways, card, Root, sorted);
+        table.Released += released ?? sorted;
+        return table;
+    }
+
     private void InitializeTorrentTabs()
     {
         PeersList.ItemsSource = _peerRows;
@@ -79,6 +114,14 @@ public sealed partial class DownloadWindow
     {
         var shown = job.Torrent is not null && TorrentsOffered ? Visibility.Visible : Visibility.Collapsed;
         PeersTab.Visibility = TrackersTab.Visibility = PiecesTab.Visibility = shown;
+        if (job.Torrent is not null)
+        {
+            // Built now, so their headers (and the widths kept for them) are there before a tab first shows.
+            _ = FilesTable;
+            _ = PeersTable;
+            _ = TrackersTable;
+        }
+
         if (shown == Visibility.Collapsed && (Tabs.SelectedItem == PeersTab || Tabs.SelectedItem == TrackersTab || Tabs.SelectedItem == PiecesTab))
             Tabs.SelectedItem = OverviewTab;
         if (job.Torrent is null) return;
@@ -133,11 +176,13 @@ public sealed partial class DownloadWindow
         switch (tab)
         {
             case TorrentDetailsTab.Peers:
+                _lastPeers = [];
                 _peerRows.Clear();
                 PeersTab.Text = "Peers";
                 PeersNote.Text = words;
                 break;
             case TorrentDetailsTab.Trackers:
+                _lastTrackers = [];
                 _trackerRows.Clear();
                 TrackersTab.Text = "Trackers";
                 TrackersNote.Text = words;
@@ -242,8 +287,10 @@ public sealed partial class DownloadWindow
         return true;
     }
 
-    private void ShowPeers(IReadOnlyList<TorrentPeerDto> peers)
+    /// <param name="sorting">A header was clicked (or a held list let go): the new order shows even under the pointer.</param>
+    private void ShowPeers(IReadOnlyList<TorrentPeerDto> peers, bool sorting = false)
     {
+        _lastPeers = peers;
         string Key(TorrentPeerDto peer) => TorrentDetailsRules.PeerAddress(peer.Address, peer.Port);
         // A torrent open for days meets many peers: the numbers start again rather than grow without end.
         if (_peerNumbers.Count > 5000) _peerNumbers.Clear();
@@ -253,19 +300,41 @@ public sealed partial class DownloadWindow
             if (!_peerNumbers.ContainsKey(key)) _peerNumbers[key] = _peerNumbers.Count + 1;
         }
 
-        // The busiest first; peers that move nothing keep the order they came in.
-        var sorted = peers.OrderByDescending(peer => peer.DownloadRate + peer.UploadRate).ThenBy(peer => _peerNumbers[Key(peer)]).ToList();
+        // The busiest first (peers that move nothing keep the order they came in), or by the column clicked (T12). Under
+        // the pointer the rows keep their places and the new order waits until it leaves.
+        var table = PeersTable;
+        var sorted = TorrentDetailsSort.Peers(peers, peer => _peerNumbers[Key(peer)], table.SortKey, table.SortAscending).ToList();
+        if (!sorting && table.Held)
+        {
+            var held = DetailsSort.Held(_peerRows.Select(row => row.Key).ToList(), sorted, Key);
+            table.ResortPending = !held.Select(Key).SequenceEqual(sorted.Select(Key));
+            sorted = held;
+        }
+
         DetailsRowSync.Sync(_peerRows, sorted, Key, row => row.Key, () => new TorrentPeerRow(),
             (row, peer, _) => row.Apply(Key(peer), _peerNumbers[Key(peer)], peer));
         PeersTab.Text = TorrentDetailsRules.TabTitle("Peers", peers.Count);
         PeersNote.Text = peers.Count == 0 ? "No peers are connected right now." : PeersNoteText;
     }
 
-    private void ShowTrackers(IReadOnlyList<TorrentTrackerDto> trackers)
+    private void ShowTrackers(IReadOnlyList<TorrentTrackerDto> trackers, bool sorting = false)
     {
-        var ordered = trackers.OrderBy(tracker => tracker.Tier).ToList();
-        DetailsRowSync.Sync(_trackerRows, ordered, tracker => tracker.Url, row => row.Key, () => new TorrentTrackerRow(),
-            (row, tracker, _) => row.Apply(tracker.Url, tracker, withNext: Controls));
+        _lastTrackers = trackers;
+        // By tier, or by the column clicked (T12); held under the pointer as the peers are.
+        var table = TrackersTable;
+        // A tracker listed in two tiers is two rows: each is known by its address and the time it comes (TrackerKeys).
+        var keys = TorrentDetailsSort.TrackerKeys(trackers);
+        string Key(TorrentTrackerDto tracker) => keys[tracker];
+        var ordered = TorrentDetailsSort.Trackers(trackers, table.SortKey, table.SortAscending).ToList();
+        if (!sorting && table.Held)
+        {
+            var held = DetailsSort.Held(_trackerRows.Select(row => row.Key).ToList(), ordered, Key);
+            table.ResortPending = !held.Select(Key).SequenceEqual(ordered.Select(Key));
+            ordered = held;
+        }
+
+        DetailsRowSync.Sync(_trackerRows, ordered, Key, row => row.Key, () => new TorrentTrackerRow(),
+            (row, tracker, _) => row.Apply(Key(tracker), tracker, withNext: Controls));
         TrackersTab.Text = TorrentDetailsRules.TabTitle("Trackers", trackers.Count);
         TrackersNote.Text = trackers.Count == 0 ? "This torrent has no trackers: it finds peers through the DHT and other peers." : TrackersNoteText;
     }

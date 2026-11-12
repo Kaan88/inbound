@@ -1,6 +1,7 @@
 <script lang="ts">
   import { copyText } from '../lib/clipboard';
   import { tick } from 'svelte';
+  import CacheBadge from '../components/CacheBadge.svelte';
   import Confirm from '../components/Confirm.svelte';
   import ContextMenu, { type MenuItem } from '../components/ContextMenu.svelte';
   import Dialog from '../components/Dialog.svelte';
@@ -14,6 +15,7 @@
     needsTheRest, providerNameOf, restoreChoice, sortItems, type FileTree, type ItemAction, type ItemSortKey,
   } from '../lib/remote';
   import { store } from '../lib/store.svelte';
+  import { isCachedWords } from '../lib/torrentIntake';
   import type { Hoster, RemoteAddResult, RemoteFile, RemoteItem } from '../lib/types';
 
   // My <provider>: what is in the account (one tab per kind of item the provider reports), and the file hosters it can
@@ -399,7 +401,7 @@
         {#each kinds as kind (kind)}
           <button role="tab" aria-selected={current === kind} class="-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] {current === kind ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" onclick={() => { tab = kind; selectedId = null; status = ''; }}>{kindHeading(kind)}</button>
         {/each}
-        <button role="tab" aria-selected={current === 'hosters'} class="-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] {current === 'hosters' ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" onclick={() => { tab = 'hosters'; selectedId = null; status = ''; }}>Hosters</button>
+        <button role="tab" aria-selected={current === 'hosters'} class="-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] {current === 'hosters' ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" title="Hosters are file-hosting sites. This lists the ones whose links {name} can download for you, and whether each is up." onclick={() => { tab = 'hosters'; selectedId = null; status = ''; }}>Hosters</button>
       </div>
 
       {#if current !== 'hosters'}
@@ -483,7 +485,12 @@
 {#if dialogOpen && selected && selectedView}
   <Dialog title={selectedView.name} wide onclose={closeDialog}>
     <p class="text-[12.5px] text-muted">{selectedView.details}</p>
-    <p class="mb-2 text-[12.5px] {toneClass[selectedView.tone]}">{selectedView.status}</p>
+    {#if isCachedWords(selectedView.status)}
+      <!-- T9 W3: "Cached on TorBox" is the same filled badge as in the torrent dialog. -->
+      <div class="mb-2"><CacheBadge badge={{ kind: 'cached', text: selectedView.status, note: '', tip: null }} /></div>
+    {:else}
+      <p class="mb-2 text-[12.5px] {toneClass[selectedView.tone]}">{selectedView.status}</p>
+    {/if}
     {#if selectedView.problem}<p class="mb-2 text-[12.5px] text-error" role="alert">{selectedView.problem}</p>{/if}
 
     {#if filesOf?.reading}

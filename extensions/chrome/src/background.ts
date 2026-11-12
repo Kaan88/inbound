@@ -13,6 +13,8 @@ import {
 } from "./capture-rules";
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
+import { DownloadWatch, IDLE, drawKey, iconTitle } from "./toolbar-status";
+import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages } from "./toolbar-icon";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
   initialTarget, isNativeHostMissing, pairWithServer, pairingName, readPairing, refusalText, serverDisplayName, type Envelope, type ServerPairing,
@@ -89,8 +91,17 @@ let settingsLoaded = false;
 let settingsLoadPromise: Promise<void> | null = null;
 let pauseUntil = 0;
 let lastJobs = new Map<string, JobSummary>();
+/** EXT.R12: the downloads sent from the browser that the toolbar icon follows, and what it last drew. */
+const watch = new DownloadWatch(chrome.runtime.id);
+// Unset at start: the browser keeps an icon set by an earlier worker, so the first state is always drawn (the plain
+// icon, if nothing is going on), and a ring left behind by that worker goes.
+let drawnKey: string | null = null;
+let flashing = false;
+/** A finish is being shown (popup or flash): the icon is drawn once that is decided, not before. */
+let finishing = false;
+let paintQueue: Promise<void> = Promise.resolve();
 // This PC: the desktop app through native messaging. Its shared connection also brings the app's job events.
-const native = new NativeTransport(NATIVE_HOST, handleNativeEvent);
+const native = new NativeTransport(NATIVE_HOST, handleNativeEvent, chrome.runtime, appEventsStopped);
 // The user's own Inbound server, once paired from Settings (transport.ts); null otherwise.
 let server: ServerTransport | null = null;
 // EXT.R7: handoff ids waiting in the popup, oldest first. Kept in session storage too, for a worker restart.
@@ -232,6 +243,11 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(() => { /* a ping: receiving it is the point */ });
   port.onDisconnect.addListener(() => { connectedHandoffs.delete(id); void handoffWindowClosed(id); });
 });
+// Review 3 N1: registered here, so the end of a download started again in the browser wakes an idle worker. Any
+// other change is dropped at once, and an end is looked up in session storage (watchRestart).
+chrome.downloads.onChanged?.addListener((delta) => {
+  void restartChanged(delta).catch(() => undefined);
+});
 chrome.runtime.onInstalled.addListener((details) => {
   void installMenus();
   if (details.reason === "install") {
@@ -248,6 +264,8 @@ void initialize();
 
 async function initialize(): Promise<void> {
   await ensureSettingsLoaded();
+  // EXT.R12: a ring an earlier worker drew outlives it; this worker follows nothing yet, so the plain icon comes back.
+  showDownloadState();
   await installMenus();
 }
 
@@ -356,6 +374,8 @@ function updateBadge(): void {
   // a request really failed: a worker that just started has not asked yet, and that is not "down".
   const serverDown = !off && !paused && automaticTarget(settings.defaultTarget, server !== null) === "server" &&
     server !== null && server.down;
+  // EXT.R12: while downloads sent from the browser are under way (or one failed or is paused), the tooltip says so.
+  const downloads = iconTitle(watch.state());
   try {
     void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : "" })
       ?.catch?.(() => undefined);
@@ -365,6 +385,8 @@ function updateBadge(): void {
     void action.setTitle?.({
       title: waiting > 0
         ? `Inbound Download Manager: ${waiting === 1 ? "a download is" : `${waiting} downloads are`} waiting for a folder`
+        : downloads
+        ? downloads
         : off
         ? "Inbound Download Manager: automatic sending is off"
         : paused
@@ -453,6 +475,8 @@ async function installMenus(): Promise<void> {
 }
 
 async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab): Promise<void> {
+  // A click can wake the worker: the user's choices (ask or not, target, folder, app windows) must be in first.
+  await ensureSettingsLoaded();
   const url = info.linkUrl ?? info.srcUrl;
   if (!url) {
     return;
@@ -480,6 +504,12 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     createdAt: Date.now(),
     cookieContext: await cookieContextForFrame(tab?.id, info.frameId ?? 0),
   };
+  // EXT.R12: with "Save to the app's default folder" the link goes straight to the app, with the page's cookies, and
+  // nothing opens: no window here, no popup, no app window. "Ask where to save" still asks in the window.
+  if (settings.destinationMode !== "ask") {
+    await sendLinkStraight(pending, info.linkUrl ? "link" : "file");
+    return;
+  }
   // Entries of earlier right-click windows that were closed with their X go now.
   await forgetClosedHandoffWindows().catch(() => undefined);
   pendingHandoffs.set(id, pending);
@@ -490,6 +520,44 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     width: 520,
     height: 680,
   });
+}
+
+/**
+ * EXT.R12: a right-clicked link sent to where automatic downloads go (This PC unless the popup's switch says the
+ * server), to the same default folder, without a window. No file name is sent: the app takes the site's own name
+ * (Content-Disposition) and falls back to the address, so a link such as get.php?id=5 is not saved as get.php. The
+ * address's name only labels the notification. The user hears how it went from a notification, as for automatic sends.
+ */
+async function sendLinkStraight(pending: PendingHandoff, kind: "link" | "file"): Promise<void> {
+  const transport = transportFor(automaticTarget(settings.defaultTarget, server !== null));
+  const where = targetWords(transport);
+  const shown = inferFileName(pending.url, kind);
+  try {
+    const ack = await requestHandoff(transport, {
+      requestId: pending.id,
+      extensionId: chrome.runtime.id,
+      url: pending.url,
+      pageUrl: pending.pageUrl,
+      referrer: pending.referrer,
+      userAgent: pending.userAgent,
+      startMode: settings.startMode,
+      isAutoIntercept: false,
+      headers: await browserCookieHeaders(pending.url, pending.cookieContext),
+      destinationDirectory: automaticDestination(transport),
+    });
+    if (ack?.accepted) {
+      notify(ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`, shown);
+      tellFolderReplaced(ack, shown);
+      return;
+    }
+    const refusal = refusalText(ack, `The ${where.thing} refused it.`);
+    setLastError(transport, refusal);
+    notify(`${where.subject} did not accept the download`, `${shown}: ${refusal}`, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setLastError(transport, message);
+    notify(where.unavailable, `${shown}: ${errorFor(transport, message)}`, true);
+  }
 }
 
 /**
@@ -661,19 +729,26 @@ function responseWindowConnectMs(): number {
 
 /** How many downloads one page's responses may hand over per minute (audit 3 L12). */
 const RESPONSE_CATCHES_PER_MINUTE = 10;
+/**
+ * How many downloads all pages' responses together may hand over per minute (review 3 N2): frames from many
+ * subdomains each have their own origin, so the per-page count alone does not hold them back.
+ */
+const RESPONSE_CATCHES_PER_MINUTE_IN_ALL = 30;
 /** Page origin to the times of its recent catches. */
 const responseCatches = new Map<string, number[]>();
 
-/** Counts one catch for the page; false once the page has had its share this minute. */
+/** Counts one catch for the page; false once the page, or all pages together, had their share this minute. */
 function takeResponseCatch(pageUrl: string, now = Date.now()): boolean {
   let origin: string;
   try { origin = new URL(pageUrl).origin; } catch { origin = pageUrl; }
+  let inAll = 0;
   for (const [key, times] of responseCatches) {
     const recent = times.filter((time) => now - time < 60_000);
     if (recent.length) responseCatches.set(key, recent); else responseCatches.delete(key);
+    inAll += recent.length;
   }
   const times = responseCatches.get(origin) ?? [];
-  if (times.length >= RESPONSE_CATCHES_PER_MINUTE) return false;
+  if (times.length >= RESPONSE_CATCHES_PER_MINUTE || inAll >= RESPONSE_CATCHES_PER_MINUTE_IN_ALL) return false;
   times.push(now);
   responseCatches.set(origin, times);
   return true;
@@ -726,9 +801,9 @@ async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersD
 
   // Audit 3 L12: a page can answer many frames as attachments at once, and each would go to the app with the
   // site's cookies before Firefox's own "allow multiple downloads" question. Past a few a minute from one page,
-  // the rest stay with Firefox, which asks.
+  // the rest stay with Firefox, which asks. All pages together have a cap too (review 3 N2).
   if (!takeResponseCatch(referrer ?? url)) {
-    await noteLeftInBrowser(fileName, "This page started many downloads at once; the rest stay in the browser.", true);
+    await noteLeftInBrowser(fileName, "Too many downloads started at once; the rest stay in the browser.", true);
     settleFromResponse(url);
     return proceed;
   }
@@ -932,7 +1007,7 @@ async function startAgainInBrowser(pending: PendingHandoff, where: Record<string
   for (const options of attempts) {
     try {
       const downloadId = await chrome.downloads.download(options as unknown as chrome.downloads.DownloadOptions);
-      if (typeof downloadId === "number") watchRestart(downloadId, fileName, pending.mimeType);
+      if (typeof downloadId === "number") await watchRestart(downloadId, fileName, pending.mimeType);
       return;
     } catch {
       // The next, plainer attempt.
@@ -942,34 +1017,62 @@ async function startAgainInBrowser(pending: PendingHandoff, where: Record<string
   await noteLeftInBrowser(fileName, failedText, false);
 }
 
-/** Downloads started again by startAgainInBrowser that have not finished yet: browser download id to what it is. */
-const restartWatches = new Map<number, { fileName: string; mimeType?: string }>();
-let watchingRestarts = false;
+/**
+ * Downloads started again by startAgainInBrowser that have not ended yet, one session-storage entry per browser
+ * download id. Kept there rather than in memory, so a worker or event page that went idle before the download
+ * ended still says how it ended (review 3 N1).
+ */
+const RESTART_WATCH_PREFIX = "restartWatch.";
+/** Ends being dealt with, so a second event for the same download says nothing more. */
+const endingRestarts = new Set<number>();
+/**
+ * The same entries in memory, filled in the same step the download id arrives, so a restart the site refuses at
+ * once is still said when its end comes before the session-storage write lands. Session storage covers a worker
+ * that went idle in between.
+ */
+const watchedRestarts = new Map<number, RestartWatch>();
 
-function watchRestart(downloadId: number, fileName: string, mimeType: string | undefined): void {
-  restartWatches.set(downloadId, { fileName, mimeType });
-  // Only once something was started again, so the worker is not woken for every download's progress otherwise.
-  if (watchingRestarts || !chrome.downloads.onChanged) return;
-  watchingRestarts = true;
-  chrome.downloads.onChanged.addListener((delta) => {
-    const watched = restartWatches.get(delta.id);
-    if (watched === undefined) return;
-    const state = delta.state?.current;
-    if (state === "complete") {
-      restartWatches.delete(delta.id);
-      // The site may answer the second request with its error page, which the browser saves under the file's name.
-      void (async () => {
-        const [saved] = await chrome.downloads.search({ id: delta.id }).catch(() => []);
-        if (restartSavedWebPage(watched.mimeType, saved?.mime)) {
-          await noteLeftInBrowser(watched.fileName, RESTART_SAVED_WEB_PAGE_TEXT, false);
-        }
-      })();
-    } else if (state === "interrupted") {
-      restartWatches.delete(delta.id);
-      const text = restartInterruptedText(delta.error?.current);
-      if (text) void noteLeftInBrowser(watched.fileName, text, false);
+interface RestartWatch { fileName: string; mimeType?: string }
+
+async function watchRestart(downloadId: number, fileName: string, mimeType: string | undefined): Promise<void> {
+  const watched: RestartWatch = mimeType ? { fileName, mimeType } : { fileName };
+  watchedRestarts.set(downloadId, watched);
+  const key = `${RESTART_WATCH_PREFIX}${downloadId}`;
+  await chrome.storage.session.set({ [key]: watched }).catch(() => undefined);
+  // Its end was already said from memory while this write was on its way: drop the entry it just left behind.
+  if (!watchedRestarts.has(downloadId)) await chrome.storage.session.remove(key).catch(() => undefined);
+}
+
+/** A browser download changed: one started again that just ended badly, or saved a web page, is said. */
+async function restartChanged(delta: chrome.downloads.DownloadDelta): Promise<void> {
+  const state = delta.state?.current;
+  // Only an end matters, and only then is session storage read.
+  if (state !== "complete" && state !== "interrupted") return;
+  if (endingRestarts.has(delta.id)) return;
+  endingRestarts.add(delta.id);
+  try {
+    const key = `${RESTART_WATCH_PREFIX}${delta.id}`;
+    let watched = watchedRestarts.get(delta.id);
+    watchedRestarts.delete(delta.id);
+    if (!watched) {
+      const stored = await chrome.storage.session.get(key).catch(() => ({} as Record<string, unknown>));
+      watched = stored[key] as RestartWatch | undefined;
     }
-  });
+    if (!watched || typeof watched.fileName !== "string") return;
+    await chrome.storage.session.remove(key).catch(() => undefined);
+    if (state === "complete") {
+      // The site may answer the second request with its error page, which the browser saves under the file's name.
+      const [saved] = await chrome.downloads.search({ id: delta.id }).catch(() => []);
+      if (restartSavedWebPage(watched.mimeType, saved?.mime)) {
+        await noteLeftInBrowser(watched.fileName, RESTART_SAVED_WEB_PAGE_TEXT, false);
+      }
+    } else {
+      const text = restartInterruptedText(delta.error?.current);
+      if (text) await noteLeftInBrowser(watched.fileName, text, false);
+    }
+  } finally {
+    endingRestarts.delete(delta.id);
+  }
 }
 
 /** The folder window's port closed: a window closed without a choice leaves the download in the browser. */
@@ -1339,10 +1442,12 @@ function errorFor(transport: Transport, message: string): string {
   return transport.target === "server" ? message : readableError(message);
 }
 
-async function requestHandoff(transport: Transport, payload: Record<string, unknown>): Promise<any> {
-  if ([payload.url, payload.finalUrl, payload.pageUrl].some(isUnsupportedUrl)) {
+async function requestHandoff(transport: Transport, sent: Record<string, unknown>): Promise<any> {
+  if ([sent.url, sent.finalUrl, sent.pageUrl].some(isUnsupportedUrl)) {
     throw new Error(UNSUPPORTED_SITE_MESSAGE);
   }
+  // EXT.R12: the app opens no window for it unless Settings asks for them; an older app ignores this.
+  const payload = { ...sent, quietWindows: !settings.openAppWindows };
 
   if (transport.target === "server") {
     // One HTTP request; the request id makes a repeat harmless, but nothing here repeats it.
@@ -1376,8 +1481,13 @@ async function pickNativeFolder(initialPath?: string): Promise<any> {
 
 /** Messages on the desktop app's shared connection that answer no request. */
 function handleNativeEvent(message: Envelope): void {
+  if (message.type === "host.exiting") {
+    appEventsStopped();
+    return;
+  }
   if (message.type === "job.event") {
     const event = message.payload as { job?: JobSummary; eventType?: string };
+    followJob(event.job, event.eventType);
     if (event.job?.id) {
       lastJobs.set(event.job.id, event.job);
       if (lastJobs.size > 20) {
@@ -1387,6 +1497,116 @@ function handleNativeEvent(message: Envelope): void {
         }
       }
     }
+  }
+}
+
+// ---- EXT.R12: the toolbar icon follows the downloads sent from the browser ----------------------------------------
+// Only from the app's job events on the shared connection (and the popup's list), so nothing runs while nothing
+// happens: no timer, no polling. The icon is drawn again only when what it shows changes (drawKey).
+
+/** Blinks of the finished flash, each on and off; then it stops. */
+const FLASH_BLINKS = 3;
+
+function flashMs(): number {
+  const override = (globalThis as { __inboundFlashMs?: unknown }).__inboundFlashMs;
+  return typeof override === "number" ? override : 400;
+}
+
+function followJob(job: JobSummary | undefined, eventType?: string): void {
+  if (!job) return;
+  const change = watch.update(job, eventType);
+  if (change.finished && !finishing) {
+    finishing = true;
+    void downloadFinished();
+  }
+  showDownloadState();
+}
+
+/** The app quit or its connection closed: no more events will say how running downloads end, so the ring goes. */
+function appEventsStopped(): void {
+  watch.forgetRunning();
+  showDownloadState();
+}
+
+/** The icon and its tooltip for what the followed downloads are doing, when that changed. */
+function showDownloadState(): void {
+  const state = watch.state();
+  const key = drawKey(state);
+  if (key === drawnKey) return;
+  drawnKey = key;
+  updateBadge();
+  // A finish being shown paints the state itself when it is done.
+  if (!flashing && !finishing) void paintRing(ringFor(state));
+}
+
+function paintRing(ring: { color: string; fill: number } | null): Promise<void> {
+  paintQueue = paintQueue.then(() => drawIcon(ring)).catch(() => undefined);
+  return paintQueue;
+}
+
+async function drawIcon(ring: { color: string; fill: number } | null): Promise<void> {
+  const action = (chrome as { action?: typeof chrome.action }).action;
+  if (typeof action?.setIcon !== "function") return;
+  if (!ring) {
+    await action.setIcon({ path: { ...DEFAULT_ICON_PATHS } });
+    return;
+  }
+  const images = await ringImages(ring);
+  if (images) await action.setIcon({ imageData: images as unknown as chrome.action.TabIconDetails["imageData"] });
+}
+
+/** EXT.R12: a download sent from the browser finished: the popup opens, the icon flashes, or nothing (Settings). */
+async function downloadFinished(): Promise<void> {
+  try {
+    await ensureSettingsLoaded();
+    if (settings.onFinish === "nothing") return;
+    if (settings.onFinish === "popup" && await openPopupForFinish()) return;
+    await flashIcon();
+  } finally {
+    finishing = false;
+    await paintRing(ringFor(watch.state()));
+  }
+}
+
+/**
+ * Opens the toolbar popup, where the finished download is at the top. Chrome and Edge allow it from 127 without a
+ * click; Firefox and older Chrome refuse it, and the icon flashes instead. Never while the popup is open or opening.
+ */
+async function openPopupForFinish(): Promise<boolean> {
+  if (askPorts.size > 0) return true;
+  if (popupOpening) return false;
+  const action = (chrome as { action?: typeof chrome.action }).action;
+  if (typeof action?.openPopup !== "function") return false;
+  try {
+    const front = await focusedNormalWindow();
+    if (!front) return false;
+    await action.openPopup({ windowId: front.id });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    (timer as { unref?: () => void }).unref?.();
+  });
+}
+
+/** A few blinks of a full green ring; the caller then draws the current state. */
+async function flashIcon(): Promise<void> {
+  if (flashing) return;
+  flashing = true;
+  try {
+    for (let blink = 0; blink < FLASH_BLINKS; blink++) {
+      await paintRing({ color: RING_COLORS.downloading, fill: 1 });
+      await pause(flashMs());
+      await paintRing(null);
+      await pause(flashMs());
+    }
+  } finally {
+    flashing = false;
   }
 }
 
@@ -1887,7 +2107,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // than a second one queued behind it, and a slow answer never retries, since a retry drops the shared
       // connection an automatic handoff may be waiting on.
       jobsInFlight ??= jobsAnswer().finally(() => { jobsInFlight = null; });
-      return await jobsInFlight;
+      const answer = await jobsInFlight;
+      // EXT.R12: the popup shows the list, so a failure or a pause has been seen and the icon stops showing it.
+      if (fromPage(sender, "popup.html")) watch.acknowledge();
+      showDownloadState();
+      return answer;
     }
 
     case "dm.jobAction": {
@@ -1923,6 +2147,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const jobId = typeof message.jobId === "string" ? message.jobId : "";
       if (!type || !/^[0-9a-f-]{32,36}$/i.test(jobId)) return { ok: false, error: "Unknown download action." };
       let payload: Record<string, unknown> = { jobId };
+      // EXT.R12: "Show in app" is the desktop app's main window at this download; a server's downloads have no app here.
+      if (command === "show") {
+        if (chosenTarget(message.target) === "server") return { ok: false, error: "This download is on the server. Open the server's page to see it." };
+        payload = { action: "", jobId };
+      }
       if (command === "rename") {
         const newFileName = typeof message.newFileName === "string" ? message.newFileName.trim() : "";
         if (!newFileName) return { ok: false, error: "Type a file name." };
@@ -1964,6 +2193,7 @@ async function jobsAnswer(): Promise<unknown> {
       const snapshot = await sendNative("jobs.query", query, 6000, 0);
       const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
       lastJobs = new Map(jobs.map((job) => [job.id, job]));
+      watch.take(jobs);
       return { ok: true, jobs };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };

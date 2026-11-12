@@ -552,7 +552,19 @@ public sealed partial class TorrentDownloadEngine : ITorrentDownloadEngine, IAsy
             // M16: the intent goes to disk before the renames, so a kill after them (before FinalizedAsync, or before the
             // resume data that knows the new names) is finished at the next start rather than downloaded again.
             var marked = !info.Finalized && _sink is not null;
-            if (marked) await _sink!.FinalizingAsync(jobId, rootName, true, CancellationToken.None).ConfigureAwait(false);
+            if (marked)
+            {
+                try
+                {
+                    await _sink!.FinalizingAsync(jobId, rootName, true, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or OperationCanceledException)
+                {
+                    // Review 2 L6: without the mark on disk nothing is renamed; the files keep their part names.
+                    await PauseAndRemoveAsync(session, jobId).ConfigureAwait(false);
+                    return Failed(job, FailureKind.Permission, $"The download could not be saved before its files were given their names: {e.Message}", retryable: true, wanted, wanted);
+                }
+            }
             try
             {
                 await session.SendAsync("finalize", finalize).ConfigureAwait(false);

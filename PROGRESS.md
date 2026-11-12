@@ -10,6 +10,313 @@
 - **Where it is written down:** the addendum of `docs/plans/gui-toolkits.md`; ROADMAP D7.
 - **Next, when the owner is on Linux (owner, 2026-11-12):** try the Linux window on Uno's native Wayland host, https://github.com/unoplatform/uno/pull/25503. The steps and what to check are in ROADMAP D7.W. Not started.
 
+### T10–T13 torrent links, Progress Details start time, list sorting, torrent window sizes (owner, 2026-11-12)
+
+Owner, during T7–T9: "also propose how extension should and/or application should handle torrent download links.
+right now it downloads them like any other file and it's awkward. / also, why is progress details window a separate
+process? it opens noticeably later than anything else in the app. / also fix sorts and column resizing in other
+windows where they exist. / and resize torrent related sub windows so that buttons on bottom fit window." Status:
+**in progress** (ROADMAP T10–T13).
+
+- T11, why a separate process: the main window opens Progress Details by starting the app's exe again with `--job <id>`
+  (`MainWindow.OpenDownloadWindow`), and the Host does the same when a download starts (`HostController`), because the
+  Host has no window of its own and, with "Closing the window ends it" on by default (PERF.5), there is often no main
+  window process to ask. Each new process starts .NET and WinUI again and connects to the Host for a snapshot, which
+  measured 0.3 to 0.7 s for the main window (PERF.5 numbers); the dialogs of the main window open inside it at once.
+  It also keeps a crash in one window from closing the others. Proposed change in this section below.
+- Proposals written (two agents each: a draft, then a reviewer that checked every claim against the code):
+  `docs/plans/t10-torrent-links.md` (recommends A: the extension stays as it is; when a finished download is a
+  .torrent, the Host offers it in the usual torrent dialog and removes the stray file and row once added) and
+  `docs/plans/t11-progress-window.md` (open Progress Details and package windows from the list inside the main
+  window's process, like Scheduler; Host-started windows stay separate processes). Owner, 2026-11-12: "do these
+  both".
+- T12/T13 built (worktree, two reviewers, fixes, merged): Progress Details' Files, Peers and Trackers lists sort by a
+  header click and resize like the main list, keep sort and selection through updates, hold their rows while the
+  pointer is over them, and scroll sideways rather than clip; widths and sort are kept in `list-layout.json` (each
+  Progress Details window is its own process, so ui-state can't hold them). Header clicks cycle usual direction,
+  reversed, the list's own order. The other windows had no sortable headers to fix (My provider already did this).
+  Window sizes come from one rule (DIPs times DPI, inside the work area); Progress Details' buttons wrap rather than
+  clip; the file-choice, provider add and torrent add dialogs scroll their content so the buttons stay. Web UI: the
+  Peers and Trackers tables sort the same way. Questions for the owner: keep `list-layout.json`, and keep the
+  three-click cycle?
+- Full checks after merging T7–T9 and T12/T13 (2026-11-12, `3fde5b2` minus the docs commit): solution build 0 errors
+  apart from TorrentWorkerProbe (its exe was running as the walk's seeder); Uno linux-x64 0 errors; Core 1841,
+  Engine 229, Archives 401, Containers 188, TorBox 323, Torrents 121, Server 187 all passed; Integration 1768 passed,
+  2 skipped, 1 failed: `AFolderNamedInTheSettingsInAnyFormStays(share)`, the failure recorded before the audit (this
+  PC has no such share). Web svelte-check 0 errors, vitest 587; extension tsc clean, npm test 311 passed.
+
+### Requests of 2026-11-12, evening (owner relayed a user's list)
+
+Owner: "do these both" (T10 option A, T11), "also user requested changes, check. I don't agree with shift+delete
+defaulting to delete, but make it possible to use keyboard arrow to go to delete. also with torrent files, context
+menu has this double line under open folder". The user's list (screenshot): Explorer windows opened by folder select
+and Show in folder stay in the background (UI.B24); Delete/Shift+Delete then Enter cancels, they want Delete as the
+default (owner: no, arrow keys instead, UI.R36); the bottom version text should say latest or that an update is
+available, and flag a connected server or app not on the latest (UI.R37); the extension should behave like the
+browser's own downloads: keep focus in the browser, icon shows progress/paused/error, popup opens or the icon
+flashes on finish (options), no app window or completion popup for extension downloads, popup right-click "Show in
+app" with a brief highlight, the browser's right-click download sends straight to this PC's app without opening the
+popup (EXT.R12). Torrent rows' right-click menu shows two separators under Open Folder (UI.B25). Status: in progress.
+- Built (2026-11-12, five worktree tracks from `3fde5b2`, each reviewed by two reviewers and fixed, merged into
+  `torrent-t1` at `752e7a9`; conflicts in `App.xaml.cs`, `HostController.cs`, `LinuxHostPlatform.cs`,
+  `DownloadWindows.cs` and the Core test project resolved by keeping both sides):
+  - T10 (option A): a finished download that looks like a torrent (type `application/x-bittorrent`, or a `.torrent`
+    name or address) and parses under the 16 MB cap is marked `TorrentFileReady`; it opens no progress or completion
+    window, and the Host launches the window's torrent dialog for it (completions within a second share one launch;
+    the wait starts only after such a completion). Adding it from there (This PC by `FromJobId`, or the provider)
+    removes the download and its file; a duplicate removes the copy; cancel leaves the row with "Open as Torrent…".
+    Torrents off and no account: as before. Web UI the same. The extension is unchanged (its guard test passes) and
+    the browser bridge never sees the new field.
+  - T11: Progress Details and package windows opened from the list, a package or the main window's completion burst
+    are built in the main window's process (one per download and server), each with its own Host connection; a
+    window the Host starts stays its own process, and either finds the other by the download's named event. With
+    "Closing the window ends it" on, closing the main window while such windows are open hides it until the last
+    closes. A "First frame" ui-trace line in Progress Details measures open time. Not yet timed.
+  - UI.B24: every Explorer or file start goes through `ShellActions.Start`, which allows the started process to take
+    the foreground; the Host's folder dialog (extension "Choose…") gets an invisible topmost owner window.
+  - UI.R36: in every dialog the arrow keys move between its buttons (Cancel stays the default); arrows inside text
+    boxes, lists and combo boxes, or with a modifier, are left alone. Web UI dialogs already did this.
+  - UI.B25: menu separators collapse (never two in a row, at the top or at the bottom), for every row kind.
+  - UI.R37: the status bar reads "0.7.0 (latest)" or "0.7.0 · update available (0.7.1)" from the last update check
+    (no new check), plain "0.7.0" when unknown; a shown server older than the latest gets "(not latest)" next to its
+    name, also in Tasks > Show Downloads Of. New optional `LatestVersion` and an `update.latest` event.
+  - EXT.R12 (extension 0.6.3, not uploaded): handoffs carry `quietWindows`, so a browser download opens no app window
+    and gets no app completion notice (extension option "Open the app's windows for browser downloads", off); the
+    toolbar icon shows a ring for downloads sent from this browser (green progress, orange paused, red failed); on
+    finish the icon flashes or the popup opens (option); the popup's right-click "Show in app" opens the main window
+    at the download and highlights it; the browser's right-click send goes straight to the app.
+  - Open from the tracks: none of this was tried in the running app or a real browser yet; on another server (D9) the
+    desktop torrent dialog still lets an "Open as Torrent" line switch to the provider, which then fails.
+- Owner, same evening, with a screen recording (`Screen Recording 2026-11-12 143048.mp4`, adding the Ubuntu torrent):
+  "have torrent category folders separate from normal category folder, both should be possible to disable." (T14)
+  and "issue with graph when adding torrents. first couple seconds it expands and drops a couple times when the graph
+  is completely zero. can you see it?" (UI.B26). Seen in frames at 5 per second: at the first sample (2.9 MB/s) a
+  full-height bar shows at the right edge for one frame, then the line is flat at zero while the figures say 2.9
+  MB/s; the scale's top goes 1 KB/s, 4 MB/s, 10 MB/s, 20 MB/s within about two seconds, before the line shows any
+  of it.
+- UI.B26 built (worktree, two reviewers, fixes, merged): two causes. The scale's top came from every kept sample,
+  including ones the line draws seconds later, so it grew before the line moved; and the 250 ms ease stretched the
+  line with a transform from the old top, so a flat zero line stretched 4,096 times (1 KB/s to 4 MB/s) showed as a
+  full-height bar for a frame. Now the top is fitted to the line as drawn up to the next sample, the ease stretches
+  at most 2.5 times and never stretches a line with nothing above zero, a late sample keeps sliding without a jump,
+  and the hover dot only picks samples within the scale. Upload (T8) and Progress Details follow the same rules. The
+  web graph draws each sample at once with no ease, so it never had this (a test pins it). Core tests replay the
+  recording frame by frame (`SpeedGraphStartTests`).
+- T14 built (worktree, two reviewers, fixes, merged): settings `UseTorrentCategoryFolders` (on) and
+  `TorrentCategoryFoldersRoot`. A new install gets `<download folder>\Torrents`, with `Torrents\Video` and so on while
+  the switch is on, and the Torrents folder itself while it is off; the normal "Folders by category" switch no longer
+  affects torrents. An upgraded install has no torrent folder, so torrents keep using the normal folders (only while
+  both switches are on), and provider torrents keep going to the download folder: nothing moves on upgrade. Options >
+  Save to has a "Torrent folders" group under "Folders by category"; the web UI Settings and a managed server's
+  Options page the same; CLI `settings set usetorrentcategoryfolders` and `torrentdir`. Checks in the worktrees: Core
+  1852 and 1858, Integration filters passed (apart from the known share case), Server filter 20, vitest 593, Uno
+  linux-x64 0 errors. Not tried in the running app yet.
+- Owner: "after these, not much remain. help me ask fable review changes, have it review the fixes made for what
+  it's found since last time reviewed." Four prompts in `tmp\review-prompts\` (local, not committed), one per part of
+  the AUDIT.1 audit made at `2ca5935`: each checks every finding of its earlier report against HEAD (fixed, fixed
+  untested, partly, not fixed, fixed with a new problem, declined) and reviews the other changes in its scope since
+  `2ca5935`; reports go to `tmp\review\`. To be run once the open tracks are merged; the owner pastes them into Fable sessions. A fifth,
+  `tmp\review-prompts\5-user-view.md` (owner: "have fable also specifically review the application from the user
+  point of view. in all areas."), reviews every area as a user meets it (steps, windows, wording, errors, keyboard),
+  on a test copy where it can, and writes `tmp\review\5-user-view.md`.
+- All tracks merged (T10–T14, UI.B24–B26, UI.R36, UI.R37, EXT.R12; `8526cac`). A review of the merged whole found two
+  interactions, fixed in `9e2195d`: a browser `.torrent` download kept quiet (EXT.R12) still opened the torrent dialog
+  (now it opens nothing; the row keeps "Open as Torrent…", documented in `docs/browser-integration.md`); and with
+  torrents on but the worker unavailable, the progress window closed while the Host opened a completion window (the
+  window now follows the Host's torrent availability). The golden pipe frames were re-recorded (the only additions are
+  `quietWindows` and the two T14 settings, checked by hand).
+- Walk in the running app (2026-11-12, published from `9e2195d` to `artifacts\app-t9`, instance `uitest-t9`, dark):
+  - UI.B25 seen: a torrent row's menu has one line under Open Folder.
+  - T11 seen: Progress Details from the list opened in the main window's process in 145 ms (ui-trace "opening
+    in-process=True" 15:31:42.873, "First frame with the download" 15:31:43.018); one window process only.
+  - UI.R36 seen: Delete on a row opened "Remove from list?" with Cancel as the default; Left moved focus to "Remove from
+    list", Right back to Cancel, Escape closed it and nothing was removed.
+  - UI.B26 seen with a loopback HTTP download at about 30 MB/s, recorded at 15 frames per second: Progress Details' graph
+    rose straight to the speed on a 40 MB/s scale with no bar or jump; the main window's 30-minute graph stayed flat
+    at its 512 B/s floor for several seconds (its first point covers a longer span), then drew the line on a 40 MB/s
+    scale, with no flash. Not repeated with a torrent: the loopback seeder had stopped.
+  - UI.B24 seen: Show in folder in the completion window put "test-downloads - File Explorer" in the foreground (read
+    with `GetForegroundWindow`). The folder picker and the Host's folder dialog were not tried.
+  - T14 seen: Options > Save to has "Torrent folders" with "Save torrents to a folder for their category" on and the
+    torrent folder "Same folders as other downloads", as an upgraded install should.
+  - UI.R37 not seen: this is a development build, so Help > Check for Updates says it doesn't update and the line
+    shows plain "0.7.0", which is the unknown case. Unit tests only.
+  - EXT.R12 and T10 from a real browser not tried (extension 0.6.3 isn't loaded anywhere); T12/T13 not walked again.
+  - New, not fixed: Add URL with a TorBox account asked TorBox about a loopback address
+    (`http://127.0.0.1:…`) and, as TorBox couldn't be reached (the key is refused), stopped with "TorBox could not be
+    reached…" until "Download directly, not through TorBox" was ticked. Loopback and LAN addresses probably shouldn't be
+    checked with a provider; left for the owner (ROADMAP UI.B27).
+- **Owner decisions waiting (2026-11-12):**
+  1. UI.B27: should Add URL skip the provider check for loopback and LAN addresses (and private host names)?
+  2. T10 on another server (D9): the desktop torrent dialog lets an "Open as Torrent" line be switched to the
+     provider, and that add then fails. Hide the provider choice for such a line, or make the server do it?
+  3. T12: keep `list-layout.json` for the other windows' lists (widths and sort survive a restart)?
+  4. T12: keep the three-click header cycle (ascending, descending, back to the list's own order)?
+  5. EXT.R12 with T10: a quiet browser `.torrent` download now opens no torrent dialog (the row keeps "Open as
+     Torrent…"). Keep that, or open the dialog even for quiet downloads?
+  6. Extension 0.6.3 (EXT.R12) is built but not uploaded to the Chrome, Edge or Firefox stores.
+- Fable reviews run (2026-11-12, workflow, five `claude-fable-5-2` agents at medium effort, at `571a119`, read-only).
+  Reports in `tmp\review\` (local, not committed). Nothing fixed yet; findings are input to verify, not evidence.
+  1. Engine/persistence/core: of 43 earlier findings, 31 fixed with a test, 3 untested, 4 partly, 4 not fixed (L11 FTP
+     password stored in the clear, L13, L14, L15; not declined anywhere), 1 fixed with a new problem (M3). New: 1
+     medium (a damaged or held media checkpoint is read as none, so a kept stream track restarts empty), 7 low.
+  2. Runtime/torrents: of 50, 33 fixed with a test, 3 untested, 7 partly, 1 with a new problem (M18), 5 not fixed. New:
+     3 medium (a schedule saved while its window is open acts up to an hour late; two schedules on one queue after
+     sleep; a finished torrent with files missing at start still fails and loses seeding), 11 low.
+     `ACancelOfAStoppedDownloadTakesItsFoldersAtOnce` failed 8 of 8 under the shared load (likely a test race).
+  3. Host/server/browser: of 17, 13 fixed, 4 partly. New: 9 low (Firefox "restart failed" note lost when the event page
+     idles; the toolbar ring follows other browsers' downloads; Setup's ticked torrent task turns torrents back on).
+  4. Frontends/CLI/scripts: of 43, 15 fixed with a test, 20 untested, 4 partly, 2 not fixed, 2 declined. New: 2 medium
+     (the desktop's settings copy drops `Revision`, so the Host's save protection is off for the desktop; Setup's
+     ticked "Open magnet links" task re-enables torrents on upgrade), 7 low.
+  5. User view: about 45 findings (4 bugs, ~17 friction, ~24 wording), about 30 seen running. Top: nothing in the app
+     leads to the extension; Add URL is two dialogs; a killed Host leaves rows "Downloading" with no restart; one thing
+     with two names in many places; ordinary links can't be dropped or pasted on the window. Bug seen: when the
+     Extraction column appears, rows already shown keep the old column positions.
+  Also still open, not a decision: the TorBox "Cached" badge was never seen (the key on this PC is refused), and the
+  Linux window opens larger than the screen under Xvfb (Linux checks deferred).
+- Fable findings verified and fixed (owner: "Yes, verify and fix"; workflow `wf_a2c58c61-093`, 2026-11-12, base
+  `96843a3`). Five triage agents checked all 161 findings against the code: 103 to fix, 25 for the owner, 12 refuted
+  (for example "no client acts on outside_roots": the desktop uses the constant; "popup polls every second": only while
+  open), 21 known or already fixed. Nine area worktrees fixed them (failing test first where practical), each reviewed
+  by a separate agent and followed up; merged into `torrent-t1` at `bb21908` (conflicts in a Core test file, two
+  post-download hint lines and the web Settings screen, resolved keeping both sides). The engine-persistence
+  follow-up hit the weekly usage limit mid-edit; the main session finished it (`1aa5c16`: a stop on the last fragment
+  of a two-track stream ends Cancelled, not a failed mux; its test fails without the fix).
+  - Fixed, among others: media checkpoints that can't be read fail the run and keep the tracks; media saves on the
+    checkpoint interval; newer-build job files stay; temp sweep in every store folder; per-host limit by the host a
+    redirect lands on; retired HTTP clients disposed; a schedule saved while its window is open acts at once; two
+    schedules on one queue; schedule arms kept over a Host restart; a finished torrent with missing files stays
+    Completed; exit-paused torrents resume; Move/Rename saved or rolled back; web sessions get no exception text;
+    desktop settings saves carry `Revision`; logs pruned daily; the native host frames each message once; Explorer and
+    rundll32 by full path; Firefox's "restart failed" note survives the event page idling; the toolbar ring only
+    follows this browser's downloads; Setup's torrent task ticked on a first install only (`checkedonce`); uninstall
+    removes only its own Run value and shortcut; the update rollback writes atomically; CLI `--flag=VALUE`, short
+    unknown-command error, Host errors in export/import; about 20 wording fixes (tray Stop All, Delete wording, failure
+    next steps, "computer action", server instead of host in the web switcher).
+  - Built although they change what users see (triage put them under "fix"; the owner may want some back): dropping
+    or pasting ordinary links opens Add Links (5:A6); per-site limits are rows instead of `pattern=number` text (5:F6b);
+    the Scheduler asks "Discard your changes?" on Close (5:S1); the add dialog is titled "Add download" and shows the
+    size only (5:A2a); "Use this folder next time too" (5:A4b); Options opens at 900x720 (5:F5); a lost Host dims the
+    list with an "out of date" bar (5:E1); a lone torrent's file list no longer opens by itself (5:T1a).
+  - Not fixed, with reasons: FTP password in the address kept in the clear (1:L11, needs a design for sealed
+    addresses); auto-extract for web sessions (2:audit-L15, contradicts D8's design); the queued half of the toolbar
+    ring (3:N7); a `repair.ps1` run test (4:N8); PROGRESS's out-of-date AUDIT.1 "Left as is" line (1:N8: it should
+    read "A damaged settings file still resets to defaults"; corrected here).
+  - New owner decisions from the triage (25, not built): site logins without a scheme sent over http/ftp/subdomains
+    (1:N4, 1:L12); custom hand-off headers crossing origins (1:T-6); a typed extension folder replaced by the default
+    (3:N8); Add URL in one dialog (5:A1); renaming "Download file info" in the extension (5:X2); "Remember this folder"
+    ticked by default (5:A4a); the Tasks menu's size (5:A7); failure reasons in Status (5:L3); Progress Details'
+    buttons (5:L4); the Q column, date format and Categories heading (5:L5); one name per thing across the app
+    (5:W1b, 5:T4, 5:X1); one Add torrent entry (5:T2); Check for Updates in one dialog (5:U1a); the extension's privacy
+    and "ask where to save" texts (5:X3, 5:X4); web toolbar buttons and phone speed (5:H2, 5:H5); a dead link holding a
+    slot while it retries (5:E3); promoting the extension inside the app (5:F1); list-layout.json's lock (4:N7, with
+    decision 3); the main graph's flat first seconds at 30 minutes (5:F3, on purpose since UI.B23/B26).
+- Tests after the merge (`bb21908`, `artifacts\check-fixes`): solution, Uno linux-x64 and Host.Linux build 0 errors;
+  Core 1988, Engine 245, Archives 401, Containers 188, TorBox 323, Torrents passed, Server 190; Integration 1865
+  passed, 2 skipped, 1 failed (the known share case); svelte-check 0 errors, vitest 628; extension tsc clean, npm test
+  336. None of the fixes was tried by hand in the running app.
+- Desktop and VM tidied (owner, 2026-11-12: only our work's leftovers; DietPi test leftovers): the empty `Desktop\idm`
+  folder went to the Recycle Bin (everything else on the desktop is the owner's or other projects'); on the VM
+  `~/inbound-check` (361 MB), `~/.uno` and the unused `inbound:0.6.3` image were removed; the `inbound` container and
+  `~/inbound` stay.
+- Tests at `9e2195d` (`artifacts\check-final3`): Core 1952 passed; Server 187 passed; Integration 1809 passed, 2
+  skipped, 1 failed (the known `AFolderNamedInTheSettingsInAnyFormStays(how: "share")` case). The other suites were run
+  before the integration fix (Engine 229, Archives 401, Containers 188, TorBox 323, Torrents 121, vitest 621,
+  svelte-check 0 errors, extension tsc clean and npm test 332) and `9e2195d` touches none of them.
+
+### T7–T9 torrent categories, upload graph, add-flow usability; Linux fix (owner, 2026-11-12)
+
+Owner, after 0.7.0: "appimage failed, check and fix. and then finish whatever is left undone, implement these: torrent
+related sort categories, info / now we need an upload graph, it can be hidden if no torrents are active. / use the vm
+to check windows build, it can launch X apps. / and do a usability flow run with the real app. especially around adding
+torrent files, and magnets. there are unnecessary steps and windows now. adding a torrent file by ticking torbox opens
+another window etc. also make torbox cached text more obvious." Then: "do everything I ask, run checks and then stop.
+no release." Status: **in progress**.
+
+- AppImage failure (run 43137980370): `SchedulerWindow.cs` used WinUI's `WindowActivationState` in the window code
+  shared with the Uno (Linux) window, where `Activated` gives `CoreWindowActivationState` (CS0019). Fixed with the same
+  `#if HAS_UNO` as `MainWindow.AddFlows.cs`. Uno, Host.Linux, Server, Cli and NativeHost now build for linux-x64.
+  No new release or tag (owner: no release); the fix ships with the next one.
+- Linux check on the owner's VM (2026-11-12, agent; owner: the VM is only for what Windows can't check, GitHub builds
+  Docker and the AppImage): `f3d36da` published for linux-x64 on Windows (Host.Linux, Cli, Uno window), run under Xvfb
+  with its own instance and data folder. The main window, Add URL, Options and Scheduler opened, "Host connected ·
+  0.7.0"; a CLI HTTP download matched curl's SHA-256. Host log: no errors, only the VM's missing desktop services
+  (keyring, tray, sleep prevention, notifications). Seen: the window opened wider and taller than the 1600x1000
+  screen (no window manager under Xvfb, so not yet known whether a real desktop clips it too); the progress window
+  the Host started for the finished download did not show in the screenshots. Rerun: `~/inbound-check/rebuild.sh`
+  on the VM. Before the owner narrowed the scope, the agent also upgraded the VM's lasting `inbound` container from
+  0.6.3 to 0.7.0 (same name, mounts, restart policy and port 8080, plus 6881 TCP/UDP as in the example compose file;
+  health 200, data folder unchanged; the old settings saved in `~/inbound-check/inbound-0.6.3-inspect.json`). The
+  web UI there has no password set, before and after.
+  Owner, 2026-11-12: "Keep 0.7.0".
+- Walk before changes (2026-11-12, WinUI, dark, published `artifactspp-t9` with test instance `uitest-t9`, a
+  `TorrentWorkerProbe` seeder on loopback; the TorBox key file on this PC is refused by TorBox, so cached checks show
+  "Couldn't check TorBox"):
+  - W1 Import Torrent File and Add Magnet: with "Ask each time" (the default route) neither This PC nor TorBox is
+    picked, and Add stays greyed until one is picked for every torrent. One click that a default would save.
+  - W2 TorBox picked, then Add: the torrent dialog closes and a second "Import torrent file" dialog opens, asking for
+    the folder, Start and Queue again, with the folder reset to the default folder (the first dialog said "Each
+    torrent's category folder"). The owner's "ticking torbox opens another window".
+  - W3 The TorBox cache answer is a few grey words in the torrent's subtitle ("Couldn't check TorBox", "Cached on
+    TorBox"); easy to miss, and nothing tells that cached means TorBox has it ready now.
+  - W4 Adding a magnet to This PC opens Progress Details at once (every download that starts gets its window), before
+    the file list is there; when the list arrives the same window switches to Files and waits for Start. The torrent
+    dialog had already asked everything else.
+  - No toolbar button for Add Magnet or Import Torrent File (Tasks menu only); dropping or pasting works.
+  - Built (2026-11-12), three worktree tracks, each reviewed by two reviewers (correctness, usability/parity) and fixed,
+  merged into `torrent-t1` without conflicts:
+  - T9 add flow: a route is always picked (This PC when this PC takes torrents, else the provider), so Add works at
+    once; Options and web Settings now show two route choices, and a stored "Ask each time" shows as This PC (stored
+    values unchanged, so older Hosts and clients still work). TorBox lines are sent from the torrent dialog itself with
+    its folder, Start and Queue (the category folder when Save to is empty); a .torrent's ticked files go with it (up
+    to 5,000). A cache badge under each line's route (filled accent "Cached on TorBox" with "TorBox has it, so it
+    downloads right away"; outline for not cached and checking; muted with a tooltip for couldn't check), also in My
+    provider's item header and the web UI. The Host opens no progress window when a torrent starts; a magnet's Choose
+    Files opens in the main window when its list arrives.
+  - T8 upload graph: an orange upload line on the bottom graph with a Download/Upload legend and "Upload <rate>" on the
+    bar, shown only while a torrent downloads or seeds; the Host keeps an upload history beside the speed history
+    (optional `UploadBytesPerSecond`, null from older Hosts); a downloading torrent's upload rate now shows on its job.
+  - T7 views: Active, Stalled (downloading, no connected peer, first started over a minute ago), Checking, Waiting for
+    files, Completed and Errored under Torrents, each shown only while it has items, also as web phone chips. No
+    Trackers grouping (needs tracker reads per torrent, which would poll).
+  - T7 info: a Torrent Info pane right of the list for one selected torrent (View menu, on by default): state,
+    progress, down/up, peers, ratio, seeding goal, time left, folder, hashes, added, trackers summary, and Open
+    Folder, Copy Magnet Link, Force Recheck, More details. It reads trackers only on progress updates (no timer) and
+    hides when the list's columns would not fit beside it. Web UI: the same pane beside the list from 1440 px.
+  - Merged checks: solution build 0 errors except TorrentWorkerProbe (its exe was running as the seeder); Uno
+    linux-x64 0 errors; Core 1807/1807; web svelte-check 0 errors, vitest 578/578.
+- Walk after the changes (2026-11-12, `artifacts\app-t9` republished, dark): Add Magnet opens with This PC picked
+  and Add enabled; after Add no Progress Details opened, and Choose Files opened in the main window once the file
+  list arrived (250 files), then the torrent downloaded. Import Torrent File with TorBox picked: Add closed the dialog
+  and the item went straight to the list ("Checking TorBox…", then TorBox refused this PC's key), with no second
+  dialog. Selecting a seeding torrent showed the Torrent Info pane; the bottom graph showed the Download/Upload legend
+  while torrents ran. Not seen: the "Cached on TorBox" badge (the key here is refused, so only "Couldn't check
+  TorBox" shows) and the extra views other than the first three (no torrent was stalled or checking). Noticed: the
+  info pane shows "Up 0" but "Down —" for a seeding torrent.
+- Interpretation of "torrent related sort categories, info" (recorded as an assumption for the owner): more torrent
+    views in the sidebar like other torrent clients (Active, Stalled, Completed, Errored, Checking, Waiting for files,
+    and by tracker), and torrent info shown in the main window for the selected torrent instead of only in Progress
+    Details.
+
+### 0.7.0 release (2026-11-12)
+
+- **Released 2026-11-12** (tag `v0.7.0` on the squash commit `96fe5e2`, parent `f3c4b33` on `main`; its tree is the `torrent-t1` tree at `4f003c2`; binaries `0.7.0+96fe5e2`). Seven assets: Setup, the update zip, `manifest.json`, `public.pem`, the signed Firefox add-on (0.6.2), `SHA256SUMS`, and `manifest-linux-x64.json` (0.6.7, uploaded again so Linux users stay on 0.6.7). Release: https://github.com/Kaan88/inbound/releases/tag/v0.7.0
+- Assets (bytes; SHA256):
+  - `DownloadManagerSetup-0.7.0.exe` 68,218,351; 962134227a6e622b4e17d020a1b43d13c909fae3df7722af98f1fdf61d1280a6
+  - `download-manager-0.7.0.zip` 96,169,517; cb7dbbd114cba9eb7707516440ccf69345288ae7ba2599b9b0d63831a69da283
+  - `manifest.json` 827; 8e3058bf6bba3552b4a3ecec8c3965c16598f9beeef750932df772788ce127ba
+  - `public.pem` 624; b2deab3801bdeb0f8a3fa555a8d2dad003a763aff5c13ae6903c400b5a2180a6 (byte-identical to v0.6.7)
+  - `inbound-bridge-0.6.2-firefox.xpi` 132,556; 42a04c954b3d09279fc7dbfbc30f02ad71c42383578651c7987f30f5e93e8cc9
+  - `SHA256SUMS` 446; `manifest-linux-x64.json` 840; 361fa67e8aceb10a4e83f17d446812ac5e2cb34dee785e7895ad926b8badf948 (same file as v0.6.7)
+- Size gate (roadmap gate 6): the worker `inbound-torrent.exe` (9,672,192 bytes) zips to 3.45 MB, under 10 MB. Against 0.6.7, Setup grew 2,919,806 bytes and the zip 3,640,187 bytes (65,298,545 and 92,529,330 before). That delta includes all other changes, so it is an upper bound for the worker.
+- Checks: version bump in five places, `git grep` clean (commit `081e8f4`); solution build 0 errors (33 warnings); Core 1,688 of 1,688 pass. Firefox add-on signed by AMO as unlisted (`sign-extension-firefox.ps1`, first run failed on an unquoted key path before upload; rerun uploaded and signed); update file commit `4f003c2` (names 0.6.2 at v0.7.0). `docs/komodo.md` absent from the tree, the disk and grep. Setup is Medium integrity; the zip's `install.ps1` says 0.7.0; `prepare-release` checks passed; `public.pem` byte-identical to v0.6.7; SHA256SUMS matches the files and the Setup as GitHub serves it. Secret scan of the zip, Setup, release files, XPI and the Chrome/Edge store zip found no PEM key, token or cookie (keyword matches only in framework DLLs and the worker's OpenSSL text). Post-release: `latest/download/manifest.json` serves 0.7.0 and matches the local file; `manifest-linux-x64.json` answers 0.6.7; `origin/main` `extensions/firefox-updates.json` names 0.6.2 at v0.7.0. The binary reports `0.7.0+96fe5e2`.
+- Docker (owner, later the same day: "have haiku make a docker release too"): run 43135543429 (`docker.yml`), cancelled at the tag push, was run again (attempt 2) and succeeded. `ghcr.io/kaan88/inbound:0.7.0`, `:0.7` and `:latest` all point at sha256:5bf77ac5f9f46a4a2643af880eceb7f488e272f31767c854c4ee5da51bb1083c (checked against the registry). Not yet started on the owner's test VM (needs the VM password); the release notes now say the image is published.
+- AppImage (owner: "have github build appimages from now on too ... forgejo is not needed after all", then "put key to github"): new `.github/workflows/appimage.yml` (ROADMAP X.6) builds the linux-x64 torrent worker with `Dockerfile.build`, packs the AppImage with appimagetool 1.9.1 (SHA-256 checked), signs `manifest-linux-x64.json` with the repository secret `UPDATE_SIGNING_KEY` after checking the key's public half equals the release's `public.pem`, and attaches the AppImage, `manifest-linux-x64.json` (replacing the 0.6.7 one) and `SHA256SUMS-linux`. Runs on `v*` tags, or by hand with `-f tag=vX.Y.Z`. On `main` only as two one-file commits (`c69de0e`, `d7ae089`) on top of the release commit. The secret was set from the key file on this PC (never printed); the key's public half was checked equal to `public.pem` here first. A Forgejo run started by an earlier agent for the same AppImage was abandoned (Forgejo has no cancel API; it only publishes to Forgejo). The 0.7.0 AppImage run by hand (43137980370) FAILED in Build the AppImage: the Uno window does not compile, SchedulerWindow.cs line 236 compares CoreWindowActivationState with WindowActivationState (CS0019); likely the audit WinUI track change, never built for Uno because Linux was deferred. Nothing was attached; Linux users stay on 0.6.7. Next: fix that line for Uno, check with a linux-x64 Uno build, then rerun with gh workflow run appimage.yml -f tag=v0.7.0 (the code fix would need a new tag or a 0.7.1).
+- GitHub issues #2, #3 and #4 (EXT.R9, EXT.R10, EXT.R11) closed as completed on 2026-11-12 (owner: "mark the 3 open issues as fixed"), each with a comment saying what 0.7.0 and extension 0.6.2 do and that the Chrome Web Store version is in review. They were still not tried by hand in a browser.
+- Chrome/Edge store zip (built, not uploaded): `artifacts\chrome-store\inbound-bridge-0.6.2-chrome.zip` in `idm-release`, 117,827 bytes, SHA256 74788ab888b83f2dc93fbb29400a29ac548c819e1ebc1c98ca3ad1addccca712. Chrome Web Store 0.6.2 was submitted on 2026-11-12 (PENDING_REVIEW); its state was not checked in this step. The owner uploads the same zip to Edge Partner Center by hand.
+- Not done: the clean-install VM run (section 9; not automated here, recorded as not done); Linux tests and arm64 (out of this release); a real update from an installed 0.6.7 (not run); ROADMAP rows not updated in this step.
+
 ### T1.SETUP magnet and .torrent association in Setup (owner request, 2026-11-12)
 
 Owner: "have torrent and magnet file association added to installer for the actual release." Status: **partial**
@@ -89,7 +396,10 @@ Left as is, for the owner or for later:
 - L10: `dm remove` still deletes a finished download's file by default (help now says so). Owner's call.
 - L24 reverted: rollback copies are kept.
 - L25 (TorBox resubmitting a failed hash): needs live TorBox calls to learn what TorBox does.
-- A damaged or newer-schema settings file still resets to defaults (the old file stays in the corrupt folder).
+- A damaged settings file still resets to defaults (the old file stays in the corrupt folder); a newer-schema file
+  keeps the settings this build knows (corrected 2026-11-12, review 1:N8).
+- L11 (an FTP password in the address is stored in the clear) needs a design for sealed addresses; L13 is fixed for
+  segment workers only (the probe and single-stream requests still count against the first host).
 - The torrent worker does not check the addresses it connects to (DNS rebinding); needs libtorrent changes.
 - Live speed limits are still not offered for stream jobs. `HandoffRequest.TotalBytes` is still sent and unread.
 - `webui/src/lib/types.ts` still has an optional `lastError` the Host no longer sends.

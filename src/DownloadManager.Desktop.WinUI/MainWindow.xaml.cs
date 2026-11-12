@@ -90,10 +90,13 @@ public sealed partial class MainWindow : Window
             // A gap means "no data" (Host disconnected). A download that has gone quiet (stalled,
             // connecting, waiting to retry) is transferring nothing, so it counts as 0, not unknown.
             // UI.B20: Progress Details samples its one download by the same rule.
-            var rate = SpeedSample.Total(_graphConnected && _graphSnapshotReady,
-                _jobsById.Values.Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.LastUpdated, now)));
+            var connected = _graphConnected && _graphSnapshotReady;
+            var rate = SpeedSample.Total(connected,
+                _jobsById.Values.Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.LastUpdated, _connection.Clock.ServerNow(now))));
+            // T8: the torrents' upload, by the same rule, on the line beside it.
+            var upload = UploadNow(connected, now);
             SpeedGraph.IsSeen = WindowShown && SpeedGraph.Visibility == Visibility.Visible;
-            SpeedGraph.AddSample(now, rate);
+            SpeedGraph.AddSample(now, rate, upload);
             // The sample after the last download stops is its 0; then the timer stops until one runs again.
             UpdateSpeedTimer();
         };
@@ -293,6 +296,8 @@ public sealed partial class MainWindow : Window
 
     public void ShowFromTray()
     {
+        // T11: a process that was to end with its last progress window keeps its main window again.
+        _progressWindows.MainWindowShown();
         AppWindow.Show();
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
@@ -349,17 +354,15 @@ public sealed partial class MainWindow : Window
         args.Cancel = true;
         // PERF.5 option: end the window's process, so the GPU driver's threads and the window's memory go with it.
         // The Host keeps downloading; the tray, a second launch or a download window starts it again.
+        // T11: progress windows opened from here are in this process too; it ends with the last of them.
         if (LocalSettings?.CloseWindowCompletely == true)
         {
             sender.Hide();
-            Application.Current.Exit();
-#if HAS_UNO
-            // Uno's X11 head leaves the process running after Exit.
-            Environment.Exit(0);
-#endif
+            CloseMainWindowCompletely();
             return;
         }
         sender.Hide();
+        _progressWindows.MainWindowClosed(endsProcess: false);
     }
 
     private void SaveUiState(AppWindow? window = null)
@@ -377,6 +380,7 @@ public sealed partial class MainWindow : Window
             _uiState.HideCategories = _hideCategories;
             _uiState.ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked;
             _uiState.SpeedGraphExpanded = SpeedGraph.IsExpanded;
+            _uiState.ShowTorrentInfo = TorrentInfoMenuItem.IsChecked;
             // AppTheme writes the start-up hint itself; this keeps a save from here putting an older one back.
             _uiState.Theme = AppTheme.Choice;
             UiStateStore.Save(_uiState);
@@ -401,7 +405,7 @@ public sealed partial class MainWindow : Window
         var graphSeen = shown && SpeedGraph.Visibility == Visibility.Visible;
         var cameBack = graphSeen && !SpeedGraph.IsSeen;
         SpeedGraph.IsSeen = graphSeen;
-        var run = shown && _graphConnected && _jobsById.Values.Any(job => SpeedSample.IsActive(job.State));
+        var run = shown && _graphConnected && _jobsById.Values.Any(KeepsSampling);
         var paused = _speedTimerStoppedAt is { } stoppedAt && Environment.TickCount64 - stoppedAt > 5_000;
         if (paused && _graphSnapshotReady && (cameBack || run && !_speedHistoryTimer.IsEnabled))
             _ = LoadSpeedHistoryAsync();
@@ -419,6 +423,24 @@ public sealed partial class MainWindow : Window
     }
 
     private long? _speedTimerStoppedAt = Environment.TickCount64;
+
+    /// <summary>T8: the job moves (a download under way, or a seeding torrent that sends), so the graph samples.</summary>
+    private static bool KeepsSampling(JobViewModel job)
+        => SpeedSample.KeepsSampling(job.State, job.Dto?.Torrent?.Seeding == true, job.Dto?.Torrent?.UploadRate ?? 0);
+
+    /// <summary>T8: the upload line shows while a torrent downloads or seeds. Runs as torrent jobs change, not on a timer.</summary>
+    private void SyncUploadGraph()
+    {
+        SpeedGraph.ShowUpload = _jobsById.Values.Any(job =>
+            SpeedSample.TorrentRuns(job.IsTorrent, job.State, job.Dto?.Torrent?.Seeding == true));
+        // The bar's upload figure while the graph has no upload sample (a seeding torrent that sends nothing, say).
+        if (SpeedGraph.ShowUpload) SpeedGraph.LiveUpload = UploadNow(_graphConnected && _graphSnapshotReady, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>T8: the torrents' upload at <paramref name="now"/>, by the graph's sampling rule; null while not connected.</summary>
+    private double? UploadNow(bool connected, DateTimeOffset now)
+        => SpeedSample.Total(connected, _jobsById.Values.Where(job => job.IsTorrent).Select(job =>
+            SpeedSample.UploadRate(job.State, job.Dto?.Torrent?.Seeding == true, job.Dto?.Torrent?.UploadRate ?? 0, job.LastUpdated, _connection.Clock.ServerNow(now))));
 
     private void ApplySnapshot(SnapshotDto snapshot)
     {
@@ -475,6 +497,8 @@ public sealed partial class MainWindow : Window
             _pendingTorrentOpen = false;
             _ = OpenQueuedTorrentsAsync();
         }
+
+        ShowPendingJob();
     }
 
     private bool _firstListTraced;
@@ -527,7 +551,10 @@ public sealed partial class MainWindow : Window
             if (row is null || member.PackageId != package.Id || shouldShow != _visibleJobs.Contains(member))
                 RebuildVisible();
             else
+            {
                 row.UpdatePackage(package, PackageMembers(package), row.IsExpanded);
+                if (_banner.Stale) row.ShowNotCurrent();
+            }
         }
         else
         {
@@ -587,7 +614,7 @@ public sealed partial class MainWindow : Window
         // A lone failure opens none, and nor does a cancel, which the user chose.
         var finishes = changeType == "completed" || (changeType == "failed" && PackageOf(job.Id) is not null);
         if (finishes && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
-                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true) &&
+                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true, job.QuietWindows) &&
             (!_connection.IsRemote || _remoteCompletions.Finished(job.Id)))
         {
             QueueCompletionWindow(job.Id);
@@ -595,7 +622,8 @@ public sealed partial class MainWindow : Window
 
         if (changeType == "completed") NoteRemoteCompletion(job);
         // A download that starts wakes the speed graph's sample timer (it sleeps while nothing transfers).
-        if (!_speedHistoryTimer.IsEnabled && SpeedSample.IsActive(job.State)) UpdateSpeedTimer();
+        if (!_speedHistoryTimer.IsEnabled && SpeedSample.KeepsSampling(job.State, job.Torrent?.Seeding == true, job.Torrent?.UploadRate ?? 0))
+            UpdateSpeedTimer();
     }
 
     private void ApplyConnection(bool connected, string? error)
@@ -604,9 +632,9 @@ public sealed partial class MainWindow : Window
         _graphSnapshotReady = false;
         UpdateSpeedTimer();
         var target = _connection.Target;
-        ConnectionText.Text = target.IsLocal
+        ShowConnectionWords(target.IsLocal
             ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
-            : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}";
+            : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}");
         NoteShownConnection(connected, error);
         OnTorrentControlsConnection(connected);
         UpdateStatusText();
@@ -676,6 +704,7 @@ public sealed partial class MainWindow : Window
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
         SyncQueueCommands();
         SyncArchiveMenus();
+        SyncTorrentInfo();
     }
 
     private string _deleteToolTip = string.Empty;
@@ -741,11 +770,20 @@ public sealed partial class MainWindow : Window
             StatusText.Text = _banner.Status ?? $"Not connected to {_connection.Target.Name}";
         if (_graphConnected)
         {
-            ConnectionText.Text = _connection.IsRemote
-                ? $"Connected to {_connection.Target.Name}" + (host is null ? string.Empty : $" · {host}")
-                : "Host connected" + (host is null ? string.Empty : $" · {host}")
-                    + (ShellWords.BrowserIntegration(_status?.BrowserIntegration) is { } integration ? $" · {integration}" : string.Empty);
+            // UI.R37: the version says whether it is the latest, as far as the last update check knows.
+            if (_connection.IsRemote)
+            {
+                var version = VersionStatus.Server(host, ShownServerLatest);
+                ShowConnectionWords($"Connected to {_connection.Target.Name}" + (version.Length == 0 ? string.Empty : $" · {version}"));
+            }
+            else
+            {
+                var version = VersionStatus.ThisPc(host, _status?.LatestVersion);
+                ShowConnectionWords("Host connected" + (version.Text.Length == 0 ? string.Empty : $" · {version.Text}"),
+                    version.UpdateLink, ShellWords.BrowserIntegration(_status?.BrowserIntegration));
+            }
         }
+        RefreshTasksServerNote();
         // The repair runs Windows PowerShell against the Windows registry; on Linux the Host registers the native host itself.
         var repair = OperatingSystem.IsWindows() && !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
         RepairBrowserButton.Visibility = repair ? Visibility.Visible : Visibility.Collapsed;
@@ -889,6 +927,10 @@ public sealed partial class MainWindow : Window
         // Rows that appeared because a package opened fade in quickly.
         var added = target.Where(row => row.PackageId is not null && !before.Contains(row)).ToList();
         if (added.Count > 0 && before.Count > 0) FadeIn(added);
+
+        // Review 5:E1: package and torrent-file rows are built afresh above from what the rows held before the Host
+        // was lost; on a stale list they say nothing of a speed or state that isn't known now either.
+        if (_banner.Stale) foreach (var row in _visibleJobs) row.ShowNotCurrent();
 
         UpdateEmptyText();
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1129,8 +1171,12 @@ public sealed partial class MainWindow : Window
             }
 
             LeaveProviderFull(selectCategory: false);
+            var left = _category;
             _category = tag;
             RebuildVisible();
+            // T7: an empty extra torrent view stays only while it is shown; it goes once another is chosen. After this
+            // change has settled, so the list isn't changed under its own selection event.
+            if (TorrentListRules.IsExtraTag(left)) DispatcherQueue.TryEnqueue(UpdateTorrentCounts);
         }
     }
 
@@ -1217,6 +1263,8 @@ public sealed partial class MainWindow : Window
         if (OperatingSystem.IsWindows()) flyout.Items.Add(_menuOpenWith);
         flyout.Items.Add(_menuOpenFolder = CreateContextItem("Open Folder", MenuOpenFolder_Click));
         flyout.Items.Add(_menuShowDownload = CreateContextItem("Show Download", (_, _) => ShowDownloadsOfSelectedRecords()));
+        // T10: a finished .torrent download goes to the torrent dialog.
+        flyout.Items.Add(_menuOpenAsTorrent = CreateContextItem("Open as Torrent…", async (_, _) => await OpenAsTorrentAsync()));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
@@ -1351,6 +1399,8 @@ public sealed partial class MainWindow : Window
         HideLocalContextItemsIfRemoteOnly();
         ShowArchiveContextItems();
         ShowProviderContextItem();
+        // Last: the rules above may leave a line with nothing between it and the next (UI.B25).
+        if (sender is MenuFlyout menu) MenuSeparators.Collapse(menu.Items);
 
         if (_priorityMenu is not null)
         {
@@ -1404,7 +1454,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+                ShellActions.Start(ShellActions.OpenFolder(folder))?.Dispose();
             }
             catch (Exception ex)
             {
@@ -1533,7 +1583,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            Process.Start(ShellActions.OpenWith(job.FinalFilePath));
+            ShellActions.Start(ShellActions.OpenWith(job.FinalFilePath))?.Dispose();
         }
         catch (Exception ex)
         {
@@ -1665,7 +1715,7 @@ public sealed partial class MainWindow : Window
             var reply = await _connection.MoveJobAsync(job.Id, target);
             var result = reply.GetPayload<JobActionResponse>();
             if (result.Ok) return (null, true);
-            var error = result.Error ?? "The host rejected the move.";
+            var error = result.Error ?? _connection.NoReasonWords;
             // Another server's own folders, so one can be typed or chosen without leaving the dialog.
             if (remote && MoveRefusal.IsOutsideRoots(result)) return (MoveRefusal.Text(error, await ServerRootsAsync(), _connection.Target.Name), false);
             return (error, false);
@@ -1750,7 +1800,7 @@ public sealed partial class MainWindow : Window
             var add = reply.GetPayload<AddJobResponse>();
             if (!add.Accepted)
             {
-                await ShowMessageAsync("Redownload", add.Error ?? "The host rejected the redownload.");
+                await ShowMessageAsync("Redownload", add.Error ?? _connection.NoReasonWords);
                 return;
             }
 
@@ -1847,7 +1897,7 @@ public sealed partial class MainWindow : Window
             var result = reply.GetPayload<SettingsResult>();
             if (!result.Ok)
             {
-                await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the action.");
+                await ShowMessageAsync("Queue action failed", result.Error ?? _connection.NoReasonWords);
                 return;
             }
 
@@ -1939,23 +1989,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        try
-        {
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("package", packageId, _connection.Target)) { UseShellExecute = false });
-        }
-        catch (Exception ex) { _ = ShowMessageAsync("Could not open progress", ex.Message); }
-    }
-
-    private void OpenDownloadWindow(Guid jobId)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("job", jobId, _connection.Target, manual: true))
-            {
-                UseShellExecute = false,
-            });
-        }
-        catch (Exception ex) { _ = ShowMessageAsync("Could not open progress", ex.Message); }
+        OpenProgressWindow(ProgressWindowKind.Package, packageId, _connection.Target);
     }
 
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
@@ -2172,7 +2206,7 @@ public sealed partial class MainWindow : Window
             var result = reply.GetPayload<JobActionResponse>();
             if (!result.Ok)
             {
-                await ShowMessageAsync("Could not update properties", result.Error ?? "The host rejected the update.");
+                await ShowMessageAsync("Could not update properties", result.Error ?? _connection.NoReasonWords);
                 return;
             }
 
@@ -2356,6 +2390,7 @@ public sealed partial class MainWindow : Window
                     StartMode = entry.StartMode,
                     ConflictPolicy = entry.ConflictPolicy,
                     ExpectedSha256 = entry.ExpectedSha256,
+                    ContentType = entry.ContentType,
                     Source = "import",
                 });
                 var add = reply.GetPayload<AddJobResponse>();
@@ -2423,7 +2458,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            await ShowMessageAsync("Pause All", ex.Message);
+            await ShowMessageAsync("Stop All", ex.Message);
         }
     }
 
@@ -2442,7 +2477,8 @@ public sealed partial class MainWindow : Window
 
     private async void MenuDeleteCompleted_Click(object sender, RoutedEventArgs e)
     {
-        var completed = _jobsById.Values.Where(j => j.State == "completed").Select(j => j.Id).ToList();
+        var completedRows = _jobsById.Values.Where(j => j.State == "completed").ToList();
+        var completed = completedRows.Select(j => j.Id).ToList();
         if (completed.Count == 0)
         {
             return;
@@ -2455,7 +2491,7 @@ public sealed partial class MainWindow : Window
             Title = "Delete completed downloads?",
             Content = new TextBlock
             {
-                Text = $"Remove {completed.Count} completed item(s) from the list? The downloaded files will stay on disk.",
+                Text = TorrentSeedRules.DeleteCompletedText(completedRows.Select(j => j.Dto ?? new JobDto { State = "completed" }).ToList()),
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Remove from list",
@@ -2550,7 +2586,7 @@ public sealed partial class MainWindow : Window
             var result = reply.GetPayload<CleanOrphansResponse>();
             if (result is null)
             {
-                await ShowMessageAsync("Clean up failed", "The host returned no result.");
+                await ShowMessageAsync("Clean up failed", _connection.NoReasonWords);
                 return;
             }
 
@@ -2832,8 +2868,10 @@ public sealed partial class MainWindow : Window
                 Title = "Update available",
                 Content = new TextBlock
                 {
-                    Text = $"Installed: {check.InstalledVersion}\nAvailable: {check.AvailableVersion}\n" +
-                           $"Size: {check.Size} bytes\n\nDownload and verify the installer now?",
+                    // Review 5:U1b: the list's size format, not a byte count.
+                    Text = $"Installed: {check.InstalledVersion}\nAvailable: {check.AvailableVersion}" +
+                           (check.Size is > 0 and var size ? $" ({UiFormat.Bytes(size)})" : string.Empty) +
+                           "\n\nDownload the update and check it now?",
                     TextWrapping = TextWrapping.Wrap,
                 },
                 PrimaryButtonText = "Download",
@@ -2864,14 +2902,16 @@ public sealed partial class MainWindow : Window
                 Title = "Install update now?",
                 Content = new TextBlock
                 {
-                    Text = $"Verified installer saved to:\n{download.Path}\n\n" +
-                           "The background Host will stop, install the update, and restart.",
+                    // Review 5:U1b: no path or "Host" in the question; the installer's place is in the tooltip.
+                    Text = "The update is downloaded and checked.\n\n" +
+                           "Inbound stops for a moment, installs it and starts again.",
                     TextWrapping = TextWrapping.Wrap,
                 },
                 PrimaryButtonText = "Install now",
                 CloseButtonText = "Later",
                 DefaultButton = ContentDialogButton.Primary,
             };
+            if (!string.IsNullOrWhiteSpace(download.Path)) ToolTipService.SetToolTip((TextBlock)installDialog.Content, $"Installer: {download.Path}");
             var installChoice = await DialogGuard.ShowAsync(installDialog);
             // Refused because another dialog is open: nothing was asked, so nothing is deferred either. The installer
             // stays downloaded, and Check for updates offers it again.
@@ -2911,7 +2951,7 @@ public sealed partial class MainWindow : Window
 
             await ShowMessageAsync("Install update",
                 install.Ok
-                    ? $"Update {install.Version} scheduled. The Host is restarting."
+                    ? $"Update {install.Version} scheduled. Inbound is restarting."
                     : install.Error ?? "The update could not be scheduled.");
         }
         catch (Exception ex)
@@ -2988,7 +3028,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            Process.Start(new ProcessStartInfo { FileName = directory, UseShellExecute = true });
+            ShellActions.Start(ShellActions.OpenFolder(directory))?.Dispose();
         }
         catch (Exception ex)
         {
@@ -3265,10 +3305,11 @@ public sealed partial class MainWindow : Window
         authenticationPanel.Children.Add(new TextBlock { Text = $"HTTP Basic authentication. Credentials apply only to this download and are {PlatformText.ProtectedBy} when saved.", TextWrapping = TextWrapping.Wrap });
         var authenticationError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         authenticationPanel.Children.Add(authenticationError);
-        var rememberFolder = new CheckBox { Content = "Remember this folder for manual downloads", IsChecked = true };
+        // Review 5:A4b: the words only; whether it starts ticked is the owner's call.
+        var rememberFolder = new CheckBox { Content = "Use this folder next time too", IsChecked = true };
         categoryBox.SelectionChanged += (_, _) => rememberFolder.Content =
             (categoryBox.SelectedItem as ComboBoxItem)?.Tag is string
-                ? "Remember this folder for the selected category" : "Remember this folder for manual downloads";
+                ? "Use this folder for this category next time too" : "Use this folder next time too";
 
         var queueBox = new ComboBox { Header = "Queue" };
         foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
@@ -3312,6 +3353,7 @@ public sealed partial class MainWindow : Window
             metadataBusy.IsActive = true;
             metadataBusy.Visibility = Visibility.Visible;
             checkMetadata.IsEnabled = false;
+            checkMetadata.Content = AddRules.CheckButtonText(checkedBefore: true);
             metadataText.Text = "Checking the server… You can start without waiting.";
             try
             {
@@ -3319,7 +3361,7 @@ public sealed partial class MainWindow : Window
                 if (useAuthentication.IsChecked == true)
                 {
                     if (string.IsNullOrWhiteSpace(authenticationUser.Text) || authenticationUser.Text.IndexOfAny([':', '\r', '\n']) >= 0)
-                        throw new ArgumentException("Enter a user name without colons or line breaks, then check file info again.");
+                        throw new ArgumentException("Enter a user name without colons or line breaks, then check again.");
                     request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
                         $"{authenticationUser.Text}:{authenticationPassword.Password}"));
                 }
@@ -3344,11 +3386,13 @@ public sealed partial class MainWindow : Window
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 // UI.R31: the list's size format; the exact count is in the tooltip.
                 var size = metadata.TotalBytes is { } bytes ? UiFormat.Bytes(bytes) : "Size unknown";
-                ToolTipService.SetToolTip(metadataText, metadata.TotalBytes is { } exact ? $"{exact:N0} bytes" : null);
+                // Review 5:A2a: the type is for those who want it, beside the exact count.
+                var type = metadata.ContentType ?? "Type unknown";
+                ToolTipService.SetToolTip(metadataText, metadata.TotalBytes is { } exact ? $"{exact:N0} bytes · {type}" : type);
                 knownSize = metadata.TotalBytes;
                 refreshSpace();
                 var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
-                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}" + (serverName is null ? string.Empty : $"\nServer name: {serverName}");
+                metadataText.Text = AddRules.FileInfoText(size, serverName, nameEdited ? nameBox.Text : serverName);
                 if (!nameEdited && serverName is not null)
                 {
                     assigningServerName = true;
@@ -3384,7 +3428,7 @@ public sealed partial class MainWindow : Window
             metadataBusy.IsActive = false;
             metadataBusy.Visibility = Visibility.Collapsed;
             checkMetadata.IsEnabled = true;
-            metadataText.Text = "Credentials changed. Check file info again to refresh the preview.";
+            metadataText.Text = "Credentials changed. Check again to refresh the file info.";
         }
         checkMetadata.Click += async (_, _) => await PreviewMetadataAsync();
         authenticationUser.TextChanged += (_, _) => MetadataCredentialsChanged();
@@ -3429,7 +3473,7 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
-            Title = ServerNames.ForWindow("Download file info", _connection.Target),
+            Title = ServerNames.ForWindow("Add download", _connection.Target),
             Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
             SecondaryButtonText = "Download later",
@@ -4084,7 +4128,7 @@ public sealed partial class MainWindow : Window
         var result = reply.GetPayload<SettingsResult>();
         if (!result.Ok)
         {
-            await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the action.");
+            await ShowMessageAsync("Queue action failed", result.Error ?? _connection.NoReasonWords);
             return;
         }
 
@@ -4126,13 +4170,13 @@ public sealed partial class MainWindow : Window
         };
         var quotaMb = new TextBox
         {
-            Header = "Download no more than (MB; max 10,485,760)",
+            Header = "Download no more than (MB)",
             Text = ((existing?.QuotaBytes ?? 200L * 1024 * 1024) / (1024m * 1024m))
                 .ToString("0.##", System.Globalization.CultureInfo.CurrentCulture),
         };
         var quotaHours = new TextBox
         {
-            Header = "Every (hours; 1–8,760)",
+            Header = "Every (hours)",
             Text = (existing?.QuotaWindowHours ?? 5).ToString(System.Globalization.CultureInfo.CurrentCulture),
         };
         void UpdateQuotaControls()
@@ -4268,7 +4312,7 @@ public sealed partial class MainWindow : Window
         var result = reply.GetPayload<SettingsResult>();
         if (!result.Ok)
         {
-            await ShowMessageAsync("Could not save queue", result.Error ?? "The host rejected the change.");
+            await ShowMessageAsync("Could not save queue", result.Error ?? _connection.NoReasonWords);
             return false;
         }
 
@@ -4334,24 +4378,50 @@ public sealed partial class MainWindow : Window
                 settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
                 1, OptionsSettingsRebase.SpeedLimitMaxKb, "Unlimited");
             speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
-            var profilesBox = new TextBox
+            // Review 5:F6b: a row per site (the site and its connections), as Site logins has, not typed pattern=number lines.
+            var siteLimitRows = new List<(TextBox Site, NumberBox Max)>();
+            var siteLimitPanel = new StackPanel { Spacing = 8 };
+            var siteLimitEmpty = SettingsWindow.Hint("No per-site limits yet.");
+            void ShowSiteLimitEmpty() => siteLimitEmpty.Visibility = siteLimitRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            void AddSiteLimitRow(string pattern, int? max)
             {
-                Header = "One host pattern=maximum connections per line",
-                Text = string.Join(
-                    Environment.NewLine,
-                    settings.ConnectionProfiles.Select(profile => $"{profile.Pattern}={profile.MaxConnections}")),
-                AcceptsReturn = true,
-                Height = 96,
-                PlaceholderText = "*.example.com=2",
-            };
+                var site = new TextBox { Header = "Site", Text = pattern, PlaceholderText = "example.com or *.example.com" };
+                var limit = SettingsWindow.Number("Connections", max, 1, 32);
+                limit.Width = 140;
+                var remove = new Button { Content = "Remove", VerticalAlignment = VerticalAlignment.Bottom };
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.Children.Add(site);
+                Grid.SetColumn(limit, 1);
+                row.Children.Add(limit);
+                Grid.SetColumn(remove, 2);
+                row.Children.Add(remove);
+                var entry = (site, limit);
+                siteLimitRows.Add(entry);
+                siteLimitPanel.Children.Add(row);
+                ShowSiteLimitEmpty();
+                remove.Click += (_, _) =>
+                {
+                    siteLimitRows.Remove(entry);
+                    siteLimitPanel.Children.Remove(row);
+                    ShowSiteLimitEmpty();
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove this per-site limit");
+            }
+            foreach (var profile in settings.ConnectionProfiles) AddSiteLimitRow(profile.Pattern, profile.MaxConnections);
+            ShowSiteLimitEmpty();
+            var addSiteLimit = new Button { Content = "Add per-site limit" };
+            addSiteLimit.Click += (_, _) => AddSiteLimitRow(string.Empty, null);
             var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
-            var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
+            var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = settings.BrowserIntegrationEnabled };
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
-            var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = settings.CloseWindowCompletely };
+            var closeCompletely = new CheckBox { Content = "Close the window completely (it opens a moment slower next time)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var providerOpens = ProviderOpensBox();
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
@@ -4377,6 +4447,10 @@ public sealed partial class MainWindow : Window
                 // UI.R31: a hint that can't be taken for a real value.
                 PlaceholderText = "Path to a program",
             };
+            // Review 2:L5: one saved before the .exe rule is kept, but the Host refuses to start it; say so here.
+            var postDownloadNote = SettingsWindow.Hint(settings.PostDownloadCommandProblem ?? string.Empty);
+            postDownloadNote.Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid);
+            postDownloadNote.Visibility = settings.PostDownloadCommandProblem is null ? Visibility.Collapsed : Visibility.Visible;
             // The update feed, key and channel are not on any page, and Options leaves them as they are: hidden boxes
             // once wrote them back, and the key's box kept only its first line (UP.B1). The CLI still sets them.
             var autoUpdate = new CheckBox
@@ -4503,6 +4577,11 @@ public sealed partial class MainWindow : Window
                 categoryRows.Add(row);
             }
 
+            // T14: a Host from before the torrent folders sends neither, and the group isn't shown for it.
+            var torrentFoldersKnown = settings.UseTorrentCategoryFolders is not null;
+            var useTorrentCategoryFolders = new CheckBox { Content = "Save torrents to a folder for their category", IsChecked = settings.UseTorrentCategoryFolders != false };
+            var (torrentFolderRow, torrentFolderBox) = window.FolderField("Torrent folder", settings.TorrentCategoryFoldersRoot, TorrentFolderText.SameFolders);
+
             // Favorite folders: name and folder per row, in order. The star beside a folder box saves at once, so OK
             // keeps any saved meanwhile and drops only the rows removed here.
             var favoriteRows = new List<(TextBox Name, TextBox Folder, UIElement Row)>();
@@ -4591,7 +4670,7 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
                 SettingsWindow.Section("Capturing downloads"), integration, clipboard);
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
-                SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.") };
+                SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder, and so do torrents when the torrent folder is empty.") };
             saveTo.AddRange(categoryRows);
             void ShowCategoryFoldersEnabled()
             {
@@ -4602,6 +4681,14 @@ public sealed partial class MainWindow : Window
             useCategoryFolders.Checked += (_, _) => ShowCategoryFoldersEnabled();
             useCategoryFolders.Unchecked += (_, _) => ShowCategoryFoldersEnabled();
             ShowCategoryFoldersEnabled();
+            // T14: torrents have their own folders, beside the ones above so both switches are seen together.
+            if (torrentFoldersKnown)
+            {
+                saveTo.Add(SettingsWindow.Section("Torrent folders"));
+                saveTo.Add(useTorrentCategoryFolders);
+                saveTo.Add(torrentFolderRow);
+                saveTo.Add(SettingsWindow.Hint(TorrentFolderText.OptionsHint));
+            }
             if (customCategoryControls.Count > 0)
             {
                 saveTo.Add(SettingsWindow.Section("Custom categories"));
@@ -4613,11 +4700,14 @@ public sealed partial class MainWindow : Window
             saveTo.Add(addFavorite);
             window.AddPage("Save to", "\uE8B7", saveTo.ToArray());
             window.AddPage("Downloads", "\uE896",
-                SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload);
+                SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload,
+                SettingsWindow.Hint(ShellWords.PostDownloadProgramGets), postDownloadNote);
             window.AddPage("Connection", "\uE774",
                 maxConcurrent, connections, speedLimit,
                 SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
-                SettingsWindow.Section("Per-site limits"), profilesBox);
+                SettingsWindow.Section("Per-site limits"),
+                SettingsWindow.Hint("Most connections a download may open to these sites. *.example.com covers its subdomains."),
+                siteLimitEmpty, siteLimitPanel, addSiteLimit);
             window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
             window.AddPage("Site logins", "\uE8D7", loginHelp, loginEmpty, loginPanel, addLogin);
             // The update source (channel, manifest URL, signing key) is set by the installer and is
@@ -4720,18 +4810,8 @@ public sealed partial class MainWindow : Window
                         return ("Enter the proxy address as host:port (port 1-65535).", ProxyPage);
                 }
 
-                var profiles = new List<ConnectionProfileDto>();
-                foreach (var line in profilesBox.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var trimmed = line.Trim();
-                    if (trimmed.Length == 0) continue;
-                    var separator = trimmed.LastIndexOf('=');
-                    if (separator <= 0 ||
-                        !int.TryParse(trimmed[(separator + 1)..].Trim(), out var profileLimit) ||
-                        profileLimit < 1 || profileLimit > 32)
-                        return ($"Per-site limit '{trimmed}' must use pattern=max (1-32).", ConnectionPage);
-                    profiles.Add(new ConnectionProfileDto { Pattern = trimmed[..separator].Trim(), MaxConnections = profileLimit });
-                }
+                var (profiles, profileProblem) = OptionsSettingsRebase.SiteLimits(siteLimitRows.Select(row => (row.Site.Text, row.Max.Value)));
+                if (profileProblem is not null) return (profileProblem, ConnectionPage);
 
                 settings.Proxy = new ProxyDto
                 {
@@ -4764,6 +4844,11 @@ public sealed partial class MainWindow : Window
                 SaveProviderOpens(providerOpens);
                 settings.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
                 settings.UseCategoryFolders = useCategoryFolders.IsChecked == true;
+                if (torrentFoldersKnown)
+                {
+                    settings.UseTorrentCategoryFolders = useTorrentCategoryFolders.IsChecked == true;
+                    settings.TorrentCategoryFoldersRoot = torrentFolderBox.Text.Trim();
+                }
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
                 settings.NotifyOnCompletion = notify.IsChecked == true;
@@ -4798,7 +4883,7 @@ public sealed partial class MainWindow : Window
                 var reply = await _connection.UpdateSettingsAsync(OptionsSettingsRebase.Rebase(settingsAtOpen, settings, latest));
                 var update = reply.GetPayload<SettingsResult>();
                 if (!update.Ok)
-                    return (update.Error ?? "The host rejected the settings.", -1);
+                    return (update.Error ?? _connection.NoReasonWords, -1);
 
                 settingsAtOpen = CloneSettings(settings);
                 torrentPage?.Saved(update.Settings);
@@ -4815,8 +4900,12 @@ public sealed partial class MainWindow : Window
                 // UI.B6: a new default folder moves the category folders that sat under the old one. Show what the
                 // Host saved, or the boxes keep the old paths and the next OK writes them back.
                 directory.Text = update.Settings.DefaultDownloadDirectory;
+                postDownloadNote.Text = update.Settings.PostDownloadCommandProblem ?? string.Empty;
+                postDownloadNote.Visibility = update.Settings.PostDownloadCommandProblem is null ? Visibility.Collapsed : Visibility.Visible;
                 foreach (var (category, box) in categoryBoxes)
                     box.Text = update.Settings.CategoryFolders.TryGetValue(category, out var saved) ? saved : string.Empty;
+                // T14: the torrent folder under the old default folder moves with it too.
+                if (torrentFoldersKnown) torrentFolderBox.Text = update.Settings.TorrentCategoryFoldersRoot ?? string.Empty;
                 var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
                 var webUiSaveProblem = await webUi.SaveAsync();
                 await RefreshAsync();
@@ -4943,7 +5032,7 @@ public sealed partial class MainWindow : Window
             }
             var action = response.GetPayload<JobActionResponse>();
             if (response.Type != MessageTypes.JobActionResult || !action.Ok)
-                failures.Add($"{change.Key}: {action.Error ?? "The host rejected the change."}");
+                failures.Add($"{change.Key}: {action.Error ?? _connection.NoReasonWords}");
         }
         if (failures.Count > 0)
         {
@@ -4984,6 +5073,8 @@ public sealed partial class MainWindow : Window
     private static SettingsDto CloneSettings(SettingsDto source)
         => new()
         {
+            // Sent back unchanged so the Host can tell which fields this copy has not seen (Contracts SettingsDto.Revision).
+            Revision = source.Revision,
             DefaultDownloadDirectory = source.DefaultDownloadDirectory,
             MaxConcurrentDownloads = source.MaxConcurrentDownloads,
             DefaultConnections = source.DefaultConnections,
@@ -5057,6 +5148,8 @@ public sealed partial class MainWindow : Window
             TorrentsEnabled = source.TorrentsEnabled,
             TorrentRoute = source.TorrentRoute,
             TorrentChooseFiles = source.TorrentChooseFiles,
+            UseTorrentCategoryFolders = source.UseTorrentCategoryFolders,
+            TorrentCategoryFoldersRoot = source.TorrentCategoryFoldersRoot,
             TorrentHandler = source.TorrentHandler,
             TorrentSeedAfterDownload = source.TorrentSeedAfterDownload,
             TorrentSeedRatio = source.TorrentSeedRatio,
@@ -5081,6 +5174,7 @@ public sealed partial class MainWindow : Window
             RecentUrls = new List<string>(source.RecentUrls),
             LastUpdateCheck = source.LastUpdateCheck,
             PostDownloadCommand = source.PostDownloadCommand,
+            PostDownloadCommandProblem = source.PostDownloadCommandProblem,
             UpdateManifestUrl = source.UpdateManifestUrl,
             UpdatePublicKey = source.UpdatePublicKey,
             UpdateChannel = source.UpdateChannel,
@@ -5128,7 +5222,7 @@ public sealed partial class MainWindow : Window
             var result = reply.GetPayload<SettingsResult>();
             if (!result.Ok)
             {
-                await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the queue action.");
+                await ShowMessageAsync("Queue action failed", result.Error ?? _connection.NoReasonWords);
                 return;
             }
 
@@ -5191,8 +5285,8 @@ public sealed partial class MainWindow : Window
         // Their files went on purpose after extraction. A box offering to delete them would do nothing, and a new file by that name isn't theirs.
         var noFilesLeft = selection.All(job => job.FileRemovedAfterExtraction);
         var question = selection.Count == 1
-            ? $"Remove '{selection[0].FileName}' from the list?"
-            : $"Remove {selection.Count} downloads from the list?";
+            ? $"Delete '{selection[0].FileName}' from the list?"
+            : $"Delete {selection.Count} downloads from the list?";
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
@@ -5311,7 +5405,7 @@ public sealed partial class MainWindow : Window
                 var result = reply.GetPayload<JobActionResponse>();
                 if (!result.Ok)
                 {
-                    await ShowMessageAsync("Action failed", result.Error ?? "The host rejected the action.");
+                    await ShowMessageAsync("Action failed", result.Error ?? _connection.NoReasonWords);
                 }
             }
 
@@ -5336,7 +5430,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                Process.Start(ShellActions.OpenFile(job.FinalFilePath));
+                ShellActions.Start(ShellActions.OpenFile(job.FinalFilePath))?.Dispose();
                 return;
             }
             catch (Exception ex)
@@ -5352,7 +5446,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                Process.Start(ShellActions.OpenFolder(job.FinalFilePath));
+                ShellActions.Start(ShellActions.OpenFolder(job.FinalFilePath))?.Dispose();
             }
             catch (Exception ex)
             {
@@ -5380,7 +5474,7 @@ public sealed partial class MainWindow : Window
                 : job.Destination;
             if (!string.IsNullOrWhiteSpace(path))
             {
-                Process.Start(ShellActions.RevealFile(path));
+                ShellActions.Start(ShellActions.RevealFile(path))?.Dispose();
             }
         }
         catch (Exception ex)

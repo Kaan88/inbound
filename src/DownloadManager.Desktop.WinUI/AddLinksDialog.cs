@@ -174,14 +174,8 @@ internal sealed class AddLinksDialog
                 AddFocus.ImportedLinks => "Import download list",
                 _ => "Add links",
             },
-            Content = new ScrollViewer
-            {
-                Padding = InboundTheme.DialogScrollPadding,
-                Content = panel,
-                MaxHeight = Math.Max(240, Math.Min(620, _themeRoot.ActualHeight - 200)),
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            },
+            // T13: as tall as the window lets it be, following it while open; the content scrolls, never the buttons.
+            Content = DialogLayout.ScrollingContent(panel, root),
             PrimaryButtonText = "Add",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,

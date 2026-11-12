@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { justCompleted } from '../src/lib/notify';
 import {
-  applyForm, archiveChanges, archiveValues, composeProxyAddress, formFrom, isUnsupportedReply, parseExtensions, parseProfiles, profilesToText,
-  friendlyRefusal, problemsText, splitProxyAddress, validateAll, validateForm, type OptionsForm,
+  applyForm, archiveChanges, archiveValues, composeProxyAddress, formFrom, isUnsupportedReply, parseExtensions, profileRows, readProfiles,
+  friendlyRefusal, problemsText, routeShown, routeToSave, splitProxyAddress, validateAll, validateForm, type OptionsForm,
 } from '../src/lib/settingsRules';
 import type { ArchiveSettings, Settings } from '../src/lib/types';
 
@@ -35,17 +35,21 @@ describe('proxy address', () => {
   });
 });
 
+// Review 5:F6b: a row each, a site and its connections, not typed pattern=max lines.
 describe('per-site limits', () => {
-  it('writes and reads pattern=max lines', () => {
-    expect(profilesToText([{ pattern: '*.a.com', maxConnections: 2 }, { pattern: 'b.org', maxConnections: 4 }])).toBe('*.a.com=2\nb.org=4');
-    expect(parseProfiles(' *.a.com = 2 \r\n\r\nb.org=4\n').profiles).toEqual([{ pattern: '*.a.com', maxConnections: 2 }, { pattern: 'b.org', maxConnections: 4 }]);
+  it('gives a row per limit and reads them back', () => {
+    const rows = profileRows([{ pattern: '*.a.com', maxConnections: 2 }, { pattern: 'b.org', maxConnections: 4 }]);
+    expect(rows.map((row) => [row.pattern, row.max])).toEqual([['*.a.com', 2], ['b.org', 4]]);
+    rows[0].pattern = ' *.a.com ';
+    rows.push({ key: 99, pattern: '', max: null });
+    expect(readProfiles(rows)).toEqual({ profiles: [{ pattern: '*.a.com', maxConnections: 2 }, { pattern: 'b.org', maxConnections: 4 }], error: null });
   });
 
-  it('names the bad line', () => {
-    expect(parseProfiles('nolimit').error).toBe("Per-site limit 'nolimit' must use pattern=max (1-32).");
-    expect(parseProfiles('a=33').error).toContain("'a=33'");
-    expect(parseProfiles('=3').error).toContain("'=3'");
-    expect(parseProfiles('a=0').error).not.toBeNull();
+  it('names the row that is wrong, in the Windows words', () => {
+    expect(readProfiles([{ key: 1, pattern: ' ', max: 3 }])).toEqual({ profiles: [], error: 'Enter a site for each per-site limit, or remove it.', field: 'profile-site-1' });
+    expect(readProfiles([{ key: 2, pattern: 'a.com', max: 33 }]).error).toBe('The limit for a.com must be 1 to 32 connections.');
+    expect(readProfiles([{ key: 3, pattern: 'a.com', max: null }]).field).toBe('profile-max-3');
+    expect(readProfiles([{ key: 4, pattern: 'a.com', max: 0 }]).error).not.toBeNull();
   });
 });
 
@@ -133,7 +137,7 @@ describe('applyForm', () => {
     form.proxy.host = 'p:1080';
     form.proxy.username = ' me ';
     form.proxy.password = 'secret';
-    form.profiles = 'b.org=4';
+    form.profiles = [{ key: 1, pattern: 'b.org', max: 4 }];
     form.logins[0].removed = true;
     applyForm(current, form);
     expect(current.maxConcurrentDownloads).toBe(5);
@@ -144,18 +148,21 @@ describe('applyForm', () => {
     expect(current.updateManifestUrl).toBe('https://feed');
   });
 
-  it('reads and writes the Torrents page: off with files chosen first by default, an unknown route asks', () => {
+  it('reads and writes the Torrents page: off with files chosen first by default, an unknown route is this PC', () => {
     const fresh = formOf();
-    expect(fresh).toMatchObject({ torrentsEnabled: false, torrentRoute: 'ask', torrentChooseFiles: true });
-    expect(formOf({ torrentRoute: 'somewhere' }).torrentRoute).toBe('ask');
+    expect(fresh).toMatchObject({ torrentsEnabled: false, torrentRoute: 'thisPc', torrentChooseFiles: true });
+    expect(formOf({ torrentRoute: 'somewhere' }).torrentRoute).toBe('thisPc');
 
     const current = settings({ torrentsEnabled: false, torrentRoute: 'ask', torrentChooseFiles: true, torrentHandler: true });
     const form = formFrom(current);
     form.torrentsEnabled = true;
-    form.torrentRoute = 'thisPc';
     form.torrentChooseFiles = false;
     applyForm(current, form);
-    expect(current).toMatchObject({ torrentsEnabled: true, torrentRoute: 'thisPc', torrentChooseFiles: false, torrentHandler: true });
+    // T9: a saved "ask" now starts on this PC too, so keeping This PC leaves it as it was.
+    expect(current).toMatchObject({ torrentsEnabled: true, torrentRoute: 'ask', torrentChooseFiles: false, torrentHandler: true });
+    form.torrentRoute = 'provider';
+    applyForm(current, form);
+    expect(current.torrentRoute).toBe('provider');
     expect(friendlyRefusal('These settings can only be changed in the app on this PC: torrentsEnabled. Nothing was saved.')).toContain('Download torrents.');
   });
 
@@ -306,5 +313,16 @@ describe('a refusal that names settings (U-WR-14)', () => {
     expect(friendlyRefusal('These settings can only be changed in the app on this PC: proxy, someNewThing. Nothing was saved.'))
       .toBe('These settings can only be changed in the app on this PC: Proxy, someNewThing. Nothing was saved.');
     expect(friendlyRefusal('Something else.')).toBe('Something else.');
+  });
+
+  it('offers two torrent routes: a saved "ask" shows and stays as this PC (T9)', () => {
+    expect(routeShown('ask')).toBe('thisPc');
+    expect(routeShown('thisPc')).toBe('thisPc');
+    expect(routeShown('provider')).toBe('provider');
+    expect(routeShown(undefined)).toBe('thisPc');
+    expect(routeToSave('thisPc', 'ask')).toBe('ask');
+    expect(routeToSave('thisPc', 'provider')).toBe('thisPc');
+    expect(routeToSave('thisPc', undefined)).toBe('thisPc');
+    expect(routeToSave('provider', 'ask')).toBe('provider');
   });
 });

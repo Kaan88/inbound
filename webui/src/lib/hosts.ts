@@ -20,11 +20,11 @@ export type Normalized = { ok: true; origin: string; cleartext: boolean } | { ok
 /** The same rules as the browser extension's server address: http by default, the path dropped, credentials refused. */
 export function normalizeHostAddress(input: string): Normalized {
   const text = input.trim();
-  if (!text) return { ok: false, error: "Type the host's address, for example http://192.168.1.20:8080." };
+  if (!text) return { ok: false, error: "Type the server's address, for example http://192.168.1.20:8080." };
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`;
   let url: URL;
   try { url = new URL(withScheme); } catch { return { ok: false, error: 'That is not a web address.' }; }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, error: "The host's address starts with http:// or https://." };
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, error: "The server's address starts with http:// or https://." };
   if (url.username || url.password) return { ok: false, error: 'Leave the user name and password out of the address.' };
   if (!url.hostname) return { ok: false, error: 'That address has no host name.' };
   const loopback = url.hostname === 'localhost' || url.hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(url.hostname);
@@ -49,7 +49,7 @@ export type Checked = { ok: true; host: SavedHost; cleartext: boolean } | { ok: 
 export function checkHost(hosts: SavedHost[], name: string, address: string, currentOrigin: string, editing?: string): Checked {
   const normal = normalizeHostAddress(address);
   if (!normal.ok) return normal;
-  if (normal.origin === currentOrigin) return { ok: false, error: 'That is the host you are on now.' };
+  if (normal.origin === currentOrigin) return { ok: false, error: 'That is the server you are on now.' };
   if (hosts.some((host) => host.origin === normal.origin && host.id !== editing)) return { ok: false, error: 'That address is already in the list.' };
   const trimmed = name.trim().slice(0, maxHostName);
   return { ok: true, cleartext: normal.cleartext, host: { id: editing ?? '', name: trimmed || defaultName(normal.origin), origin: normal.origin } };

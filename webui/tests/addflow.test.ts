@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  basicAuthorization, categoryChoices, categoryOf, chunkTorrentEntries, destinationFor, findExisting, importSummary, isTorrentEntry, metadataText, nameFromUrl, packageNameFor, parseList,
+  basicAuthorization, categoryChoices, categoryOf, checkButtonText, metadataTitle, chunkTorrentEntries, destinationFor, findExisting, importSummary, isTorrentEntry, metadataText, nameFromUrl, packageNameFor, parseList,
   serializeList, serverNameToShow, spaceLine, validUserName,
 } from '../src/lib/addflow';
 import { routeOf, type AddLine } from '../src/lib/addlines';
@@ -191,7 +191,7 @@ describe('categories and folders (A5, A6)', () => {
   } as unknown as Settings;
 
   it('lists Automatic, the built-in categories, Other and the custom ones', () => {
-    expect(categoryChoices(settings).map((c) => c.name)).toEqual(['Automatic (from file type)', 'Compressed', 'Documents', 'Music', 'Programs', 'Video', 'Other', 'Books']);
+    expect(categoryChoices(settings).map((c) => c.name)).toEqual(['Automatic (file extension)', 'Compressed', 'Documents', 'Music', 'Programs', 'Video', 'Other', 'Books']);
   });
 
   it('picks the category from the file name, custom extensions first', () => {
@@ -248,9 +248,15 @@ describe('free space and file info (A3, A24)', () => {
     expect(spaceLine({ path: '/d', freeBytes: 1 * gb, insideContainer: true }).problem).toBe(true);
   });
 
-  it('writes the size, type and server name', () => {
-    expect(metadataText({ ok: true, totalBytes: 1234567, contentType: 'application/zip' }, 'a.zip')).toBe('1,234,567 bytes · application/zip\nServer name: a.zip');
-    expect(metadataText({ ok: true }, null)).toBe('Size unknown · Type unknown');
+  it('writes the size as the list does, and the server name only when the box says something else (review 5:A2a, A5)', () => {
+    expect(metadataText({ ok: true, totalBytes: 80_000_000, contentType: 'application/zip' }, 'a.zip', 'a.zip')).toBe('76.3 MB');
+    expect(metadataText({ ok: true, totalBytes: 1234567, contentType: 'application/zip' }, 'a.zip', 'mine.zip')).toBe('1.18 MB\nThe server names it a.zip');
+    expect(metadataText({ ok: true, totalBytes: 1234567 }, 'a.zip', '')).toBe('1.18 MB');
+    expect(metadataText({ ok: true }, null, 'x')).toBe('Size unknown');
+    expect(metadataTitle({ ok: true, totalBytes: 1234567, contentType: 'application/zip' })).toBe('1,234,567 bytes · application/zip');
+    expect(metadataTitle({ ok: true })).toBe('Type unknown');
+    expect(checkButtonText(false)).toBe('Check file info');
+    expect(checkButtonText(true)).toBe('Check again');
   });
 
   it('does not show a name that is only the end of a key address', () => {
@@ -277,6 +283,12 @@ describe('download lists (A21)', () => {
   it('reads what it wrote and fills the gaps', () => {
     expect(parseList(serializeList(jobs))).toEqual([expect.objectContaining({ url: 'https://h/a', fileName: 'a', queueId: 1, requestedConnections: 4 })]);
     expect(parseList('[{"url":"https://h/x"},{"url":" "},{"nope":1}]')).toEqual([{ url: 'https://h/x', queueId: 0, requestedConnections: 0, startMode: 'later', conflictPolicy: 'rename' }]);
+  });
+
+  it('keeps the hand-off content type, so a stream is added as one again (review 1 N6)', () => {
+    const stream = [{ id: '5', url: 'https://h/play?id=7', queueId: 0, handoffContentType: 'application/dash+xml', receivedBytes: 0, state: 'paused' }] as Job[];
+    expect(parseList(serializeList(stream))).toEqual([expect.objectContaining({ url: 'https://h/play?id=7', contentType: 'application/dash+xml' })]);
+    expect(JSON.parse(serializeList(jobs))[0]).not.toHaveProperty('contentType');
   });
 
   it('refuses a file that is not a list', () => {

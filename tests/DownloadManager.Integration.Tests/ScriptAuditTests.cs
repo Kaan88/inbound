@@ -119,6 +119,34 @@ public sealed class ScriptAuditTests
         Assert.Contains("\"stop-for-setup.ps1\"", script);
     }
 
+    [Fact]
+    public void Update_rollback_writes_the_scripts_and_metadata_through_a_tmp_file()
+    {
+        // A kill mid-rollback must leave the old file or the restored one, never a truncated one (review 2026-11-12).
+        var script = Code(@"scripts\apply-update.ps1", "#");
+        Assert.DoesNotMatch(@"WriteAllBytes\(\$installedScript,", script);
+        Assert.DoesNotMatch(@"WriteAllText\(\$metadataPath,", script);
+        Assert.Matches(
+            @"WriteAllBytes\(""\$installedScript\.tmp"", \$rootScriptBackups\[\$installedScript\]\)\s+Move-Item -LiteralPath ""\$installedScript\.tmp"" -Destination \$installedScript -Force",
+            script);
+        Assert.Matches(
+            @"WriteAllText\(""\$metadataPath\.tmp"", \$metadataBackup, [^\n]+\s+Move-Item -LiteralPath ""\$metadataPath\.tmp"" -Destination \$metadataPath -Force",
+            script);
+    }
+
+    [Fact]
+    public void Uninstall_removes_the_sign_in_entry_and_shortcut_only_when_they_start_this_install()
+    {
+        // Uninstalling a copy elsewhere (a test folder) must not take them from the installed app (review 2026-11-12).
+        var script = Code(@"scripts\uninstall.ps1", "#");
+        Assert.Contains("$hostExe = Join-Path $appDir \"DownloadManager.Host.exe\"", script);
+        Assert.Matches(
+            @"if \(\$runValue -and \(\[string\]\$runValue\.DownloadManagerHost\)\.Trim\(\)\.StartsWith\('""' \+ \$hostExe \+ '""', \[StringComparison\]::OrdinalIgnoreCase\)\) \{\s+Remove-ItemProperty -LiteralPath \$runKey -Name ""DownloadManagerHost""",
+            script);
+        Assert.Matches(@"if \(\$target -ieq \$hostExe\) \{\s+Remove-Item -LiteralPath \$shortcut -Force", script);
+        Assert.DoesNotContain("Remove-ItemProperty -Path $runKey -Name \"DownloadManagerHost\" -ErrorAction SilentlyContinue", script);
+    }
+
     [Theory]
     [InlineData(@"scripts\uninstall.ps1")]
     [InlineData(@"scripts\repair.ps1")]

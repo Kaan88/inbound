@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GraphScale } from '../src/lib/graphScale';
+import { graphCeiling, SpeedHistory } from '../src/lib/list';
 
 const KB = 1024;
 const MB = 1024 * 1024;
@@ -32,5 +33,28 @@ describe('speed graph scale (UI.B23)', () => {
     const scale = new GraphScale();
     scale.update(3.5 * MB, 0);
     expect(scale.reset(100 * KB)).toBe(128 * KB);
+  });
+});
+
+describe('speed graph start (UI.B26)', () => {
+  // The owner's recording on the desktop: the top grew to 4, 10, 20 MB/s while the line still lay at zero. Here each
+  // sample is drawn the moment it comes, with no ease, and the top is fitted to the samples drawn, so the two move together.
+  it('fits the top to the samples drawn, as they come', () => {
+    const history = new SpeedHistory();
+    const scale = new GraphScale();
+    for (let i = 0; i < 60; i++) history.add(0, 1_800_000_000 + i);
+    const idleTop = scale.reset(history.peak());
+    const figures = [2.9 * MB, 2.9 * MB, 9.5 * MB, 11.8 * MB];
+    figures.forEach((figure, i) => {
+      history.add(figure, 1_800_000_060 + i);
+      const drawn = history.recent();
+      const top = scale.update(history.peak(), (60 + i) * 1000);
+      const highest = Math.max(...drawn.map((rate) => rate ?? 0));
+      // The newest figure is on the line, and the top is the step for the highest one drawn: nothing at full height.
+      expect(drawn[drawn.length - 1]).toBe(figure);
+      expect(top).toBe(graphCeiling(highest));
+      expect(highest).toBeLessThan(top);
+    });
+    expect(idleTop).toBe(graphCeiling(0));
   });
 });

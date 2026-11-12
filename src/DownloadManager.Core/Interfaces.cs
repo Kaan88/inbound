@@ -175,6 +175,10 @@ public sealed record MediaMuxResult(bool Success, string? Error);
 
 public interface IMediaCheckpointStore
 {
+    /// <summary>
+    /// As <see cref="IDownloadCheckpointStore.LoadAsync"/>: null starts the track over, so a file that can't be read
+    /// right now throws <see cref="IOException"/>, and a damaged or newer one <see cref="CheckpointUnusableException"/>.
+    /// </summary>
     Task<MediaCheckpoint?> LoadAsync(Guid jobId, string track, CancellationToken cancellationToken = default);
 
     Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default);

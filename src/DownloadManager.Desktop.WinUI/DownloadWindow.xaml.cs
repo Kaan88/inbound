@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using DownloadManager.Contracts;
@@ -64,21 +65,28 @@ public sealed class TorrentFileRow : INotifyPropertyChanged
     internal string PriorityValue => _priority;
 
     /// <summary>T3: the file's priority (Skip keeps the one it had for when it is ticked again) and whether the column shows.</summary>
-    internal void SetPriority(string priority, bool shown)
+    /// <returns>True when the priority changed.</returns>
+    internal bool SetPriority(string priority, bool shown)
     {
         var value = priority is TorrentPriorities.Skip || !TorrentPriorities.IsKnown(priority) ? _priority : priority;
-        if (value == _priority && shown == _showPriority) return;
+        if (value == _priority && shown == _showPriority) return false;
         var visibilityChanged = shown != _showPriority;
+        var priorityChanged = value != _priority;
         _priority = value;
         _showPriority = shown;
         Raise(nameof(Priority));
         if (visibilityChanged) Raise(nameof(PriorityVisibility));
+        return priorityChanged;
     }
+
+    /// <summary>T12: what the Files tab sorts this row by, as it shows now (its box may be ahead of the Host).</summary>
+    internal FileSortFacts SortFacts => new(_file.Index, _file.Path, _file.Size, _checked, _file.Done, _priority);
 
     private TorrentFileDto Shown => _file.Wanted == _checked ? _file
         : new TorrentFileDto { Index = _file.Index, Path = _file.Path, Size = _file.Size, Wanted = _checked, Done = _file.Done };
 
-    internal void Apply(TorrentFileDto file, bool complete, bool isChecked)
+    /// <returns>True when anything the row shows changed.</returns>
+    internal bool Apply(TorrentFileDto file, bool complete, bool isChecked)
     {
         // Compared by field, not by text: a refresh of 100,000 rows makes no strings for rows that didn't change.
         var old = _file;
@@ -88,13 +96,14 @@ public sealed class TorrentFileRow : INotifyPropertyChanged
         _file = file;
         _complete = complete;
         _checked = isChecked;
-        if (!changed) return;
+        if (!changed) return false;
         if (checkedChanged) Raise(nameof(Checked));
         if (old.Path != file.Path) Raise(nameof(Name));
         if (old.Size != file.Size) Raise(nameof(Size));
         Raise(nameof(Progress));
         Raise(nameof(AccessibleName));
         if (checkedChanged) Raise(nameof(Priority));
+        return true;
     }
 
     /// <summary>Puts the box to this, even when the value is the same: a click may have moved the box alone.</summary>
@@ -133,8 +142,15 @@ public sealed partial class DownloadWindow : Window
     private bool _closed;
     private bool _updatingControls;
     private readonly bool _manual;
+    private readonly bool _inMainWindowProcess;
+    private bool _firstFrameTraced;
     private bool _completedLayout;
+
+    /// <summary>T13: the window has been given a torrent's size (or a finished download's), once.</summary>
+    private bool _sizedForTorrent;
     private bool _refreshingCompletion;
+    /// <summary>T10: an account takes torrents, asked once when a .torrent download finishes with torrents off here.</summary>
+    private bool _providerTakesTorrents;
     private long? _displayedSpeedLimit;
     // UI.B20: the graph takes one sample a second on this window's clock, as the main window's does, not one per update.
     private readonly DispatcherTimer _chartTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -165,16 +181,24 @@ public sealed partial class DownloadWindow : Window
     private bool _filesNoteFromLoad;
 
     /// <param name="target">The Host the download is on: this PC, or a saved server (<c>--server</c>).</param>
-    public DownloadWindow(Guid jobId, bool manual = false, ServerTarget? target = null)
+    /// <param name="inMainWindowProcess">T11: opened by the main window in its own process, not started by the Host as a
+    /// process of its own. Such a window closes itself when this PC's Host exits, and leaves <see cref="ShownServer"/>,
+    /// which is the main window's, alone.</param>
+    public DownloadWindow(Guid jobId, bool manual = false, ServerTarget? target = null, bool inMainWindowProcess = false)
     {
+        UiTrace.Write($"Progress Details opening in-process={inMainWindowProcess}");
         _jobId = jobId;
         _connection = new HostConnection(target);
-        ShownServer.Target = _connection.Target;
+        _inMainWindowProcess = inMainWindowProcess;
         _manual = manual;
         InitializeComponent();
+        // The icon is read for this window's Host, not the one the main window shows.
+        _iconJob.OnAnotherServer = _connection.IsRemote;
         FileIconHeader.DataContext = _iconJob;
         AppTheme.Track(Root);
-        WindowLayout.ResizeForDpi(this, 640, 640);
+        // T13: never so small that the buttons at the bottom go out of the window (their row wraps instead).
+        WindowLayout.SetMinimumSize(this, WindowSizeRules.ProgressMinimumWidth, WindowSizeRules.ProgressMinimumHeight);
+        WindowLayout.ResizeForDpi(this, WindowSizeRules.ProgressWidth, WindowSizeRules.ProgressHeight);
         WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = WindowLayout.AppIconPath;
         if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
@@ -190,14 +214,19 @@ public sealed partial class DownloadWindow : Window
         };
         Root.KeyboardAccelerators.Add(enter);
         Root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
-        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
+        // A window of its own process ends it; one in the main window's process closes, and the main window ends the process.
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_inMainWindowProcess) Application.Current.Exit();
+            else if (!_closed) Close();
+        });
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
             _settings = snapshot.Settings;
-            if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
-            // Another server's theme is its own; this window keeps this PC's.
-            if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
+            // Another server's theme is its own; this window keeps this PC's. In the main window's process that window
+            // follows it for every window (T11).
+            if (!_connection.IsRemote && !_inMainWindowProcess) AppTheme.FollowSettings(snapshot.Settings);
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;
             var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == _jobId);
             if (job is null) ShowRemoved();
@@ -206,6 +235,8 @@ public sealed partial class DownloadWindow : Window
                 Update(job, completionSettingsRefreshed: true);
                 _ = LoadSpeedHistoryAsync();
             }
+
+            TraceFirstFrame();
         });
         _connection.JobChanged += (job, type) =>
         {
@@ -254,6 +285,22 @@ public sealed partial class DownloadWindow : Window
         UseSpeedLimit.Click += (_, _) => SpeedLimitInput.IsEnabled = UseSpeedLimit.IsChecked == true && _job?.CanChangeSpeedLimit == true;
         UpdateButtons();
         _connection.Start();
+    }
+
+    /// <summary>
+    /// T11: the open time is measured to the first frame drawn with the download in it, as the main window's is
+    /// (<c>First frame with the list</c>). One line in ui-trace.log per window.
+    /// </summary>
+    private void TraceFirstFrame()
+    {
+        if (_firstFrameTraced) return;
+        _firstFrameTraced = true;
+        void OnRendering(object? sender, object e)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
+            UiTrace.Write("First frame with the download");
+        }
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
     }
 
     /// <summary>
@@ -326,7 +373,7 @@ public sealed partial class DownloadWindow : Window
     {
         if (_closed || _job is not { } job) return;
         var now = at ?? DateTimeOffset.UtcNow;
-        Chart.AddSample(now, SpeedSample.Total(_connected, [SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now)]));
+        Chart.AddSample(now, SpeedSample.Total(_connected, [SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, _connection.Clock.ServerNow(now))]));
     }
 
     /// <summary>
@@ -411,6 +458,14 @@ public sealed partial class DownloadWindow : Window
             _settings = latest.Settings;
             _globalShowCompletion = latest.Settings.ShowCompletionDialog;
             var current = latest.Jobs.FirstOrDefault(candidate => candidate.Id == _jobId);
+            // T10: with torrents off or unavailable, the Host still offers a .torrent file when an account takes
+            // torrents; then this window closes as well. Asked once, here, at completion.
+            if (current is not null && !TorrentRules.Applies(TorrentsOffered, latest.Settings) &&
+                TorrentRules.AsksAboutTorrentFile(current, !_connection.IsRemote, _manual))
+            {
+                _providerTakesTorrents = await _connection.ProviderTakesTorrentsAsync();
+                if (_closed) return;
+            }
             if (current is null) ShowRemoved();
             else Update(current, completionSettingsRefreshed: true);
         }
@@ -479,6 +534,14 @@ public sealed partial class DownloadWindow : Window
         _isTorrent = job.Torrent is not null;
         _iconJob.Update(job);
         var complete = job.State == "completed";
+        if (_isTorrent && !complete && !_sizedForTorrent)
+        {
+            // T13: the window opens before it knows what it shows; a torrent's row of buttons (and its Peers columns)
+            // need more width than a file's, so it grows once, within the screen.
+            _sizedForTorrent = true;
+            var (width, height) = WindowSizeRules.ProgressSize(torrent: true, completed: false);
+            WindowLayout.GrowForDpi(this, width, height);
+        }
         if (complete && !_completedLayout && !completionSettingsRefreshed)
         {
             _ = RefreshCompletionAsync(job);
@@ -487,7 +550,9 @@ public sealed partial class DownloadWindow : Window
         var showCompletion = job.ShowCompletionDialog ?? _globalShowCompletion;
         // A user who disables future completion windows from this already-open
         // completion window should not have that same window disappear.
-        if (complete && !showCompletion && !_manual && !_completedLayout)
+        // T10: a .torrent file goes to the torrent dialog, which this PC's Host opens; this window closes as with the
+        // completion window off.
+        if (complete && (!showCompletion || TorrentRules.ProgressClosesForTorrentFile(job, !_connection.IsRemote, TorrentsOffered, _settings, _manual, _providerTakesTorrents)) && !_manual && !_completedLayout)
         {
             Close();
             return;
@@ -509,7 +574,11 @@ public sealed partial class DownloadWindow : Window
                 ShowSelectedPage();
             }
 
-            WindowLayout.ResizeForDpi(this, 600, 500);
+            // T13: a finished torrent keeps its tabs and its seeding buttons, so it stays wider than a finished file.
+            var (width, height) = WindowSizeRules.ProgressSize(job.Torrent is not null, completed: true);
+            WindowLayout.ResizeForDpi(this, width, height);
+            WindowLayout.KeepInside(this);
+            _sizedForTorrent = true;
             // The default action, ready for Enter or Space (U-WL-17).
             if (OpenButton.Visibility == Visibility.Visible || RemoteDataRules.MayUseFiles(_connection.IsRemote))
                 DispatcherQueue.TryEnqueue(() => { if (OpenButton.Visibility == Visibility.Visible) OpenButton.Focus(FocusState.Programmatic); });
@@ -524,7 +593,7 @@ public sealed partial class DownloadWindow : Window
         var displayName = !string.IsNullOrWhiteSpace(job.FileName) ? job.FileName
             : torrent is { Name.Length: > 0 } ? torrent.Name
             : torrent is not null ? "Torrent" : "Download";
-        var stateWord = complete ? "Complete" : JobViewModel.ToDisplayState(job.State);
+        var stateWord = complete ? "Complete" : JobNotes.NotStartedText(job) ?? JobViewModel.ToDisplayState(job.State);
         Heading.Text = choosingFiles ? "Choose files" : TorrentSeedRules.IsSeeding(job) ? "Seeding" : stateWord;
         SetChip(StateBrush(job));
         // U-WL-16: a percentage only while it moves and the size is known, otherwise the state; named for another server.
@@ -805,7 +874,7 @@ public sealed partial class DownloadWindow : Window
         ConnectionsTab.Visibility = Visibility.Collapsed;
         if (Tabs.SelectedItem == ConnectionsTab) Tabs.SelectedItem = OverviewTab;
         TorrentStatusText.Text = choosingFiles ? "Choose files to download" : TorrentRules.StatusText(job) ?? JobViewModel.ToDisplayState(job.State);
-        TorrentFilesText.Text = TorrentRules.FilesSummary(torrent);
+        TorrentFilesText.Text = TorrentRules.FileListWaitNote(job, DateTimeOffset.UtcNow) ?? TorrentRules.FilesSummary(torrent);
         // T3: with the v2 hash a details read gave (kept, as the progress updates don't carry it).
         InfoHashText.Text = TorrentControlRules.HashText(torrent.InfoHash, _infoHashV2);
         TorrentRatioText.Text = TorrentListRules.RatioLine(torrent);
@@ -905,21 +974,97 @@ public sealed partial class DownloadWindow : Window
 
         var same = files.Count == _fileRows.Count;
         for (var index = 0; same && index < files.Count; index++) same = files[index].Index == _fileRows[index].Index;
-        if (same)
+        var changed = false;
+        _applyingFiles = true;
+        try
         {
-            for (var index = 0; index < files.Count; index++)
-                _fileRows[index].Apply(files[index], complete, _wanted.Contains(files[index].Index));
+            if (same)
+            {
+                for (var index = 0; index < files.Count; index++)
+                    changed |= _fileRows[index].Apply(files[index], complete, _wanted.Contains(files[index].Index));
+            }
+            else
+            {
+                _fileRows = files.Select(file => new TorrentFileRow(file, complete, _wanted.Contains(file.Index), !_filesReadOnly)).ToList();
+            }
+
+            ShowFilePriorities();
         }
-        else
+        finally
         {
-            _fileRows = files.Select(file => new TorrentFileRow(file, complete, _wanted.Contains(file.Index), !_filesReadOnly)).ToList();
-            FilesList.ItemsSource = _fileRows;
+            _applyingFiles = false;
         }
 
-        ShowFilePriorities();
+        // T12: new rows are put in the list's order; rows updated in place move only when the sort is by what changed.
+        if (!same) SortFiles(FilesSortReason.Rebuilt);
+        else if (changed) SortFiles(FilesSortReason.Refresh);
 
         if (files.Count == 0) ShowFilesNote("The file list is not in yet. It comes from the peers.", fromLoad: true);
         else if (_filesNoteFromLoad) ClearFilesNote();
+    }
+
+    private enum FilesSortReason
+    {
+        /// <summary>The rows are new: they go in at once, in order.</summary>
+        Rebuilt,
+
+        /// <summary>Values changed: rows move if the sort is by them, unless the list is held.</summary>
+        Refresh,
+
+        /// <summary>The pointer left a list that was held: the order catches up, keeping the view where it is.</summary>
+        Released,
+
+        /// <summary>A header was clicked: the new order shows from the top.</summary>
+        Clicked,
+    }
+
+    /// <summary>The Files tab's rows as they show, in the order of <see cref="FilesTable"/> (T12); <see cref="_fileRows"/> keeps the torrent's order.</summary>
+    private ObservableCollection<TorrentFileRow> _shownFiles = [];
+    private bool _applyingFiles;
+
+    /// <summary>
+    /// Puts the Files tab in its order. A refresh only moves rows when the list is sorted by something that changes (progress,
+    /// priority) and isn't held under the pointer, and then by moving the few rows that changed place rather than rebuilding
+    /// a list that can hold 100,000 files.
+    /// </summary>
+    private void SortFiles(FilesSortReason reason)
+    {
+        if (_applyingFiles && reason == FilesSortReason.Refresh) return;
+        var table = FilesTable;
+        if (reason == FilesSortReason.Refresh)
+        {
+            if (!TorrentDetailsSort.Live(table.SortKey)) return;
+            if (table.Held)
+            {
+                table.ResortPending = true;
+                return;
+            }
+        }
+
+        IReadOnlyList<TorrentFileRow> target = table.SortKey is null
+            ? _fileRows
+            : TorrentDetailsSort.Files(_fileRows, row => row.SortFacts, table.SortKey, table.SortAscending).ToList();
+        if (reason != FilesSortReason.Rebuilt && RowOrder.TryReorder(_shownFiles, target))
+        {
+            if (reason == FilesSortReason.Clicked && _shownFiles.Count > 0) FilesList.ScrollIntoView(_shownFiles[0]);
+            return;
+        }
+
+        var keep = reason is FilesSortReason.Refresh or FilesSortReason.Released ? FirstShownFile() : null;
+        _shownFiles = new ObservableCollection<TorrentFileRow>(target);
+        FilesList.ItemsSource = _shownFiles;
+        if (keep is not null) FilesList.ScrollIntoView(keep, ScrollIntoViewAlignment.Leading);
+        else if (reason == FilesSortReason.Clicked && _shownFiles.Count > 0) FilesList.ScrollIntoView(_shownFiles[0]);
+    }
+
+    /// <summary>The first row in view, to keep there when the whole list is replaced.</summary>
+    private TorrentFileRow? FirstShownFile()
+    {
+#if !HAS_UNO
+        if (FilesList.ItemsPanelRoot is ItemsStackPanel panel && panel.FirstVisibleIndex is var first && first >= 0 && first < _shownFiles.Count)
+            return _shownFiles[first];
+#endif
+        return null;
     }
 
     private void SetFilesReadOnly(bool readOnly)
@@ -978,6 +1123,20 @@ public sealed partial class DownloadWindow : Window
     /// whole wanted set goes to the Host at once, and the box goes back if the Host refuses.
     /// </summary>
     private async Task ToggleFileAsync(TorrentFileRow row, bool want)
+    {
+        try
+        {
+            await ChangeFileAsync(row, want);
+        }
+        finally
+        {
+            // T12: a box decides the file's priority and progress as they show, so a list sorted by them follows it
+            // (once the pointer leaves, as on any refresh). A list in another order isn't touched.
+            if (!_closed) SortFiles(FilesSortReason.Refresh);
+        }
+    }
+
+    private async Task ChangeFileAsync(TorrentFileRow row, bool want)
     {
         var had = _wanted.Contains(row.Index);
         if (_filesReadOnly || _job?.Torrent is null)
@@ -1118,7 +1277,7 @@ public sealed partial class DownloadWindow : Window
         {
             var reply = await action();
             if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
-                Notice.Text = result.Error ?? "The host rejected the action.";
+                Notice.Text = result.Error ?? _connection.NoReasonWords;
             else if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Job: { } updated })
                 Update(updated);
         }
@@ -1142,10 +1301,10 @@ public sealed partial class DownloadWindow : Window
             RequestedTheme = Root.ActualTheme,
             Title = "Delete download?",
             Content = _job.FileRemovedAfterExtraction
-                ? $"Remove {name} from the list? {JobNotes.NothingToDelete(1)}"
+                ? $"Delete {name} from the list? {JobNotes.NothingToDelete(1)}"
                 : _job.Torrent is not null
-                    ? $"Remove {name} from the list and delete its downloaded files? This cannot be undone."
-                    : $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
+                    ? $"Delete {name} and its downloaded files? This cannot be undone."
+                    : $"Delete {name} and its downloaded file? This cannot be undone.",
             PrimaryButtonText = "Delete",
             PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
@@ -1157,7 +1316,7 @@ public sealed partial class DownloadWindow : Window
             var reply = await _connection.RemoveAsync(_jobId, deleteFile: !_job.FileRemovedAfterExtraction);
             if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
             {
-                Notice.Text = result.Error ?? "The host could not delete this download.";
+                Notice.Text = result.Error ?? _connection.NoReasonWords;
                 return;
             }
             Close();
@@ -1215,7 +1374,7 @@ public sealed partial class DownloadWindow : Window
             var result = reply.GetPayload<JobActionResponse>();
             if (!result.Ok)
             {
-                SpeedLimitNotice.Text = result.Error ?? "The host rejected the speed limit.";
+                SpeedLimitNotice.Text = result.Error ?? _connection.NoReasonWords;
                 return;
             }
 
@@ -1242,7 +1401,7 @@ public sealed partial class DownloadWindow : Window
             var result = reply.GetPayload<JobActionResponse>();
             if (!result.Ok)
             {
-                Notice.Text = result.Error ?? "The host rejected the completion preference.";
+                Notice.Text = result.Error ?? _connection.NoReasonWords;
                 ShowCompletionForJob.IsChecked = Previous();
                 return;
             }
@@ -1305,11 +1464,11 @@ public sealed partial class DownloadWindow : Window
         try
         {
             if (folder)
-                Process.Start(ShellActions.RevealFile(_job.FinalFilePath));
+                ShellActions.Start(ShellActions.RevealFile(_job.FinalFilePath))?.Dispose();
             else if (File.Exists(_job.FinalFilePath))
-                Process.Start(ShellActions.OpenFile(_job.FinalFilePath));
+                ShellActions.Start(ShellActions.OpenFile(_job.FinalFilePath))?.Dispose();
             else if (_job.Torrent is not null && Directory.Exists(_job.FinalFilePath))
-                Process.Start(ShellActions.OpenFolder(_job.FinalFilePath));
+                ShellActions.Start(ShellActions.OpenFolder(_job.FinalFilePath))?.Dispose();
             else Notice.Text = _job.Torrent is not null ? "The downloaded files could not be found." : "The downloaded file could not be found.";
         }
         catch (Exception ex) { Notice.Text = ex.Message; }
@@ -1321,7 +1480,7 @@ public sealed partial class DownloadWindow : Window
         try
         {
             if (File.Exists(_job.FinalFilePath))
-                Process.Start(ShellActions.OpenWith(_job.FinalFilePath));
+                ShellActions.Start(ShellActions.OpenWith(_job.FinalFilePath))?.Dispose();
             else Notice.Text = "The downloaded file could not be found.";
         }
         catch (Exception ex) { Notice.Text = ex.Message; }

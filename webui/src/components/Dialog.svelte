@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import { DialogStack, wrapTarget } from '../lib/dialogs';
+  import { DialogStack, arrowTarget, wrapTarget } from '../lib/dialogs';
 
   // One stack for every dialog on the page: Back closes the top one, and only the top one answers keys.
   const stack = new DialogStack(() => (typeof history === 'undefined' ? null : history), () => (typeof location === 'undefined' ? '' : location.href));
@@ -28,6 +28,8 @@
   }: { title: string; onclose: () => void; wide?: boolean; children: Snippet; footer?: Snippet } = $props();
 
   let panel: HTMLDivElement | undefined = $state();
+  let body: HTMLDivElement | undefined = $state();
+  let foot: HTMLElement | undefined = $state();
   /** The control that last had the focus here: it gets it back once it is enabled again. */
   let lastFocused: HTMLElement | null = null;
   let myId = 0;
@@ -87,9 +89,34 @@
     }
   }
 
+  /**
+   * UI.R36: the stops the arrow keys move between: the check boxes of the dialog's text (not those in a list, which keep
+   * their own keys), then the footer's buttons. Text boxes, lists, selects and radio groups are never among them.
+   */
+  function arrowStops(): HTMLElement[] {
+    const mine = (element: HTMLElement) => usable(element) && element.closest('[role="dialog"]') === panel;
+    const boxes = [...(body?.querySelectorAll<HTMLElement>('input[type="checkbox"]') ?? [])]
+      .filter((box) => mine(box) && !box.closest('ul, ol, table, [role="listbox"], [role="grid"], [role="tree"], [role="list"]'));
+    const buttons = [...(foot?.querySelectorAll<HTMLElement>('button') ?? [])].filter(mine);
+    return [...boxes, ...buttons];
+  }
+
+  function arrow(event: KeyboardEvent) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const list = arrowStops();
+    const rtl = panel ? getComputedStyle(panel).direction === 'rtl' : false;
+    const to = arrowTarget(list, list.indexOf(event.target as HTMLElement), event.key, rtl);
+    if (to) {
+      event.preventDefault();
+      to.focus();
+    }
+  }
+
   function keydown(event: KeyboardEvent) {
     if ((event.target as Element | null)?.closest?.('[role="dialog"]') !== panel) return;
-    if (event.key === 'Escape') {
+    if (event.key.startsWith('Arrow')) {
+      arrow(event);
+    } else if (event.key === 'Escape') {
       event.stopPropagation();
       event.preventDefault();
       onclose();
@@ -140,11 +167,11 @@
       <h2 class="flex-1 truncate text-[14px] font-semibold">{title}</h2>
       <button class="dialog-close rounded p-1 text-muted hover:bg-hover" data-close onclick={onclose} aria-label="Close"><Icon name="close" size={16} /></button>
     </header>
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+    <div bind:this={body} class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
       {@render children()}
     </div>
     {#if footer}
-      <footer class="flex flex-wrap items-center justify-end gap-2 border-t border-divider bg-chrome px-4 py-2.5 sm:rounded-b-lg">
+      <footer bind:this={foot} class="flex flex-wrap items-center justify-end gap-2 border-t border-divider bg-chrome px-4 py-2.5 sm:rounded-b-lg">
         {@render footer()}
       </footer>
     {/if}

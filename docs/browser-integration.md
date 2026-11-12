@@ -85,8 +85,8 @@ Edge is a supported browser (owner decision 2026-11-06). It runs the same extens
 - **Registered state.** Each key is absent, usable or broken. Usable means it points at a manifest that lists
   the store origin and names a program that exists. The bridge is registered when either key is usable, and
   the status (tray, status bar, CLI `status` and `doctor`) names a browser that cannot reach the host:
-  `on; not registered for Chrome`, `on; Chrome registration is broken`,
-  `on; Edge registration is broken`. Chrome with no Edge key stays plain `on`, because Edge may
+  `on; the extension can't reach Inbound in Chrome` (its key is missing or broken),
+  `on; the extension can't reach Inbound in Edge` (review 5:F2). Chrome with no Edge key stays plain `on`, because Edge may
   not be installed and an install from 0.4.0 has no Edge key until the Host adds it. The word is `on`, not
   `connected`: a registration means a browser can reach the app, not that one is running (U-WL-9). When a key is
   broken or missing, the window's status bar offers Repair, which runs the `register-native-host.ps1` that Setup
@@ -200,8 +200,8 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   browser window. Closing the window while the request is on its way waits for the app's answer. If the
   worker restarts anyway, the pending entry (in session storage) still works, and since the file-name
   callback is gone, Keep in browser cancels the stuck download and starts it again in the browser, once. A folder chosen there is for that
-  download only; the next window starts at the default folder again (UI.R3). The right-click menu always
-  asks, in the window. With a server paired the window also offers **This PC or Server** (below).
+  download only; the next window starts at the default folder again (UI.R3). The right-click menu asks there
+  only with "Ask where to save"; otherwise it sends straight to the app (EXT.R12). With a server paired the window also offers **This PC or Server** (below).
 - **Asking in the toolbar popup (EXT.R7).** An automatically caught download that needs a folder waits in a
   queue (`askQueue`, also in session storage), and the worker opens the extension's toolbar popup with
   `action.openPopup({ windowId })` for the normal window in front, so the question appears under the
@@ -294,6 +294,45 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   would then make the app start a downloaded file (owner question in PROGRESS). The link is copied by the popup
   itself and asks nothing of the app. An app older than these commands refuses them, and the popup then says
   "Update Inbound to use this."; a rename counts as done only when the app sends back the new name.
+
+## Like the browser's own downloads (EXT.R12, extension 0.6.3)
+
+- **The browser keeps the focus.** Every handoff carries `quietWindows` (true unless Settings > General > "Open the
+  app's windows for browser downloads" is on, which is off by default). The Host stores it on the job
+  (`JobDto.QuietWindows`) and `DownloadWindows.KeptQuiet` then opens no progress window as it starts and no finished
+  window (a package with such a file opens none either); the desktop window's own completion rule and torrent file
+  choice follow it. A link that turns out to be a `.torrent` file (T10) does not open the torrent dialog then either
+  (`TorrentFileOffers.Offers` checks `KeptQuiet`): this rule wins, and the finished row keeps Open as Torrent, which
+  Show in app leads to. The app's own "Download complete" notification and its sound stay away too
+  (`DownloadNotices`), for a lone download and for a package with such a file: the browser shows the finish. A
+  failure is still told by the app, and so is what extraction says. An older Host ignores the field and opens its
+  windows as before.
+- **The toolbar icon** follows the downloads this browser sent (Host sources `chromeAuto` and `chromeContextMenu`),
+  from the app's `job.event`s on the shared native connection and from the popup's list. While one runs, a green
+  ring fills with their combined progress around a smaller copy of the extension's icon; orange while one is paused,
+  red when one failed (both until the popup is opened, or it runs again); the plain icon otherwise. The ring is drawn
+  with OffscreenCanvas into `chrome.action.setIcon` only when its state or one of 24 steps changes; the tooltip says
+  the same in words. Nothing polls or runs on a timer: with no events nothing happens. After a browser restart the
+  icon catches up once the popup is opened (the connection, and with it the events, starts with the first request).
+  A new worker draws the plain icon once at start, since the browser keeps an icon an earlier worker set. When the
+  native connection closes or the app sends `host.exiting`, the downloads still running leave the icon (no event
+  would say how they end); failures and pauses already shown stay until the popup is opened.
+  The followed downloads are this PC's only; a paired server's are not shown on the icon.
+- **When one finishes**, Settings > "When one finishes" picks: flash the icon (three blinks, the default), open the
+  popup (`action.openPopup`; Chrome and Edge 127+; where the browser refuses without a click, as in Firefox, the icon
+  flashes instead), or nothing.
+- **Show in app** (the popup's row menu, this PC's downloads only; a server's has its web page instead) sends
+  `host.openUi` with the optional `jobId`. The Host checks the download is on its list and starts the window with
+  `--show-job <id>`; a running window gets the id through a small request file next to its queued torrent opens and
+  its activation event. A window showing another server switches to This PC first. The main window switches to All
+  Downloads if needed, opens the package holding it, selects,
+  scrolls to and focuses the row, and highlights it for 2 s (one one-shot timer). An older Host opens the main
+  window only.
+- **The right-click item** ("Download with Inbound Download Manager") sends the link straight to where automatic
+  downloads go (This PC unless the popup's switch says the server), with the page's cookies and the default folder,
+  and opens nothing; a notification says how it went. It sends no file name: the Host takes the site's own name
+  (Content-Disposition) and falls back to the address, so `get.php?id=5` is not saved as `get.php`. With "Ask where
+  to save" it still asks in its window. The worker loads the settings before acting on a click that woke it.
 
 ## Sending to the user's own server (EXT.R1 transport)
 

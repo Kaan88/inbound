@@ -183,7 +183,9 @@ public sealed class TorrentPromptRulesTests
         var now = new DateTimeOffset(2026, 11, 11, 18, 0, 0, TimeSpan.Zero);
         JobDto Added(string source = "ui", string start = "startNow", bool other = false, double secondsAgo = 2)
         {
+            // T9 W4: a torrent gets no window as it starts, so the rule is about other downloads.
             var job = Torrent(awaiting: true);
+            job.Torrent = null;
             job.Source = source;
             job.StartMode = start;
             job.AddedFromAnotherDevice = other;
@@ -199,5 +201,35 @@ public sealed class TorrentPromptRulesTests
         Assert.False(TorrentRules.ProgressWindowComing(Added(other: true), localHost: true, windowSeen: false, now));
         foreach (var source in new[] { "cli", "cliBatch", "cliImport", "remote" })
             Assert.False(TorrentRules.ProgressWindowComing(Added(source), localHost: true, windowSeen: false, now));
+    }
+
+    [Fact]
+    public void ATorrentIsNeverWaitedForSoItsChoiceOpensWhenItsListIsIn()
+    {
+        // T9 W4: the Host opens no window as a torrent starts (DownloadWindows.OpensStartWindow).
+        var now = new DateTimeOffset(2026, 11, 12, 18, 0, 0, TimeSpan.Zero);
+        var gettingList = Torrent(metadata: false, files: 0);
+        gettingList.Source = "ui";
+        gettingList.StartMode = "startNow";
+        gettingList.CreatedAt = now.AddSeconds(-1);
+        Assert.False(TorrentRules.ProgressWindowComing(gettingList, localHost: true, windowSeen: false, now));
+
+        var waiting = Torrent(gettingList.Id, awaiting: true);
+        waiting.Source = "ui";
+        waiting.StartMode = "startNow";
+        waiting.CreatedAt = gettingList.CreatedAt;
+        Assert.True(TorrentRules.FileChoiceArrived(gettingList, waiting));
+        Func<Guid, bool> coming = id => TorrentRules.ProgressWindowComing(waiting, localHost: true, windowSeen: false, now);
+
+        // Before its list is in, nothing opens; once it is, the main window's Choose Files does, once.
+        Assert.Null(TorrentRules.NextFileChoice([(gettingList, false)], new HashSet<Guid>(), true, _ => false, mayOpenDialog: true, coming));
+        Assert.Equal((waiting.Id, FileChoicePlace.Dialog),
+            TorrentRules.NextFileChoice([(waiting, true)], new HashSet<Guid>(), true, _ => false, mayOpenDialog: true, coming));
+        Assert.Null(TorrentRules.NextFileChoice([(waiting, true)], new HashSet<Guid> { waiting.Id }, true, _ => false, mayOpenDialog: true, coming));
+
+        // A .torrent file whose files were chosen in the dialog never waits for a choice: nothing opens.
+        var chosen = Torrent(awaiting: false);
+        Assert.False(TorrentRules.PrimaryIsChooseFiles(chosen));
+        Assert.Null(TorrentRules.NextFileChoice([(chosen, true)], new HashSet<Guid>(), true, _ => false, mayOpenDialog: true, coming));
     }
 }

@@ -433,6 +433,33 @@ public sealed class WebUiSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task Audit3N9_ANewBridgeIsNotStartedWhileOneThatDidNotStopStillRuns()
+    {
+        _passwords.Has = true;
+        await using var supervisor = Supervisor();
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = true, Port = 18083 });
+        var stuck = Assert.Single(_launcher.Processes);
+        stuck.IgnoresStop = true;
+
+        // A new port: the old bridge did not end, so no second one is launched beside it.
+        var status = await supervisor.SetAsync(new WebUiSetRequest { Enabled = true, Port = 18084 });
+        Assert.Equal(WebUiStates.Failed, status.State);
+        Assert.Equal("The web UI is still stopping; try again in a moment.", status.Error);
+        Assert.Single(_launcher.Processes);
+
+        // Tried again while it still runs: still nothing launched.
+        Assert.Equal(WebUiStates.Failed, (await supervisor.SetAsync(new WebUiSetRequest { Enabled = true, Port = 18084 })).State);
+        Assert.Single(_launcher.Processes);
+
+        // Once it has ended, the next try starts the bridge.
+        stuck.Exit(WebBridgeExit.Stopped, null);
+        status = await supervisor.SetAsync(new WebUiSetRequest { Enabled = true, Port = 18084 });
+        Assert.Equal(WebUiStates.Running, status.State);
+        Assert.Equal(2, _launcher.Processes.Count);
+        Assert.Equal(18084, _launcher.Starts[^1].Port);
+    }
+
+    [Fact]
     public async Task TheTicketIsGivenOnlyWhileRunningAndOnlyWhenTheBridgeItStartedIsTheOneListening()
     {
         _passwords.Has = true;

@@ -259,7 +259,7 @@ describe('Options > Torrents: network', () => {
       { label: 'Router forwarding', value: 'Asked for (UPnP and NAT-PMP)' },
       { label: 'Status', value: 'No torrent has run since the app started. Nothing listens while none runs.' },
     ]);
-    expect(networkLines({ pcOnly: true, settings: settings({ torrentListenPort: 0 }), network: null })[0].value).toBe('Chosen when torrents are turned on');
+    expect(networkLines({ pcOnly: true, settings: settings({ torrentListenPort: 0 }), network: null })[0].value).toBe('Automatic');
   });
 
   it("names the server's environment for its port until a torrent ran", () => {

@@ -27,12 +27,15 @@ public sealed class ServerLog : IHostLog
         _console = console;
         _fileName = fileName;
         Directory.CreateDirectory(_directory);
-        // L7: files older than 30 days go at start; a day's file stops at a size limit (see Write).
+        // L7: files older than 30 days go at start and when the date changes; a day's file stops at a size limit (see Write).
         DownloadManager.Persistence.LogFileRetention.DeleteOld(_directory, _fileName, DateTime.Now);
     }
 
     /// <summary>One day's file stops growing here (L7); standard output still gets every line.</summary>
     public long MaxDailyBytes { get; init; } = DownloadManager.Persistence.LogFileRetention.MaxDailyBytes;
+
+    /// <summary>The time lines are stamped with; tests move it to another day.</summary>
+    public Func<DateTimeOffset> Clock { get; init; } = static () => DateTimeOffset.Now;
 
     /// <summary>Account keys to keep out of the log, wherever a line happens to quote one.</summary>
     public IRemoteSecretMatcher? Secrets { get; set; }
@@ -44,7 +47,7 @@ public sealed class ServerLog : IHostLog
     private void Write(string level, string message)
     {
         var text = OneLine(UrlRedactor.RedactText(Secrets?.Mask(message) ?? message));
-        var now = DateTimeOffset.Now;
+        var now = Clock();
         var line = $"{now:O} [{level}] {text}";
         lock (_gate)
         {
@@ -65,6 +68,9 @@ public sealed class ServerLog : IHostLog
                 var date = now.ToString("yyyyMMdd");
                 if (_currentDate != date || _currentPath is null)
                 {
+                    // L7: a server that runs for weeks prunes once a day, not only at start.
+                    if (_currentDate is not null)
+                        DownloadManager.Persistence.LogFileRetention.DeleteOld(_directory, _fileName, now.DateTime);
                     _currentDate = date;
                     _currentPath = Path.Combine(_directory, $"{_fileName}-{date}.log");
                     _currentSize = DownloadManager.Persistence.LogFileRetention.CurrentSize(_currentPath);

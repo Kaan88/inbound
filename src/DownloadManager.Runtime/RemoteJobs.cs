@@ -61,6 +61,12 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
         }
     }
 
+    /// <summary>T14: where a torrent the provider downloaded goes when the user named no folder.</summary>
+    public string TorrentDownloadDirectory(string? torrentName)
+    {
+        lock (_sync) return TorrentFolderRules.ResolveForProvider(_settings, FileCategories.For(torrentName));
+    }
+
     /// <summary>
     /// Creates local jobs for a provider's files as one batch: one package, one settings commit.
     /// In-process only, so no client can forge a job that spends API calls. Safe to repeat: each

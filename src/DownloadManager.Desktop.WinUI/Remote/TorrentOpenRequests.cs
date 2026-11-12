@@ -16,6 +16,16 @@ internal static class TorrentOpenRequests
 
     private const string Extension = ".request";
 
+    /// <summary>T10: the Host's launch for its finished .torrent downloads (TorrentFileOffers.FromDownloadArgument).</summary>
+    public const string FromDownloadArgument = "--from-download";
+
+    /// <summary>The first line of a queued request that came from the Host's offer of a finished download.</summary>
+    private const string FromDownloadMark = "from-download";
+
+    /// <summary>Whether this launch is the Host's offer of finished .torrent downloads rather than an Explorer open.</summary>
+    public static bool IsFromDownload(IReadOnlyList<string> args)
+        => args.Any(arg => string.Equals(arg, FromDownloadArgument, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The magnet or the .torrent file's full path after <see cref="Argument"/>, or null when there is none.</summary>
     public static string? Parse(IReadOnlyList<string> args)
     {
@@ -27,6 +37,24 @@ internal static class TorrentOpenRequests
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Every magnet and .torrent path after an <see cref="Argument"/>, in order and each once. T10: the Host opens the
+    /// torrent dialog for several finished .torrent downloads with one launch, one <see cref="Argument"/> per file.
+    /// </summary>
+    public static List<string> ParseAll(IReadOnlyList<string> args)
+    {
+        var inputs = new List<string>();
+        for (var i = 0; i < args.Count - 1; i++)
+        {
+            if (!string.Equals(args[i], Argument, StringComparison.OrdinalIgnoreCase)) continue;
+            var value = FromFileUri(args[i + 1].Trim().Trim('"').Trim());
+            if (IsAccepted(value) && !inputs.Contains(value, StringComparer.Ordinal)) inputs.Add(value);
+            i++;
+        }
+
+        return inputs;
     }
 
     /// <summary>
@@ -54,12 +82,13 @@ internal static class TorrentOpenRequests
 
     public static string QueueDirectory(string dataRoot) => Path.Combine(dataRoot, "open-requests");
 
-    public static void Enqueue(string directory, string input, DateTimeOffset now)
+    /// <param name="fromDownload">T10: the Host offers a finished download's file (<see cref="FromDownloadArgument"/>).</param>
+    public static void Enqueue(string directory, string input, DateTimeOffset now, bool fromDownload = false)
     {
         Directory.CreateDirectory(directory);
         var name = $"{now.UtcTicks:D20}-{Guid.NewGuid():N}";
         var temp = Path.Combine(directory, name + ".tmp");
-        File.WriteAllText(temp, input);
+        File.WriteAllText(temp, fromDownload ? FromDownloadMark + "\n" + input : input);
         File.Move(temp, Path.Combine(directory, name + Extension));
     }
 
@@ -67,7 +96,8 @@ internal static class TorrentOpenRequests
     /// Takes every waiting request, oldest first, and deletes it. Requests older than <see cref="MaxAge"/>, ones that
     /// are not a magnet or a .torrent path, and ones another reader took first are left out.
     /// </summary>
-    public static List<string> Drain(string directory, DateTimeOffset now)
+    /// <param name="fromDownloads">T10: gets the inputs the Host queued for its finished .torrent downloads.</param>
+    public static List<string> Drain(string directory, DateTimeOffset now, ISet<string>? fromDownloads = null)
     {
         var inputs = new List<string>();
         string[] files;
@@ -98,7 +128,11 @@ internal static class TorrentOpenRequests
 
             if (!IsFresh(Path.GetFileNameWithoutExtension(file), now)) continue;
             var value = text.Trim();
-            if (IsAccepted(value) && !inputs.Contains(value, StringComparer.Ordinal)) inputs.Add(value);
+            var fromDownload = value.StartsWith(FromDownloadMark + "\n", StringComparison.Ordinal);
+            if (fromDownload) value = value[(FromDownloadMark.Length + 1)..].Trim();
+            if (!IsAccepted(value)) continue;
+            if (!inputs.Contains(value, StringComparer.Ordinal)) inputs.Add(value);
+            if (fromDownload) fromDownloads?.Add(value);
         }
 
         return inputs;

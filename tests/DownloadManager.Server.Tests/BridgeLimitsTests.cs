@@ -71,6 +71,31 @@ public sealed class BridgeLimitsTests
     }
 
     [Fact]
+    public void Audit3N3_TheServerLogDeletesOldFilesAgainWhenTheDateChanges()
+    {
+        var work = ServerHarness.NewWork();
+        try
+        {
+            var now = new DateTimeOffset(2026, 11, 12, 23, 59, 0, TimeSpan.Zero);
+            var log = new ServerLog(work, console: false) { Clock = () => now };
+            log.Info("first day");
+            var old = Path.Combine(work, "server-20261012.log");
+            File.WriteAllText(old, "x");
+            log.Info("same day");
+            Assert.True(File.Exists(old));
+
+            now = now.AddDays(2);
+            log.Info("next day");
+            Assert.False(File.Exists(old));
+            Assert.True(File.Exists(Path.Combine(work, "server-20261114.log")));
+        }
+        finally
+        {
+            Directory.Delete(work, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AFrameOverOneMegabyteBecomesAnErrorForItsRequestAndAnEventIsDropped()
     {
         var small = IpcMessage.Create(MessageTypes.JobsSnapshot, Snapshot(3), replyTo: "r1");
@@ -90,5 +115,42 @@ public sealed class BridgeLimitsTests
 
         var evt = IpcMessage.Create(MessageTypes.JobsSnapshot, big);
         Assert.Null(NativeBridgePolicy.FitForBrowser(evt, out _));
+    }
+
+    [Fact]
+    public async Task Audit3N5_TheBrowsersFrameIsTheMessageSerialisedOnce()
+    {
+        var small = IpcMessage.Create(MessageTypes.JobsSnapshot, Snapshot(3), replyTo: "r1");
+        var frame = NativeBridgePolicy.FrameForBrowser(small, out var size);
+        var json = JsonSerializer.SerializeToUtf8Bytes(small, IpcJson.Options);
+        Assert.Equal(json, frame);
+        Assert.Equal(json.Length, size);
+
+        // Written as a frame, it reads back as the message.
+        using var stream = new MemoryStream();
+        await IpcFraming.WriteFrameAsync(stream, frame!);
+        stream.Position = 0;
+        var read = await IpcFraming.ReadAsync(stream);
+        Assert.Equal(small.Id, read!.Id);
+        Assert.Equal("r1", read.ReplyTo);
+
+        var big = Snapshot(1);
+        big.Jobs[0].FileName = new string('a', NativeBridgePolicy.BrowserMaxMessageBytes);
+        var error = JsonSerializer.Deserialize<IpcMessage>(
+            NativeBridgePolicy.FrameForBrowser(IpcMessage.Create(MessageTypes.JobsSnapshot, big, replyTo: "r2"), out size)!, IpcJson.Options)!;
+        Assert.True(size > NativeBridgePolicy.BrowserMaxMessageBytes);
+        Assert.Equal(MessageTypes.HandoffError, error.Type);
+        Assert.Equal("r2", error.ReplyTo);
+        Assert.Null(NativeBridgePolicy.FrameForBrowser(IpcMessage.Create(MessageTypes.JobsSnapshot, big), out _));
+    }
+
+    [Fact]
+    public void Audit3N5_TheRequestedLimitIsReadOnlyFromAJobsQuery()
+    {
+        Assert.Equal(20, HostCommandDispatcher.RequestedLimit(IpcMessage.Create(MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 20 })));
+        Assert.Null(HostCommandDispatcher.RequestedLimit(IpcMessage.Create(MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 0 })));
+        Assert.Null(HostCommandDispatcher.RequestedLimit(IpcMessage.Create(MessageTypes.JobsQuery)));
+        Assert.Null(HostCommandDispatcher.RequestedLimit(IpcMessage.Create(MessageTypes.JobsQuery, new { limit = "many" })));
+        Assert.Null(HostCommandDispatcher.RequestedLimit(IpcMessage.Create(MessageTypes.JobsSnapshot, new JobsQueryRequest { Limit = 5 })));
     }
 }

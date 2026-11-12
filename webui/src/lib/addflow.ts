@@ -2,10 +2,11 @@
 // AddButton_Click, FolderChooser.cs, JobListFile.cs). Pure functions: the tests run them without a browser.
 
 import { spaceSize } from './addview';
+import { bytes } from './format';
 import type { FolderSpace, Job, Settings } from './types';
 
 export interface CategoryChoice {
-  /** Null is "Automatic (from file type)". */
+  /** Null is "Automatic (file extension)". */
   id: string | null;
   name: string;
 }
@@ -36,10 +37,10 @@ function capital(word: string): string {
   return word[0].toUpperCase() + word.slice(1);
 }
 
-/** "Automatic (from file type)", the built-in categories, Other, then the custom ones. */
+/** "Automatic (file extension)", the built-in categories, Other, then the custom ones. */
 export function categoryChoices(settings: Settings | null | undefined): CategoryChoice[] {
   return [
-    { id: null, name: 'Automatic (from file type)' },
+    { id: null, name: 'Automatic (file extension)' },
     ...[...builtIn, 'other'].map((id) => ({ id, name: capital(id) })),
     ...customCategories(settings).map((c) => ({ id: c.id, name: c.name })),
   ];
@@ -136,10 +137,25 @@ export function serverNameToShow(name: string | undefined, url: string, provider
   return letters(address).includes(letters(name)) ? null : name;
 }
 
-/** "N bytes · type" and the server's name, as the file-info step writes them. */
-export function metadataText(info: FileInfo, serverName: string | null): string {
-  const size = info.totalBytes != null ? `${info.totalBytes.toLocaleString('en-US')} bytes` : 'Size unknown';
-  return `${size} · ${info.contentType ?? 'Type unknown'}${serverName ? `\nServer name: ${serverName}` : ''}`;
+/**
+ * What the file check found, as the desktop's AddRules.FileInfoText writes it (review 5:A2a, A5): the size in the list's
+ * format, and the server's name for the file only when the File name box says something else.
+ */
+export function metadataText(info: FileInfo, serverName: string | null, nameInBox: string | null): string {
+  const size = info.totalBytes != null ? bytes(info.totalBytes) : 'Size unknown';
+  const shown = nameInBox?.trim() ?? '';
+  return !serverName || !shown || shown.toLowerCase() === serverName.trim().toLowerCase() ? size : `${size}\nThe server names it ${serverName}`;
+}
+
+/** The exact count and the type, for the file-info line's tooltip. */
+export function metadataTitle(info: FileInfo): string {
+  const type = info.contentType ?? 'Type unknown';
+  return info.totalBytes != null ? `${info.totalBytes.toLocaleString('en-US')} bytes · ${type}` : type;
+}
+
+/** The check button's words; once a check has run it can only check again. */
+export function checkButtonText(checkedBefore: boolean): string {
+  return checkedBefore ? 'Check again' : 'Check file info';
 }
 
 /**
@@ -213,6 +229,8 @@ export interface ListEntry {
   startMode: string;
   conflictPolicy: string;
   expectedSha256?: string;
+  /** The content type the browser hand-off gave; sent again with job.add so a stream stays a stream. */
+  contentType?: string;
   /** A torrent's own part (TorrentListEntry); its url is then the magnet. */
   torrent?: TorrentListEntry;
 }
@@ -240,7 +258,7 @@ function torrentPartSize(t?: TorrentListEntry): number {
 /** An upper bound of the characters an entry takes in JSON (text may be escaped to six characters each). */
 export function listEntrySize(entry: ListEntry): number {
   return torrentPartSize(entry.torrent) + 6 * (textLength(entry.url) + textLength(entry.fileName) + textLength(entry.destinationDirectory) +
-    textLength(entry.description) + textLength(entry.categoryId) + textLength(entry.expectedSha256)) + 512;
+    textLength(entry.description) + textLength(entry.categoryId) + textLength(entry.expectedSha256) + textLength(entry.contentType)) + 512;
 }
 
 /**
@@ -295,6 +313,7 @@ export function serializeList(jobs: Iterable<Job>, torrents?: Record<string, Tor
       startMode: job.startMode ?? 'later',
       conflictPolicy: job.conflictPolicy ?? 'rename',
       expectedSha256: job.expectedSha256,
+      ...(!torrent && job.handoffContentType ? { contentType: job.handoffContentType } : {}),
       ...(torrent ? { torrent } : {}),
     });
   }

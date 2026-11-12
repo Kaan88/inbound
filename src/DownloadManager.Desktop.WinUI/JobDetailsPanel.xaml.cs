@@ -169,7 +169,7 @@ public sealed partial class JobDetailsPanel : UserControl
             else if (!_haveSegmentMap) map.SetFraction(percent / 100);
         }
 
-        StatusValue.Text = TorrentRules.StatusText(job) ?? JobViewModel.ToDisplayState(job.State);
+        StatusValue.Text = TorrentRules.StatusText(job) ?? JobNotes.NotStartedText(job) ?? JobViewModel.ToDisplayState(job.State);
         SizeValue.Text = job.TotalBytes is >= 0 ? Bytes(job.TotalBytes.Value) : "Unknown";
         DownloadedValue.Text = job.TotalBytes is > 0
             ? $"{Bytes(job.ReceivedBytes)} ({percent:0.00}%)"

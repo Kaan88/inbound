@@ -32,6 +32,52 @@ export function isUploadInput(text: string): boolean {
   return text.trim().startsWith('upload:');
 }
 
+/**
+ * T10: a line for a finished download that is a .torrent file (`job:<id>`). The server reads that file itself
+ * (torrent.inspect and torrent.add with fromJobId), and removes the download and its file once the torrent is in.
+ */
+export function isJobInput(text: string): boolean {
+  return /^job:[0-9a-f-]{36}$/i.test(text.trim());
+}
+
+export function jobInput(jobId: string): string {
+  return `job:${jobId}`;
+}
+
+/** The fields that name a line's torrent in torrent.inspect and torrent.add: the input, or the finished download's id. */
+export function inputFields(input: string): { input: string; fromJobId?: string } {
+  return isJobInput(input) ? { input: '', fromJobId: input.trim().slice(4) } : { input };
+}
+
+/**
+ * T10: the finished .torrent download a provider add's line came from (Open as Torrent with only an account that takes
+ * torrents), which goes once the provider took it. Undefined for any other line.
+ */
+export function torrentFileJobOf(inputs: readonly { input: string; fromJobId?: string }[], input: string): string | undefined {
+  return inputs.find((entry) => entry.fromJobId && entry.input.trim() === input.trim())?.fromJobId;
+}
+
+/** T10: the request that removes a listed copy: it never adds the torrent, so a torrent removed meanwhile isn't added back. */
+export function listedCopyFields(input: string): { input: string; fromJobId?: string; onlyIfListed: true; startMode: 'later' } {
+  return { ...inputFields(input), onlyIfListed: true, startMode: 'later' };
+}
+
+/** T10: the words when torrents are off here (TorrentCommands.TorrentsOffText). */
+export const torrentsOffText = 'Torrents are turned off. Turn them on in Options > Torrents.';
+
+/** T10: one finished .torrent download offers Open as Torrent (TorrentRules.OpensAsTorrent). */
+export function opensAsTorrent(job: Pick<Job, 'state' | 'torrentFileReady' | 'torrent' | 'fileRemovedAfterExtraction' | 'isRemote'> | null | undefined): boolean {
+  return !!job && job.state === 'completed' && job.torrentFileReady === true && !job.torrent && !job.fileRemovedAfterExtraction && !job.isRemote;
+}
+
+/**
+ * T10: where Open as Torrent goes: the torrent dialog when the server downloads torrents, the provider's add dialog
+ * when only an account takes them, or the note that torrents are off.
+ */
+export function openAsTorrentStep(torrentsOn: boolean, providerTakesTorrents: boolean): 'dialog' | 'provider' | 'off' {
+  return torrentsOn ? 'dialog' : providerTakesTorrents ? 'provider' : 'off';
+}
+
 /** The account that also takes torrents, when there is one with a usable key (MainWindow.TorrentProviderAccount). */
 export function torrentProvider(remote: boolean, accounts: readonly RemoteAccount[]): RemoteAccount | null {
   if (!remote) return null;
@@ -79,6 +125,23 @@ export function torrentStatusText(job: Pick<Job, 'state' | 'torrent'> & { failur
   if (!isActive(job)) return null;
   const peers = peersText(torrent.peers);
   return torrent.hasMetadata ? `Downloading · ${peers}` : `Getting file list · ${peers}`;
+}
+
+/** How long a running torrent looks for its file list before the row says it may never come, in milliseconds. */
+export const fileListPatienceMs = 60_000;
+
+/**
+ * In place of "File list not known yet", once a running torrent has looked for its file list for a minute in this run
+ * (desktop TorrentRules.FileListWaitNote, review 5:T3). It counts from runStartedAt, not the first start, so a resumed
+ * or restored magnet starts again; an older server that doesn't send it gets no note. Worked out whenever the row is
+ * drawn again; nothing wakes up for it.
+ */
+export function fileListWaitNote(job: Pick<Job, 'state' | 'torrent' | 'runStartedAt'>, now: number): string | null {
+  if (!job.torrent || job.torrent.hasMetadata || !isActive(job) || !job.runStartedAt) return null;
+  const started = Date.parse(job.runStartedAt);
+  return Number.isFinite(started) && now - started >= fileListPatienceMs
+    ? 'Still looking for the file list. This torrent may have no one sharing it.'
+    : null;
 }
 
 /** "1 file", "11 files" or "3 of 11 files"; "File list not known yet" before the metadata. */
@@ -216,10 +279,13 @@ export function peersFigure(peers: number, seeds: number): string {
 
 export type TorrentRoute = 'unset' | 'thisPc' | 'provider';
 
-/** The route a new line starts with, from the setting (`ask`, `thisPc`, `provider`). */
-export function defaultRoute(setting: string | null | undefined, providerAvailable: boolean): TorrentRoute {
+/**
+ * The route a new line starts with, from the setting (`ask`, `thisPc`, `provider`). The older `ask` (T9 W1) still picks
+ * one so Add works at once: This PC when it takes torrents, else the provider; each line can still be switched.
+ */
+export function defaultRoute(setting: string | null | undefined, providerAvailable: boolean, thisPcAvailable = true): TorrentRoute {
   if (!providerAvailable) return 'thisPc';
-  return setting === 'thisPc' ? 'thisPc' : setting === 'provider' ? 'provider' : 'unset';
+  return setting === 'thisPc' ? 'thisPc' : setting === 'provider' ? 'provider' : thisPcAvailable ? 'thisPc' : 'provider';
 }
 
 export type TorrentLineState = 'reading' | 'ready' | 'failed' | 'listed' | 'duplicate';
@@ -238,6 +304,9 @@ export interface TorrentLine {
   sameAs: string | null;
   /** The chosen files' indexes; null means every file. */
   chosen: number[] | null;
+  /** T9 W2: the folder the server gave when asked with Save to empty (the category folder); kept apart from the
+   * result's destination, which follows each Save to typed. */
+  categoryFolder?: string | null;
   /** T3: each file's priority by index (as text); null is every file at Normal. Skip is the same as not chosen. */
   priorities: PriorityMap | null;
   wanted: boolean;
@@ -304,10 +373,11 @@ export function lineTotal(line: TorrentLine): number | null {
   return line.result?.ok && typeof line.result.totalBytes === 'number' ? line.result.totalBytes : null;
 }
 
-/** Some files are left out: only on This PC, where the file choice is used. */
+/** Some files are left out. T9: a .torrent file's choice is used on either route, except on the provider past
+ * `mostProviderFiles`, where it can't be sent and every file is taken. */
 export function isPartial(line: TorrentLine): boolean {
   const count = lineFileCount(line);
-  return line.route !== 'provider' && line.chosen !== null && count !== null && line.chosen.length < count;
+  return line.chosen !== null && count !== null && line.chosen.length < count && (line.route !== 'provider' || count <= mostProviderFiles);
 }
 
 /** What it will download, when known. */
@@ -363,13 +433,15 @@ export function addLines(state: TorrentLines, inputs: readonly { input: string; 
   let capped = state.capped;
   for (const raw of inputs) {
     const input = raw.input.trim();
-    if (!isMagnetInput(input) && !isUploadInput(input)) continue;
+    if (!isMagnetInput(input) && !isUploadInput(input) && !isJobInput(input)) continue;
     if (lines.some((line) => line.input.toLowerCase() === input.toLowerCase())) continue;
     if (lines.length >= mostLines) {
       capped = true;
       continue;
     }
-    const line: TorrentLine = { input, label: raw.label, fromPaste, route: state.defaultRoute, result: null, sameAs: null, chosen: null, priorities: null, wanted: true };
+    // T10: a finished download's .torrent file is the server's own; it is added there.
+    const route = isJobInput(input) ? 'thisPc' : state.defaultRoute;
+    const line: TorrentLine = { input, label: raw.label, fromPaste, route, result: null, sameAs: null, chosen: null, priorities: null, wanted: true };
     lines.push(line);
     added.push(line);
   }
@@ -385,22 +457,25 @@ export function syncPaste(state: TorrentLines, text: string): { state: TorrentLi
 }
 
 /** The server's answer for a line; the state stays as it was when the line is no longer listed. */
-export function inspected(state: TorrentLines, input: string, result: TorrentInspectResult | null): TorrentLines {
+export function inspected(state: TorrentLines, input: string, result: TorrentInspectResult | null, askedWithoutFolder = true): TorrentLines {
   if (!state.lines.some((line) => line.input === input)) return state;
   const answer = result ?? { ok: false, error: "This torrent couldn't be read." };
-  return { ...state, lines: recompute(state.lines.map((line) => (line.input === input ? { ...line, result: answer } : line))) };
+  const category = askedWithoutFolder && answer.ok && answer.destination ? { categoryFolder: answer.destination } : {};
+  return { ...state, lines: recompute(state.lines.map((line) => (line.input === input ? { ...line, result: answer, ...category } : line))) };
 }
 
 /** A second read for a new Save to folder: only the free space changes. A line that was read keeps its files and choice,
  * and a failed second read only forgets the free space it had for the old folder. */
-export function spaceRechecked(state: TorrentLines, input: string, result: TorrentInspectResult | null): TorrentLines {
+export function spaceRechecked(state: TorrentLines, input: string, result: TorrentInspectResult | null, folder?: string | null): TorrentLines {
   const line = state.lines.find((entry) => entry.input === input);
   if (!line) return state;
-  if (!line.result?.ok) return inspected(state, input, result);
+  if (!line.result?.ok) return inspected(state, input, result, folder === null);
   const space = result?.ok
     ? { destination: result.destination ?? null, freeBytes: result.freeBytes ?? null, spaceProblem: result.spaceProblem ?? null }
     : { destination: null, freeBytes: null, spaceProblem: null };
-  return { ...state, lines: recompute(state.lines.map((entry) => (entry.input === input ? { ...entry, result: { ...entry.result!, ...space } } : entry))) };
+  // The category folder only from an answer asked with Save to empty.
+  const category = folder === null && result?.ok && result.destination ? { categoryFolder: result.destination } : {};
+  return { ...state, lines: recompute(state.lines.map((entry) => (entry.input === input ? { ...entry, result: { ...entry.result!, ...space }, ...category } : entry))) };
 }
 
 export function removeLine(state: TorrentLines, input: string): TorrentLines {
@@ -426,13 +501,17 @@ export function selectAllState(state: TorrentLines): boolean | null {
 
 /** This PC or the provider. Without a provider every line stays on This PC. */
 export function setRoute(state: TorrentLines, input: string, route: TorrentRoute): TorrentLines {
-  if (!state.providerName || route === 'unset') return state;
+  if (!state.providerName || route === 'unset' || isJobInput(input)) return state;
   return { ...state, lines: state.lines.map((line) => (line.input === input ? { ...line, route } : line)) };
 }
 
-/** The file choice can be made here: a .torrent with several files, going to This PC, with the setting on. */
+/** The most files a provider line takes by path before it is added (the server's limit for remote.add). */
+export const mostProviderFiles = 5000;
+
+/** The file choice can be made here: a .torrent with several files, with the setting on; T9: on the provider too, by path and size. */
 export function canChooseFilesFor(state: TorrentLines, line: TorrentLine): boolean {
-  return state.chooseFiles && lineState(line) === 'ready' && !isMagnetLine(line) && line.route !== 'provider' && (lineFileCount(line) ?? 0) > 1;
+  const count = lineFileCount(line) ?? 0;
+  return state.chooseFiles && lineState(line) === 'ready' && !isMagnetLine(line) && count > 1 && (line.route !== 'provider' || count <= mostProviderFiles);
 }
 
 /** The file tree's choice for a line: null when every file is chosen. */
@@ -522,15 +601,22 @@ export function magnetNoteApplies(state: TorrentLines): boolean {
   return state.chooseFiles && state.lines.some((line) => isMagnetLine(line) && line.route !== 'provider' && (lineState(line) === 'ready' || lineState(line) === 'reading'));
 }
 
-/** One torrent to add: `files` is `all`, `chosen` (with indexes) or `askWhenReady` (a magnet whose files come later). */
+/**
+ * One torrent to add: `files` is `all`, `chosen` (with indexes) or `askWhenReady` (a magnet whose files come later). A
+ * provider line's `files` is `all`, `chosen` or `''` (the server's rule: a cached one asks, one that isn't takes all).
+ */
 export interface TorrentPick {
   input: string;
   name: string;
   route: 'thisPc' | 'provider';
-  files: 'all' | 'chosen' | 'askWhenReady';
+  files: 'all' | 'chosen' | 'askWhenReady' | '';
   fileIndexes: number[] | null;
   /** T3: the High and Low files (the rest are Normal, or left out by the choice); null for none. */
   priorities: { index: number; priority: FilePriority }[] | null;
+  /** T9, a provider line: the folder the server said it would go to with Save to empty (its category folder). */
+  categoryFolder?: string | null;
+  /** T9, a provider line: a .torrent file's ticked files by path and size. */
+  filePaths?: { path: string; size: number }[] | null;
 }
 
 /** The chosen lines as the dialog hands them on. Only meaningful while {@link canAddLines}. */
@@ -539,14 +625,47 @@ export function picks(state: TorrentLines): TorrentPick[] {
     .filter((line) => line.route !== 'unset')
     .map((line): TorrentPick => {
       const base = { input: line.input, name: lineName(line), route: line.route as 'thisPc' | 'provider', fileIndexes: null, priorities: null };
-      // The provider's own flow asks about the files.
-      if (line.route === 'provider') return { ...base, files: 'all' };
+      if (line.route === 'provider') return providerPick(state, line, base);
       if (!line.result?.files) return { ...base, files: state.chooseFiles ? 'askWhenReady' : 'all' };
       if (!canChooseFilesFor(state, line)) return { ...base, files: 'all' };
       const priorities = addPriorities(line.priorities);
       if (!isPartial(line)) return { ...base, files: 'all', priorities };
       return { ...base, files: 'chosen', fileIndexes: [...line.chosen!], priorities };
     });
+}
+
+/**
+ * T9 W2: a provider line is sent from the torrent dialog. A .torrent file whose files were shown takes the ticked ones
+ * by path and size, or all; anything else follows the server's rule. Priorities are This PC's only.
+ */
+function providerPick(state: TorrentLines, line: TorrentLine, base: Omit<TorrentPick, 'files'>): TorrentPick {
+  const categoryFolder = line.categoryFolder ?? null;
+  const files = line.result?.files;
+  // A magnet's files aren't known: the server's rule. A .torrent file not chosen here takes every file, as on This PC.
+  if (!files) return { ...base, files: '', categoryFolder };
+  if (!canChooseFilesFor(state, line)) return { ...base, files: 'all', categoryFolder };
+  if (!isPartial(line)) return { ...base, files: 'all', categoryFolder };
+  const chosen = new Set(line.chosen);
+  const filePaths = files.filter((file) => chosen.has(file.index) && file.path).map((file) => ({ path: file.path, size: file.size }));
+  return { ...base, files: 'chosen', fileIndexes: [...line.chosen!], categoryFolder, filePaths };
+}
+
+/**
+ * T9 W2: the provider's add for a line, with the torrent dialog's Save to, Start and Queue and the provider's own
+ * defaults for the rest: adding is the go-ahead, as in its add dialog. An empty Save to is the torrent's category folder
+ * as the server gave it, else the default folder.
+ */
+export function providerAddRequest(pick: TorrentPick, destination: string | null | undefined, startMode: string, queueId: number): Record<string, unknown> {
+  const folder = destination?.trim() || pick.categoryFolder || undefined;
+  return {
+    input: pick.input,
+    destination: folder,
+    queueId,
+    startMode: startMode === 'queue' || startMode === 'later' ? startMode : 'startNow',
+    approveUncached: true,
+    selection: pick.files === 'all' || pick.files === 'chosen' ? pick.files : undefined,
+    filePaths: pick.files === 'chosen' ? pick.filePaths ?? undefined : undefined,
+  };
 }
 
 /** What the page says once the This PC torrents were sent. */

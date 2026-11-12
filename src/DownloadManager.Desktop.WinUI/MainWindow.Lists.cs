@@ -22,7 +22,12 @@ public sealed partial class MainWindow
         // DT-6: the torrent columns show in the torrent views only (SyncTorrentColumns).
         foreach (var key in TorrentListRules.ColumnKeys) _jobColumns.SetVisible(key, false);
         _jobsHeader = new ColumnHeaderRow(_jobColumns, JobsHeader, JobsList, RootGrid, HeaderSort_Clicked, SaveColumnWidths);
-        _jobsHeader.MinimumWidthChanged += width => DownloadListGrid.MinWidth = width;
+        _jobsHeader.MinimumWidthChanged += width =>
+        {
+            DownloadListGrid.MinWidth = width;
+            // T7: Torrent Info narrows so the columns still fit, or stays away when they would not.
+            SyncTorrentInfo();
+        };
         _jobsHeader.ApplyToAll();
         _jobsRegion = new RegionDrag(JobsList, JobsRegionLayer, () => false, BeginRegion, ChangeRegion, EndRegion);
 #if HAS_UNO

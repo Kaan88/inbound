@@ -128,6 +128,9 @@ public sealed class TorrentInspectRequest
     /// <summary>T3: the folder it would go to, for <see cref="TorrentInspectResult.FreeBytes"/>; null is the category
     /// folder, as an add without one.</summary>
     public string? Destination { get; set; }
+    /// <summary>T10: in place of <see cref="Input"/>, the finished download whose file is a .torrent file
+    /// (<see cref="JobDto.TorrentFileReady"/>). An older Host ignores it and reads <see cref="Input"/>.</summary>
+    public Guid? FromJobId { get; set; }
 }
 
 public sealed class TorrentInspectResult
@@ -172,6 +175,19 @@ public sealed class TorrentAddRequest
     public List<TorrentFilePriorityDto>? Priorities { get; set; }
     /// <summary>T3: the torrent's own options from the start; null fields are none / Options' choice.</summary>
     public TorrentOptionsDto? Options { get; set; }
+    /// <summary>
+    /// T10: in place of <see cref="Input"/> and <see cref="Data"/>, the finished download whose file is a .torrent file
+    /// (<see cref="JobDto.TorrentFileReady"/>). The Host reads that file itself, and once the torrent is added, or was
+    /// already in the list (<see cref="TorrentAddResult.Existing"/>), it removes that download and its file. On a failure
+    /// both stay. An older Host ignores it and adds from <see cref="Input"/>, leaving the download in the list.
+    /// </summary>
+    public Guid? FromJobId { get; set; }
+    /// <summary>
+    /// T10: with <see cref="FromJobId"/>, only remove that download when its torrent is already in the list; nothing is
+    /// ever added. When the torrent is not in the list (any more), the answer is an error and the download stays. Only
+    /// sent with <see cref="FromJobId"/>, which only a Host that knows both offers (<see cref="JobDto.TorrentFileReady"/>).
+    /// </summary>
+    public bool OnlyIfListed { get; set; }
 }
 
 public sealed class TorrentAddResult

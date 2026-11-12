@@ -16,13 +16,14 @@
     onpick(kind);
   }
 
-  const items: { kind: AddKind; label: string; hint?: string }[] = [
+  const items: { kind: AddKind; label: string; hint?: string; title?: string }[] = [
     { kind: 'url', label: 'Add URL…', hint: 'Alt+N' },
     // '…' on every entry that opens a dialog, as the desktop writes 'Add Links…' (U-WU-21).
     { kind: 'links', label: 'Add links…' },
     { kind: 'magnet', label: 'Add magnet…' },
     { kind: 'torrent', label: 'Import torrent file…' },
-    { kind: 'container', label: 'Import container file…' },
+    // Review 5:P1: "link container" is another community's word, so the entry says what one is.
+    { kind: 'container', label: 'Import container file…', title: 'A link container is an .rsdf or .ccf file holding a list of links, such as JDownloader saves. Its links go to the provider like pasted ones.' },
     { kind: 'list', label: 'Import download list…' },
   ];
 </script>
@@ -38,7 +39,7 @@
     <ul class="card absolute left-0 right-0 z-40 mt-1 overflow-hidden py-1 shadow-lg" role="menu">
       {#each items as item (item.kind)}
         {#if (item.kind !== 'torrent' && item.kind !== 'container') || (canUpload && (canProvider || (item.kind === 'torrent' && canTorrents)))}
-          <li role="none"><button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={() => pick(item.kind)}><span>{item.label}</span>{#if item.hint}<span class="text-[11px] text-muted">{item.hint}</span>{/if}</button></li>
+          <li role="none"><button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" title={item.title} onclick={() => pick(item.kind)}><span>{item.label}</span>{#if item.hint}<span class="text-[11px] text-muted">{item.hint}</span>{/if}</button></li>
         {/if}
       {/each}
       <li role="none"><button class="flex w-full px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={() => { open = false; onexport(); }}>Export download list</button></li>

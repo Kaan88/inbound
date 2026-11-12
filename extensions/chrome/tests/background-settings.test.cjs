@@ -10,7 +10,7 @@ const {
 } = require('./harness.cjs');
 
 test('right-click handoff retains its source frame and refreshes matching partition cookies on confirmation', async () => {
-  const harness = makeChrome({ enabled: true, autoIntercept: true, startMode: 'now',
+  const harness = makeChrome({ enabled: true, autoIntercept: true, startMode: 'now', destinationMode: 'ask',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false }, { id: 'seed' });
   const old = global.chrome;
   const queries = [];
@@ -538,6 +538,10 @@ test('the extension makes no network requests of its own, except to the server t
       // One fetch, the transport's default; every request goes to the paired address (transport tests).
       assert.equal(text.match(/\bfetch\s*\(/g)?.length, 1, name);
       assert.match(text, /const defaultFetch: FetchLike = \(input, init\) => fetch\(input, init\);/);
+    } else if (name === 'toolbar-icon.ts') {
+      // EXT.R12: one fetch, of the extension's own icon file (a chrome-extension:// address, never the network).
+      assert.equal(text.match(/\bfetch\s*\(/g)?.length, 1, name);
+      assert.match(text, /fetch\(chrome\.runtime\.getURL\("icons\/icon32\.png"\)\)/);
     } else {
       assert.doesNotMatch(text, /\bfetch\s*\(/, name);
     }
@@ -1041,13 +1045,76 @@ test('Audit 3 M4 / L12: a restart Firefox refuses falls back to no referrer, the
 
     // The site refuses the second request: the user hears of it. A cancel by the user says nothing.
     const changed = harness.chrome.downloads.onChanged.listeners;
-    assert.equal(changed.length, 1, 'listening only once something was started again');
+    assert.equal(changed.length, 1, 'registered once, at the start');
     changed[0]({ id: 77, state: { current: 'interrupted' }, error: { current: 'SERVER_FORBIDDEN' } });
     await settle(() => log.notes.length > notes);
     assert.match(log.notes.at(-1).message, /site refused it/);
     changed[0]({ id: 77, state: { current: 'interrupted' } });
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(log.notes.length, notes + 1, 'said once');
+  });
+});
+
+test('Review 3 N1: a restart that ends after the worker went idle is still said, and other downloads read nothing', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  harness.chrome.downloads.download = async (options) => { log.downloaded.push(options); return 90; };
+  await withBackground(harness, async () => {
+    // Listening from the start, before anything was started again: a listener added later would not wake the worker.
+    assert.equal(harness.chrome.downloads.onChanged.listeners.length, 1);
+    await registered[0].listener(zipResponse('https://site.test/later.zip'));
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    assert.deepEqual(harness.session['restartWatch.90'], { fileName: 'big file.zip', mimeType: 'application/zip' });
+  });
+
+  // The worker was suspended and starts again for the download's end: its memory is gone, session storage is not.
+  await withBackground(harness, async () => {
+    const changed = harness.chrome.downloads.onChanged.listeners.at(-1);
+    let reads = 0;
+    const get = harness.chrome.storage.session.get;
+    harness.chrome.storage.session.get = async (key) => { reads++; return get(key); };
+    changed({ id: 5, filename: { current: 'x.zip' } });
+    changed({ id: 5, state: { current: 'in_progress' } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(reads, 0, 'a change that is no end reads nothing');
+    const notes = log.notes.length;
+    changed({ id: 90, state: { current: 'interrupted' }, error: { current: 'SERVER_FORBIDDEN' } });
+    await settle(() => log.notes.length > notes);
+    assert.match(log.notes.at(-1).message, /site refused it/);
+    assert.equal(harness.session['restartWatch.90'], undefined, 'forgotten once said');
+    harness.chrome.storage.session.get = get;
+  });
+});
+
+test('Review 3 follow-up: a restart the site refuses before the watch reaches session storage is still said', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  harness.chrome.downloads.download = async (options) => { log.downloaded.push(options); return 91; };
+  await withBackground(harness, async () => {
+    // Session-storage writes of the watch are held back until released, so the end arrives first.
+    const set = harness.chrome.storage.session.set;
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    harness.chrome.storage.session.set = async (items) => {
+      if (Object.keys(items).some(key => key.startsWith('restartWatch.'))) await held;
+      return set(items);
+    };
+    await registered[0].listener(zipResponse('https://site.test/now.zip'));
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    const keeping = sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    await settle(() => log.downloaded.length > 0);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(harness.session['restartWatch.91'], undefined, 'the write has not landed yet');
+    const notes = log.notes.length;
+    harness.chrome.downloads.onChanged.listeners[0](
+      { id: 91, state: { current: 'interrupted' }, error: { current: 'SERVER_FORBIDDEN' } });
+    await settle(() => log.notes.length > notes);
+    assert.match(log.notes.at(-1).message, /site refused it/);
+    release();
+    await keeping;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(harness.session['restartWatch.91'], undefined, 'the late write leaves nothing behind');
+    assert.equal(log.notes.length, notes + 1, 'said once');
+    harness.chrome.storage.session.set = set;
   });
 });
 
@@ -1078,12 +1145,30 @@ test('Audit 3 L12: one page\'s responses hand over at most ten downloads a minut
     assert.equal(results.filter(result => result.cancel === undefined).length, 2);
     assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 10);
     const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
-    assert.match(status.leftInBrowser[0].reason, /many downloads at once/);
+    assert.match(status.leftInBrowser[0].reason, /many downloads started at once/);
     // Left to Firefox: onCreated does not send them either.
     harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(70, 'f11.zip'), url: 'https://site.test/f11.zip' });
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 10);
     assert.deepEqual(log.paused, []);
+  });
+});
+
+test('Review 3 N2: frames from many subdomains hand over at most thirty downloads a minute in all', async () => {
+  const { harness, registered } = firefoxWithResponses();
+  await withBackground(harness, async () => {
+    const answers = [];
+    for (const sub of ['a', 'b', 'c', 'd']) {
+      for (let i = 0; i < 10; i++) {
+        answers.push(registered[0].listener(zipResponse(`https://${sub}.site.test/f${i}.zip`,
+          { type: 'sub_frame', originUrl: `https://${sub}.site.test/frame` })));
+      }
+    }
+    for (let i = 0; i < 30; i++) await answerNative(harness, 'handoff.request', { accepted: true });
+    const results = await Promise.all(answers);
+    assert.equal(results.filter(result => result.cancel === true).length, 30);
+    assert.equal(results.filter(result => result.cancel === undefined).length, 10);
+    assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 30);
   });
 });
 

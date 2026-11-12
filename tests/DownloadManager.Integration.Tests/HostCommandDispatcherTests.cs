@@ -204,6 +204,90 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Audit3N5_AJobsQueryWithALimitReadsOnlyTheNewestJobsInTheSameOrder()
+    {
+        var start = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+        var service = await ServiceAsync(async store =>
+        {
+            for (var i = 0; i < 6; i++)
+            {
+                var name = $"n{i}.bin";
+                await store.SaveAsync(new DownloadJob
+                {
+                    Url = $"http://127.0.0.1:9/{name}",
+                    FileName = name,
+                    DestinationDirectory = _root,
+                    FinalFilePath = Path.Combine(_root, name),
+                    PartFilePath = Path.Combine(_root, name + ".part"),
+                    State = DownloadState.Paused,
+                    StartMode = StartMode.Later,
+                    // Two share the newest time.
+                    CreatedAt = start.AddMinutes(Math.Min(i, 4)),
+                });
+            }
+        });
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+        var query = IpcMessage.Create(MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 3 });
+
+        var expected = HostCommandDispatcher.LimitJobs(service.GetSnapshot(), query).Jobs.Select(job => job.Id).ToList();
+        Assert.Equal(expected, service.GetSnapshot(3).Jobs.Select(job => job.Id));
+        Assert.Equal(6, service.GetSnapshot(null).Jobs.Count);
+        Assert.Equal(6, service.GetSnapshot(0).Jobs.Count);
+
+        var reply = await AskAsync(dispatcher, session, MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 3 });
+        // The dispatcher asked the service for the three newest alone, not for every job trimmed afterwards.
+        Assert.Equal(3, service.LastSnapshotJobsMapped);
+        var jobs = reply.GetPayload<SnapshotDto>().Jobs;
+        Assert.Equal(expected, jobs.Select(job => job.Id));
+        Assert.DoesNotContain(jobs, job => job.FileName is "n0.bin" or "n1.bin" or "n2.bin");
+
+        // Without a limit every job is read.
+        await AskAsync(dispatcher, session, MessageTypes.JobsQuery, new JobsQueryRequest());
+        Assert.Equal(6, service.LastSnapshotJobsMapped);
+    }
+
+    [Fact]
+    public async Task Audit3N5_AWebSessionsLimitedQueryGetsTheNewestJobsWithThoseOutsideItsFoldersHidden()
+    {
+        var start = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+        var web = await WebAsync(async store =>
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                var inside = SeededJob(Inside, $"in{i}.bin");
+                inside.CreatedAt = start.AddMinutes(i);
+                await store.SaveAsync(inside);
+            }
+
+            // Newer than every job in the session's folders.
+            for (var i = 0; i < 3; i++)
+            {
+                var outside = SeededJob(Outside, $"out{i}.bin");
+                outside.CreatedAt = start.AddMinutes(10 + i);
+                await store.SaveAsync(outside);
+            }
+        });
+        var query = IpcMessage.Create(MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 4 });
+        var expected = HostCommandDispatcher.LimitJobs(web.Service.GetSnapshot(), query).Jobs.Select(job => job.Id).ToList();
+
+        var reply = await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 4 });
+        Assert.Equal(4, web.Service.LastSnapshotJobsMapped);
+        var jobs = reply.GetPayload<SnapshotDto>().Jobs;
+        // The same jobs as with every job listed and then cut: the newest, whatever their folder.
+        Assert.Equal(expected, jobs.Select(job => job.Id));
+        Assert.Equal(["out2.bin", "out1.bin", "out0.bin", "in2.bin"], jobs.Select(job => job.FileName));
+        // Those outside its folders are still hidden from the web session; the one inside is not.
+        Assert.All(jobs.Take(3), job => Assert.Equal(string.Empty, job.FinalFilePath));
+        Assert.Equal(Path.Combine(Inside, "in2.bin"), jobs[3].FinalFilePath);
+
+        var pipeReply = await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobsQuery, new JobsQueryRequest { Limit = 4 });
+        Assert.Equal(4, web.Service.LastSnapshotJobsMapped);
+        Assert.Equal(expected, pipeReply.GetPayload<SnapshotDto>().Jobs.Select(job => job.Id));
+        Assert.Equal(Path.Combine(Outside, "out2.bin"), pipeReply.GetPayload<SnapshotDto>().Jobs[0].FinalFilePath);
+    }
+
+    [Fact]
     public async Task ShutdownRepliesDirectlyThenSaysExitingThenShutsDown()
     {
         var service = await ServiceAsync();
@@ -579,6 +663,15 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         public string? Picks { get; set; }
 
         public List<string> Revealed { get; } = [];
+
+        /// <summary>EXT.R12: downloads the main window was asked to open at.</summary>
+        public List<Guid> Shown { get; } = [];
+
+        public void ShowJob(Guid jobId)
+        {
+            Shown.Add(jobId);
+            lock (timeline) timeline.Add("platform:show");
+        }
 
         public void RevealFile(string path)
         {

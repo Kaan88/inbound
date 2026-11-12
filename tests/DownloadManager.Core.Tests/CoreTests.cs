@@ -124,6 +124,23 @@ public sealed class JobListFileTests
         Assert.Equal("later", entry.StartMode);
         Assert.Equal("overwrite", entry.ConflictPolicy);
         Assert.Equal("abc123", entry.ExpectedSha256);
+        Assert.Null(entry.ContentType);
+        Assert.DoesNotContain("contentType", JobListFile.Serialize(jobs));
+    }
+
+    /// <summary>Review 1 N6: a stream the browser handed off at an address without .m3u8 or .mpd stays a stream.</summary>
+    [Fact]
+    public void KeepsTheHandOffContentTypeSoAStreamIsAddedAsOneAgain()
+    {
+        var jobs = new[]
+        {
+            new JobDto { Url = "https://example.com/play?id=7", FileName = "show.mp4", HandoffContentType = "application/vnd.apple.mpegurl", StartMode = "later", ConflictPolicy = "rename" },
+        };
+
+        var entry = Assert.Single(JobListFile.Deserialize(JobListFile.Serialize(jobs)));
+        Assert.Equal("application/vnd.apple.mpegurl", entry.ContentType);
+        // An older list, without it, still reads.
+        Assert.Null(Assert.Single(JobListFile.Deserialize("[{\"url\":\"https://example.com/a\"}]")).ContentType);
     }
 
     [Fact]
@@ -203,7 +220,7 @@ public sealed class ShellActionsTests
     public void OpenWithUsesOpenAsRunDll()
     {
         var start = ShellActions.OpenWith(@"C:\Downloads\report.pdf");
-        Assert.Equal("rundll32.exe", start.FileName);
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, "rundll32.exe"), start.FileName);
         Assert.Equal("shell32.dll,OpenAs_RunDLL \"C:\\Downloads\\report.pdf\"", start.Arguments);
         Assert.True(start.UseShellExecute);
     }
@@ -220,7 +237,7 @@ public sealed class ShellActionsTests
             var start = ShellActions.RevealFile(path);
             if (OperatingSystem.IsWindows())
             {
-                Assert.Equal("explorer.exe", start.FileName);
+                Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), start.FileName);
                 Assert.Equal($"/select,\"{path}\"", start.Arguments);
                 Assert.True(start.UseShellExecute);
             }
@@ -253,7 +270,7 @@ public sealed class ShellActionsTests
         }
         var path = @"C:\Downloads\missing.bin";
         var start = ShellActions.RevealFile(path);
-        Assert.Equal("explorer.exe", start.FileName);
+        Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), start.FileName);
         Assert.Equal("\"C:\\Downloads\"", start.Arguments);
         Assert.True(start.UseShellExecute);
     }

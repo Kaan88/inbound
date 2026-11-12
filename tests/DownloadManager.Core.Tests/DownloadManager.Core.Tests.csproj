@@ -44,6 +44,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentOpenRequests.cs" Link="WinUI\TorrentOpenRequests.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ShowJobRequests.cs" Link="WinUI\ShowJobRequests.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="WinUI\ContainerImport.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AutoOpen.cs" Link="WinUI\AutoOpen.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PassingLine.cs" Link="WinUI\PassingLine.cs" />
@@ -56,8 +57,14 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentDetailsRules.cs" Link="WinUI\TorrentDetailsRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentAddLines.cs" Link="WinUI\TorrentAddLines.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentControlRules.cs" Link="WinUI\TorrentControlRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentInfoRules.cs" Link="WinUI\TorrentInfoRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SelectionCommands.cs" Link="WinUI\SelectionCommands.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\MenuSeparatorRules.cs" Link="WinUI\MenuSeparatorRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DialogArrowRules.cs" Link="WinUI\DialogArrowRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ListColumns.cs" Link="WinUI\ListColumns.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DetailsSort.cs" Link="WinUI\DetailsSort.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ListLayoutStore.cs" Link="WinUI\ListLayoutStore.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowSizeRules.cs" Link="WinUI\WindowSizeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DurationText.cs" Link="WinUI\DurationText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedSample.cs" Link="WinUI\SpeedSample.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedGraphModel.cs" Link="WinUI\SpeedGraphModel.cs" />
@@ -70,6 +77,8 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSecrets.cs" Link="WinUI\ServerSecrets.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSwitch.cs" Link="WinUI\ServerSwitch.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressWindowSet.cs" Link="WinUI\ProgressWindowSet.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\VersionStatus.cs" Link="WinUI\VersionStatus.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellWords.cs" Link="WinUI\ShellWords.cs" />

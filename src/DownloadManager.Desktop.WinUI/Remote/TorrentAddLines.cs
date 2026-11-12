@@ -12,6 +12,15 @@ internal sealed record TorrentAddPick(string Input, string Name, TorrentLineRout
     /// <summary>T3: the chosen files that aren't Normal (High or Low); null when all are Normal.</summary>
     public IReadOnlyList<TorrentFilePriorityDto>? Priorities { get; init; }
 
+    /// <summary>
+    /// T9 W2, a provider line: the folder the Host said this torrent would go to with Save to empty (its category folder),
+    /// so the provider's files land where This PC's would. Null when the Host didn't say.
+    /// </summary>
+    public string? CategoryFolder { get; init; }
+
+    /// <summary>T9 W2, a provider line: a .torrent file's ticked files by path and size, as the provider takes them; null for all or for the Host's rule.</summary>
+    public IReadOnlyList<RemoteFilePathDto>? FilePaths { get; init; }
+
     // The input may be a magnet with trackers: never in a log line.
     public override string ToString() => "[torrent pick]";
 }
@@ -27,6 +36,12 @@ internal sealed record TorrentAddChoice(IReadOnlyList<TorrentAddPick> Picks, str
     public Guid? ShowJobId { get; init; }
 
     public static TorrentAddChoice ShowJob(Guid id) => new([], null, "startNow", null) { ShowJobId = id };
+
+    /// <summary>
+    /// T10: the lines whose torrent was already in the list when the dialog closed with a choice. A finished .torrent
+    /// download among them is a copy, which the main window then removes (the Host's <c>Existing</c> rule).
+    /// </summary>
+    public IReadOnlyList<string> ListedInputs { get; init; } = [];
 
     public override string ToString() => "[torrent add choice]";
 }
@@ -59,6 +74,56 @@ internal enum TorrentCacheState
     Unknown,
 }
 
+/// <summary>How a cache badge looks (T9 W3).</summary>
+internal enum CacheBadgeKind
+{
+    /// <summary>A filled accent badge: the provider has it.</summary>
+    Cached,
+    /// <summary>A neutral outline badge.</summary>
+    NotCached,
+    /// <summary>A neutral outline badge while the answer comes.</summary>
+    Checking,
+    /// <summary>A muted badge, with the reason in its tooltip.</summary>
+    Unknown,
+}
+
+/// <summary>
+/// The provider's cache answer as a badge next to a line's provider choice (T9 W3), and the short line under it. The same
+/// badge is used wherever the desktop says an item is cached on the provider.
+/// </summary>
+internal sealed record CacheBadge(CacheBadgeKind Kind, string Text, string Note, string? ToolTip)
+{
+    /// <summary>Null when nothing was asked (no account, or the line isn't read yet).</summary>
+    public static CacheBadge? For(TorrentCacheState state, string? providerName, string? problem = null)
+    {
+        if (string.IsNullOrWhiteSpace(providerName)) return null;
+        return state switch
+        {
+            TorrentCacheState.Cached => Cached(providerName),
+            TorrentCacheState.NotCached => new(CacheBadgeKind.NotCached, $"Not cached on {providerName}", string.Empty, null),
+            TorrentCacheState.Checking => new(CacheBadgeKind.Checking, $"Checking {providerName}…", string.Empty, null),
+            TorrentCacheState.Unknown => new(CacheBadgeKind.Unknown, $"Couldn't check {providerName}", string.Empty,
+                string.IsNullOrWhiteSpace(problem) ? $"{providerName} didn't answer the check." : problem.Trim()),
+            _ => null,
+        };
+    }
+
+    /// <summary>"Cached on TorBox", with what that means for this add.</summary>
+    public static CacheBadge Cached(string providerName)
+        => new(CacheBadgeKind.Cached, $"Cached on {providerName}", $"{providerName} has it, so it downloads right away", null);
+
+    /// <summary>
+    /// A provider item's status says it is cached ("Cached on TorBox", RemoteRows): shown as the same filled badge where
+    /// it stands alone, such as My provider's item header. List cells keep their status text.
+    /// </summary>
+    public static bool IsCachedWords(string? status) => status?.StartsWith("Cached on ", StringComparison.Ordinal) == true;
+
+    /// <summary>What a screen reader hears: the badge, its line and its reason.</summary>
+    public string Spoken => string.Join(". ", new[] { Text, Note, ToolTip ?? string.Empty }.Where(part => part.Length > 0));
+
+    public override string ToString() => Text;
+}
+
 /// <summary>One magnet or .torrent file in the add dialog. UI thread only.</summary>
 internal sealed class TorrentAddLine
 {
@@ -89,10 +154,19 @@ internal sealed class TorrentAddLine
     /// <summary>The chosen files' indexes; null means every file.</summary>
     public IReadOnlyList<int>? ChosenIndexes { get; internal set; }
 
+    /// <summary>
+    /// T9 W2: the folder the Host gave when it was asked with Save to empty (the torrent's category folder). Kept apart
+    /// from <see cref="TorrentInspectResult.Destination"/>, which follows each Save to the user types; null until known.
+    /// </summary>
+    public string? CategoryFolder { get; internal set; }
+
     /// <summary>T3: the chosen files' priorities that aren't Normal, by index; null when there are none.</summary>
     public IReadOnlyDictionary<int, string>? Priorities { get; internal set; }
 
     public TorrentCacheState Cache { get; internal set; }
+
+    /// <summary>Why the cache couldn't be checked, for the badge's tooltip; null otherwise.</summary>
+    public string? CacheProblem { get; internal set; }
 
     public TorrentLineState State => Result switch
     {
@@ -136,9 +210,13 @@ internal sealed class TorrentAddLine
 
     public long? TotalBytes => Result is { Ok: true } result ? result.TotalBytes : null;
 
-    /// <summary>Some files are left out: only on This PC, where the file choice is used.</summary>
+    /// <summary>
+    /// Some files are left out. T9: a .torrent file's choice is used on either route, except on the provider past
+    /// <see cref="TorrentAddLines.MostProviderFiles"/>, where it can't be sent and every file is taken.
+    /// </summary>
     public bool IsPartial
-        => Route != TorrentLineRoute.Provider && ChosenIndexes is { } chosen && FileCount is { } count && chosen.Count < count;
+        => ChosenIndexes is { } chosen && FileCount is { } count && chosen.Count < count
+           && (Route != TorrentLineRoute.Provider || count <= TorrentAddLines.MostProviderFiles);
 
     /// <summary>What it will download, when known.</summary>
     public long? WantedBytes
@@ -190,6 +268,9 @@ internal sealed class TorrentAddLine
         TorrentCacheState.Unknown => $"Couldn't check {providerName}",
         _ => string.Empty,
     };
+
+    /// <summary>T9 W3: the cache answer as a badge next to the provider choice; null when nothing was asked.</summary>
+    public CacheBadge? Badge(string? providerName) => CacheBadge.For(Cache, providerName, CacheProblem);
 
     /// <summary>The detail is a problem, shown in the error colour.</summary>
     public bool IsProblem => State == TorrentLineState.Failed;
@@ -278,11 +359,27 @@ internal sealed class TorrentAddLines
     }
 
     /// <summary>The Host's answer for a line. False when the line is no longer listed.</summary>
-    public bool Inspected(TorrentAddLine line, TorrentInspectResult? result)
+    /// <param name="askedWithoutFolder">The Host was asked with Save to empty, so its folder is the category folder.</param>
+    public bool Inspected(TorrentAddLine line, TorrentInspectResult? result, bool askedWithoutFolder = true)
     {
         if (!_lines.Contains(line)) return false;
         line.Result = result ?? new TorrentInspectResult { Error = "This torrent couldn't be read." };
+        if (askedWithoutFolder && line.Result is { Ok: true, Destination: { Length: > 0 } category }) line.CategoryFolder = category;
         Recompute();
+        return true;
+    }
+
+    /// <summary>
+    /// T3: the Host's answer for a read line asked about another Save to (<paramref name="folder"/>; null is each category
+    /// folder). Only where it goes and what is free there change; the category folder only from an answer for null.
+    /// </summary>
+    public bool SpaceAnswered(TorrentAddLine line, string? folder, TorrentInspectResult answer)
+    {
+        if (!_lines.Contains(line) || line.Result is not { Ok: true } result) return false;
+        result.Destination = answer.Ok ? answer.Destination : folder;
+        result.FreeBytes = answer.Ok ? answer.FreeBytes : null;
+        result.SpaceProblem = answer.Ok ? answer.SpaceProblem : null;
+        if (folder is null && answer is { Ok: true, Destination: { Length: > 0 } category }) line.CategoryFolder = category;
         return true;
     }
 
@@ -331,6 +428,9 @@ internal sealed class TorrentAddLines
             { Ok: true, Cached: false } => TorrentCacheState.NotCached,
             _ => TorrentCacheState.Unknown,
         };
+        line.CacheProblem = line.Cache != TorrentCacheState.Unknown || result is null ? null
+            : !string.IsNullOrWhiteSpace(result.Error) ? RemoteText.Failure(result.Error, null, ProviderName)
+            : result.Ok ? $"{ProviderName} didn't say whether it has it." : null;
         return true;
     }
 
@@ -361,10 +461,16 @@ internal sealed class TorrentAddLines
         line.Route = route;
     }
 
-    /// <summary>The file choice can be made here: a .torrent with several files, going to This PC, with the setting on.</summary>
+    /// <summary>The most files a provider line takes by path before it is added (the Host's limit for remote.add).</summary>
+    public const int MostProviderFiles = 5000;
+
+    /// <summary>
+    /// The file choice can be made here: a .torrent with several files, with the setting on. T9: on the provider too, by
+    /// path and size, up to <see cref="MostProviderFiles"/>.
+    /// </summary>
     public bool CanChooseFilesFor(TorrentAddLine line)
-        => ChooseFiles && line.State == TorrentLineState.Ready && !line.IsMagnet && line.Route != TorrentLineRoute.Provider
-           && line.FileCount > 1;
+        => ChooseFiles && line.State == TorrentLineState.Ready && !line.IsMagnet && line.FileCount > 1
+           && (line.Route != TorrentLineRoute.Provider || line.FileCount <= MostProviderFiles);
 
     /// <summary>The file tree's choice for a line.</summary>
     /// <param name="priorities">T3: the tree's chosen files that aren't Normal, by file id; null keeps none.</param>
@@ -436,20 +542,44 @@ internal sealed class TorrentAddLines
         => ChooseFiles && _lines.Any(line => line.IsMagnet && line.Route != TorrentLineRoute.Provider
                                              && line.State is TorrentLineState.Ready or TorrentLineState.Reading);
 
+    /// <summary>T10: the inputs of the lines whose torrent is already in the list.</summary>
+    public IReadOnlyList<string> ListedInputs() => _lines.Where(line => line.State == TorrentLineState.Listed).Select(line => line.Input).ToList();
+
     /// <summary>The chosen lines as the dialog hands them on. Only meaningful while <see cref="CanAdd"/>.</summary>
     public IReadOnlyList<TorrentAddPick> Picks()
         => Chosen.Where(line => line.Route != TorrentLineRoute.Unset).Select(PickOf).ToList();
 
     private TorrentAddPick PickOf(TorrentAddLine line)
     {
-        // The provider's own flow asks about the files.
-        if (line.Route == TorrentLineRoute.Provider) return new TorrentAddPick(line.Input, line.Name, line.Route, "all", null);
+        if (line.Route == TorrentLineRoute.Provider) return ProviderPickOf(line);
         if (line.Result?.Files is null)
             return new TorrentAddPick(line.Input, line.Name, line.Route, ChooseFiles ? "askWhenReady" : "all", null);
         if (!CanChooseFilesFor(line)) return new TorrentAddPick(line.Input, line.Name, line.Route, "all", null);
         var priorities = TorrentPriorities.ToSend(line.Priorities);
         if (!line.IsPartial) return new TorrentAddPick(line.Input, line.Name, line.Route, "all", null) { Priorities = priorities };
         return new TorrentAddPick(line.Input, line.Name, line.Route, "chosen", line.ChosenIndexes!.ToList()) { Priorities = priorities };
+    }
+
+    /// <summary>
+    /// T9 W2: a provider line is sent from this dialog. A .torrent file whose files were shown takes the ticked ones by
+    /// path and size (<c>chosen</c>), or <c>all</c>; a .torrent file whose files aren't chosen here (the setting is off,
+    /// one file, or too many) takes <c>all</c>, as on This PC, so no Choose Files window follows. Only a magnet, whose
+    /// files aren't known, is left to the Host's rule (<see cref="TorrentAddPick.Files"/> is then empty). Priorities are
+    /// This PC's only.
+    /// </summary>
+    private TorrentAddPick ProviderPickOf(TorrentAddLine line)
+    {
+        var folder = line.CategoryFolder;
+        if (line.Result?.Files is not { } files)
+            return new TorrentAddPick(line.Input, line.Name, line.Route, string.Empty, null) { CategoryFolder = folder };
+        if (!CanChooseFilesFor(line))
+            return new TorrentAddPick(line.Input, line.Name, line.Route, "all", null) { CategoryFolder = folder };
+        if (!line.IsPartial) return new TorrentAddPick(line.Input, line.Name, line.Route, "all", null) { CategoryFolder = folder };
+        var chosen = line.ChosenIndexes!.ToHashSet();
+        var paths = files.Where(file => chosen.Contains(file.Index) && !string.IsNullOrEmpty(file.Path))
+            .Select(file => new RemoteFilePathDto { Path = file.Path, Size = file.Size })
+            .ToList();
+        return new TorrentAddPick(line.Input, line.Name, line.Route, "chosen", line.ChosenIndexes!.ToList()) { CategoryFolder = folder, FilePaths = paths };
     }
 
     /// <summary>
@@ -473,4 +603,24 @@ internal sealed class TorrentAddLines
             else first[hash] = line;
         }
     }
+}
+
+/// <summary>T9 W2: what the Host is asked when a torrent dialog line goes to the provider, with no second dialog.</summary>
+internal static class TorrentAddRequests
+{
+    /// <summary>
+    /// The provider's add for a line, with the torrent dialog's Save to, Start and Queue, and the provider's own defaults
+    /// for the rest: adding is the go-ahead (<c>approveUncached</c>), as in the provider's add dialog. An empty Save to
+    /// is the torrent's category folder as the Host gave it for This PC, else (not said) the default download folder.
+    /// </summary>
+    public static RemoteAddRequestDto ForProvider(TorrentAddPick pick, string? destination, string startMode, int? queueId, int defaultQueueId) => new()
+    {
+        Input = pick.Input,
+        Destination = string.IsNullOrWhiteSpace(destination) ? pick.CategoryFolder : destination.Trim(),
+        QueueId = queueId ?? defaultQueueId,
+        StartMode = startMode is "startNow" or "queue" or "later" ? startMode : "startNow",
+        ApproveUncached = true,
+        Selection = pick.Files is "all" or "chosen" ? pick.Files : null,
+        FilePaths = pick.Files == "chosen" ? pick.FilePaths?.ToList() : null,
+    };
 }

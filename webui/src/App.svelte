@@ -8,6 +8,7 @@
   import { opensAddUrl } from './lib/keys';
   import type { ClassifyResult } from './lib/types';
   import { clockTime, speed } from './lib/format';
+  import { versionWords } from './lib/versionStatus';
   import { countJobs, liveSpeed, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
@@ -23,9 +24,11 @@
   import StatisticsScreen from './screens/StatisticsScreen.svelte';
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
   import TorrentAdd from './screens/TorrentAdd.svelte';
-  import { chipText, hereName, sidebarShows, torrentProvider, torrentsApply } from './lib/torrents';
-  import { chipCompact, torrentFilters, waitingForChoice, waitingForChoiceText } from './lib/torrentList';
-  import { dragMayHoldTorrents, intake, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
+  import { chipText, hereName, jobInput, openAsTorrentStep, sidebarShows, torrentProvider, torrentsApply, torrentsOffText } from './lib/torrents';
+  import Confirm from './components/Confirm.svelte';
+  import type { Job } from './lib/types';
+  import { chipCompact, extraViewShows, torrentExtraViews, torrentFilters, waitingForChoice, waitingForChoiceText } from './lib/torrentList';
+  import { dragMayHoldTorrents, intake, intakeStep, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
 
   // The shell: header, sidebar of views, the screen picked by the address's #hash, and the toasts.
   type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider'; provider: string } | { kind: 'statistics' };
@@ -45,7 +48,8 @@
   // Which add dialog is open: Add URL, the many-inputs dialog (optionally with lines already answered), or the list import.
   type Adding = { kind: 'url' } | { kind: 'many'; mode: 'links' | 'magnet' | 'torrent' | 'imported'; seed?: { input: string; result: ClassifyResult }[]; inputs?: TorrentInput[] }
     | { kind: 'list' } | { kind: 'container' } | { kind: 'torrent'; mode: 'magnet' | 'torrent' | 'mixed'; initial?: TorrentInput[] };
-  type TorrentInput = { input: string; label?: string };
+  // T10: fromJobId, a finished .torrent download the provider's add removes once the provider took it.
+  type TorrentInput = { input: string; label?: string; fromJobId?: string };
   let adding = $state<Adding | null>(null);
   // T1: the server downloads torrents itself, so magnets and .torrent files go to the torrent dialog.
   const torrentsOn = $derived(torrentsApply(store.model.hello?.capabilities, store.model.settings));
@@ -65,40 +69,73 @@
     adding = { kind: 'many', mode, inputs };
   }
 
+  // ---- T10: a finished download that is a .torrent file, from its row's Open as Torrent ----
+
+  let torrentsOff = $state(false);
+
+  function openAsTorrent(job: Job) {
+    if (dialogOpen()) return;
+    const step = openAsTorrentStep(torrentsOn, torrentProvider(store.has('remote'), store.model.accounts) !== null);
+    if (step === 'dialog') adding = { kind: 'torrent', mode: 'mixed', initial: [{ input: jobInput(job.id), label: job.fileName }] };
+    // The provider reads the file on the server by its path, as a .torrent file given by its path.
+    else if (step === 'provider') toProvider([{ input: job.finalFilePath, label: job.fileName, fromJobId: job.id }]);
+    else torrentsOff = true;
+  }
+
   // ---- T3: magnets and .torrent files pasted (Ctrl+V) or dropped anywhere on the page, as in the Windows app ----
+  // Review 5:A6: http, https and ftp links pasted or dropped the same way go to Add Links.
 
   /** The server downloads them, or the account that also takes torrents does (MainWindow.TorrentsCanBeAdded). */
   const torrentsTaken = $derived(store.connection === 'open' && (torrentsOn || torrentProvider(store.has('remote'), store.model.accounts) !== null));
+  const connected = $derived(store.connection === 'open');
   const dialogOpen = () => adding !== null || document.querySelector('[role="dialog"]') !== null;
   let dropping = $state(false);
+  /** Links that came with torrents: Add Links opens with them once the torrent dialog closes. */
+  let pendingLinks: TorrentInput[] = [];
+
+  function closeAdding() {
+    const next = pendingLinks;
+    pendingLinks = [];
+    adding = next.length > 0 ? { kind: 'many', mode: 'links', inputs: next } : null;
+  }
 
   async function takeTorrents(text: string, files: File[], dropped: boolean) {
     const found = intake(text, files, dropped);
     if (found.empty) { store.toast(found.empty); return; }
-    const inputs: TorrentInput[] = found.magnets.map((input) => ({ input }));
-    if (found.files.length > 0 && !store.has('uploads')) store.toast(`${hereName(store.model.hello?.hostKind).upper} doesn't take uploaded files, so a .torrent file can't be sent to it from a browser.`, 'error');
-    else {
-      for (const file of found.files) {
-        try {
-          inputs.push(await uploadTorrent(file));
-        } catch (error) {
-          store.toast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    const step = intakeStep(found.magnets.length + found.files.length, found.links.length, torrentsTaken);
+    if (step.problem) { store.toast(step.problem); return; }
+    const links: TorrentInput[] = step.links ? found.links.map((input) => ({ input })) : [];
+    const inputs: TorrentInput[] = step.torrents ? found.magnets.map((input) => ({ input })) : [];
+    if (step.torrents && found.files.length > 0) {
+      if (!store.has('uploads')) store.toast(`${hereName(store.model.hello?.hostKind).upper} doesn't take uploaded files, so a .torrent file can't be sent to it from a browser.`, 'error');
+      else {
+        for (const file of found.files) {
+          try {
+            inputs.push(await uploadTorrent(file));
+          } catch (error) {
+            store.toast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+          }
         }
       }
     }
-    if (inputs.length === 0 || dialogOpen()) return;
+    if (dialogOpen()) return;
+    if (inputs.length === 0) {
+      if (links.length > 0) adding = { kind: 'many', mode: 'links', inputs: links };
+      return;
+    }
+    pendingLinks = links;
     if (torrentsOn) adding = { kind: 'torrent', mode: 'mixed', initial: inputs };
     else toProvider(inputs);
   }
 
   function pasted(event: ClipboardEvent) {
-    if (!pageTakes(torrentsTaken, dialogOpen(), isEditableTarget(event.target as HTMLElement | null))) return;
+    if (!pageTakes(connected, dialogOpen(), isEditableTarget(event.target as HTMLElement | null))) return;
     event.preventDefault();
     void takeTorrents(event.clipboardData?.getData('text/plain') ?? '', [...(event.clipboardData?.files ?? [])], false);
   }
 
   function dragOver(event: DragEvent) {
-    if (!pageTakes(torrentsTaken, dialogOpen()) || !dragMayHoldTorrents(event.dataTransfer?.types)) return;
+    if (!pageTakes(connected, dialogOpen()) || !dragMayHoldTorrents(event.dataTransfer?.types)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
     dropping = true;
@@ -112,7 +149,7 @@
   function drop(event: DragEvent) {
     const was = dropping;
     dropping = false;
-    if (!was || !pageTakes(torrentsTaken, dialogOpen())) return;
+    if (!was || !pageTakes(connected, dialogOpen())) return;
     event.preventDefault();
     const data = event.dataTransfer;
     const text = [data?.getData('text/uri-list') ?? '', data?.getData('text/plain') ?? ''].join('\n');
@@ -286,6 +323,12 @@
         {#each torrentFilters as filter (filter.key)}
           {@render link(viewHash(`torrents-${filter.key}`), `torrents-${filter.key}`, filter.icon, filter.label, count[`torrents-${filter.key}`], 1)}
         {/each}
+        <!-- T7: only while they hold a torrent, or while shown, so the sidebar doesn't grow by six empty rows. -->
+        {#each torrentExtraViews as extra (extra.key)}
+          {#if extraViewShows(count[`torrents-${extra.key}`], `torrents-${extra.key}`, current)}
+            {@render link(viewHash(`torrents-${extra.key}`), `torrents-${extra.key}`, extra.icon, extra.label, count[`torrents-${extra.key}`], 1)}
+          {/if}
+        {/each}
       {/if}
       {#if showExtractions}{@render link('#/extractions', 'extractions', 'archive', 'Extractions', count.extractions)}{/if}
       {@render link('#/queues', 'queues', 'calendar', 'Queues')}
@@ -304,7 +347,7 @@
       {#if !store.model.settings}
         <div class="flex h-full items-center justify-center text-[13px] text-muted">{connectionText[store.connection]}</div>
       {:else if screen.kind === 'list'}
-        <ListScreen view={screen.view} {search} onadd={() => openAdd('url')} />
+        <ListScreen view={screen.view} {search} onadd={() => openAdd('url')} onopentorrent={openAsTorrent} />
       {:else if screen.kind === 'queues'}
         <QueuesScreen />
       {:else if screen.kind === 'provider'}
@@ -324,23 +367,27 @@
     <span class="tabular shrink-0">{totalSpeed === null ? '' : speed(totalSpeed)}</span>
     <span class="flex-1"></span>
     {#if torrentChip}<a href={viewHash('torrents')} class="inline-flex shrink-0 items-center gap-1 hover:text-text" title="Show the torrents"><Icon name="swarm" size={13} /><span class="hidden sm:inline">{torrentChip}</span><span class="sm:hidden">{torrentChipShort}</span></a>{/if}
-    {#if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {store.model.hello.hostVersion}</span>{/if}
+    {#if store.model.hello}<span class="hidden items-center gap-1.5 sm:inline-flex"><img src="/favicon.svg" alt="" width="14" height="14" />{store.texts.versionPrefix} {versionWords(store.model.hello.hostVersion, store.model.status?.latestVersion)}</span>{/if}
   </footer>
 </div>
 
 {#if dropping}
   <div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" aria-hidden="true">
-    <div class="flex items-center gap-2 rounded-md border-2 border-dashed border-accent bg-surface px-6 py-4 text-[14px] font-semibold"><Icon name="swarm" size={18} /> Drop to add torrents</div>
+    <div class="flex items-center gap-2 rounded-md border-2 border-dashed border-accent bg-surface px-6 py-4 text-[14px] font-semibold"><Icon name="swarm" size={18} /> Drop to add downloads</div>
   </div>
 {/if}
 
+{#if torrentsOff}
+  <Confirm title="Open as torrent" message={torrentsOffText} primary="Open Options" onclose={() => (torrentsOff = false)}
+    onconfirm={() => { torrentsOff = false; location.hash = '#/settings'; }} />
+{/if}
 {#if adding?.kind === 'url'}
   <AddUrl onclose={() => (adding = null)} onprovider={(input, result) => (adding = { kind: 'many', mode: 'links', seed: [{ input, result }] })}
     ontorrent={torrentsOn ? (magnets) => (adding = { kind: 'torrent', mode: 'magnet', initial: magnets.map((input) => ({ input })) }) : undefined} />
 {:else if adding?.kind === 'many'}
-  <AddLinks mode={adding.mode} seed={adding.seed} inputs={adding.inputs} onclose={() => (adding = null)} />
+  <AddLinks mode={adding.mode} seed={adding.seed} inputs={adding.inputs} onclose={closeAdding} />
 {:else if adding?.kind === 'torrent'}
-  <TorrentAdd mode={adding.mode} initial={adding.initial} onclose={() => (adding = null)} onprovider={toProvider} />
+  <TorrentAdd mode={adding.mode} initial={adding.initial} onclose={closeAdding} />
 {:else if adding?.kind === 'list'}
   <ImportList onclose={() => (adding = null)} onreview={(seed) => (adding = { kind: 'many', mode: 'imported', seed })} />
 {:else if adding?.kind === 'container'}

@@ -79,7 +79,7 @@
       <input class="field w-24" inputmode="numeric" aria-label="Minutes between checks" bind:value={draft.options.repeatMinutes} disabled={!draft.options.timedStartEnabled || !draft.options.repeatEnabled} />
       <span class="text-[12px] text-muted">min</span>
     </div>
-    <p class="hint">Periodic checks compare completed HTTP files on the server. Changed files, or files without usable server validators, are refreshed. The schedule’s existing start and stop times define the active window.</p>
+    <p class="hint">Checks whether finished files have changed on the server and downloads them again if so. It checks between the schedule’s start and stop times.</p>
     <div class="flex flex-wrap items-center gap-2">
       <label class="flex min-w-0 flex-1 items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={draft.options.retryEnabled} /> Limit retries after a file fails</label>
       <input class="field w-24" inputmode="numeric" aria-label="Retry limit" bind:value={draft.options.retryLimit} disabled={!draft.options.retryEnabled} />

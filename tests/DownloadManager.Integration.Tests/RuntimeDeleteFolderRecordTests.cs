@@ -195,6 +195,8 @@ public sealed partial class RuntimeServiceTests
         await ctx.WaitFor(job.Id, j => j.ReceivedBytes > 32_768);
         Assert.True((await ctx.Service.PauseAsync(job.Id)).Ok);
         await ctx.WaitFor(job.Id, j => j.State == "paused");
+        // Review 2 L11: stopped means its run has ended too; one still winding down takes the folders itself, later.
+        await WaitUntil(() => !ctx.Service.IsRunningForTesting(job.Id));
 
         Assert.True((await ctx.Service.CancelAsync(job.Id, deleteFile: true)).Ok);
 

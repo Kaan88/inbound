@@ -11,12 +11,14 @@ namespace DownloadManager.Desktop.WinUI;
 /// launch listens on a Unix socket in the user's own socket folder (<see cref="UnixSockets"/>) and a later one connects
 /// and sends one byte; only this user's processes are heard.
 /// </summary>
-internal sealed class ActivationSignal
+internal sealed class ActivationSignal : IDisposable
 {
     private readonly EventWaitHandle _show;
     private readonly EventWaitHandle _settings;
     private readonly EventWaitHandle _open;
     private readonly string? _socketPath;
+    private Socket? _listener;
+    private EventHandler? _exitHandler;
 
     private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, EventWaitHandle open, string? socketPath)
     {
@@ -164,15 +166,46 @@ internal sealed class ActivationSignal
             return false;
         }
 
+        _listener = listener;
         var thread = new Thread(() => Listen(listener)) { IsBackground = true, Name = "Window activation" };
         thread.Start();
-        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        _exitHandler = (_, _) =>
         {
+            // Given back already (Dispose): the file may be another window's by now.
+            if (!ReferenceEquals(_listener, listener)) return;
             listener.Dispose();
             try { File.Delete(path); }
             catch (IOException) { /* the next window replaces it */ }
         };
+        AppDomain.CurrentDomain.ProcessExit += _exitHandler;
         return true;
+    }
+
+    /// <summary>
+    /// T11: gives the name back, for a progress window the main window's process opened and has now closed. The process
+    /// that owns <see cref="App"/>'s own signal never calls this; it keeps its name until it ends.
+    /// </summary>
+    public void Dispose()
+    {
+        // A long-lived main window process opens many progress windows; none keeps its handler (and socket) after it closes.
+        if (_exitHandler is { } exitHandler)
+        {
+            _exitHandler = null;
+            AppDomain.CurrentDomain.ProcessExit -= exitHandler;
+        }
+
+        if (_listener is { } listener)
+        {
+            _listener = null;
+            // Accept returns with ObjectDisposedException, which ends the listening thread.
+            listener.Dispose();
+            try { File.Delete(_socketPath!); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the next window replaces it */ }
+        }
+
+        _show.Dispose();
+        _settings.Dispose();
+        _open.Dispose();
     }
 
     private void Listen(Socket listener)
@@ -204,6 +237,12 @@ internal sealed class ActivationSignal
                 catch (SocketException)
                 {
                     // A probe that only connected (Reachable), or a launch that went away.
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Dispose ran while this client was being heard (an in-process progress window closed): nothing to
+                    // show any more, and the listener is gone, so the thread ends.
+                    return;
                 }
             }
         }

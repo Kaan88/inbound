@@ -42,6 +42,8 @@ internal static class DialogGuard
         var root = dialog.XamlRoot;
         if (root is null || IsOpen(root)) return null;
         Showing.Add(root);
+        // UI.R36: every dialog's buttons answer the arrow keys.
+        DialogArrowKeys.Add(dialog);
         try
         {
             return await dialog.ShowAsync();

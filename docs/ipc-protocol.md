@@ -68,7 +68,7 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   `remote.container.sendToJd` (handing a container to another download manager on this PC; `remote.container.preview`
   says `canSendToJd: false` to a web session).
 - `folders.browse`/`create` work, limited to **the app's folders**: the download folder, every built-in and custom
-  category folder, the favorites and the extraction folder, worked out again whenever the settings change. The
+  category folder, the torrent folder (T14), the favorites and the extraction folder, worked out again whenever the settings change. The
   same folders hold for `job.add` and a hand-off, `job.update` Move/Rename (`newFilePath`), `folders.space` (a folder
   outside them comes back unmeasured), `host.cleanOrphans`, the archive commands' `filePath` and `folder`, and the
   provider's `.torrent` and container paths and destinations. A refusal says "That folder is outside the app's folders."
@@ -397,6 +397,18 @@ keeps three things out of a client's hands, and tells every client when the sett
   a folder remembered by an add. A web session gets them as it is shown them. A burst shares one message (about
   100 ms). It is additive: a client that doesn't know it ignores it, and the native host doesn't pass it to the
   browser extension. A client should replace its copy with it, so its next save starts from the current settings.
+
+### The latest version (UI.R37)
+
+- The status in `jobs.snapshot` (and `host.status`) carries `latestVersion`: the newest version this Host's last
+  successful update check found on its own channel, while it runs. It is absent (null) before a check, when every
+  check failed, on a Host with no updater (a portable build, the Docker server) and from an older Host. A client
+  shows the version alone then, never "latest".
+- **`update.latest`** (Host push, payload `{ "latestVersion": "0.7.1" }`) goes to every session that takes events, a
+  web one too, when a check finds a different newest version. No new check is made for it: it comes from the Host's
+  usual update checks (automatic or Check for updates). It is additive: a client that doesn't know it ignores it.
+- The desktop window holds another server to that server's own `latestVersion`; when it has none, to this PC's,
+  because every Inbound build (Setup, the AppImage, the Docker image) is made from the same version tag.
 
 ### Downloads as every client sees them
 
@@ -775,6 +787,19 @@ by `jobId` except `torrent.inspect` and `torrent.add`.
   would look tracker names up on this PC). An HTTP proxy carries no UDP, so
   DHT, local peers and uTP stay off while it is used. Web sessions may change `torrentSeedsAtOnce`,
   `torrentConnectionsPerTorrent` and `torrentMaxConnections`; the other five are pipe-only (`WebSettingsRules`).
+- T14, torrent folders (`settings.get`/`settings.update`), apart from other downloads' `useCategoryFolders` and
+  `categoryFolders`: `useTorrentCategoryFolders` (bool) and `torrentCategoryFoldersRoot` (a full path, or empty for
+  the same folders as other downloads). Every snapshot carries both; a save that leaves either out (null, a client from
+  before T14) keeps the Host's value. Where a torrent goes with no folder given (`torrent.inspect`, `torrent.add`, and
+  a provider's torrent added without a destination): with a torrent folder, `<torrent folder>\<category>` (Video,
+  Music...; a torrent with no category goes to the torrent folder itself) while `useTorrentCategoryFolders` is on, else
+  the torrent folder itself; with none, the same folders as other downloads: the category's folder of other downloads
+  while both `useTorrentCategoryFolders` and `useCategoryFolders` are on, else the folder other downloads go to (the
+  last or default folder). With a torrent folder, `useCategoryFolders` never applies to torrents. A provider's torrent
+  with no torrent folder goes to the download folder, as before T14. A new install gets `<download folder>\Torrents`, which moves with the
+  download folder while it is still there; settings from before T14 get no torrent folder, and the torrent switch takes
+  the value `useCategoryFolders` had, so nothing moves on an upgrade. Web sessions may change
+  `useTorrentCategoryFolders`; `torrentCategoryFoldersRoot` is pipe-only, and the torrent folder is one of the app's folders.
 
 ## Archive extraction: `archive.*`
 

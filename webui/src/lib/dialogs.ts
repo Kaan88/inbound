@@ -11,6 +11,23 @@ export function wrapTarget<T>(list: readonly T[], at: number, shift: boolean): T
   return at < 0 || at === list.length - 1 ? list[0] : null;
 }
 
+/**
+ * UI.R36: where an arrow key moves the focus among a dialog's buttons (its check boxes first, then the footer's buttons,
+ * in reading order). Left and Up go back, Right and Down go on; at either end, or when the focused control is not one
+ * of them (`at` -1), null leaves the key alone. Cancel stays the default; this only lets the keys reach the others.
+ */
+export function arrowTarget<T>(list: readonly T[], at: number, key: string, rightToLeft = false): T | null {
+  if (list.length < 2 || at < 0 || at >= list.length) return null;
+  let back: boolean;
+  if (key === 'ArrowLeft') back = !rightToLeft;
+  else if (key === 'ArrowRight') back = rightToLeft;
+  else if (key === 'ArrowUp') back = true;
+  else if (key === 'ArrowDown') back = false;
+  else return null;
+  const next = back ? at - 1 : at + 1;
+  return next < 0 || next >= list.length ? null : list[next];
+}
+
 /** The part of `window.history` that is used, so tests need no browser. */
 export interface HistoryLike {
   readonly state: unknown;

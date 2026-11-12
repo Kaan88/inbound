@@ -571,27 +571,46 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
     /// <summary>A magnet, or a .torrent file on this PC (uploaded first when the target is another server).</summary>
     /// <param name="destination">T3: the folder whose free space the Host measures; null is the category folder.</param>
-    public async Task<TorrentInspectResult> InspectTorrentAsync(string input, CancellationToken cancellationToken = default, string? destination = null)
+    /// <param name="fromJobId">T10: the Host's finished .torrent download this line is the file of. The Host reads that
+    /// file itself, so nothing is uploaded and the path never has to be on this PC (another server, a network share).</param>
+    public async Task<TorrentInspectResult> InspectTorrentAsync(string input, CancellationToken cancellationToken = default, string? destination = null,
+        Guid? fromJobId = null)
     {
-        var (sent, problem) = await ForServerAsync(input, cancellationToken).ConfigureAwait(false);
-        if (sent is null) return new TorrentInspectResult { Error = problem };
-        return await QuickAsync(TorrentMessageTypes.Inspect, new TorrentInspectRequest { Input = sent, Destination = destination }, TorrentMessageTypes.InspectResult,
+        var request = new TorrentInspectRequest { Destination = destination, FromJobId = fromJobId };
+        if (fromJobId is null)
+        {
+            var (sent, problem) = await ForServerAsync(input, cancellationToken).ConfigureAwait(false);
+            if (sent is null) return new TorrentInspectResult { Error = problem };
+            request.Input = sent;
+        }
+
+        return await QuickAsync(TorrentMessageTypes.Inspect, request, TorrentMessageTypes.InspectResult,
             error => new TorrentInspectResult { Error = error }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<TorrentAddResult> AddTorrentAsync(TorrentAddRequest request, CancellationToken cancellationToken = default)
     {
-        var (sent, problem) = await ForServerAsync(request.Input, cancellationToken).ConfigureAwait(false);
-        if (sent is null) return new TorrentAddResult { Error = problem };
-        var payload = new TorrentAddRequest
+        string sent = string.Empty;
+        // T10: a finished .torrent download goes by its id; the Host reads its own file, so nothing is uploaded.
+        if (request.FromJobId is null)
         {
-            Input = sent, Destination = request.Destination, QueueId = request.QueueId, StartMode = request.StartMode,
-            Files = request.Files, FileIndexes = request.FileIndexes, Description = request.Description,
-            Priorities = request.Priorities, Options = request.Options,
-        };
+            var (forServer, problem) = await ForServerAsync(request.Input, cancellationToken).ConfigureAwait(false);
+            if (forServer is null) return new TorrentAddResult { Error = problem };
+            sent = forServer;
+        }
+
+        var payload = TorrentAddPayload(request, sent);
         return await QuickAsync(TorrentMessageTypes.Add, payload, TorrentMessageTypes.AddResult, error => new TorrentAddResult { Error = error },
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>The request as it goes to the Host, with <paramref name="sent"/> as its input (empty with a FromJobId).</summary>
+    internal static TorrentAddRequest TorrentAddPayload(TorrentAddRequest request, string sent) => new()
+    {
+        Input = sent, Destination = request.Destination, QueueId = request.QueueId, StartMode = request.StartMode,
+        Files = request.Files, FileIndexes = request.FileIndexes, Description = request.Description,
+        Priorities = request.Priorities, Options = request.Options, FromJobId = request.FromJobId, OnlyIfListed = request.OnlyIfListed,
+    };
 
     public Task<TorrentActionResult> SetTorrentFilesAsync(Guid jobId, IEnumerable<int> indexes, CancellationToken cancellationToken = default)
         => QuickAsync(TorrentMessageTypes.SetFiles, new TorrentSetFilesRequest { JobId = jobId, FileIndexes = indexes.ToList() },

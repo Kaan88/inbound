@@ -9,17 +9,19 @@ import {
 } from './list';
 import { isRow } from './remote';
 import { fileRowName, fileRowStatus, mostFileRows, moreFiles, showsFiles } from './torrents';
-import { seedGoalOf, torrentFilterOf } from './torrentList';
+import { inTorrentExtraView, seedGoalOf, torrentExtraViews, torrentFilterOf, type TorrentExtraView } from './torrentList';
 import { bytes, stateWord, tone as toneOf } from './format';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteJob, TorrentFile } from './types';
 
 export type StateView = 'all' | 'unfinished' | 'active' | 'queued' | 'failed' | 'finished' | 'remote' | 'extractions' | 'torrents'
-  | 'torrents-downloading' | 'torrents-seeding' | 'torrents-stopped';
+  | 'torrents-downloading' | 'torrents-seeding' | 'torrents-stopped' | `torrents-${TorrentExtraView}`;
 /** A state view, or a category: `cat:compressed`, `cat:<custom id>`. */
 export type ViewKey = StateView | `cat:${string}`;
 
 export const stateViews: StateView[] = [
   'all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions', 'torrents', 'torrents-downloading', 'torrents-seeding', 'torrents-stopped',
+  // T7: shown only while they hold a torrent (App.svelte, extraViewShows).
+  ...torrentExtraViews.map((view) => `torrents-${view.key}` as const),
 ];
 
 /** The Torrents view and the three under it, which show the Seeds, Peers, Up and Ratio columns. */
@@ -71,6 +73,8 @@ export function inView(job: Job, view: ViewKey, custom: readonly CategoryDefinit
     case 'torrents-downloading': return torrentFilterOf(job) === 'downloading';
     case 'torrents-seeding': return torrentFilterOf(job) === 'seeding';
     case 'torrents-stopped': return torrentFilterOf(job) === 'stopped';
+    case 'torrents-active': case 'torrents-stalled': case 'torrents-checking': case 'torrents-files': case 'torrents-completed': case 'torrents-errored':
+      return inTorrentExtraView(view.slice('torrents-'.length) as TorrentExtraView, job);
     default: return false;
   }
 }
@@ -247,12 +251,14 @@ export function counts(model: Model): Record<string, number> {
     all: 0, unfinished: 0, active: 0, queued: 0, failed: 0, finished: 0, remote: 0, extractions: 0, torrents: 0,
     'torrents-downloading': 0, 'torrents-seeding': 0, 'torrents-stopped': 0,
   };
+  for (const view of torrentExtraViews) result[`torrents-${view.key}`] = 0;
   for (const entry of categoryList(custom)) result[entry.key] = 0;
   for (const job of Object.values(model.jobs)) {
     for (const view of views) if (inView(job, view.key, custom)) result[view.key]++;
     if (job.torrent) {
       result.torrents++;
       result[`torrents-${torrentFilterOf(job)}`]++;
+      for (const view of torrentExtraViews) if (inTorrentExtraView(view.key, job)) result[`torrents-${view.key}`]++;
     }
     const category = `cat:${categoryOf(job, custom)}`;
     if (category in result) result[category]++;

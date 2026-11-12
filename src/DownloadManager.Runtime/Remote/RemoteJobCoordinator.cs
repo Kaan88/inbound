@@ -15,6 +15,9 @@ public interface IRemoteJobHost
 
     string DefaultDownloadDirectory { get; }
 
+    /// <summary>T14: where a torrent the provider downloaded goes when the user named no folder: the torrent folders.</summary>
+    string TorrentDownloadDirectory(string? torrentName) => DefaultDownloadDirectory;
+
     /// <summary>What a package's local jobs are doing right now. Null when it has gone, or this host can't say.</summary>
     RemoteLocalSummary? GetLocalSummary(Guid packageId) => null;
 
@@ -1600,6 +1603,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     private async Task<RemoteJobRecord?> UpdateAsync(Guid id, Func<RemoteJobRecord, RemoteJobRecord?> change, CancellationToken cancellationToken = default)
     {
         RemoteJobRecord? next;
+        bool shown;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1617,6 +1621,9 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             }
 
             var timersOnly = next with { NextCheckAt = current.NextCheckAt, UnchangedPolls = current.UnchangedPolls } == current;
+            // Audit 2 M20: the windows show the next check's time, so a new one is said; a count of unchanged polls
+            // alone (or nothing at all) changes nothing a client shows, and isn't broadcast.
+            shown = next with { UnchangedPolls = current.UnchangedPolls } != current;
             if (!timersOnly)
             {
                 next = next with { UpdatedAt = _time.GetUtcNow() };
@@ -1627,7 +1634,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         }
         finally { _gate.Release(); }
 
-        Raise(next);
+        if (shown) Raise(next);
         return next;
     }
 

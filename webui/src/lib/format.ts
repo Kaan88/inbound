@@ -97,6 +97,14 @@ export function stateWord(state: string): string {
   }
 }
 
+/**
+ * The state's word for one download. One added with Download later never starts by itself, so it reads "Not started"
+ * rather than "Queued" like one waiting for a free slot (desktop JobNotes.NotStartedText, review 5:A8).
+ */
+export function jobStateWord(job: Pick<Job, 'state' | 'startMode'>): string {
+  return job.state === 'queued' && job.startMode?.toLowerCase() === 'later' ? 'Not started' : stateWord(job.state);
+}
+
 export type Tone = 'active' | 'done' | 'failed' | 'waiting' | 'neutral';
 
 export function tone(state: string): Tone {
@@ -130,7 +138,7 @@ export function percent(job: Pick<Job, 'progress' | 'totalBytes' | 'receivedByte
 
 /** The status column's words: the state, with what it waits for. */
 export function statusText(job: Job): string {
-  const word = stateWord(job.state);
+  const word = jobStateWord(job);
   const p = percent(job);
   if ((job.state === 'downloading' || job.state === 'paused') && p !== null && p > 0) return `${word} ${p.toFixed(p >= 10 ? 0 : 1)}%`;
   if (job.state === 'downloading' && job.waitingForHost && !job.activeConnections) return `Waiting for ${job.waitingForHost}`;

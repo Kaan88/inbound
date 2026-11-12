@@ -3,9 +3,10 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
-import { bytes, dateTime, duration, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { failureText } from './details';
+import { bytes, dateTime, duration, jobStateWord, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
-import { filesSummary, shortMagnet, torrentReason, torrentStatusText } from './torrents';
+import { fileListWaitNote, filesSummary, shortMagnet, torrentReason, torrentStatusText } from './torrents';
 import { seedGoalOf, swarmCells, type SeedGoal, type SwarmCells } from './torrentList';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
@@ -46,7 +47,7 @@ export function statusWords(job: Job): string {
   const waiting = waitingText(job);
   if (waiting) return waiting;
   if (isProviderFile(job) && job.state === 'downloading') return 'Downloading locally';
-  return stateWord(job.state);
+  return jobStateWord(job);
 }
 
 /** The Time left column: "1h 5m", "3m 20s", "45s"; blank when there is no estimate (format.duration, the desktop's words). */
@@ -289,7 +290,7 @@ export function deletePlan(jobs: readonly Job[]): DeletePlan {
   const anyCompleted = jobs.some((job) => job.state === 'completed' && !job.fileRemovedAfterExtraction);
   const anyUnfinished = jobs.some((job) => job.state !== 'completed');
   const noFilesLeft = jobs.length > 0 && jobs.every((job) => job.fileRemovedAfterExtraction);
-  const question = jobs.length === 1 ? `Remove '${jobs[0].fileName}' from the list?` : `Remove ${jobs.length} downloads from the list?`;
+  const question = jobs.length === 1 ? `Delete '${jobs[0].fileName}' from the list?` : `Delete ${jobs.length} downloads from the list?`;
   return {
     title: jobs.length === 1 ? 'Delete download?' : `Delete ${jobs.length} downloads?`,
     text: noFilesLeft ? `${question} ${nothingToDelete(jobs.length)}`
@@ -300,8 +301,16 @@ export function deletePlan(jobs: readonly Job[]): DeletePlan {
   };
 }
 
-export function deleteCompletedText(count: number): string {
-  return `Remove ${count} completed item(s) from the list? The downloaded files will stay on disk.`;
+/**
+ * Delete Completed's question. A seeding torrent is completed too, so it goes with them; the question says that stops it
+ * seeding (review 4:L9), as TorrentSeedRules.DeleteCompletedText does on the desktop.
+ */
+export function deleteCompletedText(count: number, seeding = 0): string {
+  const text = `Remove ${count} completed item(s) from the list? The downloaded files will stay on disk.`;
+  if (seeding <= 0) return text;
+  return seeding === 1
+    ? `${text} 1 of them is a torrent that is seeding; removing it stops seeding.`
+    : `${text} ${seeding} of them are torrents that are seeding; removing them stops seeding.`;
 }
 
 // ---- Categories ----
@@ -424,6 +433,19 @@ export interface RowView {
   swarm?: SwarmCells;
 }
 
+/** Review 5:E1: the Status of a row that moves while the server can't be reached (JobViewModel.NotCurrentStatus). */
+export const notCurrentStatus = 'Status unknown';
+
+/**
+ * Review 5:E1: while the server can't be reached the list is from before, so a row that moves (a download under way, a
+ * seeding torrent; SpeedSample.Moves on the desktop) shows no speed, no time left and no state that may have ended.
+ */
+export function notCurrentView(v: RowView, jobs: readonly Pick<Job, 'state' | 'torrent'>[]): RowView {
+  const moves = jobs.some((job) => activeStates.includes(job.state) || (job.state === 'completed' && job.torrent?.seeding === true));
+  if (!moves) return v;
+  return { ...v, status: notCurrentStatus, statusTone: 'neutral', rate: 0, rateText: '', eta: null, etaText: '' };
+}
+
 export function sortRows<T>(rows: readonly T[], view: (row: T) => RowView, sort: SortState): T[] {
   const a = sort.ascending;
   switch (sort.key) {
@@ -488,7 +510,7 @@ export function jobView(job: Job, set?: ArchiveSet, goal: SeedGoal = seedGoalOf(
   const p = percent(job) ?? 0;
   const note = jobNote(job);
   // A torrent says how many of its files it downloads, unless the user gave it words of their own.
-  const own = job.torrent && !job.description?.trim() ? filesSummary(job.torrent)
+  const own = job.torrent && !job.description?.trim() ? fileListWaitNote(job, now) ?? filesSummary(job.torrent)
     : job.description ?? (job.pageUrl && (job.addressHidden || isProviderFile(job)) ? siteOnly(job.pageUrl) : job.pageUrl);
   const barStates = ['downloading', 'connecting', 'retryWaiting', 'verifying', 'paused'];
   const updated = job.completedAt ?? job.updatedAt;
@@ -502,7 +524,7 @@ export function jobView(job: Job, set?: ArchiveSet, goal: SeedGoal = seedGoalOf(
     sizeText: total > 0 ? bytes(total) : '',
     status: statusWords(job),
     statusTone: seeding ? 'active' : toneOf(job.state),
-    statusTip: job.failure?.message ?? note ?? '',
+    statusTip: failureText(job) || (note ?? ''),
     // A seeding torrent's bar is its way to the seeding goal.
     bar: swarm?.goal !== null && swarm?.goal !== undefined ? swarm.goal : barStates.includes(job.state) && p > 0 ? p : null,
     eta,
@@ -516,7 +538,7 @@ export function jobView(job: Job, set?: ArchiveSet, goal: SeedGoal = seedGoalOf(
     extractionTone: archive?.tone ?? blankTone,
     extractionTip: archive?.tooltip ?? '',
     created: ms(job.createdAt),
-    detail: job.failure?.message ? job.failure.message : shownAddress(job),
+    detail: failureText(job) || shownAddress(job),
     swarm,
   };
 }
@@ -803,6 +825,16 @@ export class SpeedHistory {
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
+  /**
+   * T8: a line of gaps as long as `length` (the download line after the server's hour replaced it), for when the server
+   * sends no upload hour that lines up with it (an older server). Upload samples taken before the gap would otherwise sit
+   * at the wrong seconds, since the two lines are laid out from the newest sample by index.
+   */
+  blank(length: number, second = Math.floor(Date.now() / 1000)): void {
+    this.samples = new Array<number | null>(Math.max(0, Math.min(this.limit, length))).fill(null);
+    this.newestSecond = second;
+  }
+
   /** The newest `count` samples, which is all the graph has room for. */
   recent(count = speedGraphWindow): (number | null)[] {
     return this.samples.length > count ? this.samples.slice(-count) : this.samples;
@@ -905,6 +937,68 @@ export function liveSpeed(jobs: readonly Job[], connected: boolean, ready: boole
     const r = job.bytesPerSecond ?? 0;
     if (Number.isFinite(r) && r > 0) sum += r;
   }
+  return sum;
+}
+
+// ---- T8: the torrents' upload on the speed graph (SpeedSample's rules) ----
+
+function seedingNow(job: Pick<Job, 'state' | 'torrent'>): boolean {
+  return job.torrent?.seeding === true && job.state === 'completed';
+}
+
+function cleanUpload(job: Pick<Job, 'torrent'>): number {
+  const rate = job.torrent?.uploadRate ?? 0;
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
+}
+
+/**
+ * The torrents' upload in one tick. A downloading torrent's counts while its update is recent, as speedSample's; a seeding
+ * one's as the server last said (seeding updates don't move updatedAt, and the server sets it to 0 when seeding stops).
+ */
+export function uploadSample(jobs: readonly Job[], connected: boolean, ready: boolean, now: number, serverOffsetMs = 0): number | null {
+  if (!connected || !ready) return null;
+  let sum = 0;
+  const serverNow = now - serverOffsetMs;
+  for (const job of jobs) {
+    if (!job.torrent) continue;
+    if (seedingNow(job)) sum += cleanUpload(job);
+    else if (activeStates.includes(job.state) && serverNow - ms(job.updatedAt) <= 10_000) sum += cleanUpload(job);
+  }
+  return sum;
+}
+
+/** The upload line, its legend and its figure show while a torrent downloads or seeds (owner: hidden while none is active). */
+export function torrentsRun(jobs: readonly Job[]): boolean {
+  return jobs.some((job) => !!job.torrent && (activeStates.includes(job.state) || seedingNow(job)));
+}
+
+/** A seeding torrent sends something: the graph samples then too. One that seeds and sends nothing wakes nothing. */
+export function anySending(jobs: readonly Job[]): boolean {
+  return jobs.some((job) => seedingNow(job) && cleanUpload(job) >= 1);
+}
+
+/**
+ * T8: the server's upload hour, when it lines up second for second with its download hour; null otherwise (an older
+ * server leaves it out, and one of another length can't be placed). The graph then blanks its upload line instead.
+ */
+export function uploadHourOf(result: { bytesPerSecond: readonly number[]; uploadBytesPerSecond?: readonly number[] | null }): number[] | null {
+  const upload = result.uploadBytesPerSecond;
+  return Array.isArray(upload) && Array.isArray(result.bytesPerSecond) && upload.length === result.bytesPerSecond.length ? [...upload] : null;
+}
+
+/**
+ * Whether the speed graph rests (audit 4 M11): connected, and nothing transfers (no download moves, no seeding torrent
+ * sends). Then no timer runs. Not idle while the server can't be reached, so a gap is drawn.
+ */
+export function graphIdle(jobs: readonly Job[], connected: boolean, ready: boolean): boolean {
+  return connected && ready && !anyActive(jobs) && !anySending(jobs);
+}
+
+/** The upload figure beside the graph's title: what the torrents send now, as the rows say. Null while the server can't be reached. */
+export function liveUpload(jobs: readonly Job[], connected: boolean, ready: boolean): number | null {
+  if (!connected || !ready) return null;
+  let sum = 0;
+  for (const job of jobs) if (job.torrent && (activeStates.includes(job.state) || seedingNow(job))) sum += cleanUpload(job);
   return sum;
 }
 

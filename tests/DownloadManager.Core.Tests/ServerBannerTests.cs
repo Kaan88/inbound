@@ -22,6 +22,23 @@ public sealed class ServerBannerTests
         Assert.False(banner.Stale);
     }
 
+    /// <summary>
+    /// Review 5:E1: this PC's Host lost after the list was shown. The rows are from before, so the bar says so and the
+    /// list is dimmed, as for a server; there is no Back to This PC and no button that starts the Host (a tray Exit stays).
+    /// </summary>
+    [Fact]
+    public void ThisPcsLostHostShowsABarAndAStaleList()
+    {
+        var banner = ServerBannerRules.For(ServerTarget.Local, connected: false, everConnected: true, pairingEnded: false, stopped: false, error: "The operation has timed out.");
+
+        Assert.True(banner.Visible);
+        Assert.True(banner.IsProblem);
+        Assert.True(banner.Stale);
+        Assert.Equal(ServerBannerAction.None, banner.Action);
+        Assert.Equal(ServerBannerRules.LocalHostLost, banner.Text);
+        Assert.False(ServerBannerRules.For(ServerTarget.Local, true, true, false, false, null).Visible);
+    }
+
     [Fact]
     public void AConnectedServerSaysWhichOneItIsWithNoProblemAndNoOtherAction()
     {
@@ -244,7 +261,9 @@ public sealed class CompletionAndAddTests
     public void AFailedAddSaysItWasNotAddedAndThatTheInputIsKept()
     {
         Assert.Equal("Not added to Office PC: Disk full. Change what is needed and try again, or Cancel.", AddRules.NotAddedText(" Disk full. ", Server));
-        Assert.StartsWith("Not added: the Host rejected the request.", AddRules.NotAddedText(null, ServerTarget.Local));
+        // Review 5:E4: with no reason it says who gave none, not "the Host rejected".
+        Assert.Equal("Not added: Inbound didn't say why. Try again, or Cancel; if it keeps happening, Help > Open Diagnostics Folder has the log.", AddRules.NotAddedText(null, ServerTarget.Local));
+        Assert.Equal("Not added to Office PC: Office PC didn't say why. Try again, or Cancel.", AddRules.NotAddedText(" ", Server));
     }
 
     [Fact]

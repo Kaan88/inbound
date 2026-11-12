@@ -130,6 +130,24 @@ public sealed class HostHousekeepingTests : IDisposable
     }
 
     [Fact]
+    public void FileLogger_DeletesOldFilesAgainWhenTheDateChanges()
+    {
+        var now = new DateTimeOffset(2026, 11, 12, 23, 59, 0, TimeSpan.Zero);
+        var logger = new FileLogger(_dir) { Clock = () => now };
+        logger.Info("first day");
+        // Written after start, so only a later prune can remove it.
+        var old = Path.Combine(_dir, "host-20261012.log");
+        File.WriteAllText(old, "x");
+        logger.Info("same day");
+        Assert.True(File.Exists(old));
+
+        now = now.AddDays(2);
+        logger.Info("next day");
+        Assert.False(File.Exists(old));
+        Assert.True(File.Exists(Path.Combine(_dir, "host-20261114.log")));
+    }
+
+    [Fact]
     public void FileLogger_StopsAtTheDailyCapWithOneClosingLine()
     {
         var logger = new FileLogger(_dir) { MaxDailyBytes = 600 };
@@ -141,5 +159,62 @@ public sealed class HostHousekeepingTests : IDisposable
         Assert.Contains(LogFileRetention.CapReachedLine, lines[^1]);
         Assert.Equal(1, lines.Count(l => l.Contains(LogFileRetention.CapReachedLine)));
         Assert.True(lines.Length < 20);
+    }
+
+    [Fact]
+    public async Task PostDownloadOutput_KeepsOnlyTheFirstCharactersButReadsToTheEnd()
+    {
+        var reader = new StringReader(new string('x', 100_000));
+        var captured = new HostPostDownloadHook.CapturedOutput(reader, 50, CancellationToken.None);
+        var text = await captured.FinishAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(new string('x', 50) + HostPostDownloadHook.CapturedOutput.TruncatedMark, text);
+        Assert.Equal(-1, reader.Peek());
+    }
+
+    [Fact]
+    public async Task PostDownloadOutput_AStreamThatStaysOpenStopsAfterTheGrace()
+    {
+        using var cancel = new CancellationTokenSource();
+        var captured = new HostPostDownloadHook.CapturedOutput(new NeverEndingReader("done"), 2000, cancel.Token);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var text = await captured.FinishAsync(TimeSpan.FromMilliseconds(300));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10));
+        Assert.Equal("done" + HostPostDownloadHook.CapturedOutput.TruncatedMark, text);
+        await cancel.CancelAsync();
+    }
+
+    [Fact]
+    public async Task PostDownloadOutput_TwoStreamsThatStayOpenShareOneGrace()
+    {
+        // A child left running holds both pipes: the two waits run together, not one grace after the other.
+        using var cancel = new CancellationTokenSource();
+        var stdout = new HostPostDownloadHook.CapturedOutput(new NeverEndingReader("out"), 2000, cancel.Token);
+        var stderr = new HostPostDownloadHook.CapturedOutput(new NeverEndingReader("err"), 2000, cancel.Token);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var (output, error) = await HostPostDownloadHook.CapturedOutput.FinishBothAsync(stdout, stderr, TimeSpan.FromSeconds(2));
+        watch.Stop();
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3.5), $"Took {watch.Elapsed}; one after the other takes 4 s.");
+        Assert.Equal("out" + HostPostDownloadHook.CapturedOutput.TruncatedMark, output);
+        Assert.Equal("err" + HostPostDownloadHook.CapturedOutput.TruncatedMark, error);
+        await cancel.CancelAsync();
+    }
+
+    /// <summary>Gives its text, then waits like a pipe a grandchild process still holds.</summary>
+    private sealed class NeverEndingReader(string first) : TextReader
+    {
+        private bool _sent;
+
+        public override async ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_sent)
+            {
+                _sent = true;
+                first.AsSpan().CopyTo(buffer.Span);
+                return first.Length;
+            }
+
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
     }
 }

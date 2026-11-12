@@ -85,8 +85,11 @@ public sealed partial class DownloadWindow
         }
 
         FilesPriorityHint.Visibility = controls && !FilesFixed(job) ? Visibility.Visible : Visibility.Collapsed;
-        PriorityColumn.Width = new GridLength(controls ? 64 : 0);
-        NextAnnounceColumn.Width = new GridLength(controls ? 96 : 0);
+        if (torrent)
+        {
+            FilesTable.SetColumnVisible("priority", controls);
+            TrackersTable.SetColumnVisible("next", controls);
+        }
         ShowFilePriorities();
         LoadOptionsIfWanted();
         ReadDetailsIfDue(job);
@@ -198,7 +201,10 @@ public sealed partial class DownloadWindow
     private void ShowFilePriorities()
     {
         var shown = _job?.Torrent is not null && Controls;
-        foreach (var row in _fileRows) row.SetPriority(_priorities.GetValueOrDefault(row.Index, TorrentPriorities.Normal), shown);
+        var changed = false;
+        foreach (var row in _fileRows) changed |= row.SetPriority(_priorities.GetValueOrDefault(row.Index, TorrentPriorities.Normal), shown);
+        // T12: a list sorted by priority follows a change of priority.
+        if (changed) SortFiles(FilesSortReason.Refresh);
     }
 
     /// <summary>Right-click, Shift+F10 or the menu key on a file: High, Normal, Low or Skip.</summary>

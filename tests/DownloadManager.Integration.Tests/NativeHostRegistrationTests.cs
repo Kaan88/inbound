@@ -86,9 +86,9 @@ public sealed class NativeHostRegistrationTests
     [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Usable, true, "on")]
     // Edge may not be installed, and a 0.4.0 install has no Edge key until the Host adds it.
     [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Absent, true, "on")]
-    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Broken, true, "on; Edge registration is broken")]
-    [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Usable, true, "on; not registered for Chrome")]
-    [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Usable, true, "on; Chrome registration is broken")]
+    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Broken, true, "on; the extension can't reach Inbound in Edge")]
+    [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Usable, true, "on; the extension can't reach Inbound in Chrome")]
+    [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Usable, true, "on; the extension can't reach Inbound in Chrome")]
     [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Absent, false, "native host not registered")]
     [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Absent, false, "native host not registered")]
     [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Broken, false, "native host not registered")]
@@ -246,7 +246,7 @@ public sealed class NativeHostRegistrationTests
         Assert.Empty(store.Writes);
         var state = NativeHostRegistrar.Read(store);
         Assert.Equal(NativeHostKeyState.Broken, state.Edge);
-        Assert.Equal("on; Edge registration is broken", state.IntegrationText(true));
+        Assert.Equal("on; the extension can't reach Inbound in Edge", state.IntegrationText(true));
     }
 
     [Fact]
@@ -382,15 +382,44 @@ public sealed class NativeHostRegistrationTests
         // Owner, 2026-11-12: the association is set up by Setup. The Host registers it only with torrents on, so the task
         // turns both on; unticked, nothing is sent and the user's choice stays.
         var iss = Read(@"installer\DownloadManager.iss");
-        Assert.Contains("Name: \"torrenthandler\"; Description: \"Open magnet links and .torrent files with {#AppName} (turns torrents on)\"", iss);
+        // checkedonce: ticked on a first install only, so an upgrade does not turn torrents back on over the user's
+        // choice in Options (review 2026-11-12).
+        Assert.Contains("Name: \"torrenthandler\"; Description: \"Open magnet links and .torrent files with {#AppName} (turns torrents on)\"; GroupDescription: \"Torrents:\"; Flags: checkedonce", iss);
         var code = Code(@"installer\DownloadManager.iss", "//");
         Assert.Matches(
-            @"if WizardIsTaskSelected\('torrenthandler'\) then\s+StartupArgument := StartupArgument \+ ' --configure-torrent-handler=enabled';\s+if not Exec\(Root \+ '\\app\\\{#HostExe\}', '--background ' \+ StartupArgument,",
+            @"if TorrentTaskApplies\(\) then\s+StartupArgument := StartupArgument \+ ' --configure-torrent-handler=enabled';\s+if not Exec\(Root \+ '\\app\\\{#HostExe\}', '--background ' \+ StartupArgument,",
             code);
+        // A silent upgrade reselects the previous run's tasks without showing them; it applies the task only when
+        // the command line names it.
+        Assert.Matches(
+            @"Result := WizardIsTaskSelected\('torrenthandler'\);\s+if not Result or not WasInstalled or not WizardSilent then\s+exit;\s+Result := False;",
+            code);
+        Assert.Matches(@"WasInstalled := DirExists\(ExpandConstant\('\{app\}\\app'\)\);", code);
+        // An interactive upgrade shows it unticked once (UsePreviousTasks would tick it again), so ticking it is the
+        // user's choice; going Back and Next keeps what the user ticked.
+        Assert.Matches(
+            @"procedure CurPageChanged\(CurPageID: Integer\);\s+begin\s+if \(CurPageID = wpSelectTasks\) and not TorrentTaskReset then\s+begin\s+TorrentTaskReset := True;\s+if DirExists\(ExpandConstant\('\{app\}\\app'\)\) then\s+WizardSelectTasks\('!torrenthandler'\);",
+            code);
+        Assert.DoesNotContain("Could not configure sign-in startup", code);
+        Assert.Contains("Could not apply the startup and torrent choices.", code);
         var host = Read(@"src\DownloadManager.Host\Program.cs");
         Assert.Contains("\"--configure-torrent-handler=\"", host);
         Assert.Contains("settings.TorrentsEnabled = true;", host);
         Assert.Contains("settings.TorrentHandler = true;", host);
+    }
+
+    [Fact]
+    public void Setup_closes_a_host_that_started_during_the_copy_and_configures_once_more()
+    {
+        // A configuring Host returns 1 while another holds the profile (it never writes settings behind it). A Host
+        // started by sign-in or the window while files were copied is closed as PrepareToInstall closes one.
+        var host = Read(@"src\DownloadManager.Host\Program.cs");
+        Assert.Contains("if (configuring) return 1;", host);
+        var code = Code(@"installer\DownloadManager.iss", "//");
+        Assert.Matches(
+            @"if \(ResultCode = 1\) and StopRunningInstance\(Root \+ '\\stop-for-setup\.ps1', Root \+ '\\app'\) then\s+if not Exec\(Root \+ '\\app\\\{#HostExe\}', '--background ' \+ StartupArgument,",
+            code);
+        Assert.Contains(@"Source: ""..\scripts\stop-for-setup.ps1""; DestDir: ""{app}""", Read(@"installer\DownloadManager.iss"));
     }
 
     [Fact]
@@ -552,6 +581,16 @@ public sealed class NativeHostRegistrationTests
     /// </summary>
     private static HarnessResult RunWithFakeRegistry(
         string directory, string script, string arguments, Dictionary<string, string>? seed = null, params string[] deniedKeys)
+        => RunWithFakeRegistry(directory, script, arguments, seed, deniedKeys, fakeValues: false, environment: null);
+
+    /// <summary>
+    /// <paramref name="fakeValues"/> also shadows Get-ItemProperty and Remove-ItemProperty for HKCU: paths: a named value
+    /// is the hive entry "&lt;key&gt;\&lt;name&gt;", the default value is the key's own entry, and a removal is recorded as a write.
+    /// <paramref name="environment"/> overrides variables such as APPDATA, so a script never reaches the real profile.
+    /// </summary>
+    private static HarnessResult RunWithFakeRegistry(
+        string directory, string script, string arguments, Dictionary<string, string>? seed, string[] deniedKeys,
+        bool fakeValues, Dictionary<string, string>? environment)
     {
         var resultPath = Path.Combine(directory, "harness-result.json");
         var seedPath = Path.Combine(directory, "harness-seed.json");
@@ -600,6 +639,25 @@ public sealed class NativeHostRegistrationTests
                 Test-FakeWrite "$Path"
                 $global:hive["$Path"] = $Value
             }
+            if ('{{fakeValues}}' -eq 'True') {
+                function global:Get-ItemProperty {
+                    param([Parameter(Position = 0)]$Path, $LiteralPath, $Name)
+                    $target = if ($LiteralPath) { "$LiteralPath" } else { "$Path" }
+                    if ($target -notlike 'HKCU:*') { throw "Unexpected Get-ItemProperty: $target" }
+                    if ($Name) {
+                        if (-not $global:hive.ContainsKey("$target\$Name")) { return $null }
+                        return [pscustomobject]@{ "$Name" = $global:hive["$target\$Name"] }
+                    }
+                    if (-not $global:hive.ContainsKey($target)) { return $null }
+                    return [pscustomobject]@{ '(default)' = $global:hive[$target] }
+                }
+                function global:Remove-ItemProperty {
+                    param([Parameter(Position = 0)]$Path, $LiteralPath, $Name)
+                    $target = if ($LiteralPath) { "$LiteralPath" } else { "$Path" }
+                    if ($target -notlike 'HKCU:*') { throw "Unexpected Remove-ItemProperty: $target" }
+                    if ($global:hive.ContainsKey("$target\$Name")) { Test-FakeWrite "$target\$Name"; $global:hive.Remove("$target\$Name") }
+                }
+            }
             $code = 0
             try { & '{{script}}' {{arguments}} }
             catch { Write-Output "THREW: $($_.Exception.Message)"; $code = 1 }
@@ -619,6 +677,10 @@ public sealed class NativeHostRegistrationTests
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", harness })
         {
             start.ArgumentList.Add(argument);
+        }
+        foreach (var (name, value) in environment ?? [])
+        {
+            start.Environment[name] = value;
         }
 
         using var process = Process.Start(start)!;
@@ -807,6 +869,8 @@ public sealed class NativeHostRegistrationTests
         Assert.Equal("old", File.ReadAllText(Path.Combine(install, "app", "DownloadManager.Host.exe")));
         Assert.Equal("# old register", File.ReadAllText(Path.Combine(install, "register-native-host.ps1")));
         Assert.Equal("# old repair", File.ReadAllText(Path.Combine(install, "repair.ps1")));
+        Assert.Equal("""{ "version": "0.4.0" }""", File.ReadAllText(Path.Combine(install, "install.json")));
+        Assert.Empty(Directory.GetFiles(install, "*.tmp"));
         Assert.Contains("\"failed\"", File.ReadAllText(resultPath));
     }
 
@@ -827,8 +891,102 @@ public sealed class NativeHostRegistrationTests
         Assert.False(File.Exists(Path.Combine(install, "repair.ps1")));
     }
 
-    // uninstall.ps1 stops processes by name and removes the real shortcut, so it is never run. Only its
-    // ownership function is, lifted out of the file with the PowerShell parser.
+    // The Run key is seeded too, so a script that checks only that the key exists still reaches the value.
+    private const string RunKey = @"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValue = RunKey + @"\DownloadManagerHost";
+
+    // An install under the sandbox with a fake APPDATA and LOCALAPPDATA beside it, so uninstall.ps1 never reaches the real
+    // Start menu. Returns the install folder, the Start-menu shortcut path and the environment for the harness.
+    private static (string Install, string Shortcut, Dictionary<string, string> Environment) BuildUninstallCase(ScriptSandbox sandbox)
+    {
+        var install = Path.Combine(sandbox.Root, "install");
+        Directory.CreateDirectory(Path.Combine(install, "app"));
+        File.WriteAllText(Path.Combine(install, "app", "DownloadManager.Host.exe"), "placeholder");
+        Directory.CreateDirectory(Path.Combine(install, "native-host"));
+        File.WriteAllText(Path.Combine(install, "install.json"), """{ "version": "0.4.0" }""");
+        File.Copy(ScriptPath("stop-for-setup.ps1"), Path.Combine(install, "stop-for-setup.ps1"));
+        var appData = Path.Combine(sandbox.Root, "roaming");
+        var programs = Path.Combine(appData, "Microsoft", "Windows", "Start Menu", "Programs");
+        Directory.CreateDirectory(programs);
+        var localAppData = Path.Combine(sandbox.Root, "local");
+        Directory.CreateDirectory(localAppData);
+        return (install, Path.Combine(programs, "Inbound Download Manager.lnk"),
+            new Dictionary<string, string> { ["APPDATA"] = appData, ["LOCALAPPDATA"] = localAppData });
+    }
+
+    private static void CreateShortcut(string directory, string shortcut, string target)
+    {
+        var script = Path.Combine(directory, "make-shortcut.ps1");
+        File.WriteAllText(script, $$"""
+            $ErrorActionPreference = 'Stop'
+            $link = (New-Object -ComObject WScript.Shell).CreateShortcut('{{shortcut}}')
+            $link.TargetPath = '{{target}}'
+            $link.Arguments = '--open'
+            $link.Save()
+            """);
+        var start = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(start)!;
+        var error = process.StandardError.ReadToEndAsync();
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0 && File.Exists(shortcut), output + error.GetAwaiter().GetResult());
+    }
+
+    [Fact]
+    public void Uninstall_of_a_copy_that_is_not_running_removes_its_folder_and_nothing_of_another_install()
+    {
+        // Run under the fake registry with HKCU: removed and APPDATA in the sandbox, so neither the real hive nor the real
+        // Start menu can be reached. The sign-in entry and the Start-menu shortcut start another install's Host here,
+        // so the script must leave them; it stops only processes under this folder, and none run there.
+        using var sandbox = new ScriptSandbox();
+        var (install, shortcut, environment) = BuildUninstallCase(sandbox);
+        var otherHost = Path.Combine(sandbox.Root, "other", "app", "DownloadManager.Host.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(otherHost)!);
+        File.WriteAllText(otherHost, "placeholder");
+        CreateShortcut(sandbox.Root, shortcut, otherHost);
+        var seed = new Dictionary<string, string> { [RunKey] = "", [RunValue] = $"\"{otherHost}\" --background" };
+
+        var result = RunWithFakeRegistry(
+            sandbox.Root, ScriptPath("uninstall.ps1"), $"-InstallRoot '{install}'", seed, [], fakeValues: true, environment);
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        Assert.False(Directory.Exists(install), result.Output);
+        Assert.Empty(result.Writes);
+        Assert.Equal($"\"{otherHost}\" --background", result.Hive[RunValue]);
+        Assert.True(File.Exists(shortcut), result.Output);
+        Assert.Contains("Removed application files.", result.Output);
+    }
+
+    [Fact]
+    public void Uninstall_removes_its_own_sign_in_entry_and_shortcut()
+    {
+        using var sandbox = new ScriptSandbox();
+        var (install, shortcut, environment) = BuildUninstallCase(sandbox);
+        var ownHost = Path.Combine(install, "app", "DownloadManager.Host.exe");
+        CreateShortcut(sandbox.Root, shortcut, ownHost);
+        var seed = new Dictionary<string, string> { [RunKey] = "", [RunValue] = $"\"{ownHost}\" --background" };
+
+        var result = RunWithFakeRegistry(
+            sandbox.Root, ScriptPath("uninstall.ps1"), $"-InstallRoot '{install}'", seed, [], fakeValues: true, environment);
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        Assert.False(Directory.Exists(install), result.Output);
+        Assert.Equal([RunValue], result.Writes);
+        Assert.False(result.Hive.ContainsKey(RunValue));
+        Assert.False(File.Exists(shortcut), result.Output);
+    }
+
+    // The ownership function alone, lifted out of uninstall.ps1 with the PowerShell parser.
     private static string RunUninstallOwnershipCheck(string directory, string registered, string ownManifest)
     {
         var script = ScriptPath("uninstall.ps1");

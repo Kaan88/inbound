@@ -58,6 +58,46 @@ internal static class ListColumnSets
         "expires",
         chrome: 60);
 
+    /// <summary>
+    /// T12: Progress Details' Files tab. The box has no header. Cells keep their gaps inside their columns (the row's
+    /// column spacing is 0), so a hidden Priority column takes no room at all.
+    /// </summary>
+    public static ListColumnLayout TorrentFiles() => new(
+        [
+            new ListColumn("check", string.Empty, 32, 32),
+            new ListColumn("name", "Name", 240, 100),
+            new ListColumn("size", "Size", 88, 48, RightAligned: true),
+            new ListColumn("progress", "Progress", 76, 48, RightAligned: true),
+            new ListColumn("priority", "Priority", 72, 48),
+        ],
+        "name",
+        "priority");
+
+    /// <summary>T12: Progress Details' Peers tab.</summary>
+    public static ListColumnLayout TorrentPeers() => new(
+        [
+            new ListColumn("peer", "Peer", 140, 60),
+            new ListColumn("client", "Client", 128, 50),
+            new ListColumn("flags", "Flags", 72, 40),
+            new ListColumn("has", "Has", 56, 40, RightAligned: true),
+            new ListColumn("down", "Down", 84, 48, SpokenTitle: "Download rate", RightAligned: true),
+            new ListColumn("up", "Up", 84, 48, SpokenTitle: "Upload rate", RightAligned: true),
+        ],
+        "peer",
+        "up");
+
+    /// <summary>T12: Progress Details' Trackers tab. Next announce shows only where the Host says it (T3).</summary>
+    public static ListColumnLayout TorrentTrackers() => new(
+        [
+            new ListColumn("tracker", "Tracker", 200, 80),
+            new ListColumn("status", "Status", 108, 60),
+            new ListColumn("seeds", "Seeds", 64, 40, RightAligned: true),
+            new ListColumn("peers", "Peers", 64, 40, RightAligned: true),
+            new ListColumn("next", "Next announce", 112, 60, RightAligned: true),
+        ],
+        "tracker",
+        "next");
+
     /// <summary>What a saved sort key may be for the download list. Order of addition has a menu item and no column.</summary>
     public static bool IsDownloadSort(string? key) => key == "added" || Downloads().Columns.Any(column => column.HasHeader && column.Key == key);
 
@@ -118,9 +158,15 @@ internal sealed class ListColumnLayout
     {
         if (!IsVisible(column.Key)) return new ColumnSize(0, false);
         var width = _widths.TryGetValue(column.Key, out var chosen) ? chosen : column.DefaultWidth;
-        var fills = NameIsFixed ? column.Key == LastKey : column.Key == NameKey;
+        var fills = NameIsFixed ? column.Key == FillingKey : column.Key == NameKey;
         return new ColumnSize(width, fills);
     }
+
+    /// <summary>
+    /// The column that takes the room left once the name is fixed: the last column, or while it is hidden (T12: a Host
+    /// without file priorities has no Priority column) the last one that shows, so the row still reaches the edge.
+    /// </summary>
+    private string FillingKey => IsVisible(LastKey) ? LastKey : Columns.LastOrDefault(column => IsVisible(column.Key))?.Key ?? LastKey;
 
     /// <summary>The narrowest the list can be without squeezing a column. Past this it scrolls sideways.</summary>
     public double MinimumTotal => Chrome + Columns.Sum(column => Size(column).Width);
@@ -187,7 +233,11 @@ internal static class ListSort
         => currentKey == clicked ? (clicked, !currentAscending) : (clicked, StartsAscending(clicked));
 
     /// <summary>Words and times read from the first down. Sizes, speeds and dates read from the biggest or newest.</summary>
-    public static bool StartsAscending(string key) => key is "name" or "queue" or "type" or "status" or "extraction" or "eta" or "description" or "expires";
+    /// <remarks>T12: Progress Details' columns follow the same rule: a peer's number, its client and flags, a tracker's
+    /// address and its next announce read from the first; what a peer has, the speeds, counts, sizes, progress and priority
+    /// from the most.</remarks>
+    public static bool StartsAscending(string key) => key is "name" or "queue" or "type" or "status" or "extraction" or "eta" or "description" or "expires"
+        or "peer" or "client" or "flags" or "tracker" or "next";
 
     public static string SpokenHeader(string title, bool sorted, bool ascending)
         => !sorted ? title : ascending ? $"{title}, sorted ascending" : $"{title}, sorted descending";

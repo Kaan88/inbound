@@ -17,6 +17,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 | `InboundDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
 | `InboundSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
 | `InboundProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
+| `InboundUploadBrush` | the speed graph's upload line and its legend (orange, apart from the blue download line); web `--upload` | `#F0A35E` | `#B35C00` |
 | `InboundProgressTrackBrush` | progress track | `#383838` | `#E2E2E2` |
 | `InboundErrorTextBrush` | inline error messages | `#F07A7A` | `#C42B1C` |
 | `InboundHighlightBrush` | informational banners and highlighted panels | `#2B3A4F` | `#DCE9F7` |
@@ -209,6 +210,11 @@ default window width. With one remote or archive row selected, the status bar sa
   - A word that names a state is a `StatusChip` (radius 10, 1px edge and text in the `InboundStatus*Brush`
     color) or, in a list row, status text in that color. A word that names a kind (Ordinary link, Magnet) is a
     neutral chip in the secondary color.
+  - A provider's cache answer (T9) is a `CacheBadgeView` next to that provider's choice: "Cached on TorBox" is a filled
+    accent badge (`InboundBadgeAccentFillBrush`/`InboundBadgeAccentTextBrush`) with a short secondary line under it;
+    "Not cached" and "Checking" are a neutral outline; "Couldn't check" is muted, with the reason in its tooltip. Where a
+    cached item's status stands alone (My provider's item header) its `StatusChip` is filled the same way; list cells
+    keep status text. The web UI's `CacheBadge.svelte` matches it.
   - Empty states: `InboundUi.EmptyState`, a 32px outline glyph over a line of secondary text, centred where the
     content would be, with the action that fills it as the accent button when there is one.
   - Secondary text: `InboundSecondaryTextStyle` (12px, `InboundSecondaryTextBrush`), not `Opacity`.

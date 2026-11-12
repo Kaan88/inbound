@@ -120,7 +120,8 @@ public sealed class DownloadNotices : IDisposable
 
             // In a package of any size, the package's own completion speaks for it: a package built one add
             // at a time can have only this file so far.
-            if (e.ChangeType == "completed" && _service.FindGroupOf(job.Id) is null) Tell(DownloadNoticeKind.Completed, "Download complete", job.FileName);
+            // EXT.R12: a download the browser keeps quiet has its finish shown by the browser (icon flash or popup).
+            if (e.ChangeType == "completed" && _service.FindGroupOf(job.Id) is null && !job.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", job.FileName);
 
             // A stop isn't marked: it can be undone, and stopping again would say the same thing twice.
             if (e.ChangeType is "completed" or "cancelled" && _service.FindPackageOf(job.Id) is { } member) MarkMayCloseEarly(member);
@@ -178,7 +179,7 @@ public sealed class DownloadNotices : IDisposable
         var jobs = e.JobIds.Select(_service.GetJob).OfType<JobDto>().ToList();
         if (jobs is [var only])
         {
-            Tell(DownloadNoticeKind.Completed, "Download complete", only.FileName);
+            if (!only.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", only.FileName);
             return;
         }
 
@@ -262,8 +263,15 @@ public sealed class DownloadNotices : IDisposable
             return;
         }
 
-        if (Closing(look, state) is { } notice && IsNewsIfEarly(packageId, look, state, notice)) Tell(notice);
+        if (Closing(look, state) is { } notice && !BrowserShowsIt(look, notice) && IsNewsIfEarly(packageId, look, state, notice)) Tell(notice);
     }
+
+    /// <summary>
+    /// EXT.R12: a package the browser sent with QuietWindows has its finish shown by the browser, so the app's
+    /// completion notice (and its sound) stays away; failures, and what extraction says, are still told.
+    /// </summary>
+    private static bool BrowserShowsIt(PackageLook look, DownloadNotice notice) =>
+        notice.Kind == DownloadNoticeKind.Completed && look.Jobs.Any(job => job.QuietWindows);
 
     /// <summary>A file's completion can reach here just after a stop has already closed the package with the same count.</summary>
     private bool IsNewsIfEarly(Guid packageId, PackageLook look, PackageState state, DownloadNotice notice)

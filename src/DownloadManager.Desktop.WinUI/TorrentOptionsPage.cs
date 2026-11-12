@@ -16,8 +16,6 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 internal sealed class TorrentOptionsPage
 {
-    private static readonly string[] Routes = [TorrentRoutesText.Ask, TorrentRoutesText.ThisPc, TorrentRoutesText.Provider];
-
     private readonly CheckBox _enabled = new()
     {
         Content = "Download torrents on this PC",
@@ -80,8 +78,8 @@ internal sealed class TorrentOptionsPage
             _route = new RadioButtons
             {
                 Header = "Magnets and .torrent files go to",
-                ItemsSource = new[] { "Ask each time", "This PC", providerName },
-                SelectedIndex = Math.Max(0, Array.IndexOf(Routes, settings.TorrentRoute)),
+                ItemsSource = new[] { "This PC", providerName },
+                SelectedIndex = TorrentRules.RouteOptionIndex(settings.TorrentRoute),
                 Margin = new Thickness(28, 0, 0, 0),
             };
             AutomationProperties.SetName(_route, "Magnets and .torrent files go to");
@@ -90,7 +88,7 @@ internal sealed class TorrentOptionsPage
 
         _chooseFiles.Margin = new Thickness(28, 0, 0, 0);
         _port = SettingsWindow.Number("Listening port", settings.TorrentListenPort is > 0 ? settings.TorrentListenPort : null,
-            TorrentListenPorts.Min, TorrentListenPorts.Max, "Chosen when torrents are turned on");
+            TorrentListenPorts.Min, TorrentListenPorts.Max, "Automatic");
         // Left as typed, so Validate can refuse a port out of range with a message instead of the box quietly changing it.
         _port.ValidationMode = NumberBoxValidationMode.Disabled;
         _upnp.IsChecked = settings.TorrentUpnp;
@@ -406,7 +404,7 @@ internal sealed class TorrentOptionsPage
         settings.TorrentsEnabled = _enabled.IsChecked == true;
         settings.TorrentChooseFiles = _chooseFiles.IsChecked == true;
         if (_handler is not null) settings.TorrentHandler = _handler.IsChecked == true;
-        if (_route is { SelectedIndex: >= 0 and < 3 } route) settings.TorrentRoute = Routes[route.SelectedIndex];
+        if (_route is { SelectedIndex: >= 0 and < 2 } route) settings.TorrentRoute = TorrentRules.RouteToSave(route.SelectedIndex, settings.TorrentRoute);
         if (!_withControls) return;
         // T3. A Host without them keeps what is saved, which the window's copy carries through.
         settings.TorrentDht = _dht.IsChecked == true;
@@ -417,12 +415,5 @@ internal sealed class TorrentOptionsPage
         settings.TorrentSeedsAtOnce = TorrentControlRules.WholeOrZero(_seedsAtOnce.Value);
         settings.TorrentConnectionsPerTorrent = TorrentControlRules.WholeOrZero(_perTorrent.Value);
         settings.TorrentMaxConnections = TorrentControlRules.WholeOrZero(_totalConnections.Value);
-    }
-
-    private static class TorrentRoutesText
-    {
-        public const string Ask = "ask";
-        public const string ThisPc = "thisPc";
-        public const string Provider = "provider";
     }
 }

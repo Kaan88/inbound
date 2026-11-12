@@ -135,6 +135,7 @@ public sealed partial class HostCommandDispatcher
     {
         _service.JobChanged += OnJobChanged;
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
+        _service.LatestVersionChanged += OnLatestVersionChanged;
         _service.SettingsChanged += OnSettingsChanged;
         if (_remote is not null) _remote.Changed += OnRemoteChanged;
     }
@@ -144,6 +145,7 @@ public sealed partial class HostCommandDispatcher
     {
         _service.JobChanged -= OnJobChanged;
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
+        _service.LatestVersionChanged -= OnLatestVersionChanged;
         _service.SettingsChanged -= OnSettingsChanged;
         if (_remote is not null) _remote.Changed -= OnRemoteChanged;
         _stopping.Cancel();
@@ -338,8 +340,10 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
+                    // Audit 3 N5: only the newest jobs asked for are read at all. A web session sees every job (those
+                    // outside its folders without their addresses or paths), so its folders don't change which are newest.
                     await Reply(client, message, MessageTypes.JobsSnapshot,
-                            LimitJobs(ForSession(_service.GetSnapshot(), rights), message))
+                            LimitJobs(ForSession(_service.GetSnapshot(RequestedLimit(message)), rights), message))
                         .ConfigureAwait(false);
                     break;
 
@@ -599,7 +603,7 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     await Reply(client, message, MessageTypes.SettingsResult,
-                        await _service.UpdateSettingsAsync(update.Settings, cancellationToken).ConfigureAwait(false))
+                        await _service.UpdateSettingsAsync(update.Settings, cancellationToken, caller).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
@@ -646,6 +650,23 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     var open = message.GetPayload<HostActionRequest>();
+                    // EXT.R12: "Show in app" from the extension opens the main window at one download. Only a download on
+                    // this list; its id is all that reaches the window's command line.
+                    if (open.JobId is { } showJob && showJob != Guid.Empty)
+                    {
+                        if (_service.GetJob(showJob) is null)
+                        {
+                            await Reply(client, message, MessageTypes.HostActionResult,
+                                new HostActionResult { Ok = false, Message = "That download is no longer in the app's list." }).ConfigureAwait(false);
+                            break;
+                        }
+
+                        _platform.ShowJob(showJob);
+                        await Reply(client, message, MessageTypes.HostActionResult,
+                            new HostActionResult { Ok = true, Message = "Showing the download in the app." }).ConfigureAwait(false);
+                        break;
+                    }
+
                     // Only a page the window knows: the text goes on its command line (report 3, L2).
                     _platform.OpenUi(ClientPage(open.Action));
                     await Reply(client, message, MessageTypes.HostActionResult,
@@ -902,19 +923,7 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public static SnapshotDto LimitJobs(SnapshotDto snapshot, IpcMessage message)
     {
-        if (message.Type != MessageTypes.JobsQuery || message.Payload is not { ValueKind: System.Text.Json.JsonValueKind.Object })
-            return snapshot;
-        JobsQueryRequest? query;
-        try
-        {
-            query = message.GetPayload<JobsQueryRequest>();
-        }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
-        {
-            return snapshot;
-        }
-
-        if (query.Limit is not int limit || limit <= 0 || limit >= snapshot.Jobs.Count) return snapshot;
+        if (RequestedLimit(message) is not int limit || limit >= snapshot.Jobs.Count) return snapshot;
         snapshot.Jobs = snapshot.Jobs
             .Select((job, index) => (job, index))
             .OrderByDescending(entry => entry.job.CreatedAt)
@@ -923,6 +932,21 @@ public sealed partial class HostCommandDispatcher
             .Select(entry => entry.job)
             .ToList();
         return snapshot;
+    }
+
+    /// <summary>The limit a <c>jobs.query</c> asks for (above 0), or null for every job.</summary>
+    public static int? RequestedLimit(IpcMessage message)
+    {
+        if (message.Type != MessageTypes.JobsQuery || message.Payload is not { ValueKind: System.Text.Json.JsonValueKind.Object })
+            return null;
+        try
+        {
+            return message.GetPayload<JobsQueryRequest>().Limit is int limit && limit > 0 ? limit : null;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException)
+        {
+            return null;
+        }
     }
 
     private SnapshotDto ForSession(SnapshotDto snapshot, SessionRights rights)
@@ -1013,6 +1037,7 @@ public sealed partial class HostCommandDispatcher
             ContentType = handoff.MimeType,
             PackageKey = handoff.PackageKey,
             PackageName = handoff.PackageName,
+            QuietWindows = handoff.QuietWindows,
         };
 
         var result = await _service.AddJobAsync(request, cancellationToken, caller).ConfigureAwait(false);
@@ -1084,6 +1109,15 @@ public sealed partial class HostCommandDispatcher
             scope => IpcMessage.Create(ArchiveMessageTypes.Changed, ArchiveForScope(change, scope)));
 
     private void OnUpdateProgressChanged(object? sender, UpdateProgressDto progress) => BroadcastUpdateProgress(progress);
+
+    private void OnLatestVersionChanged(object? sender, string? version) => BroadcastLatestVersion(version);
+
+    /// <summary>
+    /// UI.R37: every session, a web one too, hears the newest version the update check found, which snapshots also carry
+    /// (<see cref="HostStatusDto.LatestVersion"/>).
+    /// </summary>
+    public void BroadcastLatestVersion(string? version)
+        => Broadcast(IpcMessage.Create(MessageTypes.UpdateLatest, new UpdateLatestDto { LatestVersion = version }));
 
     /// <summary>
     /// An update's download opens its progress window once, where there is a window to open. A failure, a postponed

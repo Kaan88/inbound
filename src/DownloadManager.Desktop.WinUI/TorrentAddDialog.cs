@@ -9,8 +9,10 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>
 /// Add Magnet, Import Torrent File and the torrents found in pasted or dropped text (T1 step 5, mockup sections 4 to 6).
 /// Each line is asked about (torrent.inspect) as soon as it is listed, at most <see cref="MostAtOnce"/> at a time, and
-/// can be added once it is read. With an account that takes torrents each line also chooses This PC or that account.
-/// Nothing is added here: the choice goes back to the main window. The lines' rules are in <see cref="TorrentAddLines"/>.
+/// can be added once it is read. With an account that takes torrents each line also chooses This PC or that account
+/// (one is picked from the start, T9 W1), with that account's cache answer as a badge (W3). Nothing is added here: the
+/// choice goes back to the main window, which sends every line, the account's too, without another dialog (W2). The
+/// lines' rules are in <see cref="TorrentAddLines"/>.
 /// </summary>
 internal sealed class TorrentAddDialog
 {
@@ -42,6 +44,7 @@ internal sealed class TorrentAddDialog
     private bool _closed;
     private Guid? _showJobId;
     private readonly bool _withControls;
+    private readonly Func<string, Guid?>? _jobFor;
 
     /// <summary>T3: the destination the lines were last asked about (a full path), or null for each category folder.</summary>
     private string? _spaceFolder;
@@ -51,10 +54,13 @@ internal sealed class TorrentAddDialog
     /// <param name="providerName">The account's display name when an account that takes torrents exists, else null: then
     /// there is no route choice and every line is This PC.</param>
     /// <param name="withControls">T3: the Host takes file priorities and says the free space at the destination.</param>
+    /// <param name="jobFor">T10: the Host's finished .torrent download a line's path is the file of, or null. Such a line is
+    /// read by the Host from that download (FromJobId), so its path need not be on this PC.</param>
     public TorrentAddDialog(RemoteClient remote, SettingsDto settings, string? providerName, FrameworkElement themeRoot, IntPtr hwnd,
-        bool withControls = false)
+        bool withControls = false, Func<string, Guid?>? jobFor = null)
     {
         _withControls = withControls;
+        _jobFor = jobFor;
         _remote = remote;
         _settings = settings;
         _providerName = string.IsNullOrWhiteSpace(providerName) ? null : providerName.Trim();
@@ -113,7 +119,10 @@ internal sealed class TorrentAddDialog
         panel.Children.Add(_listCard);
         if (_providerName is not null)
         {
+            // Review 5:T1b: one short line on every add; the longer words are in its tooltip.
             var routeInfo = InboundUi.Secondary(
+                $"This PC: other peers see this PC's address. {_providerName}: {_providerName} downloads it, then the files come over HTTPS.");
+            ToolTipService.SetToolTip(routeInfo,
                 $"This PC downloads from other peers with this PC's own address. {_providerName} downloads it on {_providerName}'s side, then fetches the files over HTTPS like any {_providerName} download.");
             routeInfo.TextWrapping = TextWrapping.Wrap;
             panel.Children.Add(routeInfo);
@@ -124,8 +133,10 @@ internal sealed class TorrentAddDialog
 
         var (destinationRow, destination, destinationError) = AddLinksDialog.DestinationRow(string.Empty, _windowHandle);
         destination.Header = "Save to";
-        destination.PlaceholderText = "Each torrent's category folder";
-        AutomationProperties.SetName(destination, "Save to, empty for each torrent's category folder");
+        // T14: what an empty Save to means follows the torrent folder settings.
+        var emptySaveTo = TorrentFolderText.SaveToPlaceholder(_settings);
+        destination.PlaceholderText = emptySaveTo;
+        AutomationProperties.SetName(destination, $"Save to, empty for {char.ToLowerInvariant(emptySaveTo[0])}{emptySaveTo[1..]}");
         panel.Children.Add(destinationRow);
         panel.Children.Add(destinationError.Text);
         _destination = destination;
@@ -164,14 +175,8 @@ internal sealed class TorrentAddDialog
                 "torrentFiles" => "Import torrent file",
                 _ => "Add torrents",
             },
-            Content = new ScrollViewer
-            {
-                Padding = InboundTheme.DialogScrollPadding,
-                Content = panel,
-                MaxHeight = Math.Max(240, Math.Min(620, _themeRoot.ActualHeight - 200)),
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            },
+            // T13: the content scrolls and follows the window's height, so Add and Cancel always show.
+            Content = DialogLayout.ScrollingContent(panel, root),
             PrimaryButtonText = "Add",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -233,13 +238,16 @@ internal sealed class TorrentAddDialog
         }
 
         // "Show in list" on a line already in the list: the main window shows that row; nothing is added.
-        if (_showJobId is { } listed) return TorrentAddChoice.ShowJob(listed);
+        if (_showJobId is { } listed) return TorrentAddChoice.ShowJob(listed) with { ListedInputs = _lines.ListedInputs() };
         if (answer != ContentDialogResult.Primary) return null;
         var picks = _lines.Picks();
         if (picks.Count == 0) return null;
         var chosenFolder = destination.Text.Trim();
         int? queueId = queues.Count == 0 ? null : queues[Math.Clamp(queueBox.SelectedIndex, 0, queues.Count - 1)].Id;
-        return new TorrentAddChoice(picks, chosenFolder.Length > 0 ? chosenFolder : null, startMode.SelectedIndex == 1 ? "later" : "startNow", queueId);
+        return new TorrentAddChoice(picks, chosenFolder.Length > 0 ? chosenFolder : null, startMode.SelectedIndex == 1 ? "later" : "startNow", queueId)
+        {
+            ListedInputs = _lines.ListedInputs(),
+        };
     }
 
     /// <summary>Closes the dialog to show the job that already holds a line's torrent.</summary>
@@ -303,9 +311,10 @@ internal sealed class TorrentAddDialog
         {
             await _turns.WaitAsync(token);
             TorrentInspectResult result;
+            var folder = _withControls ? _spaceFolder : null;
             try
             {
-                result = await _remote.InspectTorrentAsync(line.Input, token, _withControls ? _spaceFolder : null);
+                result = await _remote.InspectTorrentAsync(line.Input, token, folder, _jobFor?.Invoke(line.Input));
             }
             finally
             {
@@ -313,7 +322,7 @@ internal sealed class TorrentAddDialog
             }
 
             if (_closed || token.IsCancellationRequested) return;
-            if (_lines.Inspected(line, result)) Changed();
+            if (_lines.Inspected(line, result, askedWithoutFolder: folder is null)) Changed();
         }
         catch (OperationCanceledException)
         {
@@ -355,19 +364,16 @@ internal sealed class TorrentAddDialog
             TorrentInspectResult answer;
             try
             {
-                answer = await _remote.InspectTorrentAsync(line.Input, _closing.Token, folder);
+                answer = await _remote.InspectTorrentAsync(line.Input, _closing.Token, folder, _jobFor?.Invoke(line.Input));
             }
             finally
             {
                 _turns.Release();
             }
 
-            if (_closed || folder != _spaceFolder || line.Result is not { Ok: true } result || !_lines.IsListed(line)) return;
+            if (_closed || folder != _spaceFolder || !_lines.IsListed(line)) return;
             // The files and the choice stay as read; only where it goes and what is free there change.
-            result.Destination = answer.Ok ? answer.Destination : folder;
-            result.FreeBytes = answer.Ok ? answer.FreeBytes : null;
-            result.SpaceProblem = answer.Ok ? answer.SpaceProblem : null;
-            if (_rows.TryGetValue(line, out var row)) row.Update();
+            if (_lines.SpaceAnswered(line, folder, answer) && _rows.TryGetValue(line, out var row)) row.Update();
         }
         catch (OperationCanceledException)
         {
@@ -502,8 +508,11 @@ internal sealed class TorrentAddDialog
         private readonly ProgressRing _reading = new() { Width = 14, Height = 14, IsActive = false, Visibility = Visibility.Collapsed };
         private readonly TextBlock _detail = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth };
 
-        // The provider's cache words ("Cached on TorBox"); empty and collapsed without an account.
-        private readonly TextBlock _cacheWord = new() { FontSize = 12, Visibility = Visibility.Collapsed };
+        // T9 W3: the provider's cache answer as a badge under the route choice; collapsed without an account.
+        private readonly CacheBadgeView _cache = new();
+
+        // T9: a .torrent going to the provider takes the ticked files; its priorities are This PC's only.
+        private readonly TextBlock _priorityNote = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(28, 0, 0, 0) };
 
         // T3: the free space where it goes, and a problem when its files don't fit.
         private readonly TextBlock _space = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth, Visibility = Visibility.Collapsed };
@@ -513,14 +522,13 @@ internal sealed class TorrentAddDialog
         private readonly Border _treeHost = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(28, 4, 0, 4) };
         private RemoteFileTreeView? _tree;
         private bool _treeOpen;
-        private bool _openedOnce;
         private bool _updating;
 
         public LineRow(TorrentAddLine line, TorrentAddDialog owner)
         {
             _line = line;
             _owner = owner;
-            var under = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _reading, _detail, _cacheWord } };
+            var under = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _reading, _detail } };
             Box = new CheckBox { Content = new StackPanel { Children = { _name, under, _space } }, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             Box.Click += (_, _) =>
             {
@@ -544,8 +552,11 @@ internal sealed class TorrentAddDialog
                     owner._lines.SetRoute(line, _route.SelectedIndex == 0 ? TorrentLineRoute.ThisPc : TorrentLineRoute.Provider);
                     owner.Changed();
                 };
-                Grid.SetColumn(_route, 1);
-                grid.Children.Add(_route);
+                // The badge sits under the choice it is about, the provider's.
+                _cache.Element.HorizontalAlignment = HorizontalAlignment.Right;
+                var side = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { _route, _cache.Element } };
+                Grid.SetColumn(side, 1);
+                grid.Children.Add(side);
             }
 
             _chooseFiles.Margin = new Thickness(24, 0, 0, 0);
@@ -559,7 +570,8 @@ internal sealed class TorrentAddDialog
             {
                 if (line.ListedJobId is { } id) owner.ShowListed(id);
             };
-            Root = new StackPanel { Spacing = 2, Children = { grid, _showInList, _chooseFiles, _treeHost } };
+            _priorityNote.Text = $"{owner._providerName} takes the ticked files. Priorities apply on This PC only.";
+            Root = new StackPanel { Spacing = 2, Children = { grid, _showInList, _chooseFiles, _treeHost, _priorityNote } };
         }
 
         public StackPanel Root { get; }
@@ -578,9 +590,7 @@ internal sealed class TorrentAddDialog
                 _detail.Foreground = InboundTheme.Brush(_line.IsProblem ? "InboundErrorTextBrush" : "InboundSecondaryTextBrush", _owner._themeRoot);
                 var reading = _line.State == TorrentLineState.Reading;
                 var cache = _line.CacheText(_owner._providerName);
-                _cacheWord.Text = cache.Length > 0 ? "· " + cache : string.Empty;
-                _cacheWord.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _owner._themeRoot);
-                _cacheWord.Visibility = cache.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+                _cache.Show(_line.Badge(_owner._providerName));
                 _reading.IsActive = reading;
                 _reading.Visibility = reading ? Visibility.Visible : Visibility.Collapsed;
                 AutomationProperties.SetName(_reading, _line.Detail);
@@ -618,9 +628,8 @@ internal sealed class TorrentAddDialog
         private void UpdateFiles(string name)
         {
             var applies = _owner._lines.CanChooseFilesFor(_line);
-            // A lone torrent opens its files at once, as the mockup's import dialog does.
-            if (applies && !_openedOnce && _owner._lines.Lines.Count == 1) _treeOpen = true;
-            if (applies && _treeOpen) _openedOnce = true;
+            // Review 5:T1a: the files stay closed until Choose files… is clicked, a lone torrent's too (all its files are
+            // ticked), so Save to, Start and Queue stay in view, as in the web UI's add dialog.
 
             _chooseFiles.Visibility = applies ? Visibility.Visible : Visibility.Collapsed;
             _chooseFiles.Content = _treeOpen ? "Hide files" : "Choose files…";
@@ -644,6 +653,8 @@ internal sealed class TorrentAddDialog
 
             if (_tree is not null) AutomationProperties.SetName(_tree, $"Files of {name}");
             _treeHost.Visibility = showTree && _tree is not null ? Visibility.Visible : Visibility.Collapsed;
+            _priorityNote.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _owner._themeRoot);
+            _priorityNote.Visibility = showTree && _owner._withControls && _line.Route == TorrentLineRoute.Provider ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 }

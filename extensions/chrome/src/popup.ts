@@ -481,8 +481,15 @@ async function renameJob(job: JobSummary): Promise<void> {
   await pollJobs();
 }
 
+/** EXT.R12: the app's main window at this download, its row highlighted for a moment. */
+async function showInApp(job: JobSummary): Promise<void> {
+  const result = await sendCommand(job, "show");
+  if (result && !result.ok) showError(result.error || "Could not open Inbound.");
+}
+
 function runMenuChoice(job: JobSummary, choice: RowMenuChoice): void {
-  if (choice === "reveal") void revealJob(job);
+  if (choice === "show") void showInApp(job);
+  else if (choice === "reveal") void revealJob(job);
   else if (choice === "copyLink") void copyLink(job);
   else if (choice === "redownload") void redownloadJob(job);
   else if (choice === "rename") void renameJob(job);

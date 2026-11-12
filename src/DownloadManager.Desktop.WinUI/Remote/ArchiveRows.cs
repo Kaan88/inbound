@@ -87,12 +87,17 @@ internal static partial class ArchiveText
         return (string.Empty, RemoteRowTone.Neutral);
     }
 
+    private static bool OnlyVolumeFailed(ArchiveSetDto set)
+        => set.FailedVolumes.Count == 1 && set.Volumes.Count <= 1 && set.MissingVolumes.Count == 0;
+
     private static (string Text, RemoteRowTone Tone) Label(ArchiveSetDto set)
     {
         switch (set.State)
         {
             case "downloading":
                 if (set.DownloadingVolumes.Count > 0) return (string.Empty, RemoteRowTone.Neutral);
+                // Review 5:L2: a one-volume archive (a single .zip) whose download failed: its row says Failed already.
+                if (OnlyVolumeFailed(set)) return (string.Empty, RemoteRowTone.Neutral);
                 return set.FailedVolumes.Count > 0
                     ? ($"{Parts(set.FailedVolumes)} didn't download", RemoteRowTone.Waiting)
                     : ("Not downloaded yet", RemoteRowTone.Neutral);

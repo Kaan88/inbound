@@ -120,7 +120,27 @@ internal static class JobNotes
     {
         if (job.State != "failed" || job.Failure is not { } failure) return null;
         var message = UrlRedactor.HideAddresses(failure.Message).Trim();
-        return string.IsNullOrWhiteSpace(message) ? null : message;
+        if (string.IsNullOrWhiteSpace(message)) return null;
+        return NextStep(job) is { } step ? $"{message} {step}" : message;
+    }
+
+    /// <summary>
+    /// Review 5:E2: what the user can do about a failure the Host names only by its HTTP code. Null when there is nothing
+    /// to suggest, or the Host's words already say it (an expired link names Refresh Download Address itself). A provider's
+    /// file gets no step: the app asks the provider for a fresh link itself. The web UI has the same rule (details.ts).
+    /// </summary>
+    public static string? NextStep(JobDto job)
+    {
+        if (job.Failure is not { } failure) return null;
+        var provider = job.IsRemote || job.Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase);
+        return failure.Kind switch
+        {
+            "unauthorized" or "forbidden" when failure.HttpStatus is 401 or 403 =>
+                "The site may want you signed in: add a login in Options > Site logins, or download it from the browser.",
+            "notFound" when failure.HttpStatus is 404 && !provider && job.Torrent is null => "The link may have expired: try Refresh Download Address.",
+            "http" when failure.HttpStatus is >= 500 and < 600 => "The site had a problem. Try again later.",
+            _ => null,
+        };
     }
 
     /// <summary>UI.B7: what a running download waiting for a free connection to its host says. The host name only.</summary>
@@ -128,6 +148,13 @@ internal static class JobNotes
         => job.State is "connecting" or "downloading" or "retryWaiting" && !string.IsNullOrWhiteSpace(job.WaitingForHost)
             ? $"Waiting for a connection to {job.WaitingForHost}"
             : null;
+
+    /// <summary>
+    /// Review 5:A8: a download added with Download later never starts by itself, so it doesn't read "Queued" like one
+    /// waiting for a free slot. Null for anything else. The web UI says the same (format.ts statusText).
+    /// </summary>
+    public static string? NotStartedText(JobDto job)
+        => job.State == "queued" && string.Equals(job.StartMode, StartModes.Later, StringComparison.OrdinalIgnoreCase) ? "Not started" : null;
 
     /// <summary>The note goes first, because the Description column is often cut short.</summary>
     public static string Description(string? note, string? own)

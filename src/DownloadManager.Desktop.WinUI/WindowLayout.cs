@@ -13,10 +13,10 @@ internal static class WindowLayout
     /// <summary>What SetIcon takes: Uno looks the file up in the app's own folder by name.</summary>
     public static string IconArgument(string path) => OperatingSystem.IsWindows() ? path : Path.GetFileName(path);
 
-    public static void ResizeForDpi(Window window, int width, int height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
+    public static void ResizeForDpi(Window window, double width, double height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
 
     /// <summary>How small the user can drag the window, and how small a remembered size can come back. Set it before restoring one.</summary>
-    public static void SetMinimumSize(Window window, int width, int height)
+    public static void SetMinimumSize(Window window, double width, double height)
     {
         if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
         var size = ScaledToFit(window, width, height);
@@ -35,20 +35,50 @@ internal static class WindowLayout
 #endif
     }
 
-    private static SizeInt32 ScaledToFit(Window window, int width, int height)
+    private static SizeInt32 ScaledToFit(Window window, double width, double height)
     {
 #if HAS_UNO
         // Uno has no DisplayArea.GetFromWindowId and scales the window itself.
-        return new SizeInt32 { Width = width, Height = height };
+        return new SizeInt32 { Width = (int)Math.Ceiling(width), Height = (int)Math.Ceiling(height) };
 #endif
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96d;
         var area = DisplayArea.GetFromWindowId(window.AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        return new SizeInt32
-        {
-            Width = Math.Min((int)Math.Ceiling(width * scale), Math.Max(200, area.Width - 24)),
-            Height = Math.Min((int)Math.Ceiling(height * scale), Math.Max(200, area.Height - 24)),
-        };
+        var size = WindowSizeRules.Fit(width, height, scale, area.Width, area.Height);
+        return new SizeInt32 { Width = size.Width, Height = size.Height };
+    }
+
+    /// <summary>
+    /// T13: makes a window that is already showing at least <paramref name="width"/> by <paramref name="height"/> DIPs
+    /// (never smaller than it is, never bigger than its screen's work area) and keeps it inside that work area, moving it
+    /// left or up when it would now reach past the edge.
+    /// </summary>
+    public static void GrowForDpi(Window window, double width, double height)
+    {
+        var appWindow = window.AppWindow;
+        if (appWindow.Presenter is OverlappedPresenter { State: not OverlappedPresenterState.Restored }) return;
+        var wanted = ScaledToFit(window, width, height);
+        var now = appWindow.Size;
+        var grown = WindowSizeRules.Grown(new PixelSize(now.Width, now.Height), new PixelSize(wanted.Width, wanted.Height));
+        if (grown.Width == now.Width && grown.Height == now.Height) return;
+        appWindow.Resize(new SizeInt32 { Width = grown.Width, Height = grown.Height });
+        KeepInside(window);
+    }
+
+    /// <summary>T13: moves a window left or up as far as needed for all of it to be inside its screen's work area.</summary>
+    public static void KeepInside(Window window)
+    {
+#if HAS_UNO
+        // Uno has no DisplayArea lookups (they throw); the window manager keeps a window on a screen there.
+        return;
+#else
+        var appWindow = window.AppWindow;
+        var area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        var position = appWindow.Position;
+        var size = new PixelSize(appWindow.Size.Width, appWindow.Size.Height);
+        var (x, y) = WindowSizeRules.KeptInside(position.X, position.Y, size, area.X, area.Y, area.Width, area.Height);
+        if (x != position.X || y != position.Y) appWindow.Move(new PointInt32 { X = x, Y = y });
+#endif
     }
 
     /// <summary>

@@ -27,6 +27,12 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private string _fileGlyph = "\uE7C3";
     private ImageSource? _fileIcon;
     private string? _iconKey;
+
+    /// <summary>
+    /// T11: the download is on another server, for a row a progress window shows (that window's own Host). Null: the
+    /// server the main window shows (<see cref="ShownServer"/>).
+    /// </summary>
+    internal bool? OnAnotherServer { get; set; }
     public ImageSource? FileIcon { get => _fileIcon; private set => Set(ref _fileIcon, value); }
     // A torrent's own glyph takes the type icon's place, in the swarm colour (TorrentGlyphVisibility).
     public Visibility FileIconVisibility => FileIcon is null || IsTorrent ? Visibility.Collapsed : Visibility.Visible;
@@ -94,9 +100,36 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush FailedStatus = StatusBrushes.Failed;
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WaitingStatus = StatusBrushes.Waiting;
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NeutralStatus = StatusBrushes.Neutral;
+
+    /// <summary>Clear, so the whole row still takes clicks; a brief accent while the row is pointed out (EXT.R12).</summary>
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NoHighlight = new(Microsoft.UI.Colors.Transparent);
+    public Microsoft.UI.Xaml.Media.Brush RowHighlight { get => _rowHighlight; private set => Set(ref _rowHighlight, value); }
+    private Microsoft.UI.Xaml.Media.Brush _rowHighlight = NoHighlight;
+
+    /// <summary>EXT.R12: shows the row's brief highlight, or ends it with null.</summary>
+    internal void Highlight(Microsoft.UI.Xaml.Media.Brush? brush) => RowHighlight = brush ?? NoHighlight;
     public DateTimeOffset CreatedAt { get => _createdAt; private set => Set(ref _createdAt, value); }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>Review 5:E1: the Status of a row that moves while the Host can't be reached.</summary>
+    public const string NotCurrentStatus = "Status unknown";
+
+    private bool Moves => IsPackage ? Children.Any(child => child.Moves) : SpeedSample.Moves(State, Dto?.Torrent?.Seeding == true);
+
+    /// <summary>
+    /// Review 5:E1: the Host was lost, so a row that moves no longer shows a speed, a time left or a state that may have
+    /// ended. The next snapshot builds the rows afresh.
+    /// </summary>
+    public void ShowNotCurrent()
+    {
+        if (!Moves) return;
+        StateText = NotCurrentStatus;
+        SpeedText = string.Empty;
+        EtaText = string.Empty;
+        BytesPerSecond = 0;
+        StatusBrush = NeutralStatus;
+    }
 
     public void Update(JobDto job)
     {
@@ -114,7 +147,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
             : job.QueueRetryAt is not null ? "Queue retry scheduled"
             : JobNotes.WaitingText(job) is { } waiting ? waiting
             : IsProviderFile && job.State == "downloading" ? "Downloading locally"
-            : ToDisplayState(job.State);
+            : JobNotes.NotStartedText(job) ?? ToDisplayState(job.State);
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
         BytesPerSecond = job.BytesPerSecond ?? 0;
         LastUpdated = job.UpdatedAt;
@@ -170,7 +203,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         RawDescription = job.Description ?? string.Empty;
         // A torrent says how many of its files it downloads, unless the user gave it words of their own.
         Description = JobNotes.Description(StatusNote,
-            job.Torrent is { } described && string.IsNullOrWhiteSpace(job.Description) ? TorrentRules.FilesSummary(described) : JobAddress.Own(job));
+            job.Torrent is { } described && string.IsNullOrWhiteSpace(job.Description) ? TorrentRules.FileListWaitNote(job, DateTimeOffset.UtcNow) ?? TorrentRules.FilesSummary(described) : JobAddress.Own(job));
         ProgressVisibility = (job.State is "downloading" or "connecting" or "retryWaiting" or "verifying" or "paused") &&
                              ProgressPercent > 0
             ? Visibility.Visible
@@ -593,7 +626,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
     {
         try
         {
-            var image = await FileIconProvider.LoadAsync(fileName, completedPath, key);
+            var image = await FileIconProvider.LoadAsync(fileName, completedPath, key, OnAnotherServer);
             if (_iconKey == key) SetFileIcon(image);
         }
         catch (Exception ex)

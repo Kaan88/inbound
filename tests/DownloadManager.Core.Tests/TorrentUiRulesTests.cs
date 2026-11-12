@@ -41,14 +41,37 @@ public sealed class TorrentUiRulesTests
         => Assert.Equal(expected, TorrentRules.IsTorrentInput(input));
 
     [Theory]
-    [InlineData("ask", true, "Unset")]
+    [InlineData("ask", true, "ThisPc")]
     [InlineData("thisPc", true, "ThisPc")]
     [InlineData("provider", true, "Provider")]
-    [InlineData("unknown", true, "Unset")]
+    [InlineData("unknown", true, "ThisPc")]
     [InlineData("ask", false, "ThisPc")]
     [InlineData("provider", false, "ThisPc")]
     public void ALineStartsOnTheRouteTheSettingGivesWhenThereIsAChoice(string setting, bool provider, string expected)
         => Assert.Equal(expected, TorrentRules.DefaultRoute(setting, provider).ToString());
+
+    [Theory]
+    [InlineData("ask", "Provider")]
+    [InlineData("thisPc", "ThisPc")]
+    [InlineData("provider", "Provider")]
+    public void AskEachTimePicksTheProviderWhenThisPcCantTakeTorrents(string setting, string expected)
+        => Assert.Equal(expected, TorrentRules.DefaultRoute(setting, providerAvailable: true, thisPcAvailable: false).ToString());
+
+    [Theory]
+    [InlineData("ask", 0)]
+    [InlineData("thisPc", 0)]
+    [InlineData("provider", 1)]
+    [InlineData(null, 0)]
+    public void OptionsShowsTwoRoutesAndAskAsThisPc(string? saved, int index)
+        => Assert.Equal(index, TorrentRules.RouteOptionIndex(saved));
+
+    [Theory]
+    [InlineData(0, "ask", "ask")]
+    [InlineData(0, "provider", "thisPc")]
+    [InlineData(0, null, "thisPc")]
+    [InlineData(1, "ask", "provider")]
+    public void OptionsSavesAskUnchangedWhenThisPcIsKept(int index, string? saved, string expected)
+        => Assert.Equal(expected, TorrentRules.RouteToSave(index, saved));
 
     [Fact]
     public void TheStatusSaysWhatATorrentIsDoing()
@@ -67,6 +90,38 @@ public sealed class TorrentUiRulesTests
         Assert.Equal("3 of 11 files", TorrentRules.FilesSummary(Torrent(wanted: 3).Torrent!));
         Assert.Equal("1 file", TorrentRules.FilesSummary(Torrent(files: 1, wanted: 1).Torrent!));
         Assert.Equal("File list not known yet", TorrentRules.FilesSummary(Torrent(metadata: false).Torrent!));
+    }
+
+    [Fact]
+    public void Review_5_T3_a_magnet_still_without_its_file_list_after_a_minute_says_it_may_never_come()
+    {
+        var now = new DateTimeOffset(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
+        var looking = Torrent(metadata: false);
+        looking.RunStartedAt = now.AddSeconds(-59);
+        Assert.Null(TorrentRules.FileListWaitNote(looking, now));
+        looking.RunStartedAt = now.AddMinutes(-1);
+        Assert.Equal("Still looking for the file list. This torrent may have no one sharing it.", TorrentRules.FileListWaitNote(looking, now));
+        // Not while stopped, once the list is known, or without a start time.
+        var stopped = Torrent(state: "paused", metadata: false);
+        stopped.RunStartedAt = now.AddHours(-1);
+        Assert.Null(TorrentRules.FileListWaitNote(stopped, now));
+        var known = Torrent();
+        known.RunStartedAt = now.AddHours(-1);
+        Assert.Null(TorrentRules.FileListWaitNote(known, now));
+        Assert.Null(TorrentRules.FileListWaitNote(Torrent(metadata: false), now));
+    }
+
+    [Fact]
+    public void Review_5_T3_a_magnet_resumed_seconds_ago_counts_from_this_run_not_its_first_start()
+    {
+        var now = new DateTimeOffset(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
+        var resumed = Torrent(metadata: false);
+        resumed.StartedAt = now.AddHours(-1);
+        resumed.RunStartedAt = now.AddSeconds(-10);
+        Assert.Null(TorrentRules.FileListWaitNote(resumed, now));
+        // An older Host sends only the first start, which can't tell a resumed run from a long one: no note.
+        resumed.RunStartedAt = null;
+        Assert.Null(TorrentRules.FileListWaitNote(resumed, now));
     }
 
     [Fact]
@@ -211,4 +266,46 @@ public sealed class TorrentUiRulesTests
     [InlineData("somethingElse", "The disk is full.", "This Host does not download torrents.")]
     public void ATorrentFilesErrorReplySaysTheHostsReason(string type, string message, string expected)
         => Assert.Equal(expected, HostConnection.TorrentReplyError(IpcMessage.Create(type, new HostActionResult { Ok = false, Message = message })));
+
+    [Fact]
+    public void ExportListFailsOnAHostErrorAndSavesWithoutTorrentsOnlyForAHostWithoutThem()
+    {
+        // A Host without torrents: the list is saved with its magnets alone.
+        Assert.Null(HostConnection.ListEntriesPage(IpcMessage.Create(MessageTypes.HostActionResult,
+            new HostActionResult { Ok = false, Message = "Unknown message type 'torrent.listEntries'." })));
+        // Any other error is the Host's, and the export stops with its words instead of saving the list without them.
+        var error = Assert.Throws<InvalidOperationException>(() => HostConnection.ListEntriesPage(IpcMessage.Create(MessageTypes.HostActionResult,
+            new HostActionResult { Ok = false, Message = "The file is in use." })));
+        Assert.Equal("The file is in use.", error.Message);
+        Assert.NotNull(HostConnection.ListEntriesPage(IpcMessage.Create(TorrentMessageTypes.ListEntriesResult, new TorrentListEntriesResult())));
+    }
+
+    /// <summary>Review 5:F6b: per-site limits are rows of a site and a number, not typed pattern=number lines.</summary>
+    [Fact]
+    public void PerSiteLimitRowsBecomeProfiles()
+    {
+        var (profiles, problem) = OptionsSettingsRebase.SiteLimits([(" *.a.com ", 2), ("", double.NaN), ("b.org", 4)]);
+        Assert.Null(problem);
+        Assert.Equal(["*.a.com=2", "b.org=4"], profiles.Select(profile => $"{profile.Pattern}={profile.MaxConnections}"));
+        Assert.Equal(OptionsSettingsRebase.SiteLimitNeedsSite, OptionsSettingsRebase.SiteLimits([(" ", 3)]).Problem);
+        Assert.Equal("The limit for a.com must be 1 to 32 connections.", OptionsSettingsRebase.SiteLimits([("a.com", double.NaN)]).Problem);
+        Assert.Equal("The limit for a.com must be 1 to 32 connections.", OptionsSettingsRebase.SiteLimits([("a.com", 33)]).Problem);
+        Assert.Empty(OptionsSettingsRebase.SiteLimits([("a.com", 0)]).Profiles);
+    }
+
+    /// <summary>Review 5:A6: ordinary links dropped or pasted on the window go to Add Links, with torrents on or off.</summary>
+    [Fact]
+    public void DroppedOrPastedLinksGoToAddLinks()
+    {
+        Assert.Equal((false, true, (string?)null), TorrentRules.Intake(torrents: 0, links: 2, torrentsCanBeAdded: false, offThisPc: false, dropped: true));
+        Assert.Equal((true, true, (string?)null), TorrentRules.Intake(1, 1, true, false, false));
+        Assert.Equal((true, false, (string?)null), TorrentRules.Intake(1, 0, true, false, true));
+        // A magnet alone with torrents off says so rather than nothing.
+        Assert.Equal((false, false, TorrentRules.TorrentsCantBeAdded), TorrentRules.Intake(1, 0, false, false, true));
+        Assert.Equal((false, false, TorrentRules.OnlyLocalTorrentFiles), TorrentRules.Intake(0, 0, true, true, true));
+        Assert.Equal((false, false, TorrentRules.NothingToDrop), TorrentRules.Intake(0, 0, true, false, true));
+        Assert.Equal((false, false, TorrentRules.NothingOnClipboard), TorrentRules.Intake(0, 0, false, false, false));
+        Assert.Equal(["https://example.com/a.zip", "ftp://example.com/b.iso"],
+            LinkExtractor.HttpLinks("see https://example.com/a.zip and ftp://example.com/b.iso, magnet:?xt=urn:btih:" + Hash));
+    }
 }

@@ -8,7 +8,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>
 /// T1 step 5, the ways a torrent comes in: Tasks › Add Magnet… / Import Torrent File…, Add URL, drag and drop and Ctrl+V
 /// on the list all lead to <see cref="TorrentAddDialog"/>. With torrents off, the provider's own flow takes them as
-/// before when an account can.
+/// before when an account can. Review 5:A6: http, https and ftp links dropped or pasted the same way go to Add Links.
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -45,19 +45,20 @@ public sealed partial class MainWindow
 
     private void RootGrid_DragOver(object sender, DragEventArgs e)
     {
-        if (!TorrentsCanBeAdded) return;
+        if (_settings is null) return;
         if (!e.DataView.Contains(StandardDataFormats.StorageItems) && !e.DataView.Contains(StandardDataFormats.Text)) return;
         e.AcceptedOperation = DataPackageOperation.Copy;
-        e.DragUIOverride.Caption = "Add torrents";
+        e.DragUIOverride.Caption = "Add downloads";
     }
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
     {
         try
         {
-            if (!TorrentsCanBeAdded) return;
+            if (_settings is null) return;
             var deferral = e.GetDeferral();
             var inputs = new List<string>();
+            var links = new List<string>();
             var offThisPc = false;
             try
             {
@@ -74,7 +75,9 @@ public sealed partial class MainWindow
                 }
                 else if (e.DataView.Contains(StandardDataFormats.Text))
                 {
-                    inputs.AddRange(TorrentInputsIn(await e.DataView.GetTextAsync(), out offThisPc));
+                    var text = await e.DataView.GetTextAsync();
+                    inputs.AddRange(TorrentInputsIn(text, out offThisPc));
+                    links.AddRange(LinkExtractor.HttpLinks(text));
                 }
             }
             finally
@@ -82,13 +85,7 @@ public sealed partial class MainWindow
                 deferral.Complete();
             }
 
-            if (inputs.Count == 0)
-            {
-                ShowPassingStatus(offThisPc ? TorrentRules.OnlyLocalTorrentFiles : "Only magnet links and .torrent files can be dropped here.");
-                return;
-            }
-
-            await AddTorrentsAsync("mixed", inputs);
+            await TakeInputsAsync(inputs, links, offThisPc, dropped: true);
         }
         catch (Exception ex)
         {
@@ -100,7 +97,7 @@ public sealed partial class MainWindow
     /// <summary>Ctrl+V on the list: magnets and .torrent paths on the clipboard go to the torrent dialog.</summary>
     private bool HandleTorrentPaste(KeyRoutedEventArgs e)
     {
-        if (e.Key != Windows.System.VirtualKey.V || !TorrentsCanBeAdded) return false;
+        if (e.Key != Windows.System.VirtualKey.V || _settings is null) return false;
         var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
         if ((ctrl & Windows.UI.Core.CoreVirtualKeyStates.Down) == 0) return false;
         if (DialogGuard.IsOpen(Content.XamlRoot)) return false;
@@ -119,7 +116,7 @@ public sealed partial class MainWindow
                 var clip = Clipboard.GetContent();
                 if (!clip.Contains(StandardDataFormats.Text))
                 {
-                    ShowPassingStatus("The clipboard holds no magnet link or .torrent file.");
+                    ShowPassingStatus(TorrentRules.NothingOnClipboard);
                     return;
                 }
 
@@ -131,19 +128,29 @@ public sealed partial class MainWindow
                 return;
             }
 
-            var inputs = TorrentInputsIn(text, out var offThisPc);
-            if (inputs.Count == 0)
-            {
-                ShowPassingStatus(offThisPc ? TorrentRules.OnlyLocalTorrentFiles : "The clipboard holds no magnet link or .torrent file.");
-                return;
-            }
-
-            await AddTorrentsAsync("mixed", inputs);
+            await TakeInputsAsync(TorrentInputsIn(text, out var offThisPc), LinkExtractor.HttpLinks(text), offThisPc, dropped: false);
         }
         catch (Exception ex)
         {
             UiTrace.Write($"Pasting torrents failed: {ex.GetType().Name}");
         }
+    }
+
+    /// <summary>
+    /// A drop's or a paste's torrents go to the torrent dialog, its links to Add Links (after the torrent dialog when
+    /// there are both); <see cref="TorrentRules.Intake"/> decides, and says why when nothing goes anywhere.
+    /// </summary>
+    private async Task TakeInputsAsync(List<string> torrents, List<string> links, bool offThisPc, bool dropped)
+    {
+        var (takeTorrents, takeLinks, problem) = TorrentRules.Intake(torrents.Count, links.Count, TorrentsCanBeAdded, offThisPc, dropped);
+        if (problem is not null)
+        {
+            ShowPassingStatus(problem);
+            return;
+        }
+
+        if (takeTorrents) await AddTorrentsAsync("mixed", torrents);
+        if (takeLinks) await ShowAddLinksAsync(links);
     }
 
     /// <summary>
@@ -174,13 +181,15 @@ public sealed partial class MainWindow
     // Torrents Windows opened while another dialog was showing: held here (not in the queue folder, where they would
     // expire) and opened when that dialog closes, so none is lost.
     private readonly List<string> _heldTorrentInputs = new();
+    // T10: those of them this PC's Host sent for its finished .torrent downloads.
+    private readonly HashSet<string> _heldFromDownloads = new(StringComparer.Ordinal);
     private bool _waitingForDialogClose;
 
     private async Task OpenQueuedTorrentsAsync()
     {
         try
         {
-            TorrentOpenRequests.Hold(_heldTorrentInputs, TorrentOpenRequests.Drain(App.TorrentQueueDirectory(), DateTimeOffset.UtcNow));
+            TorrentOpenRequests.Hold(_heldTorrentInputs, TorrentOpenRequests.Drain(App.TorrentQueueDirectory(), DateTimeOffset.UtcNow, _heldFromDownloads));
             if (_heldTorrentInputs.Count == 0) return;
             if (DialogGuard.IsOpen(Content.XamlRoot))
             {
@@ -189,11 +198,13 @@ public sealed partial class MainWindow
             }
 
             var queued = _heldTorrentInputs.ToList();
+            var fromDownloads = _heldFromDownloads.ToHashSet(StringComparer.Ordinal);
             _heldTorrentInputs.Clear();
-            var inputs = queued.Where(input => !TorrentRules.IsNetworkOrDevicePath(input)).ToList();
+            _heldFromDownloads.Clear();
+            var inputs = TorrentRules.QueuedToOpen(queued, fromDownloads, _connection.IsRemote, TorrentFileJobFor, out var keptOnThisPc, out _);
             if (inputs.Count == 0)
             {
-                ShowPassingStatus(TorrentRules.OnlyLocalTorrentFiles);
+                ShowPassingStatus(keptOnThisPc ? TorrentRules.TorrentFilesStayOnThisPc : TorrentRules.OnlyLocalTorrentFiles);
                 return;
             }
 
@@ -201,6 +212,7 @@ public sealed partial class MainWindow
             {
                 // Another dialog opened first after all: keep them for when it closes.
                 TorrentOpenRequests.Hold(_heldTorrentInputs, inputs);
+                _heldFromDownloads.UnionWith(inputs.Where(fromDownloads.Contains));
                 WaitForDialogClose();
             }
         }
@@ -292,7 +304,7 @@ public sealed partial class MainWindow
         await _connection.ProbeTorrentControlsAsync();
         if (!ReferenceEquals(connection, _connection)) return false;
         var dialog = new TorrentAddDialog(_remote, settings, TorrentProviderName(), RootGrid, WinRT.Interop.WindowNative.GetWindowHandle(this),
-            withControls: TorrentControls);
+            withControls: TorrentControls, jobFor: TorrentFileJobFor);
         var choice = await dialog.ShowAsync(Content.XamlRoot, RootGrid.ActualTheme, focus, inputs);
         if (choice is null)
         {
@@ -301,6 +313,8 @@ public sealed partial class MainWindow
             return false;
         }
 
+        // T10: a finished .torrent download whose torrent is already in the list is a copy: it goes, as an add would.
+        await RemoveListedTorrentFilesAsync(choice.ListedInputs);
         if (choice.ShowJobId is { } listed)
         {
             ShowTorrentRow(listed);
@@ -309,6 +323,55 @@ public sealed partial class MainWindow
 
         await RunTorrentChoiceAsync(choice);
         return false;
+    }
+
+    /// <summary>T10: the finished .torrent download this dialog line's path is the file of, or null.</summary>
+    private Guid? TorrentFileJobFor(string input)
+        => TorrentRules.TorrentFileJobFor(_jobsById.Values.Select(row => row.Dto).OfType<JobDto>(), input);
+
+    /// <summary>
+    /// T10: finished .torrent downloads whose torrent turned out to be in the list already: each is sent as an add from
+    /// its id, which the Host answers with Existing and removes the download and its file.
+    /// </summary>
+    private async Task RemoveListedTorrentFilesAsync(IReadOnlyList<string> inputs)
+    {
+        foreach (var input in inputs)
+        {
+            if (TorrentFileJobFor(input) is not { } id) continue;
+            try
+            {
+                // Only removes the copy: when the torrent has left the list meanwhile, nothing is added and the row stays.
+                var result = await _remote.AddTorrentAsync(new TorrentAddRequest { Input = input, FromJobId = id, OnlyIfListed = true, StartMode = "later" });
+                if (!result.Ok) UiTrace.Write("A listed .torrent download stays: the Host refused it");
+            }
+            catch (Exception ex)
+            {
+                UiTrace.Write($"A listed .torrent download stays: {ex.GetType().Name}");
+            }
+        }
+    }
+
+    /// <summary>T10: a finished .torrent download a provider took is removed with its file.</summary>
+    private async Task RemoveTorrentFileDownloadAsync(Guid id)
+    {
+        try
+        {
+            await _connection.RemoveAsync(id, deleteFile: true);
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"The .torrent download stays after the provider took it: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// T10: a row's Open as Torrent: the torrent dialog with its file as a line, as the Host opens it when the download
+    /// finishes. With torrents off and no account, the usual note with Open Options.
+    /// </summary>
+    private async Task OpenAsTorrentAsync()
+    {
+        if (SelectedJob?.Dto is not { } job || !TorrentRules.OpensAsTorrent(job)) return;
+        await AddTorrentsAsync("torrentFiles", [job.FinalFilePath]);
     }
 
     /// <summary>A job already on the list: selected and in view, on All Downloads if this view or the search hides it.</summary>
@@ -345,6 +408,8 @@ public sealed partial class MainWindow
             var result = await _remote.AddTorrentAsync(new TorrentAddRequest
             {
                 Input = pick.Input,
+                // T10: a finished .torrent download is added by its id; the Host then removes it and its file.
+                FromJobId = TorrentFileJobFor(pick.Input),
                 Destination = choice.Destination,
                 QueueId = choice.QueueId,
                 StartMode = choice.StartMode,
@@ -372,16 +437,42 @@ public sealed partial class MainWindow
             (0, _) => $"Those {existing} torrents are already in the list.",
             _ => $"Added {added} torrents; {existing} were already in the list.",
         };
-        if (status is not null) ShowPassingStatus(status);
         if (last is { } id && _jobsById.TryGetValue(id, out var row)) JobsList.ScrollIntoView(row);
 
-        // The provider's lines go through its own dialog, which checks them and asks about their files.
-        var toProvider = choice.Picks.Where(pick => pick.Route == TorrentLineRoute.Provider).Select(pick => pick.Input).ToList();
-        if (toProvider.Count > 0)
+        // T9 W2: the provider's lines are sent from here with the torrent dialog's folder, start and queue; no second dialog.
+        var toProvider = choice.Picks.Where(pick => pick.Route == TorrentLineRoute.Provider).ToList();
+        var jobs = new List<RemoteJobDto>();
+        var sent = 0;
+        var provider = ProviderWordForAdding();
+        if (toProvider.Count > 0) ShowPassingStatus($"Adding to {provider}…");
+        foreach (var pick in toProvider)
         {
-            await ShowProviderAddAsync(TorrentRules.ProviderFocus(toProvider), toProvider);
+            var fromJob = TorrentFileJobFor(pick.Input);
+            var result = await _remote.AddAsync(TorrentAddRequests.ForProvider(pick, choice.Destination, choice.StartMode, choice.QueueId, _settings?.DefaultQueueId ?? 0));
+            if (result is { Ok: true, Job: { } job }) jobs.Add(job);
+            // T10: the provider read the .torrent file as it was added, so the finished download and its file can go.
+            if (result.Ok && fromJob is { } finished) await RemoveTorrentFileDownloadAsync(finished);
+            if (!result.Ok) problems.Add(RemoteText.Refused(pick.Name, result.Error, provider));
+            else if (result.Existing) problems.Add(RemoteText.AlreadyListed(result.Job, pick.Name, result.Note));
+            else if (result.Job is not null) sent++;
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Add torrents", string.Join(Environment.NewLine, problems));
+        var said = string.Join(" ", new[] { status ?? string.Empty, RemoteText.AddedWords(0, sent, provider) }.Where(part => part.Length > 0));
+        if (problems.Count > 0)
+        {
+            await ShowMessageAsync("Add torrents", RemoteText.AddReport(said, [], problems));
+            EndPassingStatus();
+        }
+        else if (said.Length > 0)
+        {
+            ShowPassingStatus(said);
+        }
+        else
+        {
+            EndPassingStatus();
+        }
+
+        // One provider item and nothing for This PC: its row is shown, and a cached one's file choice may open by itself.
+        if (jobs.Count > 0) FollowAdd(jobs, added + existing);
     }
 }

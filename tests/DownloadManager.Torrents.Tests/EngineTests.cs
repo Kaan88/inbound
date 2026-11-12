@@ -71,6 +71,28 @@ public sealed partial class EngineTests(ITestOutputHelper output) : IDisposable
     }
 
     [Fact]
+    public async Task AFinalizeMarkThatCannotBeSavedSendsNoFinalizeAndFailsForARetry()
+    {
+        // Review 2 L6: the mark must be on disk before the worker renames anything; a failed save stops the renames.
+        FakeTorrentEngine? fake = null;
+        await using var supervisor = new TorrentWorkerSupervisor(() => fake = new FakeTorrentEngine());
+        var engine = new TorrentDownloadEngine(supervisor, new MemoryStore(), Log);
+        var sink = new Sink { OnFinalizing = () => throw new IOException("disk full") };
+        engine.SetSink(sink);
+        var job = Job("unsaved");
+
+        var run = engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        await WaitForAsync(() => fake?.Torrents.Count == 1 ? fake : null, "the torrent added");
+        for (var i = 0; i < 4; i++) fake!.Advance();
+        var result = await run.WaitAsync(Long);
+
+        Assert.False(result.Success);
+        Assert.True(result.Failure!.IsRetryable);
+        Assert.DoesNotContain(fake!.Sent, sent => sent.Command == "finalize");
+        Assert.False(sink.Finalized.ContainsKey(job.Id));
+    }
+
+    [Fact]
     public async Task AFinalizeAKillInterruptedIsFinishedAtTheNextStartAndCheckedNotDownloaded()
     {
         // The worker renamed one of two files when the Host was killed: Finalizing is on disk, Finalized is not.

@@ -48,16 +48,63 @@ public sealed partial class DownloadManagerService
     public event EventHandler<UpdateProgressDto>? UpdateProgressChanged;
     private UpdateProgressDto? _updateProgress;
     public event EventHandler<string>? UpdateDeferred;
+
+    /// <summary>UI.R37: raised with the new value (null when none is known any more) when an update check changes it.</summary>
+    public event EventHandler<string?>? LatestVersionChanged;
+    private string? _latestVersion;
+    // The channel and manifest the value came from: after either changes in settings it says nothing until a new check.
+    private string? _latestChannel;
+    private string? _latestManifestUrl;
+
+    /// <summary>
+    /// UI.R37: the newest version the last successful update check found on this Host's own channel, while it runs; null
+    /// before one, after updates are turned off or the channel or manifest changes. A failed check leaves it as it was:
+    /// it says nothing new about the latest.
+    /// </summary>
+    public string? LatestVersion
+    {
+        get { lock (_sync) return CurrentLatestVersionLocked(); }
+    }
+
+    private string? CurrentLatestVersionLocked()
+        => _latestVersion is not null &&
+           !string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) && !string.IsNullOrWhiteSpace(_settings.UpdatePublicKey) &&
+           string.Equals(_latestChannel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(_latestManifestUrl, _settings.UpdateManifestUrl, StringComparison.Ordinal)
+            ? _latestVersion
+            : null;
+
+    /// <summary>Records what a check found on the current channel and manifest; null when it found that none is known.</summary>
+    private void NoteLatestVersion(string? version)
+    {
+        lock (_sync)
+        {
+            _latestVersion = version;
+            _latestChannel = _settings.UpdateChannel;
+            _latestManifestUrl = _settings.UpdateManifestUrl;
+        }
+        AnnounceLatestVersion();
+    }
+
+    // The value clients last heard, so each change is announced once whether a check or a settings change made it.
+    private string? _latestAnnounced;
+
+    private void AnnounceLatestVersion()
+    {
+        string? current;
+        lock (_sync)
+        {
+            current = CurrentLatestVersionLocked();
+            if (string.Equals(current, _latestAnnounced, StringComparison.OrdinalIgnoreCase)) return;
+            _latestAnnounced = current;
+        }
+        LatestVersionChanged?.Invoke(this, current);
+    }
     private readonly object _sync = new();
     private readonly List<string> _orphanPartFiles = new();
     private bool _sleepPreventionActive;
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
     private readonly HashSet<int> _completionFiredQueues = new();
-    /// <summary>
-    /// Queue id to the schedule that started its current run (audit 2 M10). Only that run's end takes the schedule's
-    /// when-done actions; a manual start or any stop disarms it. In memory: a restart starts no run of its own.
-    /// </summary>
-    private readonly Dictionary<int, Guid> _armedCompletionSchedules = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private readonly SemaphoreSlim _settingsUpdateGate = new(1, 1);
     private readonly SemaphoreSlim _metadataGate = new(2, 2);
@@ -192,6 +239,17 @@ public sealed partial class DownloadManagerService
             }
         }
 
+        bool armsDropped;
+        lock (_sync) armsDropped = DropEndedRunArmsLocked();
+        if (armsDropped)
+        {
+            try { await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Dropped in memory all the same; the next settings save writes it.
+                _log?.Invoke($"Could not save the schedule arms of ended runs: {ex.Message}");
+            }
+        }
         await ScrubRecentUrlsAsync(cancellationToken).ConfigureAwait(false);
         ScanOrphanPartFiles(removeEmptyQuarantine: true);
         // A crash can land between a job's final save and its package's, so this may have news.
@@ -231,22 +289,34 @@ public sealed partial class DownloadManagerService
         };
     }
 
-    public SnapshotDto GetSnapshot()
+    public SnapshotDto GetSnapshot() => GetSnapshot(newest: null);
+
+    /// <param name="newest">
+    /// Only this many jobs, newest first (audit 3 N5): the browser popup asks for 20 every second, and the others are
+    /// then not mapped at all. Null or not above 0 lists every job.
+    /// </param>
+    public SnapshotDto GetSnapshot(int? newest)
     {
         lock (_sync)
         {
+            // A stable sort: jobs created at the same time keep the order they had, as when every job is listed.
+            var ordered = _jobs.Values.OrderByDescending(r => r.Job.CreatedAt);
+            var jobs = (newest is > 0 ? ordered.Take(newest.Value) : ordered)
+                .Select(r => Map(r.Job))
+                .ToList();
+            LastSnapshotJobsMapped = jobs.Count;
             return new SnapshotDto
             {
                 UpdateProgress = _updateProgress,
-                Jobs = _jobs.Values
-                    .Select(r => Map(r.Job))
-                    .OrderByDescending(j => j.CreatedAt)
-                    .ToList(),
+                Jobs = jobs,
                 Settings = MapSettings(_settings),
                 Status = BuildStatusLocked(),
             };
         }
     }
+
+    /// <summary>How many jobs the last snapshot mapped, so a test can see a caller asked for only the newest few.</summary>
+    internal int LastSnapshotJobsMapped { get; private set; }
 
     /// <summary>
     /// The settings alone. <see cref="GetSnapshot"/> maps and sorts every job and reads the browser
@@ -399,7 +469,10 @@ public sealed partial class DownloadManagerService
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { return new FileMetadataResult { Error = "File information request timed out. You can still start the download." }; }
         catch (Exception ex) when (ex is HttpRequestException or ArgumentException or IOException or InvalidOperationException)
-        { return new FileMetadataResult { Error = ex.Message }; }
+        {
+            // The server's answer ("404 (Not Found)") holds no local path, so every caller hears it; the other kinds can.
+            return new FileMetadataResult { Error = caller is not null && ex is HttpRequestException ? UrlRedactor.RedactText(ex.Message) : ErrorText(ex, caller) };
+        }
         finally { _metadataGate.Release(); }
     }
 
@@ -644,7 +717,7 @@ public sealed partial class DownloadManagerService
             return new AddJobResponse
             {
                 Accepted = false,
-                Error = $"Cannot use destination '{destination}': {ex.Message}",
+                Error = caller is null ? $"Cannot use destination '{destination}': {ex.Message}" : ErrorText(ex, caller),
                 ErrorCode = "invalid_destination",
             };
         }
@@ -687,6 +760,7 @@ public sealed partial class DownloadManagerService
             QueueProcessing = startMode == StartMode.Queue,
             Source = source,
             AddedFromAnotherDevice = fromAnotherDevice,
+            QuietWindows = request.QuietWindows == true,
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
             PublicNetworkOnly = caller is not null,
@@ -723,7 +797,7 @@ public sealed partial class DownloadManagerService
             return new AddJobResponse
             {
                 Accepted = false,
-                Error = $"Could not persist the download: {ex.Message}",
+                Error = caller is null ? $"Could not persist the download: {ex.Message}" : ErrorText(ex, caller),
                 ErrorCode = "persistence_failed",
             };
         }
@@ -758,7 +832,7 @@ public sealed partial class DownloadManagerService
                     return new AddJobResponse
                     {
                         Accepted = false,
-                        Error = $"Could not persist the download: {ex.Message}",
+                        Error = caller is null ? $"Could not persist the download: {ex.Message}" : ErrorText(ex, caller),
                         ErrorCode = "persistence_failed",
                     };
                 }
@@ -1222,7 +1296,7 @@ public sealed partial class DownloadManagerService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             await SaveRemovalMarkerAsync(runtime, false, deleteOnCancelBefore).ConfigureAwait(false);
-            return new JobActionResponse { Error = "The stopped download was retained because its statistics could not be saved. " + ex.Message, Job = Map(runtime.Job) };
+            return new JobActionResponse { Error = "The stopped download was retained because its statistics could not be saved. " + ErrorText(ex, caller), Job = Map(runtime.Job) };
         }
         lock (_sync)
         {
@@ -1248,7 +1322,7 @@ public sealed partial class DownloadManagerService
         // UI.B19. After it is off the list, so its own folder no longer counts as in use. With its data kept,
         // the folder still holds that data and stays. A caller limited to some folders removes none outside them.
         await RemoveEmptyFoldersMadeForAsync(runtime.Job, caller, stillListed: false).ConfigureAwait(false);
-        JobChanged?.Invoke(this, new JobChangeEventArgs(Map(runtime.Job), "removed"));
+        AnnounceJobChange(Map(runtime.Job), "removed");
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
@@ -1354,17 +1428,40 @@ public sealed partial class DownloadManagerService
         Schedule();
     }
 
+    /// <param name="caller">A caller that isn't this machine's user; null for one who is.</param>
     public async Task<SettingsResult> UpdateSettingsAsync(
         SettingsDto settings,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await UpdateSettingsCoreAsync(settings, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var result = await UpdateSettingsCoreAsync(settings, cancellationToken, caller).ConfigureAwait(false);
+            // UI.R37: another channel or manifest, or updates turned off, leaves no latest version known.
+            if (result.Ok) AnnounceLatestVersion();
+            return result;
+        }
         finally { _settingsUpdateGate.Release(); }
     }
 
-    private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken)
+    private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken, CallerScope? caller = null)
     {
+        // T14: a client from before the torrent folders sends neither, and keeps the Host's.
+        KeepUnsentTorrentFolders(settings, _settings);
+        if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot))
+        {
+            try
+            {
+                if (!Path.IsPathFullyQualified(settings.TorrentCategoryFoldersRoot.Trim())) throw new ArgumentException("not a full path");
+                settings.TorrentCategoryFoldersRoot = Path.GetFullPath(settings.TorrentCategoryFoldersRoot.Trim());
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+            {
+                return new SettingsResult { Ok = false, Error = "The torrent folder must be a full path, or empty for the same folders as other downloads.", Settings = MapSettings(_settings) };
+            }
+        }
+
         settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in settings.EventSoundFiles)
         {
@@ -1384,6 +1481,13 @@ public sealed partial class DownloadManagerService
                 schedule.RepeatEveryMinutes is not null && !schedule.TimedStartEnabled ||
                 !schedule.StartOnHostStartup && !schedule.TimedStartEnabled))
             return new SettingsResult { Error = "Select a startup or timed trigger, synchronization interval 1–1440 minutes, and retry limit 0–100 or unlimited.", Settings = MapSettings(_settings) };
+        // Audit L12: a time the scheduler can't read would be kept and never act. Only a new or changed one is refused,
+        // so a save of other settings still goes through with one kept from before.
+        if ((settings.Schedules ?? new()).Any(schedule => schedule is not null &&
+                (!TryParseScheduleTime(schedule.StartTime, out _) && !ScheduleTimeKept(schedule.Id, schedule.StartTime, stop: false) ||
+                 !string.IsNullOrWhiteSpace(schedule.StopTime) && !TryParseScheduleTime(schedule.StopTime, out _) &&
+                 !ScheduleTimeKept(schedule.Id, schedule.StopTime, stop: true))))
+            return new SettingsResult { Error = "Enter schedule times as hours and minutes, such as 09:00.", Settings = MapSettings(_settings) };
         var categories = settings.CustomCategories ?? new();
         var categoryIds = new HashSet<string>(StringComparer.Ordinal);
         var categoryNames = new HashSet<string>(FileCategories.Names.Append("other"), StringComparer.OrdinalIgnoreCase);
@@ -1435,7 +1539,7 @@ public sealed partial class DownloadManagerService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return new SettingsResult { Ok = false, Error = ex.Message, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = ErrorText(ex, caller), Settings = MapSettings(_settings) };
         }
 
         settings.DefaultDownloadDirectory = directory;
@@ -1496,6 +1600,8 @@ public sealed partial class DownloadManagerService
             TorrentsEnabled = settings.TorrentsEnabled,
             TorrentRoute = TorrentRoutes.IsKnown(settings.TorrentRoute) ? settings.TorrentRoute : TorrentRoutes.Ask,
             TorrentChooseFiles = settings.TorrentChooseFiles,
+            UseTorrentCategoryFolders = settings.UseTorrentCategoryFolders ?? true,
+            TorrentCategoryFoldersRoot = string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot) ? null : settings.TorrentCategoryFoldersRoot,
             TorrentHandler = settings.TorrentHandler,
             TorrentSeedAfterDownload = settings.TorrentSeedAfterDownload,
             TorrentSeedRatio = settings.TorrentSeedRatio,
@@ -1635,6 +1741,10 @@ public sealed partial class DownloadManagerService
             if (_settings.TorrentsEnabled && !next.TorrentsEnabled)
                 StopSeedingWhere(_ => true);
             NoteSettingsRevisionLocked(_settings, next);
+            // Review 2 L4: a queue's arm is the Host's. A run that ended while this save was under way took it from the
+            // queue being replaced (under _sync only), so the live value wins over the copy made before.
+            foreach (var queue in next.Queues)
+                queue.ArmedScheduleId = _settings.Queues.FirstOrDefault(current => current.Id == queue.Id)?.ArmedScheduleId;
             _settings = next;
             reconnected = [];
             // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
@@ -1825,7 +1935,7 @@ public sealed partial class DownloadManagerService
                 case "start":
                     _completionFiredQueues.Remove(queue.Id);
                     // A schedule that starts it arms its when-done actions again after this (audit 2 M10).
-                    _armedCompletionSchedules.Remove(queue.Id);
+                    queue.ArmedScheduleId = null;
                     queue.IsRunning = true;
                     // U-WL-2: starting a queue starts what waits in it: queued and "later" downloads, and those its own
                     // stop, quota, a move or an exit paused. One the user paused stays paused, and a failed one is tried
@@ -1865,11 +1975,11 @@ public sealed partial class DownloadManagerService
                     if (armForSchedule is { } armed && _jobs.Values.Any(r => r.Job.IsQueued && r.Job.QueueId == queue.Id &&
                             (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or
                                 DownloadState.Cancelled or DownloadState.Paused))))
-                        _armedCompletionSchedules[queue.Id] = armed;
+                        queue.ArmedScheduleId = armed;
                     break;
                 case "stop":
                     queue.IsRunning = false;
-                    _armedCompletionSchedules.Remove(queue.Id);
+                    queue.ArmedScheduleId = null;
                     // Stopping a queue (by hand or by its schedule) stops its seeding torrents too (T2).
                     StopSeedingWhere(runtime => runtime.Job.IsQueued && runtime.Job.QueueId == queue.Id);
                     foreach (var waiting in _jobs.Values.Where(runtime => runtime.Job.IsQueued && runtime.Job.QueueId == queue.Id && runtime.Job.QueueRetryAt is not null))
@@ -1968,6 +2078,8 @@ public sealed partial class DownloadManagerService
         if (string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) ||
             string.IsNullOrWhiteSpace(_settings.UpdatePublicKey))
         {
+            // UI.R37: with updates off nothing is known about the latest any more.
+            NoteLatestVersion(null);
             return new UpdateCheckResult
             {
                 Ok = false,
@@ -2047,6 +2159,8 @@ public sealed partial class DownloadManagerService
 
             if (!string.Equals(manifest.Channel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase))
             {
+                // UI.R37: a manifest of another channel says nothing about this channel's latest, nor does an older value.
+                NoteLatestVersion(null);
                 return new UpdateCheckResult
                 {
                     Ok = true,
@@ -2056,6 +2170,8 @@ public sealed partial class DownloadManagerService
                 };
             }
 
+            // UI.R37: only a manifest of this Host's own channel says what the latest is; one of another channel doesn't.
+            NoteLatestVersion(manifest.Version);
             if (!IsNewerVersion(manifest.Version, install.Version))
             {
                 return new UpdateCheckResult
@@ -2883,9 +2999,9 @@ public sealed partial class DownloadManagerService
                 if (request.NewFilePath is not null)
                     return new JobActionResponse { Error = "Change completion actions and Move/Rename in separate requests." };
                 if (completion.SystemAction is not ("none" or "exit" or "shutdown" or "restart" or "logoff"))
-                    return new JobActionResponse { Error = "Unknown completion system action." };
+                    return new JobActionResponse { Error = "Unknown computer action." };
                 if (completion.SystemAction != "none" && !_settings.AllowSystemCompletionActions)
-                    return new JobActionResponse { Error = "Enable system completion actions in Scheduler before choosing this action." };
+                    return new JobActionResponse { Error = "Allow computer actions in the Scheduler before choosing this action." };
                 if (completion.ProgramPath is { Length: > 0 } program && !IsCompletionProgramPath(program))
                     return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
             }
@@ -2943,7 +3059,7 @@ public sealed partial class DownloadManagerService
                 }
                 catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
                 {
-                    return new JobActionResponse { Ok = false, Error = ex.Message };
+                    return new JobActionResponse { Ok = false, Error = ErrorText(ex, caller) };
                 }
 
                 var directory = Path.GetDirectoryName(target);
@@ -3017,7 +3133,7 @@ public sealed partial class DownloadManagerService
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                return new JobActionResponse { Ok = false, Error = ex.Message };
+                return new JobActionResponse { Ok = false, Error = ErrorText(ex, caller) };
             }
 
             lock (_sync)
@@ -3038,9 +3154,61 @@ public sealed partial class DownloadManagerService
 
         try
         {
+            // Audit 2 L27: a moved file whose new place isn't saved would be shown as missing; it goes back instead.
             await PersistAsync(runtime, cancellationToken,
-                requireSuccess: request.CategoryId is not null || request.CompletionOptions is not null || request.Priority is not null,
+                requireSuccess: request.CategoryId is not null || request.CompletionOptions is not null || request.Priority is not null || moveTo is not null,
                 gateHeld: true).ConfigureAwait(false);
+        }
+        catch (Exception saveError) when (moveTo is not null)
+        {
+            var putBack = true;
+            try
+            {
+                File.Move(moveTo, moveFrom!);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                putBack = false;
+                _log?.Invoke($"Job {runtime.Job.Id}: its moved file could not be put back after the save failed: {ex.GetType().Name}");
+            }
+
+            if (putBack)
+            {
+                lock (_sync)
+                {
+                    runtime.Job.WrittenFinalPath = beforeEdit!.WrittenFinalPath;
+                    runtime.Job.FinalFilePath = beforeEdit.FinalFilePath;
+                    runtime.Job.FileName = beforeEdit.FileName;
+                    runtime.Job.NameFromAddress = beforeEdit.NameFromAddress;
+                    runtime.Job.DestinationDirectory = beforeEdit.DestinationDirectory;
+                    runtime.Job.PartFilePath = beforeEdit.PartFilePath;
+                    // The failed save already took the new name's automatic category; the old name's comes back with it.
+                    runtime.Job.CategoryIsAutomatic = beforeEdit.CategoryIsAutomatic;
+                    runtime.Job.CategoryId = beforeEdit.CategoryId;
+                    runtime.CategoryFileName = beforeEdit.FileName;
+                    if (request.CompletionOptions is not null) runtime.Job.CompletionOptions = beforeEdit.CompletionOptions;
+                    if (request.Description is not null) runtime.Job.Description = beforeEdit.Description;
+                    if (request.SpeedLimitBytesPerSecond is not null) runtime.Job.SpeedLimitBytesPerSecond = beforeEdit.SpeedLimitBytesPerSecond;
+                    if (request.ShowCompletionDialog is not null) runtime.Job.ShowCompletionDialog = beforeEdit.ShowCompletionDialog;
+                    if (request.Priority is not null) runtime.Job.Priority = beforeEdit.Priority;
+                    runtime.Job.Touch();
+                }
+            }
+            else
+            {
+                // The record in memory follows the file to its new place; other windows and the web UI must too.
+                Raise(runtime, "updated");
+            }
+
+            _log?.Invoke($"Job {runtime.Job.Id}: Move/Rename was not saved: {saveError.GetType().Name}");
+            return new JobActionResponse
+            {
+                Ok = false,
+                Error = putBack
+                    ? "The download's record could not be saved, so the file was left where it was."
+                    : "The file was moved, but the download's record could not be saved.",
+                Job = Map(runtime.Job),
+            };
         }
         catch
         {
@@ -3357,6 +3525,14 @@ public sealed partial class DownloadManagerService
         return false;
     }
 
+    /// <summary>Whether the saved schedule <paramref name="id"/> already has this start (or stop) time.</summary>
+    private bool ScheduleTimeKept(Guid id, string? value, bool stop)
+    {
+        lock (_sync)
+            return _settings.Schedules.FirstOrDefault(schedule => schedule.Id == id) is { } saved &&
+                   string.Equals(stop ? saved.StopTime : saved.StartTime, value, StringComparison.Ordinal);
+    }
+
     private void StartSchedulerLoop()
     {
         if (_schedulerCts is not null)
@@ -3465,6 +3641,7 @@ public sealed partial class DownloadManagerService
 
         // Quota use counted since the last save (audit 2 M9).
         await SaveQuotaUseQuietlyAsync(force: true).ConfigureAwait(false);
+        await SaveTakenArmsQuietlyAsync().ConfigureAwait(false);
 
         // The torrent worker last: every torrent has been paused and saved, so it only has to exit.
         if (_torrentEngine is IAsyncDisposable torrents)
@@ -3526,7 +3703,8 @@ public sealed partial class DownloadManagerService
                 // re-pointed concurrently can never have its part file taken away.
                 lock (_sync)
                 {
-                    if (AttachedPartPathsLocked().Contains(NormalizePath(path)) || IsTorrentPartLocked(path) || !File.Exists(path))
+                    var basePath = PartBaseOf(path);
+                    if (AttachedPartPathsLocked().Contains(NormalizePath(basePath)) || IsTorrentPartLocked(basePath) || !File.Exists(path))
                     {
                         continue;
                     }
@@ -3631,6 +3809,7 @@ public sealed partial class DownloadManagerService
     private static bool IsOwnPartFileName(string fileName)
     {
         const int Hex = 32;
+        fileName = PartBaseOf(fileName);
         if (!fileName.EndsWith(".part", StringComparison.OrdinalIgnoreCase)) return false;
         var end = fileName.Length - ".part".Length;
         var start = end - Hex;
@@ -3638,6 +3817,21 @@ public sealed partial class DownloadManagerService
         for (var i = start; i < end; i++)
             if (!char.IsAsciiHexDigit(fileName[i])) return false;
         return true;
+    }
+
+    /// <summary>The tracks the engine keeps beside a stream's part file (<c>.part.video</c>, <c>.part.audio</c>,
+    /// <c>.part.mux.mp4</c>); they belong to whatever that part file belongs to.</summary>
+    private static readonly string[] PartTrackSuffixes = [".video", ".audio", ".mux.mp4"];
+
+    /// <summary>The part file a track file goes with, or <paramref name="path"/> itself.</summary>
+    private static string PartBaseOf(string path)
+    {
+        foreach (var suffix in PartTrackSuffixes)
+        {
+            if (path.EndsWith(".part" + suffix, StringComparison.OrdinalIgnoreCase)) return path[..^suffix.Length];
+        }
+
+        return path;
     }
 
     private List<string> ScanOrphanPartFiles(bool removeEmptyQuarantine = false)
@@ -3689,14 +3883,18 @@ public sealed partial class DownloadManagerService
 
             try
             {
-                foreach (var path in Directory.EnumerateFiles(
-                             directory, "*.part", SearchOption.TopDirectoryOnly))
+                // Review 1 N3: a stream's kept tracks too, which a pause or a failed mux leaves beside its part file.
+                var found = Directory.EnumerateFiles(directory, "*.part", SearchOption.TopDirectoryOnly)
+                    .Concat(PartTrackSuffixes.SelectMany(suffix =>
+                        Directory.EnumerateFiles(directory, "*.part" + suffix, SearchOption.TopDirectoryOnly)));
+                foreach (var path in found)
                 {
                     // Audit 2 M13: only this app's own part files (name.<job id>.part). A browser's or another download
                     // manager's "name.part" in the same folder is theirs, still being written, and never ours to clean.
                     if (!IsOwnPartFileName(Path.GetFileName(path))) continue;
+                    var basePath = PartBaseOf(path);
                     bool attached;
-                    lock (_sync) attached = known.Contains(NormalizePath(path)) || IsTorrentPartLocked(path);
+                    lock (_sync) attached = known.Contains(NormalizePath(basePath)) || IsTorrentPartLocked(basePath);
                     if (attached)
                     {
                         continue;
@@ -4143,11 +4341,26 @@ public sealed partial class DownloadManagerService
 
         foreach (var runtime in toStart)
         {
+            BeforeRunForTesting?.Invoke(runtime.Job.Id);
             runtime.Runner = RunJobAsync(runtime);
         }
 
         UpdateSleepPrevention();
     }
+
+    /// <summary>
+    /// Review 2 L10: an exception's words can hold local paths and the Windows user name. This machine's user gets them;
+    /// a caller from another device gets the kind only, as the dispatcher's own catch says it (L16), and the log the words.
+    /// </summary>
+    private string ErrorText(Exception ex, CallerScope? caller)
+    {
+        if (caller is null) return ex.Message;
+        _log?.Invoke($"A web session's request failed: {UrlRedactor.RedactText(ex.Message)}");
+        return $"That could not be done ({ex.GetType().Name}). The app's log has the details.";
+    }
+
+    /// <summary>Tests only: called in the gap between a job being picked and its runner starting (audit 2 L14).</summary>
+    internal Action<Guid>? BeforeRunForTesting { get; set; }
 
     /// <summary>
     /// Audit 2 L10: decided and applied under one gate, so two callers can't apply their answers out of order and leave
@@ -4246,9 +4459,11 @@ public sealed partial class DownloadManagerService
                         job.State = DownloadState.Connecting;
                         job.Failure = null;
                         job.StartedAt ??= DateTimeOffset.UtcNow;
+                        job.RunStartedAt = DateTimeOffset.UtcNow;
                         job.CompletedAt = null;
                         job.FileRemovedAfterExtraction = false;
                         job.FileMissing = false;
+                        job.TorrentFileReady = false;
                         job.PausedByExit = false;
                         job.ActiveConnections = 0;
                         job.Touch();
@@ -4285,6 +4500,7 @@ public sealed partial class DownloadManagerService
                 {
                     // Its share of the total speed ends now, not when its wind-down finishes (UI.R24).
                     _speedHistory.Stopped(job.Id, now);
+                    _speedHistory.UploadStopped(job.Id, now);
                     return;
                 }
 
@@ -4341,7 +4557,7 @@ public sealed partial class DownloadManagerService
 
             if (dto is not null)
             {
-                JobChanged?.Invoke(this, new JobChangeEventArgs(dto, "progress"));
+                AnnounceJobChange(dto, "progress");
             }
 
             if (now - lastProgressSave >= TimeSpan.FromSeconds(5))
@@ -4409,7 +4625,10 @@ public sealed partial class DownloadManagerService
             runtime.LastPhase = null;
             runtime.Preempted = false;
             runtime.TorrentUploadRate = 0;
+            // T8: what it sent while it downloaded ends with the download; seeding reports its own.
+            if (job.Torrent is { Seeding: false } stoppedTorrent) stoppedTorrent.UploadRate = 0;
             _speedHistory.Stopped(job.Id, DateTimeOffset.UtcNow);
+            _speedHistory.UploadStopped(job.Id, DateTimeOffset.UtcNow);
 
             // The file is where it landed, whatever else happened while it got there.
             if (result.Success)
@@ -4531,6 +4750,12 @@ public sealed partial class DownloadManagerService
             // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it.
             if (job.Torrent is null) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
             else await MarkTorrentFilesAsync(job).ConfigureAwait(false);
+            // T10: a download that looks like a torrent, and whose file reads as one, is offered as a torrent. Only such a
+            // download's file is read (TorrentFileRule); every other file is left unopened.
+            if (TorrentFileRule.LooksLikeTorrent(job) && TorrentFileRule.IsTorrentFile(job.FinalFilePath))
+            {
+                lock (_sync) job.TorrentFileReady = true;
+            }
             try
             {
                 await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
@@ -4651,6 +4876,60 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    /// <summary>
+    /// Takes the queue's arm (audit 2 M10). Review 2 L4: the arm is saved with the queue, so one left on disk would hand
+    /// a later run by hand the schedule's actions after a restart; <see cref="SaveTakenArmsQuietlyAsync"/> saves that it
+    /// is gone. Under <c>_sync</c>.
+    /// </summary>
+    private Guid? TakeArmLocked(int queueId)
+    {
+        if (_settings.Queues.FirstOrDefault(queue => queue.Id == queueId) is not { ArmedScheduleId: { } armed } queue) return null;
+        queue.ArmedScheduleId = null;
+        _armsTakenUnsaved = true;
+        return armed;
+    }
+
+    private bool _armsTakenUnsaved;
+
+    /// <summary>Saves the settings for arms taken since the last save. Waits a little for a save under way; the next
+    /// settings save (or the one at exit) carries it otherwise, and a start drops an arm whose run had ended.</summary>
+    private async Task SaveTakenArmsQuietlyAsync()
+    {
+        lock (_sync)
+            if (!_armsTakenUnsaved) return;
+        if (!await _settingsUpdateGate.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false)) return;
+        try
+        {
+            lock (_sync) _armsTakenUnsaved = false;
+            await _settingsStore.SaveAsync(_settings, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lock (_sync) _armsTakenUnsaved = true;
+            _log?.Invoke($"Could not save the end of a scheduled run: {ex.Message}");
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    /// <summary>
+    /// Review 2 L4: at start, a queue keeps the arm of the schedule that started its run only while that run goes on
+    /// (downloads an exit paused resume, audit 2 M11). One whose run had ended, as a crash can leave it, is dropped.
+    /// </summary>
+    private bool DropEndedRunArmsLocked()
+    {
+        var dropped = false;
+        foreach (var queue in _settings.Queues.Where(queue => queue.ArmedScheduleId is not null))
+        {
+            if (queue.IsRunning && _jobs.Values.Any(r => r.Job.IsQueued && r.Job.QueueId == queue.Id &&
+                    (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or
+                        DownloadState.Cancelled or DownloadState.Paused))))
+                continue;
+            queue.ArmedScheduleId = null;
+            dropped = true;
+        }
+        return dropped;
+    }
+
     private async Task MaybeRunCompletionActionsAsync(
         DownloadJob job,
         string changeType,
@@ -4661,9 +4940,9 @@ public sealed partial class DownloadManagerService
             return;
         }
 
-        ScheduleRule? schedule;
-        bool allowSystemActions;
-        bool blockedByOtherDownloads;
+        ScheduleRule? schedule = null;
+        var allowSystemActions = false;
+        var blockedByOtherDownloads = false;
         lock (_sync)
         {
             // A failure the queue retries by itself doesn't end the run.
@@ -4688,27 +4967,29 @@ public sealed partial class DownloadManagerService
             if (withActions.Count == 0)
             {
                 // The run is over: an arm left behind would hand a later run by hand the actions turned on again since.
-                _armedCompletionSchedules.Remove(job.QueueId);
-                return;
+                TakeArmLocked(job.QueueId);
             }
-
-            _completionFiredQueues.Add(job.QueueId);
-            // Audit 2 M10: only a run the schedule started; a manual start or a stop disarms it, and the run's end uses
-            // the arm up whether or not its actions run.
-            schedule = _armedCompletionSchedules.Remove(job.QueueId, out var armedId)
-                ? withActions.FirstOrDefault(s => s.Id == armedId)
-                : null;
-            if (schedule is null)
+            else
             {
-                _log?.Invoke($"Completion actions skipped: queue {job.QueueId} finished a run its schedule did not start.");
-                return;
-            }
+                _completionFiredQueues.Add(job.QueueId);
+                // Audit 2 M10: only a run the schedule started; a manual start or a stop disarms it, and the run's end
+                // uses the arm up whether or not its actions run.
+                schedule = TakeArmLocked(job.QueueId) is { } armedId
+                    ? withActions.FirstOrDefault(s => s.Id == armedId)
+                    : null;
+                if (schedule is null)
+                    _log?.Invoke($"Completion actions skipped: queue {job.QueueId} finished a run its schedule did not start.");
 
-            allowSystemActions = _settings.AllowSystemCompletionActions;
-            blockedByOtherDownloads = _jobs.Values.Any(r =>
-                r.Job.Id != job.Id &&
-                (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled)));
+                allowSystemActions = _settings.AllowSystemCompletionActions;
+                blockedByOtherDownloads = _jobs.Values.Any(r =>
+                    r.Job.Id != job.Id &&
+                    (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled)));
+            }
         }
+
+        // Review 2 L4: the arm taken above is saved before any action (an exit or shutdown ends the Host).
+        await SaveTakenArmsQuietlyAsync().ConfigureAwait(false);
+        if (schedule is null) return;
 
         // Audit 2 H1: never a file a browser on another device added; opening it would run what that browser chose. A
         // provider's file neither: who chose it (added, selected or approved, from any client, often later) isn't kept
@@ -4886,7 +5167,28 @@ public sealed partial class DownloadManagerService
             dto = Map(runtime.Job);
         }
 
-        JobChanged?.Invoke(this, new JobChangeEventArgs(dto, changeType));
+        AnnounceJobChange(dto, changeType);
+    }
+
+    /// <summary>
+    /// Tells each <see cref="JobChanged"/> subscriber, one at a time. A subscriber that throws is logged and the rest are
+    /// still told: the runner that announced must go on, or its job stays Connecting with nothing running it (audit 2 L14).
+    /// </summary>
+    private void AnnounceJobChange(JobDto dto, string changeType)
+    {
+        if (JobChanged is not { } handlers) return;
+        var args = new JobChangeEventArgs(dto, changeType);
+        foreach (EventHandler<JobChangeEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"A job change listener failed for job {dto.Id}: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -5036,6 +5338,7 @@ public sealed partial class DownloadManagerService
         lock (_sync)
         {
             if (Outside("The last download folder", settings.LastDestinationDirectory, _settings.LastDestinationDirectory) is { } last) return last;
+            if (Outside("The torrent folder", settings.TorrentCategoryFoldersRoot, _settings.TorrentCategoryFoldersRoot) is { } torrents) return torrents;
             foreach (var (category, folder) in settings.CategoryFolders ?? new())
             {
                 _settings.CategoryFolders.TryGetValue(category, out var current);
@@ -5072,6 +5375,20 @@ public sealed partial class DownloadManagerService
 
         var directory = (useLastFolder ? _settings.LastDestinationDirectory : null) ?? _settings.DefaultDownloadDirectory;
         return Path.GetFullPath(directory);
+    }
+
+    /// <summary>T14: where a torrent goes, on this PC or through a provider: <paramref name="requested"/>, else <see cref="TorrentFolderRules"/>.</summary>
+    private string ResolveTorrentDestination(string? requested, string? torrentName, bool useLastFolder)
+    {
+        if (!string.IsNullOrWhiteSpace(requested)) return Path.GetFullPath(requested.Trim());
+        return TorrentFolderRules.Resolve(_settings, FileCategories.For(torrentName), useLastFolder);
+    }
+
+    /// <summary>T14: what a save from a client that predates the torrent folders leaves out (null) stays as the Host has it.</summary>
+    internal static void KeepUnsentTorrentFolders(SettingsDto requested, AppSettings current)
+    {
+        requested.UseTorrentCategoryFolders ??= current.UseTorrentCategoryFolders;
+        requested.TorrentCategoryFoldersRoot ??= current.TorrentCategoryFoldersRoot ?? string.Empty;
     }
 
     /// <summary>
@@ -5204,6 +5521,7 @@ public sealed partial class DownloadManagerService
             StateDirectory = _paths.Root,
             BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
+            LatestVersion = CurrentLatestVersionLocked(),
         };
     }
 
@@ -5260,6 +5578,7 @@ public sealed partial class DownloadManagerService
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             StartedAt = job.StartedAt,
+            RunStartedAt = job.RunStartedAt,
             CompletedAt = job.CompletedAt,
             ContentType = job.ContentType,
             ETag = job.ETag,
@@ -5279,6 +5598,7 @@ public sealed partial class DownloadManagerService
             EstimatedRemaining = job.EstimatedRemaining,
             Source = JsonNamingPolicy.CamelCase.ConvertName(job.Source.ToString()),
             AddedFromAnotherDevice = job.AddedFromAnotherDevice,
+            QuietWindows = job.QuietWindows,
             Torrent = job.Torrent is { } torrent ? new TorrentDto
             {
                 InfoHash = torrent.InfoHash, Name = torrent.Name, HasMetadata = torrent.HasMetadata,
@@ -5302,6 +5622,7 @@ public sealed partial class DownloadManagerService
             CancelledByPackageId = job.CancelledByPackageId,
             Description = job.Description,
             ExpectedSha256 = job.ExpectedSha256,
+            HandoffContentType = job.HandoffContentType,
             QueueName = job.QueueName,
             StartMode = JsonNamingPolicy.CamelCase.ConvertName(job.StartMode.ToString()),
             ConflictPolicy = JsonNamingPolicy.CamelCase.ConvertName(job.ConflictPolicy.ToString()),
@@ -5311,6 +5632,7 @@ public sealed partial class DownloadManagerService
             IsRemote = job.RemoteSource is not null,
             RemoteProvider = job.RemoteSource?.Provider,
             FileRemovedAfterExtraction = job.FileRemovedAfterExtraction,
+            TorrentFileReady = job.TorrentFileReady && job.State == DownloadState.Completed,
             StatusNote = concealed && note is not null ? UrlRedactor.HideAddresses(note) : note,
             Failure = job.Failure is null
                 ? null
@@ -5377,6 +5699,8 @@ public sealed partial class DownloadManagerService
             TorrentsEnabled = settings.TorrentsEnabled,
             TorrentRoute = settings.TorrentRoute,
             TorrentChooseFiles = settings.TorrentChooseFiles,
+            UseTorrentCategoryFolders = settings.UseTorrentCategoryFolders,
+            TorrentCategoryFoldersRoot = settings.TorrentCategoryFoldersRoot ?? string.Empty,
             TorrentHandler = settings.TorrentHandler,
             TorrentSeedAfterDownload = settings.TorrentSeedAfterDownload,
             TorrentSeedRatio = settings.TorrentSeedRatio,
@@ -5394,6 +5718,11 @@ public sealed partial class DownloadManagerService
             TorrentUseProxy = settings.TorrentUseProxy,
             FfmpegPath = settings.FfmpegPath,
             PostDownloadCommand = settings.PostDownloadCommand,
+            // Review 2:L5: a program kept from before the .exe rule is refused when it would run; Options says so.
+            PostDownloadCommandProblem = string.IsNullOrWhiteSpace(settings.PostDownloadCommand) ||
+                PostDownloadCommandLine.IsAllowedProgram(settings.PostDownloadCommand.Trim())
+                ? null
+                : $"This program won't run after downloads. {PostDownloadCommandLine.ProgramRefused}",
             UpdateManifestUrl = settings.UpdateManifestUrl,
             UpdatePublicKey = settings.UpdatePublicKey,
             UpdateChannel = settings.UpdateChannel,

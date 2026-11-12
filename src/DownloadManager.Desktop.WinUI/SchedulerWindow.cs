@@ -39,11 +39,11 @@ public sealed class SchedulerWindow : Window
     private readonly DateField _oneTimeDate = new("One-time date (optional)", "Repeat on the days above");
     private readonly CheckBox _scheduleEnabled = new() { Content = "Enable schedule" };
     private readonly CheckBox _openWhenDone = new() { Content = "Open a file when the queue finishes" };
-    private readonly CheckBox _exitWhenDone = new() { Content = "Exit Download Manager when the queue finishes" };
+    private readonly CheckBox _exitWhenDone = new() { Content = "Exit Inbound when the queue finishes" };
     private readonly CheckBox _shutdownWhenDone = new() { Content = "Turn off the computer when the queue finishes" };
     private readonly ComboBox _shutdownMode = new() { Header = "Computer action", ItemsSource = new[] { "Shut down", "Restart", "Log off" } };
     private readonly CheckBox _forceShutdown = new() { Content = "Force the selected computer action" };
-    private readonly CheckBox _allowSystemActions = new() { Content = "Allow system completion actions (global opt-in)" };
+    private readonly CheckBox _allowSystemActions = new() { Content = "Allow computer actions (shut down, restart, log off) when downloads finish" };
     private readonly TextBlock _scheduleHint = InboundUi.Secondary();
     private readonly StackPanel _runOptionsHost = new() { Spacing = 8 };
     private readonly Button _newSchedule = new() { Content = "New schedule" };
@@ -97,6 +97,52 @@ public sealed class SchedulerWindow : Window
         _forceShutdown.IsChecked, (_scheduleTarget.SelectedItem as ComboBoxItem)?.Tag, _runOptions?.StateKey });
     private string LimitsFormKey() => JsonSerializer.Serialize(new object?[] { _maxConcurrent.Text,
         _quotaEnabled.IsChecked, _quotaMb.Text, _quotaHours.Text });
+    private bool _closeConfirmed;
+    private bool _askingToClose;
+
+    /// <summary>
+    /// Review 5:S1: whether Apply has something to save: a staged queue limit, file move or schedule edit, the
+    /// completion-action opt-in, or a form changed since it was loaded and not staged yet.
+    /// </summary>
+    private bool HasUnsavedEdits()
+    {
+        if (_snapshot is null) return false;
+        if (_queueDrafts.Count > 0 || _dirtySchedules.Count > 0 || _removedSchedules.Count > 0 || _globalOptInDirty) return true;
+        if (_fileDrafts.Values.Any(draft => draft.MembershipChanges.Count > 0 || draft.OrderDirty)) return true;
+        // A New schedule form has no loaded key: Apply would save it (CaptureEditors stages it), so Close asks too.
+        if (_scheduleEditorEnabled && ScheduleFormKey() != _scheduleLoadedKey) return true;
+        return _limitsLoadedKey.Length > 0 && LimitsFormKey() != _limitsLoadedKey;
+    }
+
+    /// <summary>Closes the window, first asking whether to discard edits Apply hasn't saved. No edits: closes at once.</summary>
+    private async Task CloseAskingAsync()
+    {
+        if (_closed || _askingToClose) return;
+        if (!_closeConfirmed && HasUnsavedEdits())
+        {
+            _askingToClose = true;
+            try
+            {
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    Title = "Discard your changes?",
+                    Content = new TextBlock { Text = "Changes made here aren't saved yet. Apply saves them.", TextWrapping = TextWrapping.Wrap },
+                    PrimaryButtonText = "Discard changes",
+                    PrimaryButtonStyle = InboundUi.DangerDialogButton,
+                    CloseButtonText = "Keep editing",
+                    DefaultButton = ContentDialogButton.Close,
+                    RequestedTheme = ((FrameworkElement)Content).ActualTheme,
+                };
+                if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+            }
+            finally { _askingToClose = false; }
+        }
+        if (_closed) return;
+        _closeConfirmed = true;
+        Close();
+    }
+
     private bool CaptureEditors(int? queueId)
     {
         if (_capturingEditors || _snapshot is null) return true;
@@ -197,7 +243,14 @@ public sealed class SchedulerWindow : Window
         _apply.Click += async (_, _) => await ApplyAsync();
         Grid.SetColumn(_apply, 1);
         bottom.Children.Add(_apply);
-        _close.Click += (_, _) => Close();
+        // Review 5:S1: unsaved edits are asked about before the window goes, by Close and by the title bar alike.
+        _close.Click += async (_, _) => await CloseAskingAsync();
+        AppWindow.Closing += (sender, args) =>
+        {
+            if (_closeConfirmed || _closed || !HasUnsavedEdits()) return;
+            args.Cancel = true;
+            _ = CloseAskingAsync();
+        };
         Grid.SetColumn(_close, 2);
         bottom.Children.Add(_close);
         Grid.SetRow(bottom, 1);
@@ -233,7 +286,11 @@ public sealed class SchedulerWindow : Window
         // A queue stopped or a schedule added in another window shows when the user comes back to this one.
         Activated += (_, args) =>
         {
+#if HAS_UNO
+            if (args.WindowActivationState != Windows.UI.Core.CoreWindowActivationState.Deactivated) _ = RefreshAsync();
+#else
             if (args.WindowActivationState != WindowActivationState.Deactivated) _ = RefreshAsync();
+#endif
         };
         _connection.Start();
         _ = RefreshAsync();
@@ -1014,7 +1071,7 @@ public sealed class SchedulerWindow : Window
         {
             var reply = await _connection.QueueActionAsync(request);
             var result = reply.GetPayload<SettingsResult>();
-            if (reply.Type != MessageTypes.SettingsResult || !result.Ok) { _status.Text = result.Error ?? "The Host rejected the queue change."; return; }
+            if (reply.Type != MessageTypes.SettingsResult || !result.Ok) { _status.Text = result.Error ?? _connection.NoReasonWords; return; }
             await RefreshAsync();
             UpdateQueueList(request.Action == "create" ? result.Settings.Queues.OrderByDescending(item => item.Order).FirstOrDefault()?.Id : request.Action == "delete" ? request.MoveContentsToQueueId : request.QueueId);
             _status.Text = request.Action switch
@@ -1066,7 +1123,7 @@ public sealed class SchedulerWindow : Window
                 if (current is null) { errors.Add($"Queue '{draft.Baseline.Name}' was removed; its unsaved limits were not applied."); continue; }
                 var original = draft.Baseline;
                 if (current.MaxConcurrentDownloads != original.MaxConcurrentDownloads || current.QuotaEnabled != original.QuotaEnabled || current.QuotaBytes != original.QuotaBytes || current.QuotaWindowHours != original.QuotaWindowHours)
-                { errors.Add($"Queue '{current.Name}' limit policy changed elsewhere; its unsaved limits were not applied."); continue; }
+                { errors.Add($"Queue '{current.Name}' limits were changed elsewhere; its unsaved limits were not applied."); continue; }
                 if (draft.DesiredRetryLimit != draft.RetryBaseline && current.RetryLimit != draft.RetryBaseline)
                 { errors.Add($"Queue '{current.Name}' retry policy changed elsewhere; its unsaved queue edits were not applied."); continue; }
                 current.MaxConcurrentDownloads = draft.DesiredMaxConcurrent;
@@ -1112,7 +1169,7 @@ public sealed class SchedulerWindow : Window
             if (_globalOptInDirty)
             {
                 if (merged.AllowSystemCompletionActions != _globalOptInBaseline)
-                    errors.Add("The global system-action setting changed elsewhere; your unsaved opt-in was not applied.");
+                    errors.Add("Allow computer actions was changed elsewhere; your unsaved change to it was not applied.");
                 else { merged.AllowSystemCompletionActions = _allowSystemActions.IsChecked == true; optInApplied = true; }
             }
 
@@ -1123,7 +1180,7 @@ public sealed class SchedulerWindow : Window
                 var result = settingsReply.GetPayload<SettingsResult>();
                 if (settingsReply.Type != MessageTypes.SettingsResult || !result.Ok)
                 {
-                    errors.Add("Settings were not saved: " + (result.Error ?? "The Host rejected the update."));
+                    errors.Add("Settings were not saved: " + (result.Error ?? _connection.NoReasonWords));
                     appliedQueueIds.Clear(); appliedSchedules.Clear(); removedSchedules.Clear(); newScheduleIds.Clear(); optInApplied = false;
                 }
                 else
@@ -1175,13 +1232,13 @@ public sealed class SchedulerWindow : Window
                     var latest = await _connection.RefreshAsync();
                     var job = latest.Jobs.FirstOrDefault(item => item.Id == jobId);
                     if (job is null || job.QueueId != change.ExpectedSourceQueueId)
-                    { errors.Add($"A download unsaved for {queueName} membership changed elsewhere; it was left untouched."); membershipFailures.Add(jobId); continue; }
+                    { errors.Add($"A download you moved in or out of {queueName} was changed elsewhere; it was left as it is."); membershipFailures.Add(jobId); continue; }
                     var reply = change.TargetQueueId is { } destination
                         ? await _connection.MoveToQueueAsync(jobId, destination)
                         : await _connection.DetachFromQueueAsync(jobId);
                     var result = reply.GetPayload<JobActionResponse>();
                     if (reply.Type != MessageTypes.JobActionResult || !result.Ok)
-                    { errors.Add($"Could not update queue membership for {job.FileName}: {result.Error ?? "The Host rejected the change."}"); membershipFailures.Add(jobId); continue; }
+                    { errors.Add($"Could not change the queue of {job.FileName}: {result.Error ?? _connection.NoReasonWords}"); membershipFailures.Add(jobId); continue; }
                     draft.MembershipChanges.Remove(jobId);
                     draft.OriginalMembership.Remove(jobId);
                 }
@@ -1203,7 +1260,7 @@ public sealed class SchedulerWindow : Window
                 var reply = await _connection.QueueActionAsync(new QueueActionRequest { QueueId = queueId, Action = "reorderfiles", JobOrder = draft.OrderIds.ToList() });
                 var result = reply.GetPayload<SettingsResult>();
                 if (reply.Type != MessageTypes.SettingsResult || !result.Ok)
-                { errors.Add($"Could not save file order for {queueName}: {result.Error ?? "The Host rejected the order."}"); continue; }
+                { errors.Add($"Could not save file order for {queueName}: {result.Error ?? _connection.NoReasonWords}"); continue; }
                 draft.OrderDirty = false;
             }
             if (draft.MembershipChanges.Count == 0 && !draft.OrderDirty) _fileDrafts.Remove(queueId);

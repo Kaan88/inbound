@@ -12,6 +12,7 @@
   --color-text: var(--text);
   --color-muted: var(--muted);
   --color-progress: var(--progress);
+  --color-upload: var(--upload);
   --color-track: var(--track);
   --color-error: var(--error);
   --color-highlight: var(--highlight);

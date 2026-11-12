@@ -84,17 +84,30 @@ public partial class App : Application
         return TorrentOpenRequests.QueueDirectory(string.IsNullOrWhiteSpace(isolated) ? AppFolders.DataRoot() : isolated);
     }
 
-    private static bool TryQueueTorrent(string input)
+    private static bool TryQueueTorrent(string input, bool fromDownload)
     {
         try
         {
-            TorrentOpenRequests.Enqueue(TorrentQueueDirectory(), input, DateTimeOffset.UtcNow);
+            TorrentOpenRequests.Enqueue(TorrentQueueDirectory(), input, DateTimeOffset.UtcNow, fromDownload);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             UiTrace.Write($"A torrent to open couldn't be queued: {ex.GetType().Name}");
             return false;
+        }
+    }
+
+    /// <summary>EXT.R12: for the running main window, which takes it when this launch asks it to show itself.</summary>
+    private static void TryQueueShowJob(Guid jobId)
+    {
+        try
+        {
+            ShowJobRequests.Write(TorrentQueueDirectory(), jobId, DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            UiTrace.Write($"A download to show couldn't be passed on: {ex.GetType().Name}");
         }
     }
 
@@ -129,8 +142,12 @@ public partial class App : Application
             string.Equals(commandLine[pageIndex + 1], "settings", StringComparison.OrdinalIgnoreCase);
         // T1 step 6b: a magnet or .torrent file opened from Windows. Queued first, so whichever window takes it, this
         // launch's or the one already running, finds it in the same place.
-        var openTorrent = _updateMode || _jobId is not null || _packageId is not null ? null : TorrentOpenRequests.Parse(commandLine);
-        if (openTorrent is not null && !TryQueueTorrent(openTorrent)) openTorrent = null;
+        // T10: the Host may name several finished .torrent files in one launch, each after its own --open-torrent.
+        var openTorrents = _updateMode || _jobId is not null || _packageId is not null ? new List<string>() : TorrentOpenRequests.ParseAll(commandLine);
+        var fromDownload = TorrentOpenRequests.IsFromDownload(commandLine);
+        var openTorrent = openTorrents.Where(input => TryQueueTorrent(input, fromDownload)).ToList() is { Count: > 0 } queued ? queued[0] : null;
+        // EXT.R12: the extension's "Show in app": the main window at one download.
+        var showJob = _updateMode || _jobId is not null || _packageId is not null ? null : UiArguments.ShowJobId(commandLine);
         // Explicit launches can restart an exited Host even when the hidden
         // frontend already owns the single-instance activation event.
         HostLauncher.EnsureStarted();
@@ -143,6 +160,8 @@ public partial class App : Application
                 Exit();
                 return;
             }
+
+            if (showJob is { } shown) TryQueueShowJob(shown);
 
             // This launch came from a click, so it may take the foreground; the running window may not unless
             // it is allowed to, and without this Windows leaves it behind (UI.B4).
@@ -237,6 +256,11 @@ public partial class App : Application
             _window.RequestQueuedTorrents();
         }
 
+        if (showJob is { } showJobId)
+        {
+            _window.RequestShowJob(showJobId);
+        }
+
         _ = Task.Run(() =>
         {
             while (true)
@@ -247,6 +271,7 @@ public partial class App : Application
                     _window.ShowFromTray();
                     if (activation == 1) _window.RequestSettingsPage();
                     else if (activation == 2) _window.RequestQueuedTorrents();
+                    else if (ShowJobRequests.Take(TorrentQueueDirectory(), DateTimeOffset.UtcNow) is { } shown) _window.RequestShowJob(shown);
                 });
             }
         });

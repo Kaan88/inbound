@@ -78,6 +78,8 @@ export function archiveLabel(set: ArchiveSet): { text: string; tone: Tone } {
   switch (set.state) {
     case 'downloading':
       if (set.downloadingVolumes.length > 0) return { text: '', tone: 'neutral' };
+      // Review 5:L2: a one-volume archive (a single .zip) whose download failed: its row says Failed already.
+      if (set.failedVolumes.length === 1 && set.volumes.length <= 1 && set.missingVolumes.length === 0) return { text: '', tone: 'neutral' };
       return set.failedVolumes.length > 0
         ? { text: `${parts(set.failedVolumes)} didn't download`, tone: 'waiting' }
         : { text: 'Not downloaded yet', tone: 'neutral' };

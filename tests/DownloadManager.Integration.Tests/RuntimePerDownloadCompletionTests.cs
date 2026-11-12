@@ -129,7 +129,7 @@ public sealed partial class RuntimeServiceTests
             CompletionOptions = RestartOptions(),
         });
         Assert.False(rejected.Ok);
-        Assert.Contains("Enable system completion actions", rejected.Error);
+        Assert.Contains("Allow computer actions", rejected.Error);
 
         var enabled = ctx.Service.GetSnapshot().Settings;
         enabled.AllowSystemCompletionActions = true;

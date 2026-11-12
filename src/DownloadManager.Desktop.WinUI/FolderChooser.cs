@@ -36,8 +36,11 @@ internal static class FolderChooser
             VerticalAlignment = VerticalAlignment.Bottom,
             MinWidth = 40,
         };
+        // Review 5:W2a: Options > Save to has several in a row, so each says which box it is for.
+        var favoritesName = FavoritesName(Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(box) is { Length: > 0 } named
+            ? named : box.Header as string);
         ToolTipService.SetToolTip(favorites, "Favorite folders");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(favorites, "Favorite folders");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(favorites, favoritesName);
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(favorites, row.ColumnDefinitions.Count - 1);
         row.Children.Add(favorites);
@@ -68,13 +71,43 @@ internal static class FolderChooser
             space.Visibility = Visibility.Visible;
         }
 
+        // Review 5:A3: a long path shows its end (the folder the files go to), as the web UI's box does, and the whole
+        // path as the tooltip. Only while the box isn't being typed in, so the caret stays where the user put it.
+        void ShowEnd()
+        {
+            ToolTipService.SetToolTip(box, box.Text.Length == 0 ? null : box.Text);
+            if (box.FocusState != FocusState.Unfocused) return;
+            box.Select(box.Text.Length, 0);
+            box.DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (box.FocusState == FocusState.Unfocused && FindScrollViewer(box) is { } viewer)
+                    viewer.ChangeView(viewer.ScrollableWidth, null, null, true);
+            });
+        }
+
         refresh = Refresh;
-        box.TextChanged += (_, _) => Refresh();
-        box.Loaded += (_, _) => Refresh();
+        box.TextChanged += (_, _) => { Refresh(); ShowEnd(); };
+        box.Loaded += (_, _) => { Refresh(); ShowEnd(); };
+        box.LostFocus += (_, _) => ShowEnd();
         var panel = new StackPanel { Spacing = 4 };
         panel.Children.Add(row);
         panel.Children.Add(space);
         return panel;
+    }
+
+    /// <summary>The favorites button's spoken name: which folder box it is for.</summary>
+    public static string FavoritesName(string? boxName)
+        => string.IsNullOrWhiteSpace(boxName) ? "Favorite folders" : $"Favorite folders for {boxName.Trim()}";
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject parent)
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is ScrollViewer viewer) return viewer;
+            if (FindScrollViewer(child) is { } found) return found;
+        }
+        return null;
     }
 
     /// <summary>What the line under the box says, and whether it's a warning.</summary>

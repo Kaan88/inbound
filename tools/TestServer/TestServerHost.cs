@@ -119,6 +119,11 @@ public sealed partial class TestServerHost : IAsyncDisposable
         }
     }
 
+    private byte[]? _torrentFile;
+
+    /// <summary>T10: what <c>/auth/torrent/{name}</c> serves.</summary>
+    public void SetTorrentFile(byte[] file) => Volatile.Write(ref _torrentFile, file);
+
     public void SetUpdatePayload(byte[] manifest, byte[] package)
     {
         _updateManifest = manifest;
@@ -637,6 +642,29 @@ public sealed partial class TestServerHost : IAsyncDisposable
             await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
                 throttleBytesPerSecond: QueryInt(context, "bps", 0),
                 unknownLength: false).ConfigureAwait(false);
+        });
+
+        // T10: a .torrent file behind the login cookie, as a tracker site serves it. The test sets the bytes; the query
+        // picks the content type (?type=, default application/x-bittorrent) and a Content-Disposition name (?name=).
+        _app.MapGet("/auth/torrent/{name}", async (HttpContext context, string name) =>
+        {
+            var cookieOk = context.Request.Headers.Cookie.ToString()
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(part => part.Equals(AuthCookie, StringComparison.Ordinal));
+            if (!cookieOk)
+            {
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsync("login needed").ConfigureAwait(false);
+                return;
+            }
+
+            var body = Volatile.Read(ref _torrentFile) ?? [];
+            var type = context.Request.Query["type"].ToString();
+            context.Response.ContentType = string.IsNullOrEmpty(type) ? "application/x-bittorrent" : type;
+            var disposition = context.Request.Query["name"].ToString();
+            if (!string.IsNullOrEmpty(disposition)) context.Response.Headers.ContentDisposition = $"attachment; filename=\"{disposition}\"";
+            context.Response.ContentLength = body.Length;
+            await context.Response.Body.WriteAsync(body, context.RequestAborted).ConfigureAwait(false);
         });
 
         _app.MapGet("/auth/stats", () => Results.Json(new

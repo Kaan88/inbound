@@ -112,7 +112,7 @@
           url: entry.url, fileName: entry.fileName, categoryId: entry.categoryId, destinationDirectory: entry.destinationDirectory,
           rememberDestination: false, description: entry.description, queueId: entry.queueId,
           connections: entry.requestedConnections > 0 ? entry.requestedConnections : undefined,
-          startMode: entry.startMode, conflictPolicy: entry.conflictPolicy, expectedSha256: entry.expectedSha256, source: 'import',
+          startMode: entry.startMode, conflictPolicy: entry.conflictPolicy, expectedSha256: entry.expectedSha256, contentType: entry.contentType, source: 'import',
         });
         if (result.accepted) accepted++;
         else { failed++; firstError ??= result.error; }

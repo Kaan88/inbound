@@ -161,15 +161,34 @@ function percentText(fraction: number): string {
   return `${Math.min(99, Math.floor(fraction * 100))}%`;
 }
 
+/** "203.0.113.5:51413" or "[2001:db8::1]:51413": a peer's address, and its row's key. */
+export function peerAddress(peer: Pick<PeerDto, 'address' | 'port'>): string {
+  return ipFamily(peer.address) === 'IPv6' ? `[${peer.address}]:${peer.port}` : `${peer.address}:${peer.port}`;
+}
+
 /** The peers in the order the mockup lists them: fastest down first, then fastest up. */
-export function peerRows(peers: readonly PeerDto[]): PeerRow[] {
+/**
+ * The peers busiest first. With `numbers` (kept by the caller across reads, as the Windows app does), a peer keeps the
+ * number it got when first seen, so "Peer 3" stays the same peer and ties keep their order; without, peers are numbered
+ * by their place.
+ */
+export function peerRows(peers: readonly PeerDto[], numbers?: Map<string, number>): PeerRow[] {
+  if (numbers) {
+    // A torrent open for days meets many peers: the numbers start again rather than grow without end.
+    if (numbers.size > 5000) numbers.clear();
+    for (const peer of peers) {
+      const key = peerAddress(peer);
+      if (!numbers.has(key)) numbers.set(key, numbers.size + 1);
+    }
+  }
+  const numberOf = (peer: PeerDto) => numbers?.get(peerAddress(peer)) ?? 0;
   return [...peers]
-    .sort((a, b) => (b.downloadRate - a.downloadRate) || (b.uploadRate - a.uploadRate))
+    .sort((a, b) => (b.downloadRate - a.downloadRate) || (b.uploadRate - a.uploadRate) || (numberOf(a) - numberOf(b)))
     .map((peer, i) => {
-      const address = ipFamily(peer.address) === 'IPv6' ? `[${peer.address}]:${peer.port}` : `${peer.address}:${peer.port}`;
+      const address = peerAddress(peer);
       return {
         key: address,
-        label: `Peer ${i + 1} · ${ipFamily(peer.address)}`,
+        label: `Peer ${numbers ? numberOf(peer) : i + 1} · ${ipFamily(peer.address)}`,
         address,
         client: peer.client?.trim() || 'Unknown',
         flags: peerFlagsText(peer.flags),
@@ -251,17 +270,28 @@ function countText(value: number): string {
 }
 
 export function trackerRows(trackers: readonly TrackerDto[]): TrackerRow[] {
-  return [...trackers]
-    .sort((a, b) => a.tier - b.tier)
-    .map((tracker, i) => ({
-      key: `${i}`,
+  return trackerRowsInOrder([...trackers].sort((a, b) => a.tier - b.tier));
+}
+
+/**
+ * The rows for trackers already in the order to show. A row's key is its address (T12: a sorted list keeps each row on
+ * its own tracker), with a number after an address that is there twice.
+ */
+export function trackerRowsInOrder(trackers: readonly TrackerDto[]): TrackerRow[] {
+  const seen = new Map<string, number>();
+  return trackers.map((tracker) => {
+    const times = (seen.get(tracker.url) ?? 0) + 1;
+    seen.set(tracker.url, times);
+    return {
+      key: times === 1 ? tracker.url : `${tracker.url}#${times}`,
       url: trackerShown(tracker.url),
       status: trackerStatusText(tracker.status, tracker.message),
       failed: tracker.status === 'error',
       seeds: countText(tracker.seeds),
       peers: countText(tracker.peers),
       next: nextAnnounceText(tracker.nextAnnounce) || '–',
-    }));
+    };
+  });
 }
 
 // ---- Pieces ----

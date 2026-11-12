@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
+  import CacheBadge from '../components/CacheBadge.svelte';
   import Dialog from '../components/Dialog.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
@@ -8,24 +9,26 @@
   import { buildFileTree } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import {
-    addLines, addedWords, canAddLines, canChooseFilesFor, canSelectLine, defaultRoute, hereName, inspected, spaceRechecked, isMagnetLine, isSelected, lineDetail, lineName,
+    addLines, addedWords, canAddLines, canChooseFilesFor, canSelectLine, defaultRoute, hereName, inputFields, inspected, isJobInput, listedCopyFields, spaceRechecked, isMagnetLine, isSelected, lineDetail, lineName,
     lineSpaceProblem, lineState, lineTip, magnetNoteApplies, newLines, picks, primaryText, removeLine, selectAllState, selectLine, setLinePriorities, setRoute,
-    statusLine, syncPaste, toggleAll, torrentProvider, treeFiles, type TorrentLine, type TorrentLines, type TorrentPick,
+    providerAddRequest, statusLine, syncPaste, toggleAll, torrentProvider, treeFiles, type TorrentLine, type TorrentLines,
   } from '../lib/torrents';
+  import { torrentSaveToPlaceholder } from '../lib/settingsRules';
+  import { addReport, addedWords as providerAddedWords, alreadyListed, refused } from '../lib/addview';
   import { freeText, normalMap, prioritiesKnown, prioritySummary } from '../lib/torrentControls';
-  import { cacheChecked, cacheText, startCacheChecks, uploadTorrent, type CacheStates } from '../lib/torrentIntake';
+  import { cacheBadge, cacheChecked, cacheReason, cacheText, startCacheChecks, uploadTorrent, type CacheStates } from '../lib/torrentIntake';
   import type { ClassifyResult, TorrentAddResult, TorrentInspectResult } from '../lib/types';
 
   // The torrent dialog (T1, TorrentAddDialog): Add magnet, Import torrent file, and magnets from Add URL. One line per
   // magnet or uploaded .torrent file, each asked about with torrent.inspect. With a provider account each line goes to
-  // This PC or the provider; provider lines go on to the provider's own add dialog. A magnet is never shown whole.
+  // This PC or the provider (one is picked from the start, T9 W1), with the provider's cache answer as a badge (W3);
+  // provider lines are sent from here with this dialog's folder, start and queue, with no second dialog (W2). A magnet
+  // is never shown whole.
   type Mode = 'magnet' | 'torrent' | 'mixed';
-  let { mode = 'mixed', initial = [], onclose, onprovider }: {
+  let { mode = 'mixed', initial = [], onclose }: {
     mode?: Mode;
     initial?: { input: string; label?: string }[];
     onclose: () => void;
-    /** The lines that go to the provider, handed on to its add dialog. */
-    onprovider: (inputs: { input: string; label?: string }[]) => void;
   } = $props();
 
   const settings = $derived(store.model.settings);
@@ -67,13 +70,13 @@
     // T3: the folder it goes to, so the answer says the free space there and whether it fits.
     const folder = destination.trim() || null;
     try {
-      result = await store.ask<TorrentInspectResult>('torrent.inspect', { input, destination: folder });
+      result = await store.ask<TorrentInspectResult>('torrent.inspect', { ...inputFields(input), destination: folder });
     } catch (error) {
       result = { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     // An answer for a folder that was changed meanwhile is left for the newer one.
     if ((destination.trim() || null) !== folder) return;
-    lines = recheck ? spaceRechecked(lines, input, result) : inspected(lines, input, result);
+    lines = recheck ? spaceRechecked(lines, input, result, folder) : inspected(lines, input, result, folder === null);
   }
 
   // T3: a new Save to folder asks again about the lines that were read, for the free space there.
@@ -95,8 +98,10 @@
   $effect(() => {
     if (started) return;
     started = true;
-    const magnets = initial.filter((entry) => !entry.input.startsWith('upload:'));
-    const files = initial.filter((entry) => entry.input.startsWith('upload:'));
+    // An uploaded file, or (T10) a finished download that is a .torrent file, is a line of its own.
+    const isFile = (input: string) => input.startsWith('upload:') || isJobInput(input);
+    const magnets = initial.filter((entry) => !isFile(entry.input));
+    const files = initial.filter((entry) => isFile(entry.input));
     for (const entry of files) if (entry.label) labels.set(entry.input, entry.label);
     if (files.length > 0) {
       const next = addLines(lines, files, false);
@@ -162,6 +167,8 @@
   // ---- The provider's cache, one question per line that was read (TorrentAddLines.StartCacheChecks) ----
 
   let cache = $state<CacheStates>({});
+  /** Why a line's check couldn't say, for its badge's tooltip. */
+  let cacheReasons = $state<Record<string, string>>({});
   let closed = false;
   onDestroy(() => (closed = true));
   // One question at a time, so a long list doesn't send the provider a burst.
@@ -176,12 +183,17 @@
   async function checkCache(input: string, query: string) {
     if (closed) return;
     let result: ClassifyResult | null;
+    let failure: string | null = null;
     try {
       result = await store.ask<ClassifyResult>('remote.classify', { text: query, withFiles: true });
-    } catch {
+    } catch (error) {
       result = null;
+      failure = error instanceof Error ? error.message : null;
     }
-    if (!closed) cache = cacheChecked(cache, input, result);
+    if (closed) return;
+    cache = cacheChecked(cache, input, result);
+    const reason = cacheReason(result, providerName, failure);
+    if (reason) cacheReasons = { ...cacheReasons, [input]: reason };
   }
 
   // ---- A .torrent file's files ----
@@ -210,8 +222,9 @@
     const done = new Set<string>();
     for (const pick of chosen.filter((p) => p.route === 'thisPc')) {
       try {
+        // T10: a finished .torrent download goes by its id; the server then removes it and its file.
         const result = await store.ask<TorrentAddResult>('torrent.add', {
-          input: pick.input, destination: folder || null, queueId, startMode, files: pick.files, fileIndexes: pick.fileIndexes,
+          ...inputFields(pick.input), destination: folder || null, queueId, startMode, files: pick.files, fileIndexes: pick.fileIndexes,
           ...(pick.priorities ? { priorities: pick.priorities } : {}),
         });
         if (result.existing) existing++;
@@ -222,25 +235,45 @@
         problems.push(`${pick.name}: ${error instanceof Error ? error.message : "It couldn't be added."}`);
       }
     }
+    // T10: a finished .torrent download whose torrent is already in the list is a copy: the server removes it.
+    for (const line of lines.lines.filter((l) => lineState(l) === 'listed' && isJobInput(l.input))) {
+      try {
+        // Only removes the copy: when the torrent has left the list meanwhile, nothing is added and the row stays.
+        const result = await store.ask<TorrentAddResult>('torrent.add', listedCopyFields(line.input));
+        if (result.ok && result.existing) done.add(line.input);
+        else problems.push(`${lineName(line)}: ${result.error ?? 'The finished download stays in the list.'}`);
+      } catch (error) {
+        problems.push(`${lineName(line)}: ${error instanceof Error ? error.message : 'The finished download stays in the list.'}`);
+      }
+    }
+    // T9 W2: the provider's lines go from here, with this dialog's folder, start and queue: no second dialog.
+    let sent = 0;
+    const providerJobs: string[] = [];
+    for (const pick of chosen.filter((p) => p.route === 'provider')) {
+      const name = pick.name;
+      try {
+        const result = await store.ask<{ existing?: boolean; note?: string | null; job?: { id: string } }>('remote.add', providerAddRequest(pick, folder, startMode, queueId));
+        done.add(pick.input);
+        if (result.existing) problems.push(alreadyListed(name, result.note));
+        else if (result.job) { sent++; providerJobs.push(result.job.id); }
+      } catch (error) {
+        problems.push(refused(name, error instanceof Error ? error.message : String(error), providerName ?? undefined));
+      }
+    }
     adding = false;
 
-    const words = addedWords(added, existing);
-    if (words) store.toast(words);
+    const words = [addedWords(added, existing) ?? '', providerName ? providerAddedWords(0, sent, providerName) : ''].filter((part) => part).join(' ');
+    // One provider item and nothing for this PC: the list selects it, as the provider's own add does.
     if (last) store.revealId = last;
-
-    const toProvider: TorrentPick[] = chosen.filter((p) => p.route === 'provider');
-    if (toProvider.length > 0) {
-      for (const problem of problems) store.toast(problem, 'error');
-      onprovider(toProvider.map((p) => ({ input: p.input, label: labels.get(p.input) })));
-      return;
-    }
+    else if (providerJobs.length === 1) store.revealId = providerJobs[0];
     if (problems.length === 0) {
+      if (words) store.toast(words);
       onclose();
       return;
     }
     // What was added leaves the dialog; what wasn't stays, with why.
     for (const input of done) lines = removeLine(lines, input);
-    report = problems.join('\n');
+    report = addReport(words, [], problems);
   }
 
   function keydown(event: KeyboardEvent) {
@@ -289,21 +322,26 @@
           {@const detail = lineDetail(line)}
           {@const failed = lineState(line) === 'failed'}
           {@const cached = cacheText(cache[line.input], lines.providerName)}
+          {@const badge = cacheBadge(cache[line.input], lines.providerName, cacheReasons[line.input])}
           {@const space = lineSpaceProblem(line)}
           <li class="px-3 py-1.5">
             <div class="flex items-start gap-2">
-              <input type="checkbox" class="mt-1" checked={isSelected(line)} disabled={!canSelectLine(line)} aria-label={`${name}, ${detail}`}
+              <input type="checkbox" class="mt-1" checked={isSelected(line)} disabled={!canSelectLine(line)} aria-label={cached ? `${name}, ${detail}, ${cached}` : `${name}, ${detail}`}
                 onchange={(event) => (lines = selectLine(lines, line.input, (event.currentTarget as HTMLInputElement).checked))} />
               <Icon name={isMagnetLine(line) ? 'link' : 'file'} size={15} class="mt-0.5 shrink-0 text-icon-neutral" />
               <div class="min-w-0 flex-1">
                 <div class="truncate" title={lineTip(line)}>{name}</div>
-                <div class="text-[12px] {failed ? 'text-error' : 'text-muted'}">{detail}{#if cached} · <span aria-live="polite">{cached}</span>{/if}</div>
+                <div class="text-[12px] {failed ? 'text-error' : 'text-muted'}">{detail}</div>
                 {#if space && isSelected(line)}<div class="text-[12px] text-error">{space}</div>{/if}
               </div>
-              {#if lines.providerName && lineState(line) === 'ready'}
-                <div class="flex shrink-0 overflow-hidden rounded border border-divider text-[12px]" role="radiogroup" aria-label={routeLabel(line)}>
-                  <button role="radio" aria-checked={line.route === 'thisPc'} class="px-2 py-0.5 {line.route === 'thisPc' ? 'bg-selected font-semibold' : 'hover:bg-hover'}" onclick={() => (lines = setRoute(lines, line.input, 'thisPc'))}>{here.short}</button>
-                  <button role="radio" aria-checked={line.route === 'provider'} class="border-l border-divider px-2 py-0.5 {line.route === 'provider' ? 'bg-selected font-semibold' : 'hover:bg-hover'}" onclick={() => (lines = setRoute(lines, line.input, 'provider'))}>{lines.providerName}</button>
+              {#if lines.providerName && lineState(line) === 'ready' && !isJobInput(line.input)}
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                  <div class="flex overflow-hidden rounded border border-divider text-[12px]" role="radiogroup" aria-label={routeLabel(line)}>
+                    <button role="radio" aria-checked={line.route === 'thisPc'} class="px-2 py-0.5 {line.route === 'thisPc' ? 'bg-selected font-semibold' : 'hover:bg-hover'}" onclick={() => (lines = setRoute(lines, line.input, 'thisPc'))}>{here.short}</button>
+                    <button role="radio" aria-checked={line.route === 'provider'} class="border-l border-divider px-2 py-0.5 {line.route === 'provider' ? 'bg-selected font-semibold' : 'hover:bg-hover'}" onclick={() => (lines = setRoute(lines, line.input, 'provider'))}>{lines.providerName}</button>
+                  </div>
+                  <!-- The badge sits under the choice it is about, the provider's. -->
+                  {#if badge}<CacheBadge {badge} align="end" />{/if}
                 </div>
               {/if}
             </div>
@@ -315,6 +353,7 @@
                     <TorrentFileTree tree={openTree} priorities={openPriorities} showPriority={prioritiesKnown(line.result.files)} label="Files of {name}"
                       onchange={(next) => (lines = setLinePriorities(lines, line.input, next))} />
                     <p class="hint mt-1" aria-live="polite">{prioritySummary(line.result.files, openPriorities)}</p>
+                    {#if line.route === 'provider' && prioritiesKnown(line.result.files)}<p class="hint mt-1">{lines.providerName} takes the ticked files. Priorities apply on {here.short} only.</p>{/if}
                   </div>
                 {/if}
               </div>
@@ -327,12 +366,12 @@
     {#if status}<p class="mt-2 text-[12.5px] text-muted" role="status" aria-label="Torrents status">{status}</p>{/if}
     {#if magnetNoteApplies(lines)}<p class="hint mt-1">A magnet asks which files to download once its file list arrives.</p>{/if}
     {#if lines.providerName}
-      <p class="hint mt-1">{here.upper} downloads from other peers with {here.own} own address. {lines.providerName} downloads it on {lines.providerName}'s side, then fetches the files over HTTPS like any {lines.providerName} download.</p>
+      <p class="hint mt-1" title="{here.upper} downloads from other peers with {here.own} own address. {lines.providerName} downloads it on {lines.providerName}'s side, then fetches the files over HTTPS like any {lines.providerName} download.">{here.short}: other peers see {here.own} address. {lines.providerName}: {lines.providerName} downloads it, then the files come over HTTPS.</p>
     {/if}
 
     <div class="mt-4 grid gap-3 sm:grid-cols-2">
       <div class="sm:col-span-2">
-        <FolderField id="torrent-destination" label="Save to" placeholder="Each torrent's category folder" bind:value={destination} />
+        <FolderField id="torrent-destination" label="Save to" placeholder={torrentSaveToPlaceholder(settings)} bind:value={destination} />
         {#if free}<p class="hint mt-1" aria-label="Free space">{free}</p>{/if}
       </div>
       <div>

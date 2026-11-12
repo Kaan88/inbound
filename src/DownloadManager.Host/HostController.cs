@@ -31,6 +31,15 @@ public sealed class HostController : IHostPlatform
 
     public void OpenPackage(Guid packageId) => LaunchUi(null, null, packageId);
 
+    /// <summary>T10: the torrent dialog for finished .torrent downloads, through the window's <c>--open-torrent</c>.</summary>
+    public void OpenTorrentFiles(IReadOnlyList<string> paths)
+    {
+        foreach (var launch in TorrentFileOffers.Launches(paths)) LaunchUi(null, null, arguments: TorrentFileOffers.Arguments(launch));
+    }
+
+    /// <summary>EXT.R12: the main window, at this download.</summary>
+    public void ShowJob(Guid jobId) => LaunchUi(null, null, showJobId: jobId);
+
     public Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken)
     {
         var context = UiContext;
@@ -58,7 +67,13 @@ public sealed class HostController : IHostPlatform
                     ? _service.GetSettings().DefaultDownloadDirectory
                     : initialPath;
                 if (Directory.Exists(startingPath)) picker.InitialDirectory = startingPath;
-                var accepted = picker.ShowDialog() == DialogResult.OK;
+                // UI.B24: the Host has no window of its own, and a dialog without an owner opened behind the browser
+                // that asked for it. Owned by a hidden topmost window, the dialog is topmost too and opens in front;
+                // the browser's native host allowed this process the foreground (NativeBridgePolicy.ShowsWindow).
+                using var owner = DialogOwner();
+                owner.Show();
+                owner.Activate();
+                var accepted = picker.ShowDialog(owner) == DialogResult.OK;
                 completion.TrySetResult(new FolderPickResult
                 {
                     Ok = true, Cancelled = !accepted, Path = accepted ? picker.SelectedPath : null,
@@ -79,7 +94,24 @@ public sealed class HostController : IHostPlatform
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
 
-    private void LaunchUi(string? page, Guid? jobId, Guid? packageId = null)
+    /// <summary>An invisible topmost window at the middle of the screen the pointer is on, for a dialog to be owned by.</summary>
+    private static Form DialogOwner()
+    {
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        return new Form
+        {
+            FormBorderStyle = FormBorderStyle.None,
+            ShowInTaskbar = false,
+            TopMost = true,
+            Opacity = 0,
+            StartPosition = FormStartPosition.Manual,
+            Size = new Size(1, 1),
+            Location = new Point(area.Left + area.Width / 2, area.Top + area.Height / 3),
+            Text = "Inbound Download Manager",
+        };
+    }
+
+    private void LaunchUi(string? page, Guid? jobId, Guid? packageId = null, IReadOnlyList<string>? arguments = null, Guid? showJobId = null)
     {
         var executable = FindUiExecutable();
         if (executable is null)
@@ -97,7 +129,8 @@ public sealed class HostController : IHostPlatform
         {
             // Each argument on its own, and a page only when the window knows it: the page can come from a client's
             // host.openUi, and loose text would add arguments of its own (report 3, L2).
-            string[] arguments = packageId is { } package ? ["--package", package.ToString("D")] :
+            arguments ??= showJobId is { } shown ? [UiArguments.ShowJob, shown.ToString("D")] :
+                packageId is { } package ? ["--package", package.ToString("D")] :
                 jobId is { } id ? ["--job", id.ToString("D")] :
                 UiPages.Known(page) is { } known ? ["--page", known] : [];
             // The tray click gave the Host the foreground; pass it on so the window comes to the front (UI.B4).
@@ -124,7 +157,7 @@ public sealed class HostController : IHostPlatform
     /// <summary>EXT.R11: Explorer with the file selected, or the folder. A failure to start Explorer throws, and the client is told so.</summary>
     public void RevealFile(string path)
     {
-        using var _ = Process.Start(ShellActions.RevealFile(path));
+        using var _ = ShellActions.Start(ShellActions.RevealFile(path));
     }
 
     public void RequestShutdown()

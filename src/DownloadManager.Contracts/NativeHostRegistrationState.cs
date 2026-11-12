@@ -32,7 +32,8 @@ public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chr
     /// The browser integration status every surface shows (tray, status bar, CLI), naming a browser that
     /// cannot reach the host while the other can. An absent Edge key is not named: installs from 0.4.0
     /// have none until the Host adds it, and Edge may not be installed. Every version has written
-    /// Chrome's key, so its absence means something removed it.
+    /// Chrome's key, so its absence means something removed it. A missing and a broken key read the same:
+    /// either way the extension can't reach the app, and Repair puts both right (review 5:F2).
     /// </summary>
     public string IntegrationText(bool integrationEnabled)
     {
@@ -49,16 +50,16 @@ public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chr
         var problems = new List<string>(2);
         if (Chrome == NativeHostKeyState.Broken)
         {
-            problems.Add("Chrome registration is broken");
+            problems.Add("the extension can't reach Inbound in Chrome");
         }
         else if (Chrome == NativeHostKeyState.Absent)
         {
-            problems.Add("not registered for Chrome");
+            problems.Add("the extension can't reach Inbound in Chrome");
         }
 
         if (Edge == NativeHostKeyState.Broken)
         {
-            problems.Add("Edge registration is broken");
+            problems.Add("the extension can't reach Inbound in Edge");
         }
 
         // U-WL-9: "on", not "connected": a registration says a browser can reach the app, not that one is running.

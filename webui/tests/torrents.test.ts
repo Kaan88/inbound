@@ -4,10 +4,10 @@ import { fileCommands, jobView, planFileMenu, searchText, statusWords } from '..
 import { emptyModel } from '../src/lib/model';
 import {
   addLines, addedWords, blocksAddressCommands, canAddLines, canChooseFiles, canChooseFilesFor, chipText, choiceIndexes, choiceSaid, chosenLines, defaultRoute,
-  fileProgress, fileRowName, fileRowStatus, filesRefreshMs, filesSummary, filesTabNote, hereName, indexesOf, inspected, lineDetail, lineName, lineState, lineTip,
-  magnetNoteApplies, magnetsIn, moreFiles, newLines, nextChoice, picks, primaryIsChooseFiles, primaryText, problem, providerInputs, selectAllState, setFileChoice,
+  fileListWaitNote, fileProgress, fileRowName, fileRowStatus, filesRefreshMs, filesSummary, filesTabNote, hereName, indexesOf, inspected, lineDetail, lineName, lineState, lineTip,
+  magnetNoteApplies, magnetsIn, moreFiles, mostProviderFiles, newLines, nextChoice, picks, primaryIsChooseFiles, primaryText, problem, providerAddRequest, providerInputs, selectAllState, setFileChoice,
   setRoute, shortMagnet, showsFiles, sidebarShows, statusLine, summary, syncPaste, toggleAll, torrentProvider, torrentStatusText, torrentsApply, treeFiles,
-  wantedIds, mostLines, type TorrentLines,
+  wantedIds, mostLines, spaceRechecked, type TorrentLines,
 } from '../src/lib/torrents';
 import type { Job, RemoteAccount, Torrent, TorrentFile, TorrentInspectResult } from '../src/lib/types';
 import { buildRows, counts, inView, parseViewKey, torrentFileRows } from '../src/lib/views';
@@ -88,6 +88,21 @@ describe('a torrent row (TorrentRules)', () => {
     expect(filesSummary(torrent({ fileCount: 11, wantedCount: 11 }))).toBe('11 files');
     expect(filesSummary(torrent({ fileCount: 1, wantedCount: 1 }))).toBe('1 file');
     expect(filesSummary(torrent({ hasMetadata: false }))).toBe('File list not known yet');
+  });
+
+  it('says a magnet still without its file list after a minute may never get one (review 5:T3)', () => {
+    const now = Date.parse('2026-11-12T12:00:00Z');
+    const note = 'Still looking for the file list. This torrent may have no one sharing it.';
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: false }, { runStartedAt: '2026-11-12T11:59:01Z' }), now)).toBeNull();
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: false }, { runStartedAt: '2026-11-12T11:59:00Z' }), now)).toBe(note);
+    expect(fileListWaitNote(tjob('a', 'paused', { hasMetadata: false }, { runStartedAt: '2026-11-12T11:00:00Z' }), now)).toBeNull();
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: true }, { runStartedAt: '2026-11-12T11:00:00Z' }), now)).toBeNull();
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: false }), now)).toBeNull();
+    // First started an hour ago but resumed seconds ago: this run hasn't had its minute yet.
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: false }, { startedAt: '2026-11-12T11:00:00Z', runStartedAt: '2026-11-12T11:59:50Z' }), now)).toBeNull();
+    // An older server sends only the first start, which can't tell a resumed run from a long one: no note.
+    expect(fileListWaitNote(tjob('a', 'downloading', { hasMetadata: false }, { startedAt: '2026-11-12T11:00:00Z' }), now)).toBeNull();
+    expect(jobView(tjob('a', 'downloading', { hasMetadata: false }, { runStartedAt: '2026-11-12T11:00:00Z' }), undefined, undefined, now).description).toContain(note);
   });
 
   it('never shows the trackers of the magnet', () => {
@@ -281,7 +296,10 @@ describe('the add dialog (TorrentAddLines)', () => {
   }
 
   it('picks the default route from the setting, only with a provider', () => {
-    expect(defaultRoute('ask', true)).toBe('unset');
+    // T9 W1: Ask each time picks This PC, or the provider when this PC can't take torrents.
+    expect(defaultRoute('ask', true)).toBe('thisPc');
+    expect(defaultRoute('ask', true, false)).toBe('provider');
+    expect(defaultRoute('thisPc', true, false)).toBe('thisPc');
     expect(defaultRoute('thisPc', true)).toBe('thisPc');
     expect(defaultRoute('provider', true)).toBe('provider');
     expect(defaultRoute('provider', false)).toBe('thisPc');
@@ -341,16 +359,88 @@ describe('the add dialog (TorrentAddLines)', () => {
     expect(inspected(s, 'upload:zz', ok())).toBe(s);
   });
 
-  it('asks for a route per line with a provider on Ask each time', () => {
+  it('starts each line on This PC with Ask each time, so Add works at once, and a line can be switched', () => {
     let s = addLines(start('ask', true, 'TorBox'), [{ input: magnet }], true).state;
+    s = inspected(s, magnet, ok({ destination: 'D:/Video' }));
+    expect(s.lines[0].route).toBe('thisPc');
+    expect(canAddLines(s)).toBe(true);
+    expect(problem(s)).toBe('');
+    s = setRoute(s, magnet, 'provider');
+    expect(canAddLines(s)).toBe(true);
+    expect(picks(s)).toEqual([{ input: magnet, name: 'debian.iso', route: 'provider', files: '', fileIndexes: null, priorities: null, categoryFolder: 'D:/Video' }]);
+    expect(providerInputs(picks(s))).toEqual([magnet]);
+    expect(setRoute(start(), magnet, 'provider')).toEqual(start());
+  });
+
+  it('still waits for a route on a line that has none', () => {
+    let s = addLines(newLines('unset', true, 'TorBox'), [{ input: magnet }], true).state;
     s = inspected(s, magnet, ok());
     expect(canAddLines(s)).toBe(false);
     expect(problem(s)).toBe('Choose This PC or TorBox for each ticked torrent.');
-    s = setRoute(s, magnet, 'provider');
-    expect(canAddLines(s)).toBe(true);
-    expect(picks(s)).toEqual([{ input: magnet, name: 'debian.iso', route: 'provider', files: 'all', fileIndexes: null, priorities: null }]);
-    expect(providerInputs(picks(s))).toEqual([magnet]);
-    expect(setRoute(start(), magnet, 'provider')).toEqual(start());
+  });
+
+  it('lets the ticked files of a .torrent apply on the provider too, by path and size', () => {
+    let s = inspected(addLines(start('provider', true, 'TorBox'), [{ input: 'upload:abc' }], false).state, 'upload:abc', fileResult());
+    expect(canChooseFilesFor(s, s.lines[0])).toBe(true);
+    s = setFileChoice(s, 'upload:abc', new Set(['1']));
+    expect(lineDetail(s.lines[0])).toContain('1 of 4 files');
+    const pick = picks(s)[0];
+    expect(pick).toMatchObject({ route: 'provider', files: 'chosen', fileIndexes: [1], priorities: null });
+    expect(pick.filePaths).toEqual([{ path: files[1].path, size: files[1].size }]);
+    s = setFileChoice(s, 'upload:abc', new Set(['0', '1', '2', '3']));
+    expect(picks(s)[0]).toMatchObject({ files: 'all' });
+    // Too many to send by path: the provider's own rule.
+    const many = Array.from({ length: mostProviderFiles + 1 }, (_, index) => ({ index, path: `x/${index}`, size: 1, wanted: true }));
+    const big = inspected(addLines(start('provider', true, 'TorBox'), [{ input: 'upload:big' }], false).state, 'upload:big', fileResult({ files: many }));
+    expect(canChooseFilesFor(big, big.lines[0])).toBe(false);
+    // Every file is taken, as on This PC, so no file window follows.
+    expect(picks(big)[0].files).toBe('all');
+  });
+
+  it('forgets a This PC file choice on the provider when it is too big to send', () => {
+    const many = Array.from({ length: mostProviderFiles + 1 }, (_, index) => ({ index, path: `x/${index}`, size: 1, wanted: true }));
+    let s = inspected(addLines(start('thisPc', true, 'TorBox'), [{ input: 'upload:big' }], false).state, 'upload:big', fileResult({ files: many, totalBytes: many.length }));
+    s = setFileChoice(s, 'upload:big', new Set(['0', '1']));
+    expect(lineDetail(s.lines[0])).toContain('2 of');
+    s = setRoute(s, 'upload:big', 'provider');
+    expect(lineDetail(s.lines[0])).not.toContain('2 of');
+    expect(summary(s)).toContain('4.88 KB');
+    expect(picks(s)[0]).toMatchObject({ files: 'all', fileIndexes: null });
+    expect(picks(s)[0].filePaths).toBeUndefined();
+  });
+
+  it('sends every file of a .torrent to the provider when files are not chosen here', () => {
+    const off = inspected(addLines(start('provider', false, 'TorBox'), [{ input: 'upload:abc' }], false).state, 'upload:abc', fileResult());
+    expect(canChooseFilesFor(off, off.lines[0])).toBe(false);
+    expect(picks(off)[0].files).toBe('all');
+    // A magnet's files aren't known: the server's own rule.
+    const magnetLine = inspected(addLines(start('provider', false, 'TorBox'), [{ input: magnet }], true).state, magnet, ok());
+    expect(picks(magnetLine)[0].files).toBe('');
+  });
+
+  it('keeps the category folder from the read with Save to empty, not from a typed folder', () => {
+    let s = inspected(addLines(start('provider', true, 'TorBox'), [{ input: magnet }], true).state, magnet, ok({ destination: 'D:/Video' }));
+    s = spaceRechecked(s, magnet, ok({ destination: 'E:/Typed' }), 'E:/Typed');
+    expect(picks(s)[0].categoryFolder).toBe('D:/Video');
+    // Read first with a folder typed: no category folder until a read with Save to empty.
+    let typed = inspected(addLines(start('provider', true, 'TorBox'), [{ input: magnet }], true).state, magnet, ok({ destination: 'E:/Typed' }), false);
+    expect(picks(typed)[0].categoryFolder).toBeNull();
+    typed = spaceRechecked(typed, magnet, ok({ destination: 'D:/Video' }), null);
+    expect(picks(typed)[0].categoryFolder).toBe('D:/Video');
+  });
+
+  it('builds the provider request from the torrent dialog, with no second dialog', () => {
+    const pick = { input: magnet, name: 'debian.iso', route: 'provider' as const, files: '' as const, fileIndexes: null, priorities: null, categoryFolder: 'D:/Video' };
+    expect(providerAddRequest(pick, ' E:/Films ', 'later', 3)).toEqual({
+      input: magnet, destination: 'E:/Films', queueId: 3, startMode: 'later', approveUncached: true, selection: undefined, filePaths: undefined,
+    });
+    // An empty Save to is the torrent's category folder as the server gave it, else the default folder.
+    expect(providerAddRequest(pick, '', 'startNow', 1).destination).toBe('D:/Video');
+    expect(providerAddRequest({ ...pick, categoryFolder: null }, null, 'startNow', 1).destination).toBeUndefined();
+    expect(providerAddRequest(pick, null, 'whenever', 1).startMode).toBe('startNow');
+    const chosen = providerAddRequest({ ...pick, files: 'chosen', filePaths: [{ path: 'a/b.mkv', size: 5 }] }, null, 'queue', 1);
+    expect(chosen).toMatchObject({ selection: 'chosen', filePaths: [{ path: 'a/b.mkv', size: 5 }], startMode: 'queue' });
+    expect(providerAddRequest({ ...pick, files: 'all', filePaths: [{ path: 'a/b.mkv', size: 5 }] }, null, 'startNow', 1)).toMatchObject({ selection: 'all', filePaths: undefined });
   });
 
   it('sends a magnet with askWhenReady when files are chosen first, and all otherwise', () => {

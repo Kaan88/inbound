@@ -22,8 +22,8 @@ public sealed class JobCompletionEditor
     private readonly TextBox _programPath = new() { MinWidth = 0, PlaceholderText = "Select an executable" };
     private readonly Button _browse = new() { Content = "Browse…" };
     private readonly CheckBox _openFile = new() { Content = "Open the downloaded file when complete" };
-    private readonly ComboBox _systemAction = new() { Header = "System action", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly CheckBox _force = new() { Content = "Force the system action" };
+    private readonly ComboBox _systemAction = new() { Header = "Computer action", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly CheckBox _force = new() { Content = "Force the computer action" };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly TextBlock _systemActionNote = InboundUi.Secondary();
 
@@ -44,7 +44,7 @@ public sealed class JobCompletionEditor
         _programMode.SelectedIndex = current.ProgramPath is null ? 0 : current.ProgramPath.Length == 0 ? 1 : 2;
         _programPath.Text = current.ProgramPath ?? string.Empty;
 
-        _systemAction.Items.Add(new ComboBoxItem { Content = "No system action", Tag = "none" });
+        _systemAction.Items.Add(new ComboBoxItem { Content = "No computer action", Tag = "none" });
         _systemAction.Items.Add(new ComboBoxItem { Content = "Exit application", Tag = "exit" });
         _systemAction.Items.Add(new ComboBoxItem { Content = "Shut down", Tag = "shutdown" });
         _systemAction.Items.Add(new ComboBoxItem { Content = "Restart", Tag = "restart" });
@@ -57,8 +57,8 @@ public sealed class JobCompletionEditor
         _systemActionNote.Text = remote is { CompletionActions: false }
             ? $"{remote.ServerName} doesn't let this app open files or shut it down when a download finishes."
             : _systemActionsEnabled
-                ? "A system action runs only when no other downloads are unfinished."
-                : "Enable system completion actions in Scheduler settings to use this option.";
+                ? "A computer action runs only when no other downloads are unfinished."
+                : "Allow computer actions in the Scheduler to use this option.";
         if (remote is not null)
         {
             // A path on the server: there is nothing on this PC to browse for.
@@ -124,9 +124,9 @@ public sealed class JobCompletionEditor
             error = "Choose an absolute path to an existing .exe file.";
         // Off for a server that doesn't allow it, so whatever it has is sent back unchanged.
         else if (options.SystemAction != "none" && !_systemActionsEnabled && _remote is not { CompletionActions: false })
-            error = "Enable system completion actions in Scheduler settings before choosing a system action.";
+            error = "Allow computer actions in the Scheduler before choosing one.";
         else if (!new[] { "none", "exit", "shutdown", "restart", "logoff" }.Contains(options.SystemAction, StringComparer.Ordinal))
-            error = "Choose a valid system action.";
+            error = "Choose a valid computer action.";
 
         _error.Text = error ?? string.Empty;
         _error.Visibility = error is null ? Visibility.Collapsed : Visibility.Visible;

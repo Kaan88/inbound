@@ -110,6 +110,7 @@ public sealed partial class DownloadManagerService
             QuotaWindowStart = queue.QuotaWindowStart,
             QuotaBytesUsed = queue.QuotaBytesUsed,
             JobOrder = queue.JobOrder?.ToList() ?? new(),
+            ArmedScheduleId = queue.ArmedScheduleId,
         };
 
         List<DownloadQueue> source;
@@ -148,6 +149,7 @@ public sealed partial class DownloadManagerService
                     QuotaWindowStart = q.ResetQuota ? now : current?.QuotaWindowStart,
                     QuotaBytesUsed = q.ResetQuota ? 0 : current?.QuotaBytesUsed ?? 0,
                     JobOrder = current?.JobOrder?.ToList() ?? new(),
+                    ArmedScheduleId = current?.ArmedScheduleId,
                 };
                 if (current is not null)
                 {
@@ -219,6 +221,7 @@ public sealed partial class DownloadManagerService
         var existingById = existing.GroupBy(s => s.Id).ToDictionary(group => group.Key, group => group.First());
         var listed = new HashSet<Guid>();
         var result = new List<ScheduleRule>();
+        var now = _timeProvider.GetLocalNow();
         foreach (var s in requested.Where(s => s is not null))
         {
             var id = s.Id == Guid.Empty ? Guid.NewGuid() : s.Id;
@@ -230,6 +233,11 @@ public sealed partial class DownloadManagerService
                 previous.StopTime != s.StopTime || previous.StartOnHostStartup != s.StartOnHostStartup ||
                 previous.TimedStartEnabled != s.TimedStartEnabled || previous.RepeatEveryMinutes != s.RepeatEveryMinutes ||
                 !previous.Enabled && s.Enabled);
+            // Review 2 L2: made, turned on or changed after today's stop time, today's stop is not its to act on.
+            var setAfterStop = previous?.SetAfterStopDate;
+            if (previous is null || triggerChanged)
+                setAfterStop = TryParseScheduleTime(s.StopTime, out var stop) && TimeOnly.FromDateTime(now.DateTime) >= stop
+                    ? DateOnly.FromDateTime(now.DateTime) : null;
             result.Add(new ScheduleRule
             {
                 Id = id,
@@ -254,6 +262,7 @@ public sealed partial class DownloadManagerService
                 LastRunAt = triggerChanged ? null : previous?.LastRunAt, LastRunError = triggerChanged ? null : previous?.LastRunError,
                 LastStartDate = triggerChanged ? null : previous?.LastStartDate,
                 LastStopDate = triggerChanged ? null : previous?.LastStopDate,
+                SetAfterStopDate = setAfterStop,
             });
         }
 

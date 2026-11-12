@@ -260,6 +260,9 @@ describe('archives', () => {
   it('labels a set the way the desktop does', () => {
     expect(archiveLabel(set({ state: 'failed', failureKind: 'wrongPassword', needsPassword: true }))).toEqual({ text: 'Wrong password', tone: 'failed' });
     expect(archiveLabel(set({ state: 'completed' })).text).toBe('Extraction completed');
+    // Review 5:L2: a single .zip whose download failed adds nothing to the row's Failed.
+    expect(archiveLabel(set({ state: 'downloading', volumes: ['movie.zip'], failedVolumes: ['movie.zip'] })).text).toBe('');
+    expect(archiveLabel(set({ state: 'downloading', volumes: ['movie.rar', 'movie.r01'], failedVolumes: ['movie.r01'] })).text).toBe(".r01 didn't download");
     expect(archiveLabel(set({ state: 'extracting', percent: 40 })).text).toBe('Extracting 40%');
     expect(archiveLabel(set({ state: 'downloading', downloadingVolumes: ['a.part1.rar'] })).text).toBe('');
     expect(archiveLabel(set({ state: 'waiting', downloadingVolumes: ['a.part2.rar'], pausedVolumes: ['a.part2.rar'] })).text).toBe('Waiting: part2 paused');

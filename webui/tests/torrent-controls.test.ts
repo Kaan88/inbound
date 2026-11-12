@@ -156,7 +156,7 @@ describe('free space in the add dialog (T3)', () => {
     let fresh = addLines(newLines('thisPc', true, null), [{ input, label: 'blender.torrent' }], false).state;
     fresh = spaceRechecked(fresh, input, { ok: true, kind: 'torrentFile', infoHash: hash, name: 'Blender', totalBytes: 4000, files });
     expect(lineState(fresh.lines[0])).toBe('ready');
-    expect(addSource).toContain('spaceRechecked(lines, input, result)');
+    expect(addSource).toContain('spaceRechecked(lines, input, result, folder)');
   });
 });
 
@@ -399,7 +399,7 @@ describe('Options › Torrents peers and connections (T3)', () => {
 
 describe('the add dialog and Files tab use the priority tree (T3)', () => {
   it('sends the folder for the free space and the priorities with the add', () => {
-    expect(addSource).toContain("'torrent.inspect', { input, destination: folder }");
+    expect(addSource).toContain("'torrent.inspect', { ...inputFields(input), destination: folder }");
     expect(addSource).toContain('priorities: pick.priorities');
     expect(addSource).toContain('<TorrentFileTree');
     expect(filesPanelSource).toContain('<TorrentFileTree');

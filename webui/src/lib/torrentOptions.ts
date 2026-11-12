@@ -33,7 +33,7 @@ export function networkLines(input: { pcOnly: boolean; settings: Settings | null
   const usedPort = network?.ran && (network.port ?? 0) > 0 ? network.port! : 0;
   if (pcOnly) {
     const port = settings?.torrentListenPort ?? 0;
-    lines.push({ label: 'Listening port', value: port > 0 ? String(port) : 'Chosen when torrents are turned on' });
+    lines.push({ label: 'Listening port', value: port > 0 ? String(port) : 'Automatic' });
     lines.push({ label: 'Router forwarding', value: settings?.torrentUpnp ? 'Asked for (UPnP and NAT-PMP)' : 'Off' });
   } else {
     lines.push({ label: 'Listening port', value: usedPort > 0 ? String(usedPort) : `Set by ${serverPortVariable}` });

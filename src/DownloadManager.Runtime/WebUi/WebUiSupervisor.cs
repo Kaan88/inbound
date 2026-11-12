@@ -343,6 +343,15 @@ public sealed class WebUiSupervisor : IWebUiCommands, IAsyncDisposable
     {
         CancelRestart();
         if (_stopped) return;
+        // A bridge asked to stop that has not ended may still hold the port and the sign-in file: no second one
+        // beside it (audit N9). The next stop asks it again.
+        _lingering.RemoveAll(earlier => earlier.Process.Exited.IsCompleted);
+        if (_lingering.Count > 0)
+        {
+            Fail("The web UI is still stopping; try again in a moment.");
+            return;
+        }
+
         if (!_platform.Passwords.HasPassword())
         {
             SetState(WebUiStates.Failed, "Set a password for the web UI first.");

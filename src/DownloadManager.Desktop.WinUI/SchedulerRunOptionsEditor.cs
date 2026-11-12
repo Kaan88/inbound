@@ -68,7 +68,7 @@ public sealed class SchedulerRunOptionsEditor
         panel.Children.Add(repeatLine);
         panel.Children.Add(new TextBlock
         {
-            Text = "Periodic checks compare completed HTTP files on the server. Changed files, or files without usable server validators, are refreshed. The schedule’s existing start and stop times define the active window.",
+            Text = "Checks whether finished files have changed on the server and downloads them again if so. It checks between the schedule’s start and stop times.",
             TextWrapping = TextWrapping.Wrap,
         });
         panel.Children.Add(retryLine);

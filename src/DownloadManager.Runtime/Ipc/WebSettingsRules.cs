@@ -42,6 +42,8 @@ public static class WebSettingsRules
         // Where magnets go and whether files are chosen first; turning torrents on stays with the PC (below).
         nameof(SettingsDto.TorrentRoute),
         nameof(SettingsDto.TorrentChooseFiles),
+        // T14: whether torrents go to a folder for their category, like UseCategoryFolders. The torrent folder is pipe-only.
+        nameof(SettingsDto.UseTorrentCategoryFolders),
         // T2 seeding: how long a finished torrent is shared and how fast it may upload. They only act on torrents the
         // PC already runs (turning torrents on, the port and the router stay with the PC), and the Host checks the values.
         nameof(SettingsDto.TorrentSeedAfterDownload),
@@ -59,6 +61,7 @@ public static class WebSettingsRules
     [
         nameof(SettingsDto.DefaultDownloadDirectory),
         nameof(SettingsDto.CategoryFolders),
+        nameof(SettingsDto.TorrentCategoryFoldersRoot),
         nameof(SettingsDto.FavoriteFolders),
         nameof(SettingsDto.CloseWindowCompletely),
         nameof(SettingsDto.Proxy),
@@ -107,6 +110,8 @@ public static class WebSettingsRules
         nameof(SettingsDto.SkippedUpdateVersion),
         nameof(SettingsDto.LastUpdateCheck),
         nameof(SettingsDto.DownloadGroups),
+        // Worked out by the Host from the saved program (review 2:L5).
+        nameof(SettingsDto.PostDownloadCommandProblem),
     ];
 
     public const string ScheduleActionsRefused =
@@ -137,6 +142,7 @@ public static class WebSettingsRules
     public static IReadOnlyList<string> Hidden { get; } =
     [
         nameof(SettingsDto.PostDownloadCommand),
+        nameof(SettingsDto.PostDownloadCommandProblem),
         nameof(SettingsDto.FfmpegPath),
         nameof(SettingsDto.UpdateManifestUrl),
         nameof(SettingsDto.Proxy),
@@ -151,6 +157,7 @@ public static class WebSettingsRules
     {
         var copy = JsonSerializer.Deserialize<SettingsDto>(JsonSerializer.SerializeToElement(settings, IpcJson.Options), IpcJson.Options)!;
         copy.PostDownloadCommand = null;
+        copy.PostDownloadCommandProblem = null;
         copy.FfmpegPath = null;
         copy.UpdateManifestUrl = null;
         copy.Proxy = new ProxyDto { Mode = settings.Proxy?.Mode ?? "none" };
@@ -167,6 +174,10 @@ public static class WebSettingsRules
     /// </summary>
     public static void KeepHostOwned(SettingsDto requested, SettingsDto current)
     {
+        // T14: a browser page from before the torrent folders sends neither; it keeps the Host's (null in a save keeps).
+        requested.UseTorrentCategoryFolders ??= current.UseTorrentCategoryFolders;
+        requested.TorrentCategoryFoldersRoot ??= current.TorrentCategoryFoldersRoot;
+
         foreach (var name in KeptByHost)
         {
             var property = typeof(SettingsDto).GetProperty(name)!;

@@ -14,6 +14,10 @@ public sealed class JobListEntry
     public string StartMode { get; set; } = "later";
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
+    /// <summary>The content type the browser hand-off gave, sent again as <c>AddJobRequest.ContentType</c>, so a
+    /// stream at an address without .m3u8 or .mpd is still a stream (review 1 N6). Left out when there was none.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContentType { get; set; }
     /// <summary>A torrent job's own part; null for every other download. <see cref="Url"/> is then its magnet.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public TorrentListEntry? Torrent { get; set; }
@@ -64,6 +68,7 @@ public static class JobListFile
                 StartMode = job.StartMode,
                 ConflictPolicy = job.ConflictPolicy,
                 ExpectedSha256 = job.ExpectedSha256,
+                ContentType = job.Torrent is null ? job.HandoffContentType : null,
             })
             .ToList();
         return JsonSerializer.Serialize(entries, Options);

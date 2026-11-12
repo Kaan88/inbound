@@ -28,6 +28,9 @@ public static class OptionsSettingsRebase
         if (Changed(atOpen.CloseWindowCompletely, edited.CloseWindowCompletely)) latest.CloseWindowCompletely = edited.CloseWindowCompletely;
         if (Changed(atOpen.Theme, edited.Theme)) latest.Theme = edited.Theme;
         if (Changed(atOpen.UseCategoryFolders, edited.UseCategoryFolders)) latest.UseCategoryFolders = edited.UseCategoryFolders;
+        // T14: torrent category folders and the torrent folder (Save to page).
+        if (Changed(atOpen.UseTorrentCategoryFolders, edited.UseTorrentCategoryFolders)) latest.UseTorrentCategoryFolders = edited.UseTorrentCategoryFolders;
+        if (Changed(atOpen.TorrentCategoryFoldersRoot, edited.TorrentCategoryFoldersRoot)) latest.TorrentCategoryFoldersRoot = edited.TorrentCategoryFoldersRoot;
         if (Changed(atOpen.ClipboardMonitoring, edited.ClipboardMonitoring)) latest.ClipboardMonitoring = edited.ClipboardMonitoring;
         if (Changed(atOpen.BrowserIntegrationEnabled, edited.BrowserIntegrationEnabled)) latest.BrowserIntegrationEnabled = edited.BrowserIntegrationEnabled;
         if (Changed(atOpen.NotifyOnCompletion, edited.NotifyOnCompletion)) latest.NotifyOnCompletion = edited.NotifyOnCompletion;
@@ -72,6 +75,31 @@ public static class OptionsSettingsRebase
 
     /// <summary>The Options speed limit box's largest value, in KB/s.</summary>
     public const long SpeedLimitMaxKb = 10_000_000;
+
+    // ---- Review 5:F6b: Options › Connection's per-site limits, a row each (a site and its connections) ----
+
+    public const string SiteLimitNeedsSite = "Enter a site for each per-site limit, or remove it.";
+
+    public static string SiteLimitOutOfRange(string site) => $"The limit for {site} must be 1 to 32 connections.";
+
+    /// <summary>
+    /// The per-site limits the rows give, or the first row's problem. A row left wholly empty is skipped. The web UI's
+    /// readProfiles (webui settingsRules.ts) by the same rule. <paramref name="rows"/>: the site as typed and the number
+    /// box's value (NaN when empty).
+    /// </summary>
+    public static (List<ConnectionProfileDto> Profiles, string? Problem) SiteLimits(IEnumerable<(string Site, double Max)> rows)
+    {
+        var profiles = new List<ConnectionProfileDto>();
+        foreach (var (typed, max) in rows)
+        {
+            var site = typed.Trim();
+            if (site.Length == 0 && double.IsNaN(max)) continue;
+            if (site.Length == 0) return ([], SiteLimitNeedsSite);
+            if (double.IsNaN(max) || max != Math.Floor(max) || max is < 1 or > 32) return ([], SiteLimitOutOfRange(site));
+            profiles.Add(new ConnectionProfileDto { Pattern = site, MaxConnections = (int)max });
+        }
+        return (profiles, null);
+    }
 
     /// <summary>
     /// Audit H1: the opened settings as the Options form gives them back untouched, for the <c>atOpen</c> side of

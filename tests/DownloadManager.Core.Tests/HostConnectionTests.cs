@@ -17,6 +17,20 @@ public sealed class HostConnectionTests
     private static ServerTarget Server(string token = "dmrc_invented-first") =>
         ServerTarget.Remote(new string('a', 32), "Home", new Uri("http://homeserver:8080/"), token, plainHttpConfirmed: true);
 
+    /// <summary>Review 4:N4: a retargeted connection (the saved entry may name another machine) forgets the old clock.</summary>
+    [Fact]
+    public async Task RetargetingForgetsTheOldServersClock()
+    {
+        var fake = new FakeServers { Fail = () => new RemoteServerException("down") };
+        await using var connection = fake.Connection(Server());
+        var now = DateTimeOffset.UtcNow;
+        connection.Clock.Observe(now.AddSeconds(-5), now);
+        Assert.Equal(TimeSpan.FromSeconds(5), connection.Clock.Offset);
+
+        connection.Retarget(Server("dmrc_invented-second"));
+        Assert.Equal(TimeSpan.Zero, connection.Clock.Offset);
+    }
+
     [Fact]
     public async Task AServerThatIsDownIsTriedLessAndLessOften()
     {
@@ -144,6 +158,24 @@ public sealed class HostConnectionTests
         Assert.Equal(1, fake.Attempts);
         Assert.Contains(skipped, line => line.Contains(MessageTypes.JobsSnapshot, StringComparison.Ordinal));
         Assert.Contains(skipped, line => line.Contains(MessageTypes.UpdateProgress, StringComparison.Ordinal));
+    }
+
+    // UI.R37: a server's latest version reaches the window too (unlike update.progress, which is only this PC's).
+    [Fact]
+    public async Task TheLatestVersionArrivesFromThisPcAndFromAServer()
+    {
+        foreach (var target in new[] { ServerTarget.Local, Server() })
+        {
+            var fake = new FakeServers
+            {
+                AfterHello = connection => connection.Push(IpcMessage.Create(MessageTypes.UpdateLatest, new UpdateLatestDto { LatestVersion = "0.7.1" })),
+            };
+            await using var connection = fake.Connection(target);
+            string? latest = null;
+            connection.LatestVersionChanged += version => Volatile.Write(ref latest, version);
+            connection.Start();
+            await Until(() => Volatile.Read(ref latest) == "0.7.1");
+        }
     }
 
     private static async Task Until(Func<bool> condition)

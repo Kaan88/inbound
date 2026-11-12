@@ -11,6 +11,8 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>
 /// Session download-rate history: a slim bar with the current figures, and a plot that opens upward
 /// from it. A missing sample creates a gap rather than invented zero traffic.
+/// <para>T8: the main window also gives it the torrents' upload, drawn as a second line in its own color with a legend
+/// and its figure on the bar, while <see cref="ShowUpload"/> is set (a torrent downloads or seeds).</para>
 /// </summary>
 public sealed partial class DownloadSpeedGraph : UserControl
 {
@@ -24,6 +26,11 @@ public sealed partial class DownloadSpeedGraph : UserControl
     ];
 
     private readonly Queue<(DateTimeOffset Time, double? Rate)> _samples = new();
+    /// <summary>T8: the upload figures, taken at the same times as <see cref="_samples"/>.</summary>
+    private readonly Queue<(DateTimeOffset Time, double? Rate)> _upSamples = new();
+    private bool _showUpload;
+    private string _heading = SpeedGraphUpload.DownloadHeading;
+    private double? _liveUpload;
     private int _seconds = 1800;
     private bool _expanded = true;
     private bool _seen = true;
@@ -126,14 +133,63 @@ public sealed partial class DownloadSpeedGraph : UserControl
     {
         set
         {
-            HeadingText.Text = value;
-            AutomationProperties.SetName(Plot, $"{value} history");
+            _heading = value;
+            DescribeHeading();
         }
     }
 
-    public void AddSample(DateTimeOffset time, double? bytesPerSecond)
+    private void DescribeHeading()
     {
-        Append(time, bytesPerSecond);
+        HeadingText.Text = SpeedGraphUpload.Heading(_heading, _showUpload);
+        AutomationProperties.SetName(Plot, SpeedGraphUpload.PlotName(_heading, _showUpload));
+    }
+
+    /// <summary>
+    /// T8: the torrents' upload now, worked out from the jobs (null while the Host can't be reached). The bar shows it
+    /// while the graph has no upload sample (<see cref="SpeedSample.UploadFigure"/>). Set as jobs change, not on a timer.
+    /// </summary>
+    public double? LiveUpload
+    {
+        set
+        {
+            if (_liveUpload == value) return;
+            _liveUpload = value;
+            if (_showUpload) ShowUploadFigure();
+        }
+    }
+
+    private void ShowUploadFigure()
+    {
+        var upText = SpeedSample.UploadFigure(_upSamples.LastOrDefault().Rate, _liveUpload) is { } up ? RateText(up) : "—";
+        if (UploadCurrent.Text != upText) UploadCurrent.Text = upText;
+        AutomationProperties.SetName(UploadSummary, $"Upload {upText}");
+    }
+
+    /// <summary>
+    /// T8: shows the upload line, its legend and its figure (while a torrent downloads or seeds). Its samples are kept
+    /// while it is hidden, so it comes back with its history.
+    /// </summary>
+    public bool ShowUpload
+    {
+        get => _showUpload;
+        set
+        {
+            if (_showUpload == value) return;
+            _showUpload = value;
+            var visibility = value ? Visibility.Visible : Visibility.Collapsed;
+            UploadSummary.Visibility = visibility;
+            Legend.Visibility = visibility;
+            DescribeHeading();
+            DescribeToggle();
+            _refit = true;
+            Draw();
+        }
+    }
+
+    /// <summary>A sample; <paramref name="uploadBytesPerSecond"/> is the torrents' upload (null: none known, a gap).</summary>
+    public void AddSample(DateTimeOffset time, double? bytesPerSecond, double? uploadBytesPerSecond = null)
+    {
+        Append(time, bytesPerSecond, uploadBytesPerSecond);
         Draw();
     }
 
@@ -143,24 +199,30 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var any = false;
         foreach (var (time, rate) in samples)
         {
-            Append(time, rate);
+            Append(time, rate, null);
             any = true;
         }
         if (any) Draw();
     }
 
-    private void Append(DateTimeOffset time, double? bytesPerSecond)
+    private void Append(DateTimeOffset time, double? bytesPerSecond, double? uploadBytesPerSecond)
+    {
+        Append(_samples, time, bytesPerSecond);
+        Append(_upSamples, time, uploadBytesPerSecond);
+        _sampledAt = Environment.TickCount64;
+    }
+
+    private static void Append(Queue<(DateTimeOffset Time, double? Rate)> samples, DateTimeOffset time, double? bytesPerSecond)
     {
         var value = bytesPerSecond is { } rate && double.IsFinite(rate) && rate >= 0 ? rate : (double?)null;
-        if (_samples.Count > 0)
+        if (samples.Count > 0)
         {
-            var previous = _samples.Last().Time;
-            if (time <= previous) _samples.Clear();
-            else if (time - previous > TimeSpan.FromSeconds(5)) _samples.Enqueue((previous.AddSeconds(1), null));
+            var previous = samples.Last().Time;
+            if (time <= previous) samples.Clear();
+            else if (time - previous > TimeSpan.FromSeconds(5)) samples.Enqueue((previous.AddSeconds(1), null));
         }
-        _samples.Enqueue((time, value));
-        _sampledAt = Environment.TickCount64;
-        while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < time.AddHours(-1)) _samples.Dequeue();
+        samples.Enqueue((time, value));
+        while (samples.Count > 3601 || samples.TryPeek(out var first) && first.Time < time.AddHours(-1)) samples.Dequeue();
     }
 
     /// <summary>
@@ -168,26 +230,40 @@ public sealed partial class DownloadSpeedGraph : UserControl
     /// window's own samples for the time they cover. Older samples stay, with a gap before the Host's start if there was
     /// one; newer ones (taken while the request was out) stay after them.
     /// </summary>
-    public void LoadHistory(DateTimeOffset start, int intervalSeconds, IReadOnlyList<long> bytesPerSecond)
+    /// <remarks>
+    /// T8: <paramref name="uploadBytesPerSecond"/> is the Host's upload for the same seconds. A Host before T8 sends
+    /// none, and one with no torrent upload since it started sends none either: the upload line keeps this window's own
+    /// samples then.
+    /// </remarks>
+    public void LoadHistory(DateTimeOffset start, int intervalSeconds, IReadOnlyList<long> bytesPerSecond, IReadOnlyList<long>? uploadBytesPerSecond = null)
     {
         if (bytesPerSecond.Count == 0 || intervalSeconds <= 0) return;
-        var end = start.AddSeconds((bytesPerSecond.Count - 1) * (double)intervalSeconds);
-        var before = _samples.Where(sample => sample.Time < start).ToList();
-        var after = _samples.Where(sample => sample.Time > end).ToList();
-        _samples.Clear();
-        foreach (var sample in before) _samples.Enqueue(sample);
-        if (before.Count > 0 && start - before[^1].Time > TimeSpan.FromSeconds(5)) _samples.Enqueue((before[^1].Time.AddSeconds(1), null));
-        for (var i = 0; i < bytesPerSecond.Count; i++)
-        {
-            var rate = bytesPerSecond[i];
-            _samples.Enqueue((start.AddSeconds(i * (double)intervalSeconds), rate >= 0 ? (double?)rate : null));
-        }
-        foreach (var sample in after) _samples.Enqueue(sample);
-        if (after.Count == 0) _sampledAt = Environment.TickCount64;
-        var latest = _samples.Last().Time;
-        while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < latest.AddHours(-1)) _samples.Dequeue();
+        var after = Load(_samples, start, intervalSeconds, bytesPerSecond);
+        if (SpeedGraphUpload.UploadLinesUp(bytesPerSecond, uploadBytesPerSecond))
+            Load(_upSamples, start, intervalSeconds, uploadBytesPerSecond!);
+        if (after == 0) _sampledAt = Environment.TickCount64;
         _refit = true;
         Draw();
+    }
+
+    /// <summary>Puts the Host's figures in place of <paramref name="samples"/>' own for the time they cover; returns how many newer ones stayed.</summary>
+    private static int Load(Queue<(DateTimeOffset Time, double? Rate)> samples, DateTimeOffset start, int intervalSeconds, IReadOnlyList<long> values)
+    {
+        var end = start.AddSeconds((values.Count - 1) * (double)intervalSeconds);
+        var before = samples.Where(sample => sample.Time < start).ToList();
+        var after = samples.Where(sample => sample.Time > end).ToList();
+        samples.Clear();
+        foreach (var sample in before) samples.Enqueue(sample);
+        if (before.Count > 0 && start - before[^1].Time > TimeSpan.FromSeconds(5)) samples.Enqueue((before[^1].Time.AddSeconds(1), null));
+        for (var i = 0; i < values.Count; i++)
+        {
+            var rate = values[i];
+            samples.Enqueue((start.AddSeconds(i * (double)intervalSeconds), rate >= 0 ? (double?)rate : null));
+        }
+        foreach (var sample in after) samples.Enqueue(sample);
+        var latest = samples.Last().Time;
+        while (samples.Count > 3601 || samples.TryPeek(out var first) && first.Time < latest.AddHours(-1)) samples.Dequeue();
+        return after.Count;
     }
 
     private void ToggleButton_Click(object sender, RoutedEventArgs e)
@@ -244,7 +320,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
     private void DescribeToggle()
     {
-        var text = _expanded ? "Hide download speed graph" : "Show download speed graph";
+        var text = SpeedGraphUpload.Toggle(_expanded, _showUpload);
         AutomationProperties.SetName(ToggleButton, text);
         ToolTipService.SetToolTip(ToggleButton, text);
     }
@@ -276,6 +352,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (SummaryAverage.Text != averageText) SummaryAverage.Text = averageText;
         if (SummaryPeak.Text != peakText) SummaryPeak.Text = peakText;
         AutomationProperties.SetName(Summary, $"{currentText}, average {averageText}, peak {peakText}");
+        if (_showUpload) ShowUploadFigure();
 
         if (!_expanded) { StopSlide(); return; }
         Plot.Children.Clear();
@@ -296,10 +373,19 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (bucket != _bucketSeconds) { _bucketSeconds = bucket; _refit = true; }
         var lineStart = start - SpeedGraphPoints.Lag(bucket) - TimeSpan.FromSeconds(bucket);
         var drawnSamples = _samples.Where(sample => sample.Time >= lineStart).ToArray();
-        var linePeak = drawnSamples.Length == 0 ? 0 : drawnSamples.Max(sample => sample.Rate ?? 0);
+        // UI.B26: the lines this drawing shows and one scale for both (T8), fitted to what is drawn up to where the slide
+        // goes before the next sample, not to samples the line shows only later, so the top doesn't grow while the line
+        // still lies at zero. Past that the line is held to the fitted figure.
+        SpeedGraphDrawing.Series[] series = _showUpload
+            ? [new(drawnSamples, _samples.LastOrDefault().Rate is not null),
+               new(_upSamples.Where(sample => sample.Time >= lineStart).ToArray(), _upSamples.LastOrDefault().Rate is not null)]
+            : [new(drawnSamples, _samples.LastOrDefault().Rate is not null)];
+        var (lines, peaks) = SpeedGraphDrawing.Draw(series, start, now, bucket);
+        var downLine = lines[0];
+        var upLine = _showUpload ? lines[1] : [];
         var previousTop = _drawnTop;
         // UI.B23: grows at once, shrinks only after a hold and a step at a time, always to a round figure.
-        var top = _refit ? _scale.Reset(linePeak) : _scale.Update(linePeak, now);
+        var top = _refit ? _scale.Reset(peaks.Shown) : _scale.Update(peaks.Shown, now);
         _refit = false;
         LineClip.Clip = new RectangleGeometry { Rect = new Rect(left, 0, chartWidth, height) };
         (_left, _upper, _chartWidth, _chartHeight, _top, _start, _drawn) = (left, upper, chartWidth, chartHeight, top, start, true);
@@ -325,51 +411,55 @@ public sealed partial class DownloadSpeedGraph : UserControl
             var minutes = _seconds * (columns - column) / (60d * columns);
             Label(column == columns ? "Now" : $"−{minutes:0.#} min", Math.Clamp(x - 18, left, width - 40), upper + chartHeight + 1);
         }
-        var stroke = InboundTheme.Brush("InboundProgressFillBrush", this);
-        Polyline? line = null;
         // UI.B23: every point sits at a fixed place on the time axis and is never chosen again, so a new sample adds
         // to the right and moves nothing already drawn. Points past either edge are clipped, not squeezed onto it.
         double X(DateTimeOffset at) => left + (at - start).TotalSeconds / _seconds * chartWidth;
-        foreach (var point in SpeedGraphPoints.Build(drawnSamples, now, bucket))
+        // The line ends where the slide stops (SpeedGraphDrawing.Line): held to the fitted figure past the next sample's
+        // due time, flat past the newest point should samples come late, rather than leaving a blank strip.
+        void DrawLine(List<SpeedGraphPoints.Point> points, Brush stroke)
         {
-            if (point.Rate is null) { line = null; continue; }
-            if (line is null)
+            Polyline? line = null;
+            foreach (var point in points)
             {
-                line = new Polyline { Stroke = stroke, StrokeThickness = 1.5, Points = new PointCollection() };
-                Lines.Children.Add(line);
+                if (point.Rate is null) { line = null; continue; }
+                if (line is null)
+                {
+                    line = new Polyline { Stroke = stroke, StrokeThickness = 1.5, Points = new PointCollection() };
+                    Lines.Children.Add(line);
+                }
+                line.Points.Add(new Point(X(point.At), upper + chartHeight * (1 - Math.Clamp(point.Rate.Value / top, 0, 1))));
             }
-            line.Points.Add(new Point(X(point.At), upper + chartHeight * (1 - Math.Clamp(point.Rate.Value / top, 0, 1))));
         }
 
-        // The newest point is normally past the right edge for as long as the line slides. Should it not be (samples
-        // came late), its value carries on flat to where the slide stops, as before, rather than leaving a blank strip.
-        var slideEnd = left + chartWidth + chartWidth / _seconds * SpeedGraphPoints.MaxSlide.TotalSeconds;
-        if (line is { Points.Count: > 0 } && _samples.LastOrDefault().Rate is not null && line.Points[^1].X < slideEnd)
-            line.Points.Add(new Point(slideEnd, line.Points[^1].Y));
+        // T8: the upload line first, so the download line is on top where they meet.
+        if (_showUpload) DrawLine(upLine, InboundTheme.Brush("InboundUploadBrush", this));
+        DrawLine(downLine, InboundTheme.Brush("InboundProgressFillBrush", this));
 
         // A new sample moves the line under a pointer that is still there.
         DrawHover();
         Slide(chartWidth / _seconds);
-        EaseScale(previousTop, top, upper + chartHeight);
+        EaseScale(SpeedGraphEase.From(previousTop, top, peaks.Before, peaks.WhileEasing), upper + chartHeight);
         _drawnTop = top;
     }
 
     /// <summary>
     /// UI.B23: when the scale changes, the line is redrawn against the new top at once, then eased from its old height to
     /// its new one with a short one-off animation of a transform, so it doesn't leap. The labels change at once.
+    /// UI.B26: the stretch comes from <see cref="SpeedGraphEase.From"/>, which keeps the stroke from being stretched into a
+    /// bar and anything coming into view from going past the top.
     /// </summary>
-    private void EaseScale(double previousTop, double top, double baseline)
+    private void EaseScale(double from, double baseline)
     {
         _rescale?.Stop();
         _rescale = null;
         LineScale.ScaleY = 1;
-        if (previousTop <= 0 || previousTop == top || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
+        if (from == 1 || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
         LineScale.CenterY = baseline;
         var animation = new DoubleAnimation
         {
-            From = top / previousTop,
+            From = from,
             To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+            Duration = new Duration(SpeedGraphEase.Duration),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         Storyboard.SetTarget(animation, LineScale);
@@ -436,10 +526,11 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var shift = TimeSpan.FromSeconds(SlidSeconds);
         var time = _start + shift + TimeSpan.FromSeconds((x - _left) / _chartWidth * _seconds);
         // UI.B23: a sample is where the line draws it (a little late, in its bucket), and only once it is drawn. In a
-        // bucket, the highest figure speaks for it.
+        // bucket, the highest figure speaks for it. UI.B26: only one the scale was fitted to, so the dot is never above
+        // the line or clipped to the top.
         var latest = _samples.LastOrDefault().Time;
         var nearest = _samples
-            .Where(sample => sample.Time >= _start - SpeedGraphPoints.Lag(_bucketSeconds) && SpeedGraphPoints.IsFinished(sample.Time, latest, _bucketSeconds))
+            .Where(sample => sample.Time >= _start - SpeedGraphPoints.Lag(_bucketSeconds) && SpeedGraphDrawing.IsInScale(sample.Time, latest, _bucketSeconds))
             .OrderBy(sample => Math.Abs((SpeedGraphPoints.ShownAt(sample.Time, _bucketSeconds) - time).TotalSeconds))
             .ThenByDescending(sample => sample.Rate ?? -1)
             .FirstOrDefault();
@@ -449,15 +540,24 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var pointX = close ? _left + Math.Clamp((shownAt - _start - shift).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
         Hover.Children.Add(new Line { X1 = pointX, X2 = pointX, Y1 = _upper, Y2 = _upper + _chartHeight, Stroke = guide, StrokeThickness = 1, Opacity = 0.6 });
 
-        string text;
-        if (close && nearest.Rate is { } rate)
+        void Dot(double rate, string brush)
         {
             var y = _upper + _chartHeight * (1 - Math.Clamp(rate / _top, 0, 1));
-            var dot = new Ellipse { Width = 7, Height = 7, Fill = InboundTheme.Brush("InboundProgressFillBrush", this) };
+            var dot = new Ellipse { Width = 7, Height = 7, Fill = InboundTheme.Brush(brush, this) };
             Canvas.SetLeft(dot, pointX - 3.5);
             Canvas.SetTop(dot, y - 3.5);
             Hover.Children.Add(dot);
-            text = $"{RateText(rate)}  ·  {nearest.Time.ToLocalTime():HH:mm:ss}  ·  {Ago(_samples.Last().Time - nearest.Time)}";
+        }
+
+        string text;
+        // T8: the upload figure taken with it (the two are sampled together).
+        var upload = close && _showUpload ? _upSamples.FirstOrDefault(sample => sample.Time == nearest.Time).Rate : null;
+        if (close && nearest.Rate is { } rate)
+        {
+            if (upload is { } up) Dot(up, "InboundUploadBrush");
+            Dot(rate, "InboundProgressFillBrush");
+            var figures = upload is { } sent ? $"Down {RateText(rate)}  ·  Up {RateText(sent)}" : RateText(rate);
+            text = $"{figures}  ·  {nearest.Time.ToLocalTime():HH:mm:ss}  ·  {Ago(_samples.Last().Time - nearest.Time)}";
         }
         else
         {

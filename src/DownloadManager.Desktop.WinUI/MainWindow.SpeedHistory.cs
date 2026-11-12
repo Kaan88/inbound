@@ -17,7 +17,8 @@ public sealed partial class MainWindow
             if (reply.Type != MessageTypes.SpeedHistoryResult) return;
             var history = reply.GetPayload<SpeedHistoryDto>();
             if (history is null) return;
-            SpeedGraph.LoadHistory(history.Start, history.IntervalSeconds, history.BytesPerSecond);
+            // T8: a Host before the upload history sends none; the upload line then starts from now.
+            SpeedGraph.LoadHistory(history.Start, history.IntervalSeconds, history.BytesPerSecond, history.UploadBytesPerSecond);
         }
         catch (Exception ex)
         {

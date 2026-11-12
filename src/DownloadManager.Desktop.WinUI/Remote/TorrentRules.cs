@@ -6,7 +6,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>Where a magnet or .torrent line goes when a provider account (TorBox) could take it too (T1).</summary>
 internal enum TorrentLineRoute
 {
-    /// <summary>Not chosen yet: the setting is "Ask each time" and the line waits for a choice.</summary>
+    /// <summary>Not chosen yet. T9: the dialog starts every line with a route, so this is only a guard.</summary>
     Unset,
     ThisPc,
     Provider,
@@ -35,21 +35,103 @@ internal static class TorrentRules
 
     public static bool IsTorrent(JobDto? job) => job?.Torrent is not null;
 
+    /// <summary>
+    /// T10: a finished download whose file is a .torrent file the Host can add (<see cref="JobDto.TorrentFileReady"/>):
+    /// its row offers Open as Torrent.
+    /// </summary>
+    public static bool OpensAsTorrent(JobDto? job)
+        => job is { State: "completed", TorrentFileReady: true, Torrent: null, FileRemovedAfterExtraction: false, IsRemote: false };
+
+    /// <summary>
+    /// T10: the finished .torrent download a dialog line's path is the file of, so its add carries
+    /// <see cref="TorrentAddRequest.FromJobId"/> and the Host removes the download and the file once it is in. Null for a
+    /// magnet or any other file.
+    /// </summary>
+    public static Guid? TorrentFileJobFor(IEnumerable<JobDto> jobs, string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input) || LinkExtractor.IsMagnet(input.Trim())) return null;
+        var path = input.Trim();
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return jobs.FirstOrDefault(job => OpensAsTorrent(job) && string.Equals(job.FinalFilePath, path, comparison))?.Id;
+    }
+
+    /// <summary>
+    /// T10: a Progress Details window that was already open for a download that turned out to be a .torrent file closes
+    /// when it finishes, as with the completion window off: this PC's Host opens the torrent dialog for it instead. Only
+    /// for this PC's Host, and only where the Host offers it (TorrentFileOffers.TorrentsCanGo): torrents apply there
+    /// (<see cref="Applies"/>: the Host has a torrent engine, <paramref name="torrentsOffered"/>, and they are on), or an
+    /// account takes torrents (<paramref name="providerTakesTorrents"/>). Torrents turned on but unavailable (no engine,
+    /// or the kill switch) don't count, as on the Host, which then opens the completion window instead. A window opened
+    /// by hand stays, and so does one for a quiet browser download, which the Host offers no dialog for (EXT.R12).
+    /// </summary>
+    public static bool ProgressClosesForTorrentFile(JobDto job, bool localHost, bool torrentsOffered, SettingsDto? settings, bool openedByHand,
+        bool providerTakesTorrents = false)
+        => AsksAboutTorrentFile(job, localHost, openedByHand) && (Applies(torrentsOffered, settings) || providerTakesTorrents);
+
+    /// <summary>
+    /// T10: whether a finishing .torrent download makes the Progress Details window ask the Host once whether an account
+    /// takes torrents (torrents not applying here), so it closes on the same rule as the Host's offer
+    /// (TorrentFileOffers.Offers, which also leaves out a quiet browser download).
+    /// </summary>
+    public static bool AsksAboutTorrentFile(JobDto job, bool localHost, bool openedByHand)
+        => !openedByHand && localHost && job.State == "completed" && job.TorrentFileReady && job.Torrent is null && !job.QuietWindows;
+
+    /// <summary>An account with a usable key that takes torrents (MainWindow.TorrentProviderAccount, the Host's TorrentsCanGo).</summary>
+    public static bool ProviderTakesTorrents(IEnumerable<RemoteAccountDto> accounts)
+        => accounts.Any(account => RemoteRules.HasUsableKey(account) && account.Capabilities.Contains("torrents", StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// T10: the torrent dialog's starting lines from the queued open requests. <paramref name="fromDownloads"/> are the
+    /// ones this PC's Host sent for its finished .torrent downloads: while the window shows another server they are not
+    /// shown there (the row's Open as Torrent stays on this PC). A line that is the file of a finished .torrent download
+    /// in the shown list (<paramref name="jobFor"/>) is read by the Host by its id, so a network path is kept for it;
+    /// any other network or device path is left out (<paramref name="offThisPc"/>).
+    /// </summary>
+    public static List<string> QueuedToOpen(IReadOnlyList<string> queued, IReadOnlySet<string> fromDownloads, bool otherServer,
+        Func<string, Guid?> jobFor, out bool keptOnThisPc, out bool offThisPc)
+    {
+        keptOnThisPc = offThisPc = false;
+        var inputs = new List<string>();
+        foreach (var input in queued)
+        {
+            if (otherServer && fromDownloads.Contains(input)) keptOnThisPc = true;
+            else if (jobFor(input) is not null || !IsNetworkOrDevicePath(input)) inputs.Add(input);
+            else offThisPc = true;
+        }
+
+        return inputs;
+    }
+
+    public const string TorrentFilesStayOnThisPc = "Finished .torrent downloads stay in this PC's list. Open them there with Open as Torrent.";
+
     /// <summary>A magnet or a .torrent file's path, the inputs the torrent dialog takes.</summary>
     public static bool IsTorrentInput(string? text)
         => text is not null && (LinkExtractor.IsMagnet(text.Trim()) || LinkExtractor.IsTorrentPath(text.Trim()));
 
-    /// <summary>The route a new line starts with, from the setting (<c>ask</c>, <c>thisPc</c>, <c>provider</c>).</summary>
-    public static TorrentLineRoute DefaultRoute(string? setting, bool providerAvailable)
+    /// <summary>
+    /// The route a new line starts with, from the setting (<c>ask</c>, <c>thisPc</c>, <c>provider</c>). The older
+    /// <c>ask</c> (T9 W1) still picks one, so Add works at once: This PC when this PC takes torrents, else the provider; each line
+    /// can still be switched. Never <see cref="TorrentLineRoute.Unset"/>.
+    /// </summary>
+    public static TorrentLineRoute DefaultRoute(string? setting, bool providerAvailable, bool thisPcAvailable = true)
     {
         if (!providerAvailable) return TorrentLineRoute.ThisPc;
         return setting switch
         {
             "thisPc" => TorrentLineRoute.ThisPc,
             "provider" => TorrentLineRoute.Provider,
-            _ => TorrentLineRoute.Unset,
+            _ => thisPcAvailable ? TorrentLineRoute.ThisPc : TorrentLineRoute.Provider,
         };
     }
+
+    /// <summary>
+    /// T9: Options offers two choices, This PC (0) and the provider (1). A saved <c>ask</c> now starts each torrent on
+    /// this PC too (each one can still be switched), so it shows as This PC.
+    /// </summary>
+    public static int RouteOptionIndex(string? saved) => saved == "provider" ? 1 : 0;
+
+    /// <summary>What is saved for the chosen option: a saved <c>ask</c> stays when This PC is kept, so saving changes nothing.</summary>
+    public static string RouteToSave(int index, string? saved) => index == 1 ? "provider" : saved == "ask" ? "ask" : "thisPc";
 
     public static bool IsActive(JobDto job) => job.State is "connecting" or "downloading" or "verifying";
 
@@ -73,6 +155,20 @@ internal static class TorrentRules
         var total = torrent.FileCount == 1 ? "1 file" : $"{torrent.FileCount} files";
         return torrent.WantedCount >= torrent.FileCount ? total : $"{torrent.WantedCount} of {total}";
     }
+
+    /// <summary>How long a running torrent looks for its file list before the row says it may never come.</summary>
+    public static readonly TimeSpan FileListPatience = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Review 5:T3: in place of "File list not known yet", once a running torrent has looked for its file list for a
+    /// minute in this run (<see cref="JobDto.RunStartedAt"/>, not the first start, so a resumed or restored magnet starts
+    /// counting again; an older Host that doesn't send it gets no note). Worked out whenever the row is shown again, so
+    /// nothing wakes up for it. Null otherwise. The web UI has the same rule (torrents.ts fileListWaitNote).
+    /// </summary>
+    public static string? FileListWaitNote(JobDto job, DateTimeOffset now)
+        => job.Torrent is { HasMetadata: false } && IsActive(job) && job.RunStartedAt is { } started && now - started >= FileListPatience
+            ? "Still looking for the file list. This torrent may have no one sharing it."
+            : null;
 
     public static string Peers(int peers) => peers == 1 ? "1 peer" : $"{peers} peers";
 
@@ -197,6 +293,26 @@ internal static class TorrentRules
 
     public const string OnlyLocalTorrentFiles = "Only .torrent files on a drive of this computer can be added.";
 
+    // ---- Review 5:A6: what a drop or Ctrl+V on the window carries ----
+
+    public const string NothingToDrop = "Only links, magnet links and .torrent files can be dropped here.";
+    public const string NothingOnClipboard = "The clipboard holds no link, magnet link or .torrent file.";
+    public const string TorrentsCantBeAdded = "Torrents are turned off. Turn them on in Options › Torrents.";
+
+    /// <summary>
+    /// Where a drop or a paste goes: magnets and .torrent files to the torrent dialog while torrents can be added,
+    /// http, https and ftp links to Add Links (after the torrent dialog when there are both). Null when nothing goes
+    /// anywhere, with the words to show. The web UI's intakeStep (webui torrentIntake.ts) by the same rule.
+    /// </summary>
+    public static (bool Torrents, bool Links, string? Problem) Intake(int torrents, int links, bool torrentsCanBeAdded, bool offThisPc, bool dropped)
+    {
+        var takeTorrents = torrents > 0 && torrentsCanBeAdded;
+        if (takeTorrents || links > 0) return (takeTorrents, links > 0, null);
+        if (torrents > 0) return (false, false, TorrentsCantBeAdded);
+        if (offThisPc) return (false, false, OnlyLocalTorrentFiles);
+        return (false, false, dropped ? NothingToDrop : NothingOnClipboard);
+    }
+
     // ---- Asking for files (review fixes)
 
     /// <summary>
@@ -251,14 +367,16 @@ internal static class TorrentRules
     public static readonly TimeSpan ProgressWindowGrace = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// The Host of this PC opens this download's Progress Details window by itself as it starts (the rule of
-    /// Runtime's DownloadWindows: added here, not by the CLI or another device, to start now), and that window may not
-    /// be up yet: a magnet's file list can come in before the new window's process has started. So, for a short while
-    /// after the add and until the window has been seen, the main window doesn't open its own Choose Files for it
-    /// (<see cref="NextFileChoice"/>). Another server's Host opens no window on this PC.
+    /// The Host of this PC opens a download's Progress Details window by itself as it starts (the rule of Runtime's
+    /// DownloadWindows: added here, not by the CLI or another device, to start now), and that window may not be up yet.
+    /// So, for a short while after the add and until the window has been seen, the main window doesn't open its own
+    /// Choose Files for it (<see cref="NextFileChoice"/>). Another server's Host opens no window on this PC, and since T9
+    /// (W4) no Host opens one when a torrent starts (DownloadWindows.OpensStartWindow): the torrent dialog already asked
+    /// everything, so a torrent is never waited for and a magnet's Choose Files opens here once its file list is in. A
+    /// download the browser asked to keep quiet opens no window either (DownloadWindows.KeptQuiet, EXT.R12).
     /// </summary>
     public static bool ProgressWindowComing(JobDto job, bool localHost, bool windowSeen, DateTimeOffset now)
-        => localHost && !windowSeen && !job.AddedFromAnotherDevice && job.StartMode == "startNow" &&
+        => job.Torrent is null && localHost && !windowSeen && !job.AddedFromAnotherDevice && !job.QuietWindows && job.StartMode == "startNow" &&
            job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote") &&
            now - job.CreatedAt < ProgressWindowGrace;
 
@@ -276,4 +394,30 @@ internal static class TorrentRules
     /// </summary>
     public static (string State, int FileCount, bool HasMetadata, int Wanted, long WantedBytes) FilesReadKey(JobDto job)
         => (job.State, job.Torrent?.FileCount ?? 0, job.Torrent?.HasMetadata == true, job.Torrent?.WantedCount ?? 0, job.Torrent?.WantedBytes ?? 0);
+}
+
+/// <summary>T14: the words for the torrent folders, in Options and the torrent dialog's Save to (the web UI says the same).</summary>
+internal static class TorrentFolderText
+{
+    /// <summary>The torrent folder box when empty.</summary>
+    public const string SameFolders = "Same folders as other downloads";
+
+    public const string OptionsHint =
+        "Torrents go to the torrent folder, in a folder for their category (Torrents\\Video). Turned off, every torrent " +
+        "goes straight to the torrent folder. Leave the torrent folder empty to use the same folders as other downloads.";
+
+    /// <summary>
+    /// What an empty Save to in the torrent dialog means, as <c>TorrentFolderRules.Resolve</c> decides: each torrent's
+    /// category folder while torrent category folders are on (with no torrent folder, only while other downloads' are
+    /// on too), else the torrent folder, or with none the folder other downloads go to (the last or default folder).
+    /// An older Host doesn't say: as before.
+    /// </summary>
+    public static string SaveToPlaceholder(SettingsDto settings)
+    {
+        if (settings.UseTorrentCategoryFolders is not { } torrentOn) return EachCategoryFolder;
+        if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot)) return torrentOn ? EachCategoryFolder : "The torrent folder";
+        return torrentOn && settings.UseCategoryFolders ? EachCategoryFolder : "Same folder as other downloads";
+    }
+
+    private const string EachCategoryFolder = "Each torrent's category folder";
 }

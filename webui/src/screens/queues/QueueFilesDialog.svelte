@@ -62,7 +62,7 @@
           await store.ask('job.moveToQueue', destination === null ? { jobId: id, queueId: 0, detach: true } : { jobId: id, queueId: destination });
           delete staged[id];
         } catch (error) {
-          errors.push(`Could not update queue membership for ${job.fileName}: ${error instanceof Error ? error.message : String(error)}`);
+          errors.push(`Could not change the queue of ${job.fileName}: ${error instanceof Error ? error.message : String(error)}`);
           failed.add(id);
         }
       }

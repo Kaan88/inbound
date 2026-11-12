@@ -409,8 +409,12 @@ public sealed partial class MainWindow
             pick.ArchivePassword = null;
             if (request is null) continue;
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;
+            // T10: a finished .torrent download (Open as Torrent, or the Host's offer with torrents off here).
+            var torrentFileJob = TorrentFileJobFor(pick.Line.Input);
             var result = await _remote.AddAsync(request);
             if (result is { Ok: true, Job: { } job }) jobs.Add(job);
+            // The provider read the .torrent file as it was added, so the finished download and its file can go.
+            if (result.Ok && torrentFileJob is { } finished) await RemoveTorrentFileDownloadAsync(finished);
 
             // A refusal is the end of it for this link. Nothing here tries it any other way. Found again, it says what
             // of this add it didn't use, such as a folder.

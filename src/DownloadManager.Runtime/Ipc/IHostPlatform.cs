@@ -82,6 +82,13 @@ public interface IHostPlatform
     /// <summary>Opens the frontend, at <paramref name="page"/> when one is named. Only called when <see cref="PlatformCapabilities.SupportsOpenUi"/>.</summary>
     void OpenUi(string? page = null);
 
+    /// <summary>
+    /// EXT.R12: opens the main window at <paramref name="jobId"/>, selected and briefly highlighted. The dispatcher has
+    /// checked the download is on the list. Only called when <see cref="PlatformCapabilities.SupportsOpenUi"/>; a platform
+    /// that can't name a row opens the main window.
+    /// </summary>
+    void ShowJob(Guid jobId) => OpenUi();
+
     /// <summary>Ends the process soon after. Only called when <see cref="PlatformCapabilities.SupportsShutdown"/>.</summary>
     void RequestShutdown();
 
@@ -93,6 +100,13 @@ public interface IHostPlatform
     /// dispatcher has checked that one of them exists. Only called when <see cref="PlatformCapabilities.SupportsReveal"/>.
     /// </summary>
     void RevealFile(string path) => throw new NotSupportedException("Showing files is not available here.");
+
+    /// <summary>
+    /// T10: opens the window's torrent dialog with these finished .torrent files (full paths), as the Explorer association
+    /// does: one launch of the window with <c>--open-torrent</c> before each path, which a running window takes over
+    /// (<see cref="TorrentFileOffers"/> batches them). Only called when <see cref="PlatformCapabilities.SupportsOpenUi"/>.
+    /// </summary>
+    void OpenTorrentFiles(IReadOnlyList<string> paths) => throw new NotSupportedException("Opening the torrent dialog is not available here.");
 }
 
 /// <summary>The window pages <see cref="IHostPlatform.OpenUi"/> knows. Any other text opens the main window.</summary>

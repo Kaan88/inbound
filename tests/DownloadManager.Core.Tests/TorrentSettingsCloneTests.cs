@@ -22,4 +22,23 @@ public sealed class TorrentSettingsCloneTests
         foreach (var name in torrentSettings)
             Assert.Matches(new Regex($@"\b{name} = source\.{name}\b"), body);
     }
+
+    /// <summary>A setting the copy leaves at its default is lost on save; Revision left at 0 also turns off the Host's
+    /// merge protection for every save from the window (review 4:N1).</summary>
+    [Fact]
+    public void The_window_copies_every_setting_including_the_revision()
+    {
+        var source = File.ReadAllText(WindowLocalFindingsTests.WinUiFile("MainWindow.xaml.cs"));
+        var start = source.IndexOf("private static SettingsDto CloneSettings(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "CloneSettings was not found.");
+        var end = source.IndexOf("};", start, StringComparison.Ordinal);
+        var body = source[start..end];
+
+        // Groups and category deletions are sent only by the screens that change them.
+        string[] notCopied = [nameof(SettingsDto.DownloadGroups), nameof(SettingsDto.DeleteCategoryIds)];
+        var missing = typeof(SettingsDto).GetProperties().Select(property => property.Name)
+            .Where(name => !notCopied.Contains(name) && !Regex.IsMatch(body, $@"\b{name} = "))
+            .ToList();
+        Assert.Empty(missing);
+    }
 }

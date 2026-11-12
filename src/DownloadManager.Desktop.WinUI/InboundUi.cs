@@ -132,28 +132,103 @@ internal sealed class StatusChip
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = Text,
         };
-        InboundUi.Follow(Element, "InboundCardBrush", brush => Element.Background = brush);
         Element.Loaded += (_, _) => Apply();
         Element.ActualThemeChanged += (_, _) => Apply();
         Set(text, brushKey);
     }
 
-    public void Set(string text, string brushKey)
+    /// <param name="filled">T9 W3: a filled accent badge (Cached on TorBox) instead of the outline in the status color.</param>
+    public void Set(string text, string brushKey, bool filled = false)
     {
         var changed = Text.Text != text;
         Text.Text = text;
         _brushKey = brushKey;
+        _filled = filled;
         Element.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetName(Element, text);
         Apply();
         if (_announce && changed && text.Length > 0) LiveRegion.Announce(Element);
     }
 
+    private bool _filled;
+
     private void Apply()
     {
+        if (_filled)
+        {
+            var fill = InboundTheme.Brush("InboundBadgeAccentFillBrush", Element);
+            Element.Background = fill;
+            Element.BorderBrush = fill;
+            Text.Foreground = InboundTheme.Brush("InboundBadgeAccentTextBrush", Element);
+            return;
+        }
+
         var brush = InboundTheme.Brush(_brushKey, Element);
+        Element.Background = InboundTheme.Brush("InboundCardBrush", Element);
         Text.Foreground = brush;
         Element.BorderBrush = brush;
+    }
+}
+
+/// <summary>
+/// T9 W3: the provider's cache answer as a badge (radius 10 like <see cref="StatusChip"/>), with a short line under it.
+/// Cached is a filled accent badge; not cached and checking are a neutral outline; couldn't check is muted, with the
+/// reason in its tooltip. The words come from <see cref="CacheBadge"/>.
+/// </summary>
+internal sealed class CacheBadgeView
+{
+    private readonly Border _badge;
+    private readonly TextBlock _text = new() { FontSize = 12, TextWrapping = TextWrapping.NoWrap };
+    private readonly TextBlock _note = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxWidth = 220, Visibility = Visibility.Collapsed };
+    private CacheBadge? _shown;
+
+    public CacheBadgeView()
+    {
+        _badge = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 1, 8, 2),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = _text,
+        };
+        Element = new StackPanel { Spacing = 2, Visibility = Visibility.Collapsed, Children = { _badge, _note } };
+        Element.ActualThemeChanged += (_, _) => Apply();
+        Element.Loaded += (_, _) => Apply();
+    }
+
+    public StackPanel Element { get; }
+
+    public void Show(CacheBadge? badge)
+    {
+        if (badge == _shown) return;
+        var announce = _shown is not null && badge is not null && badge.Kind != CacheBadgeKind.Checking;
+        _shown = badge;
+        Element.Visibility = badge is null ? Visibility.Collapsed : Visibility.Visible;
+        _text.Text = badge?.Text ?? string.Empty;
+        _note.Text = badge?.Note ?? string.Empty;
+        _note.Visibility = string.IsNullOrEmpty(badge?.Note) ? Visibility.Collapsed : Visibility.Visible;
+        ToolTipService.SetToolTip(_badge, string.IsNullOrEmpty(badge?.ToolTip) ? null : badge.ToolTip);
+        AutomationProperties.SetName(Element, badge?.Spoken ?? string.Empty);
+        AutomationProperties.SetLiveSetting(Element, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
+        Apply();
+        if (announce) LiveRegion.Announce(Element);
+    }
+
+    private void Apply()
+    {
+        var kind = _shown?.Kind ?? CacheBadgeKind.NotCached;
+        var (fill, edge, text) = kind switch
+        {
+            CacheBadgeKind.Cached => ("InboundBadgeAccentFillBrush", "InboundBadgeAccentFillBrush", "InboundBadgeAccentTextBrush"),
+            CacheBadgeKind.Unknown => ("InboundCardBrush", "InboundCardStrokeBrush", "InboundSecondaryTextBrush"),
+            _ => ("InboundCardBrush", "InboundStatusNeutralBrush", "InboundStatusNeutralBrush"),
+        };
+        _badge.Background = InboundTheme.Brush(fill, Element);
+        _badge.BorderBrush = InboundTheme.Brush(edge, Element);
+        _text.Foreground = InboundTheme.Brush(text, Element);
+        _text.FontWeight = kind == CacheBadgeKind.Cached ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        _note.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", Element);
     }
 }
 

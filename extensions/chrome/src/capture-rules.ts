@@ -16,6 +16,11 @@ export type ThemeChoice = "system" | "light" | "dark";
  * "last": the last folder a download was sent to from a form, per target. "custom": a folder set here, for This PC.
  */
 export type AskStartsOn = "default" | "last" | "custom";
+/**
+ * EXT.R12: what the toolbar icon does when a download sent from the browser finishes: open the toolbar popup (where the
+ * browser allows it; otherwise the icon flashes), flash the icon a few times, or nothing.
+ */
+export type FinishAction = "popup" | "flash" | "nothing";
 
 export interface Settings {
   enabled: boolean;
@@ -48,6 +53,13 @@ export interface Settings {
   askStartsOn: AskStartsOn;
   /** EXT.R10: the folder on This PC that "custom" starts on. */
   askStartFolder: string;
+  /**
+   * EXT.R12: the app opens its progress and finished windows for downloads sent from the browser. Off by default: the
+   * browser keeps the focus and the toolbar icon shows the progress, as for the browser's own downloads.
+   */
+  openAppWindows: boolean;
+  /** EXT.R12: what happens when a download sent from the browser finishes. */
+  onFinish: FinishAction;
   /** Which version of the default rules these settings were written against (see migrateSettings). */
   rulesVersion: number;
 }
@@ -94,6 +106,8 @@ export const DEFAULT_SETTINGS: Settings = {
   browserFolder: "",
   askStartsOn: "default",
   askStartFolder: "",
+  openAppWindows: false,
+  onFinish: "flash",
   rulesVersion: RULES_VERSION,
 };
 
@@ -116,7 +130,7 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...stored };
   // Audit 3 L12: a stored value of the wrong type (a damaged or hand-edited store) falls back to the default, so
   // decideCapture can't throw on it and leave every download in the browser without a word.
-  for (const key of ["enabled", "autoIntercept", "notifications"] as const) {
+  for (const key of ["enabled", "autoIntercept", "notifications", "openAppWindows"] as const) {
     if (typeof settings[key] !== "boolean") settings[key] = DEFAULT_SETTINGS[key];
   }
   for (const key of ["interceptedExtensions", "excludedExtensions", "excludedHosts"] as const) {
@@ -134,6 +148,7 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   settings.browserFolder = folderSetting(settings.browserFolder);
   if (settings.askStartsOn !== "last" && settings.askStartsOn !== "custom") settings.askStartsOn = "default";
   settings.askStartFolder = folderSetting(settings.askStartFolder);
+  if (settings.onFinish !== "popup" && settings.onFinish !== "nothing") settings.onFinish = "flash";
   if ((stored.rulesVersion ?? 1) >= RULES_VERSION) {
     return { settings, changed: false };
   }
@@ -164,7 +179,7 @@ export function folderSetting(value: unknown): string {
 export const SETTING_KEYS: ReadonlyArray<keyof Settings> = [
   "enabled", "autoIntercept", "startMode", "destinationMode", "defaultTarget", "interceptedExtensions",
   "excludedExtensions", "excludedHosts", "notifications", "theme", "serverCustomName",
-  "browserFolder", "askStartsOn", "askStartFolder",
+  "browserFolder", "askStartsOn", "askStartFolder", "openAppWindows", "onFinish",
 ];
 
 /**

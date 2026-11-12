@@ -172,20 +172,33 @@ public sealed class TorrentAddLinesTests
     }
 
     [Fact]
-    public void WithAskEachTimeEveryLineWaitsForARoute()
+    public void WithAskEachTimeEveryLineStartsOnThisPcAndAddWorksAtOnce()
+    {
+        // T9 W1: "Ask each time" picks This PC for each torrent; Add needs no extra click.
+        var lines = new TorrentAddLines(TorrentRules.DefaultRoute("ask", providerAvailable: true), true, "TorBox");
+        lines.Add([MagnetA, FileA], fromPaste: false);
+        lines.Inspected(lines.Lines[0], Magnet());
+        lines.Inspected(lines.Lines[1], File(HashB, 1024));
+        Assert.All(lines.Lines, line => Assert.Equal(TorrentLineRoute.ThisPc, line.Route));
+        Assert.True(lines.CanAdd);
+        Assert.Equal(string.Empty, lines.Problem());
+
+        // Each line can still be switched.
+        lines.SetRoute(lines.Lines[0], TorrentLineRoute.Provider);
+        Assert.True(lines.CanAdd);
+        var picks = lines.Picks();
+        Assert.Equal(TorrentLineRoute.Provider, picks[0].Route);
+        Assert.Equal(TorrentLineRoute.ThisPc, picks[1].Route);
+    }
+
+    [Fact]
+    public void ALineWithNoRouteStillWaitsForOne()
     {
         var lines = new TorrentAddLines(TorrentLineRoute.Unset, true, "TorBox");
         lines.Add([MagnetA], fromPaste: false);
         lines.Inspected(lines.Lines[0], Magnet());
-        Assert.Equal(TorrentLineRoute.Unset, lines.Lines[0].Route);
         Assert.False(lines.CanAdd);
         Assert.Equal("Choose This PC or TorBox for each ticked torrent.", lines.Problem());
-        lines.SetRoute(lines.Lines[0], TorrentLineRoute.Provider);
-        Assert.True(lines.CanAdd);
-        var pick = Assert.Single(lines.Picks());
-        Assert.Equal(TorrentLineRoute.Provider, pick.Route);
-        Assert.Equal("all", pick.Files);
-        Assert.Null(pick.FileIndexes);
     }
 
     [Fact]
@@ -239,8 +252,9 @@ public sealed class TorrentAddLinesTests
     }
 
     [Fact]
-    public void OnTheProviderTheFileChoiceIsNotUsed()
+    public void OnTheProviderATorrentFilesTickedFilesGoByPathAndSize()
     {
+        // T9 W2: the same tree applies to the provider route; its files are sent by path and size.
         var lines = new TorrentAddLines(TorrentLineRoute.ThisPc, true, "TorBox");
         lines.Add([FileA], fromPaste: false);
         var line = lines.Lines[0];
@@ -248,13 +262,174 @@ public sealed class TorrentAddLinesTests
         lines.SetFileChoice(line, new RemoteFileChoice(false, ["1"]));
         Assert.Equal("chosen", Assert.Single(lines.Picks()).Files);
 
-        // Its own flow asks about the files.
         lines.SetRoute(line, TorrentLineRoute.Provider);
-        Assert.False(lines.CanChooseFilesFor(line));
-        Assert.Equal(".torrent file · 7.0 KB · 3 files", line.Detail);
+        Assert.True(lines.CanChooseFilesFor(line));
+        Assert.Equal(".torrent file · 2.0 KB of 7.0 KB · 1 of 3 files", line.Detail);
+        var pick = Assert.Single(lines.Picks());
+        Assert.Equal("chosen", pick.Files);
+        var path = Assert.Single(pick.FilePaths!);
+        Assert.Equal("Sintel/part1.mkv", path.Path);
+        Assert.Equal(2048, path.Size);
+        Assert.Null(pick.Priorities);
+
+        lines.SetFileChoice(line, new RemoteFileChoice(true, []));
+        pick = Assert.Single(lines.Picks());
+        Assert.Equal("all", pick.Files);
+        Assert.Null(pick.FilePaths);
+    }
+
+    [Fact]
+    public void OnTheProviderAMagnetFollowsTheHostsRuleAndAnUnchosenTorrentTakesAll()
+    {
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, chooseFiles: false, "TorBox");
+        lines.Add([MagnetA, FileA], fromPaste: false);
+        lines.Inspected(lines.Lines[0], Magnet());
+        lines.Inspected(lines.Lines[1], File(HashB, 1024, 2048));
+        Assert.False(lines.CanChooseFilesFor(lines.Lines[1]));
+        Assert.Equal([string.Empty, "all"], lines.Picks().Select(pick => pick.Files));
+        Assert.False(lines.MagnetNoteApplies);
+    }
+
+    [Fact]
+    public void OnTheProviderATorrentWithTooManyFilesIsNotChosenHere()
+    {
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, true, "TorBox");
+        lines.Add([FileA], fromPaste: false);
+        lines.Inspected(lines.Lines[0], File(HashA, Enumerable.Repeat(10L, TorrentAddLines.MostProviderFiles + 1).ToArray()));
+        Assert.False(lines.CanChooseFilesFor(lines.Lines[0]));
+        lines.SetRoute(lines.Lines[0], TorrentLineRoute.ThisPc);
+        Assert.True(lines.CanChooseFilesFor(lines.Lines[0]));
+    }
+
+    [Fact]
+    public void AThisPcFileChoiceIsDroppedOnTheProviderWhenItCantBeSent()
+    {
+        // Review: past the provider's limit the choice can't go, so the line shows and sends every file.
+        var lines = new TorrentAddLines(TorrentLineRoute.ThisPc, true, "TorBox");
+        lines.Add([FileA], fromPaste: false);
+        var line = lines.Lines[0];
+        lines.Inspected(line, File(HashA, Enumerable.Repeat(10L, TorrentAddLines.MostProviderFiles + 1).ToArray()));
+        lines.SetFileChoice(line, new RemoteFileChoice(false, ["0", "1"]));
+        Assert.True(line.IsPartial);
+        Assert.Contains("2 of", line.Detail);
+
+        lines.SetRoute(line, TorrentLineRoute.Provider);
+        Assert.False(line.IsPartial);
+        Assert.DoesNotContain("2 of", line.Detail);
+        Assert.Equal(line.TotalBytes, line.WantedBytes);
         var pick = Assert.Single(lines.Picks());
         Assert.Equal("all", pick.Files);
         Assert.Null(pick.FileIndexes);
+        Assert.Null(pick.FilePaths);
+        // Back on This PC the choice is used again.
+        lines.SetRoute(line, TorrentLineRoute.ThisPc);
+        Assert.Equal("chosen", Assert.Single(lines.Picks()).Files);
+    }
+
+    [Theory]
+    [InlineData(false, 100L, 200L)]
+    [InlineData(true, 100L)]
+    public void ATorrentFileOnTheProviderTakesEveryFileWhenNoneAreChosenHere(bool chooseFiles, params long[] sizes)
+    {
+        // Review: the setting off (or one file) sends "all", as This PC does, so no Choose Files window follows.
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, chooseFiles, "TorBox");
+        lines.Add([FileA], fromPaste: false);
+        lines.Inspected(lines.Lines[0], File(HashA, sizes));
+        Assert.False(lines.CanChooseFilesFor(lines.Lines[0]));
+        var pick = Assert.Single(lines.Picks());
+        Assert.Equal("all", pick.Files);
+        Assert.Equal("all", TorrentAddRequests.ForProvider(pick, null, "startNow", null, 1).Selection);
+    }
+
+    [Fact]
+    public void AMagnetOnTheProviderIsLeftToTheHostsRule()
+    {
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, false, "TorBox");
+        lines.Add([MagnetA], fromPaste: false);
+        lines.Inspected(lines.Lines[0], Magnet());
+        var pick = Assert.Single(lines.Picks());
+        Assert.Equal(string.Empty, pick.Files);
+        Assert.Null(TorrentAddRequests.ForProvider(pick, null, "startNow", null, 1).Selection);
+    }
+
+    // ---- T9 W2: the provider's request comes from the torrent dialog ---------------------------
+
+    private static TorrentAddPick ProviderPick(string files = "", string? category = @"D:\Video", IReadOnlyList<RemoteFilePathDto>? paths = null)
+        => new(MagnetA, "Film", TorrentLineRoute.Provider, files, null) { CategoryFolder = category, FilePaths = paths };
+
+    [Fact]
+    public void TheProviderRequestTakesTheDialogsFolderStartAndQueue()
+    {
+        var request = TorrentAddRequests.ForProvider(ProviderPick(), @"E:\Films ", "later", 3, defaultQueueId: 1);
+        Assert.Equal(MagnetA, request.Input);
+        Assert.Equal(@"E:\Films", request.Destination);
+        Assert.Equal("later", request.StartMode);
+        Assert.Equal(3, request.QueueId);
+        // Adding is the go-ahead, as in the provider's own add dialog; nothing else is asked.
+        Assert.True(request.ApproveUncached);
+        Assert.Null(request.Selection);
+        Assert.Null(request.FilePaths);
+        Assert.Null(request.FileIds);
+        Assert.Null(request.LinkPassword);
+    }
+
+    [Fact]
+    public void AnEmptySaveToIsTheTorrentsCategoryFolderOrTheDefault()
+    {
+        Assert.Equal(@"D:\Video", TorrentAddRequests.ForProvider(ProviderPick(), null, "startNow", null, 1).Destination);
+        Assert.Equal(@"D:\Video", TorrentAddRequests.ForProvider(ProviderPick(), "  ", "startNow", null, 1).Destination);
+        Assert.Null(TorrentAddRequests.ForProvider(ProviderPick(category: null), null, "startNow", null, 1).Destination);
+        Assert.Equal(1, TorrentAddRequests.ForProvider(ProviderPick(), null, "startNow", null, 1).QueueId);
+        Assert.Equal("startNow", TorrentAddRequests.ForProvider(ProviderPick(), null, "whenever", null, 1).StartMode);
+    }
+
+    [Fact]
+    public void TheProviderRequestCarriesTheFileChoice()
+    {
+        var paths = new List<RemoteFilePathDto> { new() { Path = "Sintel/part1.mkv", Size = 2048 } };
+        var chosen = TorrentAddRequests.ForProvider(ProviderPick("chosen", paths: paths), null, "startNow", 1, 1);
+        Assert.Equal("chosen", chosen.Selection);
+        Assert.Equal("Sintel/part1.mkv", Assert.Single(chosen.FilePaths!).Path);
+        var all = TorrentAddRequests.ForProvider(ProviderPick("all", paths: paths), null, "startNow", 1, 1);
+        Assert.Equal("all", all.Selection);
+        Assert.Null(all.FilePaths);
+    }
+
+    [Fact]
+    public void AProviderPickKnowsItsCategoryFolderFromTheHost()
+    {
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, true, "TorBox");
+        lines.Add([MagnetA], fromPaste: false);
+        var read = Magnet();
+        read.Destination = @"D:\Video";
+        lines.Inspected(lines.Lines[0], read);
+        Assert.Equal(@"D:\Video", Assert.Single(lines.Picks()).CategoryFolder);
+    }
+
+    [Fact]
+    public void TheCategoryFolderIsNotTakenFromATypedSaveTo()
+    {
+        // Review: Save to typed, then cleared before the next answer: the typed folder must not stand in for the category.
+        var lines = new TorrentAddLines(TorrentLineRoute.Provider, true, "TorBox");
+        lines.Add([MagnetA], fromPaste: false);
+        var line = lines.Lines[0];
+        var read = Magnet();
+        read.Destination = @"D:\Video";
+        lines.Inspected(line, read);
+        Assert.True(lines.SpaceAnswered(line, @"E:\Typed", new TorrentInspectResult { Ok = true, Destination = @"E:\Typed", FreeBytes = 5 }));
+        Assert.Equal(@"E:\Typed", line.Result!.Destination);
+        Assert.Equal(5, line.Result.FreeBytes);
+        Assert.Equal(@"D:\Video", Assert.Single(lines.Picks()).CategoryFolder);
+
+        // Read first with a folder typed: no category folder until an answer for Save to empty.
+        var typed = new TorrentAddLines(TorrentLineRoute.Provider, true, "TorBox");
+        typed.Add([MagnetA], fromPaste: false);
+        var first = Magnet();
+        first.Destination = @"E:\Typed";
+        typed.Inspected(typed.Lines[0], first, askedWithoutFolder: false);
+        Assert.Null(Assert.Single(typed.Picks()).CategoryFolder);
+        typed.SpaceAnswered(typed.Lines[0], null, new TorrentInspectResult { Ok = true, Destination = @"D:\Video" });
+        Assert.Equal(@"D:\Video", Assert.Single(typed.Picks()).CategoryFolder);
     }
 
     [Fact]
@@ -366,6 +541,55 @@ public sealed class TorrentAddLinesTests
         lines.CacheChecked(lines.Lines[1], null);
         Assert.Equal(TorrentCacheState.Unknown, lines.Lines[1].Cache);
     }
+
+    // ---- T9 W3: the cache answer as a badge ----------------------------------------------------
+
+    [Fact]
+    public void TheCacheAnswerIsABadgeNextToTheProviderChoice()
+    {
+        var lines = new TorrentAddLines(TorrentLineRoute.ThisPc, true, "TorBox");
+        lines.Add([MagnetA, FileA, FileB], fromPaste: false);
+        Assert.Null(lines.Lines[0].Badge("TorBox"));
+        lines.Inspected(lines.Lines[0], Magnet());
+        lines.Inspected(lines.Lines[1], File(HashB, 1024));
+        lines.Inspected(lines.Lines[2], File("cdef0123456789abcdef0123456789abcdef0123", 1024));
+        lines.StartCacheChecks();
+        Assert.Equal(new CacheBadge(CacheBadgeKind.Checking, "Checking TorBox…", "", null), lines.Lines[0].Badge("TorBox"));
+
+        lines.CacheChecked(lines.Lines[0], new RemoteClassifyResult { Ok = true, Cached = true });
+        lines.CacheChecked(lines.Lines[1], new RemoteClassifyResult { Ok = true, Cached = false });
+        lines.CacheChecked(lines.Lines[2], new RemoteClassifyResult { Error = "TorBox refused the API key. Check it, then save it again." });
+
+        var cached = lines.Lines[0].Badge("TorBox")!;
+        Assert.Equal(CacheBadgeKind.Cached, cached.Kind);
+        Assert.Equal("Cached on TorBox", cached.Text);
+        Assert.Equal("TorBox has it, so it downloads right away", cached.Note);
+        Assert.Null(cached.ToolTip);
+
+        var notCached = lines.Lines[1].Badge("TorBox")!;
+        Assert.Equal(CacheBadgeKind.NotCached, notCached.Kind);
+        Assert.Equal("Not cached on TorBox", notCached.Text);
+        Assert.Equal(string.Empty, notCached.Note);
+
+        var unknown = lines.Lines[2].Badge("TorBox")!;
+        Assert.Equal(CacheBadgeKind.Unknown, unknown.Kind);
+        Assert.Equal("Couldn't check TorBox", unknown.Text);
+        Assert.Equal("TorBox refused the API key. Check it, then save it again.", unknown.ToolTip);
+        Assert.Equal("Couldn't check TorBox. TorBox refused the API key. Check it, then save it again.", unknown.Spoken);
+
+        // No reason given: the tooltip still says something.
+        lines.CacheChecked(lines.Lines[2], null);
+        Assert.Equal("TorBox didn't answer the check.", lines.Lines[2].Badge("TorBox")!.ToolTip);
+        Assert.Null(lines.Lines[2].Badge(null));
+    }
+
+    [Theory]
+    [InlineData("Cached on TorBox", true)]
+    [InlineData("Ready to download", false)]
+    [InlineData("Not cached on TorBox", false)]
+    [InlineData(null, false)]
+    public void ACachedStatusIsShownAsTheSameBadge(string? status, bool filled)
+        => Assert.Equal(filled, CacheBadge.IsCachedWords(status));
 
     [Fact]
     public void TheCacheNeverPicksTheRoute()

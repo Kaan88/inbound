@@ -1213,7 +1213,7 @@ internal sealed class ProviderPanel
         var view = ViewOf(row.Item, job);
         row.Update(row.Item, view, OnListOf(job));
         _detailHeader.Element.Visibility = _mode == ProviderPanelMode.Full ? Visibility.Visible : Visibility.Collapsed;
-        _detailHeader.Chip.Set(view.Status, ToneKey(view.Tone));
+        _detailHeader.Chip.Set(view.Status, ToneKey(view.Tone), filled: CacheBadge.IsCachedWords(view.Status));
         // This runs every few seconds, and setting a tooltip again would close one being read.
         if (_detailTitle.Text != view.Name)
         {

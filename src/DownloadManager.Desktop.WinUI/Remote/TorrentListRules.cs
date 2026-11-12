@@ -24,6 +24,24 @@ internal readonly record struct TorrentCounts(int All, int Downloading, int Seed
 }
 
 /// <summary>
+/// T7: how many torrents the extra views under Torrents hold (<see cref="TorrentListRules.ExtraTags"/>). A torrent can be
+/// in several of them, or in none.
+/// </summary>
+internal readonly record struct TorrentExtraCounts(int Active, int Stalled, int Checking, int Files, int Completed, int Errored)
+{
+    public int Of(string tag) => tag switch
+    {
+        TorrentListRules.ActiveTag => Active,
+        TorrentListRules.StalledTag => Stalled,
+        TorrentListRules.CheckingTag => Checking,
+        TorrentListRules.FilesTag => Files,
+        TorrentListRules.CompletedTag => Completed,
+        TorrentListRules.ErroredTag => Errored,
+        _ => 0,
+    };
+}
+
+/// <summary>
 /// The Host's seeding policy as Options sets it (TorrentSeedRatio, TorrentSeedHours): seeding ends at the ratio or after
 /// the hours, whichever comes first; 0 is no limit of that kind. It applies to every seeding torrent, also one started by
 /// hand (Runtime's TorrentSeeding).
@@ -76,13 +94,30 @@ internal static class TorrentListRules
     public const string SeedingTag = "torrents:seeding";
     public const string StoppedTag = "torrents:stopped";
 
-    /// <summary>The views under Torrents, in the sidebar's order.</summary>
-    public static readonly IReadOnlyList<string> SubTags = [DownloadingTag, SeedingTag, StoppedTag];
+    // T7 (owner, 2026-11-12: "torrent related sort categories"): the views other torrent clients have, built only from what
+    // the jobs carry. Each shows only while it holds a torrent (or is the view shown), so empty ones take no room.
+    public const string ActiveTag = "torrents:active";
+    public const string StalledTag = "torrents:stalled";
+    public const string CheckingTag = "torrents:checking";
+    public const string FilesTag = "torrents:files";
+    public const string CompletedTag = "torrents:completed";
+    public const string ErroredTag = "torrents:errored";
+
+    /// <summary>The views always under Torrents, in the sidebar's order.</summary>
+    public static readonly IReadOnlyList<string> MainTags = [DownloadingTag, SeedingTag, StoppedTag];
+
+    /// <summary>T7: the views under Torrents that show only while they hold a torrent, in the sidebar's order (after the main three).</summary>
+    public static readonly IReadOnlyList<string> ExtraTags = [ActiveTag, StalledTag, CheckingTag, FilesTag, CompletedTag, ErroredTag];
+
+    /// <summary>Every view under Torrents, in the sidebar's order.</summary>
+    public static readonly IReadOnlyList<string> SubTags = [.. MainTags, .. ExtraTags];
 
     /// <summary>The columns only the torrent views show.</summary>
     public static readonly IReadOnlyList<string> ColumnKeys = ["seeds", "peers", "up", "ratio"];
 
-    public static bool IsSubTag(string? category) => category is DownloadingTag or SeedingTag or StoppedTag;
+    public static bool IsSubTag(string? category) => category is not null && SubTags.Contains(category);
+
+    public static bool IsExtraTag(string? category) => category is not null && ExtraTags.Contains(category);
 
     /// <summary>Torrents, or one of the views under it.</summary>
     public static bool IsTorrentView(string? category) => category == TorrentRules.SidebarTag || IsSubTag(category);
@@ -106,14 +141,87 @@ internal static class TorrentListRules
         return job.State is "paused" or "failed" or "cancelled" or "completed" ? TorrentGroup.Stopped : TorrentGroup.Downloading;
     }
 
-    public static bool Matches(string category, JobDto? job) => GroupOf(job) is { } group && category switch
+    public static bool Matches(string category, JobDto? job, DateTimeOffset? now = null) => GroupOf(job) is { } group && category switch
     {
         TorrentRules.SidebarTag => true,
         DownloadingTag => group == TorrentGroup.Downloading,
         SeedingTag => group == TorrentGroup.Seeding,
         StoppedTag => group == TorrentGroup.Stopped,
+        ActiveTag => IsTransferring(job!),
+        StalledTag => IsStalled(job!, now),
+        CheckingTag => IsChecking(job!),
+        FilesTag => IsWaitingForFiles(job!),
+        CompletedTag => IsCompletedNotSeeding(job!),
+        ErroredTag => IsErrored(job!),
         _ => false,
     };
+
+    // ---- T7: the extra views. Each takes a torrent job (job.Torrent is set). ----
+
+    /// <summary>What it receives now, in bytes per second, while it downloads; 0 otherwise.</summary>
+    private static double DownloadRate(JobDto job)
+        => TorrentRules.IsActive(job) && job.BytesPerSecond is { } rate && double.IsFinite(rate) && rate > 0 ? rate : 0;
+
+    /// <summary>Active: it moves data now: it downloads and receives something, or (downloading or seeding) sends something.</summary>
+    public static bool IsTransferring(JobDto job)
+        => job.Torrent is not null && (DownloadRate(job) >= 1 || IsRunning(job) && UploadRate(job) is not null);
+
+    /// <summary>How long a torrent runs before it can count as stalled, so a start (finding peers) isn't one.</summary>
+    public static readonly TimeSpan StallGrace = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Stalled: it should be downloading (connecting or downloading), receives nothing (no figure, or under 1 B/s), has
+    /// no peer connected (Peers and Seeds 0), and first started at least <see cref="StallGrace"/> ago. The peer count
+    /// changes far less often than the rate, so a dip in the rate doesn't move a torrent in and out of the view; one
+    /// with peers that sends it nothing yet isn't stalled. A torrent that sends has a peer, so Active and Stalled don't
+    /// overlap. A magnet still waiting for its file list counts too. A file check and a wait for the file choice are
+    /// views of their own, so neither counts. The time comes from <see cref="JobDto.StartedAt"/> (the first start);
+    /// with none, the grace doesn't apply.
+    /// </summary>
+    public static bool IsStalled(JobDto job, DateTimeOffset? now = null)
+        => job.Torrent is { Checking: false } torrent && job.State is "connecting" or "downloading"
+           && !(torrent.HasMetadata && torrent.AwaitingFileChoice) && DownloadRate(job) < 1
+           && torrent.Peers <= 0 && torrent.Seeds <= 0
+           && (job.StartedAt is not { } started || (now ?? DateTimeOffset.UtcNow) - started >= StallGrace);
+
+    /// <summary>Checking: the worker checks its files on disk now.</summary>
+    public static bool IsChecking(JobDto job) => job.Torrent is { Checking: true };
+
+    /// <summary>Waiting for files: its file list is in and it waits for the choice of files (not once it is finished or removed).</summary>
+    public static bool IsWaitingForFiles(JobDto job)
+        => TorrentRules.PrimaryIsChooseFiles(job) && job.State is not ("completed" or "cancelled");
+
+    /// <summary>Completed: finished and not seeding.</summary>
+    public static bool IsCompletedNotSeeding(JobDto job) => job is { State: "completed", Torrent.Seeding: false };
+
+    /// <summary>Errored: it failed, or the Host paused it because the disk is full (the row says so).</summary>
+    public static bool IsErrored(JobDto job)
+        => job.Torrent is not null && (job.State == "failed" || job.State == "paused" && job.Failure?.Kind == "diskFull");
+
+    public static TorrentExtraCounts CountExtras(IEnumerable<JobDto> jobs, DateTimeOffset? now = null)
+    {
+        var at = now ?? DateTimeOffset.UtcNow;
+        int active = 0, stalled = 0, checking = 0, files = 0, completed = 0, errored = 0;
+        foreach (var job in jobs)
+        {
+            if (job.Torrent is null) continue;
+            if (IsTransferring(job)) active++;
+            if (IsStalled(job, at)) stalled++;
+            if (IsChecking(job)) checking++;
+            if (IsWaitingForFiles(job)) files++;
+            if (IsCompletedNotSeeding(job)) completed++;
+            if (IsErrored(job)) errored++;
+        }
+
+        return new TorrentExtraCounts(active, stalled, checking, files, completed, errored);
+    }
+
+    /// <summary>
+    /// T7: whether a view under Torrents is in the sidebar. The main three always are; an extra one while it holds a
+    /// torrent, or while it is the view shown (or about to be restored), so it doesn't vanish from under the user.
+    /// </summary>
+    public static bool ViewShows(string tag, int count, string? shownCategory, string? pendingCategory = null)
+        => !IsExtraTag(tag) || count > 0 || tag == shownCategory || tag == pendingCategory;
 
     public static TorrentCounts Count(IEnumerable<JobDto> jobs)
     {
@@ -234,7 +342,7 @@ internal static class TorrentListRules
     {
         if (job.Torrent is null || settings is null) return null;
         var goal = SeedGoal.From(settings).For(job);
-        if (job.Torrent.SeedGoal == "never") return "Never stops (this torrent's own option)";
+        if (job.Torrent.SeedGoal == "never") return "Don't seed (this torrent's own option)";
         if (GoalText(goal) is not { } text) return null;
         if (SeedGoal.IsOwn(job)) text += " (this torrent's own option)";
         if (TorrentSeedRules.IsSeeding(job))

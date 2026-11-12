@@ -65,6 +65,39 @@ public sealed class ServerPathStyleTests
         Assert.Equal(@"a full folder path, such as D:\Downloads", ServerPaths.FullFolderWords(PathStyle.ThisPc));
     }
 
+    /// <summary>
+    /// T11: a progress window in the main window's process says where its own download is; the shown server, the main
+    /// window's, stays as it was. In this class so no other test changes the shown server meanwhile.
+    /// </summary>
+    [Fact]
+    public void AProgressWindowForThisPcLeavesTheShownServerAtTheMainWindowsServer()
+    {
+        var before = ShownServer.Target;
+        try
+        {
+            var server = ServerTarget.Remote("0123456789abcdef0123456789abcdef", "minipc", new Uri("http://minipc:8080/"), "token", false);
+            ShownServer.Target = server;
+            ShownServer.Describe(HostKinds.Server, null);
+
+            // This PC's progress window reads this PC's file icons; another server's window doesn't.
+            Assert.False(ShownServer.IsRemoteFor(ownRemote: false));
+            Assert.True(ShownServer.IsRemoteFor(ownRemote: true));
+            // The main window's own rows still follow the shown server.
+            Assert.True(ShownServer.IsRemoteFor(null));
+
+            Assert.Same(server, ShownServer.Target);
+            Assert.Equal(PathStyle.Linux, ShownServer.PathStyle);
+
+            ShownServer.Target = ServerTarget.Local;
+            Assert.True(ShownServer.IsRemoteFor(ownRemote: true));
+            Assert.False(ShownServer.IsRemoteFor(null));
+        }
+        finally
+        {
+            ShownServer.Target = before;
+        }
+    }
+
     [Fact]
     public void TheShownServerForgetsTheLastOnesPathsWhenAnotherIsShown()
     {

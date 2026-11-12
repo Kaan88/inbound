@@ -1,9 +1,50 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace DownloadManager.Contracts;
 
 public static class ShellActions
 {
+    private const int AnyProcess = -1; // ASFW_ANY
+
+    // Full paths, not bare names: the Host's working folder is the user profile, so a bare name could be looked up
+    // there first (audit N6, as L3 did for its own programs).
+    private static string Explorer => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+    private static string RunDll32 => Path.Combine(Environment.SystemDirectory, "rundll32.exe");
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
+    /// <summary>
+    /// UI.B24: starts <paramref name="start"/> (Explorer, a file's program) so that the window it shows may come to the
+    /// front. The explorer.exe started here normally passes the request on to the Explorer already running, which opens the
+    /// window or tab; that process was not started by the foreground one, so Windows keeps its window behind unless
+    /// the foreground process allows it (AllowSetForegroundWindow). Only a process that may set the foreground itself
+    /// can allow it, so this helps only when the caller is the foreground process, was started by it, or was allowed
+    /// by it in turn; otherwise the call does nothing. Off Windows it just starts the process.
+    /// </summary>
+    public static Process? Start(ProcessStartInfo start)
+    {
+        AllowShellForeground();
+        return Process.Start(start);
+    }
+
+    /// <summary>Lets any process take the foreground until the user's next input (ASFW_ANY); Windows only, a no-op
+    /// elsewhere and when this process may not set the foreground itself.</summary>
+    public static void AllowShellForeground()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            AllowSetForegroundWindow(AnyProcess);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Not a desktop Windows: nothing to allow.
+        }
+    }
+
     /// <summary>Opens a completed file with its registered handler.</summary>
     public static ProcessStartInfo OpenFile(string path)
         => new(path)
@@ -13,7 +54,7 @@ public static class ShellActions
 
     /// <summary>Shows the Windows "Open with" chooser for an existing file.</summary>
     public static ProcessStartInfo OpenWith(string path)
-        => new("rundll32.exe", $"shell32.dll,OpenAs_RunDLL \"{path}\"")
+        => new(RunDll32, $"shell32.dll,OpenAs_RunDLL \"{path}\"")
         {
             UseShellExecute = true,
         };
@@ -27,7 +68,7 @@ public static class ShellActions
             open.ArgumentList.Add(folder);
             return open;
         }
-        return new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true };
+        return new ProcessStartInfo(Explorer, $"\"{folder}\"") { UseShellExecute = true };
     }
 
     /// <summary>
@@ -49,13 +90,13 @@ public static class ShellActions
         }
         if (File.Exists(path))
         {
-            return new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
+            return new ProcessStartInfo(Explorer, $"/select,\"{path}\"")
             {
                 UseShellExecute = true,
             };
         }
 
-        return new ProcessStartInfo("explorer.exe", $"\"{folder ?? path}\"")
+        return new ProcessStartInfo(Explorer, $"\"{folder ?? path}\"")
         {
             UseShellExecute = true,
         };

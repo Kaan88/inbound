@@ -18,7 +18,8 @@ public static class TorrentListPaging
 
     public static long SizeOf(JobListEntry entry)
         => SizeOf(entry.Torrent) + 6L * (entry.Url.Length + (entry.FileName?.Length ?? 0) + (entry.DestinationDirectory?.Length ?? 0) +
-           (entry.Description?.Length ?? 0) + (entry.CategoryId?.Length ?? 0) + (entry.ExpectedSha256?.Length ?? 0)) + 512;
+           (entry.Description?.Length ?? 0) + (entry.CategoryId?.Length ?? 0) + (entry.ExpectedSha256?.Length ?? 0) +
+           (entry.ContentType?.Length ?? 0)) + 512;
 
     /// <summary>The entry itself, or a copy without its .torrent when that alone would not fit in a page.</summary>
     public static TorrentListEntry Fitting(TorrentListEntry torrent)
@@ -78,6 +79,7 @@ public static class TorrentListPaging
         StartMode = entry.StartMode,
         ConflictPolicy = entry.ConflictPolicy,
         ExpectedSha256 = entry.ExpectedSha256,
+        ContentType = entry.ContentType,
         Torrent = entry.Torrent,
     };
 }

@@ -78,6 +78,15 @@ export function apply(model: Model, message: Envelope): boolean {
       model.groups = (message.payload as DownloadGroup[]) ?? [];
       return true;
 
+    // UI.R37: the server's update check found another latest version. Before the snapshot there is nothing to put it
+    // on; the snapshot carries it.
+    case 'update.latest': {
+      const latest = (message.payload as { latestVersion?: string | null } | undefined)?.latestVersion ?? null;
+      if (!model.status || model.status.latestVersion === latest) return false;
+      model.status = { ...model.status, latestVersion: latest };
+      return true;
+    }
+
     case 'settings.result': {
       const result = message.payload as { ok: boolean; settings?: Settings };
       if (!result?.settings) return false;

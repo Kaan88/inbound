@@ -187,6 +187,12 @@ public sealed class DownloadJob
     /// </summary>
     public bool FileMissing { get; set; }
 
+    /// <summary>
+    /// T10: when it completed, this download looked like a torrent (its content type or name) and its file read as a
+    /// .torrent file within <c>TorrentMetadata.MaxFileBytes</c>. Cleared when the job runs again.
+    /// </summary>
+    public bool TorrentFileReady { get; set; }
+
     public string? ETag { get; set; }
     public string? LastModified { get; set; }
     public string? ContentType { get; set; }
@@ -222,6 +228,13 @@ public sealed class DownloadJob
     /// property it doesn't know but would set aside a job whose source it can't read.
     /// </summary>
     public bool AddedFromAnotherDevice { get; set; }
+
+    /// <summary>
+    /// EXT.R12: the browser extension that sent it shows its progress on its toolbar icon and asked the app to open no
+    /// window for it (no progress window as it starts, no completion window), so the browser keeps the focus. A flag of
+    /// its own, like <see cref="AddedFromAnotherDevice"/>: an older build ignores it.
+    /// </summary>
+    public bool QuietWindows { get; set; }
 
     /// <summary>
     /// A browser on another device added this download or last changed its address (D8), so it never reaches this PC
@@ -270,6 +283,13 @@ public sealed class DownloadJob
     /// </summary>
     [JsonIgnore]
     public string? WaitingForHost { get; set; }
+
+    /// <summary>
+    /// When this job last started running in this Host's lifetime (review 5:T3). Unlike <see cref="StartedAt"/>, which
+    /// is the first start ever, it is set again on every start, so a resumed or restored job counts from now. Memory only.
+    /// </summary>
+    [JsonIgnore]
+    public DateTimeOffset? RunStartedAt { get; set; }
 
     /// <summary>The user removed this job. A restart finishes that instead of bringing the job back.</summary>
     public bool RemovalPending { get; set; }
@@ -490,6 +510,12 @@ public sealed class DownloadQueue
     public int QuotaWindowHours { get; set; } = 5;
     public DateTimeOffset? QuotaWindowStart { get; set; }
     public long QuotaBytesUsed { get; set; }
+
+    /// <summary>
+    /// The schedule that started the queue's current run, whose when-done actions its end takes (audit 2 M10). Saved,
+    /// so a run that goes on after a restart keeps them (review 2 L4). The Host's own; never from a client.
+    /// </summary>
+    public Guid? ArmedScheduleId { get; set; }
 }
 
 public sealed class ScheduleRule
@@ -520,6 +546,12 @@ public sealed class ScheduleRule
 
     /// <summary>Local date the queue was last stopped by this schedule.</summary>
     public DateOnly? LastStopDate { get; set; }
+
+    /// <summary>
+    /// Local date on which the schedule was made, turned on or had its trigger changed after that day's stop time
+    /// (review 2 L2). That day's stop is only recorded: the schedule did not start what runs then. The Host's own.
+    /// </summary>
+    public DateOnly? SetAfterStopDate { get; set; }
 
     public bool OpenFileWhenDone { get; set; }
     public bool ExitWhenDone { get; set; }
@@ -630,6 +662,18 @@ public sealed class AppSettings
     public string TorrentRoute { get; set; } = TorrentRoutes.Ask;
     /// <summary>Ask which files to download before a multi-file torrent starts.</summary>
     public bool TorrentChooseFiles { get; set; } = true;
+    /// <summary>
+    /// T14: torrents go to a folder for their category (<see cref="TorrentFolderRules"/>); off, each goes straight to the
+    /// torrent folder. Apart from <see cref="UseCategoryFolders"/>, which is for other downloads only. Settings from
+    /// before T14 get the value <see cref="UseCategoryFolders"/> had, since that one decided for torrents then.
+    /// </summary>
+    public bool UseTorrentCategoryFolders { get; set; } = true;
+    /// <summary>
+    /// T14: the torrent folder, which holds the torrents' category folders (Video, Music...). Null: torrents use the
+    /// same folders as other downloads, which is what settings from before T14 get, so an upgrade moves nothing. A new
+    /// install gets Torrents under the download folder (<see cref="NewInstall"/>), which follows that folder when it moves.
+    /// </summary>
+    public string? TorrentCategoryFoldersRoot { get; set; }
     /// <summary>Open magnet links and .torrent files with this app (a per-user registration the window makes).</summary>
     public bool TorrentHandler { get; set; }
     /// <summary>T2: keep sharing a torrent after it finished downloading, until <see cref="TorrentSeedRatio"/> or
@@ -721,6 +765,14 @@ public sealed class AppSettings
         "qt", "ra", "rar", "rm", "rmvb", "sea", "sit", "sitx", "tar", "wav", "wma",
         "wmv", "z", "zip"
     };
+
+    /// <summary>The settings of a new install: the defaults, and torrents in their own folder (T14).</summary>
+    public static AppSettings NewInstall()
+    {
+        var settings = new AppSettings();
+        settings.TorrentCategoryFoldersRoot = TorrentFolderRules.DefaultRoot(settings.DefaultDownloadDirectory);
+        return settings;
+    }
 
     public static string GetDefaultDownloadDirectory()
     {

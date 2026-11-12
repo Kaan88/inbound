@@ -11,7 +11,7 @@ namespace DownloadManager.Cli;
 /// </summary>
 internal static partial class Program
 {
-    private static readonly string[] RemoteValueOptions =
+    internal static readonly string[] RemoteValueOptions =
         ["--dest", "--queue", "--start", "--select", "--provider", "--offset", "--limit", "--item", "--add"];
 
     private static async Task<int> RemoteAsync(CliClient client, string[] args, bool json)
@@ -196,9 +196,9 @@ internal static partial class Program
                 return PrintRemoteAction(await AskAsync<RemoteActionResultDto>(client, MessageTypes.RemoteRetry, new RemoteRetryRequest
                 {
                     JobId = id,
-                    ApproveUncached = args.Contains("--approve-uncached", StringComparer.OrdinalIgnoreCase) ? true : null,
-                    LinkPassword = args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase) ? ReadSecretLine("Link password: ") : null,
-                    LinkPasswordForArchives = args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase),
+                    ApproveUncached = CliArgs.HasFlag(args, "--approve-uncached") ? true : null,
+                    LinkPassword = CliArgs.HasFlag(args, "--link-password-stdin") ? ReadSecretLine("Link password: ") : null,
+                    LinkPasswordForArchives = CliArgs.HasFlag(args, "--link-password-for-archives"),
                 }).ConfigureAwait(false), json);
             }
 
@@ -237,14 +237,14 @@ internal static partial class Program
                     return 2;
                 }
 
-                if (!args.Contains("--delete-from-provider", StringComparer.OrdinalIgnoreCase))
+                if (!CliArgs.HasFlag(args, "--delete-from-provider"))
                 {
                     var removed = PrintRemoteAction(await AskAsync<RemoteActionResultDto>(client, MessageTypes.RemoteRemove, new RemoteJobIdRequest { JobId = id }).ConfigureAwait(false), json);
                     if (removed == 0 && !json) Console.WriteLine("Taken off this list. The item on the provider and any local downloads are as they were.");
                     return removed;
                 }
 
-                if (!args.Contains("--yes", StringComparer.OrdinalIgnoreCase))
+                if (!CliArgs.HasFlag(args, "--yes"))
                 {
                     Console.Error.WriteLine("This deletes the item from the provider for good. Add --yes to confirm.");
                     return 2;
@@ -314,7 +314,7 @@ internal static partial class Program
     /// </summary>
     private sealed class DirectAddCheck(CliClient client, string[] args)
     {
-        private readonly bool _direct = args.Contains("--direct", StringComparer.OrdinalIgnoreCase);
+        private readonly bool _direct = CliArgs.HasFlag(args, "--direct");
         private bool _saidIncomplete;
 
         /// <returns>Why this address can't be added directly. Null when it can.</returns>
@@ -422,16 +422,16 @@ internal static partial class Program
             Input = input,
             Destination = GetOption(args, "--dest") is { } dest ? Path.GetFullPath(dest) : null,
             StartMode = GetOption(args, "--start") ?? "startNow",
-            ApproveUncached = args.Contains("--approve-uncached", StringComparer.OrdinalIgnoreCase),
+            ApproveUncached = CliArgs.HasFlag(args, "--approve-uncached"),
         };
-        if (args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase))
+        if (CliArgs.HasFlag(args, "--link-password-stdin"))
         {
             request.LinkPassword = ReadSecretLine("Link password: ");
             // TB.S2: the user's own go-ahead to try it on this link's archives too.
-            request.LinkPasswordForArchives = args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase);
+            request.LinkPasswordForArchives = CliArgs.HasFlag(args, "--link-password-for-archives");
         }
 
-        if (args.Contains("--archive-password-stdin", StringComparer.OrdinalIgnoreCase))
+        if (CliArgs.HasFlag(args, "--archive-password-stdin"))
         {
             request.ArchivePassword = ReadArchivePassword();
         }
@@ -482,7 +482,7 @@ internal static partial class Program
             return RemoteUsage(usage);
         }
 
-        var all = args.Contains("--all", StringComparer.OrdinalIgnoreCase);
+        var all = CliArgs.HasFlag(args, "--all");
         var addOption = GetOption(args, "--add");
         if (all && addOption is not null)
         {
@@ -555,7 +555,7 @@ internal static partial class Program
             EntryIds = chosen,
             Destination = GetOption(args, "--dest") is { } dest ? Path.GetFullPath(dest) : null,
             StartMode = GetOption(args, "--start") ?? "startNow",
-            ApproveUncached = args.Contains("--approve-uncached", StringComparer.OrdinalIgnoreCase),
+            ApproveUncached = CliArgs.HasFlag(args, "--approve-uncached"),
         };
         if (int.TryParse(GetOption(args, "--queue"), out var queue))
         {
@@ -757,8 +757,8 @@ internal static partial class Program
 
     /// <summary>TB.S2: the archives flag only widens a link password given here; on its own it would quietly do nothing.</summary>
     private static bool ArchivesFlagWithoutLinkPassword(string[] args) =>
-        args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase) &&
-        !args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase);
+        CliArgs.HasFlag(args, "--link-password-for-archives") &&
+        !CliArgs.HasFlag(args, "--link-password-stdin");
 
     private static int RemoteUsage(string usage)
     {

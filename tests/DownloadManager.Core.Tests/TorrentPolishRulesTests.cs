@@ -58,6 +58,16 @@ public sealed class TorrentPolishRulesTests
         Assert.Equal("Added 3 of 3 downloads.", RemoteText.ImportSummary(3, 3, 0, null, 0));
     }
 
+    /// <summary>N6 follow-up: an entry's hand-off content type is sent in the import request, so its size counts too
+    /// (the web UI's listEntrySize counts it already).</summary>
+    [Fact]
+    public void AnEntrysContentTypeCountsTowardsItsRequestSize()
+    {
+        var plain = new JobListEntry { Url = "https://example.test/a.bin" };
+        var typed = new JobListEntry { Url = "https://example.test/a.bin", ContentType = new string('x', 100) };
+        Assert.Equal(TorrentListPaging.SizeOf(plain) + 600, TorrentListPaging.SizeOf(typed));
+    }
+
     [Fact]
     public void AnImportIsSentInRequestsUnderTheSizeLimitAndATooLargeTorrentFileGoesAsItsMagnet()
     {

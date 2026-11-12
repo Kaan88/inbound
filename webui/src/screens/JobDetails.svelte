@@ -15,7 +15,7 @@
   import { announceSaid, canAnnounce, canRecheck, recheckSaid } from '../lib/torrentControls';
   import { cantTell, routeOf } from '../lib/addlines';
   import {
-    addressLabel, barValue, completedSize, detailRows, failureLabel, hasOwnAddress, heading, mergeSegments, noFileText, noticeText,
+    addressLabel, barValue, completedSize, detailRows, failureLabel, failureText, hasOwnAddress, heading, mergeSegments, noFileText, noticeText,
     hideAddresses, pollsSegments, redownloadRefusal, segmentRows, segmentsMove, updateRates, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
   } from '../lib/details';
   import { archiveRowView, extractSummary, fullWithNote, looksLikeArchive, planFor, type ArchivePasswordTarget } from '../lib/archives';
@@ -420,7 +420,7 @@
           {#if listenPort > 0}<dt class="text-muted">Listen port</dt><dd class="tabular">{listenPort}</dd>{/if}
         {/if}
         {#if hideAddresses(job.statusNote)}<dt class="text-muted">Note</dt><dd>{hideAddresses(job.statusNote)}</dd>{/if}
-        {#if failLabel && job.failure}<dt class="text-muted">{failLabel}</dt><dd class="text-error">{job.failure.message}</dd>{/if}
+        {#if failLabel && job.failure}<dt class="text-muted">{failLabel}</dt><dd class="text-error">{failureText(job)}</dd>{/if}
         {#if set}
           <dt class="text-muted">Extraction</dt>
           <dd>
@@ -520,8 +520,8 @@
   <AskDialog
     title="Delete download?"
     text={job.fileRemovedAfterExtraction
-      ? `Remove ${job.fileName ? `“${job.fileName}”` : 'this download'} from the list? ${nothingToDelete()}`
-      : `Remove ${job.fileName ? `“${job.fileName}”` : 'this download'} from the list and delete its downloaded file? This cannot be undone.`}
+      ? `Delete ${job.fileName ? `“${job.fileName}”` : 'this download'} from the list? ${nothingToDelete()}`
+      : `Delete ${job.fileName ? `“${job.fileName}”` : 'this download'} and its downloaded file? This cannot be undone.`}
     confirm="Delete"
     danger
     onconfirm={deleteDownload}

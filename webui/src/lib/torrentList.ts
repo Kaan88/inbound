@@ -48,6 +48,84 @@ export function torrentCounts(jobs: Iterable<Pick<Job, 'state' | 'torrent'>>): T
   return result;
 }
 
+// ---- T7: the views other torrent clients have (MainWindow.Torrents, TorrentListRules) ----
+
+/**
+ * Shown under the three only while they hold a torrent, or while they are the view shown. A torrent can be in several,
+ * or in none. Built only from what the jobs carry.
+ */
+export type TorrentExtraView = 'active' | 'stalled' | 'checking' | 'files' | 'completed' | 'errored';
+
+export const torrentExtraViews: { key: TorrentExtraView; label: string; icon: string }[] = [
+  { key: 'active', label: 'Active', icon: 'play' },
+  { key: 'stalled', label: 'Stalled', icon: 'info' },
+  { key: 'checking', label: 'Checking', icon: 'refresh' },
+  { key: 'files', label: 'Waiting for files', icon: 'queue' },
+  { key: 'completed', label: 'Completed', icon: 'check' },
+  { key: 'errored', label: 'Errored', icon: 'alert' },
+];
+
+type ViewJob = Pick<Job, 'state' | 'torrent' | 'bytesPerSecond' | 'failure'> & Partial<Pick<Job, 'startedAt'>>;
+
+/** How long a torrent runs before it can count as stalled, so a start (finding peers) isn't one (TorrentListRules.StallGrace). */
+export const stallGraceMs = 60_000;
+
+/** What it receives now, while it downloads; 0 otherwise. */
+function receiving(job: ViewJob): number {
+  const rate = job.bytesPerSecond ?? 0;
+  return isActive(job) && Number.isFinite(rate) && rate > 0 ? rate : 0;
+}
+
+/** What it sends now, while it downloads or seeds; 0 otherwise. */
+function sending(job: ViewJob): number {
+  const rate = job.torrent?.uploadRate ?? 0;
+  return mayRun(job) && Number.isFinite(rate) && rate >= 1 ? rate : 0;
+}
+
+/**
+ * Active: it moves data now (receives, or sends while it downloads or seeds). Stalled: it should be downloading
+ * (connecting or downloading), receives nothing (under 1 B/s), has no peer connected (peers and seeds 0) and first
+ * started at least a minute ago (no startedAt: no grace), apart from a file check and a wait for the file choice. The
+ * peer count changes far less often than the rate, so a dip doesn't move a torrent in and out; one that sends has a
+ * peer, so Active and Stalled don't overlap. Checking: the worker checks its files now. Waiting for files:
+ * its file list is in and the choice is open. Completed: finished and not seeding. Errored: it failed, or the server
+ * paused it because the disk is full.
+ */
+export function inTorrentExtraView(view: TorrentExtraView, job: ViewJob, now: number = Date.now()): boolean {
+  const torrent = job.torrent;
+  if (!torrent) return false;
+  switch (view) {
+    case 'active': return receiving(job) >= 1 || sending(job) >= 1;
+    case 'stalled':
+      return (job.state === 'connecting' || job.state === 'downloading') && torrent.checking !== true
+        && !(torrent.hasMetadata && torrent.awaitingFileChoice) && receiving(job) < 1
+        && (torrent.peers ?? 0) <= 0 && (torrent.seeds ?? 0) <= 0 && ranLongEnough(job.startedAt, now);
+    case 'checking': return torrent.checking === true;
+    case 'files': return torrent.hasMetadata && torrent.awaitingFileChoice && job.state !== 'completed' && job.state !== 'cancelled';
+    case 'completed': return job.state === 'completed' && torrent.seeding !== true;
+    case 'errored': return job.state === 'failed' || (job.state === 'paused' && job.failure?.kind === 'diskFull');
+  }
+}
+
+function ranLongEnough(startedAt: string | undefined, now: number): boolean {
+  const started = startedAt ? Date.parse(startedAt) : NaN;
+  return !Number.isFinite(started) || now - started >= stallGraceMs;
+}
+
+export function torrentExtraCounts(jobs: Iterable<ViewJob>, now: number = Date.now()): Record<TorrentExtraView, number> {
+  const result: Record<TorrentExtraView, number> = { active: 0, stalled: 0, checking: 0, files: 0, completed: 0, errored: 0 };
+  for (const job of jobs) {
+    if (!job.torrent) continue;
+    for (const view of torrentExtraViews) if (inTorrentExtraView(view.key, job, now)) result[view.key]++;
+  }
+  return result;
+}
+
+/** An extra view is in the sidebar while it holds a torrent, or while it is the view shown, so it doesn't vanish under the user. */
+export function extraViewShows(count: number | undefined, key: string, current: string): boolean {
+  return (count ?? 0) > 0 || key === current;
+}
+
 // ---- The seeding goal (Options > Torrents) ----
 
 export interface SeedGoal {
@@ -142,7 +220,8 @@ export function swarmCells(job: Pick<Job, 'state' | 'torrent'>, goal: SeedGoal, 
   goal = goalFor(torrent, goal);
   const running = mayRun(job);
   const seeding = torrent.seeding === true;
-  const up = seeding ? Math.max(0, torrent.uploadRate ?? 0) : 0;
+  // T8: a downloading torrent sends too; its figure shows once it sends something.
+  const up = running ? Math.max(0, torrent.uploadRate ?? 0) : 0;
   const seeds = Math.max(0, torrent.seeds);
   const peers = Math.max(0, torrent.peers);
   const ratio = ratioCell(torrent, goal, now);
@@ -154,7 +233,7 @@ export function swarmCells(job: Pick<Job, 'state' | 'torrent'>, goal: SeedGoal, 
     ratio: Math.max(0, torrent.ratio ?? 0),
     seedsText: running ? String(seeds) : '–',
     peersText: running ? String(peers) : '–',
-    upText: seeding ? speed(up) || '0 B/s' : '–',
+    upText: seeding ? speed(up) || '0 B/s' : up >= 1 ? speed(up) : '–',
     ratioText: ratio,
     goal: seeding && (goal.ratio > 0 || goal.hours > 0) ? goalPercent(torrent, goal, now) : null,
     line: [swarm, `ratio ${ratio}`].filter(Boolean).join(' · '),
@@ -210,7 +289,7 @@ export function torrentSummary(jobs: Iterable<Pick<Job, 'state' | 'torrent' | 'b
     if (!job.torrent) continue;
     any = true;
     if (isActive(job)) down += Math.max(0, job.bytesPerSecond ?? 0);
-    if (job.torrent.seeding === true) up += Math.max(0, job.torrent.uploadRate ?? 0);
+    if (mayRun(job)) up += Math.max(0, job.torrent.uploadRate ?? 0);
   }
   if (!any) return '';
   const parts = [`↓ ${speed(down) || '0 B/s'}`, `↑ ${speed(up) || '0 B/s'}`];

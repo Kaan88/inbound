@@ -142,7 +142,9 @@ public sealed partial class DownloadManagerService
     public async Task<TorrentInspectResult> InspectTorrentAsync(TorrentInspectRequest request, CancellationToken cancellationToken = default, CallerScope? caller = null)
     {
         if (TorrentsRefusal() is { } refused) return new TorrentInspectResult { Error = refused };
-        var (input, error) = await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false);
+        var (input, error) = request.FromJobId is { } fromJob
+            ? await ReadTorrentFileJobAsync(fromJob, caller, cancellationToken).ConfigureAwait(false)
+            : await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false);
         if (input is null) return new TorrentInspectResult { Error = error };
         if (caller is not null && await DescribeTorrentAddressesAsync(input, cancellationToken).ConfigureAwait(false) is { } local)
             return new TorrentInspectResult { Error = local };
@@ -151,8 +153,8 @@ public sealed partial class DownloadManagerService
         var totalBytes = input.Parsed?.Files.Sum(file => file.Length);
         // T3: the room at the folder it would go to, measured where the files would be written.
         var name = FileNameResolver.Sanitize(input.Name);
-        var destination = ResolveDestination(request.Destination, name, useLastFolder: caller is null, useCategoryFolder: true,
-            categoryId: FileCategories.For(input.Name));
+        // T14: the torrent folders, apart from other downloads'.
+        var destination = ResolveTorrentDestination(request.Destination, input.Name, useLastFolder: caller is null);
         long? free = null;
         if ((caller?.Roots ?? Roots) is not { } roots || roots.Allowed(destination) is not null)
             free = await FreeBytesAtAsync(destination, cancellationToken).ConfigureAwait(false);
@@ -212,10 +214,20 @@ public sealed partial class DownloadManagerService
 
     public async Task<TorrentAddResult> AddTorrentAsync(TorrentAddRequest request, CancellationToken cancellationToken = default, CallerScope? caller = null)
     {
+        var result = await AddTorrentCoreAsync(request, cancellationToken, caller).ConfigureAwait(false);
+        // T10: added from a finished .torrent download, new or already in the list: that download and its file go.
+        if (request.FromJobId is { } fromJob && result.Ok) await RemoveTorrentFileJobAsync(fromJob, caller).ConfigureAwait(false);
+        return result;
+    }
+
+    private async Task<TorrentAddResult> AddTorrentCoreAsync(TorrentAddRequest request, CancellationToken cancellationToken, CallerScope? caller)
+    {
         if (TorrentsRefusal() is { } refused) return new TorrentAddResult { Error = refused };
-        var (input, error) = string.IsNullOrWhiteSpace(request.Data)
-            ? await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false)
-            : ReadTorrentData(request.Data);
+        var (input, error) = request.FromJobId is { } fromJob
+            ? await ReadTorrentFileJobAsync(fromJob, caller, cancellationToken).ConfigureAwait(false)
+            : string.IsNullOrWhiteSpace(request.Data)
+                ? await ReadTorrentInputAsync(request.Input, caller, cancellationToken).ConfigureAwait(false)
+                : ReadTorrentData(request.Data);
         if (input is null) return new TorrentAddResult { Error = error };
         if (caller is not null && await DescribeTorrentAddressesAsync(input, cancellationToken).ConfigureAwait(false) is { } local)
             return new TorrentAddResult { Error = local };
@@ -224,6 +236,9 @@ public sealed partial class DownloadManagerService
             if (FindTorrentJobLocked(input.InfoHash) is { } existing)
                 return new TorrentAddResult { Ok = true, Existing = true, Job = Map(existing.Job) };
         }
+
+        // T10: only the copy of a torrent already in the list is removed; this request never adds one.
+        if (request.OnlyIfListed) return new TorrentAddResult { Error = TorrentNoLongerListedText };
 
         var filesMode = (request.Files ?? "all").Trim();
         if (filesMode is not ("all" or "chosen" or "askWhenReady"))
@@ -256,7 +271,7 @@ public sealed partial class DownloadManagerService
         var startMode = ParseEnum(request.StartMode, StartMode.StartNow);
         var categoryId = FileCategories.For(input.Name);
         var name = FileNameResolver.Sanitize(input.Name);
-        var destination = ResolveDestination(request.Destination, name, useLastFolder: caller is null, useCategoryFolder: true, categoryId: categoryId);
+        var destination = ResolveTorrentDestination(request.Destination, input.Name, useLastFolder: caller is null);
         if ((caller?.Roots ?? Roots) is { } roots)
         {
             if (roots.Allowed(destination) is not { } inside) return new TorrentAddResult { Error = roots.OutsideTextFor(destination) };

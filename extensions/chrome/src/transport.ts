@@ -91,6 +91,8 @@ export class NativeTransport implements Transport {
     /** Messages on the shared connection that answer no request (job.event and the like). */
     private readonly onEvent: (message: Envelope) => void = () => undefined,
     private readonly runtime: NativeRuntime = chrome.runtime,
+    /** The shared connection closed (the app quit, or the browser dropped it): its events stop until the next request. */
+    private readonly onDisconnect: () => void = () => undefined,
   ) {}
 
   get connected(): boolean {
@@ -153,6 +155,7 @@ export class NativeTransport implements Transport {
       this.port = null;
       for (const request of this.pending.values()) request.reject(new Error(message));
       this.pending.clear();
+      try { this.onDisconnect(); } catch { /* the listener's own fault */ }
     });
     this.port = port;
     this.lastError = "";

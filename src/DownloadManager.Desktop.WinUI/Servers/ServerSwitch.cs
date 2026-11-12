@@ -95,13 +95,24 @@ internal static class ServerBannerRules
 {
     public const string BackText = "Back to This PC";
 
+    /// <summary>Review 5:E1: this PC's Host can't be reached any more, so the list shown is from before.</summary>
+    public const string LocalHostLost =
+        "Can't reach Inbound's background program, so this list is out of date: downloads may have stopped. It updates again once the program is back.";
+
     /// <param name="everConnected">The connection to this server was up at least once since it was shown.</param>
     /// <param name="pairingEnded">The server refused the token (<see cref="HostConnection.PairingEnded"/>).</param>
     /// <param name="stopped">Nothing more is tried until the user changes something (<see cref="HostConnection.StoppedTrying"/>).</param>
     /// <param name="error">The connection's last words, if it went down.</param>
     public static ServerBanner For(ServerTarget target, bool connected, bool everConnected, bool pairingEnded, bool stopped, string? error)
     {
-        if (target.IsLocal) return new ServerBanner(false, string.Empty, false, ServerBannerAction.None, false, null, connected);
+        if (target.IsLocal)
+        {
+            // Review 5:E1: a lost Host leaves rows that looked live; the bar says the list is out of date and dims it. Nothing
+            // here starts the Host: the window only waits for it, so a tray Exit stays an exit.
+            return !connected && everConnected
+                ? new ServerBanner(true, LocalHostLost, true, ServerBannerAction.None, true, null, false)
+                : new ServerBanner(false, string.Empty, false, ServerBannerAction.None, false, null, connected);
+        }
         var name = target.Name;
         if (connected)
             return new ServerBanner(true, $"Showing the downloads of {name}.", false, ServerBannerAction.None, false, null, true);

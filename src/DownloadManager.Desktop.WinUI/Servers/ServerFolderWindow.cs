@@ -169,6 +169,7 @@ internal sealed class ServerFolderWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
+        DialogArrowKeys.Add(dialog);
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || name.Text.Trim().Length == 0) return;
         Show(await AskAsync(MessageTypes.FoldersCreate, new FolderCreateRequest { Parent = parent, Name = name.Text.Trim() }));
     }

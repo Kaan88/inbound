@@ -113,6 +113,20 @@ public sealed class TorrentSeedingUiTests
             TorrentRules.ChipText([Torrent(state: "downloading", peers: 4), Torrent(seeding: true, peers: 3)]));
     }
 
+    /// <summary>Review 4:L9: Delete Completed takes seeding torrents too (they are completed), and says that stops them seeding.</summary>
+    [Fact]
+    public void Delete_completed_says_seeding_stops()
+    {
+        Assert.Equal("Remove 3 completed item(s) from the list? The downloaded files will stay on disk.",
+            TorrentSeedRules.DeleteCompletedText([Torrent(), Torrent(), new JobDto { State = "completed" }]));
+        Assert.Equal("Remove 2 completed item(s) from the list? The downloaded files will stay on disk. "
+            + "1 of them is a torrent that is seeding; removing it stops seeding.",
+            TorrentSeedRules.DeleteCompletedText([Torrent(), Torrent(seeding: true)]));
+        Assert.Equal("Remove 2 completed item(s) from the list? The downloaded files will stay on disk. "
+            + "2 of them are torrents that are seeding; removing them stops seeding.",
+            TorrentSeedRules.DeleteCompletedText([Torrent(seeding: true), Torrent(seeding: true)]));
+    }
+
     // ---- Start Seeding and Stop Seeding ----
 
     [Fact]

@@ -115,11 +115,16 @@ public sealed partial class RuntimeServiceTests
         await ctx.WaitFor(job.Id, j => j.State == "paused");
         var paused = ctx.Service.GetJob(job.Id)!;
         Assert.True(paused.ReceivedBytes > 0);
+        Assert.NotNull(paused.StartedAt);
+        Assert.NotNull(paused.RunStartedAt);
 
         var resume = await ctx.Service.ResumeAsync(job.Id);
         Assert.True(resume.Ok, resume.Error);
         var completed = await ctx.WaitFor(job.Id, j => j.State == "completed");
         Assert.Equal(size, completed.ReceivedBytes);
+        // Review 5:T3: the first start stays, and the run start is the resume's.
+        Assert.Equal(paused.StartedAt, completed.StartedAt);
+        Assert.True(completed.RunStartedAt > paused.RunStartedAt);
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             TestContent.Generate(5, size))).ToLowerInvariant();
         Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
@@ -567,6 +572,11 @@ public sealed partial class RuntimeServiceTests
         await using var ctx = await ServiceContext.CreateAsync(_server);
         var portable = await ctx.Service.CheckForUpdatesAsync();
         Assert.Equal("notInstalled", portable.Status);
+        // UI.R37: a build with no updater knows no latest version, and its status says none.
+        var latestSeen = new List<string?>();
+        ctx.Service.LatestVersionChanged += (_, version) => latestSeen.Add(version);
+        Assert.Null(ctx.Service.LatestVersion);
+        Assert.Null(ctx.Service.GetStatus().LatestVersion);
 
         var root = Path.Combine(
             AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"), "install");
@@ -611,6 +621,11 @@ public sealed partial class RuntimeServiceTests
                 Assert.Equal("updateAvailable", check.Status);
                 Assert.Equal("1.0.0", check.InstalledVersion);
                 Assert.Equal("1.0.1", check.AvailableVersion);
+                // UI.R37: the check's newest version is kept for the status and announced once; the same again isn't.
+                Assert.Equal("1.0.1", ctx.Service.GetStatus().LatestVersion);
+                Assert.Equal("1.0.1", ctx.Service.GetSnapshot().Status.LatestVersion);
+                Assert.True((await ctx.Service.CheckForUpdatesAsync()).Ok);
+                Assert.Equal(["1.0.1"], latestSeen);
 
                 var download = await ctx.Service.DownloadUpdateAsync();
                 Assert.True(download.Ok, download.Error);
@@ -649,6 +664,27 @@ public sealed partial class RuntimeServiceTests
                 Assert.True(deferred.Ok, deferred.Error);
                 Assert.Equal("1.0.1",
                     ctx.Service.GetSnapshot().Settings.SkippedUpdateVersion);
+
+                // UI.R37: the stable manifest's latest says nothing about the beta channel. The switch announces that no
+                // latest is known, and a check that still finds a stable manifest keeps it so.
+                var beta = ctx.Service.GetSnapshot().Settings;
+                beta.UpdateChannel = "beta";
+                Assert.True((await ctx.Service.UpdateSettingsAsync(beta)).Ok);
+                Assert.Null(ctx.Service.LatestVersion);
+                Assert.Null(ctx.Service.GetStatus().LatestVersion);
+                Assert.Equal(["1.0.1", null], latestSeen);
+                Assert.True((await ctx.Service.CheckForUpdatesAsync()).Ok);
+                Assert.Equal(["1.0.1", null], latestSeen);
+                // Back on stable, the check finds the latest again; with updates off it is gone.
+                beta.UpdateChannel = "stable";
+                Assert.True((await ctx.Service.UpdateSettingsAsync(beta)).Ok);
+                Assert.True((await ctx.Service.CheckForUpdatesAsync()).Ok);
+                Assert.Equal("1.0.1", ctx.Service.GetStatus().LatestVersion);
+                beta.UpdateManifestUrl = string.Empty;
+                Assert.True((await ctx.Service.UpdateSettingsAsync(beta)).Ok);
+                Assert.Null(ctx.Service.GetStatus().LatestVersion);
+                Assert.Equal("notConfigured", (await ctx.Service.CheckForUpdatesAsync()).Status);
+                Assert.Equal(["1.0.1", null, "1.0.1", null], latestSeen);
             }
             finally
             {
@@ -1137,6 +1173,83 @@ public sealed partial class RuntimeServiceTests
         Assert.Single(hook.Calls);
     }
 
+    /// <summary>Review 3 L3: the post-download hook starts Windows PowerShell by its full path, never by a search of
+    /// the current folder or PATH.</summary>
+    [Fact]
+    public void WindowsPowerShellIsStartedByItsFullPathInTheSystemFolder()
+    {
+        if (!OperatingSystem.IsWindows()) return; // the hook runs PowerShell on Windows only
+        var path = DownloadManagerService.WindowsPowerShellPath;
+        Assert.True(Path.IsPathRooted(path), path);
+        Assert.StartsWith(Environment.SystemDirectory, path, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(@"WindowsPowerShell\v1.0\powershell.exe".Replace('\\', Path.DirectorySeparatorChar), path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Audit 2 L7: the slot a finished download frees is filled before its hook runs, not after.</summary>
+    [Fact]
+    public async Task TheNextDownloadStartsWhileTheLastOnesHookStillRuns()
+    {
+        var hook = new BlockingPostDownloadHook();
+        await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook, maxConcurrent: 1);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.PostDownloadCommand = "C:\\Scanner\\scan.exe";
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/hook-first.bin?size=65536&seed=312",
+            DestinationDirectory = ctx.Destination, FileName = "hook-first.bin", Source = "cli",
+        });
+        var second = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/hook-second.bin?size=65536&seed=313",
+            DestinationDirectory = ctx.Destination, FileName = "hook-second.bin", Source = "cli",
+        });
+        try
+        {
+            await hook.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            // The first one's hook holds; the second still runs to the end.
+            await ctx.WaitFor(second.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            Assert.Equal("completed", ctx.Service.GetJob(first.Job!.Id)!.State);
+        }
+        finally
+        {
+            hook.Release.TrySetResult();
+        }
+    }
+
+    /// <summary>Audit 2 L14: a pause in the gap between a job being picked and its runner starting frees its slot for
+    /// the next one, and a listener that throws doesn't stop a download.</summary>
+    [Fact]
+    public async Task APauseBeforeTheRunnerStartsFreesTheSlotAndAThrowingListenerStopsNothing()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 1);
+        ctx.Service.JobChanged += (_, _) => throw new InvalidOperationException("a broken listener");
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/gap-first.bin?size=65536&seed=314",
+            DestinationDirectory = ctx.Destination, FileName = "gap-first.bin", Source = "cli", StartMode = "later",
+        });
+        var second = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/gap-second.bin?size=65536&seed=315",
+            DestinationDirectory = ctx.Destination, FileName = "gap-second.bin", Source = "cli", StartMode = "later",
+        });
+        var paused = 0;
+        ctx.Service.BeforeRunForTesting = id =>
+        {
+            if (id == first.Job!.Id && Interlocked.Exchange(ref paused, 1) == 0)
+                Assert.True(ctx.Service.PauseAsync(id).GetAwaiter().GetResult().Ok);
+        };
+
+        Assert.True((await ctx.Service.ResumeAsync(first.Job!.Id)).Ok);
+        Assert.True((await ctx.Service.ResumeAsync(second.Job!.Id)).Ok);
+
+        await ctx.WaitFor(second.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(1, Volatile.Read(ref paused));
+        Assert.Equal("paused", ctx.Service.GetJob(first.Job.Id)!.State);
+    }
+
     [Fact]
     public async Task Perf6_FtpDownloadsTakeALiveSpeedLimitAndTheSharedCap()
     {
@@ -1510,6 +1623,109 @@ public sealed partial class RuntimeServiceTests
         {
             try { Directory.Delete(root, recursive: true); } catch (IOException) { }
         }
+    }
+
+    /// <summary>Audit 2 L27: a rename whose new name can't be saved puts the file back, so the list never points at a
+    /// name that isn't there.</summary>
+    [Fact]
+    public async Task ARenameThatCannotBeSavedLeavesTheFileWhereItWas()
+    {
+        if (!OperatingSystem.IsWindows()) return; // a read-only record file refuses the replace on Windows only
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/unsaved.bin?size=1024&seed=907",
+            DestinationDirectory = ctx.Destination, FileName = "unsaved.bin", Source = "cli",
+        });
+        var done = await ctx.WaitFor(added.Job!.Id, job => job.State == "completed");
+        var record = new FileInfo(Path.Combine(ctx.Paths.JobsDirectory, $"{done.Id:N}.json"));
+        Assert.True(record.Exists);
+        record.IsReadOnly = true;
+        try
+        {
+            var target = Path.Combine(ctx.Destination, "renamed.bin");
+            var renamed = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = done.Id, NewFilePath = target });
+            Assert.False(renamed.Ok);
+            Assert.True(File.Exists(done.FinalFilePath));
+            Assert.False(File.Exists(target));
+            Assert.Equal(done.FinalFilePath, ctx.Service.GetJob(done.Id)!.FinalFilePath);
+        }
+        finally
+        {
+            record.IsReadOnly = false;
+        }
+    }
+
+    /// <summary>Audit 2 L27 follow-up: a rename to another kind of file whose save fails keeps the old name's
+    /// automatic category, which the failed save had already taken from the new name.</summary>
+    [Fact]
+    public async Task ARenameToAnotherKindThatCannotBeSavedKeepsItsCategory()
+    {
+        if (!OperatingSystem.IsWindows()) return; // a read-only record file refuses the replace on Windows only
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/kind.zip?size=1024&seed=909",
+            DestinationDirectory = ctx.Destination, FileName = "kind.zip", Source = "cli",
+        });
+        var done = await ctx.WaitFor(added.Job!.Id, job => job.State == "completed");
+        var record = new FileInfo(Path.Combine(ctx.Paths.JobsDirectory, $"{done.Id:N}.json"));
+        record.IsReadOnly = true;
+        try
+        {
+            var renamed = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = done.Id, NewFilePath = Path.Combine(ctx.Destination, "kind.mp4") });
+            Assert.False(renamed.Ok);
+            Assert.NotEqual(FileCategories.For("kind.mp4"), done.CategoryId);
+            Assert.Equal(done.CategoryId, renamed.Job!.CategoryId);
+            Assert.Equal(done.CategoryId, ctx.Service.GetJob(done.Id)!.CategoryId);
+        }
+        finally
+        {
+            record.IsReadOnly = false;
+        }
+    }
+
+    /// <summary>Review follow-up to 2 L10: a server's answer to a file information request has no local path in it, so a
+    /// web session hears it too, not only the kind of failure.</summary>
+    [Fact]
+    public async Task AWebSessionHearsWhyTheServerGaveNoFileInformation()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        // A name under .test never resolves: the request fails with the HTTP client's own words.
+        var read = await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = "https://no-such-host.invalid.test/file.bin" },
+            CancellationToken.None, new CallerScope(new PathRoots([ctx.Destination])));
+        Assert.False(read.Ok);
+        Assert.False(string.IsNullOrWhiteSpace(read.Error));
+        Assert.DoesNotContain("The app's log has the details", read.Error);
+    }
+
+    /// <summary>Review 2 L10: a web session's failed move hears the kind of failure, not the exception's words with
+    /// this machine's paths; this machine's user still hears them.</summary>
+    [Fact]
+    public async Task AFailedMoveTellsAWebSessionTheKindOnlyAndThisPcsUserTheWords()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/words.bin?size=1024&seed=908",
+            DestinationDirectory = ctx.Destination, FileName = "words.bin", Source = "cli",
+        });
+        var done = await ctx.WaitFor(added.Job!.Id, job => job.State == "completed");
+        // A file where the new folder would have to be: making the folder fails with the path in its words.
+        var blocker = Path.Combine(ctx.Destination, "blocker");
+        await File.WriteAllTextAsync(blocker, "a file");
+        var target = Path.Combine(blocker, "inside", "words.bin");
+
+        var web = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = done.Id, NewFilePath = target },
+            CancellationToken.None, new CallerScope(new PathRoots([ctx.Destination])));
+        Assert.False(web.Ok);
+        Assert.DoesNotContain(ctx.Destination, web.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("The app's log has the details", web.Error);
+
+        var local = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = done.Id, NewFilePath = target });
+        Assert.False(local.Ok);
+        Assert.DoesNotContain("The app's log has the details", local.Error);
+        Assert.True(File.Exists(done.FinalFilePath));
     }
 
     [Fact]
@@ -4194,6 +4410,18 @@ public sealed partial class RuntimeServiceTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class BlockingPostDownloadHook : IPostDownloadHook
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task RunAsync(string command, string filePath, CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
         }
     }
 

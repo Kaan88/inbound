@@ -3,10 +3,14 @@
   import { speed } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import {
-    addSpeedPoint, cellNote, hasTorrentControls, mayRun, notRunningText, peerRows, peersCount, pieceCells, piecesHad, piecesSummary, ratioText, shouldAsk, speedLine,
-    swarmPollMs, trackerRows, uploadedText, type PeerDto, type PiecesDto, type SpeedPoint, type SwarmTab, type TrackerDto,
+    addSpeedPoint, cellNote, hasTorrentControls, mayRun, notRunningText, peersCount, pieceCells, piecesHad, piecesSummary, ratioText, shouldAsk, speedLine,
+    swarmPollMs, uploadedText, type PeerDto, type PiecesDto, type SpeedPoint, type SwarmTab, type TrackerDto,
   } from '../lib/torrentDetails';
   import { announceSaid, canAnnounce, detailsPollMs, wasteText, type TorrentDetails } from '../lib/torrentControls';
+  import {
+    ariaSort, heldOrder, nextColumnSort, parseColumnSort, peerSortKeys, sortedPeerRows, sortedTrackerRows, sortMark, trackerSortKeys,
+    type ColumnSort, type PeerSortKey, type TrackerSortKey,
+  } from '../lib/detailsSort';
   import type { Job } from '../lib/types';
 
   // A torrent's Peers, Trackers or Pieces & Speed tab (T2, c-torrent-details.html). It asks the server only while it is
@@ -96,12 +100,86 @@
       announcing = false;
     }
   }
-  const peerList = $derived(peerRows(peers));
-  const trackerList = $derived(trackerRows(trackers));
+  // T12: the tables sort by a click on a header (kept in this browser), and hold still while the pointer is over them.
+  function load(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function save(key: string, value: string) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Private windows may refuse; the order still holds for this page.
+    }
+  }
+  let peerSort = $state<ColumnSort<PeerSortKey>>(parseColumnSort(load('inbound.peerSort'), peerSortKeys));
+  let trackerSort = $state<ColumnSort<TrackerSortKey>>(parseColumnSort(load('inbound.trackerSort'), trackerSortKeys));
+  let holding = $state(false);
+  // A table that goes (no peers left, the torrent stopped, another tab) takes the pointer's leave with it: let go then,
+  // or later rows would keep held places until the pointer came back.
+  const tableShown = $derived(
+    !notRunning && answered !== null && (kind === 'peers' ? peers.length > 0 : kind === 'trackers' ? trackers.length > 0 : false),
+  );
+  $effect(() => {
+    if (!tableShown) holding = false;
+  });
+  // A peer keeps the number it got when first seen on this torrent, so "Peer 3" stays one peer (as in the Windows app).
+  const peerNumbers = new Map<string, number>();
+  let numbersFor = '';
+  function numbersOf(jobId: string): Map<string, number> {
+    if (numbersFor !== jobId) {
+      peerNumbers.clear();
+      numbersFor = jobId;
+    }
+    return peerNumbers;
+  }
+  // The order on screen, which a held table keeps. Not state: it follows what was drawn.
+  let shownPeers: string[] = [];
+  let shownTrackers: string[] = [];
+  const peerList = $derived.by(() => {
+    const sorted = sortedPeerRows(peers, peerSort, numbersOf(job.id));
+    const list = holding ? heldOrder(shownPeers, sorted, (row) => row.key) : sorted;
+    shownPeers = list.map((row) => row.key);
+    return list;
+  });
+  const trackerList = $derived.by(() => {
+    const sorted = sortedTrackerRows(trackers, trackerSort);
+    const list = holding ? heldOrder(shownTrackers, sorted, (row) => row.key) : sorted;
+    shownTrackers = list.map((row) => row.key);
+    return list;
+  });
+  function sortPeers(key: PeerSortKey) {
+    const next = nextColumnSort(peerSort, key);
+    // A click shows the new order at once, pointer or not.
+    shownPeers = sortedPeerRows(peers, next, numbersOf(job.id)).map((row) => row.key);
+    peerSort = next;
+    save('inbound.peerSort', JSON.stringify(next));
+  }
+  function sortTrackers(key: TrackerSortKey) {
+    const next = nextColumnSort(trackerSort, key);
+    shownTrackers = sortedTrackerRows(trackers, next).map((row) => row.key);
+    trackerSort = next;
+    save('inbound.trackerSort', JSON.stringify(next));
+  }
   const pieceBar = $derived(pieces ? pieceCells(piecesHad(pieces), cells) : []);
   const graphWidth = 300;
   const graphHeight = 60;
 </script>
+
+{#snippet peerHead(key: PeerSortKey, label: string, cls: string)}
+  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(peerSort, key)}>
+    <button class="header-cell" onclick={() => sortPeers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(peerSort, key)}</span></button>
+  </th>
+{/snippet}
+
+{#snippet trackerHead(key: TrackerSortKey, label: string, cls: string)}
+  <th class="px-2 py-1 font-normal {cls}" aria-sort={ariaSort(trackerSort, key)}>
+    <button class="header-cell" onclick={() => sortTrackers(key)} title="Sort by {label}">{label}<span class="sort-mark" aria-hidden="true">{sortMark(trackerSort, key)}</span></button>
+  </th>
+{/snippet}
 
 <div class="grid gap-2 text-[13px]">
   {#if problem}
@@ -116,10 +194,13 @@
       <p class="text-muted">No peers connected right now.</p>
     {:else}
       <p class="text-muted">{peersCount(peerList.length)}</p>
-      <div class="max-h-72 overflow-auto rounded border border-divider">
+      <div class="max-h-72 overflow-auto rounded border border-divider" role="region" aria-label="Peers" onpointerenter={() => (holding = true)} onpointerleave={() => (holding = false)}>
         <table class="w-full min-w-[520px] text-left text-[12.5px]">
           <thead class="sticky top-0 bg-chrome text-muted">
-            <tr><th class="px-2 py-1 font-normal">Peer</th><th class="px-2 py-1 font-normal">Client</th><th class="px-2 py-1 font-normal">Connection</th><th class="px-2 py-1 text-right font-normal">Has</th><th class="px-2 py-1 text-right font-normal">Down</th><th class="px-2 py-1 text-right font-normal">Up</th></tr>
+            <tr>
+              {@render peerHead('peer', 'Peer', '')}{@render peerHead('client', 'Client', '')}{@render peerHead('flags', 'Connection', '')}
+              {@render peerHead('has', 'Has', 'text-right')}{@render peerHead('down', 'Down', 'text-right')}{@render peerHead('up', 'Up', 'text-right')}
+            </tr>
           </thead>
           <tbody>
             {#each peerList as peer (peer.key)}
@@ -143,10 +224,13 @@
     {:else if trackerList.length === 0}
       <p class="text-muted">This torrent has no trackers. Peers are found through DHT.</p>
     {:else}
-      <div class="max-h-72 overflow-auto rounded border border-divider">
+      <div class="max-h-72 overflow-auto rounded border border-divider" role="region" aria-label="Trackers" onpointerenter={() => (holding = true)} onpointerleave={() => (holding = false)}>
         <table class="w-full min-w-[520px] text-left text-[12.5px]">
           <thead class="sticky top-0 bg-chrome text-muted">
-            <tr><th class="px-2 py-1 font-normal">Tracker</th><th class="px-2 py-1 font-normal">Status</th><th class="px-2 py-1 text-right font-normal">Seeds</th><th class="px-2 py-1 text-right font-normal">Peers</th><th class="px-2 py-1 text-right font-normal">Next announce</th></tr>
+            <tr>
+              {@render trackerHead('tracker', 'Tracker', '')}{@render trackerHead('status', 'Status', '')}{@render trackerHead('seeds', 'Seeds', 'text-right')}
+              {@render trackerHead('peers', 'Peers', 'text-right')}{@render trackerHead('next', 'Next announce', 'text-right')}
+            </tr>
           </thead>
           <tbody>
             {#each trackerList as tracker (tracker.key)}
@@ -198,3 +282,10 @@
     {/if}
   {/if}
 </div>
+
+<style>
+  /* The download list's headers (ListScreen): a plain button that sorts, with the arrow after its words. */
+  .header-cell { padding: 0; background: transparent; white-space: nowrap; font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
+  .header-cell:hover { text-decoration: underline; }
+  .sort-mark { margin-left: 3px; font-size: 9px; color: var(--muted); }
+</style>

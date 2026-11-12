@@ -12,7 +12,7 @@
   } from '../lib/archives';
   import {
     archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteBatches, deleteCompletedText, deletePlan,
-    downloadChoices, emptyText, fileCommands, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
+    downloadChoices, emptyText, fileCommands, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, notCurrentView, offersDownloadAll, parseSort,
     pauseTargets, planFileMenu, priorityTargets, queueText, remoteEnterAction, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
@@ -24,13 +24,17 @@
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
   import { foldTools } from '../lib/toolbar';
   import { buildRows, isTorrentView, selectedJobIds, viewHash, type Row, type TorrentFilesView, type ViewKey } from '../lib/views';
-  import { knownListenPort, magnetToCopy, sortForView, sortMenuTitles, torrentCounts, torrentFilters, torrentSummary } from '../lib/torrentList';
-  import { blocksAddressCommands, canChooseFiles, filesRefreshMs, isActive as torrentRuns, primaryIsChooseFiles, showsFiles } from '../lib/torrents';
+  import {
+    extraViewShows, knownListenPort, magnetToCopy, sortForView, sortMenuTitles, torrentCounts, torrentExtraCounts, torrentExtraViews, torrentFilters, torrentSummary,
+  } from '../lib/torrentList';
+  import { blocksAddressCommands, canChooseFiles, filesRefreshMs, isActive as torrentRuns, opensAsTorrent, primaryIsChooseFiles, showsFiles } from '../lib/torrents';
   import type { TorrentFilesResult } from '../lib/types';
   import TorrentChooseFiles from './TorrentChooseFiles.svelte';
   import { hasTorrentControls, mayRun, seedSaid, seedTargets } from '../lib/torrentDetails';
   import { announceSaid, canAnnounce, canRecheck, recheckSaid } from '../lib/torrentControls';
   import { watchTorrents } from '../lib/torrentWatch.svelte';
+  import { infoJob, infoKey, infoMinWidth, infoOn, infoReserved } from '../lib/torrentInfo';
+  import TorrentInfoPane from '../components/TorrentInfoPane.svelte';
   import ArchiveRecord from './ArchiveRecord.svelte';
   import ChangeCategory from './ChangeCategory.svelte';
   import MoveRename from './MoveRename.svelte';
@@ -40,7 +44,7 @@
   import PackageDialog from './PackageDialog.svelte';
   import RemoteActions from './RemoteActions.svelte';
 
-  let { view, search, onadd }: { view: ViewKey; search: string; onadd: () => void } = $props();
+  let { view, search, onadd, onopentorrent }: { view: ViewKey; search: string; onadd: () => void; onopentorrent?: (job: Job) => void } = $props();
 
   type PackageRow = Extract<Row, { kind: 'package' }>;
   type RemoteRow = Extract<Row, { kind: 'remote' }>;
@@ -149,6 +153,27 @@
   });
   const selectedIds = $derived(selectedJobIds(rows, selected));
   const selectedJobs = $derived(selectedIds.map((id) => store.model.jobs[id]).filter((job): job is Job => !!job));
+  // T7: Torrent Info, the one selected torrent's facts beside the list (on unless turned off, kept per browser).
+  let torrentInfoOn = $state(infoOn(load(infoKey)));
+  function setTorrentInfo(on: boolean) {
+    torrentInfoOn = on;
+    save(infoKey, on ? 'on' : 'off');
+  }
+  const infoTorrent = $derived(store.has('torrents') ? infoJob(torrentInfoOn, selectedJobs) : null);
+  // The pane shows inline only from infoMinWidth; narrower, More › Torrent Info says it needs a wider window.
+  let infoWide = $state(typeof window === 'undefined' || typeof window.matchMedia !== 'function' ? true : window.matchMedia(`(min-width: ${infoMinWidth}px)`).matches);
+  $effect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(`(min-width: ${infoMinWidth}px)`);
+    const changed = () => (infoWide = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
+  function hideTorrentInfo() {
+    setTorrentInfo(false);
+    // The pane's × goes with it: the list keeps the keyboard, as in the desktop window.
+    grid?.focus();
+  }
   const localRows = $derived(selectedRows.filter((row): row is JobRow | PackageRow => row.kind === 'job' || row.kind === 'package'));
   const firstLocal = $derived(localRows[0]);
   const removableSideRows = $derived(remoteRows.length + archiveRows.filter((row) => archiveRemovable(row.set)).length);
@@ -168,6 +193,8 @@
     return map;
   });
   const torrentCount = $derived(torrentCols ? torrentCounts(Object.values(store.model.jobs)) : null);
+  // T7: the extra views' chips, each while it holds a torrent or is the view shown (as in the sidebar).
+  const torrentExtraCount = $derived(torrentCols ? torrentExtraCounts(Object.values(store.model.jobs)) : null);
   const torrentLine = $derived(torrentCols ? torrentSummary(Object.values(store.model.jobs), knownListenPort(store.model.settings, store.model.hello?.hostKind)) : '');
 
   // A toast's Show opens that download.
@@ -401,6 +428,8 @@
 
   // T3: while a torrent is on the list in view or its details are open, and the page is visible, the server is told
   // (torrent.watch) so its progress comes every second; otherwise every 5 s. No torrent shown: nothing is sent.
+  // Its room is kept while the list shows torrents, whatever is selected, so the columns don't change on each click.
+  const infoRoom = $derived(infoReserved({ on: torrentInfoOn, offered: store.has('torrents'), wide: infoWide, listsTorrents: rows.some((row) => row.kind === 'job' && !!row.job.torrent) }));
   watchTorrents(() => rows.some((row) => row.kind === 'job' && !!row.job.torrent) || (!!details && !!store.model.jobs[details]?.torrent));
 
   /** T2: Start seeding or Stop seeding on every selected torrent it applies to (torrent.seed, one each). */
@@ -553,7 +582,7 @@
     boxChecked = false;
     confirm = {
       title: 'Delete completed downloads?',
-      text: deleteCompletedText(ids.length),
+      text: deleteCompletedText(ids.length, allJobs.filter((job) => job.state === 'completed' && job.torrent?.seeding === true).length),
       ok: 'Remove from list',
       // Only the list: the downloaded files stay on disk.
       onok: async () => {
@@ -686,7 +715,7 @@
     );
     if (view === 'remote') list.push({ id: 'checkNow', label: 'Check now', icon: 'refresh', tone: 'text-icon-info', title: (canCheckRemote ? 'Ask the provider about your waiting items now, without waiting for the next check.' : 'Nothing is waiting on a provider, so there is nothing to check.') + why, disabled: !connected || !canCheckRemote, run: () => void store.attempt('remote.checkNow', {}, 'Checking now…'), group: 4, keep: 2 });
     list.push(
-      { id: 'options', label: 'Options', icon: 'settings', tone: 'text-icon-neutral', title: 'Open Download Manager settings', href: '#/settings', group: 5, keep: 6 },
+      { id: 'options', label: 'Options', icon: 'settings', tone: 'text-icon-neutral', title: "Open Inbound's options", href: '#/settings', group: 5, keep: 6 },
       { id: 'scheduler', label: 'Scheduler', icon: 'calendar', tone: 'text-icon-info', title: 'Manage scheduled queue runs', href: '#/queues', group: 5, keep: 6 },
       { id: 'startQueue', label: 'Start Queue', icon: 'play', tone: 'text-icon-start', title: (targetQueue ? `Start the ${targetQueue.name} queue (${queueStateText(targetQueue, allJobs).toLowerCase()}).` : 'Start the selected queue.') + why, disabled: !connected || !targetQueue || !canStartQueue(targetQueue, allJobs), run: () => void queueAction('start', queueTarget), menu: queues.length > 1 ? () => queueMenu('start') : undefined, menuLabel: 'Start a queue', group: 6, keep: 5 },
       { id: 'stopQueue', label: 'Stop Queue', icon: 'stop', tone: 'text-icon-pause', title: (targetQueue ? `Stop the ${targetQueue.name} queue and pause its downloads.` : 'Stop the selected queue and pause its downloads.') + why, disabled: !connected || !targetQueue || !canStopQueue(targetQueue), run: () => void queueAction('stop', queueTarget), menu: queues.length > 1 ? () => queueMenu('stop') : undefined, menuLabel: 'Stop a queue', group: 6, keep: 5 },
@@ -752,6 +781,8 @@
           onselect: () => applySort(nextSort(shownSort, key)),
         })),
       },
+      // T7: the selected torrent's facts beside the list, on a window 1440 px wide or more.
+      { label: 'Torrent Info', checked: torrentInfoOn && infoWide, hidden: !store.has('torrents'), disabled: !infoWide, hint: infoWide ? undefined : 'Wider window', onselect: () => setTorrentInfo(!torrentInfoOn) },
       { separator: true },
       {
         label: `Simultaneous Downloads: ${s?.maxConcurrentDownloads ?? ''}`,
@@ -829,6 +860,8 @@
         { label: menuLabel('Copy folder path', plan.openReason), disabled: plan.openReason !== null || !single?.destinationDirectory, onselect: () => void copy(single?.destinationDirectory ?? '', 'Folder path copied.') },
         // WEB-T4: the info hash and the name; the trackers stay with the server.
         { label: 'Copy Magnet Link', hidden: !magnetToCopy(single?.torrent), onselect: () => void copy(magnetToCopy(single?.torrent) ?? '', 'Magnet link copied.') },
+        // T10: one finished download that is a .torrent file goes to the torrent dialog.
+        { label: 'Open as Torrent…', hidden: !onopentorrent || selectedJobs.length !== 1 || !opensAsTorrent(single), onselect: () => { if (single) onopentorrent?.(single); } },
         { label: commands.move.label, hint: 'Ctrl+M', hidden: commands.move.hidden, disabled: !commands.move.enabled, onselect: () => (moving = single) },
         { separator: true },
         ...(showsArchive ? [...archiveItems(archive, records, null), { separator: true } as MenuItem] : []),
@@ -1102,11 +1135,19 @@
     {#each torrentFilters as filter (filter.key)}
       <a href={viewHash(`torrents-${filter.key}`)} class="torrent-chip" aria-current={view === `torrents-${filter.key}` ? 'page' : undefined}>{filter.label} <span class="tabular">{torrentCount[filter.key]}</span></a>
     {/each}
+    {#each torrentExtraViews as extra (extra.key)}
+      {#if extraViewShows(torrentExtraCount?.[extra.key], `torrents-${extra.key}`, view)}
+        <a href={viewHash(`torrents-${extra.key}`)} class="torrent-chip" aria-current={view === `torrents-${extra.key}` ? 'page' : undefined}>{extra.label} <span class="tabular">{torrentExtraCount?.[extra.key] ?? 0}</span></a>
+      {/if}
+    {/each}
   </nav>
   {#if torrentLine}<p class="tabular border-b border-divider px-3 py-1 text-[12px] text-muted md:hidden">{torrentLine}</p>{/if}
 {/if}
 
-<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} class:torrent-cols={torrentCols} role="row">
+<!-- T7: the list, and Torrent Info on its right on a wide window (it narrows the list's columns, never scrolls it sideways). -->
+<div class="flex items-start">
+<div class="min-w-0 flex-1">
+<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} class:torrent-cols={torrentCols} class:with-info={infoRoom} role="row">
   <label class="flex items-center justify-center self-stretch"><input type="checkbox" aria-label="Select all" checked={selectableCount > 0 && selected.size === selectableCount} onchange={toggleAll} /></label>
   {@render head('name', 'File Name', 'text-left')}
   {#if !onlyExtraction}
@@ -1120,14 +1161,14 @@
     {@render head('rate', 'Transfer rate', 'text-right')}
   {/if}
   {#if torrentCols}
-    {@render head('seeds', 'Seeds', 'hidden text-right lg:block')}
-    {@render head('peers', 'Peers', 'hidden text-right lg:block')}
-    {@render head('up', 'Up', 'hidden text-right lg:block')}
-    {@render head('ratio', 'Ratio', 'hidden text-right lg:block')}
+    {@render head('seeds', 'Seeds', 'hidden text-right lg:block wide-col')}
+    {@render head('peers', 'Peers', 'hidden text-right lg:block wide-col')}
+    {@render head('up', 'Up', 'hidden text-right lg:block wide-col')}
+    {@render head('ratio', 'Ratio', 'hidden text-right lg:block wide-col')}
   {:else}
-    {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block')}
+    {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block wide-col')}
   {/if}
-  {@render head('description', 'Description', 'hidden text-left lg:block')}
+  {@render head('description', 'Description', 'hidden text-left lg:block wide-col')}
 </div>
 
 <!-- One tab stop for the whole list: the arrows move, Shift extends, Space ticks, Enter does the row's main thing. -->
@@ -1144,7 +1185,8 @@
   onfocus={() => { if (!cursor && rows.length > 0) cursor = rows[0].id; }}
 >
   {#each rows as row (row.id)}
-    {@const v = row.view}
+    {@const v = connected || store.model.snapshots === 0 ? row.view
+      : notCurrentView(row.view, row.kind === 'job' ? [row.job] : row.kind === 'package' ? row.jobs : [])}
     <!-- The grid above handles the keys for every row. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
@@ -1154,6 +1196,7 @@
       class:with-extraction={showExtraction}
       class:only-extraction={onlyExtraction}
       class:torrent-cols={torrentCols}
+      class:with-info={infoRoom}
       class:is-cursor={cursor === row.id}
       role="row"
       aria-selected={selected.has(row.id)}
@@ -1248,6 +1291,23 @@
       {/if}
     </div>
   {/each}
+</div>
+</div>
+{#if infoRoom}
+  <div class="sticky top-0 hidden max-h-[calc(100dvh-7rem)] w-80 shrink-0 self-start min-[1440px]:flex">
+    {#if infoTorrent}
+      <TorrentInfoPane job={infoTorrent} onmore={() => { details = infoTorrent?.id ?? null; }} onrecheck={() => void recheckSelection()} onhide={hideTorrentInfo} />
+    {:else}
+      <aside class="flex min-h-[8rem] w-full flex-col border-l border-divider bg-surface text-[12.5px]" aria-label="Torrent info">
+        <div class="flex h-[27px] shrink-0 items-center justify-between border-b border-divider bg-chrome pl-3 pr-1 text-[12px] font-semibold">
+          <span>Torrent Info</span>
+          <button class="btn-icon h-6 w-6" title="Hide Torrent Info. More › Torrent Info shows it again." aria-label="Hide Torrent Info" onclick={hideTorrentInfo}><Icon name="close" size={13} /></button>
+        </div>
+        <p class="px-3 py-2.5 text-muted">Select one torrent to see its info here.</p>
+      </aside>
+    {/if}
+  </div>
+{/if}
 </div>
 
 {#if menu}
@@ -1505,5 +1565,18 @@
     /* The torrent views: Seeds, Peers, Up and Ratio in place of Last Try Date. */
     .list-grid.torrent-cols, .list-row.torrent-cols { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
     .list-grid.torrent-cols.with-extraction, .list-row.torrent-cols.with-extraction { grid-template-columns: 28px minmax(150px, 2fr) 34px 80px 150px 120px 80px 90px 48px 48px 72px 110px minmax(80px, 1fr); }
+  }
+  /* T7: beside Torrent Info the list keeps the columns it has between 768 and 1023 px, so it never scrolls sideways;
+     the pane shows the swarm, the ratio and the rest for the selected torrent. */
+  @media (min-width: 1440px) {
+    .list-grid.with-info, .list-row.with-info, .list-grid.with-info.torrent-cols, .list-row.with-info.torrent-cols {
+      grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 80px 90px;
+    }
+    .list-grid.with-info.with-extraction, .list-row.with-info.with-extraction,
+    .list-grid.with-info.torrent-cols.with-extraction, .list-row.with-info.torrent-cols.with-extraction {
+      grid-template-columns: 28px minmax(180px, 1fr) 34px 80px 150px 120px 80px 90px;
+    }
+    .list-grid.with-info.only-extraction, .list-row.with-info.only-extraction { grid-template-columns: 28px minmax(180px, 1fr) 220px; }
+    .list-grid.with-info :global(.wide-col), .list-row.with-info .cell-desc, .list-row.with-info .cell-added, .list-row.with-info .cell-swarm { display: none; }
   }
 </style>

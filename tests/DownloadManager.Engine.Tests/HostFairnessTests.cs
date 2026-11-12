@@ -226,6 +226,32 @@ public sealed class HostFairnessTests(TestServerFixture fixture, ITestOutputHelp
         Assert.DoesNotContain(notices, notice => notice.Job == w.Id && notice.Host is not null);
     }
 
+    /// <summary>
+    /// Audit 1, L13: the workers of a segmented job count against the host its link redirects to, where the bytes come
+    /// from, not the host of the link itself.
+    /// </summary>
+    [Fact]
+    public async Task SegmentWorkersCountAgainstTheHostARedirectLandsOn()
+    {
+        const int size = Megabyte;
+        var engine = Engine(hostLimit: 1);
+        var x = Job("landing-x.bin", 2 * Megabyte, 841, 512 * 1024, 1);
+        var xRun = engine.ExecuteAsync(x, null, null, CancellationToken.None);
+        await UntilAsync(() => engine.HostConnectionsActive == 1, "X to hold the host's only connection");
+
+        var port = new Uri(_server.BaseAddress).Port;
+        var target = $"{_server.BaseAddress}/file/landing-w.bin?size={size}&seed=842";
+        var w = Job("landing-w.bin", size, 842, 0, 2);
+        w.Url = $"http://localhost:{port}/redirect?to={Uri.EscapeDataString(target)}";
+        Assert.NotEqual("localhost", Host);
+        var wRun = engine.ExecuteAsync(w, null, null, CancellationToken.None);
+
+        await UntilAsync(() => engine.WaitingForHost(w.Id) == Host || wRun.IsCompleted, "W to wait for the landing host");
+        Assert.False(wRun.IsCompleted, "W ran beside X on the host X holds the only connection to.");
+        await AssertFileAsync(await wRun.WaitAsync(Patience), 842, size);
+        await AssertFileAsync(await xRun.WaitAsync(Patience), 841, 2 * Megabyte);
+    }
+
     /// <summary>UI.R21: a running segmented job takes a raised connection count at once, and a lowered one adds none.</summary>
     [Fact]
     public async Task ConnectionCountChangesApplyToARunningSegmentedJob()

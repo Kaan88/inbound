@@ -11,10 +11,12 @@ internal static class FileIconProvider
     private const int Capacity = 256;
 
     // Invoked on the UI thread; no filesystem access or Shell calls before yielding.
-    internal static async Task<WriteableBitmap?> LoadAsync(string fileName, string? completedPath, string revision)
+    /// <param name="remote">The download is on another server: the asking window's own Host (T11). Null: the server
+    /// the main window shows.</param>
+    internal static async Task<WriteableBitmap?> LoadAsync(string fileName, string? completedPath, string revision, bool? remote = null)
     {
         // A download on another server: its file is on that machine, so only its type's icon (design D9, section 5).
-        completedPath = RemoteDataRules.IconPath(ShownServer.IsRemote, completedPath);
+        completedPath = RemoteDataRules.IconPath(ShownServer.IsRemoteFor(remote), completedPath);
         var key = completedPath is null ? "type:" + Path.GetExtension(fileName) : "file:" + completedPath + ":" + revision;
         Task<byte[]?> task;
         lock (Cache)

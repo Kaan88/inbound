@@ -46,8 +46,9 @@ public sealed class JDownloaderBridge : IDisposable
     private static readonly string[] SendableSchemes = [Uri.UriSchemeHttp, Uri.UriSchemeHttps, Uri.UriSchemeFtp, "magnet"];
     private static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(3);
 
-    // JDownloader holds the request open while its dialog waits for the user, so this is a person's reading time.
-    private static readonly TimeSpan DefaultAnswerTimeout = TimeSpan.FromMinutes(5);
+    // JDownloader holds the request open while its dialog waits for the user, so this is a person's reading time. The
+    // CLI waits longer than this for the Host's reply (CliClient.ReplyTimeout).
+    internal static readonly TimeSpan DefaultAnswerTimeout = TimeSpan.FromMinutes(5);
 
     private readonly HttpClient _client;
     private readonly TimeSpan _probeTimeout;

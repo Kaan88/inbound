@@ -19,8 +19,23 @@ internal static class ShellWords
     /// <summary>U-WL-9: the browser part of the status bar, from the Host's integration status, or null when it has none.</summary>
     public static string? BrowserIntegration(string? status)
         => string.IsNullOrWhiteSpace(status) || status == "unknown" ? null
-            : status == "native host not registered" ? "browser integration not registered"
+            : status == "native host not registered" ? "the browser extension can't reach Inbound"
             : $"browser integration {status}";
+
+    /// <summary>
+    /// Review 5:K1: what the post-download program gets, said under its box (the Host passes the finished file's path as
+    /// its one argument, PostDownloadCommandLine.Create). The web UI's Options say the same.
+    /// </summary>
+    public const string PostDownloadProgramGets = "It gets the finished file's full path as its only argument.";
+
+    /// <summary>
+    /// Review 5:E4: what an error says when the app refused an action and gave no reason. Not "the host rejected": it says
+    /// who couldn't, and what to do next. <paramref name="serverName"/> is another server's name; null for this PC, whose
+    /// log is a menu item away.
+    /// </summary>
+    public static string NoReason(string? serverName) => serverName is null
+        ? "Inbound couldn't do that and didn't say why. Try again; if it keeps happening, Help > Open Diagnostics Folder has the log."
+        : $"{serverName} couldn't do that and didn't say why. Try again.";
 
     /// <summary>U-WL-9: whether the status names a registration that Repair could put right. Off by choice isn't one.</summary>
     public static bool IntegrationNeedsRepair(string? status)

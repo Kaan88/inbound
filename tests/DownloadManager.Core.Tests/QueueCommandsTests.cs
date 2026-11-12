@@ -70,6 +70,51 @@ public sealed class QueueCommandsTests
         Assert.Null(JobNotes.FailureMessage(silent));
     }
 
+    [Theory]
+    [InlineData("forbidden", 403, "The server returned HTTP 403. The site may want you signed in: add a login in Options > Site logins, or download it from the browser.")]
+    [InlineData("unauthorized", 401, "The server returned HTTP 401. The site may want you signed in: add a login in Options > Site logins, or download it from the browser.")]
+    [InlineData("unauthorized", 407, "The server returned HTTP 407.")]
+    [InlineData("notFound", 404, "The server returned HTTP 404. The link may have expired: try Refresh Download Address.")]
+    [InlineData("http", 503, "The server returned HTTP 503. The site had a problem. Try again later.")]
+    [InlineData("http", 400, "The server returned HTTP 400.")]
+    [InlineData("network", null, "The server returned HTTP 403.")]
+    public void Review_5_E2_a_failure_named_by_its_HTTP_code_says_what_to_do_next(string kind, int? status, string expected)
+    {
+        var failed = Job("failed");
+        failed.Url = "https://example.test/file.bin";
+        failed.Failure = new FailureDto { Kind = kind, HttpStatus = status, Message = kind == "network" ? "The server returned HTTP 403." : $"The server returned HTTP {status}." };
+        Assert.Equal(expected, JobNotes.FailureMessage(failed));
+        Assert.Equal($"Failed: {expected}", JobNotes.FailureReason(failed));
+    }
+
+    [Fact]
+    public void Review_5_E2_a_not_found_without_an_HTTP_404_gets_no_Refresh_step()
+    {
+        // An FTP 550 is notFound with no HTTP code, and Refresh Download Address doesn't fit an FTP path.
+        var failed = Job("failed");
+        failed.Url = "ftp://example.test/pub/file.bin";
+        failed.Failure = new FailureDto { Kind = "notFound", Message = "FTP server returned 550: File unavailable." };
+        Assert.Equal("FTP server returned 550: File unavailable.", JobNotes.FailureMessage(failed));
+    }
+
+    [Fact]
+    public void Review_5_E2_a_providers_file_gets_no_Refresh_step()
+    {
+        var failed = Job("failed");
+        failed.Url = "remote://torbox/1/2";
+        failed.Failure = new FailureDto { Kind = "notFound", HttpStatus = 404, Message = "The server returned HTTP 404." };
+        Assert.Equal("The server returned HTTP 404.", JobNotes.FailureMessage(failed));
+    }
+
+    [Fact]
+    public void Review_5_A8_a_download_later_reads_Not_started_and_one_waiting_for_a_slot_Queued()
+    {
+        Assert.Equal("Not started", JobNotes.NotStartedText(Job("queued", "later")));
+        Assert.Null(JobNotes.NotStartedText(Job("queued")));
+        Assert.Null(JobNotes.NotStartedText(Job("queued", "queue")));
+        Assert.Null(JobNotes.NotStartedText(Job("paused", "later")));
+    }
+
     [Fact]
     public void Open_and_Open_With_wait_for_a_finished_file_and_Open_Folder_does_not()
     {

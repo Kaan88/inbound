@@ -26,7 +26,7 @@ internal static class TorrentCommands
     private const string NotRunning = "not running: the torrent is stopped, or finished and not seeding";
 
     /// <summary>The flags that take a value (their value is not a positional argument).</summary>
-    private static readonly string[] ValueFlags = ["--dest", "--files", "--priority", "--down", "--up", "--seed-goal", "--sequential"];
+    internal static readonly string[] ValueFlags = ["--dest", "--files", "--priority", "--down", "--up", "--seed-goal", "--sequential"];
 
     private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
 
@@ -288,11 +288,12 @@ internal static class TorrentCommands
         else if (!result.Ok) Console.Error.WriteLine($"failed: {result.Error}");
         else
         {
-            Console.WriteLine($"{result.Name}  {result.InfoHash}  ({result.Kind})");
+            // The name, paths and folder come from the torrent as its author wrote them (audit 4 L15).
+            Console.WriteLine($"{Printable(result.Name)}  {result.InfoHash}  ({result.Kind})");
             if (result.TotalBytes is { } total) Console.WriteLine($"size: {Size(total)}");
             if (result.ExistingJobId is { } existing) Console.WriteLine($"already in the list: {existing}");
             if (result.Destination is { } folder)
-                Console.WriteLine($"to: {folder}" + (result.FreeBytes is { } free ? $"  ({Size(free)} free)" : string.Empty));
+                Console.WriteLine($"to: {Printable(folder)}" + (result.FreeBytes is { } free ? $"  ({Size(free)} free)" : string.Empty));
             if (!string.IsNullOrWhiteSpace(result.SpaceProblem)) Console.WriteLine(result.SpaceProblem);
             if (result.Files is { } files) PrintFiles(files);
             else Console.WriteLine("files: known once the magnet's file list is in");
@@ -346,7 +347,7 @@ internal static class TorrentCommands
         var result = reply.GetPayload<TorrentAddResult>();
         if (json) Print(result);
         else if (!result.Ok) Console.Error.WriteLine($"failed: {result.Error}");
-        else Console.WriteLine($"{(result.Existing ? "already in the list" : "added")}: {result.Job!.Id}  {result.Job.FileName}");
+        else Console.WriteLine($"{(result.Existing ? "already in the list" : "added")}: {result.Job!.Id}  {Printable(result.Job.FileName)}");
         return result.Ok ? 0 : 1;
     }
 
@@ -364,12 +365,15 @@ internal static class TorrentCommands
     private static void PrintFiles(IReadOnlyList<TorrentFileDto> files)
     {
         Console.WriteLine($"files: {files.Count}");
-        foreach (var file in files)
-        {
-            var priority = file.Priority ?? (file.Wanted ? "normal" : "skip");
-            var done = file.Done is { } bytes ? $"  {Size(bytes)} done" : string.Empty;
-            Console.WriteLine($"  {file.Index,4}  {priority,-6}  {Size(file.Size),9}  {file.Path}{done}");
-        }
+        foreach (var file in files) Console.WriteLine(FileLine(file));
+    }
+
+    /// <summary>One file of a torrent, its path as the torrent's author wrote it made printable.</summary>
+    internal static string FileLine(TorrentFileDto file)
+    {
+        var priority = Printable(file.Priority ?? (file.Wanted ? "normal" : "skip"));
+        var done = file.Done is { } bytes ? $"  {Size(bytes)} done" : string.Empty;
+        return $"  {file.Index,4}  {priority,-6}  {Size(file.Size),9}  {Printable(file.Path)}{done}";
     }
 
     private static async Task<int> PriorityAsync(CliClient client, Guid jobId, string[] pairs, bool json)
@@ -479,8 +483,8 @@ internal static class TorrentCommands
         }
 
         Console.WriteLine($"info hash: {result.InfoHash}" + (result.InfoHashV2 is { } v2 ? $"  v2 {v2}" : string.Empty));
-        Console.WriteLine($"from: {result.Source}  added {result.AddedAt.ToLocalTime():g}");
-        Console.WriteLine($"folder: {result.DestinationDirectory}");
+        Console.WriteLine($"from: {Printable(result.Source)}  added {result.AddedAt.ToLocalTime():g}");
+        Console.WriteLine($"folder: {Printable(result.DestinationDirectory)}");
         if (!result.Running)
         {
             Console.WriteLine(NotRunning);
@@ -551,14 +555,21 @@ internal static class TorrentCommands
     /// Host's own error (a refusal, or the command failed there) and is shown in its words.
     /// </summary>
     internal static string NotDone(IpcMessage reply, string fallback)
+        => HostError(reply) is { } error ? "failed: " + error : fallback;
+
+    /// <summary>
+    /// The Host's own error in a reply that is not the expected result, made printable; null for a Host that doesn't
+    /// know the command ("Unknown message type", an older Host or one without torrents) or a reply that isn't an error.
+    /// </summary>
+    internal static string? HostError(IpcMessage reply)
     {
-        if (reply.Type != MessageTypes.HostActionResult) return fallback;
+        if (reply.Type != MessageTypes.HostActionResult) return null;
         string? message;
         try { message = reply.GetPayload<HostActionResult>()?.Message; }
-        catch (JsonException) { return fallback; }
+        catch (JsonException) { return null; }
         return string.IsNullOrWhiteSpace(message) || message.StartsWith("Unknown message type", StringComparison.Ordinal)
-            ? fallback
-            : "failed: " + Printable(message);
+            ? null
+            : Printable(message);
     }
 
     private static string Endpoint(string address, int port) => address.Contains(':') ? $"[{address}]:{port}" : $"{address}:{port}";

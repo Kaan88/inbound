@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteBatches, deleteCompletedText, deletePlan, mixedDeleteNote, describe as describeNote,
-  graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
+  graphCeiling, jobView, lastTryText, notCurrentView, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
   priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, hoverPoint, agoText, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
 } from '../src/lib/list';
@@ -119,6 +119,19 @@ describe('package rules (PackageRules)', () => {
 });
 
 describe('cells (JobViewModel)', () => {
+  // Review 5:E1: while the server can't be reached a row that moves says its status isn't known, with no speed or time left.
+  it('blanks what a lost connection makes unknown, only on rows that move', () => {
+    const running = job('a', 'downloading', { bytesPerSecond: 320_000, estimatedRemaining: '00:44:00' });
+    const v = notCurrentView(jobView(running), [running]);
+    expect(v.status).toBe('Status unknown');
+    expect(v.statusTone).toBe('neutral');
+    expect([v.rate, v.rateText, v.eta, v.etaText]).toEqual([0, '', null, '']);
+    const paused = job('b', 'paused');
+    expect(notCurrentView(jobView(paused), [paused])).toEqual(jobView(paused));
+    const seeding = job('c', 'completed', { torrent: { seeding: true } as Job['torrent'] });
+    expect(notCurrentView(jobView(seeding), [seeding]).status).toBe('Status unknown');
+  });
+
   it('writes the time left as the desktop does', () => {
     expect(timeLeft(null)).toBe('');
     expect(timeLeft(0)).toBe('');
@@ -193,19 +206,19 @@ describe('deleting', () => {
   it('words the question and offers the file box only for a completed file', () => {
     const one = deletePlan([job('a', 'completed')]);
     expect(one.title).toBe('Delete download?');
-    expect(one.text).toBe("Remove 'a.bin' from the list?");
+    expect(one.text).toBe("Delete 'a.bin' from the list?");
     expect(one.offerFiles).toBe(true);
 
     const many = deletePlan([job('a', 'downloading'), job('b', 'paused')]);
     expect(many.title).toBe('Delete 2 downloads?');
-    expect(many.text).toBe('Remove 2 downloads from the list? Partial data is always removed.');
+    expect(many.text).toBe('Delete 2 downloads from the list? Partial data is always removed.');
     expect(many.offerFiles).toBe(false);
     expect(many.deleteFile).toBe(true);
   });
 
   it('UI.B19: a mixed selection always removes the unfinished ones\' partial data, whatever the box says', () => {
     const jobs = [job('a', 'completed'), job('b', 'paused'), job('c', 'failed')];
-    expect(deletePlan(jobs).text).toBe(`Remove 3 downloads from the list? ${mixedDeleteNote}`);
+    expect(deletePlan(jobs).text).toBe(`Delete 3 downloads from the list? ${mixedDeleteNote}`);
     expect(deletePlan(jobs).offerFiles).toBe(true);
     expect(deleteBatches(jobs, false)).toEqual([{ ids: ['b', 'c'], deleteFile: true }, { ids: ['a'], deleteFile: false }]);
     expect(deleteBatches(jobs, true)).toEqual([{ ids: ['a', 'b', 'c'], deleteFile: true }]);
@@ -224,6 +237,10 @@ describe('deleting', () => {
 
   it('keeps Delete Completed to the list', () => {
     expect(deleteCompletedText(3)).toBe('Remove 3 completed item(s) from the list? The downloaded files will stay on disk.');
+    // Review 4:L9: seeding torrents are completed too; removing them stops seeding.
+    expect(deleteCompletedText(2, 1)).toBe('Remove 2 completed item(s) from the list? The downloaded files will stay on disk. '
+      + '1 of them is a torrent that is seeding; removing it stops seeding.');
+    expect(deleteCompletedText(2, 2)).toContain('2 of them are torrents that are seeding; removing them stops seeding.');
   });
 });
 

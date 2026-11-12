@@ -62,6 +62,10 @@ export interface OptionsForm {
   defaultDownloadDirectory: string;
   useCategoryFolders: boolean;
   categoryFolders: Record<string, string>;
+  /** T14: torrent category folders; null when the server predates them (the group is not shown). */
+  useTorrentCategoryFolders: boolean | null;
+  /** T14: the torrent folder; empty for the same folders as other downloads. */
+  torrentFolder: string;
   customCategories: CategoryRow[];
   favorites: FavoriteRow[];
   /** Folders that were favorites when the draft was made, to keep ones saved meanwhile. */
@@ -73,7 +77,8 @@ export interface OptionsForm {
   /** The limit as stored and as shown when the draft was made, so an untouched box keeps the stored bytes. */
   speedBytesAtOpen: number | null;
   speedKbAtOpen: number | null;
-  profiles: string;
+  /** Per-site limits, a row each (review 5:F6b). */
+  profiles: ProfileRow[];
   autoResume: boolean;
   allowLocalNetwork: boolean;
   browserIntegration: boolean;
@@ -255,21 +260,29 @@ export function composeProxyAddress(type: number, hostPort: string | null | unde
   return index === 0 ? text : `${proxySchemes[index]}://${text}`;
 }
 
-// Per-site limits: one "pattern=max" per line.
-export function profilesToText(profiles: ConnectionProfile[] | undefined): string {
-  return (profiles ?? []).map((p) => `${p.pattern}=${p.maxConnections}`).join('\n');
+// Per-site limits (review 5:F6b): a row each, a site and its connections, as Site logins has; no typed "pattern=max".
+export interface ProfileRow { key: number; pattern: string; max: number | null }
+
+export const siteLimitNeedsSite = 'Enter a site for each per-site limit, or remove it.';
+
+export function profileRows(profiles: ConnectionProfile[] | undefined): ProfileRow[] {
+  return (profiles ?? []).map((p) => ({ key: nextRowKey(), pattern: p.pattern, max: p.maxConnections }));
 }
 
-export function parseProfiles(text: string): { profiles: ConnectionProfile[]; error: string | null } {
+/**
+ * The limits the rows give, or the first row's problem and its field. A row left wholly empty is skipped. The Windows
+ * app's OptionsSettingsRebase.SiteLimits by the same rule and words.
+ */
+export function readProfiles(rows: readonly ProfileRow[]): { profiles: ConnectionProfile[]; error: string | null; field?: string } {
   const profiles: ConnectionProfile[] = [];
-  for (const line of text.split(/[\r\n]+/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const at = trimmed.lastIndexOf('=');
-    const limitText = at > 0 ? trimmed.slice(at + 1).trim() : '';
-    const limit = /^\d+$/.test(limitText) ? Number(limitText) : NaN;
-    if (!(limit >= 1 && limit <= 32)) return { profiles: [], error: `Per-site limit '${trimmed}' must use pattern=max (1-32).` };
-    profiles.push({ pattern: trimmed.slice(0, at).trim(), maxConnections: limit });
+  for (const row of rows) {
+    const site = row.pattern.trim();
+    const max = row.max === null || row.max === undefined || Number.isNaN(row.max) ? null : row.max;
+    if (!site && max === null) continue;
+    if (!site) return { profiles: [], error: siteLimitNeedsSite, field: `profile-site-${row.key}` };
+    if (max === null || !Number.isInteger(max) || max < 1 || max > 32)
+      return { profiles: [], error: `The limit for ${site} must be 1 to 32 connections.`, field: `profile-max-${row.key}` };
+    profiles.push({ pattern: site, maxConnections: max });
   }
   return { profiles, error: null };
 }
@@ -337,6 +350,18 @@ export function isUnsupportedReply(message: string): boolean {
 /** Where magnets and .torrent files go when an account takes torrents too (TorrentRoutes): ask, this PC or server, the account. */
 export const torrentRoutes = ['ask', 'thisPc', 'provider'];
 
+/** T9: Settings offers two choices. The saved `ask` now starts each torrent on this PC too (each one can still be
+ * switched), so it is shown as `thisPc`. */
+export function routeShown(saved: string | null | undefined): 'thisPc' | 'provider' {
+  return saved === 'provider' ? 'provider' : 'thisPc';
+}
+
+/** What is saved for the chosen option: a saved `ask` stays when this PC is kept, so opening and saving changes nothing. */
+export function routeToSave(shown: string, saved: string | null | undefined): string {
+  if (shown === 'provider') return 'provider';
+  return saved === 'ask' ? 'ask' : 'thisPc';
+}
+
 let rowKey = 0;
 export function nextRowKey(): number {
   return ++rowKey;
@@ -357,6 +382,8 @@ export function formFrom(settings: Settings): OptionsForm {
     defaultDownloadDirectory: settings.defaultDownloadDirectory,
     useCategoryFolders: settings.useCategoryFolders,
     categoryFolders: folders,
+    useTorrentCategoryFolders: typeof settings.useTorrentCategoryFolders === 'boolean' ? settings.useTorrentCategoryFolders : null,
+    torrentFolder: settings.torrentCategoryFoldersRoot ?? '',
     customCategories: (settings.customCategories ?? []).map((c) => ({
       id: c.id, name: c.name, extensions: (c.extensions ?? []).join(' '), folder: c.destinationDirectory ?? '', removed: false,
     })),
@@ -368,12 +395,12 @@ export function formFrom(settings: Settings): OptionsForm {
     speedKb: speedShown,
     speedBytesAtOpen: speedBytes,
     speedKbAtOpen: speedShown,
-    profiles: profilesToText(settings.connectionProfiles),
+    profiles: profileRows(settings.connectionProfiles),
     autoResume: settings.autoResumeUnfinishedOnStartup,
     allowLocalNetwork: settings.allowLocalNetwork,
     browserIntegration: settings.browserIntegrationEnabled,
     torrentsEnabled: settings.torrentsEnabled === true,
-    torrentRoute: torrentRoutes.includes(settings.torrentRoute ?? '') ? settings.torrentRoute! : 'ask',
+    torrentRoute: routeShown(settings.torrentRoute),
     torrentChooseFiles: settings.torrentChooseFiles !== false,
     seeding: seedingFrom(settings),
     peers: peersFrom(settings),
@@ -438,8 +465,8 @@ export function validateAll(
   const proxyKept = context.pcOnly || (form.proxy.addressHidden && form.proxy.host.trim() === '');
   if (!proxyKept && form.proxy.mode === 'manual' && composeProxyAddress(form.proxy.type, form.proxy.host) === null)
     problems.push({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy', field: 'proxy-address' });
-  const profiles = parseProfiles(form.profiles);
-  if (profiles.error) problems.push({ message: profiles.error, page: 'connection', field: 'set-profiles' });
+  const profiles = readProfiles(form.profiles);
+  if (profiles.error) problems.push({ message: profiles.error, page: 'connection', field: profiles.field ?? 'profile-add' });
   const seeding = form.seeding ? seedingProblem(form.seeding) : null;
   if (seeding) problems.push({ ...seeding, page: 'torrents' });
   const peers = form.peers ? peersProblem(form.peers) : null;
@@ -459,16 +486,48 @@ export function problemsText(problems: readonly Problem[], pageLabel: (page: Opt
   return `${problems.length} values need fixing. ${problems.map((problem) => `${pageLabel(problem.page)}: ${problem.message}`).join(' ')}`;
 }
 
+/** T14: the torrent folder box when empty (the desktop's TorrentFolderText says the same). */
+export const torrentSameFolders = 'Same folders as other downloads';
+
+export const torrentFoldersHint =
+  'Torrents go to the torrent folder, in a folder for their category (Torrents\\Video). Turned off, every torrent goes straight to the torrent folder. Leave the torrent folder empty to use the same folders as other downloads.';
+
+/**
+ * T14: what an empty Save to in the torrent dialog means, as the server's TorrentFolderRules decides (the desktop's
+ * TorrentFolderText says the same): each torrent's category folder while torrent category folders are on (with no
+ * torrent folder, only while other downloads' are on too), else the torrent folder, or with none the folder other
+ * downloads go to. A server that predates them doesn't say: as before.
+ */
+export function torrentSaveToPlaceholder(
+  settings: Partial<Pick<Settings, 'useTorrentCategoryFolders' | 'torrentCategoryFoldersRoot' | 'useCategoryFolders'>> | null | undefined,
+): string {
+  const each = "Each torrent's category folder";
+  if (typeof settings?.useTorrentCategoryFolders !== 'boolean') return each;
+  const torrentOn = settings.useTorrentCategoryFolders;
+  if (settings.torrentCategoryFoldersRoot?.trim()) return torrentOn ? each : 'The torrent folder';
+  return torrentOn && settings.useCategoryFolders !== false ? each : 'Same folder as other downloads';
+}
+
+/**
+ * The browser-capture box's words (review 5:H4). On a desktop Host (the Windows app, or the Linux one, which has native
+ * messaging too) it is the desktop's box; on a server only browsers paired with it (Sign-in and browsers) can send it
+ * downloads, so it says that.
+ */
+export function captureLabel(hostKind: string | null | undefined): string {
+  return hostKind === 'windows' || hostKind === 'linux' ? 'Capture downloads from your browser' : 'Accept downloads from paired browsers';
+}
+
 /** The settings' names as Options writes them, for a server refusal that names fields (U-WR-14). */
 const settingLabels: Record<string, string> = {
   defaultDownloadDirectory: 'Default download folder',
   categoryFolders: 'Folders by category',
+  torrentCategoryFoldersRoot: 'Torrent folder',
   favoriteFolders: 'Favorite folders',
   proxy: 'Proxy',
   siteLogins: 'Site logins',
   browserIntegrationEnabled: 'Capture downloads from your browser',
   allowLocalNetwork: 'Allow downloads from addresses on the local network',
-  clipboardMonitoring: 'Clipboard monitoring',
+  clipboardMonitoring: 'Add links I copy to the download list',
   launchAtStartup: 'Start with Windows',
   notifyOnCompletion: 'Notify when a download finishes',
   playCompletionSound: 'Completion sound',
@@ -530,13 +589,18 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   settings.globalSpeedLimitBytesPerSecond = limit === form.speedKbAtOpen && form.speedBytesAtOpen !== null
     ? form.speedBytesAtOpen
     : limit !== null && limit > 0 ? limit * 1024 : undefined;
-  settings.connectionProfiles = parseProfiles(form.profiles).profiles;
+  settings.connectionProfiles = readProfiles(form.profiles).profiles;
   settings.useCategoryFolders = form.useCategoryFolders;
+  // T14: only to a server that knows them; an older one is sent neither.
+  if (form.useTorrentCategoryFolders !== null) {
+    settings.useTorrentCategoryFolders = form.useTorrentCategoryFolders;
+    settings.torrentCategoryFoldersRoot = form.torrentFolder.trim();
+  }
   settings.autoResumeUnfinishedOnStartup = form.autoResume;
   settings.allowLocalNetwork = form.allowLocalNetwork;
   settings.browserIntegrationEnabled = form.browserIntegration;
   settings.torrentsEnabled = form.torrentsEnabled;
-  settings.torrentRoute = form.torrentRoute;
+  settings.torrentRoute = routeToSave(form.torrentRoute, settings.torrentRoute);
   settings.torrentChooseFiles = form.torrentChooseFiles;
   if (form.seeding) {
     settings.torrentSeedAfterDownload = form.seeding.afterDownload;

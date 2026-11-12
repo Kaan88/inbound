@@ -227,4 +227,35 @@ public sealed class TorrentBridgePolicyTests
         Assert.True(job.GetProperty("canResume").GetBoolean());
         Assert.Equal(NativeBridgePolicy.AppManagedError, shown.Payload!.Value.GetProperty("Error").GetString());
     }
+    [Theory]
+    [MemberData(nameof(Roles))]
+    public void A_finished_torrent_file_download_reaches_the_browser_as_an_ordinary_download(BridgeRole role)
+    {
+        // T10: the Host marks a finished .torrent download; the extension never hears of it (roadmap rule 5).
+        var finished = PlainJob();
+        finished.State = "completed";
+        finished.TorrentFileReady = true;
+        var plain = PlainJob();
+        var messages = new[]
+        {
+            IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto { Jobs = [finished, plain] }),
+            IpcMessage.Create(MessageTypes.JobEvent, new JobEventDto { Job = finished, EventType = "completed" }),
+            IpcMessage.Create(MessageTypes.JobActionResult, new JobActionResponse { Ok = true, Job = finished }),
+        };
+
+        foreach (var message in messages)
+        {
+            var shown = NativeBridgePolicy.To(role, message)!;
+            var text = shown.Payload!.Value.GetRawText();
+            Assert.DoesNotContain("orrent", text);
+            var job = message.Type == MessageTypes.JobsSnapshot ? shown.Payload!.Value.GetProperty("jobs")[0] : JobOf(shown);
+            Assert.False(job.TryGetProperty(NativeBridgePolicy.AppManagedProperty, out _));
+            Assert.Equal("completed", job.GetProperty("state").GetString());
+        }
+
+        // Unmarked, the field isn't written at all, so an ordinary download's events pass as they are.
+        var ordinary = IpcMessage.Create(MessageTypes.JobEvent, new JobEventDto { Job = plain, EventType = "progress" });
+        Assert.DoesNotContain("orrent", ordinary.Payload!.Value.GetRawText());
+        Assert.Same(ordinary, NativeBridgePolicy.To(role, ordinary));
+    }
 }

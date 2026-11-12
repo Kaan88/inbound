@@ -86,6 +86,8 @@ public sealed class WebSessionProfile : IDisposable
     {
         yield return settings.DefaultDownloadDirectory;
         foreach (var folder in (settings.CategoryFolders ?? new()).Values) yield return folder;
+        // T14: the torrent folder holds the torrents' category folders.
+        if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot)) yield return settings.TorrentCategoryFoldersRoot;
         foreach (var category in settings.CustomCategories ?? []) if (category?.DestinationDirectory is { } folder) yield return folder;
         foreach (var favorite in settings.FavoriteFolders ?? []) if (favorite?.Path is { } path) yield return path;
         if (extractionFolder is not null) yield return extractionFolder;

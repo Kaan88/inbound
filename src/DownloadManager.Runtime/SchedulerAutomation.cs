@@ -31,6 +31,7 @@ public sealed partial class DownloadManagerService
                     _startupSchedulesEvaluated = true;
                 }
                 _startupSchedulesPending.RemoveWhere(id => !_settings.Schedules.Any(schedule => schedule.Id == id && schedule.Enabled && schedule.StartOnHostStartup));
+                var plans = new List<(ScheduleRule Schedule, DownloadQueue Queue, TimeOnly Start, bool HasStop, TimeOnly Stop, bool Overnight, DateOnly? Window)>();
                 foreach (var schedule in _settings.Schedules.Where(item => item.Enabled))
                 {
                     var queue = _settings.Queues.FirstOrDefault(item => item.Id == schedule.QueueId);
@@ -40,6 +41,10 @@ public sealed partial class DownloadManagerService
                     DateOnly? window = null;
                     if (time >= start && (!hasStop || overnight || time < stop) && Eligible(schedule, today)) window = today;
                     else if (overnight && time < stop && Eligible(schedule, today.AddDays(-1))) window = today.AddDays(-1);
+                    plans.Add((schedule, queue, start, hasStop, stop, overnight, window));
+                }
+                foreach (var (schedule, queue, start, hasStop, stop, overnight, window) in plans)
+                {
                     // From the stop time until midnight (or the next start, overnight): a start at host startup waits.
                     var stopDue = hasStop && (overnight ? time >= stop && time < start && Eligible(schedule, today.AddDays(-1))
                         : time >= stop && Eligible(schedule, today));
@@ -60,9 +65,15 @@ public sealed partial class DownloadManagerService
                     }
                     if (stopDate is { } stopDay && schedule.LastStopDate != stopDay && (schedule.LastStopDate is null || schedule.LastStopDate < stopDay))
                     {
+                        // Review 2 L2: made, turned on or changed after that day's stop time, the schedule did not start
+                        // what runs now. Review 2 M2: another schedule's window for the queue is open, so the queue runs
+                        // for that one (a stop missed while asleep would otherwise end its run). Either way only recorded.
+                        var notThisStops = schedule.SetAfterStopDate == stopDay ||
+                            plans.Any(other => other.Schedule.Id != schedule.Id && other.Queue.Id == queue.Id &&
+                                               other.Schedule.TimedStartEnabled && other.Window is not null);
                         // A stopped queue may still have torrents seeding from before its stop time: the stop stops them
                         // too (T2). Seeding started after the stop time (by hand) is left alone.
-                        if (queue.IsRunning || QueueSeededBeforeLocked(queue.Id, new DateTimeOffset(stopDay.ToDateTime(stop), localNow.Offset)))
+                        if (!notThisStops && (queue.IsRunning || QueueSeededBeforeLocked(queue.Id, LocalInstant(stopDay, stop))))
                         {
                             due.Add((schedule.Id, queue.Id, "stop", stopDay, false, false));
                             continue;
@@ -78,11 +89,19 @@ public sealed partial class DownloadManagerService
             }
             if (passedStops.Count > 0) await RecordPassedStopsAsync(passedStops, cancellationToken).ConfigureAwait(false);
             var results = new List<ScheduleAction>();
-            foreach (var item in due)
+            // Review 2 M2: stops before starts, so one schedule's stop never ends a run another starts in the same pass.
+            // Audit L11: the starts that synchronise first come last, so their metadata reads hold back no other.
+            foreach (var item in due.OrderBy(item => item.Action == "stop" ? 0 : item.Synchronize ? 2 : 1))
             {
                 lock (_sync)
                     if (_shuttingDown) break;
-                var warning = item.Synchronize ? await SynchronizeQueueAsync(item.Id, item.QueueId, cancellationToken).ConfigureAwait(false) : null;
+                string? warning = null;
+                // Audit L11: the metadata reads (up to 12 s each) run under the evaluation gate, last in the pass, so
+                // they hold back no other schedule of this pass. The gate stays held: an evaluation that went on
+                // meanwhile could stop the queue (a window's end) and this start would then run it past its stop.
+                // Wakes come through SchedulerTickAsync, which runs one evaluation at a time anyway.
+                if (item.Synchronize)
+                    warning = await SynchronizeQueueAsync(item.Id, item.QueueId, cancellationToken).ConfigureAwait(false);
                 await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
@@ -133,9 +152,18 @@ public sealed partial class DownloadManagerService
             ArmSchedulerTimer();
         }
 
-        static bool Eligible(ScheduleRule schedule, DateOnly date) => schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase)
-            ? schedule.StartDate == date : MatchesDay(schedule.Days, date.DayOfWeek);
+        // Audit L9 (DST edges): a stop time before a clock change has another offset than now's. Counted from now's
+        // offset, so a caller's time that is not in this zone (a test's) is read as before.
+        DateTimeOffset LocalInstant(DateOnly date, TimeOnly at)
+        {
+            var local = date.ToDateTime(at);
+            var zone = _timeProvider.LocalTimeZone;
+            return new DateTimeOffset(local, localNow.Offset + zone.GetUtcOffset(local) - zone.GetUtcOffset(localNow.DateTime));
+        }
     }
+
+    private static bool Eligible(ScheduleRule schedule, DateOnly date) => schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase)
+        ? schedule.StartDate == date : MatchesDay(schedule.Days, date.DayOfWeek);
 
     /// <summary>Saves stops that came due on an idle queue as done (audit 2 M8). Nothing else changes.</summary>
     private async Task RecordPassedStopsAsync(List<(Guid Id, DateOnly StopDate)> stops, CancellationToken cancellationToken)
@@ -190,7 +218,17 @@ public sealed partial class DownloadManagerService
         get { lock (_sync) return _schedulerWakeAt; }
     }
 
-    private void OnSchedulerSettingsChanged(object? sender, AppSettings settings) => ArmSchedulerTimer();
+    /// <summary>
+    /// A schedule made, turned on or moved may be due already (review 2 M1): one evaluation now, rather than only the
+    /// next wake, which can be an hour away. Armed first, so the wake reads right at once. Not a loop: an evaluation
+    /// that acts raises one more change, and the evaluation after it finds nothing left to do.
+    /// </summary>
+    private void OnSchedulerSettingsChanged(object? sender, AppSettings settings)
+    {
+        ArmSchedulerTimer();
+        // Off the raiser's thread, which may hold a gate or a lock.
+        if (_schedulerCts is { IsCancellationRequested: false }) _ = Task.Run(SchedulerTickAsync);
+    }
 
     private void ArmSchedulerTimer()
     {
@@ -292,15 +330,28 @@ public sealed partial class DownloadManagerService
         }
         // A margin, so the evaluation reads a time at or past the one it waits for.
         DateTimeOffset At(DateOnly date, TimeOnly time) => Instant(date, time).AddMilliseconds(500);
-        // Once the time itself has come (the evaluation acts on it), the next is tomorrow's, even within the margin:
-        // a timer can fire a little early by the wall clock.
-        DateTimeOffset NextAt(TimeOnly time) => Instant(today, time) > localNow ? At(today, time) : At(today.AddDays(1), time);
+        // Once the time itself has come (the evaluation acts on it), the next is a later day's, even within the margin:
+        // a timer can fire a little early by the wall clock. Review 2 L9: only on a day the schedule runs (for a stop
+        // after midnight, the day after one), so a one-time schedule whose date has passed keeps no wake.
+        DateTimeOffset? NextAt(ScheduleRule schedule, TimeOnly time, int daysAfterRunDay)
+        {
+            if (schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase))
+                return schedule.StartDate?.AddDays(daysAfterRunDay) is { } date && Instant(date, time) > localNow ? At(date, time) : null;
+            for (var add = 0; add <= 7; add++)
+            {
+                var date = today.AddDays(add);
+                if (Instant(date, time) > localNow && Eligible(schedule, date.AddDays(-daysAfterRunDay))) return At(date, time);
+            }
+            return null;
+        }
 
         foreach (var schedule in _settings.Schedules.Where(schedule => schedule.Enabled))
         {
-            if (!_settings.Queues.Any(queue => queue.Id == schedule.QueueId)) continue;
-            if (schedule.TimedStartEnabled && TryParseScheduleTime(schedule.StartTime, out var start)) Consider(NextAt(start));
-            if (TryParseScheduleTime(schedule.StopTime, out var stop)) Consider(NextAt(stop));
+            // As the evaluation: a schedule whose start time can't be read does nothing.
+            if (!_settings.Queues.Any(queue => queue.Id == schedule.QueueId) || !TryParseScheduleTime(schedule.StartTime, out var start)) continue;
+            var hasStop = TryParseScheduleTime(schedule.StopTime, out var stop);
+            if (schedule.TimedStartEnabled && NextAt(schedule, start, 0) is { } nextStart) Consider(nextStart);
+            if (hasStop && NextAt(schedule, stop, schedule.TimedStartEnabled && stop <= start ? 1 : 0) is { } nextStop) Consider(nextStop);
             if (schedule.RepeatEveryMinutes is { } interval && schedule.LastRunAt is { } lastRun &&
                 lastRun + TimeSpan.FromMinutes(interval) is var repeat && repeat > localNow)
                 Consider(repeat);
@@ -382,6 +433,9 @@ public sealed partial class DownloadManagerService
             // a pasted one is a secret that FinalUrl would write out in plain text.
             if (original.RemoteSource is not null || original.ProtectedUrl is not null) continue;
             if (!SupportsLiveSpeedLimit(original)) { errors++; continue; }
+            // Review 2 L3, the H2 rule: a file whose folder can't be reached (a drive not mounted yet) is not missing, and
+            // is not downloaded all over again. Nothing is said, as at start.
+            if (!File.Exists(original.FinalFilePath) && !FolderReachable(original.FinalFilePath)) continue;
             FileMetadata metadata;
             try
             {

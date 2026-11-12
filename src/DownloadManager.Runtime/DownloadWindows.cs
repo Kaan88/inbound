@@ -13,7 +13,10 @@ public sealed record DownloadWindowRequest(Guid Id, bool IsPackage);
 /// package built one add at a time can have only its first file when that file starts or finishes. Downloads the
 /// CLI added (one add, a batch or an import) stay headless, a provider's files start by themselves, often many at once,
 /// so they stay in the list, and nobody at this PC asked for one added from another device (D8,
-/// <see cref="JobDto.AddedFromAnotherDevice"/>).
+/// <see cref="JobDto.AddedFromAnotherDevice"/>). A torrent gets no window when it starts (T9 W4): the torrent dialog
+/// already asked where and which files, and a magnet's file choice opens in the main window once its list is in. Its
+/// completion window follows the usual rule. A download the browser extension asked to keep quiet opens neither window
+/// (<see cref="KeptQuiet"/>).
 /// </summary>
 public sealed class DownloadWindows : IDisposable
 {
@@ -24,6 +27,9 @@ public sealed class DownloadWindows : IDisposable
 
     /// <summary>Jobs and packages whose window was opened for this run of transfers, so starting again doesn't repeat it.</summary>
     private readonly ConcurrentDictionary<Guid, byte> _shown = new();
+
+    /// <summary>T10: files in a package whose start window was skipped as a .torrent file, so their progress isn't asked again.</summary>
+    private readonly ConcurrentDictionary<Guid, byte> _skippedInPackage = new();
 
     /// <param name="open">Must not block. Called on whichever thread brought the news.</param>
     public DownloadWindows(DownloadManagerService service, Func<bool> showCompletionByDefault, Action<DownloadWindowRequest> open, Action<string>? log = null)
@@ -46,13 +52,42 @@ public sealed class DownloadWindows : IDisposable
     public static bool OpensWindows(JobDto job) =>
         !job.AddedFromAnotherDevice && job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote");
 
+    /// <summary>A window opens as it starts: one that opens windows at all, and not a torrent.</summary>
+    /// <remarks>The desktop window's TorrentRules.ProgressWindowComing follows this rule: change them together.</remarks>
+    public static bool OpensStartWindow(JobDto job) => OpensWindows(job) && job.Torrent is null;
+
+    /// <summary>
+    /// EXT.R12: the browser extension sent it and shows its progress on its own toolbar icon, so the app opens no window
+    /// for it, neither as it starts nor when it finishes, and the browser keeps the focus (<see cref="JobDto.QuietWindows"/>).
+    /// A package with any such file opens none either. That includes the torrent dialog for a .torrent file it turns out
+    /// to be (T10, <see cref="TorrentFileOffers.Offers"/>): EXT.R12 wins, and the finished row keeps Open as Torrent.
+    /// </summary>
+    public static bool KeptQuiet(JobDto job) => job.QuietWindows;
+
     private bool ShowsCompletion(JobDto job) => job.ShowCompletionDialog ?? _showCompletionByDefault();
+
+    /// <summary>
+    /// T10: whether a .torrent file that finishes is offered as a torrent here (torrents on, or an account that takes
+    /// them). Then such a download opens no window: none as it starts when it already looks like a torrent, and no
+    /// completion window once its file read as one (<see cref="JobDto.TorrentFileReady"/>); the torrent dialog opens
+    /// instead (<see cref="TorrentFileOffers"/>). Null or false: today's windows.
+    /// </summary>
+    public Func<bool>? TorrentFilesOffered { get; init; }
+
+    private bool SkipsForTorrentFile(JobDto job, bool starting)
+        => (starting ? _service.LooksLikeTorrentFile(job.Id) : job.TorrentFileReady) && TorrentFilesOffered?.Invoke() == true;
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)
     {
         try
         {
             var job = e.Job;
+            if (KeptQuiet(job))
+            {
+                _shown.TryRemove(job.Id, out _);
+                return;
+            }
+
             var starting = (e.ChangeType == "added" && job.StartMode == "startNow") ||
                            (e.ChangeType == "progress" && job.State is "connecting" or "downloading");
             if (OpensWindows(job) && (starting || e.ChangeType == "completed"))
@@ -60,15 +95,26 @@ public sealed class DownloadWindows : IDisposable
                 if (_service.FindGroupOf(job.Id) is { } package)
                 {
                     // A finished file in a package waits for the package's own completion.
-                    if (starting && _shown.TryAdd(package, 0)) _open(new DownloadWindowRequest(package, IsPackage: true));
+                    // T10: a .torrent file is recorded for itself, not for the package, so another file can still open it.
+                    if (starting && OpensStartWindow(job) && !_shown.ContainsKey(package) && !_skippedInPackage.ContainsKey(job.Id))
+                    {
+                        if (SkipsForTorrentFile(job, starting: true)) _skippedInPackage.TryAdd(job.Id, 0);
+                        else if (_shown.TryAdd(package, 0)) _open(new DownloadWindowRequest(package, IsPackage: true));
+                    }
                 }
-                else if ((starting && _shown.TryAdd(job.Id, 0)) || (e.ChangeType == "completed" && ShowsCompletion(job)))
+                // A start that is skipped for a .torrent file still counts as decided, so its progress isn't asked again.
+                else if ((starting && OpensStartWindow(job) && _shown.TryAdd(job.Id, 0) && !SkipsForTorrentFile(job, starting: true)) ||
+                         (e.ChangeType == "completed" && ShowsCompletion(job) && !SkipsForTorrentFile(job, starting: false)))
                 {
                     _open(new DownloadWindowRequest(job.Id, IsPackage: false));
                 }
             }
 
-            if (e.ChangeType is "paused" or "cancelled" or "failed" or "completed" or "removed") _shown.TryRemove(job.Id, out _);
+            if (e.ChangeType is "paused" or "cancelled" or "failed" or "completed" or "removed")
+            {
+                _shown.TryRemove(job.Id, out _);
+                _skippedInPackage.TryRemove(job.Id, out _);
+            }
         }
         catch (Exception ex)
         {
@@ -82,7 +128,9 @@ public sealed class DownloadWindows : IDisposable
         {
             _shown.TryRemove(e.PackageId, out _);
             var jobs = e.JobIds.Select(_service.GetJob).OfType<JobDto>().ToList();
-            if (jobs.Count == 0 || !jobs.All(OpensWindows)) return;
+            if (jobs.Count == 0 || !jobs.All(OpensWindows) || jobs.Any(KeptQuiet)) return;
+            // T10: a package of .torrent files only goes to the torrent dialog.
+            if (jobs.All(job => SkipsForTorrentFile(job, starting: false))) return;
             var last = jobs.MaxBy(job => job.CompletedAt ?? DateTimeOffset.MinValue)!;
             if (!ShowsCompletion(last)) return;
 

@@ -152,6 +152,49 @@ public sealed partial class HostCommandDispatcherTests
         Assert.True(SeedingNow(service, job.Id));
     }
 
+    [Fact]
+    public async Task SeedingFromBeforeTheStopTimeIsStoppedWhenTheClockMovedOnBetweenTheStopAndTheEvaluation()
+    {
+        // A zone with US-style summer time: on 2027-03-14 the clock goes from 02:00 to 03:00 (UTC-5 to UTC-4).
+        var zone = TimeZoneInfo.CreateCustomTimeZone("Review summer time", TimeSpan.FromHours(-5), "Review summer time", "Review standard",
+            "Review summer", [TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(new DateTime(2000, 1, 1), new DateTime(2099, 12, 31),
+                TimeSpan.FromHours(1),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 2, 0, 0), 3, 2, DayOfWeek.Sunday),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 2, 0, 0), 11, 1, DayOfWeek.Sunday))]);
+        var time = new ZoneClock(zone) { Now = new DateTimeOffset(2027, 3, 14, 5, 45, 0, TimeSpan.Zero) }; // 00:45 local
+        var service = await TorrentServiceAsync(timeProvider: time, settings: saved => saved.TorrentSeedAfterDownload = false);
+        var dispatcher = Dispatcher(service);
+        var settings = service.GetSettings();
+        settings.Queues.Add(new QueueDto { Id = 9, Name = "Early", IsRunning = true, MaxConcurrentDownloads = 1, Order = 9 });
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(), Name = "Early window", QueueId = 9, Enabled = true,
+            Kind = "daily", Days = "Mon,Tue,Wed,Thu,Fri,Sat,Sun", StartTime = "00:30", StopTime = "01:30",
+        });
+        Assert.True((await service.UpdateSettingsAsync(settings)).Ok);
+        var job = await AddTorrentAsync(dispatcher, "Early", queueId: 9);
+        await UntilTorrentCompletedAsync(service, job.Id);
+        Assert.True((await service.QueueActionAsync(new QueueActionRequest { QueueId = 9, Action = "stop" })).Ok);
+
+        // Seeded by hand at 01:00, half an hour before the stop time (01:30, UTC-5).
+        time.Now = new DateTimeOffset(2027, 3, 14, 6, 0, 0, TimeSpan.Zero);
+        Assert.True((await service.SetTorrentSeedingAsync(new TorrentSeedRequest { JobId = job.Id, On = true })).Ok);
+        Assert.True(SeedingNow(service, job.Id));
+
+        // 03:30 by the clock after the change (UTC-4): the stop is due, and the seeding began before it.
+        time.Now = new DateTimeOffset(2027, 3, 14, 7, 30, 0, TimeSpan.Zero);
+        Assert.Equal(TimeSpan.FromHours(-4), time.GetLocalNow().Offset);
+        Assert.Equal("stop", Assert.Single(await service.EvaluateSchedulesAsync(time.GetLocalNow())).Action);
+        await UntilAsync(() => service.GetSnapshot().Jobs.FirstOrDefault(j => j.Id == job.Id && !j.Torrent!.Seeding));
+    }
+
+    private sealed class ZoneClock(TimeZoneInfo zone) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; }
+        public override DateTimeOffset GetUtcNow() => Now;
+        public override TimeZoneInfo LocalTimeZone => zone;
+    }
+
     // ----- One speed budget for HTTP downloads, torrent downloads and torrent uploads -----
 
     private async Task<DownloadManagerService> LimitedTorrentServiceAsync(long limit, long uploadLimit = 0)

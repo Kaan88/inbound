@@ -16,7 +16,7 @@ public sealed class FileLogger : IHostLog
     private long _currentSize;
     private bool _capped;
 
-    /// <summary>L7: deletes this prefix's files older than <see cref="LogFileRetention.KeepDays"/> days.</summary>
+    /// <summary>L7: deletes this prefix's files older than <see cref="LogFileRetention.KeepDays"/> days, at start and when the date changes.</summary>
     public FileLogger(string directory, string prefix = "host")
     {
         _directory = directory;
@@ -31,6 +31,9 @@ public sealed class FileLogger : IHostLog
     /// <summary>One day's file stops growing here (L7); tests set a smaller limit.</summary>
     public long MaxDailyBytes { get; init; } = LogFileRetention.MaxDailyBytes;
 
+    /// <summary>The time lines are stamped with; tests move it to another day.</summary>
+    public Func<DateTimeOffset> Clock { get; init; } = static () => DateTimeOffset.Now;
+
     public void Info(string message) => Write("INFO", message);
     public void Warn(string message) => Write("WARN", message);
     public void Error(string message) => Write("ERROR", message);
@@ -41,10 +44,12 @@ public sealed class FileLogger : IHostLog
         {
             lock (_gate)
             {
-                var now = DateTimeOffset.Now;
+                var now = Clock();
                 var date = now.ToString("yyyyMMdd");
                 if (_currentDate != date || _currentPath is null)
                 {
+                    // L7: a Host that runs for weeks prunes once a day, not only at start.
+                    if (_currentDate is not null) LogFileRetention.DeleteOld(_directory, _prefix, now.DateTime);
                     _currentDate = date;
                     _currentPath = Path.Combine(_directory, $"{_prefix}-{date}.log");
                     _currentSize = LogFileRetention.CurrentSize(_currentPath);

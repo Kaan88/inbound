@@ -41,9 +41,21 @@ public sealed class JobDto
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
+    /// <summary>
+    /// Review 5:T3: when the latest run started, in this Host's lifetime (<see cref="StartedAt"/> is the first start
+    /// ever). Set again on each start, so a resumed or restored download counts from then. An older Host leaves it out.
+    /// </summary>
+    public DateTimeOffset? RunStartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     /// <summary>A completed download whose file was deleted on purpose after a verified extraction. Not a failure, and there is no file to open.</summary>
     public bool FileRemovedAfterExtraction { get; set; }
+    /// <summary>
+    /// T10: this finished download is a .torrent file (its type or name said so and it reads as one), so it can be added
+    /// as a torrent with <see cref="TorrentAddRequest.FromJobId"/> ("Open as Torrent"). An older Host leaves it false.
+    /// Left out when false, and never sent to a browser extension (<see cref="NativeBridgePolicy"/>, roadmap rule 5).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TorrentFileReady { get; set; }
     /// <summary>Something to say about a job beside its state, in words for the user. Null when there is nothing.</summary>
     public string? StatusNote { get; set; }
     public string? ContentType { get; set; }
@@ -67,12 +79,17 @@ public sealed class JobDto
     public string Source { get; set; } = "cli";
     /// <summary>D8: a browser on another device added it; it opens no window on the Host's screen.</summary>
     public bool AddedFromAnotherDevice { get; set; }
+    /// <summary>EXT.R12: the browser that sent it shows its progress, so it opens no app window. Older clients ignore it.</summary>
+    public bool QuietWindows { get; set; }
     public string? ClientRequestId { get; set; }
     public string? OwnerExtensionId { get; set; }
     public int QueueId { get; set; }
     public int Priority { get; set; }
     public string? Description { get; set; }
     public string? ExpectedSha256 { get; set; }
+    /// <summary>The content type the browser hand-off gave (an HLS or DASH playlist's, say), so a saved list adds a
+    /// stream again as a stream (review 1 N6). Null when there was none; older Hosts leave it out.</summary>
+    public string? HandoffContentType { get; set; }
     public string? QueueName { get; set; }
     public string StartMode { get; set; } = "startNow";
     public string ConflictPolicy { get; set; } = "rename";
@@ -245,6 +262,18 @@ public sealed class SettingsDto
     public bool TorrentsEnabled { get; set; }
     public string TorrentRoute { get; set; } = "ask";
     public bool TorrentChooseFiles { get; set; } = true;
+    /// <summary>
+    /// T14: torrents go to a folder for their category; off, straight to the torrent folder (or, with none, the download
+    /// folder). Apart from <see cref="UseCategoryFolders"/>, which is for other downloads only. Every snapshot has it; null
+    /// in a save (a client from before T14) keeps the Host's value.
+    /// </summary>
+    public bool? UseTorrentCategoryFolders { get; set; }
+    /// <summary>
+    /// T14: the torrent folder (a full path), which holds the torrents' category folders. Empty: torrents use the same
+    /// folders as other downloads (what an install upgraded from before T14 has). Every snapshot has it; null in a save
+    /// (a client from before T14) keeps the Host's value.
+    /// </summary>
+    public string? TorrentCategoryFoldersRoot { get; set; }
     public bool TorrentHandler { get; set; }
     public bool TorrentSeedAfterDownload { get; set; } = true;
     public double TorrentSeedRatio { get; set; } = 1.0;
@@ -277,6 +306,12 @@ public sealed class SettingsDto
     public bool TorrentUseProxy { get; set; }
     public string? FfmpegPath { get; set; }
     public string? PostDownloadCommand { get; set; }
+    /// <summary>
+    /// Set by the Host: why the saved <see cref="PostDownloadCommand"/> won't run (one saved before the .exe rule is kept
+    /// by a save of other settings, and refused when it would run), for Options to say beside the box. Null when it can
+    /// run or none is set, and from an older Host. A client's copy is ignored.
+    /// </summary>
+    public string? PostDownloadCommandProblem { get; set; }
     public string? UpdateManifestUrl { get; set; }
     public string? UpdatePublicKey { get; set; }
     public string UpdateChannel { get; set; } = "stable";
@@ -315,6 +350,20 @@ public sealed class HostStatusDto
     public string StateDirectory { get; set; } = string.Empty;
     public string BrowserIntegration { get; set; } = "unknown";
     public List<string> OrphanPartFiles { get; set; } = new();
+
+    /// <summary>
+    /// UI.R37: the newest version this Host's last update check found for its own build, while the Host runs. Null when it
+    /// hasn't checked yet, its checks failed, it has no updater (portable build, Docker server), or it is older than this
+    /// field. Changes arrive as <see cref="MessageTypes.UpdateLatest"/>.
+    /// </summary>
+    public string? LatestVersion { get; set; }
+}
+
+/// <summary>UI.R37: the payload of <see cref="MessageTypes.UpdateLatest"/>.</summary>
+public sealed class UpdateLatestDto
+{
+    /// <summary>As <see cref="HostStatusDto.LatestVersion"/>.</summary>
+    public string? LatestVersion { get; set; }
 }
 
 public sealed class HostHelloDto
@@ -417,6 +466,13 @@ public sealed class SpeedHistoryDto
     public DateTimeOffset Start { get; set; }
     public int IntervalSeconds { get; set; } = 1;
     public List<long> BytesPerSecond { get; set; } = new();
+
+    /// <summary>
+    /// T8: what the torrents sent, one figure for each of <see cref="BytesPerSecond"/>'s seconds (same start and
+    /// interval). Null for one download's figures, from a Host before T8, and while no torrent has sent anything since the
+    /// Host started; a client then starts the upload line empty.
+    /// </summary>
+    public List<long>? UploadBytesPerSecond { get; set; }
 }
 
 public sealed class FolderPickRequest
@@ -486,6 +542,8 @@ public sealed class AddJobRequest
     public string? PackageName { get; set; }
     /// <summary>A <see cref="JobPriorities"/> value; null is normal.</summary>
     public int? Priority { get; set; }
+    /// <summary>EXT.R12: open no app window for this download (<see cref="HandoffRequest.QuietWindows"/>).</summary>
+    public bool? QuietWindows { get; set; }
 }
 
 public sealed class AddJobResponse
@@ -649,6 +707,12 @@ public sealed class DownloadFoldersRequest
 public sealed class HostActionRequest
 {
     public string Action { get; set; } = string.Empty;
+
+    /// <summary>
+    /// EXT.R12, <c>host.openUi</c> only: open the main window at this download, selected and briefly highlighted. Added
+    /// without a protocol bump: an older Host ignores it and opens the main window as before.
+    /// </summary>
+    public Guid? JobId { get; set; }
 }
 
 public sealed class HostActionResult
@@ -675,6 +739,13 @@ public sealed class HandoffRequest
     public string? DestinationDirectory { get; set; }
     public string? PackageKey { get; set; }
     public string? PackageName { get; set; }
+
+    /// <summary>
+    /// EXT.R12: the browser shows this download's progress itself, so the app opens no window for it (no progress window
+    /// as it starts, no completion window) and the browser keeps the focus. Added without a protocol bump: an older Host
+    /// ignores it.
+    /// </summary>
+    public bool? QuietWindows { get; set; }
 }
 
 public sealed class HandoffAck

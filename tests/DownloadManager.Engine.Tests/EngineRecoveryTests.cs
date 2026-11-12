@@ -721,6 +721,51 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
         Assert.True(result.Success, result.Failure?.Message);
     }
 
+    /// <summary>Audit 1, L15: a client a proxy change replaced lives while a transfer started on it runs, and no longer.</summary>
+    [Fact]
+    public async Task AClientReplacedByAProxyChangeIsDisposedWhenItsLastTransferEnds()
+    {
+        const int size = Megabyte;
+        var engine = Engine();
+        var job = Job($"{_server.BaseAddress}/file/retired-client.bin?size={size}&seed=741&bps={512 * 1024}", "retired-client.bin");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p =>
+        {
+            if (p.ReceivedBytes > 0) started.TrySetResult();
+        }), CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        engine.UpdateProxy(new ProxySettings { Mode = "system" });
+        Assert.Equal(1, engine.RetiredClientCount);
+        // The client of the first change carried nothing, so the second change disposes it at once.
+        engine.UpdateProxy(new ProxySettings { Mode = "none" });
+        Assert.Equal(1, engine.RetiredClientCount);
+
+        var result = await run.WaitAsync(TimeSpan.FromSeconds(60));
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(Sha256Of(741, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
+        Assert.Equal(0, engine.RetiredClientCount);
+    }
+
+    /// <summary>Audit 1, L14: a caller that sets no part path gets the "&lt;final&gt;.&lt;jobId&gt;.part" the orphan scan knows.</summary>
+    [Fact]
+    public async Task AJobWithoutAPartPathGetsOneWithItsId()
+    {
+        Directory.CreateDirectory(Destination);
+        var job = new DownloadJob
+        {
+            Url = $"{_server.BaseAddress}/file/no-part.bin?size=4096&seed=742",
+            FileName = "no-part.bin",
+            DestinationDirectory = Destination,
+            RequestedConnections = 1,
+        };
+
+        var result = await Engine().ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal($"{job.FinalFilePath}.{job.Id:N}.part", job.PartFilePath);
+    }
+
     [Fact]
     public async Task ProxiedHandlerTakesTheEngineProxyRoute()
     {

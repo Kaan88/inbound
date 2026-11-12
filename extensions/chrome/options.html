@@ -46,7 +46,25 @@
           <label class="check"><input type="radio" name="destinationMode" value="default" /><span>Save to the app's default folder</span></label>
           <label class="check"><input type="radio" name="destinationMode" value="ask" /><span>Ask where to save</span></label>
         </div>
-        <p class="hint indent">The default folder is the one set below for this PC, or the server's when downloads go to the server. "Ask where to save" asks in the extension's toolbar popup, under its icon; a small window asks instead when the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front). The folder chosen there is for that download only. The right-click menu always asks in a window.</p>
+        <p class="hint indent">The default folder is the one set below for this PC, or the server's when downloads go to the server. "Ask where to save" asks in the extension's toolbar popup, under its icon; a small window asks instead when the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front). The folder chosen there is for that download only. The right-click menu's download goes straight to the default folder, or asks in a window with "Ask where to save".</p>
+
+        <h2 class="section">While a download from the browser runs</h2>
+        <label class="check">
+          <input id="openAppWindows" type="checkbox" />
+          <span>Open the app's windows for browser downloads</span>
+        </label>
+        <p class="hint indent">Off: the browser keeps the focus, and the extension's icon shows the progress: a green ring while downloading, orange when paused, red when one failed. On: the app opens its progress window and its finished window, as for downloads added in the app.</p>
+        <div class="form-grid compact">
+          <label class="label" for="onFinish">When one finishes</label>
+          <div>
+            <select id="onFinish" class="field auto-width">
+              <option value="flash">Flash the icon</option>
+              <option value="popup">Open the popup</option>
+              <option value="nothing">Do nothing</option>
+            </select>
+            <p class="hint">Chrome or Edge before 127, and Firefox before 149, can't open the popup by themselves (nor when the browser isn't in front); the icon flashes there instead.</p>
+          </div>
+        </div>
 
         <h2 class="section">Default folder for browser downloads on This PC</h2>
         <div class="radio-group" role="radiogroup" aria-label="Default folder for browser downloads on This PC">

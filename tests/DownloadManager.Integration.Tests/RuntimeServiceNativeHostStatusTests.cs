@@ -19,9 +19,9 @@ public sealed partial class RuntimeServiceTests
 
         ctx.Service.NativeHostState = () => new NativeHostRegistrationState(NativeHostKeyState.Absent, NativeHostKeyState.Usable);
         Assert.True(ctx.Service.GetSnapshot().Status.NativeHostRegistered);
-        Assert.Equal("on; not registered for Chrome", ctx.Service.GetSnapshot().Status.BrowserIntegration);
+        Assert.Equal("on; the extension can't reach Inbound in Chrome", ctx.Service.GetSnapshot().Status.BrowserIntegration);
 
         ctx.Service.NativeHostState = () => new NativeHostRegistrationState(NativeHostKeyState.Usable, NativeHostKeyState.Broken);
-        Assert.Equal("on; Edge registration is broken", ctx.Service.GetSnapshot().Status.BrowserIntegration);
+        Assert.Equal("on; the extension can't reach Inbound in Edge", ctx.Service.GetSnapshot().Status.BrowserIntegration);
     }
 }

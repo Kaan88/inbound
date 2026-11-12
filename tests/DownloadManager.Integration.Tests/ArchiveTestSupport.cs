@@ -278,7 +278,8 @@ internal sealed class ArchiveHarness : IAsyncDisposable
     }
 
     /// <summary>A real download of these bytes from the local server.</summary>
-    public async Task<JobDto> DownloadAsync(string name, byte[] bytes, string startMode = "startNow", string? packageKey = null)
+    public async Task<JobDto> DownloadAsync(string name, byte[] bytes, string startMode = "startNow", string? packageKey = null,
+        string source = "cli", bool? quietWindows = null)
     {
         var response = await Service.AddJobAsync(new AddJobRequest
         {
@@ -286,8 +287,9 @@ internal sealed class ArchiveHarness : IAsyncDisposable
             DestinationDirectory = Downloads,
             FileName = name,
             StartMode = startMode,
-            Source = "cli",
+            Source = source,
             PackageKey = packageKey,
+            QuietWindows = quietWindows,
         });
         Assert.True(response.Accepted, response.Error);
         return response.Job!;

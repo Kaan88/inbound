@@ -58,8 +58,13 @@ public sealed partial class HostConnection : IAsyncDisposable
         _reload = reload;
     }
 
+    /// <summary>Review 4:N4: this connection's Host's clock as seen from job updates, for the speed graphs' rule.</summary>
+    public ServerClock Clock { get; } = new();
+
     public event Action<SnapshotDto>? SnapshotReceived;
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
+    /// <summary>UI.R37: the newest version the connected Host's update check found changed; this PC's or a server's.</summary>
+    public event Action<string?>? LatestVersionChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<List<DownloadGroupDto>>? GroupsChanged;
     public event Action<ArchiveChangedDto>? ArchiveChanged;
@@ -74,6 +79,9 @@ public sealed partial class HostConnection : IAsyncDisposable
 
     /// <summary>Another server, not this PC: its paths and files are not this PC's.</summary>
     public bool IsRemote => !_target.IsLocal;
+
+    /// <summary>Review 5:E4: what an error says when this connection's Host refused an action without a reason.</summary>
+    public string NoReasonWords => ShellWords.NoReason(IsRemote ? _target.Name : null);
 
     /// <summary>What the connected Host said in its hello (capabilities, hostKind); null until connected.</summary>
     public HostHelloDto? Hello => _hello;
@@ -101,6 +109,8 @@ public sealed partial class HostConnection : IAsyncDisposable
         lock (_sync)
         {
             _target = target;
+            // Review 4:N4: the saved entry may now name another machine, whose clock the old offset says nothing of.
+            Clock.Reset();
             PairingEnded = false;
             _stopped = false;
             _hello = null;
@@ -175,6 +185,25 @@ public sealed partial class HostConnection : IAsyncDisposable
     /// <summary>F-12: one download's figures while it runs. An older Host answers with the total (no <c>jobId</c>).</summary>
     public Task<IpcMessage> GetSpeedHistoryAsync(Guid jobId, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SpeedHistoryGet, new SpeedHistoryRequest { JobId = jobId }, TimeSpan.FromSeconds(8), cancellationToken);
+
+    /// <summary>
+    /// T10: whether an account with a usable key takes torrents, from the Host's last known answer (no provider call).
+    /// False when the Host has no accounts or doesn't answer.
+    /// </summary>
+    public async Task<bool> ProviderTakesTorrentsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reply = await RequestAsync(MessageTypes.RemoteAccountGet, new RemoteAccountRequest(), TimeSpan.FromSeconds(8), cancellationToken)
+                .ConfigureAwait(false);
+            return reply.Type == MessageTypes.RemoteAccountResult && reply.GetPayload<RemoteAccountResult>() is { Ok: true } result &&
+                   TorrentRules.ProviderTakesTorrents(result.Accounts);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
@@ -395,7 +424,9 @@ public sealed partial class HostConnection : IAsyncDisposable
     }
 
     /// <summary>What Export list saves of each torrent job; null from a Host without torrents (its magnets are saved alone).
-    /// Asked page by page, so a long list stays under the message size limit.</summary>
+    /// Asked page by page, so a long list stays under the message size limit. Any other error reply throws with the
+    /// Host's words, so the export fails and writes nothing rather than saving the list without its torrents (as
+    /// <c>dm export</c> does).</summary>
     public async Task<IReadOnlyDictionary<Guid, TorrentListEntry>?> GetTorrentListEntriesAsync(CancellationToken cancellationToken = default)
     {
         var all = new Dictionary<Guid, TorrentListEntry>();
@@ -404,8 +435,7 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             var reply = await RequestAsync(TorrentMessageTypes.ListEntries, new TorrentListEntriesRequest { After = after },
                 TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
-            if (reply.Type != TorrentMessageTypes.ListEntriesResult) return all.Count > 0 ? all : null;
-            var page = reply.GetPayload<TorrentListEntriesResult>();
+            if (ListEntriesPage(reply) is not { } page) return all.Count > 0 ? all : null;
             foreach (var (id, entry) in page.Entries) all[id] = entry;
             // A page that moves nothing on ends it, whatever it says.
             after = page.Next is { } next && next != after ? next : null;
@@ -415,8 +445,19 @@ public sealed partial class HostConnection : IAsyncDisposable
         return all;
     }
 
+    /// <summary>
+    /// A page of torrent list entries; null from a Host that doesn't know the request (no torrents). Any other reply is
+    /// the Host's error and throws with its words.
+    /// </summary>
+    internal static TorrentListEntriesResult? ListEntriesPage(IpcMessage reply)
+    {
+        if (reply.Type == TorrentMessageTypes.ListEntriesResult) return reply.GetPayload<TorrentListEntriesResult>();
+        if (IsUnknownRequest(reply)) return null;
+        throw new InvalidOperationException(TorrentReplyError(reply));
+    }
+
     /// <summary>Adds an imported list's torrents, in requests that each fit one message; a Host without torrents skips
-    /// them all and says why.</summary>
+    /// them all and says why. A Host error counts the torrents not yet added as failed, with the Host's words.</summary>
     public async Task<TorrentImportResult> ImportTorrentsAsync(IReadOnlyList<JobListEntry> entries, CancellationToken cancellationToken = default)
     {
         var total = new TorrentImportResult { Ok = true };
@@ -427,7 +468,7 @@ public sealed partial class HostConnection : IAsyncDisposable
                 TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
             if (reply.Type != TorrentMessageTypes.ImportResult)
             {
-                if (sent == 0) return new TorrentImportResult { Ok = true, Skipped = entries.Count, SkipReason = TorrentReplyError(reply) };
+                if (sent == 0 && IsUnknownRequest(reply)) return new TorrentImportResult { Ok = true, Skipped = entries.Count, SkipReason = TorrentReplyError(reply) };
                 total.Failed += entries.Count - sent;
                 total.FirstError ??= TorrentReplyError(reply);
                 break;
@@ -876,6 +917,12 @@ public sealed partial class HostConnection : IAsyncDisposable
             if (!IsRemote) UpdateProgressChanged?.Invoke(message.GetPayload<UpdateProgressDto>());
             return;
         }
+        if (message.Type == MessageTypes.UpdateLatest)
+        {
+            // An unreadable one is skipped and said, like update.progress (audit L8).
+            LatestVersionChanged?.Invoke(message.GetPayload<UpdateLatestDto>()?.LatestVersion);
+            return;
+        }
         if (message.ReplyTo is not null && _pending.TryGetValue(message.ReplyTo, out var completion))
         {
             _pending.TryRemove(message.ReplyTo, out _);
@@ -902,6 +949,8 @@ public sealed partial class HostConnection : IAsyncDisposable
             try
             {
                 var jobEvent = message.GetPayload<JobEventDto>();
+                // An update is sent as it is made, so its time is the Host's "now" (a snapshot's jobs can be old).
+                if (jobEvent.Job is not null) Clock.Observe(jobEvent.Job.UpdatedAt, DateTimeOffset.UtcNow);
                 JobChanged?.Invoke(jobEvent.Job, jobEvent.EventType);
             }
             catch

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { heldLeave, loginNeedsPassword } from '../src/lib/settingsRules';
+import { captureLabel, heldLeave, loginNeedsPassword } from '../src/lib/settingsRules';
 
 describe('loginNeedsPassword', () => {
   const saved = { site: 'Example.com', username: 'ann', hasPassword: true };
@@ -32,5 +32,14 @@ describe('heldLeave', () => {
     expect(heldLeave('http://x/#/queues', true, true)).toBeNull();
     expect(heldLeave('http://x/#/settings', true, false)).toBeNull();
     expect(heldLeave('not an address', true, false)).toBeNull();
+  });
+});
+
+describe('captureLabel (review 5:H4)', () => {
+  it('names the box for paired browsers on a server, and as the desktop does on the Windows app', () => {
+    expect(captureLabel('windows')).toBe('Capture downloads from your browser');
+    expect(captureLabel('linux')).toBe('Capture downloads from your browser');
+    expect(captureLabel('server')).toBe('Accept downloads from paired browsers');
+    expect(captureLabel(undefined)).toBe('Accept downloads from paired browsers');
   });
 });

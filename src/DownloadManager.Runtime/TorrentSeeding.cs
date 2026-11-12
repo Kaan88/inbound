@@ -215,6 +215,8 @@ public sealed partial class DownloadManagerService
         JobRuntime? runtime;
         lock (_sync)
         {
+            // T8: it sends nothing more, also when its job has gone.
+            _speedHistory.UploadStopped(jobId, DateTimeOffset.UtcNow);
             if (!_jobs.TryGetValue(jobId, out runtime) || runtime.Job.Torrent is not { } info) return;
             var noted = failure is { Length: > 0 } && info.SeedingStoppedNote != failure;
             if (!info.Seeding && !noted) return;
@@ -241,6 +243,7 @@ public sealed partial class DownloadManagerService
             info.UploadRate = uploadRate;
             info.Peers = peers;
             info.Seeds = seeds;
+            _speedHistory.ReportUpload(jobId, uploadRate, DateTimeOffset.UtcNow);
         }
 
         Raise(runtime, "progress");

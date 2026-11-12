@@ -63,6 +63,14 @@ public static class NativeBridgePolicy
         MessageTypes.SettingsDownloadFoldersResult,
     };
 
+    /// <summary>
+    /// UI.B24: the messages for which the Host shows a window: Explorer for job.reveal, the folder dialog, the app's
+    /// window. The browser is in front when the user asks, so the native host it started may set the foreground, and
+    /// allows it to the Host before passing one of these on; otherwise the window opens behind the browser.
+    /// </summary>
+    public static bool ShowsWindow(string? messageType) =>
+        messageType is MessageTypes.JobReveal or MessageTypes.HostPickFolder or MessageTypes.HostOpenUi;
+
     public static bool AllowFrom(BridgeRole role, string? messageType) => role switch
     {
         BridgeRole.BrowserExtension => messageType is not null && FromExtensionTypes.Contains(messageType),
@@ -259,12 +267,17 @@ public static class NativeBridgePolicy
         {
             if (property.Name.Equals(TorrentProperty, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.Object)
                 return true;
+            // T10: only a finished .torrent download carries it (it is left out when false).
+            if (property.Name.Equals(TorrentFileProperty, StringComparison.OrdinalIgnoreCase)) return true;
         }
 
         return false;
     }
 
     private const string TorrentProperty = "torrent";
+
+    /// <summary>T10: <see cref="JobDto.TorrentFileReady"/>, which no browser bridge is sent.</summary>
+    private const string TorrentFileProperty = "torrentFileReady";
 
     /// <summary>
     /// Set on a download a browser bridge shows (see <see cref="ForBridge"/>) whose files only the app manages: the
@@ -290,6 +303,8 @@ public static class NativeBridgePolicy
     /// </summary>
     public static bool ForBridge(JsonObject job)
     {
+        // T10: a finished download that is a .torrent file stays an ordinary download in the browser.
+        Remove(job, TorrentFileProperty);
         if (Find(job, TorrentProperty) is not JsonObject torrent) return false;
         var hash = Find(torrent, "infoHash") is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
         var shortAddress = !string.IsNullOrEmpty(hash) && hash.All(char.IsAsciiLetterOrDigit) ? "magnet:?xt=urn:btih:" + hash : string.Empty;
@@ -347,7 +362,24 @@ public static class NativeBridgePolicy
     public static IpcMessage? FitForBrowser(IpcMessage message, out int size)
     {
         size = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options).Length;
-        if (size <= BrowserMaxMessageBytes) return message;
+        return size <= BrowserMaxMessageBytes ? message : TooLarge(message, size);
+    }
+
+    /// <summary>
+    /// <see cref="FitForBrowser"/> as the frame's bytes (<see cref="IpcFraming.WriteFrameAsync"/>): the message is
+    /// serialised once, to measure it and to send it (audit 3 N5). <paramref name="size"/> is the message's own size;
+    /// null for an event that is dropped.
+    /// </summary>
+    public static byte[]? FrameForBrowser(IpcMessage message, out int size)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options);
+        size = json.Length;
+        if (size <= BrowserMaxMessageBytes) return json;
+        return TooLarge(message, size) is { } error ? JsonSerializer.SerializeToUtf8Bytes(error, IpcJson.Options) : null;
+    }
+
+    private static IpcMessage? TooLarge(IpcMessage message, int size)
+    {
         if (string.IsNullOrEmpty(message.ReplyTo)) return null;
         return IpcMessage.Create(MessageTypes.HandoffError, new
         {

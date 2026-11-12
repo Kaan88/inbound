@@ -39,14 +39,34 @@ public sealed class WindowLocalFindingsTests
 
     [Theory]
     [InlineData("on", "browser integration on", false)]
-    [InlineData("on; Chrome registration is broken", "browser integration on; Chrome registration is broken", true)]
-    [InlineData("on; not registered for Chrome", "browser integration on; not registered for Chrome", true)]
-    [InlineData("native host not registered", "browser integration not registered", true)]
+    [InlineData("on; the extension can't reach Inbound in Chrome", "browser integration on; the extension can't reach Inbound in Chrome", true)]
+    [InlineData("native host not registered", "the browser extension can't reach Inbound", true)]
     [InlineData("disabled", "browser integration disabled", false)]
     public void U_WL_9_the_status_bar_says_integration_and_offers_repair_only_for_a_registration(string status, string words, bool repair)
     {
         Assert.Equal(words, ShellWords.BrowserIntegration(status));
         Assert.Equal(repair, ShellWords.IntegrationNeedsRepair(status));
+    }
+
+    [Fact]
+    public void Review_5_E4_an_action_refused_without_a_reason_says_who_and_what_next_not_host()
+    {
+        Assert.Equal("Inbound couldn't do that and didn't say why. Try again; if it keeps happening, Help > Open Diagnostics Folder has the log.", ShellWords.NoReason(null));
+        Assert.Equal("Office PC couldn't do that and didn't say why. Try again.", ShellWords.NoReason("Office PC"));
+        foreach (var file in new[] { "MainWindow.xaml.cs", "DownloadWindow.xaml.cs", "SchedulerWindow.cs", Path.Combine("Servers", "RemoteRules.cs") })
+            Assert.DoesNotMatch("[\"\\s][Tt]he [Hh]ost (rejected|returned no result|could not)", File.ReadAllText(WinUiFile(file)));
+    }
+
+    [Fact]
+    public void Review_5_A2a_the_file_check_says_the_size_and_the_servers_name_only_when_the_box_differs()
+    {
+        Assert.Equal("76.3 MB", AddRules.FileInfoText("76.3 MB", "ubuntu.iso", "ubuntu.iso"));
+        Assert.Equal("76.3 MB", AddRules.FileInfoText("76.3 MB", "ubuntu.iso", "UBUNTU.ISO "));
+        Assert.Equal("76.3 MB", AddRules.FileInfoText("76.3 MB", null, "mine.iso"));
+        Assert.Equal("76.3 MB", AddRules.FileInfoText("76.3 MB", "ubuntu.iso", " "));
+        Assert.Equal("76.3 MB\nThe server names it ubuntu.iso", AddRules.FileInfoText("76.3 MB", "ubuntu.iso", "mine.iso"));
+        Assert.Equal("Check file info", AddRules.CheckButtonText(checkedBefore: false));
+        Assert.Equal("Check again", AddRules.CheckButtonText(checkedBefore: true));
     }
 
     [Fact]
@@ -205,6 +225,11 @@ public sealed class WindowLocalFindingsTests
         Assert.Equal("Import Link Container…", RemoteText.ContainerImportItem("TorBox"));
         Assert.Contains("needs a provider key", RemoteText.ContainerImportItem(null));
         Assert.Contains(".rsdf, .ccf or .dlc", RemoteText.ContainerImportHelp("TorBox"));
+        // Review 5:P1: both the item and its dimmed form say what a link container is, and Hosters what it lists.
+        Assert.StartsWith("A link container is ", RemoteText.ContainerImportHelp("TorBox"), StringComparison.Ordinal);
+        Assert.Contains("needs a provider key", RemoteText.ContainerImportHelp(null));
+        Assert.StartsWith("Hosters are file-hosting sites.", RemoteText.HostersHelp("TorBox"), StringComparison.Ordinal);
+        Assert.Contains("TorBox", RemoteText.HostersHelp("TorBox"));
         Assert.DoesNotContain("JD Container", File.ReadAllText(WinUiFile("MainWindow.Remote.cs")));
     }
 

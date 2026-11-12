@@ -232,4 +232,106 @@ public sealed class PersistenceStoreTests : IDisposable
         Assert.True(File.Exists(fresh), "a write in progress elsewhere is left alone");
         Assert.True(File.Exists(other), "only files of the atomic-write shape are removed");
     }
+
+    /// <summary>Audit 1, N2: the torrent, archive and update folders are swept too.</summary>
+    [Fact]
+    public async Task StaleTemporaryFilesAreSweptInEveryStoreFolder()
+    {
+        var folders = new[]
+        {
+            _paths.TorrentsDirectory, Path.Combine(_root, "archive"), Path.Combine(_root, "archive", "sets"),
+            Path.Combine(_root, "archive", "packages"), Path.Combine(_root, "updates"),
+        };
+        var stale = new List<string>();
+        foreach (var folder in folders)
+        {
+            Directory.CreateDirectory(folder);
+            var file = Path.Combine(folder, $".{Guid.NewGuid():N}.resume.{Guid.NewGuid():N}.tmp");
+            await File.WriteAllTextAsync(file, "x");
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(-10));
+            stale.Add(file);
+        }
+
+        await new JsonJobStore(_paths).InitializeAsync();
+
+        Assert.All(stale, file => Assert.False(File.Exists(file), file));
+    }
+
+    /// <summary>Audit 1, N7: a job from a newer build stays where it is, as its checkpoint and the settings do.</summary>
+    [Fact]
+    public async Task AJobFileFromANewerBuildStaysAndIsNotSetAside()
+    {
+        var store = new JsonJobStore(_paths);
+        var job = NewJob();
+        await store.SaveAsync(job);
+        var path = Directory.GetFiles(_paths.JobsDirectory, "*.json").Single();
+        var node = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        var key = node.Select(pair => pair.Key).Single(name => name.Equals("schemaVersion", StringComparison.OrdinalIgnoreCase));
+        node[key] = DownloadJob.CurrentSchemaVersion + 1;
+        await File.WriteAllTextAsync(path, node.ToJsonString());
+
+        Assert.Empty(await store.LoadAllAsync());
+        Assert.True(File.Exists(path), "the newer job must stay where it is");
+        Assert.Empty(Directory.GetFiles(_paths.CorruptDirectory));
+    }
+
+    /// <summary>Audit 1, N1: a stream track's checkpoint that can't be used throws, as a download checkpoint does.</summary>
+    [Fact]
+    public async Task AMediaCheckpointFromANewerBuildFailsInsteadOfReadingAsNone()
+    {
+        var store = new JsonMediaCheckpointStore(_paths);
+        var id = Guid.NewGuid();
+        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "dash-video", CompletedSegments = 3, CompletedBytes = 300 });
+        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
+        var node = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        var key = node.Select(pair => pair.Key).Single(name => name.Equals("schemaVersion", StringComparison.OrdinalIgnoreCase));
+        node[key] = MediaCheckpoint.CurrentSchemaVersion + 1;
+        await File.WriteAllTextAsync(path, node.ToJsonString());
+
+        var error = await Assert.ThrowsAsync<CheckpointTooNewException>(() => store.LoadAsync(id, "dash-video"));
+        Assert.IsAssignableFrom<CheckpointUnusableException>(error);
+        Assert.True(File.Exists(path));
+    }
+
+    [Theory]
+    [InlineData("{ \"jobId\": ")]
+    [InlineData("not json at all")]
+    [InlineData("null")]
+    public async Task ADamagedMediaCheckpointFailsInsteadOfReadingAsNone(string content)
+    {
+        var store = new JsonMediaCheckpointStore(_paths);
+        var id = Guid.NewGuid();
+        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "hls" });
+        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
+        await File.WriteAllTextAsync(path, content);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<CheckpointDamagedException>(() => store.LoadAsync(id, "hls"));
+        watch.Stop();
+        Assert.True(watch.ElapsedMilliseconds < 500, $"took {watch.ElapsedMilliseconds} ms; a damaged checkpoint was retried");
+        Assert.Equal(content, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task AHeldMediaCheckpointIsReadAgainAndThrowsWhenStillHeld()
+    {
+        var store = new JsonMediaCheckpointStore(_paths);
+        var id = Guid.NewGuid();
+        await store.SaveAsync(new MediaCheckpoint { JobId = id, Track = "hls", CompletedSegments = 2, CompletedBytes = 20 });
+        var path = Directory.GetFiles(_paths.MediaCheckpointsDirectory, "*.json").Single();
+
+        // Held throughout: not none, which would truncate the track.
+        await using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var error = await Assert.ThrowsAnyAsync<IOException>(() => store.LoadAsync(id, "hls"));
+            Assert.IsNotAssignableFrom<CheckpointUnusableException>(error);
+        }
+
+        // Let go during the retries: read.
+        var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var release = Task.Delay(150).ContinueWith(_ => holder.Dispose());
+        var loaded = await store.LoadAsync(id, "hls");
+        await release;
+        Assert.Equal(2, loaded!.CompletedSegments);
+    }
 }

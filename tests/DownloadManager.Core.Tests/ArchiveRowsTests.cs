@@ -102,6 +102,18 @@ public sealed class ArchiveRowsTests
         Assert.False(ArchiveText.Set(Set("failed", "corrupted")).NeedsPassword);
     }
 
+    /// <summary>Review 5:L2: a single .zip whose download failed: the row says Failed, and the column has nothing to add.</summary>
+    [Fact]
+    public void A_one_volume_set_whose_volume_failed_shows_no_extraction_words()
+    {
+        Assert.Equal(string.Empty, ArchiveText.Set(Set("downloading", change: s => { s.Volumes = ["movie.zip"]; s.FailedVolumes = ["movie.zip"]; })).Text);
+        Assert.Equal(".r02 didn't download", ArchiveText.Set(Set("downloading", change: s =>
+        {
+            s.Volumes = ["movie.rar", "movie.r01", "movie.r02"];
+            s.FailedVolumes = ["movie.r02"];
+        })).Text);
+    }
+
     [Fact]
     public void Waiting_names_what_it_waits_for()
     {

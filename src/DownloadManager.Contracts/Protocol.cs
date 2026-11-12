@@ -88,6 +88,11 @@ public static class MessageTypes
     public const string HostPickFolder = "host.pickFolder";
     public const string HostFolderPicked = "host.folderPicked";
     public const string UpdateProgress = "update.progress";
+    /// <summary>
+    /// UI.R37, Host push: the newest version its update check found changed (<see cref="UpdateLatestDto"/>). Sent only
+    /// when a check finds a different one; a client that doesn't know it ignores it.
+    /// </summary>
+    public const string UpdateLatest = "update.latest";
     public const string HostCleanOrphans = "host.cleanOrphans";
     public const string HostCleanOrphansResult = "host.cleanOrphansResult";
     public const string HostActionResult = "host.actionResult";
@@ -193,9 +198,12 @@ public sealed record IpcMessage(
 
 public static class IpcFraming
 {
-    public static async Task WriteAsync(Stream stream, IpcMessage message, CancellationToken cancellationToken = default)
+    public static Task WriteAsync(Stream stream, IpcMessage message, CancellationToken cancellationToken = default)
+        => WriteFrameAsync(stream, JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options), cancellationToken);
+
+    /// <summary>One frame of a message already serialised with <see cref="IpcJson.Options"/>.</summary>
+    public static async Task WriteFrameAsync(Stream stream, byte[] json, CancellationToken cancellationToken = default)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options);
         if (json.Length > Protocol.MaxFrameBytes)
         {
             throw new InvalidDataException($"IPC frame is too large ({json.Length} bytes).");

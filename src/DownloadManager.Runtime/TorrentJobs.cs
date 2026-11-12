@@ -217,14 +217,47 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
         JobRuntime? runtime;
         lock (_sync)
         {
-            if (!_jobs.TryGetValue(jobId, out runtime) || runtime.Job.Torrent is not { } info) return;
+            if (!_jobs.TryGetValue(jobId, out runtime) || runtime.Job.Torrent is not { } info)
+            {
+                // Removed meanwhile: nothing may be renamed for it.
+                if (finalizing) throw new InvalidOperationException("The download is being removed.");
+                return;
+            }
             info.Finalizing = finalizing;
             info.FinalizingRootName = finalizing ? rootName : null;
             runtime.Job.Touch();
         }
 
-        // M16: on disk before the worker renames anything.
-        await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
+        if (!finalizing)
+        {
+            // The worker renamed nothing; a mark left on disk only makes the next start look again.
+            await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        // M16 (review 2 L6): on disk before the worker renames anything, or the worker is not told to rename.
+        try
+        {
+            await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_sync)
+            {
+                if (runtime.Job.Torrent is { } info)
+                {
+                    info.Finalizing = false;
+                    info.FinalizingRootName = null;
+                }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>Tests only: a copy of the job's record as it is in memory (review 2 L6).</summary>
+    internal DownloadJob? JobRecordForTesting(Guid id)
+    {
+        lock (_sync) return _jobs.TryGetValue(id, out var runtime) ? runtime.Job.Clone() : null;
     }
 
     /// <summary>REV.4 for a torrent: every file it wrote is marked as from the internet.</summary>
@@ -258,6 +291,10 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
                 info.Peers = peers;
                 info.Seeds = seeds;
                 runtime.TorrentUploadRate = uploadRate;
+                // T8: the job's upload rate is what it sends now, while it downloads too (the list's Up column and the
+                // upload graph). Seeding sets it itself.
+                if (!info.Seeding) info.UploadRate = uploadRate;
+                _speedHistory.ReportUpload(jobId, uploadRate, DateTimeOffset.UtcNow);
             }
         }
     }
@@ -269,6 +306,19 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
             .Where(suffix => !string.IsNullOrEmpty(suffix))
             .Select(suffix => suffix!)
             .ToList();
+
+    private static bool SizeIs(string path, long size)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists && info.Length == size;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private bool IsTorrentPartLocked(string path)
     {
@@ -303,13 +353,33 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
         var ownNames = includeFinal && info.Finalized;
         var destination = job.DestinationDirectory;
         var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A file that still had its part-name file was never renamed, so a file at its final name is not this download's.
+        var notRenamed = new HashSet<int>();
         foreach (var file in files)
         {
             var final = TorrentLayout.DiskPathOf(destination, file);
             if (!IsInside(destination, final)) continue;
+            if (File.Exists(final + info.PartSuffix)) notRenamed.Add(file.Index);
             DeleteFileQuietly(final + info.PartSuffix);
             if (ownNames && file.Wanted) DeleteFileQuietly(final);
             if (Path.GetDirectoryName(final) is { } folder) folders.Add(folder);
+        }
+
+        // Review 2 L7: a finalize the Host stopped in the middle gave some files their own names already, under the
+        // top-level name it had picked; those are this download's too.
+        if (includeFinal && !info.Finalized && info.Finalizing)
+        {
+            var renamed = info.FinalizingRootName is { Length: > 0 } root ? TorrentLayout.WithTopName(files, root) : files;
+            foreach (var file in renamed)
+            {
+                var final = TorrentLayout.DiskPathOf(destination, file);
+                if (!file.Wanted || notRenamed.Contains(file.Index) || !IsInside(destination, final)) continue;
+                // The mark can outlive a finalize that renamed nothing (the Host stopped first, or the name was taken):
+                // only a file of this file's own size can be the one it renamed.
+                if (!SizeIs(final, file.Size)) continue;
+                DeleteFileQuietly(final);
+                if (Path.GetDirectoryName(final) is { } folder) folders.Add(folder);
+            }
         }
 
         // libtorrent's store for pieces that overlap files left out (it lets go of it a moment after the torrent left the worker).
@@ -389,12 +459,57 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
             changed = true;
         }
 
-        if (job.State == DownloadState.Completed && !File.Exists(job.FinalFilePath) && !Directory.Exists(job.FinalFilePath))
+        // Audit 2 M11: paused only because the Host exited while it ran; it goes on as the single-file rule does.
+        if (job.PausedByExit)
         {
-            job.State = DownloadState.Failed;
-            job.Failure = new JobFailure(FailureKind.DestinationUnavailable,
-                "The completed files are missing from their destination.", false, false, DateTimeOffset.UtcNow);
+            if (job.State == DownloadState.Paused && !job.PausedByUser &&
+                job.AutoResumeAfterRestart && _settings.AutoResumeUnfinishedOnStartup)
+            {
+                job.State = DownloadState.Queued;
+                job.StartMode = StartMode.StartNow;
+            }
+            job.PausedByExit = false;
             changed = true;
+        }
+
+        // An older build turned a finished torrent whose files were missing into this failure (review 2 M3): it is
+        // completed again, and the check below gives it the note instead.
+        if (job.State == DownloadState.Failed && job.CompletedAt is not null &&
+            job.Failure is { Kind: FailureKind.DestinationUnavailable, Message: "The completed files are missing from their destination." })
+        {
+            job.State = DownloadState.Completed;
+            job.Failure = null;
+            changed = true;
+        }
+
+        // Audit 2 H2 for a torrent: a finished one whose files were moved or deleted stays completed with a note, so
+        // Resume All or a queue start doesn't download it again. A folder that can't be reached yet says nothing, and
+        // its seeding is left as it was.
+        if (job.State == DownloadState.Completed && !job.FileRemovedAfterExtraction)
+        {
+            var present = File.Exists(job.FinalFilePath) || Directory.Exists(job.FinalFilePath);
+            if (!present && FolderReachable(job.FinalFilePath))
+            {
+                if (!job.FileMissing)
+                {
+                    job.FileMissing = true;
+                    _log?.Invoke($"Torrent job {job.Id}: its completed files are not in their folder; it stays completed.");
+                    changed = true;
+                }
+
+                // Nothing there to seed from.
+                if (job.Torrent is { Seeding: true } absent)
+                {
+                    absent.Seeding = false;
+                    absent.SeedingSince = null;
+                    changed = true;
+                }
+            }
+            else if (present && job.FileMissing)
+            {
+                job.FileMissing = false;
+                changed = true;
+            }
         }
 
         // Only a completed torrent seeds (T2).

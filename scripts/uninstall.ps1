@@ -131,16 +131,23 @@ if ($ruleIsOurs) {
     }
 }
 
+# The sign-in entry and the Start-menu shortcut only when they start this install's Host: uninstalling a copy elsewhere
+# (a test folder, an older location) must not take them from the installed app (review 2026-11-12).
+$hostExe = Join-Path $appDir "DownloadManager.Host.exe"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-if (Test-Path $runKey) {
-    Remove-ItemProperty -Path $runKey -Name "DownloadManagerHost" -ErrorAction SilentlyContinue
+$runValue = Get-ItemProperty -LiteralPath $runKey -Name "DownloadManagerHost" -ErrorAction SilentlyContinue
+if ($runValue -and ([string]$runValue.DownloadManagerHost).Trim().StartsWith('"' + $hostExe + '"', [StringComparison]::OrdinalIgnoreCase)) {
+    Remove-ItemProperty -LiteralPath $runKey -Name "DownloadManagerHost"
 }
 
-# Current name plus the shortcut created by versions named plain "Download Manager".
 foreach ($name in @("Inbound Download Manager.lnk")) {
     $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$name"
-    if (Test-Path $shortcut) {
-        Remove-Item $shortcut -Force
+    if (-not (Test-Path -LiteralPath $shortcut)) { continue }
+    $target = ""
+    try { $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath }
+    catch { $target = "" }
+    if ($target -ieq $hostExe) {
+        Remove-Item -LiteralPath $shortcut -Force
     }
 }
 

@@ -117,6 +117,22 @@ public sealed partial class HostCommandDispatcherTests
         Assert.False(web.Dispatcher.OffersRole("admin"));
     }
 
+    // UI.R37: the newest version the update check found goes to every session, the web one too.
+    [Fact]
+    public async Task TheLatestVersionGoesToWebAndPipeSessions()
+    {
+        var web = await WebAsync();
+
+        web.Dispatcher.BroadcastLatestVersion("0.7.1");
+
+        foreach (var session in new[] { web.Session, web.Pipe })
+        {
+            await session.UntilAsync(frames => frames.Any(f => f.Type == MessageTypes.UpdateLatest));
+            var frame = session.Frames.Single(f => f.Type == MessageTypes.UpdateLatest);
+            Assert.Equal("0.7.1", frame.GetPayload<UpdateLatestDto>().LatestVersion);
+        }
+    }
+
     [Fact]
     public async Task ClosingTheWebSessionsEndsThemAndLeavesThePipeSessions()
     {
@@ -274,6 +290,15 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Equal(TorrentRoutes.Provider, web.Service.GetSettings().TorrentRoute);
         Assert.False(web.Service.GetSettings().TorrentChooseFiles);
 
+        // T14: torrent category folders are the browser's to turn off, like folders by category; a page from before
+        // them sends neither and keeps the Host's.
+        var torrentFolders = await Save(web.Session, s => s.UseTorrentCategoryFolders = false);
+        Assert.True(torrentFolders.Ok, torrentFolders.Error);
+        Assert.False(web.Service.GetSettings().UseTorrentCategoryFolders);
+        var olderPage = await Save(web.Session, s => { s.UseTorrentCategoryFolders = null; s.TorrentCategoryFoldersRoot = null; });
+        Assert.True(olderPage.Ok, olderPage.Error);
+        Assert.False(web.Service.GetSettings().UseTorrentCategoryFolders);
+
         // T2 seeding is the browser's to change too, and the Host's checks still hold for it.
         var seeding = await Save(web.Session, s => { s.TorrentSeedAfterDownload = false; s.TorrentSeedRatio = 2.5; s.TorrentSeedHours = 0; s.TorrentUploadLimit = 512_000; });
         Assert.True(seeding.Ok, seeding.Error);
@@ -288,6 +313,7 @@ public sealed partial class HostCommandDispatcherTests
             ("defaultDownloadDirectory", s => s.DefaultDownloadDirectory = Outside),
             ("favoriteFolders", s => s.FavoriteFolders = [new FavoriteFolderDto { Name = "x", Path = Outside }]),
             ("categoryFolders", s => s.CategoryFolders["video"] = Outside),
+            ("torrentCategoryFoldersRoot", s => s.TorrentCategoryFoldersRoot = Outside),
             ("proxy", s => s.Proxy = new ProxyDto { Mode = "http", Address = "203.0.113.1:8080" }),
             ("allowLocalNetwork", s => s.AllowLocalNetwork = !s.AllowLocalNetwork),
             ("postDownloadCommand", s => s.PostDownloadCommand = "cmd.exe /c echo"),

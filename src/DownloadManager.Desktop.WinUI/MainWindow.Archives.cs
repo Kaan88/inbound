@@ -632,7 +632,7 @@ public sealed partial class MainWindow
         {
             try
             {
-                using var _ = Process.Start(ShellActions.OpenFolder(folder));
+                using var _ = ShellActions.Start(ShellActions.OpenFolder(folder));
             }
             catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
             {

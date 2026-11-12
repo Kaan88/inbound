@@ -453,11 +453,18 @@ catch {
         }
     }
     foreach ($installedScript in @($rootScriptBackups.Keys)) {
-        try { [IO.File]::WriteAllBytes($installedScript, $rootScriptBackups[$installedScript]) }
+        # Through a .tmp beside it, as the forward path writes them, so a kill here leaves a whole file.
+        try {
+            [IO.File]::WriteAllBytes("$installedScript.tmp", $rootScriptBackups[$installedScript])
+            Move-Item -LiteralPath "$installedScript.tmp" -Destination $installedScript -Force
+        }
         catch { $message = "$message; script rollback error: $($_.Exception.Message)" }
     }
     if ($null -ne $metadataBackup) {
-        try { [System.IO.File]::WriteAllText($metadataPath, $metadataBackup, (New-Object System.Text.UTF8Encoding($false))) }
+        try {
+            [System.IO.File]::WriteAllText("$metadataPath.tmp", $metadataBackup, (New-Object System.Text.UTF8Encoding($false)))
+            Move-Item -LiteralPath "$metadataPath.tmp" -Destination $metadataPath -Force
+        }
         catch { $message = "$message; metadata rollback error: $($_.Exception.Message)" }
     }
     try { Restore-UninstallEntry }

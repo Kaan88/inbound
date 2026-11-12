@@ -4,7 +4,7 @@
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
   import {
-    basicAuthorization, categoryChoices, fileInfoProblem, conflictOptions, customCategories, destinationFor, findExisting, metadataText, nameFromUrl, recentAddresses,
+    basicAuthorization, categoryChoices, checkButtonText, fileInfoProblem, conflictOptions, customCategories, destinationFor, findExisting, metadataText, metadataTitle, nameFromUrl, recentAddresses,
     serverNameToShow, validUserName, type ConflictPolicy, type FileInfo,
   } from '../lib/addflow';
   import { hideAddresses, isMagnet } from '../lib/addview';
@@ -15,7 +15,7 @@
   import { store } from '../lib/store.svelte';
   import type { ClassifyResult, Job } from '../lib/types';
 
-  // Add URL, in the desktop's two steps: "Enter new address to download", then "Download file info" with the
+  // Add URL, in the desktop's two steps: "Enter new address to download", then "Add download" with the
   // checks, the name, category, folder, description, sign-in and conflict choices. An address a provider handles
   // goes on to the multi-line dialog with that one line.
   // ontorrent: set while the server downloads torrents itself (T1); a magnet then goes to the torrent dialog.
@@ -41,6 +41,8 @@
   // File information
   let info = $state('File information has not been checked.');
   let infoBusy = $state(false);
+  let infoTitle = $state<string | undefined>(undefined);
+  let checkedOnce = $state(false);
   let knownSize = $state<number | null>(null);
   let generation = 0;
   let name = $state('');
@@ -170,16 +172,19 @@
   async function previewMetadata() {
     const mine = ++generation;
     infoBusy = true;
+    checkedOnce = true;
+    infoTitle = undefined;
     info = 'Checking the server… You can start without waiting.';
     try {
       const headers = useAuth ? authHeaders() : {};
-      if (headers === null) throw new Error('Enter a user name without colons or line breaks, then check file info again.');
+      if (headers === null) throw new Error('Enter a user name without colons or line breaks, then check again.');
       const found = await store.ask<FileInfo>('file.metadata', { url, headers });
       if (mine !== generation) return;
       if (found.ok === false) throw new Error(found.error ?? 'File information is unavailable.');
       knownSize = found.totalBytes ?? null;
       const server = serverNameToShow(found.fileName, url, result?.kind === 'providerDirectLink');
-      info = metadataText(found, server);
+      info = metadataText(found, server, nameEdited ? name : server);
+      infoTitle = metadataTitle(found);
       if (!nameEdited && server) { name = server; useCategoryFolder(); }
     } catch (error) {
       if (mine === generation) info = `${fileInfoProblem(error instanceof Error ? error.message : String(error))} You can still start the download.`;
@@ -192,7 +197,7 @@
     generation++;
     infoBusy = false;
     authError = '';
-    info = 'Credentials changed. Check file info again to refresh the preview.';
+    info = 'Credentials changed. Check again to refresh the file info.';
   }
 
   async function createCategory() {
@@ -252,7 +257,7 @@
         queueId,
         headers: Object.keys(headers).length ? headers : undefined,
       });
-      if (!reply.accepted) throw new Error(reply.error ?? 'The server rejected the request.');
+      if (!reply.accepted) throw new Error(reply.error ?? "The server didn't add it and didn't say why. Try again.");
       store.toast(reply.duplicate ? 'That download was already queued.' : 'Added 1 download.');
       password = '';
       onclose();
@@ -282,7 +287,7 @@
   }
 </script>
 
-<Dialog title={step === 'address' ? 'Enter new address to download' : step === 'duplicate' ? 'Download already exists' : 'Download file info'} {onclose}>
+<Dialog title={step === 'address' ? 'Enter new address to download' : step === 'duplicate' ? 'Download already exists' : 'Add download'} {onclose}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div onkeydown={keydown}>
   {#if step === 'address'}
@@ -309,8 +314,8 @@
         <div class="field truncate bg-chrome font-mono text-[12px]" title={shownAddress}>{shownAddress}</div>
       </div>
       {#if result?.note}<p class="text-[12.5px] text-muted">{hideAddresses(result.note)}</p>{/if}
-      <p class="whitespace-pre-line text-[12.5px]" role="status" aria-live="polite">{info}</p>
-      <button class="btn" type="button" disabled={infoBusy} onclick={previewMetadata}>{infoBusy ? 'Checking…' : 'Check file info'}</button>
+      <p class="whitespace-pre-line text-[12.5px]" role="status" aria-live="polite" title={infoTitle}>{info}</p>
+      <button class="btn" type="button" disabled={infoBusy} onclick={previewMetadata}>{infoBusy ? 'Checking…' : checkButtonText(checkedOnce)}</button>
 
       <div>
         <label class="label" for="file-name">File name (optional)</label>
@@ -324,7 +329,7 @@
       </div>
       <div>
         <FolderField id="destination" label="Destination folder" bind:value={destination} showSpace neededBytes={knownSize} />
-        <label class="mt-1 flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={remember} /> {categoryId ? 'Remember this folder for the selected category' : 'Remember this folder for manual downloads'}</label>
+        <label class="mt-1 flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={remember} /> {categoryId ? 'Use this folder for this category next time too' : 'Use this folder next time too'}</label>
       </div>
 
       <details class="card px-3 py-2">

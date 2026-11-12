@@ -787,8 +787,15 @@ internal static partial class RemoteText
     public static string ContainerImportItem(string? provider)
         => provider is null ? "Import Link Container… (needs a provider key in Options)" : "Import Link Container…";
 
-    public static string ContainerImportHelp(string provider)
-        => $"Opens an .rsdf, .ccf or .dlc file, such as JDownloader saves, and sends its links to {provider} like pasted ones";
+    /// <summary>Review 5:P1: what a link container is, for the menu item's tooltip; with no provider key, what it needs.</summary>
+    public static string ContainerImportHelp(string? provider)
+        => provider is null
+            ? "A link container is an .rsdf, .ccf or .dlc file holding a list of links, such as JDownloader saves. Its links go to a provider, so it needs a provider key in Options."
+            : $"A link container is an .rsdf, .ccf or .dlc file holding a list of links, such as JDownloader saves. This opens one and sends its links to {provider} like pasted ones.";
+
+    /// <summary>Review 5:P1: what the provider's Hosters window lists, for the menu item's tooltip.</summary>
+    public static string HostersHelp(string provider)
+        => $"Hosters are file-hosting sites. This lists the ones whose links {provider} can download for you, and whether each is up.";
 
     /// <summary>U-WL-25: Save key checks the key straight away; these say both outcomes in one line.</summary>
     public static string KeySavedAndChecked(string validated) => $"Key saved. {validated}";

@@ -227,10 +227,10 @@
                                 AutomationProperties.AcceleratorKey="Enter">
                             <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8A7;" FontSize="14" /><TextBlock Text="Open" /></StackPanel>
                         </Button>
-                        <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7" AutomationProperties.Name="Show in folder">
-                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE838;" FontSize="14" /><TextBlock Text="Show in folder" /></StackPanel>
+                        <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7" AutomationProperties.Name="Open Folder">
+                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE838;" FontSize="14" /><TextBlock Text="Open Folder" /></StackPanel>
                         </Button>
-                        <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Padding="16,7" />
+                        <Button x:Name="OpenWithButton" Content="Open With…" Click="OpenWith_Click" Padding="16,7" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
@@ -279,10 +279,10 @@
                 </StackPanel>
             </Grid>
 
-            <!-- T1 Files: a torrent's files, ticked for the ones it downloads. Virtualized: a torrent can hold 100,000 files. -->
+            <!-- T1 Files: a torrent's files, ticked for the ones it downloads. Virtualized: a torrent can hold 100,000 files.
+                 T12: the header sorts and resizes as the download list's does (ColumnHeaderRow, built in DetailsTable). -->
             <Grid x:Name="FilesPage" RowSpacing="8" Visibility="Collapsed">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -301,55 +301,57 @@
                         </StackPanel>
                     </Button>
                 </Grid>
-                <Grid Grid.Row="1" ColumnSpacing="8" Padding="9,0,13,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="28" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="84" />
-                        <ColumnDefinition Width="64" />
-                        <ColumnDefinition x:Name="PriorityColumn" Width="0" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="1" Text="Name" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="3" Text="Progress" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="4" Text="Priority" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                </Grid>
-                <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="4">
-                    <!-- No selection in the list itself: the boxes are the choice. Arrows move and Space ticks. -->
-                    <ListView x:Name="FilesList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
-                              PreviewKeyDown="FilesList_PreviewKeyDown" ContextRequested="FilesList_ContextRequested"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                              AutomationProperties.Name="Files in this torrent">
-                        <ListView.ItemContainerTransitions>
-                            <TransitionCollection />
-                        </ListView.ItemContainerTransitions>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="28" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="84" />
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <CheckBox MinWidth="0" MinHeight="0" Width="22" Height="22" Padding="0" VerticalAlignment="Center"
-                                              IsChecked="{Binding Checked, Mode=TwoWay}" IsEnabled="{Binding CanCheck}" Click="FileBox_Click"
-                                              AutomationProperties.Name="{Binding AccessibleName}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" ToolTipService.ToolTip="{Binding Name}" />
-                                    <TextBlock Grid.Column="2" Text="{Binding Size}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="3" Text="{Binding Progress}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="4" Text="{Binding Priority}" Visibility="{Binding PriorityVisibility}" Width="64"
-                                               FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                <Border x:Name="FilesCard" Grid.Row="1" Style="{StaticResource CardStyle}" Padding="4">
+                    <!-- T12: wider columns than the card scroll sideways, header and rows together (DetailsTable sets the grid's widths). -->
+                    <ScrollViewer x:Name="FilesSideways" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <Grid x:Name="FilesGrid">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="27" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+                            <Grid x:Name="FilesHeader" Padding="4,0,8,0" ColumnSpacing="0" />
+                        </Border>
+                        <!-- No selection in the list itself: the boxes are the choice. Arrows move and Space ticks. -->
+                        <ListView x:Name="FilesList" Grid.Row="1" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                                  PreviewKeyDown="FilesList_PreviewKeyDown" ContextRequested="FilesList_ContextRequested"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  AutomationProperties.Name="Files in this torrent">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- Widths come from the header (ColumnHeaderRow); the gaps are the cells' margins. -->
+                                    <Grid MinHeight="27" ColumnSpacing="0" Padding="4,0,8,0" Background="Transparent">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="32" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="88" />
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="72" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox MinWidth="0" MinHeight="0" Width="22" Height="22" Padding="0" VerticalAlignment="Center"
+                                                  IsChecked="{Binding Checked, Mode=TwoWay}" IsEnabled="{Binding CanCheck}" Click="FileBox_Click"
+                                                  AutomationProperties.Name="{Binding AccessibleName}" />
+                                        <TextBlock Grid.Column="1" Margin="4,0,8,0" Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" ToolTipService.ToolTip="{Binding Name}" />
+                                        <TextBlock Grid.Column="2" Margin="0,0,12,0" Text="{Binding Size}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="3" Margin="0,0,12,0" Text="{Binding Progress}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="4" Margin="4,0,8,0" Text="{Binding Priority}" Visibility="{Binding PriorityVisibility}"
+                                                   FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    </ScrollViewer>
                 </Border>
-                <StackPanel Grid.Row="3" Spacing="4">
+                <StackPanel Grid.Row="2" Spacing="4">
                     <TextBlock x:Name="FilesNote" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
                                Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                     <TextBlock x:Name="FilesPriorityHint" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
@@ -358,121 +360,115 @@
                 </StackPanel>
             </Grid>
 
-            <!-- T2 Peers: one row per connected peer. A peer is named by its place; its address is on hover. -->
+            <!-- T2 Peers: one row per connected peer. A peer is named by its place; its address is on hover. T12: sortable, resizable. -->
             <Grid x:Name="PeersPage" RowSpacing="8" Visibility="Collapsed">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid ColumnSpacing="8" Padding="9,0,13,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="120" />
-                        <ColumnDefinition Width="64" />
-                        <ColumnDefinition Width="44" />
-                        <ColumnDefinition Width="76" />
-                        <ColumnDefinition Width="76" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Peer" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="1" Text="Client" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="2" Text="Flags" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="3" Text="Has" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="4" Text="Down" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="5" Text="Up" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                </Grid>
-                <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="4">
-                    <ListView x:Name="PeersList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Peers of this torrent">
-                        <ListView.ItemContainerTransitions>
-                            <TransitionCollection />
-                        </ListView.ItemContainerTransitions>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent"
-                                      ToolTipService.ToolTip="{Binding Address}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="120" />
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="44" />
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="76" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Client}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
-                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                    <TextBlock Grid.Column="2" Text="{Binding Flags}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
-                                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                    <TextBlock Grid.Column="3" Text="{Binding Has}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="4" Text="{Binding Down}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="5" Text="{Binding Up}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                <Border x:Name="PeersCard" Style="{StaticResource CardStyle}" Padding="4">
+                    <!-- T12: wider columns than the card scroll sideways, header and rows together (DetailsTable sets the grid's widths). -->
+                    <ScrollViewer x:Name="PeersSideways" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <Grid x:Name="PeersGrid">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="27" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+                            <Grid x:Name="PeersHeader" Padding="4,0,8,0" ColumnSpacing="0" />
+                        </Border>
+                        <ListView x:Name="PeersList" Grid.Row="1" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Peers of this torrent">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="27" ColumnSpacing="0" Padding="4,0,8,0" Background="Transparent"
+                                          ToolTipService.ToolTip="{Binding Address}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="128" />
+                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="56" />
+                                            <ColumnDefinition Width="84" />
+                                            <ColumnDefinition Width="84" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Margin="4,0,8,0" Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Margin="4,0,8,0" Text="{Binding Client}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                        <TextBlock Grid.Column="2" Margin="4,0,8,0" Text="{Binding Flags}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                        <TextBlock Grid.Column="3" Margin="0,0,12,0" Text="{Binding Has}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="4" Margin="0,0,12,0" Text="{Binding Down}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="5" Margin="0,0,12,0" Text="{Binding Up}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    </ScrollViewer>
                 </Border>
-                <TextBlock x:Name="PeersNote" Grid.Row="2" FontSize="12" TextWrapping="Wrap"
+                <TextBlock x:Name="PeersNote" Grid.Row="1" FontSize="12" TextWrapping="Wrap"
                            Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            Text="Peers see the public IP address of the computer that downloads, and it sees theirs; that is how BitTorrent works." />
             </Grid>
 
-            <!-- T2 Trackers: what each tracker said last. What the tracker said in words is on hover. -->
+            <!-- T2 Trackers: what each tracker said last. What the tracker said in words is on hover. T12: sortable, resizable. -->
             <Grid x:Name="TrackersPage" RowSpacing="8" Visibility="Collapsed">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid ColumnSpacing="8" Padding="9,0,13,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="100" />
-                        <ColumnDefinition Width="56" />
-                        <ColumnDefinition Width="56" />
-                        <ColumnDefinition x:Name="NextAnnounceColumn" Width="0" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Tracker" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="1" Text="Status" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" />
-                    <TextBlock Grid.Column="2" Text="Seeds" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="3" Text="Peers" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right" />
-                    <TextBlock Grid.Column="4" Text="Next announce" Style="{StaticResource KeyStyle}" FontWeight="SemiBold" TextAlignment="Right"
-                               TextTrimming="CharacterEllipsis" />
-                </Grid>
-                <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="4">
-                    <ListView x:Name="TrackersList" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Trackers of this torrent">
-                        <ListView.ItemContainerTransitions>
-                            <TransitionCollection />
-                        </ListView.ItemContainerTransitions>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid MinHeight="27" ColumnSpacing="8" Padding="4,0,8,0" Background="Transparent"
-                                      ToolTipService.ToolTip="{Binding Message}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="100" />
-                                        <ColumnDefinition Width="56" />
-                                        <ColumnDefinition Width="56" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Tracker}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="{Binding Seeds}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="3" Text="{Binding Peers}" FontSize="12" TextAlignment="Right" VerticalAlignment="Center"
-                                               Typography.NumeralAlignment="Tabular" />
-                                    <TextBlock Grid.Column="4" Text="{Binding NextAnnounce}" Visibility="{Binding NextAnnounceVisibility}" Width="96"
-                                               FontSize="12" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                <Border x:Name="TrackersCard" Style="{StaticResource CardStyle}" Padding="4">
+                    <!-- T12: wider columns than the card scroll sideways, header and rows together (DetailsTable sets the grid's widths). -->
+                    <ScrollViewer x:Name="TrackersSideways" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <Grid x:Name="TrackersGrid">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="27" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+                            <Grid x:Name="TrackersHeader" Padding="4,0,8,0" ColumnSpacing="0" />
+                        </Border>
+                        <ListView x:Name="TrackersList" Grid.Row="1" SelectionMode="None" ItemContainerStyle="{StaticResource InboundListRowStyle}"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Trackers of this torrent">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="27" ColumnSpacing="0" Padding="4,0,8,0" Background="Transparent"
+                                          ToolTipService.ToolTip="{Binding Message}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="108" />
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="112" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Margin="4,0,8,0" Text="{Binding Tracker}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Margin="4,0,8,0" Text="{Binding Status}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Margin="0,0,12,0" Text="{Binding Seeds}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="3" Margin="0,0,12,0" Text="{Binding Peers}" FontSize="12" TextAlignment="Right" HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                        <TextBlock Grid.Column="4" Margin="0,0,12,0" Text="{Binding NextAnnounce}" Visibility="{Binding NextAnnounceVisibility}"
+                                                   FontSize="12" TextAlignment="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Typography.NumeralAlignment="Tabular" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    </ScrollViewer>
                 </Border>
-                <TextBlock x:Name="TrackersNote" Grid.Row="2" FontSize="12" TextWrapping="Wrap"
+                <TextBlock x:Name="TrackersNote" Grid.Row="1" FontSize="12" TextWrapping="Wrap"
                            Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            Text="A tracker's address is shown without what follows its name, where a private tracker keeps your passkey." />
             </Grid>
@@ -624,10 +620,12 @@
                    Foreground="{ThemeResource InboundSecondaryTextBrush}" />
 
         <!-- A torrent's extra buttons (seeding, recheck, announce) leave the box no room beside them: it goes above them then. -->
+        <!-- T13: the buttons are in a star column so their row can wrap onto a line above when the window is narrower than
+             they are (ActionRowPanel); the box keeps the width it needs. -->
         <Grid x:Name="Footer" Grid.Row="4" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -635,7 +633,7 @@
             </Grid.RowDefinitions>
             <CheckBox x:Name="DontShowAgain" Content="Don't show this window again" Visibility="Collapsed"
                       Click="DontShowAgain_Click" VerticalAlignment="Center" />
-            <StackPanel x:Name="ActionRow" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <local:ActionRowPanel x:Name="ActionRow" Grid.Column="1" Spacing="8" VerticalAlignment="Center">
                 <!-- U-WL-17: Delete first and set apart, so it is never next to the default action. -->
                 <Button x:Name="DeleteButton" Click="Delete_Click" Margin="0,0,16,0" AutomationProperties.Name="Delete" ToolTipService.ToolTip="Remove this download and delete its file">
                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -686,7 +684,7 @@
                     </StackPanel>
                 </Button>
                 <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="92" />
-            </StackPanel>
+            </local:ActionRowPanel>
         </Grid>
     </Grid>
 </Window>

@@ -104,6 +104,8 @@ internal static class Program
     {
         if (NativeBridgePolicy.AllowFromExtension(message))
         {
+            // UI.B24: started by the browser in front, this process may let the Host's window come to the front.
+            if (NativeBridgePolicy.ShowsWindow(message.Type)) ShellActions.AllowShellForeground();
             await host.SendAsync(message).ConfigureAwait(false);
             log($"Forwarded '{message.Type}' {message.Id}.");
             return;
@@ -116,10 +118,13 @@ internal static class Program
     }
 
     /// <summary>Both pumps can answer the extension, and two frames must not interleave on stdout.</summary>
-    private static async Task WriteToExtensionAsync(IpcMessage message)
+    private static Task WriteToExtensionAsync(IpcMessage message)
+        => WriteFrameToExtensionAsync(JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options));
+
+    private static async Task WriteFrameToExtensionAsync(byte[] json)
     {
         await StdoutGate.WaitAsync().ConfigureAwait(false);
-        try { await IpcFraming.WriteAsync(_stdout, message).ConfigureAwait(false); }
+        try { await IpcFraming.WriteFrameAsync(_stdout, json).ConfigureAwait(false); }
         finally { StdoutGate.Release(); }
     }
 
@@ -138,10 +143,11 @@ internal static class Program
                 if (NativeBridgePolicy.ToExtension(message) is { } allowed)
                 {
                     // Audit 3 M3: a frame over the browser's 1 MB limit would close the port under every request on it.
-                    var fitted = NativeBridgePolicy.FitForBrowser(allowed, out var size);
-                    if (!ReferenceEquals(fitted, allowed))
+                    // N5: serialised once, to measure and to send.
+                    var frame = NativeBridgePolicy.FrameForBrowser(allowed, out var size);
+                    if (size > NativeBridgePolicy.BrowserMaxMessageBytes)
                         log($"Refused to pass '{allowed.Type}' to the browser: {size} bytes is over its 1 MB limit.");
-                    if (fitted is not null) await WriteToExtensionAsync(fitted).ConfigureAwait(false);
+                    if (frame is not null) await WriteFrameToExtensionAsync(frame).ConfigureAwait(false);
                 }
             }
         }

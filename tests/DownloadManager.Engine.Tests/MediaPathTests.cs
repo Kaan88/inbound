@@ -300,6 +300,185 @@ public sealed class MediaPathTests : IDisposable
         Assert.False(File.Exists(job.PartFilePath + ".audio"));
     }
 
+    /// <summary>Audit 1, N1: a kept track whose checkpoint can't be used is left as it is, not recreated empty.</summary>
+    [Theory]
+    [InlineData("not json at all", false)]
+    [InlineData("{ \"schemaVersion\": 99, \"jobId\": \"JOB\", \"track\": \"dash-video\" }", false)]
+    [InlineData(null, true)]
+    public async Task UnusableTrackCheckpointFailsTheRunAndKeepsTheTrack(string? content, bool held)
+    {
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        var checkpoints = new JsonMediaCheckpointStore(paths);
+        using var engine = new HttpDownloadEngine(FastRetries(), muxer: new FailOnceMuxer(), mediaCheckpoints: checkpoints);
+        var job = Job($"{_server.BaseAddress}/media/dash/av.mpd", "film.mp4");
+        var first = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        Assert.Equal(FailureKind.MuxingFailed, first.Failure!.Kind);
+        var video = await File.ReadAllBytesAsync(job.PartFilePath + ".video");
+        var checkpoint = Directory.GetFiles(paths.MediaCheckpointsDirectory, "*dashvideo.json").Single();
+        if (content is not null) await File.WriteAllTextAsync(checkpoint, content.Replace("JOB", job.Id.ToString()));
+
+        DownloadResult second;
+        // Held for longer than the store's retries (100 + 200 + 300 ms).
+        await using (held ? new FileStream(checkpoint, FileMode.Open, FileAccess.Read, FileShare.None) : null)
+        {
+            second = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        }
+
+        Assert.False(second.Success);
+        Assert.Equal(DownloadState.Failed, second.FinalState);
+        Assert.True(second.Failure!.IsResumable);
+        Assert.Equal(held, second.Failure.IsRetryable);
+        Assert.Equal(video, await File.ReadAllBytesAsync(job.PartFilePath + ".video"));
+        Assert.True(File.Exists(checkpoint));
+        Assert.Equal(4, new[] { "v1", "v2", "a1", "a2" }.Sum(_server.MediaRequests));
+    }
+
+    /// <summary>Audit 1, N5: a track's checkpoint is saved on the HTTP path's interval and when the loop ends, not per fragment.</summary>
+    [Fact]
+    public async Task TrackCheckpointIsSavedOnTheIntervalNotPerFragment()
+    {
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        var checkpoints = new CountingMediaCheckpoints(new JsonMediaCheckpointStore(paths));
+        using var engine = new HttpDownloadEngine(FastRetries() with { CheckpointInterval = TimeSpan.FromHours(1) }, mediaCheckpoints: checkpoints);
+        var job = Job($"{_server.BaseAddress}/media/hls/playlist.m3u8?n=8&size=1000");
+
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(1, checkpoints.Saves);
+        Assert.Equal(Expected(8, 1000), await File.ReadAllBytesAsync(result.FinalFilePath!));
+    }
+
+    /// <summary>Audit 1, N5: fragments finished since the last save are kept when a later one fails.</summary>
+    [Fact]
+    public async Task FinishedFragmentsAreKeptWhenALaterOneFails()
+    {
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        var checkpoints = new JsonMediaCheckpointStore(paths);
+        var options = FastRetries(maxAttempts: 1) with { CheckpointInterval = TimeSpan.FromHours(1) };
+        var job = Job($"{_server.BaseAddress}/media/hls/playlist.m3u8?n=4&size=1000&cut=2&cutAt=500");
+        using (var engine = new HttpDownloadEngine(options, mediaCheckpoints: checkpoints))
+        {
+            var failed = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+            Assert.False(failed.Success);
+        }
+
+        var saved = await checkpoints.LoadAsync(job.Id, "hls");
+        Assert.NotNull(saved);
+        Assert.Equal(2, saved.CompletedSegments);
+        Assert.Equal(2000, saved.CompletedBytes);
+
+        using (var engine = new HttpDownloadEngine(options, mediaCheckpoints: checkpoints))
+        {
+            var resumed = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+            Assert.True(resumed.Success, resumed.Failure?.Message);
+            Assert.Equal(Expected(4, 1000), await File.ReadAllBytesAsync(resumed.FinalFilePath!));
+        }
+
+        Assert.Equal(1, _server.MediaRequests("seg0"));
+        Assert.Equal(1, _server.MediaRequests("seg1"));
+    }
+
+    /// <summary>
+    /// A stop that arrives once the last audio fragment's body has been read must end the run Cancelled, not go on
+    /// to mux with a cancelled token (FFmpeg is then killed and the run ended as a failed mux).
+    /// </summary>
+    [Fact]
+    public async Task StopAfterTheLastAudioFragmentIsACancelNotAFailedMux()
+    {
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        using var stop = new CancellationTokenSource();
+        var muxer = new CancelAwareMuxer();
+        using var handler = new CancelAfterBodyHandler("/a2.", stop) { InnerHandler = new SocketsHttpHandler() };
+        using var engine = new HttpDownloadEngine(
+            FastRetries(), handler, muxer: muxer, mediaCheckpoints: new JsonMediaCheckpointStore(paths));
+        var job = Job($"{_server.BaseAddress}/media/dash/av.mpd", "film.mp4");
+
+        var result = await engine.ExecuteAsync(job, null, null, stop.Token);
+
+        Assert.True(handler.Fired, "The stop was not raised after the last audio fragment.");
+        Assert.False(result.Success);
+        Assert.Equal(DownloadState.Cancelled, result.FinalState);
+        Assert.Equal(FailureKind.Cancelled, result.Failure!.Kind);
+        Assert.Equal(0, muxer.Calls);
+        Assert.True(File.Exists(job.PartFilePath + ".video"));
+        Assert.True(File.Exists(job.PartFilePath + ".audio"));
+    }
+
+    /// <summary>Like FfmpegMediaMuxer: a cancelled token ends the mux as a failure.</summary>
+    private sealed class CancelAwareMuxer : IMediaMuxer
+    {
+        private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<MediaMuxResult> MuxAsync(string videoPath, string audioPath, string outputPath, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromResult(cancellationToken.IsCancellationRequested
+                ? new MediaMuxResult(false, "Muxing was cancelled.")
+                : new MediaMuxResult(true, null));
+        }
+    }
+
+    /// <summary>Cancels <paramref name="stop"/> when the body of a request whose path contains <paramref name="match"/> has been read to its end.</summary>
+    private sealed class CancelAfterBodyHandler(string match, CancellationTokenSource stop) : DelegatingHandler
+    {
+        private int _fired;
+        public bool Fired => Volatile.Read(ref _fired) == 1;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!request.RequestUri!.AbsolutePath.Contains(match, StringComparison.Ordinal))
+            {
+                return response;
+            }
+
+            var body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            var content = new StreamContent(new EndSignallingStream(body, () =>
+            {
+                if (Interlocked.Exchange(ref _fired, 1) == 0) stop.Cancel();
+            }));
+            foreach (var header in response.Content.Headers) content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            response.Content = content;
+            return response;
+        }
+    }
+
+    private sealed class EndSignallingStream(byte[] data, Action atEnd) : MemoryStream(data, writable: false)
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await base.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0) atEnd();
+            return read;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = base.Read(buffer, offset, count);
+            if (read == 0) atEnd();
+            return read;
+        }
+    }
+
+    private sealed class CountingMediaCheckpoints(IMediaCheckpointStore inner) : IMediaCheckpointStore
+    {
+        private int _saves;
+        public int Saves => Volatile.Read(ref _saves);
+        public Task<MediaCheckpoint?> LoadAsync(Guid jobId, string track, CancellationToken cancellationToken = default) => inner.LoadAsync(jobId, track, cancellationToken);
+        public Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _saves);
+            return inner.SaveAsync(checkpoint, cancellationToken);
+        }
+        public Task DeleteAsync(Guid jobId, string? track = null, CancellationToken cancellationToken = default) => inner.DeleteAsync(jobId, track, cancellationToken);
+    }
+
     [Fact]
     public async Task DescriptionTextDoesNotMakeAPlainFileAPlaylist()
     {

@@ -247,10 +247,13 @@ public sealed class JsonJobStore : IJobStore
     {
         _paths.EnsureCreated();
         var removed = 0;
+        // Every folder of the state root that an atomic write saves into (the web sign-in files live in the root).
         foreach (var directory in new[]
                  {
                      _paths.Root, _paths.JobsDirectory, _paths.CheckpointsDirectory, _paths.MediaCheckpointsDirectory,
-                     _paths.DedupeDirectory, _paths.RemoteDirectory, _paths.RemoteJobsDirectory,
+                     _paths.DedupeDirectory, _paths.RemoteDirectory, _paths.RemoteJobsDirectory, _paths.TorrentsDirectory,
+                     Path.Combine(_paths.Root, "archive"), Path.Combine(_paths.Root, "archive", "sets"),
+                     Path.Combine(_paths.Root, "archive", "packages"), Path.Combine(_paths.Root, "updates"),
                  })
         {
             removed += AtomicFile.SweepStaleTemps(directory, TimeSpan.FromMinutes(1));
@@ -314,7 +317,10 @@ public sealed class JsonJobStore : IJobStore
 
                 if (job.SchemaVersion > DownloadJob.CurrentSchemaVersion)
                 {
-                    throw new InvalidDataException($"Unsupported job schema {job.SchemaVersion}.");
+                    // A newer build's job, after a downgrade. Setting it aside would leave its kept checkpoint and part
+                    // with no job, while settings and checkpoints from that build are kept; it stays for that build.
+                    _log?.Invoke($"Job '{Path.GetFileName(file)}' was saved by a newer version of the app (schema {job.SchemaVersion}). It stays on disk for that version.");
+                    continue;
                 }
 
                 if (job.Id == Guid.Empty || string.IsNullOrWhiteSpace(job.Url))
@@ -676,6 +682,8 @@ public sealed class CheckpointDamagedException()
 
 public sealed class JsonMediaCheckpointStore : IMediaCheckpointStore
 {
+    private const int LoadAttempts = 4;
+
     private readonly StoragePaths _paths;
 
     public JsonMediaCheckpointStore(StoragePaths paths)
@@ -694,20 +702,41 @@ public sealed class JsonMediaCheckpointStore : IMediaCheckpointStore
             return null;
         }
 
-        try
+        // As for a download checkpoint (JsonCheckpointStore.LoadAsync): null tells the engine to start the track over,
+        // which truncates a track that may hold gigabytes, so only a missing file or another job's or track's is none.
+        for (var attempt = 1; ; attempt++)
         {
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            var checkpoint = JsonSerializer.Deserialize<MediaCheckpoint>(json, PersistenceJson.Options);
-            return checkpoint is not null &&
-                   checkpoint.SchemaVersion <= MediaCheckpoint.CurrentSchemaVersion &&
-                   checkpoint.JobId == jobId &&
-                   string.Equals(checkpoint.Track, track, StringComparison.Ordinal)
-                ? checkpoint
-                : null;
-        }
-        catch (Exception ex) when (ex is IOException or JsonException)
-        {
-            return null;
+            try
+            {
+                var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+                var checkpoint = JsonSerializer.Deserialize<MediaCheckpoint>(json, PersistenceJson.Options);
+                if (checkpoint is null)
+                {
+                    throw new CheckpointDamagedException();
+                }
+
+                if (checkpoint.SchemaVersion > MediaCheckpoint.CurrentSchemaVersion)
+                {
+                    throw new CheckpointTooNewException(checkpoint.SchemaVersion);
+                }
+
+                return checkpoint.JobId == jobId && string.Equals(checkpoint.Track, track, StringComparison.Ordinal)
+                    ? checkpoint
+                    : null;
+            }
+            catch (JsonException)
+            {
+                throw new CheckpointDamagedException();
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException &&
+                                       ex is not CheckpointUnusableException && attempt < LoadAttempts)
+            {
+                await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -773,7 +802,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         _paths.EnsureCreated();
         if (!File.Exists(_paths.SettingsFile))
         {
-            var defaults = new AppSettings();
+            var defaults = AppSettings.NewInstall();
             await SaveAsync(defaults, cancellationToken).ConfigureAwait(false);
             return defaults;
         }
@@ -812,6 +841,14 @@ public sealed class JsonSettingsStore : ISettingsStore
                 settings.CloseWindowCompletely = true;
             }
 
+            // T14: before it, "folders by category" decided for torrents too. Settings saved without the torrent switch
+            // keep that choice for torrents, and (with no torrent folder in them) the same folders, so nothing moves.
+            var torrentFoldersPending = !HasProperty(json, nameof(AppSettings.UseTorrentCategoryFolders));
+            if (torrentFoldersPending)
+            {
+                settings.UseTorrentCategoryFolders = settings.UseCategoryFolders;
+            }
+
             Normalize(settings);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
@@ -827,7 +864,7 @@ public sealed class JsonSettingsStore : ISettingsStore
                 // SaveAsync keeps it until a new password is set.
             }
 
-            if (heldProviderLink || closeWindowDefaultPending || fromNewerBuild)
+            if (heldProviderLink || closeWindowDefaultPending || torrentFoldersPending || fromNewerBuild)
             {
                 await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
@@ -847,7 +884,7 @@ public sealed class JsonSettingsStore : ISettingsStore
                 // fall through with defaults
             }
 
-            var defaults = new AppSettings();
+            var defaults = AppSettings.NewInstall();
             await SaveAsync(defaults, cancellationToken).ConfigureAwait(false);
             return defaults;
         }
@@ -881,11 +918,22 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
     }
 
-    private static readonly (string Id, string Name)[] BuiltInCategoryFolders =
-    [
-        ("compressed", "Compressed"), ("documents", "Documents"), ("music", "Music"),
-        ("programs", "Programs"), ("video", "Video"),
-    ];
+    private static IReadOnlyList<(string Id, string Name)> BuiltInCategoryFolders => TorrentFolderRules.BuiltInFolders;
+
+    /// <summary>Whether the settings file names <paramref name="name"/> at the top level, in any letter case.</summary>
+    private static bool HasProperty(string json, string name)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private static bool IsPublicKey(string pem)
     {
@@ -997,10 +1045,20 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
         }
 
+        settings.TorrentCategoryFoldersRoot = string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot)
+            ? null
+            : settings.TorrentCategoryFoldersRoot.Trim();
         var root = settings.DefaultDownloadDirectory;
         if (!string.Equals(settings.CategoryFoldersRoot, root, StringComparison.OrdinalIgnoreCase))
         {
             var previous = settings.CategoryFoldersRoot;
+            // T14: the torrent folder still at Torrents under the old download folder moves with it, like the category folders.
+            if (previous is not null && settings.TorrentCategoryFoldersRoot is { } torrentRoot &&
+                string.Equals(torrentRoot, TorrentFolderRules.DefaultRoot(previous), StringComparison.OrdinalIgnoreCase))
+            {
+                settings.TorrentCategoryFoldersRoot = TorrentFolderRules.DefaultRoot(root);
+            }
+
             foreach (var (id, name) in BuiltInCategoryFolders)
             {
                 if (previous is null)
