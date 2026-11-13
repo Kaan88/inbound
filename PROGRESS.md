@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### Owner reports, 2026-11-14: Linux popup double-click does not start an AppImage (EXT.B8), no minimized start on Linux (UI.B36)
+
+- Reported (owner, 2026-11-14, on Linux): "double clicking extension does not launch executable, an appimage in this case" and "on startup, app does not start minimized, unlike windows." The screenshot shows the popup with `Caustica-0.12.0-x86_64.AppImage` Completed (765 MB), the paired server `inbound.kweb.ovh` with no downloads, and the red banner "Update Inbound to use this."
+- That banner means the app refused the command as unknown, so the Linux app may predate EXT.R13 (`job.open`, not yet released); version to be checked. If it is current, `xdg-open` does not run an AppImage without its execute bit (EXT.B8).
+- UI.B36: no cause looked for yet.
+- Recorded only: no code changed, nothing tried. Fresh clone of `origin/main` (0.7.4) made 2026-11-14; the old local `linux-host` branch and its unpushed commit were deleted at the owner's word.
+
 ### Owner reports, 2026-11-13: popup double-click opens the file (EXT.R13), security warning behind the window (UI.B34), torrent Progress Details icon (UI.B35)
 
 - Reported (owner, 2026-11-13): "when double clicking a finished download item on the extension popup, open the file. it makes no sense to open the app at all. right click has a menu for that already." / "app double click sends windows open file security warning dialogue to background" / "torrent progress details lacks a placeholder icon". Recorded as ROADMAP EXT.R13, UI.B34, UI.B35.
