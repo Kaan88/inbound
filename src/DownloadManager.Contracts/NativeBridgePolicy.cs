@@ -46,6 +46,9 @@ public static class NativeBridgePolicy
         MessageTypes.JobReveal,
         MessageTypes.JobUpdate,
         MessageTypes.JobRedownload,
+        // EXT.R13: the popup's double-click on a finished download, from the native host only like job.reveal. The Host
+        // shows a program or script in its folder instead of starting it.
+        MessageTypes.JobOpen,
     };
 
     private static readonly HashSet<string> ToExtensionTypes = new(StringComparer.Ordinal)
@@ -64,17 +67,17 @@ public static class NativeBridgePolicy
     };
 
     /// <summary>
-    /// UI.B24: the messages for which the Host shows a window: Explorer for job.reveal, the folder dialog, the app's
+    /// UI.B24: the messages for which the Host shows a window: Explorer for job.reveal, a file (and the Windows security warning) for job.open, the folder dialog, the app's
     /// window. The browser is in front when the user asks, so the native host it started may set the foreground, and
     /// allows it to the Host before passing one of these on; otherwise the window opens behind the browser.
     /// </summary>
     public static bool ShowsWindow(string? messageType) =>
-        messageType is MessageTypes.JobReveal or MessageTypes.HostPickFolder or MessageTypes.HostOpenUi;
+        messageType is MessageTypes.JobReveal or MessageTypes.JobOpen or MessageTypes.HostPickFolder or MessageTypes.HostOpenUi;
 
     public static bool AllowFrom(BridgeRole role, string? messageType) => role switch
     {
         BridgeRole.BrowserExtension => messageType is not null && FromExtensionTypes.Contains(messageType),
-        BridgeRole.ServerExtension => messageType is not null && messageType != MessageTypes.JobReveal &&
+        BridgeRole.ServerExtension => messageType is not null && messageType is not (MessageTypes.JobReveal or MessageTypes.JobOpen) &&
             (FromExtensionTypes.Contains(messageType) || messageType == MessageTypes.FoldersBrowse),
         _ => false,
     };
@@ -153,6 +156,7 @@ public static class NativeBridgePolicy
     private static readonly Dictionary<string, string?> ExactJobMessages = new(StringComparer.Ordinal)
     {
         [MessageTypes.JobReveal] = null,
+        [MessageTypes.JobOpen] = null,
         [MessageTypes.JobRedownload] = null,
         [MessageTypes.JobUpdate] = "newFileName",
     };

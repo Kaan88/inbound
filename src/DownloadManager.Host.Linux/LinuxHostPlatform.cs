@@ -111,6 +111,20 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         });
     }
 
+    /// <summary>EXT.R13: the file (or a folder) with the desktop's program for it, through xdg-open. Not yet tried on a Linux desktop.</summary>
+    public void OpenFile(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            using var folder = Process.Start(ShellActions.OpenFolder(path));
+            return;
+        }
+
+        var open = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+        open.ArgumentList.Add(path);
+        using var _ = Process.Start(open);
+    }
+
     public void RequestShutdown()
     {
         log.Info("Exit requested.");

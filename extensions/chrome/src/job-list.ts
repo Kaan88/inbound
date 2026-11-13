@@ -52,14 +52,16 @@ export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
 
 /**
  * EXT.R11: the right-click menu's commands, each on one download, as the native host's allow-list names them. Rename
- * is job.update with a new file name only; reveal goes to this PC only.
+ * is job.update with a new file name only; reveal goes to this PC only. EXT.R13: open is a row's double-click on a
+ * finished download of this PC; the app shows a program in its folder instead of starting it.
  */
-export type JobCommand = "reveal" | "rename" | "redownload" | "show";
+export type JobCommand = "reveal" | "rename" | "redownload" | "show" | "open";
 
 export const JOB_COMMAND_MESSAGES: Record<JobCommand, string> = {
   // EXT.R12: the app's main window at this download (host.openUi with its id; an older app opens the window only).
   show: "host.openUi",
   reveal: "job.reveal",
+  open: "job.open",
   rename: "job.update",
   redownload: "job.redownload",
 };
@@ -101,7 +103,7 @@ export function jobCommandOutcome(command: JobCommand, result: any, options: { n
   return { ok: true, job, message: typeof result.message === "string" ? result.message : undefined };
 }
 
-/** What the row menu offers (GitHub #4). "Open file" is not offered: the browser would make the app start a file. */
+/** What the row menu offers (GitHub #4). Open file is the row's double-click (EXT.R13), not a menu entry. */
 export type RowMenuChoice = "show" | "reveal" | "copyLink" | "redownload" | "rename" | "remove";
 
 export interface RowMenuEntry {
@@ -123,6 +125,11 @@ export function onThisPc(job: JobSummary): boolean {
 export function hasUsableLink(job: JobSummary): boolean {
   const url = (job.url ?? "").trim();
   return /^https?:\/\//i.test(url) && job.addressHidden !== true;
+}
+
+/** EXT.R13: a double-click (or Enter) opens the file itself: a finished download of this PC whose file is still there. */
+export function opensFile(job: JobSummary): boolean {
+  return onThisPc(job) && job.state === "completed" && job.fileRemovedAfterExtraction !== true;
 }
 
 /** Redownload as the desktop allows it: a finished, failed or stopped download with a usable link. */

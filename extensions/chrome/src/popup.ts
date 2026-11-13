@@ -11,7 +11,7 @@ import { fillIcons, icon } from "./ui/icon";
 import { menuOpen, openMenu } from "./ui/menu";
 import { applyTheme, followThemeChanges, type ThemeChoice } from "./ui/theme";
 import {
-  badFileName, deleteAsksAboutFile, deleteFileFor, REDOWNLOAD_NOTE, rowMenuEntries, type JobAction, type JobCommand, type JobSummary,
+  badFileName, deleteAsksAboutFile, deleteFileFor, opensFile, REDOWNLOAD_NOTE, rowMenuEntries, type JobAction, type JobCommand, type JobSummary,
   type RowMenuChoice,
 } from "./job-list";
 
@@ -509,8 +509,25 @@ function openRowMenu(job: JobSummary, row: HTMLElement, at?: { x: number; y: num
   })), { at });
 }
 
+/** EXT.R13 (owner, 2026-11-13): a finished download's file opens, not the app; the app shows a program in its folder. */
+async function openFile(job: JobSummary): Promise<void> {
+  // A second double-click while the first is still being answered (Windows' warning may be up) is not sent again.
+  if (opening.has(job.id)) return;
+  opening.add(job.id);
+  try {
+    const result = await sendCommand(job, "open");
+    if (result && !result.ok) showError(result.error || "Could not open the file.");
+    else if (result) say(result.message || `Opened ${job.fileName}`);
+  } finally {
+    opening.delete(job.id);
+  }
+}
+
+const opening = new Set<string>();
+
 function openJob(job: JobSummary): void {
-  if (job.target === "server") openServer();
+  if (opensFile(job)) void openFile(job);
+  else if (job.target === "server") openServer();
   else void openApp();
 }
 

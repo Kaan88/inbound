@@ -1463,7 +1463,8 @@ public sealed partial class DownloadWindow : Window
             if (folder)
                 ShellActions.Start(ShellActions.RevealFile(_job.FinalFilePath))?.Dispose();
             else if (File.Exists(_job.FinalFilePath))
-                ShellActions.Start(ShellActions.OpenFile(_job.FinalFilePath))?.Dispose();
+                // UI.B34: owned by this window, so Windows' security warning for the file comes in front of it.
+                ShellActions.Start(ShellActions.OpenFile(_job.FinalFilePath, OperatingSystem.IsWindows() ? WinRT.Interop.WindowNative.GetWindowHandle(this) : 0))?.Dispose();
             else if (_job.Torrent is not null && Directory.Exists(_job.FinalFilePath))
                 ShellActions.Start(ShellActions.OpenFolder(_job.FinalFilePath))?.Dispose();
             else Notice.Text = _job.Torrent is not null ? "The downloaded files could not be found." : "The downloaded file could not be found.";

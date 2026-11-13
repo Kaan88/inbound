@@ -902,11 +902,11 @@ to every connected client, and throttled during a run.
 
 The native host passes only `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`,
 `jobs.query`, `settings.downloadFolders`, the popup's job actions (`job.pause/resume/retry/cancel/remove`) and its
-row menu's commands (`job.reveal`, `job.update`, `job.redownload`) from the extension, and refuses anything else with
+row menu's commands (`job.reveal`, `job.update`, `job.redownload`) and its double-click (`job.open`) from the extension, and refuses anything else with
 `host.actionResult`. Each job message names exactly one download; the menu's commands carry nothing else, and
 `job.update` from the extension carries only `newFileName`. Nothing named `remote.*` or `archive.*` crosses in either
 direction, and neither does `groups.changed`. A snapshot reaches the extension without its settings. See
-`NativeBridgePolicy` in Contracts. A paired server takes the same, without `job.reveal` and with `folders.browse`.
+`NativeBridgePolicy` in Contracts. A paired server takes the same, without `job.reveal` and `job.open`, and with `folders.browse`.
 
 Chrome, Edge and Firefox refuse a native message over 1 MB and close the port, which would fail every request
 waiting on it. The native host never sends such a frame: a reply that is too large is replaced by `handoff.error`
@@ -926,6 +926,13 @@ reason and the port stays open; an event that is too large is dropped and logged
   desktop. No hello capability names it: the extension does not see the hello through the native host, so it reads
   an older app's refusal ("The browser extension cannot send this message.", "Unknown message type …") as "Update
   Inbound to use this."
+- **`job.open`** `{ jobId }` (EXT.R13) opens a completed download's file with its program on the Host's machine (a
+  multi-file torrent's folder in the file manager; `xdg-open` on Linux, not tried on a real desktop), a program
+  included (owner, 2026-11-13: "Open programs too"); Windows asks first for a file with the mark of the web, which
+  the app writes on non-torrent downloads. Refused for an unfinished download ("This download hasn't
+  finished."), a file that is gone ("The file isn't there any more."), and where `SupportsReveal` is false or for a
+  web session. Opening may wait on Windows' security warning, so the answer comes when the program failed to start or
+  after 3 seconds, whichever is first; a later failure is logged. The native host passes the foreground on for it.
 - **`job.update`** with **`newFileName`** renames a completed download's file in its own folder. The name must be a
   bare file name (no `\ / : * ? " < > |`, not `.` or `..`, no trailing dot, not a device name such as `CON` or
   `nul.txt`); the file must be there; another file of that name is never replaced ("The target file already

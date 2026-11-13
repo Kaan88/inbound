@@ -489,6 +489,12 @@ public sealed partial class HostCommandDispatcher
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.JobOpen:
+                    await Reply(client, message, MessageTypes.HostActionResult,
+                        await OpenAsync(message.GetPayload<JobActionRequest>().JobId, platform, caller, cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobReveal:
                     await Reply(client, message, MessageTypes.HostActionResult,
                         await RevealAsync(message.GetPayload<JobActionRequest>().JobId, platform, caller, cancellationToken).ConfigureAwait(false))
@@ -839,6 +845,54 @@ public sealed partial class HostCommandDispatcher
             // The check goes on by itself; a late answer still opens the folder, which is what was asked.
             _ = reveal.ContinueWith(static task => _ = task.Exception, TaskScheduler.Default);
             return new HostActionResult { Ok = false, Message = "The download's folder didn't answer in time." };
+        }
+    }
+
+    /// <summary>How long <c>job.open</c> waits to hear that the file's program could not be started.</summary>
+    private static readonly TimeSpan OpenAnswerTime = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// EXT.R13: <c>job.open</c>. One finished download's own file, never a path a client names. A program starts too
+    /// (owner, 2026-11-13: "Open programs too"); Windows asks first for a file with the mark of the web. Opening can wait on Windows' security warning for as long as the user takes, so the answer is sent when the
+    /// program has failed to start or after a short while, whichever is first; a later failure is only logged.
+    /// </summary>
+    private async Task<HostActionResult> OpenAsync(Guid jobId, PlatformCapabilities platform, CallerScope? caller, CancellationToken cancellationToken)
+    {
+        if (!platform.SupportsReveal || caller is not null) return new HostActionResult { Ok = false, Message = "Opening a file is not available here." };
+        if (_service.GetJob(jobId) is not { } job) return new HostActionResult { Ok = false, Message = "Job not found." };
+        if (!string.Equals(job.State, "completed", StringComparison.OrdinalIgnoreCase)) return new HostActionResult { Ok = false, Message = "This download hasn't finished." };
+        var path = job.FinalFilePath;
+        if (string.IsNullOrWhiteSpace(path) || job.FileRemovedAfterExtraction)
+            return new HostActionResult { Ok = false, Message = "The file isn't there any more." };
+
+        var open = Task.Run(() =>
+        {
+            if (Directory.Exists(path))
+            {
+                _platform.OpenFile(path);
+                return new HostActionResult { Ok = true, Message = "Opened the download's folder." };
+            }
+
+            if (!File.Exists(path)) return new HostActionResult { Ok = false, Message = "The file isn't there any more." };
+            _platform.OpenFile(path);
+            return new HostActionResult { Ok = true, Message = "Opened the file." };
+        }, cancellationToken);
+        try
+        {
+            return await open.WaitAsync(OpenAnswerTime, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // Windows is asking the user about the file, or a share is slow. Either way it goes on by itself.
+            _ = open.ContinueWith(task =>
+            {
+                if (task.Exception?.GetBaseException() is { } error) _log.Warn($"Could not open a download's file: {error.Message}");
+            }, TaskScheduler.Default);
+            return new HostActionResult { Ok = true, Message = "Opening the file." };
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return new HostActionResult { Ok = false, Message = $"Could not open the file: {error.Message}" };
         }
     }
 

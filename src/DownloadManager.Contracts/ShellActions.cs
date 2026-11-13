@@ -45,11 +45,19 @@ public static class ShellActions
         }
     }
 
-    /// <summary>Opens a completed file with its registered handler.</summary>
-    public static ProcessStartInfo OpenFile(string path)
+    /// <summary>
+    /// Opens a completed file with its registered handler. UI.B34: <paramref name="owner"/> is the window asking (its
+    /// HWND), which owns whatever Windows shows on the way: the "Open File - Security Warning" for a file with the mark of
+    /// the web, the "How do you want to open" chooser, an error. Without an owner that dialog has no parent and the
+    /// window, still active from the double-click, stays over it. Zero (the Host, which has no window) leaves it unowned.
+    /// </summary>
+    public static ProcessStartInfo OpenFile(string path, nint owner = 0)
         => new(path)
         {
             UseShellExecute = true,
+            // In .NET, ErrorDialog is what passes the owner to ShellExecuteEx; without it the call runs with no UI parent.
+            ErrorDialog = owner != 0,
+            ErrorDialogParentHandle = owner,
         };
 
     /// <summary>Shows the Windows "Open with" chooser for an existing file.</summary>

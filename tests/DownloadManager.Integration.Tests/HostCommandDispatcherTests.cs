@@ -685,6 +685,15 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
             Revealed.Add(path);
             lock (timeline) timeline.Add("platform:reveal");
         }
+
+        /// <summary>EXT.R13: files the popup's double-click opened.</summary>
+        public List<string> OpenedFiles { get; } = [];
+
+        public void OpenFile(string path)
+        {
+            lock (OpenedFiles) OpenedFiles.Add(path);
+            lock (timeline) timeline.Add("platform:open");
+        }
     }
 
     private sealed class ListLog : IHostLog

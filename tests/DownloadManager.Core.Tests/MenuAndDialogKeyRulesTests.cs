@@ -144,6 +144,7 @@ public sealed class MenuAndDialogKeyRulesTests
 
     [Theory]
     [InlineData(MessageTypes.JobReveal, true)]
+    [InlineData(MessageTypes.JobOpen, true)]
     [InlineData(MessageTypes.HostPickFolder, true)]
     [InlineData(MessageTypes.HostOpenUi, true)]
     [InlineData(MessageTypes.JobsQuery, false)]

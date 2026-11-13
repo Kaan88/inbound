@@ -93,6 +93,61 @@ public sealed partial class HostCommandDispatcherTests
         Assert.False(WebSessionProfile.WebCapabilities(PlatformCapabilities.Desktop).SupportsReveal);
     }
 
+    // ---- job.open (EXT.R13) -------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task OpenStartsAFinishedFileProgramsIncludedButNotAnUnfinishedOrMissingOne()
+    {
+        var unfinished = Finished("half.bin");
+        unfinished.State = DownloadState.Paused;
+        var (service, jobs) = await SeededAsync(Finished("report.pdf"), Finished("setup.exe"), Finished("run.bat"), unfinished);
+        var platform = new FakePlatform(PlatformCapabilities.Desktop, _timeline);
+        var dispatcher = Dispatcher(service, platform);
+        var session = Session();
+        async Task<HostActionResult> Open(Guid id) =>
+            (await AskAsync(dispatcher, session, MessageTypes.JobOpen, new { jobId = id })).GetPayload<HostActionResult>();
+
+        var file = await Open(jobs[0].Id);
+        Assert.True(file.Ok, file.Message);
+        Assert.Equal([jobs[0].FinalFilePath], platform.OpenedFiles);
+
+        // Owner, 2026-11-13: "Open programs too". Windows asks first for one with the mark of the web.
+        foreach (var program in new[] { jobs[1], jobs[2] })
+        {
+            var started = await Open(program.Id);
+            Assert.True(started.Ok, started.Message);
+        }
+        Assert.Equal([jobs[0].FinalFilePath, jobs[1].FinalFilePath, jobs[2].FinalFilePath], platform.OpenedFiles);
+        Assert.Empty(platform.Revealed);
+
+        var notDone = await Open(jobs[3].Id);
+        Assert.False(notDone.Ok);
+        Assert.Equal("This download hasn't finished.", notDone.Message);
+
+        File.Delete(jobs[0].FinalFilePath);
+        var gone = await Open(jobs[0].Id);
+        Assert.False(gone.Ok);
+        Assert.Equal("The file isn't there any more.", gone.Message);
+        Assert.Equal(3, platform.OpenedFiles.Count);
+    }
+
+    [Fact]
+    public async Task OpenIsRefusedWhereThePlatformCannotShowFilesAndForAWebSession()
+    {
+        var (service, jobs) = await SeededAsync(Finished("server.pdf"));
+        var platform = new FakePlatform(PlatformCapabilities.Desktop with { SupportsReveal = false }, _timeline);
+        var reply = (await AskAsync(Dispatcher(service, platform), Session(), MessageTypes.JobOpen, new { jobId = jobs[0].Id }))
+            .GetPayload<HostActionResult>();
+        Assert.False(reply.Ok);
+        Assert.Contains("not available here", reply.Message);
+
+        var web = await WebAsync(service: service);
+        var fromWeb = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobOpen, new { jobId = jobs[0].Id })).GetPayload<HostActionResult>();
+        Assert.False(fromWeb.Ok);
+        Assert.Empty(platform.OpenedFiles);
+        Assert.Empty(web.Platform.OpenedFiles);
+    }
+
     // ---- job.update with newFileName ----------------------------------------------------------------------------
 
     [Fact]

@@ -341,6 +341,7 @@ public sealed class NativeBridgePolicyTests
 
     [Theory]
     [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.open", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
     [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
     [InlineData("job.update", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""newFileName"":""renamed.bin""}")]
     [InlineData("job.update", @"{""JobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""NewFileName"":""renamed.bin""}")]
@@ -364,6 +365,11 @@ public sealed class NativeBridgePolicyTests
     [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":false}")]
     [InlineData("job.reveal", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""path"":""C:\\Windows""}")]
     [InlineData("job.reveal", @"{""jobId"":""00000000-0000-0000-0000-000000000000""}")]
+    // EXT.R13: job.open names one download and nothing else, never a path or a program.
+    [InlineData("job.open", @"{}")]
+    [InlineData("job.open", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""path"":""C:\\Windows\\x.exe""}")]
+    [InlineData("job.open", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""arguments"":""/c calc""}")]
+    [InlineData("job.open", @"{""jobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""]}")]
     [InlineData("job.redownload", @"{""jobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""]}")]
     [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""JOBID"":""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
     [InlineData("job.redownload", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""url"":""https://elsewhere.test/x.exe""}")]
@@ -383,6 +389,9 @@ public sealed class NativeBridgePolicyTests
         Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, Raw(MessageTypes.JobReveal, $@"{{""jobId"":""{OneJob}""}}")));
         Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, MessageTypes.JobReveal));
         Assert.True(NativeBridgePolicy.AllowFrom(BridgeRole.BrowserExtension, MessageTypes.JobReveal));
+        // EXT.R13: nor open a file on the server's machine.
+        Assert.False(NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, Raw(MessageTypes.JobOpen, $@"{{""jobId"":""{OneJob}""}}")));
+        Assert.True(NativeBridgePolicy.AllowFrom(BridgeRole.BrowserExtension, MessageTypes.JobOpen));
     }
 
     [Fact]

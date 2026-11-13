@@ -2161,6 +2161,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const target = chosenTarget(message.target);
       // The server's screen is not this user's: its folders are not opened from here.
       if (command === "reveal" && target === "server") return { ok: false, error: "Folders can be opened only for downloads on this PC." };
+      if (command === "open" && target === "server") return { ok: false, error: "Files can be opened only for downloads on this PC." };
       const transport = transportFor(target);
       const reply = await transport.request(type, payload, 10000,
         transport.target === "server" ? "Timed out waiting for the Inbound server." : "Timed out waiting for the desktop app.");

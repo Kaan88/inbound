@@ -284,7 +284,7 @@ test('EXT.R11: the background sends each command for one download with exactly i
 
     const before = harness.nativeMessages.length;
     for (const message of [
-      { command: 'open', jobId: JOB }, { command: 'constructor', jobId: JOB }, { command: 'reveal', jobId: 'not-a-job' },
+      { command: 'constructor', jobId: JOB }, { command: 'reveal', jobId: 'not-a-job' },
       { command: 'rename', jobId: JOB }, { command: 'rename', jobId: JOB, newFileName: '   ' },
     ]) {
       assert.equal((await sendRuntimeMessage(harness, { type: 'dm.jobCommand', ...message }, ownPage('popup.html'))).ok, false,
@@ -312,5 +312,57 @@ test('EXT.R11: the background sends each command for one download with exactly i
     const notRenamed = await ignored;
     assert.equal(notRenamed.ok, false);
     assert.match(notRenamed.error, /not renamed\. Update Inbound/);
+  });
+});
+
+test('EXT.R13: a double-click on a finished download of this PC opens its file; other rows open the app', async () => {
+  const page = await openPopup([
+    finished(),
+    finished({ id: 'run-1', fileName: 'running.zip', state: 'downloading', canPause: true }),
+    finished({ id: 'gone-1', fileName: 'gone.zip', fileRemovedAfterExtraction: true }),
+  ], {
+    'dm.jobCommand': async () => ({ ok: true, message: 'Opened the file.' }),
+    'dm.openApp': async () => ({ ok: true }),
+  });
+  try {
+    const doc = page.document;
+    const row = (name) => [...doc.querySelectorAll('.job')].find((item) => item.textContent.includes(name));
+    const dbl = (name) => row(name).dispatchEvent(new page.window.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    dbl('report.pdf');
+    await flush();
+    assert.deepEqual(page.sent.filter((m) => m.type === 'dm.jobCommand').at(-1), { type: 'dm.jobCommand', command: 'open', jobId: JOB, target: 'local' });
+    assert.equal(page.sent.some((m) => m.type === 'dm.openApp'), false, 'the app is not opened');
+    assert.equal(doc.getElementById('live').textContent, 'Opened the file.');
+
+    // Enter on the row does the same.
+    row('report.pdf').focus();
+    row('report.pdf').dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await flush();
+    assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand' && m.command === 'open').length, 2);
+
+    for (const name of ['running.zip', 'gone.zip']) {
+      const before = page.sent.filter((m) => m.type === 'dm.jobCommand').length;
+      dbl(name);
+      await flush();
+      assert.equal(page.sent.filter((m) => m.type === 'dm.jobCommand').length, before, name);
+    }
+    assert.equal(page.sent.filter((m) => m.type === 'dm.openApp').length, 2);
+  } finally { page.restore(); }
+});
+
+test('EXT.R13: the background sends job.open with only the download, and never for the server', async () => {
+  const { harness } = capturingChrome(catching);
+  await withBackground(harness, async () => {
+    const reply = sendRuntimeMessage(harness, { type: 'dm.jobCommand', command: 'open', jobId: JOB, target: 'local', path: 'C:/x.exe' },
+      ownPage('popup.html'));
+    const request = await answerNative(harness, 'job.open', { ok: true, message: 'Opened the file.' });
+    assert.deepEqual(request.payload, { jobId: JOB });
+    assert.deepEqual(await reply, { ok: true, job: undefined, message: 'Opened the file.' });
+
+    const before = harness.nativeMessages.length;
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.jobCommand', command: 'open', jobId: JOB, target: 'server' },
+      ownPage('popup.html'))).ok, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.jobCommand', command: 'open', jobId: JOB }, ownPage('options.html'))).ok, false);
+    assert.equal(harness.nativeMessages.length, before);
   });
 });

@@ -290,8 +290,10 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   (finished, failed or stopped downloads; it saves a new copy and keeps the existing file), Rename… (finished
   downloads; the app checks the name and never replaces another file) and Delete… (the Delete button's question).
   A finished This PC download has a folder button left of Delete, which opens Explorer with the file selected, or
-  its folder when the file is gone, or says "The file and its folder are gone." There is no Open file: the browser
-  would then make the app start a downloaded file (owner question in PROGRESS). The link is copied by the popup
+  its folder when the file is gone, or says "The file and its folder are gone." Open file is the row's double-click
+  (or Enter) on a finished This PC download (EXT.R13, `job.open`): the app opens the file with its program, a
+  program included (owner, 2026-11-13); Windows shows its own security warning first for a file with the mark of the
+  web. Other rows open the app. The link is copied by the popup
   itself and asks nothing of the app. An app older than these commands refuses them, and the popup then says
   "Update Inbound to use this."; a rename counts as done only when the app sends back the new name.
 

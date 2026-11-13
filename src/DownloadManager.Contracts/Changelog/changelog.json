@@ -1,6 +1,27 @@
 {
   "versions": [
     {
+      "version": "0.7.4",
+      "date": "2026-11-13",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Inbound is open source under the MIT license.", "tags": ["all"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "Opening a finished download from the list or Progress Details shows Windows' security warning in front of the window, not behind it.", "tags": ["windows"] },
+            { "text": "Progress Details of a torrent shows the torrent's icon instead of an empty tile.", "tags": ["windows", "torrents"] },
+            { "text": "The version in the status bar looks like the rest of the bar, and is coloured only when an update is waiting.", "tags": ["windows"] },
+            { "text": "The version at the bottom of the page is coloured only when the server is out of date.", "tags": ["webui", "server", "docker"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.3",
       "date": "2026-11-13",
       "sections": [

@@ -160,6 +160,15 @@ public sealed class HostController : IHostPlatform
         using var _ = ShellActions.Start(ShellActions.RevealFile(path));
     }
 
+    /// <summary>
+    /// EXT.R13: the file with its program, or a folder in Explorer. The native host allowed the Host the foreground first,
+    /// so the program's window (or Windows' security warning for a file from the web) can come in front of the browser.
+    /// </summary>
+    public void OpenFile(string path)
+    {
+        using var _ = ShellActions.Start(Directory.Exists(path) ? ShellActions.OpenFolder(path) : ShellActions.OpenFile(path));
+    }
+
     public void RequestShutdown()
     {
         _log.Info("Exit requested from the tray or IPC.");

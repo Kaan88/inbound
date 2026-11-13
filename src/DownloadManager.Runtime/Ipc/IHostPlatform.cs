@@ -102,6 +102,13 @@ public interface IHostPlatform
     void RevealFile(string path) => throw new NotSupportedException("Showing files is not available here.");
 
     /// <summary>
+    /// EXT.R13: opens <paramref name="path"/>, an existing file the dispatcher has checked is not a program, with its
+    /// program, or an existing folder in the file manager. May block while Windows asks about the file (its security
+    /// warning), so the dispatcher calls it off its thread. Only called when <see cref="PlatformCapabilities.SupportsReveal"/>.
+    /// </summary>
+    void OpenFile(string path) => throw new NotSupportedException("Opening files is not available here.");
+
+    /// <summary>
     /// T10: opens the window's torrent dialog with these finished .torrent files (full paths), as the Explorer association
     /// does: one launch of the window with <c>--open-torrent</c> before each path, which a running window takes over
     /// (<see cref="TorrentFileOffers"/> batches them). Only called when <see cref="PlatformCapabilities.SupportsOpenUi"/>.

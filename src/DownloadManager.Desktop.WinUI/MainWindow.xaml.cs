@@ -4733,7 +4733,9 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                ShellActions.Start(ShellActions.OpenFile(job.FinalFilePath))?.Dispose();
+                // UI.B34: owned by this window. Unowned, Windows' security warning for a file from the web opened behind it,
+                // because the window was still active from the double-click.
+                ShellActions.Start(ShellActions.OpenFile(job.FinalFilePath, OperatingSystem.IsWindows() ? WinRT.Interop.WindowNative.GetWindowHandle(this) : 0))?.Dispose();
                 return;
             }
             catch (Exception ex)

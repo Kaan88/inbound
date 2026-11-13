@@ -48,6 +48,12 @@ public static class MessageTypes
     /// </summary>
     public const string JobReveal = "job.reveal";
     /// <summary>
+    /// EXT.R13: opens one finished download's file with its program on the Host's machine (a multi-file torrent's
+    /// folder in the file manager), a program included (owner, 2026-11-13). A <see cref="JobActionRequest"/> with <c>jobId</c>;
+    /// answered with <see cref="HostActionResult"/>. Where <c>SupportsReveal</c>, never for a web session.
+    /// </summary>
+    public const string JobOpen = "job.open";
+    /// <summary>
     /// EXT.R11: adds one download again from its address, into its folder under a new name when the file is there (the
     /// conflict policy is always rename), as the desktop's Redownload does. A <see cref="JobActionRequest"/> with
     /// <c>jobId</c>; answered with <see cref="JobActionResult"/> holding the new download.

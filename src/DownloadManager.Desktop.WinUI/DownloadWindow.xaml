@@ -57,6 +57,9 @@
                 <Grid x:Name="FileIconHeader">
                     <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}" Width="24" Height="24" />
                     <FontIcon Glyph="{Binding FileGlyph}" Visibility="{Binding FileGlyphVisibility}" FontSize="20" />
+                    <!-- UI.B35: a torrent shows its swarm glyph (a link for a magnet still getting its file list), as its list row does. -->
+                    <FontIcon Glyph="{Binding FileGlyph}" Visibility="{Binding TorrentVisibility}" FontSize="20"
+                              Foreground="{ThemeResource InboundIconMediaBrush}" />
                 </Grid>
             </Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">

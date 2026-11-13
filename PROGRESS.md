@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+### Owner reports, 2026-11-13: popup double-click opens the file (EXT.R13), security warning behind the window (UI.B34), torrent Progress Details icon (UI.B35)
+
+- Reported (owner, 2026-11-13): "when double clicking a finished download item on the extension popup, open the file. it makes no sense to open the app at all. right click has a menu for that already." / "app double click sends windows open file security warning dialogue to background" / "torrent progress details lacks a placeholder icon". Recorded as ROADMAP EXT.R13, UI.B34, UI.B35.
+- EXT.R13 built: this answers the open EXT.R11 question ("should the popup open files at all"). Kept from that question's reasoning: a program, installer, script or shortcut is not started from the browser; the Host shows it selected in its folder and says so. Other files open with their program; Windows still shows its own security warning for a file with the mark of the web. New `job.open` (Protocol, NativeBridgePolicy exact payload and ShowsWindow, not for a paired server), `IHostPlatform.OpenFile` (Windows Host, Linux Host through xdg-open, untried on Linux), `ShellActions.IsProgram`, dispatcher `OpenAsync` (answers when the program failed to start or after 3 s, since Windows' warning waits for the user). Popup: double-click and Enter on a finished This PC row send `open`; other rows open the app as before. Owner may want programs opened too; then the IsProgram rule is the one line to drop.
+- Owner, 2026-11-13: "Open programs too". `ShellActions.IsProgram` and the reveal-instead rule are removed; `job.open` opens any finished file, programs included. Windows' security warning still comes first for a non-torrent download (the app writes the mark of the web); a torrent's files carry none, so a program from a torrent starts without that warning, as it would from the app's own double-click.
+- UI.B34 fixed: `ShellActions.OpenFile(path, owner)`; the main window and Progress Details pass their HWND, so Windows' dialogs for the file are owned by the window.
+- UI.B35 fixed: Progress Details header shows the torrent's swarm/magnet glyph.
+- Not done: none of the three tried in the running app or a browser.
+
 ### Remote sites: design agreed, integration plan written (owner, 2026-11-13; no code)
 
 - **Decisions (owner):** "I completely agree with your mockups and suggestions", so the fourth mockup page is the agreed design. Sites is to be switchable. Asked whether rclone must be a separate process; told yes in practice (the Host survives a crash, "use your own rclone" works, no Go build of our own), and did not object. rclone runs only while a site is open or a transfer is active.
