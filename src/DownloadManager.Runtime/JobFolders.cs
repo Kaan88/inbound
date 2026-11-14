@@ -130,7 +130,7 @@ public sealed partial class DownloadManagerService
         var keptForms = kept.SelectMany(FormsOf).ToList();
         // And by identity (volume + file ID) of each, and of every existing folder above it, for names the text can't
         // reconcile, such as a share of this computer that isn't an administrative one. Windows only; empty elsewhere.
-        var keptIdentities = kept.SelectMany(IdentitiesAtAndAbove).ToHashSet();
+        var keptIdentities = IdentitiesAtAndAbove(kept);
         var otherForms = others.SelectMany(other => FormsOf(other.Folder).Select(form => (other.Runtime, Form: form))).ToList();
 
         var removed = new List<string>();
@@ -350,14 +350,24 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    /// <summary>The identities of a folder and of every existing folder above it.</summary>
-    private static IEnumerable<(uint Volume, ulong Index)> IdentitiesAtAndAbove(string folder)
+    /// <summary>
+    /// The identities of these folders and of every existing folder above them. Each path is opened once, however many
+    /// of the folders lie under it: the folders named in the settings mostly share their upper folders.
+    /// </summary>
+    private static HashSet<(uint Volume, ulong Index)> IdentitiesAtAndAbove(IEnumerable<string> folders)
     {
-        if (!OperatingSystem.IsWindows()) yield break;
-        for (var current = folder; current is not null; current = Path.GetDirectoryName(current))
+        var identities = new HashSet<(uint Volume, ulong Index)>();
+        if (!OperatingSystem.IsWindows()) return identities;
+        var seen = new HashSet<string>(PathNames.Comparer);
+        foreach (var folder in folders)
         {
-            if (FolderIdentity(current) is { } identity) yield return identity;
+            for (var current = folder; current is not null && seen.Add(current); current = Path.GetDirectoryName(current))
+            {
+                if (FolderIdentity(current) is { } identity) identities.Add(identity);
+            }
         }
+
+        return identities;
     }
 
     [StructLayout(LayoutKind.Sequential)]
