@@ -1,5 +1,28 @@
 # Progress — session handoff
 
+### Windows builds on GitHub, and the first GitHub runs (CI.2, CI.1, X.8; owner, 2026-11-14)
+
+Owner: "merge to main, make window and all builds by github too." The Linux fixes and workflows are on `main`.
+
+- **CI.2, built:** `windows.yml` builds Setup and the update zip on a pushed `v*` tag (or by hand with a tag), signs
+  `manifest.json` with the `UPDATE_SIGNING_KEY` secret after checking it against the latest release's `public.pem`,
+  and puts the six files in a **draft** release with notes drafted by `scripts\release-notes.ps1`. The owner
+  publishes the draft; that starts the Linux packages and the Docker image. Flow: `docs\release-builds.md`.
+- **Run on GitHub (main, `b8a3367`):** CI run 43592770082, both jobs passed (Windows: solution build and
+  `scripts\test.ps1`; Linux: web UI, extension, the Linux projects and tests). Windows build run 43592776806, a test
+  build: the torrent worker was built with vcpkg, Setup compiled with Inno Setup 6.7.1, the zip was made; artifact
+  `windows-test-build-0.7.4`, 163 MB. Linux packages run 43591481758 (`9f3d750`): AppImage, tar.gz, .deb, .rpm and
+  pacman package built; the .deb installed and answered `--cli --version` in an Ubuntu 24.04 container.
+- **What the first runs found, fixed:** three `LinuxMenuEntryTests` expected a Linux path in the Exec line; a
+  web-rights test took the test drive for the Windows drive (the runner works on D:); `DownloadManager.iss` passed a
+  Variant to `Trim`, which Inno Setup 6.7.1 refuses.
+- **Found, not fixed (UI.B38):** a folder named in the settings as `\\localhost\D$\...` is not recognised as the
+  folder a download made. The test case had returned early on every machine where the administrative share can't be
+  opened; it is now a skipped test of its own.
+- **Not run:** the release path of `windows.yml` (signed Firefox add-on, signing, the draft release) and the
+  release paths of the Linux packages and Docker workflows; they need a version tag and a published release. The
+  Setup and zip GitHub built were not installed or started. No package was tried on a desktop.
+
 ### Linux fixes (EXT.B8, UI.B36, X.7), release names, CI and more package types (owner, 2026-11-14)
 
 - Asked (owner, 2026-11-14): "fix the issues I mentioned yesterday. 3 items or so. delegate work.", then "also, build ci and build workflows and expand package release types on github" and "fix the release name on github. some named inbound some named download manager."
