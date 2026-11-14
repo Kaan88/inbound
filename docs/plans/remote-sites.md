@@ -122,6 +122,8 @@ The price is that these places must be taught about it on purpose:
 - **OAuth kinds** (Drive, OneDrive, Dropbox): sign-in through the browser with rclone's own flow; on a server with no
   browser, the `rclone authorize` paste flow from the earlier mockups. The Host stores the token sealed and must
   write back a refreshed token after each use. How it learns of a refresh is not documented; see the run list.
+  App registration (owner, 2026-11-14): rclone's shared app IDs are used by default, and the site's settings have an
+  optional field for the user's own client ID and secret. Other providers are added one at a time.
 - **Key files:** rclone reads passphrase-protected keys only in the old PEM format. The Add a site dialog must detect
   the current OpenSSH format with a passphrase and say what to do, or the Host converts a copy in memory. Open.
 - **Web sessions** keep their folder limit: local paths in any `sites.*` command go through `CallerScope` and
