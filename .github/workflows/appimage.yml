@@ -1,49 +1,64 @@
-# Builds the Linux AppImage (x86_64) with its torrent worker and attaches it to the GitHub release of a version tag
-# (owner, 2026-11-12: GitHub builds the AppImage from now on, alongside the Docker image; ROADMAP X.6). It runs on a
-# pushed v* tag, or by hand for an existing tag. It also signs the Linux update file (manifest-linux-x64.json) with
-# the UPDATE_SIGNING_KEY repository secret (owner, 2026-11-12: "put key to github"), after checking that the key
-# matches the release's public.pem, and attaches it with SHA256SUMS-linux. arm64 is not built.
-name: AppImage
+# Builds the Linux packages (x86_64) with their torrent worker: the AppImage, a tar.gz, a .deb, an .rpm and a pacman
+# package (X.6, X.8).
+#
+# - When a release of a version tag is published, or by hand with a tag: builds from that tag and attaches everything
+#   to the release. It also signs the Linux update file (manifest-linux-x64.json) with the UPDATE_SIGNING_KEY
+#   repository secret (owner, 2026-11-12: "put key to github"), after checking that the key matches the release's
+#   public.pem, and attaches it with SHA256SUMS-linux. Only the AppImage updates itself, so only it is in the manifest.
+# - By hand without a tag: builds the branch the run was started from and keeps the packages as run artifacts for
+#   14 days. Nothing is signed or attached.
+#
+# It used to run on the pushed tag, but GitHub starts nothing for a push whose commit message has [skip ci], and the
+# 0.7.3 and 0.7.4 release commits had it, so neither got an AppImage (CI.1). A published release is not a push.
+# arm64 is not built. Actions are pinned to the commit of the release named beside each.
+name: Linux packages
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag to build and attach to (for example v0.7.0)"
-        required: true
+        description: "Existing version tag to build and attach to (for example v0.7.4). Empty: build this branch, attach nothing."
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: appimage-${{ inputs.tag || github.ref }}
+  group: linux-packages-${{ inputs.tag || github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
 
 jobs:
-  appimage:
+  packages:
     if: github.repository == 'Kaan88/inbound'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
       contents: write
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      # Empty for a build of a branch.
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: ${{ (inputs.tag || github.event.release.tag_name) && format('refs/tags/{0}', inputs.tag || github.event.release.tag_name) || github.ref }}
           persist-credentials: false
 
-      - name: Tag is a version
+      - name: Version
         run: |
-          case "$TAG" in v[0-9]*) ;; *) echo "Not a version tag: $TAG"; exit 1 ;; esac
           version="$(grep -oPm1 '(?<=<Version>)[^<]+' Directory.Build.props)"
-          test "v$version" = "$TAG" || { echo "Directory.Build.props says $version, the tag is $TAG"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ -n "$TAG" ]; then
+            case "$TAG" in v[0-9]*) ;; *) echo "Not a version tag: $TAG"; exit 1 ;; esac
+            test "v$version" = "$TAG" || { echo "Directory.Build.props says $version, the tag is $TAG"; exit 1; }
+          else
+            echo "No tag: building $GITHUB_REF_NAME as $version; nothing will be attached."
+          fi
 
       - name: .NET SDK 10
         run: |
@@ -68,26 +83,64 @@ jobs:
           (cd "$RUNNER_TEMP" && ./appimagetool.AppImage --appimage-extract >/dev/null)
           echo "APPIMAGETOOL=$RUNNER_TEMP/squashfs-root/AppRun" >> "$GITHUB_ENV"
 
+      - name: nfpm 2.49.0 (checked against its published SHA-256)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.tar.gz" \
+            https://github.com/goreleaser/nfpm/releases/download/v2.49.0/nfpm_2.49.0_Linux_x86_64.tar.gz
+          echo "2afaa5ffb5e3493402e31e7c67a5a1fb42133e3f66fc315ca0051934125561c7  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/nfpm"
+          tar -C "$RUNNER_TEMP/nfpm" -xzf "$RUNNER_TEMP/nfpm.tar.gz" nfpm
+          "$RUNNER_TEMP/nfpm/nfpm" --version
+          echo "NFPM=$RUNNER_TEMP/nfpm/nfpm" >> "$GITHUB_ENV"
+
       - name: Build the AppImage
         run: |
           bash scripts/package-appimage.sh
-          f="artifacts/linux/Inbound-${TAG#v}-x86_64.AppImage"
+          f="artifacts/linux/Inbound-$VERSION-x86_64.AppImage"
           test -f "$f"
           ls -la "$f"; sha256sum "$f"
           echo "APPIMAGE=$f" >> "$GITHUB_ENV"
 
-      - name: Keep it as a run artifact
+      - name: Build the tar.gz, .deb, .rpm and pacman package
+        run: |
+          bash scripts/package-linux.sh
+          cd artifacts/linux
+          test "$(wc -l < SHA256SUMS-linux-packages)" -eq 4 || { echo "Expected four packages:"; cat SHA256SUMS-linux-packages; exit 1; }
+          sha256sum -c SHA256SUMS-linux-packages
+          ls -la
+          # What each package says about itself, for the log.
+          dpkg-deb --info inbound_*.deb
+          dpkg-deb --contents inbound_*.deb | grep -E 'usr/bin/inbound|inbound\.desktop|pixmaps|inbound-host$'
+
+      - name: The .deb installs and starts (in a clean Ubuntu container)
+        run: |
+          deb="$(ls artifacts/linux/inbound_*.deb)"
+          docker run --rm -v "$PWD/artifacts/linux:/pkg:ro" ubuntu:24.04 sh -ec '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg/'"$(basename "$deb")"' >/dev/null
+            test -x /usr/bin/inbound && test -x /usr/lib/inbound/inbound-host
+            test -f /usr/share/applications/inbound.desktop
+            /usr/bin/inbound --cli --version'
+
+      - name: Keep them as run artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: appimage-${{ env.TAG }}
-          path: ${{ env.APPIMAGE }}
+          name: linux-packages-${{ env.TAG || env.VERSION }}
+          path: |
+            ${{ env.APPIMAGE }}
+            artifacts/linux/*.tar.gz
+            artifacts/linux/*.deb
+            artifacts/linux/*.rpm
+            artifacts/linux/*.pkg.tar.zst
+            artifacts/linux/SHA256SUMS-linux-packages
           retention-days: 14
 
       - name: Wait for the release
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # On a tag push the release is usually made by hand after the tag: wait up to an hour for it.
+          # A run by hand can come before the release is made: wait up to an hour for it.
           for i in $(seq 1 60); do
             gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
             echo "No release $TAG yet; waiting ($i/60)"; sleep 60
@@ -95,6 +148,7 @@ jobs:
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null
 
       - name: Sign the Linux update file
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
@@ -116,10 +170,13 @@ jobs:
           echo "SIGNED=$out" >> "$GITHUB_ENV"
 
       - name: Attach to the release
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # manifest-linux-x64.json replaces any earlier one, so Linux installs are offered this version.
           gh release upload "$TAG" "$SIGNED/$(basename "$APPIMAGE")" "$SIGNED/manifest-linux-x64.json" \
-            "$SIGNED/SHA256SUMS-linux" -R "$GITHUB_REPOSITORY" --clobber
-          echo "Attached $(basename "$APPIMAGE"), manifest-linux-x64.json and SHA256SUMS-linux to $TAG."
+            "$SIGNED/SHA256SUMS-linux" \
+            artifacts/linux/*.tar.gz artifacts/linux/*.deb artifacts/linux/*.rpm artifacts/linux/*.pkg.tar.zst \
+            artifacts/linux/SHA256SUMS-linux-packages -R "$GITHUB_REPOSITORY" --clobber
+          echo "Attached the AppImage, manifest-linux-x64.json, SHA256SUMS-linux and four packages to $TAG."

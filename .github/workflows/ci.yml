@@ -1,0 +1,128 @@
+# CI (CI.1): builds and tests every push to main and every pull request.
+#
+# - windows: the whole solution and every test project, the extension and the web UI, through the same scripts used
+#   locally (scripts\build.ps1, scripts\test.ps1). This is the full check.
+# - linux: the programs the Linux build ships (Host, CLI, native host, server, the Uno window), the web UI, the
+#   extension, the test projects that pass on Linux (Engine, TorBox, Containers, Torrents) and the tests about Linux.
+#   Core, Archives, Server and the rest of Integration are not run here: some of their cases are about Windows paths,
+#   commands and the bridge and fail on Linux (31, 10, 13 and 182 on 2026-11-14).
+#
+# A commit whose message has [skip ci] starts nothing, which is what the notes-only commits use. Changes to Markdown
+# and docs alone start nothing either. No secrets are used and nothing is published.
+# Actions are pinned to the commit of the release named beside each.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            webui/package-lock.json
+            extensions/chrome/package-lock.json
+
+      - name: .NET SDK 10
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build (web UI, extension, solution)
+        shell: powershell
+        run: .\scripts\build.ps1 -Configuration Release
+
+      - name: Test (every test project, extension, web UI)
+        shell: powershell
+        run: .\scripts\test.ps1 -Configuration Release
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            webui/package-lock.json
+            extensions/chrome/package-lock.json
+
+      - name: .NET SDK 10
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Web UI (type check, tests, build)
+        working-directory: webui
+        run: |
+          npm ci
+          npm run check
+          npm test
+          npm run build
+
+      - name: Extension (type check, tests, build)
+        working-directory: extensions/chrome
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm test
+          npm run build
+
+      - name: Shell scripts parse
+        run: |
+          for script in scripts/*.sh; do bash -n "$script"; done
+
+      - name: Build what the Linux build ships
+        run: |
+          for project in Host.Linux Cli NativeHost Server Desktop.Uno; do
+            echo "::group::$project"
+            dotnet build "src/DownloadManager.$project/DownloadManager.$project.csproj" -c Release
+            echo "::endgroup::"
+          done
+
+      - name: Tests that pass on Linux (Engine, TorBox, Containers, Torrents)
+        run: |
+          for project in Engine TorBox Containers Torrents; do
+            echo "::group::$project"
+            dotnet test "tests/DownloadManager.$project.Tests/DownloadManager.$project.Tests.csproj" -c Release
+            echo "::endgroup::"
+          done
+
+      - name: Tests about Linux
+        run: |
+          dotnet test tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj -c Release \
+            --filter "FullyQualifiedName~DownloadManager.Integration.Tests.Linux"

@@ -9,8 +9,8 @@ What is inside:
 - the web UI as static files (no Node at run time);
 - the official 7-Zip 26.04 for Linux (`7zz`) in `/app/tools/7-Zip`, for extraction (its license is next to it).
 
-Image: `ghcr.io/kaan88/inbound` for `linux/amd64` (arm64 is not published yet), built when a version tag is pushed
-(`.github/workflows/docker.yml`). Tags: the version (`0.6.0`), the minor line (`0.6`) and `latest` (not for a
+Image: `ghcr.io/kaan88/inbound` for `linux/amd64` (arm64 is not published yet), built when a release of a version tag
+is published, or by hand for a tag (`.github/workflows/docker.yml`). Tags: the version (`0.6.0`), the minor line (`0.6`) and `latest` (not for a
 pre-release such as `v0.6.0-rc1`).
 
 ## Quick start

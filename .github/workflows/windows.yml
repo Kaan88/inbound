@@ -1,0 +1,104 @@
+# Windows test build (CI.1): Setup and the zip, built by hand from any branch and kept as run artifacts for 14 days.
+# Start it from Actions, Windows build, Run workflow.
+#
+# These are test builds, not release files: Setup carries no Firefox add-on (the signed XPI is made locally with the
+# addons.mozilla.org key), nothing is signed for the updater, and nothing is attached to a release. A release's
+# Windows files are still made locally (docs/release-builds.md).
+#
+# The native torrent worker takes long to build (vcpkg builds libtorrent and Boost), so the built
+# inbound-torrent.exe is cached and rebuilt only when native/torrent-worker changes.
+# Actions are pinned to the commit of the release named beside each.
+name: Windows build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Version
+        shell: powershell
+        run: |
+          $version = (Select-Xml -Path Directory.Build.props -XPath '/Project/PropertyGroup/Version').Node.InnerText.Trim()
+          if ($version -notmatch '^\d+(\.\d+){2,3}$') { throw "No version in Directory.Build.props: '$version'" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Building $version from $env:GITHUB_REF_NAME"
+
+      - name: Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            webui/package-lock.json
+            extensions/chrome/package-lock.json
+
+      - name: .NET SDK 10
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Torrent worker from the cache
+        id: worker
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: artifacts/torrent-worker/win-x64
+          key: torrent-worker-win-x64-${{ hashFiles('native/torrent-worker/**') }}
+
+      - name: Build the torrent worker (vcpkg; long)
+        if: steps.worker.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          rem build-windows.cmd looks for vcpkg in idm-deps\vcpkg next to the repository.
+          git clone https://github.com/microsoft/vcpkg.git "%GITHUB_WORKSPACE%\..\idm-deps\vcpkg" || exit /b 1
+          call "%GITHUB_WORKSPACE%\..\idm-deps\vcpkg\bootstrap-vcpkg.bat" -disableMetrics || exit /b 1
+          call native\torrent-worker\build-windows.cmd || exit /b 1
+
+      - name: Torrent worker is there
+        shell: powershell
+        run: |
+          $worker = "artifacts\torrent-worker\win-x64\inbound-torrent.exe"
+          if (-not (Test-Path -LiteralPath $worker -PathType Leaf)) { throw "$worker is missing." }
+          & $worker --version
+
+      - name: Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup was not installed." }
+
+      - name: Setup (without the Firefox add-on)
+        shell: powershell
+        run: .\scripts\build-installer.ps1 -Version $env:VERSION -NoFirefoxXpi
+
+      - name: Zip
+        shell: powershell
+        run: .\scripts\package.ps1 -Version $env:VERSION
+
+      - name: Keep them as run artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-build-${{ env.VERSION }}
+          path: |
+            artifacts/installer/DownloadManagerSetup-${{ env.VERSION }}.exe
+            artifacts/package/download-manager-${{ env.VERSION }}.zip
+          if-no-files-found: error
+          retention-days: 14

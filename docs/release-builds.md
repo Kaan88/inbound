@@ -140,8 +140,8 @@ retrying.
 The AppImage is built on Linux x86_64 with the .NET 10 SDK and `appimagetool`: `scripts/package-appimage.sh` writes
 `artifacts/linux/Inbound-<version>-x86_64.AppImage`. It needs the Linux torrent worker first, and stops without it:
 `docker build -f native/torrent-worker/Dockerfile.build --build-arg TARGET=x64 --output artifacts/torrent-worker/linux-x64 native/torrent-worker`,
-or set `TORRENT_WORKER` to a worker built earlier. Any Linux runner with that worker works; the project's own builds run on a
-self-hosted Forgejo Actions runner, not on GitHub. Sign it with the same key as the Windows manifest:
+or set `TORRENT_WORKER` to a worker built earlier. Any Linux runner with that worker works; the release's own are built
+on GitHub (see "GitHub workflows" below). Sign it with the same key as the Windows manifest:
 
 ```sh
 scripts/prepare-appimage-release.sh X.Y.Z artifacts/linux/Inbound-X.Y.Z-x86_64.AppImage <path to update-signing.pem>
@@ -152,3 +152,36 @@ Upload all three with the Windows files. When a release does not rebuild the App
 `manifest-linux-x64.json` (it names the earlier release's AppImage) so that
 `releases/latest/download/manifest-linux-x64.json` keeps answering. The signed file must be the exact file uploaded:
 the manifest binds its size and SHA-256.
+
+### The other Linux packages (X.8)
+
+`scripts/package-linux.sh` makes four more files from the AppDir that `package-appimage.sh` leaves in
+`artifacts/linux/AppDir`, so run that first:
+
+| File | For |
+| --- | --- |
+| `Inbound-<version>-x86_64.tar.gz` | Any distribution: unpack and run `./inbound` |
+| `inbound_<version>-1_amd64.deb` | Debian, Ubuntu, Mint |
+| `inbound-<version>-1.x86_64.rpm` | Fedora, openSUSE |
+| `inbound-<version>-1-x86_64.pkg.tar.zst` | Arch, CachyOS, Manjaro (`pacman -U`) |
+
+and `SHA256SUMS-linux-packages`. The three packages need [nfpm](https://nfpm.goreleaser.com) on PATH or named by
+`NFPM`; without it only the tar.gz is made. A package installs the same files as the AppImage under
+`/usr/lib/inbound`, the launcher `/usr/bin/inbound`, a menu entry and an icon. None of them updates itself: the
+in-app updater is for the AppImage, so they are not in `manifest-linux-x64.json` and are not signed.
+
+## GitHub workflows (CI.1)
+
+| Workflow | Starts | Does |
+| --- | --- | --- |
+| `ci.yml` (CI) | Every push to main and every pull request, except Markdown and docs only | Windows: `scripts\build.ps1` and `scripts\test.ps1`. Linux: the web UI, the extension, the programs the Linux build ships, and the tests that pass on Linux |
+| `appimage.yml` (Linux packages) | A published release, or by hand | With a tag: builds the AppImage and the four packages from the tag, signs `manifest-linux-x64.json` and attaches everything to the release. By hand without a tag: builds the chosen branch and keeps the files as run artifacts |
+| `docker.yml` (Docker image) | A published release, or by hand from a tag | Builds and pushes the server image |
+| `windows.yml` (Windows build) | By hand | An unsigned test Setup (no Firefox add-on) and zip as run artifacts. The release's Windows files are still made locally, as above |
+
+The release workflows start when the release is **published**, not when the tag is pushed. GitHub starts nothing
+for a push whose commit message has `[skip ci]`, and that is how 0.7.3 and 0.7.4 got no AppImage and no Docker
+image. So the order is: push the tag, create the release with the Windows files (`public.pem` among them, which the
+Linux workflow checks the signing key against), publish it. To build for a tag that has a release already: Actions,
+Linux packages, Run workflow, and give the tag; for the image, Actions, Docker image, Run workflow, and choose the
+tag under "Use workflow from".
