@@ -1460,10 +1460,19 @@ public sealed partial class MockTorBox
         var file = link.File;
         byte[] content;
         DateTimeOffset modified;
+        bool dead;
         lock (_sync)
         {
+            // Looked at again here, with the content: a link that died while this request waited serves nothing.
+            dead = link.Expired;
             content = file.Content;
             modified = file.LastModified;
+        }
+
+        if (dead)
+        {
+            context.Response.StatusCode = ExpiredLinkStatus;
+            return;
         }
 
         var lastModified = modified.ToString("R", CultureInfo.InvariantCulture);
@@ -1551,7 +1560,17 @@ public sealed partial class MockTorBox
                 written += count;
                 if (link.CountBytes(count))
                 {
-                    LinkDied?.Invoke();
+                    // What the test changes at this moment (other content, a new md5) is in place before anyone
+                    // can see the link as dead, and under the lock the list and the CDN read under. Otherwise a
+                    // client that noticed the dead link first could read the old md5 and then be served the new
+                    // content: when the killing bytes were the last of a request, that client is not held up by
+                    // this answer, and a busy machine left it time for it (CI.3).
+                    lock (_sync)
+                    {
+                        LinkDied?.Invoke();
+                        link.Kill();
+                    }
+
                     context.Abort();
                     return;
                 }
@@ -1612,17 +1631,22 @@ public sealed class MockCdnLink(string uuid, MockTorBoxItem item, MockTorBoxFile
         lock (_sync) _ranges.Add(range);
     }
 
-    /// <summary>Returns true when this count is the one that kills the link.</summary>
+    private int _limitReached;
+
+    /// <summary>
+    /// Returns true when this count is the one that kills the link, to one caller only. The link is still alive
+    /// then: the caller makes its changes and calls <see cref="Kill"/>.
+    /// </summary>
     internal bool CountBytes(int count)
     {
         var total = Interlocked.Add(ref _served, count);
-        if (diesAfterBytes is { } limit && total >= limit && !Expired)
-        {
-            Expired = true;
-            AbortInFlight = true;
-            return true;
-        }
+        return diesAfterBytes is { } limit && total >= limit && !Expired && Interlocked.Exchange(ref _limitReached, 1) == 0;
+    }
 
-        return false;
+    /// <summary>New requests are refused and answers under way are cut off.</summary>
+    internal void Kill()
+    {
+        Expired = true;
+        AbortInFlight = true;
     }
 }
