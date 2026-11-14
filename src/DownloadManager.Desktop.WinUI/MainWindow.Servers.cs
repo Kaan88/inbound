@@ -254,7 +254,7 @@ public sealed partial class MainWindow
 
     /// <summary>UI.R37: the latest version the shown server is held to (<see cref="VersionStatus.LatestFor"/>).</summary>
     private string? ShownServerLatest
-        => VersionStatus.LatestFor(_status?.LatestVersion, _connection.Hello?.HostKind, _localStatus?.LatestVersion);
+        => VersionStatus.LatestFor(_status?.LatestVersion, _connection.Hello?.HostKind, _localStatus?.LatestVersion, _local.Hello?.HostKind);
 
     /// <summary>
     /// The connection words at the right of the status bar (UI.R37): <paramref name="text"/>, then a link to the update

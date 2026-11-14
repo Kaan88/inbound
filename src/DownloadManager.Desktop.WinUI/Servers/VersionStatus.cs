@@ -41,21 +41,28 @@ internal static class VersionStatus
         => Compare(version, latest) < 0 ? $"{version} (not latest)" : null;
 
     /// <summary>
-    /// The latest version to hold another server to. Its own update check is the one for its build (a Linux server
-    /// reads the Linux manifest). Without one, this PC's: every Inbound build (Windows Setup, the Linux AppImage, the
-    /// Docker server) is made from the same version tag with one version number (Directory.Build.props, the
-    /// <c>v*</c> tag workflows), so this PC's latest is theirs too. A Host of a kind this window doesn't know isn't
-    /// held to it.
+    /// UI.B33: the latest version to hold another server to, which is only one found for its own install kind. Its own
+    /// update check is the one for its build (a Linux server reads the Linux manifest). Without one, this PC's latest
+    /// stands for it only when this PC is the same kind (Windows with Windows, Linux with Linux): releases don't ship
+    /// every kind from each tag (0.7.3 had no Docker image). A Docker server (<see cref="HostKinds.Server"/>) has no
+    /// check yet, and a Host of a kind this window doesn't know isn't held to anything; both show the version alone.
     /// </summary>
-    public static string? LatestFor(string? serverLatest, string? serverKind, string? thisPcLatest)
+    public static string? LatestFor(string? serverLatest, string? serverKind, string? thisPcLatest, string? thisPcKind)
     {
         if (!string.IsNullOrWhiteSpace(serverLatest)) return serverLatest;
-        return SameReleaseLine(serverKind) ? thisPcLatest : null;
+        return SameInstallKind(serverKind, thisPcKind) ? thisPcLatest : null;
     }
 
-    /// <summary>A Host from before <c>hostKind</c> is a desktop Host of the same releases.</summary>
-    public static bool SameReleaseLine(string? kind)
-        => kind is null or HostKinds.Windows or HostKinds.Linux or HostKinds.Server;
+    /// <summary>
+    /// Whether two Hosts are the same install kind. A Host from before <c>hostKind</c> is a Windows one. The Docker
+    /// server kind is never this PC's: a desktop window runs on Windows or Linux.
+    /// </summary>
+    public static bool SameInstallKind(string? serverKind, string? thisPcKind)
+    {
+        var server = serverKind ?? HostKinds.Windows;
+        var pc = thisPcKind ?? HostKinds.Windows;
+        return server == pc && server is HostKinds.Windows or HostKinds.Linux;
+    }
 
     /// <summary>Negative when <paramref name="version"/> is older than <paramref name="latest"/>; null when either can't be read.</summary>
     public static int? Compare(string? version, string? latest)
