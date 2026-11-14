@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Performance ideas written up; PERF.8 to PERF.14 added (owner, 2026-11-14; no code)
+
+- Asked (owner, 2026-11-14): what a Rust rewrite of the core would gain and lose (answer: mostly loss; the work is network- and disk-bound), then "writeup some possible performance gains, areas", then "add it, and should some benchmarking be done for possible rust replacements?"
+- **Done:** `docs/plans/performance-areas.md`, from reading the code: startup of the small processes (no JSON source generation, AOT, ReadyToRun), the transfer loop, saves, IPC events, the window, and a benchmarking section. ROADMAP PERF.8 to PERF.14, all not started.
+- **Not done:** nothing measured, no code changed. PERF.8 (the baseline) comes first; PERF.14 (a Rust test program for the transfer loop) only if the baseline shows the .NET engine is the limit.
+
 ### Owner reports, 2026-11-14: Linux popup double-click does not start an AppImage (EXT.B8), no minimized start on Linux (UI.B36)
 
 - Reported (owner, 2026-11-14, on Linux): "double clicking extension does not launch executable, an appimage in this case" and "on startup, app does not start minimized, unlike windows." The screenshot shows the popup with `Caustica-0.12.0-x86_64.AppImage` Completed (765 MB), the paired server `inbound.kweb.ovh` with no downloads, and the red banner "Update Inbound to use this."
