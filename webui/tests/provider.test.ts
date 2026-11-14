@@ -5,7 +5,7 @@ import {
 } from '../src/lib/archives';
 import { archivePrimary } from '../src/lib/list';
 import {
-  accountView, actionsOf, buildFileTree, canBrowse, canChooseEarly, canDeleteFromProvider, checkable, choiceOf, checkedState, countedItems, downloadStarted,
+  accountView, actionsOf, buildFileTree, canBrowse, canChooseEarly, canDeleteFromProvider, canDeleteJobsFromProvider, commonProviderName, deleteJobsQuestion, deleteQuestion, checkable, choiceOf, checkedState, countedItems, downloadStarted,
   failureText, filterHosters, hosterDetails, isFullPath, isInProviderQueue, itemView, jobFor, jobRow, localWords, needsTheRest, removeQuestion,
   restoreChoice, setChecked, shortStatus, showsWaiting, sortItems, treeSummary, visibleNodes, choosableIds,
 } from '../src/lib/remote';
@@ -83,6 +83,16 @@ describe('remote rows', () => {
   it('asks the remove question in the desktop\'s words', () => {
     expect(removeQuestion([job({ name: 'Linux' })])).toBe('Take \'Linux\' off this list? This doesn\'t touch TorBox: anything on your account stays there, and this app just stops watching it.');
     expect(removeQuestion([job(), job({ id: 'x' })])).toContain('these 2 items');
+  });
+
+  it('offers Delete from the provider in the download list only when every selected job knows its item (TB.F16)', () => {
+    expect(canDeleteJobsFromProvider([job({ itemId: '1' }), job({ id: 'b', itemId: '2' })])).toBe(true);
+    expect(canDeleteJobsFromProvider([job({ itemId: '1' }), job({ id: 'b' })])).toBe(false);
+    expect(canDeleteJobsFromProvider([job({ stage: 'queued' })])).toBe(false);
+    expect(canDeleteJobsFromProvider([])).toBe(false);
+    expect(commonProviderName([job({ itemId: '1' })])).toBe('TorBox');
+    expect(deleteJobsQuestion([job({ name: 'Linux', itemId: '1' })])).toBe(deleteQuestion('Linux', 'TorBox'));
+    expect(deleteJobsQuestion([job({ itemId: '1' }), job({ id: 'b', itemId: '2' })])).toBe("Delete these 2 items from your TorBox account? This can't be undone. Files already on this computer are kept.");
   });
 
   it('turns a failure kind into plain words, and never shows an address', () => {

@@ -182,6 +182,9 @@ internal static class RemoteRules
     /// <summary><c>remote.deleteRemote</c> takes a job, and refuses one whose item isn't known. An item with no job on the list can't be deleted from here.</summary>
     public static bool CanDeleteFromProvider(RemoteJobDto? job) => job is { ItemId.Length: > 0 };
 
+    /// <summary>TB.F16: the main list's "Delete from {provider}…" is offered when every selected job passes the same rule as the My provider window.</summary>
+    public static bool CanDeleteAllFromProvider(IReadOnlyList<RemoteJobDto> jobs) => jobs.Count > 0 && jobs.All(job => CanDeleteFromProvider(job));
+
     /// <summary>
     /// U-WL-11: a My provider row's quick actions, as the web UI's row menu has them (D2d): the window's buttons for
     /// that row, plus copying the name. The provider's items carry no link, so the name is all there is to copy.
@@ -502,16 +505,30 @@ internal static partial class RemoteText
     /// <summary>Said in passing once "Download All Files" was taken, for how many rows the Host took it.</summary>
     public static string AllFilesTaken(int rows) => rows == 1 ? "All its files will download." : $"All files of {rows} items will download.";
 
-    public static string RemoveQuestion(IReadOnlyList<RemoteJobDto> jobs)
+    /// <summary>The provider's name when the jobs share one, otherwise "the provider".</summary>
+    public static string CommonProviderName(IReadOnlyList<RemoteJobDto> jobs)
     {
         var providers = jobs.Select(ProviderName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var provider = providers.Count == 1 ? providers[0] : "the provider";
+        return providers.Count == 1 ? providers[0] : "the provider";
+    }
+
+    public static string RemoveQuestion(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var provider = CommonProviderName(jobs);
         var what = jobs.Count == 1 ? $"'{JobName(jobs[0])}'" : $"these {jobs.Count} items";
         return $"Take {what} off this list? This doesn't touch {provider}: anything on your account stays there, and this app just stops watching it.";
     }
 
     public static string DeleteQuestion(string itemName, string provider)
         => $"Delete '{itemName}' from your {provider} account? This can't be undone. Files already on this computer are kept.";
+
+    /// <summary>TB.F16: the same question for the main list, where several rows may be selected.</summary>
+    public static string DeleteQuestion(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var provider = CommonProviderName(jobs);
+        if (jobs.Count == 1) return DeleteQuestion(JobName(jobs[0]), provider);
+        return $"Delete these {jobs.Count} items from your {provider} account? This can't be undone. Files already on this computer are kept.";
+    }
 
     public static string LinkPasswordHint(RemoteJobDto job)
         => $"'{JobName(job)}' needs the password its source site set for the link. This isn't an archive password. It is kept encrypted.";

@@ -354,6 +354,37 @@ public sealed class RemoteRulesTests
         Assert.False(RemoteRules.CanDeleteFromProvider(null));
     }
 
+    [Fact]
+    public void TheMainListOffersDeleteFromTheProviderOnlyWhenEveryRowPassesTheSameRule()
+    {
+        var unknown = Job("waiting");
+        unknown.ItemId = null;
+
+        Assert.True(RemoteRules.CanDeleteAllFromProvider([Job("failed")]));
+        Assert.True(RemoteRules.CanDeleteAllFromProvider([Job("waiting"), Job("failed")]));
+        Assert.False(RemoteRules.CanDeleteAllFromProvider([Job("waiting"), unknown]));
+        Assert.False(RemoteRules.CanDeleteAllFromProvider([unknown]));
+        Assert.False(RemoteRules.CanDeleteAllFromProvider([]));
+
+        Assert.Equal("TorBox", RemoteText.CommonProviderName([Job("waiting"), Job("failed")]));
+        var one = RemoteText.DeleteQuestion([Job("waiting")]);
+        Assert.Equal(RemoteText.DeleteQuestion(RemoteText.JobRow(Job("waiting"), DateTimeOffset.Now).Name, "TorBox"), one);
+        Assert.Contains("these 2 items from your TorBox account", RemoteText.DeleteQuestion([Job("waiting"), Job("failed")]), StringComparison.Ordinal);
+        Assert.Contains("can't be undone", RemoteText.DeleteQuestion([Job("waiting"), Job("failed")]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheMainListMenuSharesTheProviderWindowsDialogAndDoesNotDeleteLocalFiles()
+    {
+        var menu = File.ReadAllText(WindowLocalFindingsTests.WinUiFile("MainWindow.Remote.cs"));
+        Assert.Contains("_menuRemoteDeleteFromProvider = CreateContextItem(", menu, StringComparison.Ordinal);
+        Assert.Contains("RemoteRules.CanDeleteAllFromProvider(jobs)", menu, StringComparison.Ordinal);
+        Assert.Contains("ProviderPanel.ConfirmDeleteAsync(", menu, StringComparison.Ordinal);
+        Assert.Contains("_remote.DeleteRemoteAsync(job.Id, confirmed: true)", menu, StringComparison.Ordinal);
+        var panel = File.ReadAllText(WindowLocalFindingsTests.WinUiFile("ProviderPanel.cs"));
+        Assert.Contains("ConfirmDeleteAsync(_root.XamlRoot", panel, StringComparison.Ordinal);
+    }
+
     private static RemoteJobDto Asking(string state, string mode)
     {
         var job = Job(state);

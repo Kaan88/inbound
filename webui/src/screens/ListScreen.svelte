@@ -23,7 +23,7 @@
   } from '../lib/columns';
   import { LongPress } from '../lib/longpress';
   import { canStartQueue, canStopQueue, orderedQueues, queueStartedText, queueStateText } from '../lib/queues';
-  import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
+  import { actionsOf, canDeleteJobsFromProvider, commonProviderName, deleteJobsQuestion, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
   import { foldTools } from '../lib/toolbar';
@@ -710,6 +710,22 @@
     };
   }
 
+  /** TB.F16: the same question and call as My provider. The Host takes each deleted job off the list; downloaded files stay. */
+  function askDeleteFromProvider(jobs: RemoteJob[]) {
+    const deletable = jobs.filter((job) => canDeleteJobsFromProvider([job]));
+    if (deletable.length === 0) return;
+    const provider = commonProviderName(deletable);
+    confirm = {
+      title: `Delete from ${provider}?`,
+      text: deleteJobsQuestion(deletable),
+      ok: `Delete from ${provider}`,
+      onok: async () => {
+        for (const job of deletable) await store.attempt('remote.deleteRemote', { jobId: job.id, confirmed: true });
+        selected = new Set();
+      },
+    };
+  }
+
   async function answer(ok: boolean) {
     const current = confirm;
     const box = boxChecked;
@@ -916,6 +932,7 @@
         { label: 'Check Now', hint: 'F5', hidden: !actions.some((a) => a.checkNow), onselect: () => void runRemote('checkNow', remote.filter((j) => actionsOf(j).checkNow)) },
         { label: `Start Now on ${name}`, hidden: !queuedHere, onselect: () => void each(remote, 'remote.startQueued', (j) => ({ jobId: j.id }), 'Started at the provider.') },
         { label: 'Remove from Queue…', hidden: !queuedHere, onselect: () => askDequeue(remote) },
+        { label: `Delete from ${commonProviderName(remote)}…`, hidden: !canDeleteJobsFromProvider(remote), onselect: () => askDeleteFromProvider(remote) },
         { label: 'Details…', hidden: remote.length !== 1, onselect: () => (remoteOpen = remote[0]) },
         { label: 'Remove from List…', hint: 'Delete', onselect: () => void removeSideRows() },
       );
