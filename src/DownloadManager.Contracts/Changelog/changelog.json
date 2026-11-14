@@ -1,6 +1,26 @@
 {
   "versions": [
     {
+      "version": "0.7.6",
+      "date": "2026-11-14",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Delete from TorBox is back in the download list's right-click menu, in the desktop window and the web UI. It asks first, and works on several selected downloads when they all came from the same provider.", "tags": ["torbox", "all"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "A folder set in Options through this PC's own share, such as \\\\localhost\\D$\\Downloads, is no longer removed when the last download in it is deleted together with its file.", "tags": ["windows"] },
+            { "text": "The dm command starts Inbound in the background when it is not running, instead of failing to find it.", "tags": ["linux"] },
+            { "text": "A server is marked (not latest) only against the newest version of its own kind, so a Docker server is no longer compared with the Windows release.", "tags": ["server", "windows", "linux"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.5",
       "date": "2026-11-14",
       "sections": [
