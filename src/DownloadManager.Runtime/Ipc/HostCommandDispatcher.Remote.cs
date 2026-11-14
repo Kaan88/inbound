@@ -100,7 +100,7 @@ public sealed partial class HostCommandDispatcher
         {
             // Never the exception's words: its text could quote what the request carried.
             _log.Error($"IPC command '{message.Type}' failed: {ex.GetType().Name}.");
-            await Reply(client, message, replyType, new { Ok = false, Error = $"That could not be done ({ex.GetType().Name}). See the log for when it happened." }).ConfigureAwait(false);
+            await Reply(client, message, replyType, new OkErrorPayload { Ok = false, Error = $"That could not be done ({ex.GetType().Name}). See the log for when it happened." }).ConfigureAwait(false);
         }
 
         return true;
@@ -116,7 +116,7 @@ public sealed partial class HostCommandDispatcher
         if (message.Payload is { } payload && payload.GetRawText().Length >= Protocol.MaxFrameBytes - 1024)
         {
             _log.Warn($"IPC reply '{type}' was too large to send.");
-            await Reply(client, request, type, new { Ok = false, Error = "This answer is too large to send. For a list, ask for a smaller page." }).ConfigureAwait(false);
+            await Reply(client, request, type, new OkErrorPayload { Ok = false, Error = "This answer is too large to send. For a list, ask for a smaller page." }).ConfigureAwait(false);
             return;
         }
 

@@ -591,12 +591,12 @@ internal static partial class Program
             }
             case "pause-all":
             {
-                var reply = await client.RequestAsync(MessageTypes.JobsPauseAll, new { }).ConfigureAwait(false);
+                var reply = await client.RequestAsync(MessageTypes.JobsPauseAll, new EmptyPayload()).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
             case "resume-all":
             {
-                var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new { }).ConfigureAwait(false);
+                var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new EmptyPayload()).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
             case "queue":
@@ -688,7 +688,7 @@ internal static partial class Program
 
                 if (sub == "shutdown")
                 {
-                    var reply = await client.RequestAsync(MessageTypes.HostShutdown, new { }).ConfigureAwait(false);
+                    var reply = await client.RequestAsync(MessageTypes.HostShutdown, new EmptyPayload()).ConfigureAwait(false);
                     return PrintAction(reply, json);
                 }
 
@@ -1122,7 +1122,7 @@ internal static partial class Program
             "install" => MessageTypes.UpdateInstall,
             _ => MessageTypes.UpdateCheck,
         };
-        var reply = await client.RequestAsync(type, new { }).ConfigureAwait(false);
+        var reply = await client.RequestAsync(type, new EmptyPayload()).ConfigureAwait(false);
 
         if (sub == "install")
         {
@@ -2489,14 +2489,14 @@ internal sealed class CliClient : IAsyncDisposable
         }
     }
 
-    public Task<SnapshotDto> SnapshotAsync() => AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { });
+    public Task<SnapshotDto> SnapshotAsync() => AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new EmptyPayload());
 
-    public Task<HostStatusDto> StatusAsync() => AskAsync<HostStatusDto>(MessageTypes.HostStatus, new { });
+    public Task<HostStatusDto> StatusAsync() => AskAsync<HostStatusDto>(MessageTypes.HostStatus, new EmptyPayload());
 
     /// <summary>The settings as the Host holds them now: read right before a change is made to them and sent back.</summary>
     public async Task<SettingsDto> SettingsAsync()
     {
-        var result = await AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { }).ConfigureAwait(false);
+        var result = await AskAsync<SettingsResult>(MessageTypes.SettingsGet, new EmptyPayload()).ConfigureAwait(false);
         return result.Ok ? result.Settings : throw new HostRefusedException(result.Error ?? "Inbound did not send its settings.");
     }
 

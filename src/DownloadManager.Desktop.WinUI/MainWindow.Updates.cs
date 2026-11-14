@@ -450,7 +450,7 @@ public sealed partial class MainWindow
     /// earlier one is still running.
     /// </summary>
     private static async Task<UpdateDownloadResult?> StartUpdateDownloadAsync()
-        => (await ServerConnector.SendOnceAsync(ServerTarget.Local, IpcMessage.Create(MessageTypes.UpdateDownload, new { }),
+        => (await ServerConnector.SendOnceAsync(ServerTarget.Local, IpcMessage.Create(MessageTypes.UpdateDownload, new EmptyPayload()),
             UpdateDownloadTimeout)).GetPayload<UpdateDownloadResult>();
 
     /// <summary>The longest wait for the installer (the signed size is at most 1 GB).</summary>

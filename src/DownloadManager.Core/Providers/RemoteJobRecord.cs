@@ -65,86 +65,88 @@ public sealed record RemoteFileKey(string Path, long Size)
 /// drops fields it doesn't know. The protected fields only ever hold ciphertext, so a record is safe
 /// to write, copy and log; nothing else in it is a link or a password.
 /// </summary>
+// PERF.10: `set`, not `init`, on every member: generated JSON metadata builds a type with init-only members without
+// running its property initializers, so a member missing from an old file would read as 0 or null instead of its default.
 public sealed record RemoteJobRecord
 {
     public const int CurrentSchemaVersion = 1;
 
-    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
-    public required Guid Id { get; init; }
-    public required string Provider { get; init; }
-    public required RemoteItemKind Kind { get; init; }
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public required Guid Id { get; set; }
+    public required string Provider { get; set; }
+    public required RemoteItemKind Kind { get; set; }
 
-    public string? ProtectedInput { get; init; }
-    public string? ProtectedTorrent { get; init; }
-    public string? ProtectedLinkPassword { get; init; }
+    public string? ProtectedInput { get; set; }
+    public string? ProtectedTorrent { get; set; }
+    public string? ProtectedLinkPassword { get; set; }
     /// <summary>
     /// For the archives this job brings, which is not the source site's password for the link. Held
     /// here only until there is a package to give it to, and <see cref="ArchivePasswordHandedOver"/> says that happened.
     /// </summary>
-    public string? ProtectedArchivePassword { get; init; }
-    public bool ArchivePasswordHandedOver { get; init; }
+    public string? ProtectedArchivePassword { get; set; }
+    public bool ArchivePasswordHandedOver { get; set; }
     /// <summary>It came with the input, such as from a container, and nobody typed it. It never replaces one the package already has.</summary>
-    public bool ArchivePasswordOffered { get; init; }
+    public bool ArchivePasswordOffered { get; set; }
     /// <summary>Where local jobs go when this job is one of several that belong together. Null gives it a package of its own.</summary>
-    public RemoteJobPlacement? Placement { get; init; }
+    public RemoteJobPlacement? Placement { get; set; }
 
     /// <summary>What the provider knows the input by, worked out here, so it can be found after a lost answer.</summary>
-    public string? PredictedHash { get; init; }
-    public string? ItemId { get; init; }
-    public string? Name { get; init; }
+    public string? PredictedHash { get; set; }
+    public string? ItemId { get; set; }
+    public string? Name { get; set; }
     /// <summary>Host name only, without path or key.</summary>
-    public string? DisplayHost { get; init; }
-    public string? HosterName { get; init; }
+    public string? DisplayHost { get; set; }
+    public string? HosterName { get; set; }
 
-    public RemoteJobState State { get; init; }
-    public RemoteStage? Stage { get; init; }
-    public string? RawState { get; init; }
-    public double Progress { get; init; }
-    public long SpeedBytesPerSecond { get; init; }
-    public long? EtaSeconds { get; init; }
-    public bool Cached { get; init; }
+    public RemoteJobState State { get; set; }
+    public RemoteStage? Stage { get; set; }
+    public string? RawState { get; set; }
+    public double Progress { get; set; }
+    public long SpeedBytesPerSecond { get; set; }
+    public long? EtaSeconds { get; set; }
+    public bool Cached { get; set; }
 
-    public RemoteFailureKind? FailureKind { get; init; }
-    public string? FailureMessage { get; init; }
-    public DateTimeOffset? NextCheckAt { get; init; }
-    public int ConsecutiveFailures { get; init; }
-    public int UnchangedPolls { get; init; }
+    public RemoteFailureKind? FailureKind { get; set; }
+    public string? FailureMessage { get; set; }
+    public DateTimeOffset? NextCheckAt { get; set; }
+    public int ConsecutiveFailures { get; set; }
+    public int UnchangedPolls { get; set; }
 
     /// <summary>Null means the default download folder when the local jobs are created.</summary>
-    public string? Destination { get; init; }
-    public int QueueId { get; init; }
-    public string StartMode { get; init; } = "startNow";
-    public RemoteSelectionMode SelectionMode { get; init; }
-    public IReadOnlyList<string> SelectedFileIds { get; init; } = [];
+    public string? Destination { get; set; }
+    public int QueueId { get; set; }
+    public string StartMode { get; set; } = "startNow";
+    public RemoteSelectionMode SelectionMode { get; set; }
+    public IReadOnlyList<string> SelectedFileIds { get; set; } = [];
     /// <summary>
     /// With <see cref="RemoteSelectionMode.Chosen"/>: files chosen from the input's own list, such as a .torrent file's,
     /// before the provider had one. Turned into <see cref="SelectedFileIds"/> when the item is ready. Any still here
     /// then weren't found, and the job asks again rather than leave them out.
     /// </summary>
-    public IReadOnlyList<RemoteFileKey> SelectedPaths { get; init; } = [];
+    public IReadOnlyList<RemoteFileKey> SelectedPaths { get; set; } = [];
 
-    public bool ApprovedUncached { get; init; }
+    public bool ApprovedUncached { get; set; }
     /// <summary>It isn't cached and nobody has agreed to start work on the provider yet, so nothing was sent.</summary>
-    public bool ApprovalNeeded { get; init; }
+    public bool ApprovalNeeded { get; set; }
     /// <summary>
     /// A copied link nobody has asked for yet. <see cref="ApprovalNeeded"/> is set too, but nothing is known about
     /// whether it is cached, because nothing is sent or even asked until the user agrees.
     /// </summary>
-    public bool HeldForApproval { get; init; }
+    public bool HeldForApproval { get; set; }
 
-    public Guid? PackageId { get; init; }
+    public Guid? PackageId { get; set; }
     /// <summary>What was left out and why, in words for the user.</summary>
-    public IReadOnlyList<string> Notes { get; init; } = [];
+    public IReadOnlyList<string> Notes { get; set; } = [];
 
-    public DateTimeOffset CreatedAt { get; init; }
-    public DateTimeOffset UpdatedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     /// <summary>When the submission was last sent, or about to be. The grace period counts from here.</summary>
-    public DateTimeOffset? SubmittedAt { get; init; }
+    public DateTimeOffset? SubmittedAt { get; set; }
     /// <summary>When a submitted item was first missing from everything the provider lists.</summary>
-    public DateTimeOffset? MissingSince { get; init; }
-    public int Resubmits { get; init; }
+    public DateTimeOffset? MissingSince { get; set; }
+    public int Resubmits { get; set; }
     /// <summary>What the provider itself said when it last failed to take this, in clean words. Null if it said nothing.</summary>
-    public string? LastSubmitAnswer { get; init; }
+    public string? LastSubmitAnswer { get; set; }
 }
 
 /// <summary>
@@ -161,11 +163,11 @@ public sealed record RemoteJobPlacement(string PackageKey, string? PackageName, 
 public sealed record RemoteAccountPacing
 {
     /// <summary>The next web download may be created at this time. Reserved before the request is sent.</summary>
-    public DateTimeOffset? NextWebCreateAt { get; init; }
+    public DateTimeOffset? NextWebCreateAt { get; set; }
     /// <summary>The provider said to stop calling until then, with a 429.</summary>
-    public DateTimeOffset? RateLimitedUntil { get; init; }
+    public DateTimeOffset? RateLimitedUntil { get; set; }
     /// <summary>Set by a quota error, and nothing new is created until the user retries.</summary>
-    public string? CreationStoppedReason { get; init; }
+    public string? CreationStoppedReason { get; set; }
 }
 
 public interface IRemoteJobStore

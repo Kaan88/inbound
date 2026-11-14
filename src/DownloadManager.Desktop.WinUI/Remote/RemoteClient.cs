@@ -281,7 +281,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
     /// <summary>The provider's list of sites, from the Host's hourly cache.</summary>
     public Task<RemoteHostersResult> GetHostersAsync(CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteHosters, new { }, MessageTypes.RemoteHostersResult,
+        => SlowAsync(MessageTypes.RemoteHosters, new EmptyPayload(), MessageTypes.RemoteHostersResult,
             error => new RemoteHostersResult { Error = RemoteText.Failure(error) }, cancellationToken);
 
     // ---- remote.classify, add, list, item, files, select, retry, checkNow, remove, deleteRemote ----
@@ -435,7 +435,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     public async Task<RemoteListResult> ListAsync(CancellationToken cancellationToken = default)
     {
         _post(State.BeginJobList);
-        var result = await QuickAsync(MessageTypes.RemoteList, new { }, MessageTypes.RemoteListResult,
+        var result = await QuickAsync(MessageTypes.RemoteList, new EmptyPayload(), MessageTypes.RemoteListResult,
             error => new RemoteListResult { Error = error }, cancellationToken).ConfigureAwait(false);
         if (result.Ok) _post(() => State.ApplyJobList(result.Jobs));
         return result;
@@ -630,7 +630,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     // ---- archive.* ----------------------------------------------------------------------------
 
     public Task<ArchiveSettingsResult> GetArchiveSettingsAsync(CancellationToken cancellationToken = default)
-        => QuickAsync(ArchiveMessageTypes.SettingsGet, new { }, ArchiveMessageTypes.SettingsResult, FailedSettings, cancellationToken);
+        => QuickAsync(ArchiveMessageTypes.SettingsGet, new EmptyPayload(), ArchiveMessageTypes.SettingsResult, FailedSettings, cancellationToken);
 
     /// <summary>A magnet, or a .torrent file on this PC (uploaded first when the target is another server).</summary>
     /// <param name="destination">T3: the folder whose free space the Host measures; null is the category folder.</param>
@@ -700,7 +700,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
     /// <summary>T2: the port hint of Options › Torrents.</summary>
     public Task<TorrentNetworkResult> GetTorrentNetworkAsync(CancellationToken cancellationToken = default)
-        => QuickAsync(TorrentMessageTypes.Network, new { }, TorrentMessageTypes.NetworkResult,
+        => QuickAsync(TorrentMessageTypes.Network, new EmptyPayload(), TorrentMessageTypes.NetworkResult,
             error => new TorrentNetworkResult { Error = error }, cancellationToken);
 
     public Task<ArchiveSettingsResult> SetArchiveSettingsAsync(ArchiveSettingsUpdate update, CancellationToken cancellationToken = default)
@@ -709,7 +709,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     public async Task<ArchiveListReply> ListArchivesAsync(CancellationToken cancellationToken = default)
     {
         _post(State.BeginArchiveList);
-        var reply = await QuickAsync(ArchiveMessageTypes.List, new { }, ArchiveMessageTypes.ListResult,
+        var reply = await QuickAsync(ArchiveMessageTypes.List, new EmptyPayload(), ArchiveMessageTypes.ListResult,
             error => new ArchiveListReply(error), ReadArchiveList, cancellationToken).ConfigureAwait(false);
         if (reply.Ok) _post(() => State.ApplyArchiveList(reply.Sets));
         return reply;
@@ -1132,7 +1132,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(_quickTimeout);
         _post(State.BeginArchiveList);
-        var reply = await RequestOnControlAsync(ArchiveMessageTypes.List, new { }, deadline.Token).ConfigureAwait(false);
+        var reply = await RequestOnControlAsync(ArchiveMessageTypes.List, new EmptyPayload(), deadline.Token).ConfigureAwait(false);
         var supported = reply.Type == ArchiveMessageTypes.ListResult;
         var sets = supported ? reply.GetPayload<ArchiveListResult>().Sets : [];
         _post(() =>

@@ -36,13 +36,16 @@ public sealed class TorrentListEntry
     public List<int>? FileIndexes { get; set; }
 }
 
+/// <summary>PERF.10: generated metadata for the saved-list file (web defaults, indented; the same bytes as before).</summary>
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(JsonSerializerDefaults.Web, WriteIndented = true,
+    GenerationMode = System.Text.Json.Serialization.JsonSourceGenerationMode.Metadata)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(List<JobListEntry>))]
+internal sealed partial class JobListJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+{
+}
+
 public static class JobListFile
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
-
     /// <summary>An entry that is a torrent (from this list format, or a bare magnet in an older or hand-made list).</summary>
     public static bool IsTorrent(JobListEntry entry)
         => entry.Torrent is not null || entry.Url.TrimStart().StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
@@ -72,14 +75,14 @@ public static class JobListFile
                 ContentType = job.Torrent is null ? job.HandoffContentType : null,
             })
             .ToList();
-        return JsonSerializer.Serialize(entries, Options);
+        return JsonSerializer.Serialize(entries, JobListJsonContext.Default.ListJobListEntry);
     }
 
     public static IReadOnlyList<JobListEntry> Deserialize(string json)
     {
         try
         {
-            var entries = JsonSerializer.Deserialize<List<JobListEntry>>(json, Options);
+            var entries = JsonSerializer.Deserialize(json, JobListJsonContext.Default.ListJobListEntry);
             if (entries is null)
             {
                 throw new FormatException("The download list is empty.");

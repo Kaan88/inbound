@@ -30,4 +30,8 @@
     <ProjectReference Include="..\..\src\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\JsonSampleFiller.cs" Link="Shared\JsonSampleFiller.cs" />
+  </ItemGroup>
+
 </Project>
