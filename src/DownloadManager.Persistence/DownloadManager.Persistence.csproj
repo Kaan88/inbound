@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <PropertyGroup>
+    <!-- PERF.10: IsAotCompatible is left off here until the AOT step: about 20 JsonSerializer call sites warn (IL2026/IL3050). -->
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
