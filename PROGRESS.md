@@ -1,5 +1,23 @@
 # Progress — session handoff
 
+### Release 0.7.6: the four small fixes released (owner, 2026-11-14)
+
+Owner asked whether the fixes after 0.7.5 had been released; they had not, and said yes to releasing them.
+
+- **0.7.6:** version and `changelog.json` (TB.F16, UI.B38, UI.B37, UI.B33). The extension stays 0.6.4;
+  `extensions/firefox-updates.json` names the same signed file, same hash, at this release.
+- **Built by GitHub:** tag `v0.7.6` started the Windows build (run 43624824205). A first tag was replaced within
+  minutes, before any draft existed, because the changelog line for UI.B38 described the wrong case (run 43624747849,
+  cancelled). Checked before publishing: `SHA256SUMS`, manifest size and hash against the zip, `public.pem`
+  identical to 0.7.5's; the zip's file list differs from 0.7.5's only in the web UI bundle's name. Publishing started
+  Linux packages (run 43625696127) and Docker image (run 43625696154); both passed. The release has 14 files;
+  `releases/latest/download/manifest.json` and `manifest-linux-x64.json` both answer 0.7.6; `ghcr.io/kaan88/inbound`
+  has the tag `0.7.6`.
+- **CI:** the run on the release commit `291746a` was cancelled when newer commits were pushed to main (run
+  43625705580); the last full pass before it was on `99d7365`, and the release commit changes only version texts.
+- **Not done:** nothing was installed or started. None of the four changes was seen in the installed app's window
+  or in a browser.
+
 ### Small items before Sites and performance; CI made steady (owner, 2026-11-14)
 
 Owner: "any small items in the roadmap before sites/perf run?", then "for code and all the in progress items.
