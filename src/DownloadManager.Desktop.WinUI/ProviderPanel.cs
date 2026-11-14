@@ -1497,28 +1497,34 @@ internal sealed class ProviderPanel
         });
     }
 
-    private async Task DeleteFromProviderAsync()
+    /// <summary>The "Delete from {provider}?" question, shared with the main list's menu (TB.F16). Cancel, or a dialog already open, is false.</summary>
+    internal static async Task<bool> ConfirmDeleteAsync(XamlRoot xamlRoot, ElementTheme theme, string question, string provider)
     {
-        if (_selected is not { } row || RemoteRules.JobFor(_client.State.Jobs, row.Item) is not { } job || !RemoteRules.CanDeleteFromProvider(job)) return;
         var dialog = new ContentDialog
         {
-            XamlRoot = _root.XamlRoot,
-            RequestedTheme = _root.ActualTheme,
-            Title = $"Delete from {_name}?",
-            Content = new TextBlock { Text = RemoteText.DeleteQuestion(row.View.Name, _name), TextWrapping = TextWrapping.Wrap },
-            PrimaryButtonText = $"Delete from {_name}",
+            XamlRoot = xamlRoot,
+            RequestedTheme = theme,
+            Title = $"Delete from {provider}?",
+            Content = new TextBlock { Text = question, TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = $"Delete from {provider}",
             PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
         try
         {
-            if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+            return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
-            return;
+            return false;
         }
+    }
+
+    private async Task DeleteFromProviderAsync()
+    {
+        if (_selected is not { } row || RemoteRules.JobFor(_client.State.Jobs, row.Item) is not { } job || !RemoteRules.CanDeleteFromProvider(job)) return;
+        if (!await ConfirmDeleteAsync(_root.XamlRoot, _root.ActualTheme, RemoteText.DeleteQuestion(row.View.Name, _name), _name)) return;
 
         var page = _page;
         await RunAsync($"Deleting from {_name}…", async token =>

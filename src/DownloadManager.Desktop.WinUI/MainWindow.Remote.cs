@@ -33,6 +33,7 @@ public sealed partial class MainWindow
     private MenuFlyoutItem? _menuRemoteRemove;
     private MenuFlyoutItem? _menuRemoteStartQueued;
     private MenuFlyoutItem? _menuRemoteDequeue;
+    private MenuFlyoutItem? _menuRemoteDeleteFromProvider;
     private MenuFlyoutSeparator? _remoteContextSeparator;
     private string? _pendingRemoteCategory;
     private string _remoteTasksOffers = string.Empty;
@@ -369,10 +370,12 @@ public sealed partial class MainWindow
         // TB.S1: named for the provider when the menu opens.
         _menuRemoteStartQueued = CreateContextItem("Start Now", async (_, _) => await StartQueuedAsync(SelectedRemoteJobs));
         _menuRemoteDequeue = CreateContextItem("Remove from Queue…", async (_, _) => await RemoveFromProviderQueueAsync(SelectedRemoteJobs));
+        // TB.F16: named for the provider when the menu opens.
+        _menuRemoteDeleteFromProvider = CreateContextItem("Delete from the provider…", async (_, _) => await DeleteFromProviderAsync(SelectedRemoteJobs));
         _menuRemoteRemove = CreateContextItem("Delete…", async (_, _) => await RemoveRemoteAsync(SelectedRemoteJobs));
         _menuRemoteRemove.KeyboardAcceleratorTextOverride = "Del";
         _remoteContextSeparator = new MenuFlyoutSeparator();
-        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteStartQueued, _menuRemoteDequeue, _menuRemoteRemove, _remoteContextSeparator];
+        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteStartQueued, _menuRemoteDequeue, _menuRemoteDeleteFromProvider, _menuRemoteRemove, _remoteContextSeparator];
         for (var i = 0; i < items.Length; i++) flyout.Items.Insert(i, items[i]);
         _remoteContextItems.AddRange(items);
     }
@@ -408,6 +411,12 @@ public sealed partial class MainWindow
         {
             _menuRemoteDequeue.Visibility = Show(queued);
             _menuRemoteDequeue.Text = $"Remove from {queueProvider}'s Queue…";
+        }
+
+        if (_menuRemoteDeleteFromProvider is not null)
+        {
+            _menuRemoteDeleteFromProvider.Visibility = Show(RemoteRules.CanDeleteAllFromProvider(jobs));
+            _menuRemoteDeleteFromProvider.Text = $"Delete from {RemoteText.CommonProviderName(jobs)}…";
         }
 
         if (_menuRemoteRemove is not null) _menuRemoteRemove.Visibility = Show(jobs.Count > 0);
@@ -664,6 +673,28 @@ public sealed partial class MainWindow
         }
 
         if (problems.Count > 0) await ShowMessageAsync("Remove from queue", string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// TB.F16: deletes these items from the provider's account, as the My provider window's button does (same question,
+    /// same call). The Host takes each deleted job off the list; files already downloaded stay on disk.
+    /// </summary>
+    private async Task DeleteFromProviderAsync(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var deletable = jobs.Where(job => RemoteRules.CanDeleteFromProvider(job)).ToList();
+        if (deletable.Count == 0) return;
+        var provider = RemoteText.CommonProviderName(deletable);
+        if (!await ProviderPanel.ConfirmDeleteAsync(Content.XamlRoot, RootGrid.ActualTheme, RemoteText.DeleteQuestion(deletable), provider)) return;
+
+        var problems = new List<string>();
+        foreach (var job in deletable)
+        {
+            var result = await _remote.DeleteRemoteAsync(job.Id, confirmed: true);
+            if (!result.Ok) problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
+        }
+
+        if (problems.Count > 0) await ShowMessageAsync($"Delete from {provider}", string.Join(Environment.NewLine, problems));
+        else ShowPassingStatus(deletable.Count == 1 ? $"Deleted from {provider}." : $"Deleted {deletable.Count} items from {provider}.");
     }
 
     private async Task RemoveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)

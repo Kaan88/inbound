@@ -267,6 +267,11 @@ export function canDeleteFromProvider(job: RemoteJob | undefined): boolean {
   return !!job && !!job.itemId;
 }
 
+/** TB.F16: the download list offers "Delete from <provider>" when every selected job passes the same rule as My provider. */
+export function canDeleteJobsFromProvider(jobs: RemoteJob[]): boolean {
+  return jobs.length > 0 && jobs.every((job) => canDeleteFromProvider(job));
+}
+
 /** TB.S1: accepted by the provider and waiting in its queue, with no item yet. */
 export function isInProviderQueue(job: RemoteJob | undefined): boolean {
   return !!job && job.state === 'waiting' && job.stage === 'queued' && !job.itemId;
@@ -446,6 +451,19 @@ export function removeQuestion(jobs: RemoteJob[]): string {
 
 export function deleteQuestion(itemName: string, provider: string): string {
   return `Delete '${itemName}' from your ${provider} account? This can't be undone. Files already on this computer are kept.`;
+}
+
+/** The provider's name when the jobs share one, otherwise "the provider". */
+export function commonProviderName(jobs: RemoteJob[]): string {
+  const providers = new Set(jobs.map((job) => providerNameOf(job).toLowerCase()));
+  return providers.size === 1 ? providerNameOf(jobs[0]) : 'the provider';
+}
+
+/** TB.F16: deleteQuestion for the download list, where several rows may be selected. */
+export function deleteJobsQuestion(jobs: RemoteJob[]): string {
+  const provider = commonProviderName(jobs);
+  if (jobs.length === 1) return deleteQuestion(jobName(jobs[0]), provider);
+  return `Delete these ${jobs.length} items from your ${provider} account? This can't be undone. Files already on this computer are kept.`;
 }
 
 export function dequeueQuestion(jobs: RemoteJob[]): string {
