@@ -28,7 +28,7 @@ Nothing in either plan is built or measured. The order among the performance ite
 
 | Stage | Items | What it is | Why here |
 | --- | --- | --- | --- |
-| **A1** | SITES.0 | The rclone run: the ten checks in `remote-sites.md` | Needs only the owner's yes to download rclone. Independent of everything else in stage A, so it can run alongside. Its tenth check (rclone's start time, idle memory, size) is taken with the A2 numbers |
+| **A1** | SITES.0 | The rclone run: the ten checks in `remote-sites.md` | The owner said yes to downloading rclone (2026-11-14). Independent of everything else in stage A, so it can run alongside. Its tenth check (rclone's start time, idle memory, size) is taken with the A2 numbers |
 | **A2** | PERF.8, PERF.15 | Both baselines in one session: engine, saves, start times, the window on both toolkits, the web UI | The only stage that cannot be made up later |
 | **A3** | PERF.11, the ReadyToRun part of PERF.18 | ReadyToRun for the Host, server, window and the AppImage | Publish-only; changes every later start-time number, so before more measuring |
 | **A4** | PERF.10 | JSON source generation for the contracts, then Native AOT for the native host and the CLI | SITES.2 adds `SiteDtos.cs`. With the generated context in place, each new type is added to it as it is written |
@@ -81,4 +81,4 @@ These cost nothing extra if followed while Sites is written, and they are the re
 
 - The Sites design, its phases and its open questions for the owner.
 - The rule that nothing is marked implemented without evidence.
-- SITES.0 still waits for the owner's yes to download rclone.
+- SITES.0: the owner said yes to downloading rclone (2026-11-14); not started.
