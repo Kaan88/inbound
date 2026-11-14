@@ -92,6 +92,9 @@ about 10 to 20% of it on CPU and equal on throughput, the question is closed.
 
 ## Order of work (both plans, PERF.8 to PERF.20)
 
+With the Sites work placed between these steps, the order is `sites-and-performance-order.md`; the order among
+the PERF items is the same there.
+
 Revised 2026-11-14 after going through the dependencies. This replaces the two separate lists; the window and web
 UI items are described in `ui-performance-areas.md`.
 

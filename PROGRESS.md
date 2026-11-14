@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### Sites and performance in one order (owner, 2026-11-14; no code)
+
+- Asked (owner, 2026-11-14): whether the performance work comes before or after Sites (answer: a small part before, the rest after), then "make a combined sites, perf plan based on your optimized flow."
+- **Done:** `docs/plans/sites-and-performance-order.md`: stages A to E placing SITES.0 to SITES.9 between PERF.8 to PERF.20, the rules the performance plans set for the Sites phases (generated JSON context, compact single saves, small transfer events, per-tick UI updates, compiled bindings and virtualised lists in new views, nothing running while Sites is off), and additions to four phases' "done when". ROADMAP's Sites section, `remote-sites.md` and both performance plans point at it.
+- **Not changed:** the Sites design, its phases and open questions; the order among the PERF items. SITES.0 still waits for the owner's yes to download rclone.
+- **Not done:** nothing measured, no code changed.
+
 ### Performance plans put in one order (owner, 2026-11-14; no code)
 
 - Asked (owner, 2026-11-14): "check the order of the plan, optimize it if needed and push".

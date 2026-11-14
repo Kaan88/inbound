@@ -592,6 +592,12 @@ Every protocol runs through one bundled `rclone` process that the Host starts on
 the code it touches, the phases and the open questions, is `docs/plans/remote-sites.md`. The agreed design is the
 fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and suggestions"). Nothing is built.
 
+Order together with PERF.8 to PERF.20 (owner, 2026-11-14): `docs/plans/sites-and-performance-order.md`. In short:
+SITES.0, both baselines, ReadyToRun, JSON source generation and event gathering first (stage A); then SITES.1 to
+SITES.5 (stage B); measure again, the IPC progress change and the Linux AOT trial (stage C); SITES.6 to SITES.9 with
+the web UI list and serving work (stage D); the rest of PERF last (stage E). That file also lists the rules the
+performance plans set for the Sites phases.
+
 | ID | Item | Status | Depends | Notes |
 | --- | --- | --- | --- | --- |
 | SITES.0 | rclone run: per-call credentials with no config file, host-key pinning, key-file formats, FTPS with a site CA, partial files and resume, stats and limits over rc, OAuth refresh, start time and sizes | not started; waiting for the owner's yes to download rclone | - | Ten checks listed in the plan. Read from rclone's documentation on 2026-11-13, none run. |

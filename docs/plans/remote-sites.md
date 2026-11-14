@@ -2,6 +2,9 @@
 
 Status: plan only, 2026-11-13. Nothing is built. Tracked as ROADMAP SITES.1 to SITES.9.
 
+Order together with the performance work (PERF.8 to PERF.20), and the rules that work sets for these phases:
+`sites-and-performance-order.md` (2026-11-14).
+
 ## What this is
 
 A Sites view in Inbound: saved remote places, a file browser for each, and uploads, downloads, delete, rename and new

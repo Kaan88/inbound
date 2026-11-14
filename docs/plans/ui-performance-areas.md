@@ -87,6 +87,7 @@ only a performance one.
 ## Order of work
 
 Tracked as ROADMAP PERF.15 to PERF.20. The order, together with PERF.8 to PERF.14, is in
-`performance-areas.md`, "Order of work". In short for this plan: the baseline; ReadyToRun; event gathering in the
+`performance-areas.md`, "Order of work", and with the Sites phases placed between them in
+`sites-and-performance-order.md`. In short for this plan: the baseline; ReadyToRun; event gathering in the
 window and the web UI; the Linux AOT trial after JSON source generation; then, on new numbers, the windowed list,
 compiled bindings and the IPC and serving changes; the Linux renderer and row work last, after D7.W.
