@@ -37,6 +37,18 @@ Owner: "start site/perf, delegate when you can". Four pieces were delegated to S
   (AuthStore, WebUiConfig, ExtensionSightings, picked folders, UpdateInstallJournal), Host.Linux options, the CLI's
   `PrettyJson`, WinUI stores, `NativeBridgePolicy`, UpdateSigner. `IsAotCompatible` is on in Contracts, Core, Cli
   and NativeHost (about 25 IL2026/IL3050 warnings to clear) and off in Persistence (about 20).
+- **PERF.16 and the per-frame part of PERF.19 (merged `e39ab2b`):** the window's job, snapshot and group events go
+  through `EventCoalescer` (plain C#, `MainWindow.Events.cs` on the window side) and are applied once per 100 ms
+  tick from a one-shot timer that runs only while events wait. Applied at once: a connection change, a reply to the
+  window's own command (`HostConnection.CommandReplied`), a list refresh. Rows keep the order the Host first
+  announced them in (review change). A finish or failure inside a tick is kept over a later update of the same job,
+  so completion windows still open; a download that finishes and is deleted inside one tick opens none. Web UI:
+  `coalesce.ts` and `frameBatch.ts`, once per animation frame, 1 s while hidden. A new event family (Sites) joins
+  by adding a `WindowEventFamily` value. Left: counts kept by state, and `RebuildVisible` still runs per event.
+  Not seen in a running window or browser; nothing measured.
+- **CI:** run 43629422765 (`71626e6`, which includes all of the above) is green on Windows and Linux. One more
+  occasional Windows failure fixed in the test (CI.3): `ChangingTheKeyLiftsWhatTheOldAccountsAnswersCaused` read the
+  pacing file from outside the service while it was being saved.
 - **Owner, same day:** Sites sign-in kinds use rclone's shared app IDs by default with an optional own client ID
   (written into `remote-sites.md`).
 
