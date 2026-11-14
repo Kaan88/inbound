@@ -45,7 +45,7 @@ network is the limit.
 | Area | What the code does now | Possible gain | Effort / risk |
 | --- | --- | --- | --- |
 | Progress events | Each active job announces at most every 300 ms (`DownloadManagerService.cs:4633`), a whole `JobDto` each time | A small progress DTO (bytes, speed, state) instead of the full job; or one batched message for all active jobs per tick | Medium: an IPC change, so a protocol note and old-client handling |
-| Broadcast | `Broadcast` enqueues the same `IpcMessage` to each client (`HostCommandDispatcher.cs:1170`); whether it is serialised once or once per client was not checked | If per client: serialise once and share the bytes | Low, after checking |
+| Broadcast | `Broadcast` enqueues the same `IpcMessage` to each client (`HostCommandDispatcher.cs:1170`); the WebSocket transport serialises per client (`WebSocketTransport.cs:193`); the pipe transport was not checked | Serialise once and share the bytes | Low to medium |
 | Snapshot size | 8.5 MB of JSON at 5,040 jobs (PERF.7); the window still gets it on connect | Paging or a slimmer list DTO would cut the window's open time at 5,000 jobs (890 to 935 ms of 1,065 to 1,129 ms is the snapshot) | High: every frontend reads the snapshot |
 
 ## 5. Window (WinUI)

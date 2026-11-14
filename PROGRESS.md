@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### UI performance ideas written up; PERF.15 to PERF.20 added (owner, 2026-11-14; no code)
+
+- Asked (owner, 2026-11-14): "what about similar plan for both ui toolkits and webui?"
+- **Done:** `docs/plans/ui-performance-areas.md`, from reading the code: the shared window source (per-event list-sized work in `ApplyJobEvent`, reflection bindings), WinUI only, Uno only (publish mode, AOT trial, renderer), and the web UI (every row rendered, rows rebuilt per event, uncompressed snapshot and static files). ROADMAP PERF.15 to PERF.20, all not started. `performance-areas.md`: the WebSocket transport serialises per client.
+- **Not done:** nothing measured, no code changed. There are no numbers of our own for the Uno window. PERF.15 (the baseline) comes first.
+
 ### Performance ideas written up; PERF.8 to PERF.14 added (owner, 2026-11-14; no code)
 
 - Asked (owner, 2026-11-14): what a Rust rewrite of the core would gain and lose (answer: mostly loss; the work is network- and disk-bound), then "writeup some possible performance gains, areas", then "add it, and should some benchmarking be done for possible rust replacements?"
