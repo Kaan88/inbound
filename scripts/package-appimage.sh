@@ -6,7 +6,7 @@
 #   usr/lib/inbound/          inbound-host, DownloadManager.Cli, DownloadManager.NativeHost, DownloadManager.Server,
 #                             inbound-torrent (the torrent worker)
 #   usr/lib/inbound/desktop/  the Uno window (the Host looks for the window here)
-#   AppRun                    --native-host | --cli | --host | (nothing: Host, then the window)
+#   AppRun                    --native-host | --cli | --host | --background (Host only) | (nothing: Host, then the window)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/artifacts/linux"
@@ -44,6 +44,9 @@ case "$1" in
   --native-host) shift; exec "$lib/DownloadManager.NativeHost" "$@" ;;
   --cli) shift; exec "$lib/DownloadManager.Cli" "$@" ;;
   --host) shift; exec "$lib/inbound-host" "$@" ;;
+  # The sign-in start (the autostart entry's "<AppImage> --background"): only the Host, no window. exec keeps this the
+  # started process and keeps the AppImage mount alive for as long as the Host runs.
+  --background) exec "$lib/inbound-host" "$@" ;;
 esac
 # A second Host asks the running one and exits, so this is safe when it already runs.
 setsid -f "$lib/inbound-host" >/dev/null 2>&1 </dev/null
