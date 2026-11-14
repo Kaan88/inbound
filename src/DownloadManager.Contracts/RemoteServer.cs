@@ -326,7 +326,7 @@ public sealed class WebSocketIpcClient : IIpcConnection
 
     public async Task SendAsync(IpcMessage message, CancellationToken cancellationToken = default)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options);
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>());
         if (json.Length > Protocol.MaxFrameBytes) throw new InvalidDataException($"IPC frame is too large ({json.Length} bytes).");
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -369,7 +369,7 @@ public sealed class WebSocketIpcClient : IIpcConnection
 
         try
         {
-            return JsonSerializer.Deserialize<IpcMessage>(buffer.WrittenSpan, IpcJson.Options)
+            return JsonSerializer.Deserialize(buffer.WrittenSpan, IpcJson.Info<IpcMessage>())
                    ?? throw new InvalidDataException("The server sent an empty message.");
         }
         catch (JsonException ex)
@@ -567,7 +567,7 @@ public static class RemoteServerHttp
         ServerAddress.EnsureMaySend(target);
         using var request = new HttpRequestMessage(HttpMethod.Post, ServerAddress.Endpoint(target.Address!, "/api/ipc"))
         {
-            Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options)),
+            Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>())),
         };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", target.Token);
@@ -587,7 +587,7 @@ public static class RemoteServerHttp
             var bytes = await ReadLimitedAsync(response, cancellationToken).ConfigureAwait(false);
             try
             {
-                return JsonSerializer.Deserialize<IpcMessage>(bytes, IpcJson.Options) ?? throw new InvalidDataException("The server sent an empty reply.");
+                return JsonSerializer.Deserialize(bytes, IpcJson.Info<IpcMessage>()) ?? throw new InvalidDataException("The server sent an empty reply.");
             }
             catch (JsonException ex)
             {
@@ -707,7 +707,7 @@ public static class RemoteServerHttp
 
     private static ByteArrayContent JsonContent<T>(T value)
     {
-        var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(value, IpcJson.Options));
+        var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(value, IpcJson.Info<T>()));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
         return content;
     }

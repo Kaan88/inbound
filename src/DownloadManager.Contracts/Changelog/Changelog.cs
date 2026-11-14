@@ -100,7 +100,7 @@ public static class Changelog
     /// <summary>Reads <c>changelog.json</c>. Throws <see cref="JsonException"/> or <see cref="InvalidDataException"/> when it is not one.</summary>
     public static IReadOnlyList<ChangelogVersion> Parse(string json)
     {
-        var dto = JsonSerializer.Deserialize<ChangelogDto>(json, IpcJson.Options)
+        var dto = JsonSerializer.Deserialize(json, IpcJson.Info<ChangelogDto>())
                   ?? throw new InvalidDataException("The changelog is empty.");
         foreach (var version in dto.Versions)
         {

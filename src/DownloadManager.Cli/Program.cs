@@ -12,7 +12,18 @@ namespace DownloadManager.Cli;
 
 internal static partial class Program
 {
-    private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
+    /// <summary>
+    /// The wire's options, indented. The CLI prints only types of <see cref="IpcJsonContext"/> and <see cref="CliJsonContext"/>, so
+    /// those two are all it resolves from (never the reflection fallback of <see cref="IpcJson.Options"/>: a Native AOT build has none).
+    /// </summary>
+    private static readonly JsonSerializerOptions PrettyJson = CreatePretty();
+
+    private static JsonSerializerOptions CreatePretty()
+        => new(IpcJson.Options)
+        {
+            WriteIndented = true,
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(IpcJsonContext.Default, CliJsonContext.Default),
+        };
 
     /// <summary>
     /// The name this program was started by (DownloadManager.Cli as Setup installs it), for the help and the errors that
@@ -1719,9 +1730,9 @@ internal static partial class Program
             SettingsDto? imported;
             try
             {
-                imported = JsonSerializer.Deserialize<SettingsDto>(
+                imported = JsonSerializer.Deserialize(
                     await File.ReadAllTextAsync(optionArgs[1]).ConfigureAwait(false),
-                    IpcJson.Options);
+                    IpcJson.Info<SettingsDto>());
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {
@@ -2125,21 +2136,19 @@ internal static partial class Program
 
     /// <summary><c>add-batch --json</c>: one row per address, in the order given.</summary>
     internal static string AddBatchJson(IEnumerable<(string Url, AddJobResponse Result)> results)
-        => PrettyText(results.Select(r => new { r.Url, r.Result.Accepted, r.Result.Duplicate, r.Result.Error, r.Result.Job }));
+        => PrettyText(results.Select(r => new AddBatchRow(r.Url, r.Result.Accepted, r.Result.Duplicate, r.Result.Error, r.Result.Job)).ToList());
 
     /// <summary><c>folders --json</c>: favorite, default and recent folders with the space the Host measured.</summary>
     internal static string FoldersJson(IEnumerable<(string Kind, string Name, string Path)> rows, IReadOnlyList<FolderSpaceDto> measured)
     {
         FolderSpaceDto? SpaceOf(string path) => measured.FirstOrDefault(folder => string.Equals(folder.Path, path.Trim(), StringComparison.OrdinalIgnoreCase));
-        return PrettyText(rows.Select(row => new
-        {
-            kind = row.Kind,
-            name = row.Name.Length == 0 ? null : row.Name,
-            path = row.Path,
-            freeBytes = SpaceOf(row.Path)?.FreeBytes,
-            totalBytes = SpaceOf(row.Path)?.TotalBytes,
-            insideContainer = SpaceOf(row.Path)?.InsideContainer ?? false,
-        }));
+        return PrettyText(rows.Select(row => new FolderRow(
+            row.Kind,
+            row.Name.Length == 0 ? null : row.Name,
+            row.Path,
+            SpaceOf(row.Path)?.FreeBytes,
+            SpaceOf(row.Path)?.TotalBytes,
+            SpaceOf(row.Path)?.InsideContainer ?? false)).ToList());
     }
 
     /// <summary>

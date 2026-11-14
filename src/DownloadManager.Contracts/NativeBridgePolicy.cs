@@ -228,7 +228,7 @@ public static class NativeBridgePolicy
                 kept[property.Name] = value;
             }
 
-            return message with { Payload = JsonSerializer.SerializeToElement(kept) };
+            return message with { Payload = NodeToElement(kept) };
         }
 
         // One download in an event, an action's answer or a handoff's acknowledgement. Rewritten only when it needs it,
@@ -262,7 +262,14 @@ public static class NativeBridgePolicy
             }
         }
 
-        return message with { Payload = JsonSerializer.SerializeToElement(whole) };
+        return message with { Payload = NodeToElement(whole) };
+    }
+
+    /// <summary>A JSON tree as an element, written with the default options as <c>SerializeToElement(node)</c> did (no reflection).</summary>
+    private static JsonElement NodeToElement(JsonNode node)
+    {
+        using var document = JsonDocument.Parse(node.ToJsonString());
+        return document.RootElement.Clone();
     }
 
     private static bool NeedsRewrite(JsonElement job)
@@ -365,7 +372,7 @@ public static class NativeBridgePolicy
     /// </summary>
     public static IpcMessage? FitForBrowser(IpcMessage message, out int size)
     {
-        size = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options).Length;
+        size = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>()).Length;
         return size <= BrowserMaxMessageBytes ? message : TooLarge(message, size);
     }
 
@@ -376,10 +383,10 @@ public static class NativeBridgePolicy
     /// </summary>
     public static byte[]? FrameForBrowser(IpcMessage message, out int size)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options);
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>());
         size = json.Length;
         if (size <= BrowserMaxMessageBytes) return json;
-        return TooLarge(message, size) is { } error ? JsonSerializer.SerializeToUtf8Bytes(error, IpcJson.Options) : null;
+        return TooLarge(message, size) is { } error ? JsonSerializer.SerializeToUtf8Bytes(error, IpcJson.Info<IpcMessage>()) : null;
     }
 
     private static IpcMessage? TooLarge(IpcMessage message, int size)

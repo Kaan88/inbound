@@ -122,7 +122,7 @@ internal static class Program
 
     /// <summary>Both pumps can answer the extension, and two frames must not interleave on stdout.</summary>
     private static Task WriteToExtensionAsync(IpcMessage message)
-        => WriteFrameToExtensionAsync(JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options));
+        => WriteFrameToExtensionAsync(JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>()));
 
     private static async Task WriteFrameToExtensionAsync(byte[] json)
     {

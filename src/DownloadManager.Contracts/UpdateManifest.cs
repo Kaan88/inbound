@@ -116,7 +116,7 @@ public static class UpdateManifestVerifier
                     if (tag.ValueKind == JsonValueKind.String) tags.Add(tag.GetString()!);
             }
 
-            builder.Append(JsonSerializer.Serialize(text)).Append(' ').Append(JsonSerializer.Serialize(tags));
+            builder.Append(JsonSerializer.Serialize(text, IpcJson.Info<string?>())).Append(' ').Append(JsonSerializer.Serialize(tags, IpcJson.Info<List<string>>()));
         }
 
         return builder.ToString();
@@ -148,7 +148,7 @@ public static class UpdateManifestVerifier
     {
         try
         {
-            return JsonSerializer.Deserialize<UpdateManifest>(json, IpcJson.Options);
+            return JsonSerializer.Deserialize(json, IpcJson.Info<UpdateManifest>());
         }
         catch (JsonException)
         {

@@ -1,4 +1,6 @@
-﻿using System.Buffers.Binary;
+﻿using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
+using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -175,8 +177,28 @@ public static class MessageTypes
 
 public static class IpcJson
 {
+    /// <summary>
+    /// The shared wire options. Generated metadata (<see cref="IpcJsonContext"/>) always; the reflection serializer as a fallback
+    /// for the Host, the server and the window, which have types outside the context (stores, HTTP bodies) and a runtime that can
+    /// emit code. Where reflection is off (<see cref="JsonSerializer.IsReflectionEnabledByDefault"/> is false, which Native AOT
+    /// publishes set, or <see cref="RuntimeFeature.IsDynamicCodeSupported"/> is false) the options are the context alone, and
+    /// a type it doesn't know fails with <see cref="NotSupportedException"/> instead of reaching reflection. Tests can switch
+    /// reflection off with the <c>JsonSerializerIsReflectionEnabledByDefault</c> MSBuild property of the test project (PERF.10).
+    /// </summary>
     public static readonly JsonSerializerOptions Options = Create();
 
+    /// <summary>The generated metadata of <typeparamref name="T"/> in <see cref="Options"/>; throws <see cref="NotSupportedException"/> when it has none and reflection is off.</summary>
+    public static JsonTypeInfo<T> Info<T>() => (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+
+    /// <summary>True when <see cref="Options"/> has the reflection fallback (false in an AOT-published client).</summary>
+    public static bool ReflectionFallback { get; private set; }
+
+    // The reflection branch runs only when JsonSerializer.IsReflectionEnabledByDefault and RuntimeFeature.IsDynamicCodeSupported
+    // are both true. Both are feature switches: a Native AOT publish sets them false and the compiler removes the branch, so
+    // the reflection types are never kept. IpcJsonNoReflectionTests runs the options with the switch off and fails if the
+    // fallback is still there or a type the clients use resolves only through it.
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Only reached while JsonSerializer.IsReflectionEnabledByDefault is true; the switch is false, and the branch removed, in trimmed and AOT publishes. Tested by IpcJsonNoReflectionTests.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Only reached while RuntimeFeature.IsDynamicCodeSupported is true. Tested by IpcJsonNoReflectionTests.")]
     private static JsonSerializerOptions Create()
     {
         var options = new JsonSerializerOptions
@@ -185,9 +207,17 @@ public static class IpcJson
             PropertyNameCaseInsensitive = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
-        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-        // PERF.10: generated metadata first (IpcJsonContext), reflection for whatever is not registered, until the Native AOT step.
-        options.TypeInfoResolver = JsonTypeInfoResolver.Combine(IpcJsonContext.Default, new DefaultJsonTypeInfoResolver());
+        if (JsonSerializer.IsReflectionEnabledByDefault && RuntimeFeature.IsDynamicCodeSupported)
+        {
+            ReflectionFallback = true;
+            options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+            options.TypeInfoResolver = JsonTypeInfoResolver.Combine(IpcJsonContext.Default, new DefaultJsonTypeInfoResolver());
+        }
+        else
+        {
+            options.TypeInfoResolver = IpcJsonContext.Default;
+        }
+
         return options;
     }
 }
@@ -201,7 +231,7 @@ public sealed record IpcMessage(
 {
     public static IpcMessage Create<T>(string type, T payload, string? replyTo = null)
         => new(Protocol.Version, type, Guid.NewGuid().ToString("N"), replyTo,
-            JsonSerializer.SerializeToElement(payload, IpcJson.Options));
+            JsonSerializer.SerializeToElement(payload, IpcJson.Info<T>()));
 
     public static IpcMessage Create(string type, string? replyTo = null)
         => new(Protocol.Version, type, Guid.NewGuid().ToString("N"), replyTo, null);
@@ -213,7 +243,7 @@ public sealed record IpcMessage(
             throw new InvalidDataException($"Message '{Type}' has no payload.");
         }
 
-        return Payload.Value.Deserialize<T>(IpcJson.Options)
+        return Payload.Value.Deserialize(IpcJson.Info<T>())
                ?? throw new InvalidDataException($"Message '{Type}' payload could not be deserialized.");
     }
 }
@@ -221,7 +251,7 @@ public sealed record IpcMessage(
 public static class IpcFraming
 {
     public static Task WriteAsync(Stream stream, IpcMessage message, CancellationToken cancellationToken = default)
-        => WriteFrameAsync(stream, JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options), cancellationToken);
+        => WriteFrameAsync(stream, JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Info<IpcMessage>()), cancellationToken);
 
     /// <summary>One frame of a message already serialised with <see cref="IpcJson.Options"/>.</summary>
     public static async Task WriteFrameAsync(Stream stream, byte[] json, CancellationToken cancellationToken = default)
@@ -255,7 +285,7 @@ public static class IpcFraming
 
         var payload = new byte[length];
         await ReadExactlyAsync(stream, payload, allowEof: false, cancellationToken).ConfigureAwait(false);
-        return JsonSerializer.Deserialize<IpcMessage>(payload, IpcJson.Options)
+        return JsonSerializer.Deserialize(payload, IpcJson.Info<IpcMessage>())
                ?? throw new InvalidDataException("IPC frame was empty.");
     }
 
