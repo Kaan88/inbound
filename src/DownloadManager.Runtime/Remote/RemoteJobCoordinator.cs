@@ -1438,6 +1438,54 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>TB.F17: the job that holds this item of the account, if one does.</summary>
+    public RemoteJobView? FindByItem(string provider, RemoteItemKind kind, string itemId)
+        => List().FirstOrDefault(job => job.Kind == kind && job.ItemId == itemId && string.Equals(job.Provider, provider, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// TB.F17: deletes an item of the account named by itself, for the same explicit, confirmed choice as
+    /// <see cref="RemoveRemoteItemAsync(Guid, bool, CancellationToken)"/>. A job that holds the item goes the same way as there.
+    /// </summary>
+    public async Task<RemoteActionResult> RemoveRemoteItemAsync(RemoteItemRef item, bool confirmed, CancellationToken cancellationToken = default)
+    {
+        if (!confirmed)
+        {
+            return new RemoteActionResult(false, "Removing an item from the provider has to be confirmed first.");
+        }
+
+        if (FindByItem(item.Provider, item.Kind, item.ItemId) is { } holder)
+        {
+            return await RemoveRemoteItemAsync(holder.Id, confirmed, cancellationToken).ConfigureAwait(false);
+        }
+
+        var entry = _providers.Find(item.Provider);
+        var name = entry?.DisplayName ?? "The provider";
+        if (entry?.Remover is not { } remover)
+        {
+            return new RemoteActionResult(false, $"{name} can't remove items from here.");
+        }
+
+        if (entry.AccountProblem() is { } problem)
+        {
+            return new RemoteActionResult(false, problem);
+        }
+
+        try
+        {
+            await remover.RemoveAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.NotFound)
+        {
+            // Already gone from the provider: what was asked for is true.
+        }
+        catch (RemoteProviderException ex)
+        {
+            return new RemoteActionResult(false, Describe(entry, ex));
+        }
+
+        return new RemoteActionResult(true);
+    }
+
     /// <summary>
     /// TB.S1: starts, or takes out, a job's entry in the provider's queue. Only from an explicit user action, and only
     /// for a job still waiting there with no item: its entry is found again by the job's hash in a fresh read of the

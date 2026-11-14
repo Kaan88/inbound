@@ -224,13 +224,16 @@
   }
 
   async function deleteFromProvider() {
-    if (!selected || !selectedJob || !canDeleteFromProvider(selectedJob)) return;
+    if (!selected || !selected.itemId) return;
     const item = selected;
     const label = selectedView?.name ?? item.itemId;
     acting = true;
     confirmDelete = false;
     try {
-      await store.ask('remote.deleteRemote', { jobId: selectedJob.id, confirmed: true });
+      // TB.F17: through the job when one holds the item (it leaves the list with it), by the item itself otherwise.
+      await store.ask('remote.deleteRemote', selectedJob && canDeleteFromProvider(selectedJob)
+        ? { jobId: selectedJob.id, confirmed: true }
+        : { provider: item.provider, kind: item.kind, itemId: item.itemId, confirmed: true });
       const p = pages[item.kind];
       if (p) p.items = p.items.filter((known) => known.itemId !== item.itemId);
       if (dialogOpen) closeDialog();
@@ -510,7 +513,7 @@
     {#if status}<p class="mt-2 text-[12.5px] {statusIsProblem ? 'text-error' : 'text-muted'}" role="status">{status}</p>{/if}
 
     {#snippet footer()}
-      {#if canDeleteFromProvider(selectedJob)}<button class="btn-danger mr-auto" disabled={acting} onclick={() => (confirmDelete = true)}>Delete from {name}…</button>{/if}
+      <button class="btn-danger mr-auto" disabled={acting} onclick={() => (confirmDelete = true)}>Delete from {name}…</button>
       <button class="btn" onclick={closeDialog}>Close</button>
       <button class="btn" data-autofocus disabled={acting || !selectedView.canDownload} title="Starts once {name} has the files." onclick={() => download(true)}>Download all</button>
       <button class="btn-primary" disabled={acting || !selectedView.canDownload || !filesOf || filesOf.reading || filesOf.chosen.size === 0} title="Starts once {name} has the files." onclick={() => download(false)}>Download selected</button>

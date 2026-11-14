@@ -254,7 +254,9 @@ public sealed class WindowLocalFindingsTests
     public void U_WL_11_a_my_provider_row_has_the_web_UIs_quick_actions()
     {
         var none = RemoteRules.ItemMenu(canDownload: true, job: null, "TorBox", acting: false, loading: false);
-        Assert.Equal(["open", "downloadAll", null, "copyName", "refresh"], none.Select(entry => entry.Action));
+        // TB.F17: Delete is there for an item no job here knows, too.
+        Assert.Equal(["open", "downloadAll", null, "copyName", "refresh", null, "deleteFromProvider"], none.Select(entry => entry.Action));
+        Assert.Equal("Delete from TorBox…", none[^1].Label);
         Assert.Equal("Download all", none[1].Label);
         Assert.False(none[1].Disabled);
 

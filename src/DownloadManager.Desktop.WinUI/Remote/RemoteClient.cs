@@ -479,6 +479,12 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         => Feed(await SlowAsync(MessageTypes.RemoteDeleteRemote, new RemoteDeleteRequest { JobId = jobId, Confirmed = confirmed },
             MessageTypes.RemoteActionResult, FailedAction, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>TB.F17: the same for an item of the account that no job here knows. Ask the user first.</summary>
+    public async Task<RemoteActionResultDto> DeleteRemoteItemAsync(RemoteItemDto item, bool confirmed, CancellationToken cancellationToken = default)
+        => Feed(await SlowAsync(MessageTypes.RemoteDeleteRemote,
+            new RemoteDeleteRequest { Provider = item.Provider, Kind = item.Kind, ItemId = item.ItemId, Confirmed = confirmed },
+            MessageTypes.RemoteActionResult, FailedAction, cancellationToken).ConfigureAwait(false));
+
     // ---- remote.container.* --------------------------------------------------------------------
 
     /// <summary>

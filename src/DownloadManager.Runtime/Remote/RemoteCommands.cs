@@ -514,7 +514,32 @@ public sealed class RemoteCommands : IDisposable
         => RefuseOutside(request.JobId) ?? ToDto(await _jobs.ControlQueuedAsync(request.JobId, RemoteQueueAction.Start, cancellationToken).ConfigureAwait(false));
 
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(RemoteDeleteRequest request, CancellationToken cancellationToken = default)
-        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
+    {
+        if (request.JobId != Guid.Empty || string.IsNullOrEmpty(request.ItemId))
+        {
+            return RefuseOutside(request.JobId) ?? ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
+        }
+
+        // TB.F17: an item of the account named by itself, as My provider lists it, with or without a job here.
+        if (OneProvider(request.Provider, out var entry) is { } refusal)
+        {
+            return new RemoteActionResultDto { Error = refusal };
+        }
+
+        if (!RemoteKinds.TryParse(request.Kind ?? string.Empty, out var kind))
+        {
+            return new RemoteActionResultDto { Error = "The kind has to be torrents, webdl or usenet." };
+        }
+
+        // A job that holds this item goes with it, so the same rule as for the job applies.
+        var holder = _jobs.FindByItem(entry!.Id, kind, request.ItemId);
+        if (holder is not null && RefuseOutside(holder.Id) is { } outside)
+        {
+            return outside;
+        }
+
+        return ToDto(await _jobs.RemoveRemoteItemAsync(new RemoteItemRef(entry.Id, kind, request.ItemId), request.Confirmed, cancellationToken).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// TB.S2: the link's password, when the user agreed to have it tried on this job's own archives and gave no archive
