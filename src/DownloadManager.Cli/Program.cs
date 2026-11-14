@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
@@ -1406,7 +1407,7 @@ internal static partial class Program
 
         if (json)
         {
-            PrintJson(results.Select(r => new { r.Url, r.Result.Accepted, r.Result.Duplicate, r.Result.Error, r.Result.Job }));
+            Console.WriteLine(AddBatchJson(results));
         }
 
         var accepted = results.Count(r => r.Result.Accepted);
@@ -1641,15 +1642,7 @@ internal static partial class Program
         FolderSpaceDto? SpaceOf(string path) => measured.FirstOrDefault(folder => string.Equals(folder.Path, path.Trim(), StringComparison.OrdinalIgnoreCase));
         if (json)
         {
-            PrintJson(rows.Select(row => new
-            {
-                kind = row.Kind,
-                name = row.Name.Length == 0 ? null : row.Name,
-                path = row.Path,
-                freeBytes = SpaceOf(row.Path)?.FreeBytes,
-                totalBytes = SpaceOf(row.Path)?.TotalBytes,
-                insideContainer = SpaceOf(row.Path)?.InsideContainer ?? false,
-            }));
+            Console.WriteLine(FoldersJson(rows, measured));
             return 0;
         }
 
@@ -1710,7 +1703,7 @@ internal static partial class Program
 
             await WriteFileAtomicallyAsync(
                 optionArgs[1],
-                JsonSerializer.Serialize(current.Settings, PrettyJson)).ConfigureAwait(false);
+                PrettyText(current.Settings)).ConfigureAwait(false);
             Console.WriteLine($"exported settings to {optionArgs[1]}");
             return 0;
         }
@@ -2125,8 +2118,29 @@ internal static partial class Program
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 
-    private static void PrintJson<T>(T value)
-        => Console.WriteLine(JsonSerializer.Serialize(value, PrettyJson));
+    private static void PrintJson<T>(T value) => Console.WriteLine(PrettyText(value));
+
+    /// <summary>What a --json command prints: the value as indented JSON with the wire's naming (PERF.10: from generated metadata).</summary>
+    internal static string PrettyText<T>(T value) => JsonSerializer.Serialize(value, (JsonTypeInfo<T>)PrettyJson.GetTypeInfo(typeof(T)));
+
+    /// <summary><c>add-batch --json</c>: one row per address, in the order given.</summary>
+    internal static string AddBatchJson(IEnumerable<(string Url, AddJobResponse Result)> results)
+        => PrettyText(results.Select(r => new { r.Url, r.Result.Accepted, r.Result.Duplicate, r.Result.Error, r.Result.Job }));
+
+    /// <summary><c>folders --json</c>: favorite, default and recent folders with the space the Host measured.</summary>
+    internal static string FoldersJson(IEnumerable<(string Kind, string Name, string Path)> rows, IReadOnlyList<FolderSpaceDto> measured)
+    {
+        FolderSpaceDto? SpaceOf(string path) => measured.FirstOrDefault(folder => string.Equals(folder.Path, path.Trim(), StringComparison.OrdinalIgnoreCase));
+        return PrettyText(rows.Select(row => new
+        {
+            kind = row.Kind,
+            name = row.Name.Length == 0 ? null : row.Name,
+            path = row.Path,
+            freeBytes = SpaceOf(row.Path)?.FreeBytes,
+            totalBytes = SpaceOf(row.Path)?.TotalBytes,
+            insideContainer = SpaceOf(row.Path)?.InsideContainer ?? false,
+        }));
+    }
 
     /// <summary>
     /// Writes beside the file and then puts it in place, so a stop part way (Ctrl+C, a full disk) leaves the old file

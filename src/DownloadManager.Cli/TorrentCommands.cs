@@ -28,8 +28,6 @@ internal static class TorrentCommands
     /// <summary>The flags that take a value (their value is not a positional argument).</summary>
     internal static readonly string[] ValueFlags = ["--dest", "--files", "--priority", "--down", "--up", "--seed-goal", "--sequential"];
 
-    private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
-
     public static async Task<int> RunAsync(CliClient client, string[] args, bool json)
     {
         var positional = Positional(args);
@@ -576,5 +574,5 @@ internal static class TorrentCommands
         return unit == 0 ? $"{bytes} B" : value.ToString("0.#", CultureInfo.InvariantCulture) + " " + units[unit];
     }
 
-    private static void Print<T>(T value) => Console.WriteLine(JsonSerializer.Serialize(value, PrettyJson));
+    private static void Print<T>(T value) => Console.WriteLine(Program.PrettyText(value));
 }
