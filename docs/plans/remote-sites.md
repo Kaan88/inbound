@@ -266,7 +266,8 @@ batch durability, the IPC surface) stay with the main model; dialogs, CLI text a
 
 ## To settle in the rclone run (phase 0)
 
-Read from rclone's documentation on 2026-11-13; none of it has been run.
+Read from rclone's documentation on 2026-11-13. Run on Linux on 2026-11-14 with rclone 1.76.0: the answers, with what
+was run and seen, are in `remote-sites-rclone-run.md`. Nothing was run on Windows.
 
 1. `fs` as a JSON object with a password, with `--config ""`: works, and no file appears anywhere.
 2. How the rc user and password are best passed so they are not visible to other processes.
@@ -281,6 +282,33 @@ Read from rclone's documentation on 2026-11-13; none of it has been run.
 9. OAuth token refresh with an in-memory config: where the new token can be read.
 10. Start time, idle memory, and the size of the exe unpacked and in the Setup.
 
+## What the run changed (2026-11-14)
+
+Where this differs from the sections above, this section stands until they are rewritten in SITES.1 and SITES.2.
+
+- **Version:** rclone 1.75.0 is the oldest that has `host_keys`. Inbound refuses an older rclone for SFTP.
+- **Start:** the rc user and password go in `RCLONE_RC_USER` and `RCLONE_RC_PASS`, never in flags (flags show in the
+  process list). rclone is never run with `-vv`, which logs them. `--cache-dir` and `--temp-dir` point into our state
+  folder. `--config ""` reads and writes no file.
+- **Secrets:** every password and key passphrase is obscured with `core/obscure` before use. rc error bodies repeat
+  the secrets they were given, so they are never logged or shown as they are.
+- **First-use host key:** rclone cannot report a server's key before a login, and its pin flag sends the credentials
+  first. Inbound reads the key with a small SSH handshake of its own (key exchange only, no login), shows the
+  fingerprint, and passes the accepted key in `host_keys`. A 50-line probe did this in the run.
+- **Key files:** passphrase keys in the current OpenSSH format work. The conversion step is dropped.
+- **FTPS:** there is no per-site CA. Open question 6.
+- **Resume:** no kind resumes a cut transfer; the file starts again from zero. Downloads, and SFTP and FTP uploads,
+  go to `name.<hex>.partial` and are renamed at the end; WebDAV uploads have no temporary name. "Pause" is stop and
+  start again, and the UI says so. Stray `.partial` files are removed after a crash. Open question 7.
+- **Lifetime:** rclone keeps running, and keeps transferring, when its parent dies. The Host ties it to itself: a
+  job object on Windows, `PR_SET_PDEATHSIG` on Linux.
+- **Sign-in kinds:** one named in-memory remote per site; the token is read back with `config/get` after each batch
+  and stored if it changed. A real refresh has not been seen.
+- **Size:** rclone.exe is about 86 MB unpacked and 32 MB zipped, about 43% on top of the current install. This bears
+  on open question 5.
+- **Not known:** everything on Windows; timings on a quiet machine; a real token refresh; per-batch speed limits
+  (only the global limit was seen to work); a cut upload to a real WebDAV, FTP or cloud server.
+
 ## Open questions for the owner
 
 1. Do site transfers count against "downloads at once", or have their own limit (proposed: their own)?
@@ -288,6 +316,12 @@ Read from rclone's documentation on 2026-11-13; none of it has been run.
 3. Is "to this device" and "from this device" in the first web UI release, or server-side only at first?
 4. Is the extension popup line wanted at all?
 5. Setup: is rclone always installed, or a component the user can untick?
+6. FTPS with a self-signed certificate (from the run): either Inbound keeps one CA file of the certificates the user
+   accepted and restarts rclone when it changes, or rclone's check is turned off for that site and Inbound checks
+   the certificate's fingerprint itself before each connection (proposed: the first; the second leaves a gap between
+   our check and rclone's connection).
+7. No resume (from the run): a stopped or failed site transfer starts its current file again from zero. Accept this
+   for the first release (proposed: yes, and say so in the UI), or hold Sites until a way to resume is found?
 
 ## Rejected
 
