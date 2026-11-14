@@ -1,5 +1,22 @@
 # Progress — session handoff
 
+### Release 0.7.7: Delete from TorBox on every item in My TorBox (owner, 2026-11-14)
+
+The owner did not find Delete from TorBox in My TorBox on 0.7.6: TB.F16 had put it in the main list's menu, and in My
+TorBox it was only there for items a job here knew. What was wanted was every item (TB.F17).
+
+- **TB.F17:** `remote.deleteRemote` also takes provider, kind and item ID when no job is given
+  (`RemoteJobCoordinator.RemoveRemoteItemAsync(RemoteItemRef, ...)`, `FindByItem`); a job that holds the item goes
+  with it, under the same web-session folder rule. Delete is on every row of My TorBox, desktop and web UI.
+- **0.7.7 is 0.7.6 plus TB.F17 only**, built from branch `release-0.7.7` (cut at `v0.7.6`). The work on `main` after
+  0.7.6 (PERF.10 generated JSON, PERF.16 events once per tick, the benchmark tools) is not in it: none of it has
+  been tried in a running app. The next release from `main` carries both.
+- **Checked:** CI run 43629493776 on the release branch, Windows and Linux green. Windows build run 43631395836 made
+  the draft with six files; `SHA256SUMS`, the manifest's size and hash against the zip, and `public.pem` identical
+  to 0.7.6's were checked before publishing. The extension stays 0.6.4, same signed file and hash.
+- **Not checked:** nothing was installed or opened; the Linux packages and Docker image start on publishing and
+  were not looked at here.
+
 ### Sites and performance, stage A started (2026-11-14)
 
 Owner: "start site/perf, delegate when you can". Four pieces were delegated to Sonnet and reviewed here.
