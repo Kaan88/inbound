@@ -447,7 +447,12 @@ public sealed partial class RuntimeServiceTests
         await EventuallyWithTime(rig.Time, () => rig.View(first.Id).State == RemoteJobState.Failed, "the refusal");
 
         await rig.Box.Account.SetKeyAsync(MockKey);
-        await Eventually(() => new JsonRemoteJobStore(rig.Ctx.Paths).LoadPacingAsync("torbox").GetAwaiter().GetResult().CreationStoppedReason is null, "the stop to be lifted");
+        // This reads the file from outside the service, so on Windows it can meet the service's save: that is "not yet".
+        await Eventually(() =>
+        {
+            try { return new JsonRemoteJobStore(rig.Ctx.Paths).LoadPacingAsync("torbox").GetAwaiter().GetResult().CreationStoppedReason is null; }
+            catch (IOException) { return false; }
+        }, "the stop to be lifted");
 
         var (next, _, _) = rig.ScriptHoster("next", MockTorBoxState.Ready);
         var second = await rig.AddAsync(new RemoteAddRequest { Input = next, ApprovedUncached = true });
