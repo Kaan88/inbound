@@ -39,16 +39,34 @@ public sealed class VersionStatusTests
     }
 
     [Fact]
-    public void AServerIsHeldToItsOwnCheckFirstThenThisPcs()
+    public void AServerIsHeldToItsOwnCheckFirstThenThisPcsOfTheSameKind()
     {
-        // Its own check reads its own build's manifest (the AppImage's Linux one), so it wins.
-        Assert.Equal("0.7.0", VersionStatus.LatestFor("0.7.0", HostKinds.Linux, "0.7.1"));
-        // Every Inbound build comes from the same version tag, so this PC's latest stands for the others.
-        Assert.Equal("0.7.1", VersionStatus.LatestFor(null, HostKinds.Server, "0.7.1"));
-        Assert.Equal("0.7.1", VersionStatus.LatestFor(null, HostKinds.Windows, "0.7.1"));
-        Assert.Equal("0.7.1", VersionStatus.LatestFor(" ", null, "0.7.1"));
+        // Its own check reads its own build's manifest (the AppImage's Linux one), so it wins, whatever this PC is.
+        Assert.Equal("0.7.0", VersionStatus.LatestFor("0.7.0", HostKinds.Linux, "0.7.1", HostKinds.Windows));
+        Assert.Equal("0.7.0", VersionStatus.LatestFor("0.7.0", HostKinds.Server, "0.7.1", HostKinds.Windows));
+        // The same kind of install is released together, so this PC's latest stands for it.
+        Assert.Equal("0.7.1", VersionStatus.LatestFor(null, HostKinds.Windows, "0.7.1", HostKinds.Windows));
+        Assert.Equal("0.7.1", VersionStatus.LatestFor(" ", HostKinds.Linux, "0.7.1", HostKinds.Linux));
+        // A Host from before hostKind is a Windows one.
+        Assert.Equal("0.7.1", VersionStatus.LatestFor(null, null, "0.7.1", HostKinds.Windows));
+        Assert.Equal("0.7.1", VersionStatus.LatestFor(null, HostKinds.Windows, "0.7.1", null));
+    }
+
+    [Fact]
+    public void AServerIsNeverHeldToAnotherInstallKindsLatest()
+    {
+        // UI.B33: 0.7.3 was Windows only, so a Docker server on 0.7.2 is not behind it.
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Windows));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Linux));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Server));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Linux, "0.7.3", HostKinds.Windows));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Windows, "0.7.3", HostKinds.Linux));
         // A kind this window doesn't know isn't claimed to be behind.
-        Assert.Null(VersionStatus.LatestFor(null, "something-else", "0.7.1"));
-        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Server, null));
+        Assert.Null(VersionStatus.LatestFor(null, "something-else", "0.7.1", "something-else"));
+        Assert.Null(VersionStatus.LatestFor(null, HostKinds.Windows, null, HostKinds.Windows));
+        // With no latest known the version is shown alone.
+        var latest = VersionStatus.LatestFor(null, HostKinds.Server, "0.7.3", HostKinds.Windows);
+        Assert.Equal("0.7.2", VersionStatus.Server("0.7.2", latest));
+        Assert.Null(VersionStatus.ServerNote("0.7.2", latest));
     }
 }
