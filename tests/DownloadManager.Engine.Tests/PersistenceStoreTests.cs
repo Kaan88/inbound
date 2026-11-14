@@ -186,14 +186,11 @@ public sealed class PersistenceStoreTests : IDisposable
         checkpoint.Segments.Add(new SegmentCheckpoint { Start = 0, End = 99, Completed = 50 });
         await store.SaveAsync(checkpoint);
 
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var error = await Assert.ThrowsAsync<CheckpointTooNewException>(() => store.LoadAsync(id));
-        watch.Stop();
+        var (error, fastest) = await FailsAsync<CheckpointTooNewException>(() => store.LoadAsync(id));
         Assert.IsAssignableFrom<CheckpointUnusableException>(error);
         Assert.IsAssignableFrom<IOException>(error);
         Assert.Contains("newer version of the app", error.Message);
-        // The store's own retries (100 + 200 + 300 ms) are for a held file, not for one that can never be read.
-        Assert.True(watch.ElapsedMilliseconds < 500, $"took {watch.ElapsedMilliseconds} ms; an unusable checkpoint was retried");
+        Assert.True(fastest < 500, $"took {fastest} ms; an unusable checkpoint was retried");
         Assert.True(File.Exists(Path.Combine(_paths.CheckpointsDirectory, $"{id:N}.json")));
     }
 
@@ -208,12 +205,31 @@ public sealed class PersistenceStoreTests : IDisposable
         var path = Path.Combine(_paths.CheckpointsDirectory, $"{id:N}.json");
         await File.WriteAllTextAsync(path, content);
 
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var error = await Assert.ThrowsAsync<CheckpointDamagedException>(() => store.LoadAsync(id));
-        watch.Stop();
+        var (error, fastest) = await FailsAsync<CheckpointDamagedException>(() => store.LoadAsync(id));
         Assert.IsAssignableFrom<CheckpointUnusableException>(error);
-        Assert.True(watch.ElapsedMilliseconds < 500, $"took {watch.ElapsedMilliseconds} ms; a damaged checkpoint was retried");
+        Assert.True(fastest < 500, $"took {fastest} ms; a damaged checkpoint was retried");
         Assert.Equal(content, await File.ReadAllTextAsync(path));
+    }
+
+    /// <summary>
+    /// The failure and the fastest of up to three tries, in milliseconds. The store's own retries (100 + 200 + 300 ms)
+    /// are for a held file, not for one that can never be read: a load that retried takes 600 ms or more every time,
+    /// while a busy machine (a shared CI runner stalled one load for a second, CI.3) is slow now and then. So one
+    /// fast try shows there is no retry, and a retry still fails all three.
+    /// </summary>
+    private static async Task<(T Error, long FastestMs)> FailsAsync<T>(Func<Task> load) where T : Exception
+    {
+        var fastest = long.MaxValue;
+        T? error = null;
+        for (var attempt = 0; attempt < 3 && fastest >= 500; attempt++)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            error = await Assert.ThrowsAsync<T>(load);
+            watch.Stop();
+            fastest = Math.Min(fastest, watch.ElapsedMilliseconds);
+        }
+
+        return (error!, fastest);
     }
 
     [Fact]

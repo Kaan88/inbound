@@ -11,16 +11,25 @@ public sealed class TransferRateLimiterTests
     {
         const long limit = 8_000_000;
         const int read = 16 * 1024;
-        var limiter = new TransferRateLimiter(() => limit);
-        long bytes = 0;
-        var stopwatch = Stopwatch.StartNew();
-        while (stopwatch.Elapsed < TimeSpan.FromSeconds(1.5))
+        // Too fast fails at once. Too slow is measured again, up to three times: a busy machine (a shared CI runner
+        // measured 2.5 MB/s once, CI.3) is slow now and then, while a limiter that can't reach the limit with small
+        // reads is slow every time.
+        var rate = 0d;
+        for (var attempt = 0; attempt < 3 && rate < limit * 0.6; attempt++)
         {
-            await limiter.WaitAsync(read, CancellationToken.None);
-            bytes += read;
+            var limiter = new TransferRateLimiter(() => limit);
+            long bytes = 0;
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.Elapsed < TimeSpan.FromSeconds(1.5))
+            {
+                await limiter.WaitAsync(read, CancellationToken.None);
+                bytes += read;
+            }
+
+            rate = bytes / stopwatch.Elapsed.TotalSeconds;
+            Assert.True(rate <= limit * 1.15, $"{rate:N0} bytes a second is over the limit of {limit:N0}");
         }
 
-        var rate = bytes / stopwatch.Elapsed.TotalSeconds;
         Assert.InRange(rate, limit * 0.6, limit * 1.15);
     }
 

@@ -73,8 +73,14 @@ public sealed class ContainerUploadTests
         using var empty = await client.SendAsync(HttpMethod.Post, "/api/upload/container", null,
             Upload("a.ccf", new ByteArrayContent([])));
         Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
-        using var large = await client.SendAsync(HttpMethod.Post, "/api/upload/container", null,
-            Upload("a.dlc", new ByteArrayContent(new byte[16 * 1024 * 1024 + 1])));
+        // The server refuses on the declared length and reads nothing. A client that is still sending 16 MB then can
+        // lose the connection before it reads the answer (seen on Windows, CI.3), so this one asks first
+        // (Expect: 100-continue) and sends the body only if told to, as browsers' large uploads may.
+        using var large = await client.SendAsync(HttpMethod.Post, "/api/upload/container", null, request =>
+        {
+            Upload("a.dlc", new ByteArrayContent(new byte[16 * 1024 * 1024 + 1]))(request);
+            request.Headers.ExpectContinue = true;
+        });
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, large.StatusCode);
         Assert.Equal("This file is too large to be a container.", (await client.JsonAsync(large)).GetProperty("error").GetString());
         Assert.Empty(Directory.GetFiles(Path.Combine(server.Data, TorrentUploads.FolderName)));
