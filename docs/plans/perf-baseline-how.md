@@ -46,7 +46,9 @@ scripts/perf-seed.sh stop --name x [--purge]
   on Windows, which also adds held jobs by `add-batch`.
 - **Active downloads**: `/slow/active-<i>.bin?size=268435456&bps=262144` from `tools/TestServer`: 256 MiB at 256 KiB/s on one
   connection each, so each stays active for about 17 minutes (a measurement is 70 s). `ACTIVE_BPS` and `ACTIVE_SIZE` change
-  this. The Host's `maxconcurrent` is set to A + 2 so all of them run at once. Completion windows are turned off.
+  this. The Host's `maxconcurrent` is set to A + 2 so all of them run at once, and above 8 the per-host limit
+  (`maxConnectionsPerHost`, 8 by default; all of them come from 127.0.0.1) is raised to A + 2 as well. The product runs at most
+  16 downloads at once, so `--active 20` gives 16 running and 4 waiting; check `activeSeen`. Completion windows are turned off.
 - `--target host` (the Linux Host holds the jobs; for the window) or `--target server`: the held jobs are seeded through the
   Host, which then stops, the headless `DownloadManager.Server` starts on the same data folder, and the active downloads
   are added over HTTP with the signed-in session (`perf-seed-active.mjs`, `POST /api/ipc` `job.add`, as the web UI does).

@@ -143,6 +143,12 @@ perf_start() {
   perf_cli settings set maxconcurrent $((active > 4 ? active + 2 : 4)) >/dev/null
   perf_cli settings export "$PERF_INST/settings-in.json" >/dev/null
   sed -i 's/"showCompletionDialog": *true/"showCompletionDialog": false/' "$PERF_INST/settings-in.json"
+  # All active downloads come from one host (127.0.0.1) and the per-host limit is 8 by default, so more than 8 would
+  # leave the rest waiting. Raised only then, so runs with 8 or fewer keep the default.
+  if [ "$active" -gt 8 ]; then
+    sed -i "s/\"maxConnectionsPerHost\": *[0-9]*/\"maxConnectionsPerHost\": $((active + 2))/" "$PERF_INST/settings-in.json"
+    grep -q "\"maxConnectionsPerHost\": $((active + 2))" "$PERF_INST/settings-in.json" || { perf_log "could not raise maxConnectionsPerHost"; perf_kill_started; return 1; }
+  fi
   perf_cli settings import "$PERF_INST/settings-in.json" >/dev/null
   perf_add_held "$jobs" || { perf_kill_started; return 1; }
 

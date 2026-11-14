@@ -7,7 +7,7 @@ This file only sets the order. What each item is stays where it was:
 - Performance: `performance-areas.md` (Host, engine, saves, IPC) and `ui-performance-areas.md` (window, web UI),
   ROADMAP PERF.8 to PERF.20.
 
-Nothing in either plan is built or measured. The order among the performance items is the same as in
+Status is in ROADMAP and PROGRESS (the Linux baseline: `perf-baseline-a2-linux.md`). The order among the performance items is the same as in
 `performance-areas.md`, "Order of work"; here the Sites phases are placed between them.
 
 ## What decided the order

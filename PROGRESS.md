@@ -39,9 +39,18 @@ Owner: "start site/perf, delegate when you can". Four pieces were delegated to S
 - **PERF.15 tools:** `scripts/perf-seed.sh`, `perf-webui.sh` (headless Chrome over CDP, no npm packages) and
   `perf-window-linux.sh` (the Uno window on a private `kwin_wayland --virtual` display, default and software
   rendering). How to run and what is left for Windows: `docs/plans/perf-baseline-how.md`.
-- **No baseline numbers yet.** The PC's load average was 100 to 300 from other work during this session; the owner
-  said not to run load-sensitive tests until it is quiet. Only smoke runs were made, and their numbers are not
-  recorded. The commit to measure is tagged locally `perf-baseline-a2` (`ff949a4`, before the JSON change).
+- **Linux baseline taken (2026-11-14, late):** `docs/plans/perf-baseline-a2-linux.md`, at the tag `perf-baseline-a2`
+  (`ff949a4`, before the JSON change; the tag is on the remote). The PC was not idle (load average median 3.8, up to
+  12.6, on 28 CPUs; other work was running), and one window combination measured twice differed by a factor of two,
+  so window CPU figures are rough. Engine: about 1.2 GB/s to disk at any segment count (the disk is the limit), 5 to
+  7 GB/s to RAM. A save is 0.8 to 1 ms and nearly all of it is the sync. Starts: CLI 22 ms, native host 76 ms, Host
+  152 ms. Web UI: usable in 0.3 s at 500 jobs and 1.1 to 1.3 s at 5,000; at 5,000 jobs with 8 or more downloads
+  running the page's main thread is busy all the time and falls behind on events. Linux window: first frame at about
+  1.1 s at either size; idle is idle; one running download costs 10 to 30 % of a core, 16 about twice that; software
+  rendering costs about twice the CPU of OpenGL. Found while measuring: "20 active" cannot exist, the product runs at
+  most 16 at once, and the first run had only 8 running because of the per-host limit of 8; `scripts/perf-seed.sh`
+  now raises that limit above 8 and the "20" rows were rerun with 16 running. Not taken: anything on Windows (WinUI
+  window, the bench on NTFS), dropped frames while scrolling. Not repeated on a quiet machine.
 - **PERF.10, first half (merged `d5ef3ea`):** `IpcJsonContext` (160 types), `PersistenceJsonContext` (11 roots) and an
   internal context for the saved-list file, plugged into the two shared options objects with reflection as the
   fallback. About 20 anonymous payloads became `EmptyPayload`, `ErrorPayload` and `OkErrorPayload` with the same
