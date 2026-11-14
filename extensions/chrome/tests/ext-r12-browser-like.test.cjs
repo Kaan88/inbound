@@ -344,6 +344,12 @@ test('EXT.R12: "Open the popup" opens it on a finish; where the browser refuses,
           const before = icons.length;
           emit(harness, { eventType: 'completed', job: job({ state: 'completed' }) });
           await new Promise((resolve) => setTimeout(resolve, 60));
+          // Six flash steps of 1 ms each take longer than 60 ms where timers are coarse (Windows, about 16 ms a
+          // step), so wait for them, up to two seconds, and then once more to see that no further one comes.
+          for (let waited = 0; expectFlash && icons.length - before < 7 && waited < 2000; waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          if (expectFlash) await new Promise((resolve) => setTimeout(resolve, 60));
           assert.equal(popups.length > 0, expectPopup, onFinish);
           if (expectPopup) assert.deepEqual(popups[0], { windowId: 7 });
           // The plain icon for idle is drawn either way; a flash draws six more.
