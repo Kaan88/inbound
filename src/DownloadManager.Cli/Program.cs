@@ -2304,21 +2304,34 @@ internal sealed class CliClient : IAsyncDisposable
         }
 
         var host = HostLocator.FindHostExecutable()
-                   ?? throw new HostUnavailableException("Could not find DownloadManager.Host.exe. Build or install the host first.");
+                   ?? throw new HostUnavailableException($"Could not find {HostLocator.HostFileName}. Build or install the host first.");
         try
         {
-            // The Host would otherwise inherit this process's standard handles and hold a script's pipe open
-            // for as long as it runs, so `dm list | findstr` would never end. Not through the shell: that can
-            // put a security warning on the desktop and wait for it.
-            KeepStandardHandlesFromChildren();
-            Process.Start(new ProcessStartInfo
+            if (OperatingSystem.IsLinux())
             {
-                FileName = host,
-                Arguments = "--background",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            });
+                // In a session of its own, so the Host outlives this command, and with no standard handles of ours,
+                // or `dm list | jq` would never end. The shell only redirects them; setsid starts the Host.
+                var start = new ProcessStartInfo("sh") { UseShellExecute = false };
+                start.ArgumentList.Add("-c");
+                start.ArgumentList.Add("exec setsid -f \"$0\" --background >/dev/null 2>&1 </dev/null");
+                start.ArgumentList.Add(host);
+                Process.Start(start)?.Dispose();
+            }
+            else
+            {
+                // The Host would otherwise inherit this process's standard handles and hold a script's pipe open
+                // for as long as it runs, so `dm list | findstr` would never end. Not through the shell: that can
+                // put a security warning on the desktop and wait for it.
+                KeepStandardHandlesFromChildren();
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = host,
+                    Arguments = "--background",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -2492,22 +2505,39 @@ internal sealed class CliClient : IAsyncDisposable
 
 internal static class HostLocator
 {
-    public static string? FindHostExecutable()
-    {
-        var candidates = new List<string>
-        {
-            Path.Combine(AppContext.BaseDirectory, "DownloadManager.Host.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "DownloadManager.Host.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Host", "bin", "Debug", "net10.0-windows", "DownloadManager.Host.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Host", "bin", "Release", "net10.0-windows", "DownloadManager.Host.exe"),
-        };
+    /// <summary>The file name of the Host program on this system.</summary>
+    public static string HostFileName => HostFileNameFor(OperatingSystem.IsLinux());
 
-        var fromEnv = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_HOST");
+    public static string HostFileNameFor(bool linux) => linux ? "inbound-host" : "DownloadManager.Host.exe";
+
+    public static string? FindHostExecutable()
+        => Candidates(OperatingSystem.IsLinux(), AppContext.BaseDirectory, Environment.GetEnvironmentVariable("DOWNLOADMANAGER_HOST"))
+            .Select(Path.GetFullPath).FirstOrDefault(File.Exists);
+
+    /// <summary>The places tried, first to last. Linux: beside this program (the AppImage keeps everything in one folder) and the build folders.</summary>
+    public static List<string> Candidates(bool linux, string baseDirectory, string? fromEnv)
+    {
+        var candidates = linux
+            ? new List<string>
+            {
+                Path.Combine(baseDirectory, "inbound-host"),
+                Path.Combine(baseDirectory, "..", "inbound-host"),
+                Path.Combine(baseDirectory, "..", "..", "..", "..", "DownloadManager.Host.Linux", "bin", "Debug", "net10.0", "inbound-host"),
+                Path.Combine(baseDirectory, "..", "..", "..", "..", "DownloadManager.Host.Linux", "bin", "Release", "net10.0", "inbound-host"),
+            }
+            : new List<string>
+            {
+                Path.Combine(baseDirectory, "DownloadManager.Host.exe"),
+                Path.Combine(baseDirectory, "..", "DownloadManager.Host.exe"),
+                Path.Combine(baseDirectory, "..", "..", "..", "..", "DownloadManager.Host", "bin", "Debug", "net10.0-windows", "DownloadManager.Host.exe"),
+                Path.Combine(baseDirectory, "..", "..", "..", "..", "DownloadManager.Host", "bin", "Release", "net10.0-windows", "DownloadManager.Host.exe"),
+            };
+
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             candidates.Insert(0, fromEnv);
         }
 
-        return candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
+        return candidates;
     }
 }
