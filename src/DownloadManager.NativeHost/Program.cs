@@ -264,7 +264,7 @@ internal static class Program
         try
         {
             await WriteToExtensionAsync(IpcMessage.Create(MessageTypes.HandoffError,
-                new { errorCode = code, error = message })).ConfigureAwait(false);
+                new ErrorPayload { ErrorCode = code, Error = message })).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

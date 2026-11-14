@@ -1,0 +1,202 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace DownloadManager.Contracts;
+
+/// <summary>An empty JSON object <c>{}</c> as a payload (what <c>new { }</c> was).</summary>
+public sealed class EmptyPayload
+{
+}
+
+/// <summary>The generic failed answer <c>{"ok":false,"error":...}</c> of the Remote commands (what an anonymous object was).</summary>
+public sealed class OkErrorPayload
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>A browser-facing error payload, <c>{"errorCode":..., "error":...}</c> (what an anonymous object was).</summary>
+public sealed class ErrorPayload
+{
+    public string? ErrorCode { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>
+/// PERF.10: generated JSON metadata for every type that goes through <see cref="IpcJson.Options"/> (the IPC envelope, every
+/// payload, <see cref="UpdateManifest"/>, the changelog). <b>Every new DTO is added here</b> (one <c>[JsonSerializable]</c>
+/// line); <c>IpcJsonContextTests</c> fails for a public DTO that is missing. The options below match
+/// <see cref="IpcJson.Options"/>, so <c>IpcJsonContext.Default</c> alone gives the same bytes; the shared
+/// <see cref="IpcJson.Options"/> object plugs this context in as a resolver and keeps reflection as the fallback until the
+/// Native AOT step. Metadata only (no generated serialisation fast path), so the bytes can't differ from the reflection serializer's.
+/// No registered DTO has an enum property today (a test checks), so the context names no enum converter; the first one that does
+/// needs a <c>JsonStringEnumConverter&lt;T&gt;</c> subclass with the camelCase policy listed in <c>Converters</c> here.
+/// </summary>
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(IpcMessage))]
+[JsonSerializable(typeof(EmptyPayload))]
+[JsonSerializable(typeof(ErrorPayload))]
+[JsonSerializable(typeof(OkErrorPayload))]
+[JsonSerializable(typeof(List<SegmentDto>))]
+[JsonSerializable(typeof(List<DownloadGroupDto>))]
+[JsonSerializable(typeof(List<ConnectionTelemetryDto>))]
+[JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(string[]))]
+// DTOs, alphabetical. Add new ones here.
+[JsonSerializable(typeof(AddJobRequest))]
+[JsonSerializable(typeof(AddJobResponse))]
+[JsonSerializable(typeof(ArchiveActionRequest))]
+[JsonSerializable(typeof(ArchiveActionResult))]
+[JsonSerializable(typeof(ArchiveChangedDto))]
+[JsonSerializable(typeof(ArchiveExtractIgnored))]
+[JsonSerializable(typeof(ArchiveExtractRequest))]
+[JsonSerializable(typeof(ArchiveExtractResult))]
+[JsonSerializable(typeof(ArchiveListResult))]
+[JsonSerializable(typeof(ArchiveSetDto))]
+[JsonSerializable(typeof(ArchiveSetPasswordRequest))]
+[JsonSerializable(typeof(ArchiveSettingsDto))]
+[JsonSerializable(typeof(ArchiveSettingsResult))]
+[JsonSerializable(typeof(ArchiveSettingsUpdate))]
+[JsonSerializable(typeof(ArchiveToolStatusDto))]
+[JsonSerializable(typeof(CategoryDefinitionDto))]
+[JsonSerializable(typeof(ChangelogDto))]
+[JsonSerializable(typeof(ChangelogItem))]
+[JsonSerializable(typeof(ChangelogSection))]
+[JsonSerializable(typeof(ChangelogVersion))]
+[JsonSerializable(typeof(CleanOrphansRequest))]
+[JsonSerializable(typeof(CleanOrphansResponse))]
+[JsonSerializable(typeof(ClientHelloDto))]
+[JsonSerializable(typeof(ConnectionProfileDto))]
+[JsonSerializable(typeof(ConnectionTelemetryDto))]
+[JsonSerializable(typeof(DownloadFoldersRequest))]
+[JsonSerializable(typeof(DownloadFoldersResult))]
+[JsonSerializable(typeof(DownloadGroupDto))]
+[JsonSerializable(typeof(DownloadStatisticsDto))]
+[JsonSerializable(typeof(ExtensionsSeenDto))]
+[JsonSerializable(typeof(FailureDto))]
+[JsonSerializable(typeof(FavoriteFolderDto))]
+[JsonSerializable(typeof(FileMetadataRequest))]
+[JsonSerializable(typeof(FileMetadataResult))]
+[JsonSerializable(typeof(FolderBrowseRequest))]
+[JsonSerializable(typeof(FolderBrowseResult))]
+[JsonSerializable(typeof(FolderCreateRequest))]
+[JsonSerializable(typeof(FolderEntryDto))]
+[JsonSerializable(typeof(FolderFileDto))]
+[JsonSerializable(typeof(FolderPickRequest))]
+[JsonSerializable(typeof(FolderPickResult))]
+[JsonSerializable(typeof(FolderSpaceDto))]
+[JsonSerializable(typeof(FolderSpaceRequest))]
+[JsonSerializable(typeof(FolderSpaceResult))]
+[JsonSerializable(typeof(GroupActionRequest))]
+[JsonSerializable(typeof(GroupActionResult))]
+[JsonSerializable(typeof(HandoffAck))]
+[JsonSerializable(typeof(HandoffRequest))]
+[JsonSerializable(typeof(HostActionRequest))]
+[JsonSerializable(typeof(HostActionResult))]
+[JsonSerializable(typeof(HostHelloDto))]
+[JsonSerializable(typeof(HostStatusDto))]
+[JsonSerializable(typeof(IncompatibleDto))]
+[JsonSerializable(typeof(JobActionRequest))]
+[JsonSerializable(typeof(JobActionResponse))]
+[JsonSerializable(typeof(JobCompletionOptionsDto))]
+[JsonSerializable(typeof(JobDto))]
+[JsonSerializable(typeof(JobEventDto))]
+[JsonSerializable(typeof(JobQueueRequest))]
+[JsonSerializable(typeof(JobRefreshUrlRequest))]
+[JsonSerializable(typeof(JobsQueryRequest))]
+[JsonSerializable(typeof(JobUpdateRequest))]
+[JsonSerializable(typeof(ProxyDto))]
+[JsonSerializable(typeof(QueueActionRequest))]
+[JsonSerializable(typeof(QueueDto))]
+[JsonSerializable(typeof(RemoteAccountDto))]
+[JsonSerializable(typeof(RemoteAccountRequest))]
+[JsonSerializable(typeof(RemoteAccountResult))]
+[JsonSerializable(typeof(RemoteActionResultDto))]
+[JsonSerializable(typeof(RemoteAddRequestDto))]
+[JsonSerializable(typeof(RemoteAddResultDto))]
+[JsonSerializable(typeof(RemoteArchivePasswordRequest))]
+[JsonSerializable(typeof(RemoteChangedDto))]
+[JsonSerializable(typeof(RemoteCheckNowRequest))]
+[JsonSerializable(typeof(RemoteClassifyRequest))]
+[JsonSerializable(typeof(RemoteClassifyResult))]
+[JsonSerializable(typeof(RemoteContainerAddOutcomeDto))]
+[JsonSerializable(typeof(RemoteContainerAddRequest))]
+[JsonSerializable(typeof(RemoteContainerAddResult))]
+[JsonSerializable(typeof(RemoteContainerEntryDto))]
+[JsonSerializable(typeof(RemoteContainerPackageDto))]
+[JsonSerializable(typeof(RemoteContainerPreviewRequest))]
+[JsonSerializable(typeof(RemoteContainerPreviewResult))]
+[JsonSerializable(typeof(RemoteContainerSendRequest))]
+[JsonSerializable(typeof(RemoteContainerSendResult))]
+[JsonSerializable(typeof(RemoteDeleteRequest))]
+[JsonSerializable(typeof(RemoteFileDto))]
+[JsonSerializable(typeof(RemoteFilePathDto))]
+[JsonSerializable(typeof(RemoteFilesResultDto))]
+[JsonSerializable(typeof(RemoteHosterDto))]
+[JsonSerializable(typeof(RemoteHostersResult))]
+[JsonSerializable(typeof(RemoteItemDto))]
+[JsonSerializable(typeof(RemoteItemRequest))]
+[JsonSerializable(typeof(RemoteItemResult))]
+[JsonSerializable(typeof(RemoteJobDto))]
+[JsonSerializable(typeof(RemoteJobIdRequest))]
+[JsonSerializable(typeof(RemoteListResult))]
+[JsonSerializable(typeof(RemotePairResult))]
+[JsonSerializable(typeof(RemoteRetryRequest))]
+[JsonSerializable(typeof(RemoteSelectRequest))]
+[JsonSerializable(typeof(RemoteSetKeyRequest))]
+[JsonSerializable(typeof(ScheduleDto))]
+[JsonSerializable(typeof(SegmentDto))]
+[JsonSerializable(typeof(SettingsDto))]
+[JsonSerializable(typeof(SettingsResult))]
+[JsonSerializable(typeof(SettingsUpdateRequest))]
+[JsonSerializable(typeof(SiteLoginDto))]
+[JsonSerializable(typeof(SnapshotDto))]
+[JsonSerializable(typeof(SpeedHistoryDto))]
+[JsonSerializable(typeof(SpeedHistoryRequest))]
+[JsonSerializable(typeof(TorrentActionResult))]
+[JsonSerializable(typeof(TorrentAddRequest))]
+[JsonSerializable(typeof(TorrentAddResult))]
+[JsonSerializable(typeof(TorrentDetailsResult))]
+[JsonSerializable(typeof(TorrentDto))]
+[JsonSerializable(typeof(TorrentFileDto))]
+[JsonSerializable(typeof(TorrentFilePriorityDto))]
+[JsonSerializable(typeof(TorrentFilesRequest))]
+[JsonSerializable(typeof(TorrentFilesResult))]
+[JsonSerializable(typeof(TorrentImportRequest))]
+[JsonSerializable(typeof(TorrentImportResult))]
+[JsonSerializable(typeof(TorrentInspectRequest))]
+[JsonSerializable(typeof(TorrentInspectResult))]
+[JsonSerializable(typeof(TorrentJobRequest))]
+[JsonSerializable(typeof(TorrentListEntriesRequest))]
+[JsonSerializable(typeof(TorrentListEntriesResult))]
+[JsonSerializable(typeof(TorrentNetworkResult))]
+[JsonSerializable(typeof(TorrentOptionsDto))]
+[JsonSerializable(typeof(TorrentOptionsResult))]
+[JsonSerializable(typeof(TorrentPeerDto))]
+[JsonSerializable(typeof(TorrentPeersResult))]
+[JsonSerializable(typeof(TorrentPiecesResult))]
+[JsonSerializable(typeof(TorrentSeedRequest))]
+[JsonSerializable(typeof(TorrentSetFilesRequest))]
+[JsonSerializable(typeof(TorrentTrackerDto))]
+[JsonSerializable(typeof(TorrentTrackersResult))]
+[JsonSerializable(typeof(TorrentWatchRequest))]
+[JsonSerializable(typeof(UpdateCheckResult))]
+[JsonSerializable(typeof(UpdateDeferRequest))]
+[JsonSerializable(typeof(UpdateDownloadResult))]
+[JsonSerializable(typeof(UpdateInstallRequest))]
+[JsonSerializable(typeof(UpdateInstallResult))]
+[JsonSerializable(typeof(UpdateLatestDto))]
+[JsonSerializable(typeof(UpdateManifest))]
+[JsonSerializable(typeof(UpdateProgressDto))]
+[JsonSerializable(typeof(WebBridgeStartDto))]
+[JsonSerializable(typeof(WebUiPasswordRequest))]
+[JsonSerializable(typeof(WebUiSetRequest))]
+[JsonSerializable(typeof(WebUiStatusDto))]
+[JsonSerializable(typeof(WebUiTicketDto))]
+public sealed partial class IpcJsonContext : JsonSerializerContext
+{
+}

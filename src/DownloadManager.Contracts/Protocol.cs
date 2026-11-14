@@ -7,6 +7,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace DownloadManager.Contracts;
 
@@ -185,6 +186,8 @@ public static class IpcJson
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        // PERF.10: generated metadata first (IpcJsonContext), reflection for whatever is not registered, until the Native AOT step.
+        options.TypeInfoResolver = JsonTypeInfoResolver.Combine(IpcJsonContext.Default, new DefaultJsonTypeInfoResolver());
         return options;
     }
 }

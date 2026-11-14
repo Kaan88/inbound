@@ -10,6 +10,8 @@
   </ItemGroup>
 
   <PropertyGroup>
+    <!-- PERF.10: the trim and AOT analyzers only (no publish change); the warnings are the list for the Native AOT step. -->
+    <IsAotCompatible>true</IsAotCompatible>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

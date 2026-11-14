@@ -508,7 +508,7 @@ internal static class TorrentCommands
 
     private static async Task<int> NetworkAsync(CliClient client, bool json)
     {
-        var reply = await client.RequestAsync(TorrentMessageTypes.Network, new { }).ConfigureAwait(false);
+        var reply = await client.RequestAsync(TorrentMessageTypes.Network, new EmptyPayload()).ConfigureAwait(false);
         if (reply.Type != TorrentMessageTypes.NetworkResult) return Unavailable(reply);
         var result = reply.GetPayload<TorrentNetworkResult>();
         if (json)

@@ -22,7 +22,7 @@ internal sealed partial class RemoteClient
     public event Action<WebUiStatusDto>? WebUiChanged;
 
     public Task<WebUiResult> GetWebUiAsync(CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.Get, new { }, cancellationToken);
+        => WebUiCallAsync(WebUiMessageTypes.Get, new EmptyPayload(), cancellationToken);
 
     public Task<WebUiResult> SetWebUiAsync(WebUiSetRequest request, CancellationToken cancellationToken = default)
         => WebUiCallAsync(WebUiMessageTypes.Set, request, cancellationToken);
@@ -33,12 +33,12 @@ internal sealed partial class RemoteClient
 
     /// <summary>Reads the firewall rule again, for example after this window added it.</summary>
     public Task<WebUiResult> RecheckWebUiAsync(CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.Recheck, new { }, cancellationToken);
+        => WebUiCallAsync(WebUiMessageTypes.Recheck, new EmptyPayload(), cancellationToken);
 
     /// <summary>A link on this PC that signs in once and expires after a minute.</summary>
     public async Task<WebUiTicketResult> OpenWebUiTicketAsync(CancellationToken cancellationToken = default)
     {
-        var result = await WebUiCoreAsync(WebUiMessageTypes.OpenTicket, new { }, cancellationToken, readTicket: true).ConfigureAwait(false);
+        var result = await WebUiCoreAsync(WebUiMessageTypes.OpenTicket, new EmptyPayload(), cancellationToken, readTicket: true).ConfigureAwait(false);
         return result.Error is not null ? new WebUiTicketResult(null, result.Error) : new WebUiTicketResult(result.Ticket, null);
     }
 

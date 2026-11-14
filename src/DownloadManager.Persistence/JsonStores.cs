@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using DownloadManager.Core;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
@@ -117,6 +118,8 @@ internal static class PersistenceJson
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        // PERF.10: generated metadata first (PersistenceJsonContext), reflection for whatever is not registered, until the Native AOT step.
+        options.TypeInfoResolver = JsonTypeInfoResolver.Combine(PersistenceJsonContext.Default, new DefaultJsonTypeInfoResolver());
         return options;
     }
 }
@@ -594,7 +597,7 @@ public sealed class JsonJobStore : IJobStore
         }
     }
 
-    private sealed class RequestClaim
+    internal sealed class RequestClaim
     {
         public Guid JobId { get; set; }
         public string ExtensionId { get; set; } = string.Empty;

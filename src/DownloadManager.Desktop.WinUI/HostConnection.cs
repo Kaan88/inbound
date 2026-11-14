@@ -159,13 +159,13 @@ public sealed partial class HostConnection : IAsyncDisposable
 
     public async Task<SnapshotDto> RefreshAsync(CancellationToken cancellationToken = default)
     {
-        var reply = await RequestAsync(MessageTypes.JobsQuery, new { }, TimeSpan.FromSeconds(8), cancellationToken)
+        var reply = await RequestAsync(MessageTypes.JobsQuery, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken)
             .ConfigureAwait(false);
         return reply.GetPayload<SnapshotDto>();
     }
 
     public Task<IpcMessage> ListArchivesAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(ArchiveMessageTypes.List, new { }, TimeSpan.FromSeconds(30), cancellationToken);
+        => RequestAsync(ArchiveMessageTypes.List, new EmptyPayload(), TimeSpan.FromSeconds(30), cancellationToken);
 
     /// <summary>The password goes only into this one message. An empty one clears what is on record.</summary>
     public Task<IpcMessage> SetArchivePasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
@@ -178,11 +178,11 @@ public sealed partial class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobConnections, new JobActionRequest { JobId = jobId }, TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task<IpcMessage> GetStatisticsAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.StatisticsGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+        => RequestAsync(MessageTypes.StatisticsGet, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken);
 
     /// <summary>UI.R24: the Host's last hour of total download speed.</summary>
     public Task<IpcMessage> GetSpeedHistoryAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.SpeedHistoryGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+        => RequestAsync(MessageTypes.SpeedHistoryGet, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken);
 
     /// <summary>F-12: one download's figures while it runs. An older Host answers with the total (no <c>jobId</c>).</summary>
     public Task<IpcMessage> GetSpeedHistoryAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -398,7 +398,7 @@ public sealed partial class HostConnection : IAsyncDisposable
     /// <summary>T3: the torrent engine's DHT nodes and listening; null when not answered.</summary>
     public async Task<TorrentNetworkResult?> GetTorrentNetworkAsync(CancellationToken cancellationToken = default)
     {
-        var reply = await RequestAsync(TorrentMessageTypes.Network, new { }, TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+        var reply = await RequestAsync(TorrentMessageTypes.Network, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
         return reply.Type == TorrentMessageTypes.NetworkResult ? reply.GetPayload<TorrentNetworkResult>() : null;
     }
 
@@ -604,10 +604,10 @@ public sealed partial class HostConnection : IAsyncDisposable
             TimeSpan.FromSeconds(30), cancellationToken);
 
     public Task<IpcMessage> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.UpdateCheck, new { }, TimeSpan.FromSeconds(30), cancellationToken);
+        => RequestAsync(MessageTypes.UpdateCheck, new EmptyPayload(), TimeSpan.FromSeconds(30), cancellationToken);
 
     public Task<IpcMessage> DownloadUpdateAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.UpdateDownload, new { }, TimeSpan.FromMinutes(5), cancellationToken);
+        => RequestAsync(MessageTypes.UpdateDownload, new EmptyPayload(), TimeSpan.FromMinutes(5), cancellationToken);
 
     public Task<IpcMessage> InstallUpdateAsync(bool force = false, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.UpdateInstall, new UpdateInstallRequest { Force = force },
@@ -643,13 +643,13 @@ public sealed partial class HostConnection : IAsyncDisposable
             TimeSpan.FromSeconds(30), cancellationToken);
 
     public Task<IpcMessage> PauseAllAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.JobsPauseAll, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+        => RequestAsync(MessageTypes.JobsPauseAll, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task<IpcMessage> ResumeAllAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.JobsResumeAll, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+        => RequestAsync(MessageTypes.JobsResumeAll, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task<IpcMessage> ShutdownAsync(CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.HostShutdown, new { }, TimeSpan.FromSeconds(5), cancellationToken);
+        => RequestAsync(MessageTypes.HostShutdown, new EmptyPayload(), TimeSpan.FromSeconds(5), cancellationToken);
 
     private async Task<IpcMessage> RequestAsync<T>(
         string type,

@@ -200,7 +200,7 @@ public sealed partial class HostCommandDispatcher
         // told there; one without events learns it from host.openUi's answer.
         if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
         {
-            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
+            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new EmptyPayload()), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -691,7 +691,7 @@ public sealed partial class HostCommandDispatcher
                     // take it for a running one, whatever its client.hello asked for.
                     if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
                     {
-                        await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
+                        await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new EmptyPayload()), cancellationToken).ConfigureAwait(false);
                         break;
                     }
 
@@ -1192,7 +1192,7 @@ public sealed partial class HostCommandDispatcher
     {
         Interlocked.Exchange(ref _exiting, 1);
         using var cts = new CancellationTokenSource(timeout);
-        var message = IpcMessage.Create(MessageTypes.HostExiting, new { });
+        var message = IpcMessage.Create(MessageTypes.HostExiting, new EmptyPayload());
         await Task.WhenAll(_sessions.Values.Select(async client =>
         {
             try { await client.SendDirectAsync(message, cts.Token).ConfigureAwait(false); }

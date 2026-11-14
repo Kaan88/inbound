@@ -385,10 +385,10 @@ public static class NativeBridgePolicy
     private static IpcMessage? TooLarge(IpcMessage message, int size)
     {
         if (string.IsNullOrEmpty(message.ReplyTo)) return null;
-        return IpcMessage.Create(MessageTypes.HandoffError, new
+        return IpcMessage.Create(MessageTypes.HandoffError, new ErrorPayload
         {
-            errorCode = "message_too_large",
-            error = $"The desktop app's answer ({size / 1024} KB) is larger than the browser accepts (1 MB). Update the extension, or open the app to see the list.",
+            ErrorCode = "message_too_large",
+            Error =$"The desktop app's answer ({size / 1024} KB) is larger than the browser accepts (1 MB). Update the extension, or open the app to see the list.",
         }, message.ReplyTo);
     }
 }

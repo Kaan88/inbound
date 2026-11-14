@@ -3,14 +3,16 @@ using System.Text.Json;
 namespace DownloadManager.Persistence;
 
 /// <summary>What a provider's account file holds. The key is only ever ciphertext here.</summary>
+// PERF.10: `set`, not `init`: generated JSON metadata builds a type with init-only members without running its
+// property initializers (a member missing from an old file read as 0 or null, not as the default below).
 public sealed record StoredRemoteAccount
 {
     public const int CurrentSchemaVersion = 1;
 
-    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
-    public string Provider { get; init; } = string.Empty;
-    public string? ProtectedKey { get; init; }
-    public DateTimeOffset UpdatedAt { get; init; }
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public string Provider { get; set; } = string.Empty;
+    public string? ProtectedKey { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 /// <summary>
