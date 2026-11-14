@@ -177,11 +177,31 @@ in-app updater is for the AppImage, so they are not in `manifest-linux-x64.json`
 | `ci.yml` (CI) | Every push to main and every pull request, except Markdown and docs only | Windows: `scripts\build.ps1` and `scripts\test.ps1`. Linux: the web UI, the extension, the programs the Linux build ships, and the tests that pass on Linux |
 | `appimage.yml` (Linux packages) | A published release, or by hand | With a tag: builds the AppImage and the four packages from the tag, signs `manifest-linux-x64.json` and attaches everything to the release. By hand without a tag: builds the chosen branch and keeps the files as run artifacts |
 | `docker.yml` (Docker image) | A published release, or by hand from a tag | Builds and pushes the server image |
-| `windows.yml` (Windows build) | By hand | An unsigned test Setup (no Firefox add-on) and zip as run artifacts. The release's Windows files are still made locally, as above |
+| `windows.yml` (Windows build) | A pushed version tag, or by hand | With a tag: builds Setup (with the signed Firefox add-on) and the zip, signs `manifest.json`, and puts the six files in a **draft** release with notes drafted from `changelog.json` (CI.2). By hand without a tag: a test Setup (no Firefox add-on) and zip of the chosen branch as run artifacts, nothing signed |
 
-The release workflows start when the release is **published**, not when the tag is pushed. GitHub starts nothing
-for a push whose commit message has `[skip ci]`, and that is how 0.7.3 and 0.7.4 got no AppImage and no Docker
-image. So the order is: push the tag, create the release with the Windows files (`public.pem` among them, which the
-Linux workflow checks the signing key against), publish it. To build for a tag that has a release already: Actions,
-Linux packages, Run workflow, and give the tag; for the image, Actions, Docker image, Run workflow, and choose the
-tag under "Use workflow from".
+### A release built by GitHub (CI.2)
+
+1. Locally, as before: write `changelog.json`, set the version, and when the extension's version changed, sign the
+   Firefox add-on (`scripts\sign-extension-firefox.ps1 -ReleaseTag vX.Y.Z`; for an unchanged extension the same
+   command with `-SignedXpi`), so that `extensions/firefox-updates.json` names the file at this release with its hash.
+   Commit. Do not put `[skip ci]` in the release commit's message: GitHub starts nothing for such a push, tags
+   included, and that is how 0.7.3 and 0.7.4 got no AppImage and no Docker image.
+2. For a **new** extension version only: make a draft release for the tag by hand and attach the signed XPI to it,
+   since no earlier release has that file. Otherwise the workflow takes it from the newest earlier release that has
+   it. Either way it is checked against the hash in `extensions/firefox-updates.json`.
+3. Push the tag alone (`git push origin vX.Y.Z`). The Windows build runs: Setup, the zip, `manifest.json` signed with
+   the `UPDATE_SIGNING_KEY` secret (and refused unless its `public.pem` equals the latest release's), `SHA256SUMS`, all
+   six files in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
+   Run workflow, and give the tag.
+4. Read the draft: the files, the manifest, the notes. The notes come from `changelog.json`; add the summary
+   paragraph, the browser extension line and Known issues by hand, as in earlier releases.
+5. Publish the draft. That starts the Linux packages and the Docker image, which attach their files to the release
+   a few minutes later. (A release that GitHub's own token publishes would start neither, which is one reason the
+   publishing stays a person's step.)
+6. Push `main`, so Firefox finds `extensions/firefox-updates.json`.
+
+The local way above (`build-installer.ps1`, `package.ps1`, `prepare-release.ps1`, then creating the release by
+hand) still works and gives the same six files. The Chrome Web Store and Edge Add-ons uploads stay local either way.
+
+To build for a tag whose release exists already: Actions, Linux packages, Run workflow, and give the tag; for the
+image, Actions, Docker image, Run workflow, and choose the tag under "Use workflow from".

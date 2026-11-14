@@ -1,9 +1,20 @@
-# Windows test build (CI.1): Setup and the zip, built by hand from any branch and kept as run artifacts for 14 days.
-# Start it from Actions, Windows build, Run workflow.
+# Builds the Windows files: Setup and the update zip (CI.1, CI.2).
 #
-# These are test builds, not release files: Setup carries no Firefox add-on (the signed XPI is made locally with the
-# addons.mozilla.org key), nothing is signed for the updater, and nothing is attached to a release. A release's
-# Windows files are still made locally (docs/release-builds.md).
+# - When a version tag (v*) is pushed, or by hand with a tag: a release build from that tag. Setup carries the signed
+#   Firefox add-on, the update file (manifest.json) is signed with the UPDATE_SIGNING_KEY repository secret, and the
+#   six files (Setup, zip, manifest.json, public.pem, the Firefox add-on, SHA256SUMS) are put in a DRAFT release with
+#   notes drafted from changelog.json. Nothing is public until the owner reads the draft, finishes the notes and
+#   publishes it; publishing then starts the Linux packages and the Docker image (their workflows).
+# - By hand without a tag: a test build of the chosen branch, kept as run artifacts for 14 days. Setup then has no
+#   Firefox add-on, and nothing is signed or put in a release.
+#
+# GitHub starts nothing for a pushed tag whose commit message has [skip ci]. Leave it off the release commit, or run
+# this by hand with the tag.
+#
+# The Firefox add-on is signed by addons.mozilla.org once per extension version, locally
+# (scripts\sign-extension-firefox.ps1), and extensions/firefox-updates.json in the tagged commit names it with its
+# hash. This workflow takes the file from a draft release of this tag if the owner made one and attached it there,
+# else from the newest earlier release that has it, and checks it against that hash.
 #
 # The native torrent worker takes long to build (vcpkg builds libtorrent and Boost), so the built
 # inbound-torrent.exe is cached and rebuilt only when native/torrent-worker changes.
@@ -11,14 +22,21 @@
 name: Windows build
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag for a release build into a draft release (for example v0.7.5). Empty: test build of this branch."
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-build-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -26,12 +44,19 @@ env:
 
 jobs:
   build:
+    if: github.repository == 'Kaan88/inbound'
     runs-on: windows-latest
     timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      # Empty for a test build of a branch.
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           persist-credentials: false
 
       - name: Version
@@ -39,8 +64,13 @@ jobs:
         run: |
           $version = (Select-Xml -Path Directory.Build.props -XPath '/Project/PropertyGroup/Version').Node.InnerText.Trim()
           if ($version -notmatch '^\d+(\.\d+){2,3}$') { throw "No version in Directory.Build.props: '$version'" }
+          if ($env:TAG) {
+              if ($env:TAG -cne "v$version") { throw "Directory.Build.props says $version, the tag is $env:TAG" }
+              Write-Host "Release build of $env:TAG"
+          } else {
+              Write-Host "Test build of $env:GITHUB_REF_NAME as $version; nothing will be signed or released."
+          }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "Building $version from $env:GITHUB_REF_NAME"
 
       - name: Node 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -85,9 +115,40 @@ jobs:
           choco install innosetup --no-progress -y
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup was not installed." }
 
-      - name: Setup (without the Firefox add-on)
+      - name: Signed Firefox add-on (release build)
+        if: env.TAG != ''
         shell: powershell
-        run: .\scripts\build-installer.ps1 -Version $env:VERSION -NoFirefoxXpi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $extensionVersion = ([IO.File]::ReadAllText("extensions\chrome\package.json") | ConvertFrom-Json).version
+          $name = "inbound-bridge-$extensionVersion-firefox.xpi"
+          $updates = [IO.File]::ReadAllText("extensions\firefox-updates.json") | ConvertFrom-Json
+          $entry = @($updates.addons.'inbound-bridge@kaan88'.updates | Where-Object { $_.version -eq $extensionVersion })
+          if ($entry.Count -ne 1) { throw "extensions\firefox-updates.json has no entry for extension $extensionVersion." }
+          $wanted = $entry[0].update_hash
+          $folder = "artifacts\firefox-addon"
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $file = Join-Path $folder $name
+          # gh writes to stderr when a release has no such file; that must not end the step.
+          $ErrorActionPreference = 'Continue'
+          # This tag's own (draft) release first, then earlier releases, newest first.
+          $tags = @($env:TAG) + @(gh release list -R $env:GITHUB_REPOSITORY --limit 30 --json tagName --jq '.[].tagName' | Where-Object { $_ -ne $env:TAG })
+          foreach ($tag in $tags) {
+              if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+              gh release download $tag -R $env:GITHUB_REPOSITORY -p $name -D $folder 2>$null
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $file)) { continue }
+              $hash = "sha256:" + (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($hash -ceq $wanted) { Write-Host "Took $name from $tag."; exit 0 }
+              Write-Host "$name in $tag is not the file firefox-updates.json names; looking further."
+          }
+          throw "No release has $name with the hash in extensions\firefox-updates.json. Sign it locally (scripts\sign-extension-firefox.ps1 -ReleaseTag $env:TAG), attach it to a draft release of $env:TAG, and run this again."
+
+      - name: Setup
+        shell: powershell
+        run: |
+          if ($env:TAG) { .\scripts\build-installer.ps1 -Version $env:VERSION }
+          else { .\scripts\build-installer.ps1 -Version $env:VERSION -NoFirefoxXpi }
 
       - name: Zip
         shell: powershell
@@ -96,9 +157,65 @@ jobs:
       - name: Keep them as run artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-test-build-${{ env.VERSION }}
+          name: windows-${{ env.TAG && 'release' || 'test' }}-build-${{ env.VERSION }}
           path: |
             artifacts/installer/DownloadManagerSetup-${{ env.VERSION }}.exe
             artifacts/package/download-manager-${{ env.VERSION }}.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Sign the update file and gather the release files
+        if: env.TAG != ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:UPDATE_SIGNING_KEY) { throw "The UPDATE_SIGNING_KEY secret is missing." }
+          dotnet build tools\UpdateSigner -c Release
+          if ($LASTEXITCODE -ne 0) { throw "UpdateSigner did not build." }
+          $key = Join-Path $env:RUNNER_TEMP "update-signing.pem"
+          try {
+              [IO.File]::WriteAllText($key, ($env:UPDATE_SIGNING_KEY.Trim() + "`n"), [Text.UTF8Encoding]::new($false))
+              .\scripts\prepare-release.ps1 -Version $env:VERSION -PrivateKeyPath $key
+          }
+          finally {
+              if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Force }
+          }
+          $out = "artifacts\release\v$env:VERSION"
+          # The key must be the one installed apps trust: the public.pem just written equals the latest release's.
+          $earlier = Join-Path $env:RUNNER_TEMP "earlier-release"
+          gh release download -R $env:GITHUB_REPOSITORY -p public.pem -D $earlier
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch public.pem from the latest release." }
+          $normal = { param($path) ([IO.File]::ReadAllText($path) -replace '\s', '') }
+          if ((& $normal (Join-Path $out "public.pem")) -cne (& $normal (Join-Path $earlier "public.pem"))) {
+              throw "The signing key does not match the latest release's public.pem. Nothing was released."
+          }
+          Get-Content (Join-Path $out "SHA256SUMS")
+          "RELEASE_DIR=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Put them in a draft release
+        if: env.TAG != ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @(Get-ChildItem -LiteralPath $env:RELEASE_DIR -File | ForEach-Object { $_.FullName })
+          if ($files.Count -ne 6) { throw "Expected six release files, found $($files.Count)." }
+          $ErrorActionPreference = 'Continue'
+          $state = gh release view $env:TAG -R $env:GITHUB_REPOSITORY --json isDraft --jq '.isDraft' 2>$null
+          $found = $LASTEXITCODE -eq 0
+          $ErrorActionPreference = 'Stop'
+          if ($found) {
+              if ($state -ne 'true') { throw "A published release $env:TAG already exists; its files are not replaced. Delete or re-draft it by hand if that is meant." }
+              gh release upload $env:TAG @files -R $env:GITHUB_REPOSITORY --clobber
+              if ($LASTEXITCODE -ne 0) { throw "Upload to the draft release failed." }
+              Write-Host "Added the six files to the existing draft release $env:TAG. Its notes were left as they are."
+          } else {
+              $notes = Join-Path $env:RUNNER_TEMP "release-notes.md"
+              .\scripts\release-notes.ps1 -Version $env:VERSION -OutFile $notes
+              gh release create $env:TAG @files -R $env:GITHUB_REPOSITORY --draft --verify-tag `
+                  --title "Inbound Download Manager $env:VERSION" --notes-file $notes
+              if ($LASTEXITCODE -ne 0) { throw "The draft release was not created." }
+              Write-Host "Made the draft release $env:TAG with six files. Finish its notes and publish it; that starts the Linux packages and the Docker image."
+          }
