@@ -13,7 +13,7 @@ as the public key trusted by installed applications.
 Sign the update ZIP (the package containing `apply-update.ps1`, not the setup EXE):
 
 ```powershell
-dotnet run --project tools/UpdateSigner -- artifacts/release 0.1.1 https://HOST/download-manager-0.1.1.zip artifacts/package/download-manager-0.1.1.zip secrets/update-signing.pem stable
+dotnet run --project tools/UpdateSigner -- artifacts/release 0.1.1 https://HOST/Inbound-0.1.1-windows-x64.zip artifacts/package/Inbound-0.1.1-windows-x64.zip secrets/update-signing.pem stable
 ```
 
 Output contains `manifest.json` and `public.pem` only. Publish the manifest and

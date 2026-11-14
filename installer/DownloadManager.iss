@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.7.4"
+  #define AppVersion "0.7.5"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -50,7 +50,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#SourceRoot}\installer
-OutputBaseFilename=DownloadManagerSetup-{#AppVersion}
+OutputBaseFilename=InboundSetup-{#AppVersion}
 SetupIconFile=..\assets\app.ico
 UninstallDisplayIcon={app}\app\{#HostExe}
 UninstallDisplayName={#AppName}

@@ -159,8 +159,8 @@ jobs:
         with:
           name: windows-${{ env.TAG && 'release' || 'test' }}-build-${{ env.VERSION }}
           path: |
-            artifacts/installer/DownloadManagerSetup-${{ env.VERSION }}.exe
-            artifacts/package/download-manager-${{ env.VERSION }}.zip
+            artifacts/installer/InboundSetup-${{ env.VERSION }}.exe
+            artifacts/package/Inbound-${{ env.VERSION }}-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
 

@@ -104,14 +104,15 @@ For version `X.Y.Z`, prepare from the already-built artifacts:
 Replace `X.Y.Z` with the release version and use the existing private key. Keep a second, offline copy of it: no
 installed app accepts an update signed by any other key.
 
-The script expects `artifacts/installer/DownloadManagerSetup-X.Y.Z.exe`,
-`artifacts/package/download-manager-X.Y.Z.zip`, and the already-built
+The script expects `artifacts/installer/InboundSetup-X.Y.Z.exe`,
+`artifacts/package/Inbound-X.Y.Z-windows-x64.zip`, and the already-built
 `tools/UpdateSigner/bin/Release/net10.0/UpdateSigner.exe`. It validates package
 contents/version, signs the update ZIP with the existing private key, and writes
 six reviewable files under `artifacts/release/vX.Y.Z/`:
 
-- `DownloadManagerSetup-X.Y.Z.exe`
-- `download-manager-X.Y.Z.zip`
+- `InboundSetup-X.Y.Z.exe` (up to 0.7.4: `DownloadManagerSetup-X.Y.Z.exe` and `download-manager-X.Y.Z.zip`; the
+  updater takes the zip's address from the signed `manifest.json`, so the names are free)
+- `Inbound-X.Y.Z-windows-x64.zip`
 - `manifest.json`
 - `public.pem`
 - `inbound-bridge-<extension version>-firefox.xpi`, after checking that

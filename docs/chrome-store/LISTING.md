@@ -164,7 +164,7 @@ This extension is the browser half of a Windows desktop app. It cannot be fully 
 Tested on Windows 11 x64; the installer also accepts 64-bit Windows 10 version 1809 or later. No account is needed.
 
 Install the desktop app:
-https://github.com/Kaan88/inbound/releases/download/v<version>/DownloadManagerSetup-<version>.exe
+https://github.com/Kaan88/inbound/releases/download/v<version>/InboundSetup-<version>.exe
 SHA-256: <sha256>
 The installer is not code-signed, so Windows SmartScreen may warn about it (More info, then Run anyway).
 

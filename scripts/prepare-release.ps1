@@ -21,10 +21,10 @@ if ($BuildsRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
 
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $root "artifacts\installer\DownloadManagerSetup-$Version.exe"
+    $InstallerPath = Join-Path $root "artifacts\installer\InboundSetup-$Version.exe"
 }
 if (-not $UpdatePackagePath) {
-    $UpdatePackagePath = Join-Path $root "artifacts\package\download-manager-$Version.zip"
+    $UpdatePackagePath = Join-Path $root "artifacts\package\Inbound-$Version-windows-x64.zip"
 }
 if (-not $SignerExe) {
     $SignerExe = Join-Path $root "tools\UpdateSigner\bin\Release\net10.0\UpdateSigner.exe"
@@ -71,11 +71,11 @@ $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 $package = (Resolve-Path -LiteralPath $UpdatePackagePath).Path
 $privateKey = (Resolve-Path -LiteralPath $PrivateKeyPath).Path
 $signer = (Resolve-Path -LiteralPath $SignerExe).Path
-if ([IO.Path]::GetFileName($installer) -cne "DownloadManagerSetup-$Version.exe") {
-    throw "Installer filename must be DownloadManagerSetup-$Version.exe."
+if ([IO.Path]::GetFileName($installer) -cne "InboundSetup-$Version.exe") {
+    throw "Installer filename must be InboundSetup-$Version.exe."
 }
-if ([IO.Path]::GetFileName($package) -cne "download-manager-$Version.zip") {
-    throw "Update package filename must be download-manager-$Version.zip."
+if ([IO.Path]::GetFileName($package) -cne "Inbound-$Version-windows-x64.zip") {
+    throw "Update package filename must be Inbound-$Version-windows-x64.zip."
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -127,9 +127,9 @@ if (Test-Path -LiteralPath $outputDir) {
 
 $stagingDir = Join-Path $releaseRoot (".v$Version.staging-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $stagingDir | Out-Null
-$zipName = "download-manager-$Version.zip"
+$zipName = "Inbound-$Version-windows-x64.zip"
 $manifestUrl = "https://github.com/$BuildsRepository/releases/download/v$Version/$zipName"
-Copy-Item -LiteralPath $installer -Destination (Join-Path $stagingDir "DownloadManagerSetup-$Version.exe")
+Copy-Item -LiteralPath $installer -Destination (Join-Path $stagingDir "InboundSetup-$Version.exe")
 Copy-Item -LiteralPath $package -Destination (Join-Path $stagingDir $zipName)
 
 $signerArgs = @($stagingDir, $Version, $manifestUrl, (Join-Path $stagingDir $zipName), $privateKey, "stable", "--notes-from", $changelogPath)
@@ -139,7 +139,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $checksumFiles = @(
-    "DownloadManagerSetup-$Version.exe",
+    "InboundSetup-$Version.exe",
     $zipName,
     "manifest.json",
     "public.pem"

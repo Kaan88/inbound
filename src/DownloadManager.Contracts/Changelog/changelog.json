@@ -1,6 +1,33 @@
 {
   "versions": [
     {
+      "version": "0.7.5",
+      "date": "2026-11-14",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Linux has more ways to install: a .deb, an .rpm, a pacman package and a tar.gz beside the AppImage. Only the AppImage updates itself.", "tags": ["linux"] },
+            { "text": "The AppImage adds Inbound to the application menu the first time it starts, and keeps the entry pointing at itself when it is moved or updated.", "tags": ["linux"] },
+            { "text": "Windows, Linux and the Docker image are the same version again.", "tags": ["all"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "Started at sign-in, Inbound stays in the tray instead of opening its window.", "tags": ["linux"] },
+            { "text": "Opening a finished AppImage download starts it instead of doing nothing.", "tags": ["linux"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "The Windows files on the release page are named Inbound: InboundSetup and Inbound-windows-x64.zip. Updating from inside the app works as before.", "tags": ["windows"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.4",
       "date": "2026-11-13",
       "sections": [

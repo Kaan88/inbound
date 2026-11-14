@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "0.7.4",
+    [string]$Version = "0.7.5",
     [string]$Iscc,
     # A Setup without the Firefox add-on, for local test builds. A release Setup carries it (EXT.S4).
     [switch]$NoFirefoxXpi,
@@ -8,7 +8,7 @@ param(
     [string]$TorrentWorker
 )
 
-# Builds artifacts\installer\DownloadManagerSetup-<Version>.exe: a per-user Inno Setup installer
+# Builds artifacts\installer\InboundSetup-<Version>.exe: a per-user Inno Setup installer
 # with a self-contained app (bundles .NET and the Windows App SDK).
 $ErrorActionPreference = "Stop"
 $versionPattern = '^\d+(?:\.\d+){2,3}$'
@@ -90,7 +90,7 @@ if (-not $NoFirefoxXpi) {
 & $Iscc @isccArgs (Join-Path $root "installer\DownloadManager.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed." }
 
-$setup = Join-Path $root "artifacts\installer\DownloadManagerSetup-$Version.exe"
+$setup = Join-Path $root "artifacts\installer\InboundSetup-$Version.exe"
 # The repository root carries an explicit Low mandatory label (agent sandbox), which files built here
 # inherit. Windows starts a Low-labelled exe at Low integrity, and Inno Setup then cannot create its
 # %TEMP%\is-*.tmp folder ("Error 5: Access is denied") unless run as admin. Give the setup an explicit
