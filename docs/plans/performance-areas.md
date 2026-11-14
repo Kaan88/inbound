@@ -90,10 +90,33 @@ about 10 to 20% of it on CPU and equal on throughput, the question is closed.
 - Faster downloads on an ordinary connection: the engine is not the limit there.
 - A smaller window process: the toolkit sets that.
 
-## Suggested order
+## Order of work (both plans, PERF.8 to PERF.20)
 
-Tracked as ROADMAP PERF.8 to PERF.14. The baseline (PERF.8) comes before any of these.
+Revised 2026-11-14 after going through the dependencies. This replaces the two separate lists; the window and web
+UI items are described in `ui-performance-areas.md`.
 
-1. Read-timeout and buffer pooling in the transfer loop (small, contained, covered by engine tests).
-2. JSON source generation, then Native AOT for `NativeHost` and `Cli`.
-3. ReadyToRun for the Host and the window, measured with `scripts/perf-window.sh`.
+What decided the order:
+
+- The two baselines use the same test instance and the same 500 and 5,000 job sets, so they are one session.
+- Publish-only changes come first: no code risk, and they change every later start-time number.
+- Client-side event gathering (window, web UI) comes before the IPC change (PERF.13). It needs no protocol
+  change, and it may remove most of what PERF.13 would save, so PERF.13 is decided on numbers taken after it.
+- JSON source generation comes before every Native AOT step, including the Linux window's trial, which today
+  only works by keeping reflection JSON on.
+- Anything that touches durability (PERF.12) or depends on an outside event (D7.W, the Uno pull request) is late.
+
+| Step | Items | Why here |
+| --- | --- | --- |
+| 1 | PERF.8 and PERF.15 together: engine, saves, start times, window on both toolkits, web UI | Everything else is judged against it. Linux numbers on this PC, Windows numbers on the VM |
+| 2 | ReadyToRun: PERF.11, and the ReadyToRun part of PERF.18 for the AppImage | One publish property each; rerun the start times and install sizes |
+| 3 | PERF.16 (window: events once per tick, constant-time lookups) and the first half of PERF.19 (web UI: updates once per frame, one collator) | The same idea in both clients, no protocol change, helps WinUI and Uno at once |
+| 4 | PERF.9 (transfer loop) | Independent of the UI work and covered by engine tests; can run alongside step 3 |
+| 5 | PERF.10: JSON source generation, then Native AOT for the native host and the CLI | Opens the way to step 6 |
+| 6 | The Native AOT part of PERF.18 (Linux window) | Needs step 5 to be a fair trial |
+| 7 | Measure again, then decide: PERF.13 with the serialise-once part of PERF.20; the windowed list (second half of PERF.19); PERF.17 (compiled bindings) | Each is larger, and steps 3 to 5 may have made it unnecessary. If step 1 shows the web UI already slow at 500 jobs, the windowed list moves up to step 3 |
+| 8 | The rest of PERF.20: compressed and cached static files, the snapshot's size | Matters only for a server reached over a slow link; the compression question is a security decision |
+| 9 | PERF.12 (saves) | Touches the durability rule; needs the kill and recovery tests rerun |
+| 10 | The renderer and list-row parts of PERF.18 | After the D7.W comparison, if that trial is run |
+| 11 | PERF.14 (Rust comparison of the transfer loop) | Only if steps 1 and 4 leave the engine as the limit |
+
+Steps 2, 3, 4 and 5 do not depend on each other and can be done in any order or side by side.

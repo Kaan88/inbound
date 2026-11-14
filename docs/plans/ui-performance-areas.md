@@ -49,7 +49,7 @@ figures in `gui-toolkits.md` are for other apps.
 | Renderer | `Program.cs`: X11 host with OpenGL by default, software rendering behind `DOWNLOADMANAGER_UNO_SOFTWARE=1` | Pick per measurement: idle wake-ups and scroll smoothness on each; on Windows the GPU driver was the idle cost (PERF.4) | Low to measure |
 | Idle while closed | Whether closing the Linux window ends its process as on Windows (PERF.5) was not checked here | If not, the same saving as on Windows | Check first |
 | List rows | Uno's `ListViewItem` uses the expanded template; `UnoListRows.Trim` walks each container's visual tree to collapse unused parts | Rows cost more than on WinUI; a slimmer `ItemContainerStyle` for Uno removes the parts instead of hiding them | Medium |
-| Wayland host | D7.W waits for the owner; rendering through XWayland adds a copy | Unknown | With D7.W |
+| Wayland host (D7.W) | The window runs on Uno's X11 host, so on a Wayland desktop it goes through XWayland. Uno's native Wayland host is pull request 25503, still open and waiting for review on 2026-11-14, so it is in no Uno release | Unknown. It changes the rendering path, so idle CPU, scrolling and start time measured on X11 do not carry over | The D7.W trial needs a private Uno build; shipping waits for a Uno release |
 
 ## 4. Web UI
 
@@ -73,6 +73,9 @@ only a performance one.
 - **Window, both toolkits:** with 500 and 5,000 jobs and 1, 8 and 20 active downloads: UI-thread CPU per minute,
   dropped frames while scrolling, time to open. `scripts/perf-window.sh` and the soak driver cover Windows; the
   Linux window needs the same three numbers plus memory and idle CPU, on OpenGL and on software rendering.
+  If the D7.W trial is run, take the same Linux numbers on the Wayland host too, in the same session, so the two
+  hosts can be compared. Renderer and row work for Linux (PERF.18) is better decided after that comparison: tuning
+  the X11 path first may be work on a path that is later replaced.
 - **Web UI:** the same job counts in a browser's performance panel: scripting time per second while downloads
   run, element count, time from sign-in to a usable list, bytes transferred on first load and for the snapshot.
 
@@ -81,12 +84,9 @@ only a performance one.
 - A WinUI window much under 200 MB.
 - A web UI gain from a different framework: the costs above are list size and update rate, not Svelte.
 
-## Suggested order
+## Order of work
 
-Tracked as ROADMAP PERF.15 to PERF.20.
-
-1. The baseline (PERF.15).
-2. Event coalescing and constant-time lookups in the shared window code (PERF.16): one change, both toolkits.
-3. Web UI: per-frame updates, then the windowed list (PERF.19).
-4. Linux: ReadyToRun, renderer choice, then the AOT trial (PERF.18).
-5. Compiled bindings (PERF.17) and web serving (PERF.20).
+Tracked as ROADMAP PERF.15 to PERF.20. The order, together with PERF.8 to PERF.14, is in
+`performance-areas.md`, "Order of work". In short for this plan: the baseline; ReadyToRun; event gathering in the
+window and the web UI; the Linux AOT trial after JSON source generation; then, on new numbers, the windowed list,
+compiled bindings and the IPC and serving changes; the Linux renderer and row work last, after D7.W.

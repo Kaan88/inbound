@@ -1,10 +1,18 @@
 # Progress — session handoff
 
+### Performance plans put in one order (owner, 2026-11-14; no code)
+
+- Asked (owner, 2026-11-14): "check the order of the plan, optimize it if needed and push".
+- **Done:** one order for PERF.8 to PERF.20 in `docs/plans/performance-areas.md`, "Order of work" (eleven steps); the UI plan points at it; each ROADMAP row names its step and its dependencies.
+- **Changed from the two earlier lists:** the two baselines are one session; ReadyToRun moved to the front; event gathering in the window and the web UI comes before the IPC change (PERF.13), which is now decided on numbers taken after it; JSON source generation comes before the Linux window's AOT trial; the windowed web list and compiled bindings wait for a second measurement.
+- **Not done:** nothing measured, no code changed.
+
 ### UI performance ideas written up; PERF.15 to PERF.20 added (owner, 2026-11-14; no code)
 
 - Asked (owner, 2026-11-14): "what about similar plan for both ui toolkits and webui?"
 - **Done:** `docs/plans/ui-performance-areas.md`, from reading the code: the shared window source (per-event list-sized work in `ApplyJobEvent`, reflection bindings), WinUI only, Uno only (publish mode, AOT trial, renderer), and the web UI (every row rendered, rows rebuilt per event, uncompressed snapshot and static files). ROADMAP PERF.15 to PERF.20, all not started. `performance-areas.md`: the WebSocket transport serialises per client.
 - **Not done:** nothing measured, no code changed. There are no numbers of our own for the Uno window. PERF.15 (the baseline) comes first.
+- **Wayland (owner, 2026-11-14: "does plan need updating?"):** yes, in three places. The Uno pull request 25503 was still open and waiting for review on 2026-11-14. The plan, PERF.15, PERF.18 and D7.W now say: measure Linux on both hosts if the trial is run, and leave the renderer and row work until after that comparison. The owner is on Linux (KDE, Wayland), so D7.W's wait is over, but it has not been asked for or started.
 
 ### Performance ideas written up; PERF.8 to PERF.14 added (owner, 2026-11-14; no code)
 
