@@ -128,6 +128,9 @@ public sealed partial class DownloadManagerService
 
         // Each kept or used folder by its text and, where it exists, by what it leads to.
         var keptForms = kept.SelectMany(FormsOf).ToList();
+        // And by identity (volume + file ID) of each, and of every existing folder above it, for names the text can't
+        // reconcile, such as a share of this computer that isn't an administrative one. Windows only; empty elsewhere.
+        var keptIdentities = kept.SelectMany(IdentitiesAtAndAbove).ToHashSet();
         var otherForms = others.SelectMany(other => FormsOf(other.Folder).Select(form => (other.Runtime, Form: form))).ToList();
 
         var removed = new List<string>();
@@ -154,6 +157,12 @@ public sealed partial class DownloadManagerService
                 if (identity is null && OperatingSystem.IsWindows())
                 {
                     _log?.Invoke($"Kept a folder made for job {job.Id}: it could not be identified.");
+                    continue;
+                }
+
+                if (FolderIdentity(folder) is { } folderIdentity && keptIdentities.Contains(folderIdentity))
+                {
+                    _log?.Invoke($"Kept a folder made for job {job.Id}: it is or holds a folder named in the settings.");
                     continue;
                 }
 
@@ -293,13 +302,82 @@ public sealed partial class DownloadManagerService
             var path = buffer.ToString();
             if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) path = @"\\" + path[8..];
             else if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
-            return Path.TrimEndingDirectorySeparator(path);
+            return LocalFormOfAdminShare(Path.TrimEndingDirectorySeparator(path));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or DllNotFoundException or EntryPointNotFoundException)
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// UI.B38: <c>\\localhost\D$\x</c>, <c>\\127.0.0.1\D$\x</c> and <c>\\this-pc\D$\x</c> are <c>D:\x</c>. Anything else,
+    /// including a share that isn't an administrative one, is returned as it is (those are told apart by identity).
+    /// </summary>
+    internal static string LocalFormOfAdminShare(string path)
+    {
+        if (!path.StartsWith(@"\\", StringComparison.Ordinal)) return path;
+        var parts = path[2..].Split('\\', 3);
+        if (parts.Length < 2 || parts[1].Length != 2 || !char.IsAsciiLetter(parts[1][0]) || parts[1][1] != '$') return path;
+        var host = parts[0];
+        var ours = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1"
+            || host.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+        if (!ours) return path;
+        var drive = char.ToUpperInvariant(parts[1][0]) + @":\";
+        return parts.Length == 3 ? drive + parts[2] : drive;
+    }
+
+    /// <summary>
+    /// UI.B38: what a folder IS, not what it is called: volume serial number and file ID. Null when it doesn't exist,
+    /// can't be opened, has no usable ID, and on other systems. The ID through a loopback share may differ from the
+    /// one through the drive; then the identities simply don't match and the text forms decide, as before.
+    /// </summary>
+    internal static (uint Volume, ulong Index)? FolderIdentity(string folder)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            using var handle = CreateFileW(folder, 0, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, FileMode.Open,
+                BackupSemantics, IntPtr.Zero);
+            if (handle.IsInvalid || !GetFileInformationByHandle(handle, out var info)) return null;
+            var index = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
+            // No ID (0) can't tell folders apart, so it is no identity: only a real match keeps a folder.
+            return index == 0 ? null : (info.VolumeSerialNumber, index);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The identities of a folder and of every existing folder above it.</summary>
+    private static IEnumerable<(uint Volume, ulong Index)> IdentitiesAtAndAbove(string folder)
+    {
+        if (!OperatingSystem.IsWindows()) yield break;
+        for (var current = folder; current is not null; current = Path.GetDirectoryName(current))
+        {
+            if (FolderIdentity(current) is { } identity) yield return identity;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out ByHandleFileInformation info);
 
     private const uint BackupSemantics = 0x02000000;
 
