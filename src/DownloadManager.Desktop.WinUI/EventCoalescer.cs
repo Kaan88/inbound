@@ -93,7 +93,9 @@ internal sealed class EventCoalescer<TKey, TKind, TValue> where TKey : notnull
         }
     }
 
-    public void Upsert(TKey key, TKind kind, TValue value)
+    /// <param name="keepPlace">A later upsert of the same key keeps the first one's place in the batch, so rows are added in the
+    /// order they were first announced. Without it the item moves to its newest event's place.</param>
+    public void Upsert(TKey key, TKind kind, TValue value, bool keepPlace = false)
     {
         bool arm;
         lock (_gate)
@@ -114,10 +116,13 @@ internal sealed class EventCoalescer<TKey, TKind, TValue> where TKey : notnull
                 {
                     entry.Kind = entry.Op == CoalescedOp.Upsert ? _mergeKind(entry.Kind, kind) : kind;
                     entry.Value = entry.Op == CoalescedOp.Upsert ? _mergeValue(entry.Value, value) : value;
+                    var merged = entry.Op == CoalescedOp.Upsert;
                     entry.Op = CoalescedOp.Upsert;
+                    if (merged && keepPlace) goto placed;
                 }
 
                 entry.Seq = ++_seq;
+            placed:;
             }
             else
             {

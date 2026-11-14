@@ -85,7 +85,8 @@ public sealed partial class MainWindow
             if (job is null) return;
             var key = new WindowEventKey(WindowEventFamily.Job, connection, job.Id);
             if (type == "removed") _events.Remove(key, type, new(job, false));
-            else _events.Upsert(key, type, new(job, false));
+            // New rows keep the order the Host announced them in, however often each changed since.
+            else _events.Upsert(key, type, new(job, false), keepPlace: true);
         };
         connection.GroupsChanged += groups => _events.Upsert(new(WindowEventFamily.Groups, connection, Guid.Empty), "groups", new(groups, false));
         // A connection going up or down keeps its place among the events and is applied at once.

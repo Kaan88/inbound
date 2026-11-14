@@ -29,6 +29,22 @@ public sealed class EventCoalescerTests
         => events.Drain().Select(item => (item.Op, item.Key, item.Kind, item.Value)).ToList();
 
     [Fact]
+    public void Keeping_place_leaves_keys_in_the_order_first_seen()
+    {
+        var (events, _) = Make();
+        events.Upsert("a", "added", 1, keepPlace: true);
+        events.Upsert("b", "added", 1, keepPlace: true);
+        events.Upsert("a", "progress", 2, keepPlace: true);
+
+        Assert.Equal([(CoalescedOp.Upsert, "a", "progress", 2), (CoalescedOp.Upsert, "b", "added", 1)], Take(events));
+
+        events.Upsert("a", "added", 1);
+        events.Upsert("b", "added", 1);
+        events.Upsert("a", "progress", 2);
+        Assert.Equal([(CoalescedOp.Upsert, "b", "added", 1), (CoalescedOp.Upsert, "a", "progress", 2)], Take(events));
+    }
+
+    [Fact]
     public void Latest_state_per_key_wins_and_one_item_comes_out()
     {
         var (events, _) = Make();
