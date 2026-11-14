@@ -188,7 +188,7 @@ internal static class RemoteRules
     /// <summary>
     /// U-WL-11: a My provider row's quick actions, as the web UI's row menu has them (D2d): the window's buttons for
     /// that row, plus copying the name. The provider's items carry no link, so the name is all there is to copy.
-    /// Delete needs a job that knows the item, as the window's button does. A null action is a separator.
+    /// Delete is there for every item (TB.F17). A null action is a separator.
     /// </summary>
     /// <param name="onList">UI.R32: the item's downloads are on the list, so the menu leads there.</param>
     /// <param name="ownWindow">UI.R32: the panel is in the main window and can move to a window of its own.</param>
@@ -206,11 +206,9 @@ internal static class RemoteRules
         entries.Add(new("copyName", "Copy name", false));
         entries.Add(new("refresh", "Refresh list", loading));
         if (ownWindow) entries.Add(new("ownWindow", "Open in its own window", false));
-        if (CanDeleteFromProvider(job))
-        {
-            entries.Add(new(null, string.Empty, false));
-            entries.Add(new("deleteFromProvider", $"Delete from {provider}…", acting));
-        }
+        // TB.F17: every item of the account can go, whether or not a job here knows it.
+        entries.Add(new(null, string.Empty, false));
+        entries.Add(new("deleteFromProvider", $"Delete from {provider}…", acting));
 
         return entries;
     }

@@ -15,9 +15,10 @@ const shown = (entries: ItemMenuEntry[]) => entries.filter((entry) => !entry.hid
 const entry = (entries: ItemMenuEntry[], action: string) => entries.find((e) => e.action === action)!;
 
 describe('the row menu of My TorBox', () => {
-  it('offers open, download all, copy name and refresh for an item not on the list, and no delete (it takes a job)', () => {
+  it('offers open, download all, copy name, refresh and Delete for an item not on the list (TB.F17)', () => {
     const menu = itemMenu({ canDownload: true }, undefined, 'TorBox', idle);
-    expect(shown(menu)).toEqual(['open', 'downloadAll', 'copyName', 'refresh']);
+    expect(shown(menu)).toEqual(['open', 'downloadAll', 'copyName', 'refresh', 'deleteFromProvider']);
+    expect(entry(menu, 'deleteFromProvider').label).toBe('Delete from TorBox…');
     expect(entry(menu, 'open').label).toBe('Choose files and download…');
     expect(entry(menu, 'downloadAll').label).toBe('Download all');
   });
@@ -29,10 +30,10 @@ describe('the row menu of My TorBox', () => {
     expect(entry(menu, 'downloadAll').label).toBe('Download all its files');
   });
 
-  it('hides Check now where the Host would refuse it, and Delete for a job with no item', () => {
+  it('hides Check now where the Host would refuse it, and keeps Delete (the item is named by itself, TB.F17)', () => {
     const menu = itemMenu({ canDownload: true }, job({ state: 'localStarted' }), 'TorBox', idle);
     expect(entry(menu, 'checkNow').hidden).toBe(true);
-    expect(entry(menu, 'deleteFromProvider').hidden).toBe(true);
+    expect(entry(menu, 'deleteFromProvider').hidden).toBeFalsy();
     expect(entry(itemMenu({ canDownload: true }, job({ state: 'intended', heldForApproval: true }), 'TorBox', idle), 'checkNow').hidden).toBe(true);
   });
 

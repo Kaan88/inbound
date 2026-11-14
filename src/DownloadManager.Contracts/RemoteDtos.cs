@@ -319,7 +319,13 @@ public sealed class RemoteCheckNowRequest
 
 public sealed class RemoteDeleteRequest
 {
+    /// <summary>The job whose item goes. Empty when the item is named below instead (TB.F17).</summary>
     public Guid JobId { get; set; }
+    /// <summary>TB.F17: an item on the account that no job here knows. Used only when <see cref="JobId"/> is empty.</summary>
+    public string? Provider { get; set; }
+    /// <summary>torrents, webdl or usenet.</summary>
+    public string? Kind { get; set; }
+    public string? ItemId { get; set; }
     /// <summary>Has to be true. The item on the provider's side is gone for good.</summary>
     public bool Confirmed { get; set; }
 }

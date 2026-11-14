@@ -798,7 +798,7 @@ export interface ItemMenuEntry {
 /**
  * What a row's menu offers: the desktop window's My <provider> buttons for that row (Download selected / all, Check now,
  * Delete from <provider>, Refresh), plus copying the name. The provider's items carry no link, so there is nothing to copy
- * but the name. Delete needs a job that knows the item (remote.deleteRemote takes a job), as the desktop's button does.
+ * but the name. TB.F17: Delete is there for every item; remote.deleteRemote takes the job that holds it, or the item itself.
  */
 export function itemMenu(view: Pick<RemoteItemView, 'canDownload'>, job: RemoteJob | undefined, provider: string, busy: { acting: boolean; loading: boolean }): ItemMenuEntry[] {
   const active = !!job && job.state !== 'failed';
@@ -810,7 +810,7 @@ export function itemMenu(view: Pick<RemoteItemView, 'canDownload'>, job: RemoteJ
     { action: 'copyName', label: 'Copy name' },
     { action: 'refresh', label: 'Refresh list', disabled: busy.loading },
     { separator: true },
-    { action: 'deleteFromProvider', label: `Delete from ${provider}…`, hidden: !canDeleteFromProvider(job), disabled: busy.acting },
+    { action: 'deleteFromProvider', label: `Delete from ${provider}…`, disabled: busy.acting },
   ];
 }
 

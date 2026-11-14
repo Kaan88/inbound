@@ -69,6 +69,34 @@ public sealed partial class RuntimeServiceTests
         Assert.Single(rig.Children());
     }
 
+    /// <summary>TB.F17: an item of the account that no job here knows is deleted by itself; one a job holds takes the job with it.</summary>
+    [Fact]
+    public async Task AnItemIsDeletedByItselfWithOrWithoutAJob()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var stranger = rig.Mock.AddItem(RemoteItemKind.Torrent, "Stranger", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Stranger/a.bin", Kb, 1)]);
+        var held = rig.Mock.AddItem(RemoteItemKind.Torrent, "Held", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Held/a.bin", Kb, 2)]);
+        static RemoteItemRef Ref(MockTorBoxItem item) => new("torbox", RemoteItemKind.Torrent, item.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var unconfirmed = await rig.Jobs.RemoveRemoteItemAsync(Ref(stranger), confirmed: false);
+        Assert.False(unconfirmed.Ok);
+        Assert.Empty(rig.Mock.Deleted);
+
+        var deleted = await rig.Jobs.RemoveRemoteItemAsync(Ref(stranger), confirmed: true);
+        Assert.True(deleted.Ok, deleted.Error);
+        Assert.Equal(stranger.Id, Assert.Single(rig.Mock.Deleted).Id);
+        // Gone already: what was asked for is true.
+        Assert.True((await rig.Jobs.RemoveRemoteItemAsync(Ref(stranger), confirmed: true)).Ok);
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={held.Id}&type=torrents" });
+        await rig.RunAsync();
+        Assert.Equal(job.Id, rig.Jobs.FindByItem("TorBox", RemoteItemKind.Torrent, Ref(held).ItemId)?.Id);
+        var withJob = await rig.Jobs.RemoveRemoteItemAsync(Ref(held), confirmed: true);
+        Assert.True(withJob.Ok, withJob.Error);
+        Assert.Contains(rig.Mock.Deleted, item => item.Id == held.Id);
+        Assert.Null(rig.Jobs.Find(job.Id));
+    }
+
     [Fact]
     public async Task DeletingAnItemAlreadyGoneFromTheProviderTakesTheJobOff()
     {

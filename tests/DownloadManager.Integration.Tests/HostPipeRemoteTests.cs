@@ -563,6 +563,45 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Empty((await connection.AskAsync<RemoteListResult>(MessageTypes.RemoteList, new { })).Jobs);
     }
 
+    /// <summary>TB.F17: My provider lists items no job here knows, such as ones added on the provider's site. They can be deleted too.</summary>
+    [Fact]
+    public async Task AnItemNoJobKnowsIsDeletedByItselfAndOneAJobHoldsTakesTheJobWithIt()
+    {
+        await using var host = await StartHostAsync();
+        await using var connection = await WithKeyAsync(host);
+        var stranger = Mock.AddItem(RemoteItemKind.Torrent, "Stranger", [NewFile("Stranger/a.bin", 2 * Kb, 1)]);
+        var held = Mock.AddItem(RemoteItemKind.Torrent, "Held", [NewFile("Held/a.bin", 2 * Kb, 2), NewFile("Held/b.bin", 2 * Kb, 3)]);
+        RemoteDeleteRequest For(MockTorBoxItem item, bool confirmed)
+            => new() { Provider = "torbox", Kind = "torrents", ItemId = item.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), Confirmed = confirmed };
+
+        var unconfirmed = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteDeleteRemote, For(stranger, confirmed: false));
+        Assert.False(unconfirmed.Ok);
+        Assert.Contains("confirmed", unconfirmed.Error);
+        var badKind = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteDeleteRemote,
+            new RemoteDeleteRequest { Provider = "torbox", Kind = "films", ItemId = "1", Confirmed = true });
+        Assert.False(badKind.Ok);
+        Assert.Empty(Mock.Deleted);
+
+        var deleted = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteDeleteRemote, For(stranger, confirmed: true));
+        Assert.True(deleted.Ok, deleted.Error);
+        Assert.Equal(stranger.Id, Assert.Single(Mock.Deleted).Id);
+
+        // Gone already, such as deleted on the site meanwhile: what was asked for is true.
+        var again = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteDeleteRemote, For(stranger, confirmed: true));
+        Assert.True(again.Ok, again.Error);
+
+        var job = (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto
+        {
+            Input = $"https://torbox.app/download?id={held.Id}&type=torrents",
+            Destination = host.Destination,
+        })).Job!;
+        await UntilAsync(connection, job.Id, found => found.State == "awaitingSelection", "the held item");
+        var withJob = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteDeleteRemote, For(held, confirmed: true));
+        Assert.True(withJob.Ok, withJob.Error);
+        Assert.Contains(Mock.Deleted, item => item.Id == held.Id);
+        Assert.Empty((await connection.AskAsync<RemoteListResult>(MessageTypes.RemoteList, new { })).Jobs);
+    }
+
     /// <summary>Seen live: a script reading the CLI's output hung for as long as the Host the CLI had started went on running.</summary>
     [Fact]
     public async Task TheCliEndsItsOutputWhenItStartedTheHostItself()

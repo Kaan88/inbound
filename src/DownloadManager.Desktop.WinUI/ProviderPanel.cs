@@ -1370,8 +1370,8 @@ internal sealed class ProviderPanel
             ? $"Ask {_name} about your waiting items now, without waiting for the next check"
             : $"Nothing is waiting on {_name}, so there is nothing to check");
 
-        // Only what the Host would take: a job that knows its item, with local files behind it for the rest.
-        _delete.Visibility = RemoteRules.CanDeleteFromProvider(job) ? Visibility.Visible : Visibility.Collapsed;
+        // TB.F17: any item of the account, with or without a job here.
+        _delete.Visibility = _selected is not null ? Visibility.Visible : Visibility.Collapsed;
         _delete.IsEnabled = free;
     }
 
@@ -1523,13 +1523,17 @@ internal sealed class ProviderPanel
 
     private async Task DeleteFromProviderAsync()
     {
-        if (_selected is not { } row || RemoteRules.JobFor(_client.State.Jobs, row.Item) is not { } job || !RemoteRules.CanDeleteFromProvider(job)) return;
+        if (_selected is not { } row || string.IsNullOrEmpty(row.Item.ItemId)) return;
+        // TB.F17: through the job when one holds the item (it leaves the list with it), by the item itself otherwise.
+        var job = RemoteRules.JobFor(_client.State.Jobs, row.Item) is { } known && RemoteRules.CanDeleteFromProvider(known) ? known : null;
         if (!await ConfirmDeleteAsync(_root.XamlRoot, _root.ActualTheme, RemoteText.DeleteQuestion(row.View.Name, _name), _name)) return;
 
         var page = _page;
         await RunAsync($"Deleting from {_name}…", async token =>
         {
-            var result = await _client.DeleteRemoteAsync(job.Id, confirmed: true, token);
+            var result = job is not null
+                ? await _client.DeleteRemoteAsync(job.Id, confirmed: true, token)
+                : await _client.DeleteRemoteItemAsync(row.Item, confirmed: true, token);
             if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true, null);
             row.Expansion = null;
             page?.Rows.Remove(row);
