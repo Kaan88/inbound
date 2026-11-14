@@ -111,9 +111,9 @@ public sealed partial class RuntimeServiceTests
         Assert.False(Directory.Exists(sub));
     }
 
-    // UI.B38: fails where the administrative share can be opened (an elevated process, GitHub's runners): the folder
-    // is removed. Where it can't be opened the case returned early, so it had never really run.
-    [Fact(Skip = "UI.B38: a folder named through a share of this computer is not recognised as the same folder")]
+    // UI.B38: where the administrative share can be opened (an elevated process, GitHub's runners) the folder is the
+    // same one as through its drive letter. Where it can't be opened the case returns early.
+    [Fact]
     public Task AFolderNamedThroughAShareOfThisComputerStays() => AFolderNamedInTheSettingsInAnyFormStays("share");
 
     [Theory]
