@@ -297,12 +297,15 @@ end;
 function TorrentFirewallRuleExists(const WorkerPath: String): Boolean;
 var
   Policy, Rule: Variant;
+  RuleProgram: String;
 begin
   Result := False;
   try
     Policy := CreateOleObject('HNetCfg.FwPolicy2');
     Rule := Policy.Rules.Item('{#TorrentRuleName}');
-    Result := CompareText(Trim(Rule.ApplicationName), WorkerPath) = 0;
+    // Into a String first: Inno Setup 6.7 refuses a Variant as Trim's argument ("Type mismatch").
+    RuleProgram := Rule.ApplicationName;
+    Result := CompareText(Trim(RuleProgram), WorkerPath) = 0;
   except
     Result := False;
   end;

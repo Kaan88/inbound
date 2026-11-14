@@ -37,6 +37,12 @@ public sealed class LinuxMenuEntryTests : IDisposable
             return true;
         }, log is null ? null : log.Add);
 
+    /// <summary>
+    /// A path as an Exec line shows it. These tests also run on Windows, where the temp path has backslashes, and a
+    /// desktop file writes each as four (DesktopEntryText.QuoteExec). A Linux path has none and stays as it is.
+    /// </summary>
+    private static string InExec(string path) => path.Replace("\\", "\\\\\\\\", StringComparison.Ordinal);
+
     [Fact]
     public void Writes_the_entry_from_an_AppImage()
     {
@@ -46,7 +52,7 @@ public sealed class LinuxMenuEntryTests : IDisposable
         Assert.Contains("[Desktop Entry]\n", text, StringComparison.Ordinal);
         Assert.Contains("Type=Application\n", text, StringComparison.Ordinal);
         Assert.Contains("Name=Inbound Download Manager\n", text, StringComparison.Ordinal);
-        Assert.Contains("Exec=\"" + appImage + "\" %U\n", text, StringComparison.Ordinal);
+        Assert.Contains("Exec=\"" + InExec(appImage) + "\" %U\n", text, StringComparison.Ordinal);
         Assert.Contains("Terminal=false\n", text, StringComparison.Ordinal);
         Assert.Contains("Categories=Network;FileTransfer;\n", text, StringComparison.Ordinal);
         Assert.Contains("StartupWMClass=DownloadManager.Desktop.Uno\n", text, StringComparison.Ordinal);
@@ -71,8 +77,8 @@ public sealed class LinuxMenuEntryTests : IDisposable
         var second = MakeFile("apps/Inbound-2.AppImage");
         Assert.True(Entry(first).Install());
         Assert.True(Entry(second).Install());
-        Assert.Contains(second, File.ReadAllText(DesktopFile), StringComparison.Ordinal);
-        Assert.DoesNotContain(first, File.ReadAllText(DesktopFile), StringComparison.Ordinal);
+        Assert.Contains(InExec(second), File.ReadAllText(DesktopFile), StringComparison.Ordinal);
+        Assert.DoesNotContain(InExec(first), File.ReadAllText(DesktopFile), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -108,7 +114,7 @@ public sealed class LinuxMenuEntryTests : IDisposable
     {
         var appImage = MakeFile("my apps/Inbound $1.AppImage");
         Entry(appImage).Install();
-        Assert.Contains("Exec=\"" + appImage.Replace("$", "\\\\$", StringComparison.Ordinal) + "\" %U\n",
+        Assert.Contains("Exec=\"" + InExec(appImage).Replace("$", "\\\\$", StringComparison.Ordinal) + "\" %U\n",
             File.ReadAllText(DesktopFile), StringComparison.Ordinal);
     }
 

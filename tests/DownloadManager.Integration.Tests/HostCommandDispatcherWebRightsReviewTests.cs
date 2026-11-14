@@ -313,7 +313,8 @@ public sealed partial class HostCommandDispatcherTests
         if (!OperatingSystem.IsWindows()) return;
         var web = await WebAsync();
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var drive = Path.GetPathRoot(Inside)!;
+        // The drive Windows is on, which is not always the drive the test folders are on (GitHub's runners: D:).
+        var drive = Path.GetPathRoot(Environment.SystemDirectory)!;
         var settings = web.Service.GetSettings();
         settings.FavoriteFolders = [new FavoriteFolderDto { Name = "Drive", Path = drive }, new FavoriteFolderDto { Name = "Startup", Path = Path.Combine(appData, "Microsoft") }];
         Assert.True((await web.Service.UpdateSettingsAsync(settings)).Ok);
