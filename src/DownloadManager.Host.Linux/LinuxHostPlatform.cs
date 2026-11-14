@@ -111,13 +111,36 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         });
     }
 
-    /// <summary>EXT.R13: the file (or a folder) with the desktop's program for it, through xdg-open. Not yet tried on a Linux desktop.</summary>
+    /// <summary>
+    /// EXT.R13: the file (or a folder) with the desktop's program for it, through xdg-open. EXT.B8: an AppImage is given
+    /// its owner's execute bit and started directly, since xdg-open does not run one (<see cref="LinuxOpenRule"/>).
+    /// Not yet tried on a Linux desktop.
+    /// </summary>
     public void OpenFile(string path)
     {
         if (Directory.Exists(path))
         {
             using var folder = Process.Start(ShellActions.OpenFolder(path));
             return;
+        }
+
+        if (LinuxOpenRule.IsAppImage(path))
+        {
+            try
+            {
+                LinuxOpenRule.MakeOwnerExecutable(path);
+                var start = new ProcessStartInfo(path)
+                {
+                    UseShellExecute = false,
+                    WorkingDirectory = Path.GetDirectoryName(path) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                };
+                using var program = Process.Start(start);
+                return;
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException($"Couldn't start {Path.GetFileName(path)}: {error.Message}", error);
+            }
         }
 
         var open = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
