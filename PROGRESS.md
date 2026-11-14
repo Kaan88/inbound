@@ -21,7 +21,8 @@ diff read before merging. Nothing here was seen in a running window or browser (
   the mock TorBox applying a test's change after its link was already dead. All fixed in tests and the test server.
 - **Noticed, not changed:** T4 still says the Linux desktop torrent work is deferred (owner, 2026-11-12), while the
   AppImage ships the torrent worker.
-- **Before Sites:** SITES.0 waits for the owner's yes to download rclone.
+- **Owner, 2026-11-14: "close t12, yes to rclone".** T12 is closed: the other windows' lists get no column
+  headers. SITES.0 may download rclone; not started.
 
 ### Release 0.7.5: one version everywhere, Windows files named Inbound (owner, 2026-11-14)
 
