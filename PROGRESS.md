@@ -1,5 +1,28 @@
 # Progress — session handoff
 
+### Small items before Sites and performance; CI made steady (owner, 2026-11-14)
+
+Owner: "any small items in the roadmap before sites/perf run?", then "for code and all the in progress items.
+delegate work to sonnet then review." Four Sonnet agents, one worktree each, and a fifth for a read-only audit; every
+diff read before merging. Nothing here was seen in a running window or browser (the Windows VM is unreachable).
+
+- **UI.B38, fixed in code:** a folder named through this computer's own share stays when a download that made it is
+  deleted. The share test is no longer skipped and passed on GitHub's Windows runner, where it had failed. Changed in
+  review: each upper folder is opened once.
+- **TB.F16, built:** "Delete from {provider}…" in the main list's right-click menu, desktop and web UI; My TorBox
+  already had it. Scope from the owner: "two views of desktop apps and webui".
+- **UI.B37, fixed:** the CLI starts the Host on Linux; run for real in a test instance.
+- **UI.B33, fixed in code:** a server is held only to a latest version of its own install kind.
+- **CI on `99d7365`:** run 43621121517, both systems green.
+- **T7, T8, T9, T12, T13:** the rows said "in progress" though all five were built, merged and released in 0.7.1.
+  Audit of the code today (file references in ROADMAP): all found. Statuses now say what was seen in the app and what
+  was not: T7, T8, T9 partial; T12, T13 unverified. Open for the owner: T12's "other windows" have no column headers.
+- **CI.3:** five tests failed now and then on GitHub's runners. Four depended on the machine's speed; the fifth was
+  the mock TorBox applying a test's change after its link was already dead. All fixed in tests and the test server.
+- **Noticed, not changed:** T4 still says the Linux desktop torrent work is deferred (owner, 2026-11-12), while the
+  AppImage ships the torrent worker.
+- **Before Sites:** SITES.0 waits for the owner's yes to download rclone.
+
 ### Release 0.7.5: one version everywhere, Windows files named Inbound (owner, 2026-11-14)
 
 Owner: "rename, sync all releases to the same version and make release, except extensions."
