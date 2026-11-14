@@ -263,10 +263,10 @@ internal static class LinuxApp
 {
     public const string Name = "Inbound Download Manager";
 
-    /// <summary>The desktop file's id (<c>inbound.desktop</c>) the window installs; notifications name it.</summary>
+    /// <summary>The desktop file's id (<c>inbound.desktop</c>) the AppImage's Host installs at start (<see cref="DownloadManager.Host.LinuxMenuEntry"/>); notifications and the tray name it.</summary>
     public const string DesktopId = "inbound";
 
-    /// <summary>A themed icon every desktop has, until the AppImage installs the app's own.</summary>
+    /// <summary>A themed icon every desktop has, for the tray, notifications and the autostart entry; the menu entry uses the app's own png (LinuxMenuEntry) and falls back to this.</summary>
     public const string IconName = "folder-download";
 
     /// <summary>The AppImage when the Host runs from one (its mount point changes every run), else this program.</summary>

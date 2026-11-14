@@ -26,6 +26,7 @@
     <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\TorrentHandlerRegistration.cs" Link="TorrentHandlerRegistration.cs" />
     <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxTorrentHandler.cs" Link="LinuxTorrentHandler.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host.Linux\LinuxMenuEntry.cs" Link="LinuxMenuEntry.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\UpdatePostponement.cs" Link="UpdatePostponement.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\ClipboardRetrySchedule.cs" Link="ClipboardRetrySchedule.cs" />
