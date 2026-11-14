@@ -1,5 +1,26 @@
 # Progress — session handoff
 
+### Release 0.7.5: one version everywhere, Windows files named Inbound (owner, 2026-11-14)
+
+Owner: "rename, sync all releases to the same version and make release, except extensions."
+
+- **Renamed:** Setup is `InboundSetup-<version>.exe`, the update zip `Inbound-<version>-windows-x64.zip` (iss,
+  `build-installer.ps1`, `package.ps1`, `prepare-release.ps1`, `windows.yml`, docs). The updater takes the zip's
+  address from the signed manifest and saves it under its own name, so the names are free.
+- **0.7.5:** version and `changelog.json` (Linux packages, AppImage menu entry, EXT.B8, UI.B36, the new names). The
+  extension stays 0.6.4 and was not uploaded to any store; `extensions/firefox-updates.json` names the same signed
+  file, same hash, at this release, as `prepare-release.ps1` requires.
+- **Built by GitHub, first run of the whole release path:** tag `v0.7.5` started the Windows build (run 43597038093),
+  which made the draft with six files. Checked before publishing: `SHA256SUMS`, manifest size and hash against the
+  zip, `public.pem` identical to 0.7.4's, the zip's file list identical to 0.7.4's. Publishing started Linux packages
+  (run 43597679593) and Docker image (run 43597679645); both passed. The release has 14 files;
+  `releases/latest/download/manifest.json` and `manifest-linux-x64.json` both answer 0.7.5; `ghcr.io/kaan88/inbound`
+  has the tag `0.7.5`.
+- **Not done:** nothing was installed or started: not Setup, not an update from 0.7.4 inside the app, no Linux
+  package on a desktop, not the Docker image. The manifest signatures were not verified with the app's own
+  verifier (the key was compared).
+- Local cleanup: the three agent worktrees and their merged branches, `linux-fixes-and-ci`, and build output.
+
 ### Windows builds on GitHub, and the first GitHub runs (CI.2, CI.1, X.8; owner, 2026-11-14)
 
 Owner: "merge to main, make window and all builds by github too." The Linux fixes and workflows are on `main`.
