@@ -4,6 +4,8 @@ import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
 import { notifyEnabled } from './notify';
 import { noticeFor } from './details';
+import { Coalescer, type Item } from './coalesce';
+import { FrameBatcher } from './frameBatch';
 import { becameReadyToChoose, readyToChooseText } from './torrentList';
 import { featuresOf, hostTexts, type Features, type HostTexts } from './hostKind';
 import type { Job, Settings } from './types';
@@ -58,6 +60,11 @@ export class Store {
   leaveGuard: ((event: HashChangeEvent) => boolean) | null = null;
   private client: ProtocolClient | null = null;
   private toastId = 0;
+  // PERF.16: job events, group changes and snapshots are gathered and applied once per animation frame (once a second
+  // while the tab is hidden, and at once when it shows again), newest per job. Every other message keeps its place: what
+  // is pending is applied first, then it.
+  private readonly pending = new Coalescer<Envelope>();
+  private readonly frames = new FrameBatcher<Envelope>(this.pending, (items) => this.applyBatch(items));
 
   start(): void {
     this.applyTheme();
@@ -80,6 +87,7 @@ export class Store {
       },
     });
     this.client.connect();
+    document.addEventListener('visibilitychange', () => this.frames.visibilityChanged());
     void fetch('/api/auth/status', { credentials: 'same-origin' })
       .then((response) => response.json())
       .then((status: { signInRequired: boolean }) => (this.signInRequired = status.signInRequired))
@@ -87,6 +95,30 @@ export class Store {
   }
 
   private receive(message: Envelope): void {
+    if (message.type === 'job.event') {
+      const job = (message.payload as { job?: Job; eventType?: string } | undefined);
+      const id = job?.job?.id;
+      if (!id) return;
+      if (job.eventType === 'removed') this.pending.remove(`job:${id}`, message);
+      else this.pending.upsert(`job:${id}`, message);
+    } else if (message.type === 'jobs.snapshot') {
+      this.pending.reset('snapshot', message, (key) => key === 'snapshot' || key === 'groups' || key.startsWith('job:'));
+    } else if (message.type === 'groups.changed') {
+      this.pending.upsert('groups', message);
+    } else {
+      // Keeps its place among the others, and is not held back.
+      this.frames.flush();
+      this.applyMessage(message);
+      return;
+    }
+    this.frames.notify();
+  }
+
+  private applyBatch(items: Item<Envelope>[]): void {
+    for (const item of items) this.applyMessage(item.value);
+  }
+
+  private applyMessage(message: Envelope): void {
     const event = message.type === 'job.event' ? (message.payload as { job?: Job; eventType?: string } | undefined) : undefined;
     const earlier = event?.job?.id ? this.model.jobs[event.job.id] : undefined;
     const before = earlier?.state;
@@ -153,6 +185,8 @@ export class Store {
     } else {
       reply = await this.client.request<unknown, R>(type, payload);
     }
+    // What the server sent before the reply is applied first, so the reply is not overtaken by older events.
+    this.frames.flush();
     apply(this.model, reply);
     return reply;
   }
