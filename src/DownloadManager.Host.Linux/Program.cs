@@ -187,6 +187,7 @@ internal static class Program
         // finds no installed build and stays idle.
         using var updateMonitor = new HostUpdateMonitor(service, log.Info);
         service.UpdateShutdownRequested += (_, _) => platform.RequestShutdown();
+        InstallMenuEntry(log);
         var torrentHandler = new TorrentHandlerSync(log);
         torrentHandler.Apply(service.TorrentsAvailable && currentSettings.TorrentsEnabled && currentSettings.TorrentHandler);
         service.SettingsChanged += (_, _) =>
@@ -374,6 +375,53 @@ internal static class Program
 
         log.Info("The secret key is kept in the data folder's key file.");
         return AesGcmSecretProtector.OpenForDataFolder(keyFile, paths.Root, discardUnreadable: false, log.Warn);
+    }
+
+    /// <summary>
+    /// X.7: from an AppImage, puts Inbound in the application menu. Off the start path; a sandbox data folder (tests, a
+    /// second profile) must not change the real menu.
+    /// </summary>
+    private static void InstallMenuEntry(FileLogger log)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+        var appImage = Environment.GetEnvironmentVariable("APPIMAGE");
+        if (string.IsNullOrWhiteSpace(appImage) || !File.Exists(appImage)) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+                var appDir = Environment.GetEnvironmentVariable("APPDIR");
+                var icon = string.IsNullOrWhiteSpace(appDir) ? null : Path.Combine(appDir, LinuxMenuEntry.IconFileName);
+                var entry = new LinuxMenuEntry(LinuxTorrentHandler.ApplicationsDirectory(home, dataHome),
+                    LinuxMenuEntry.IconDirectory(home, dataHome), appImage, icon, RunUpdateDesktopDatabase, log.Info);
+                if (entry.Install()) log.Info("Put Inbound in the application menu.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                log.Warn($"Could not add Inbound to the application menu: {ex.GetType().Name}");
+            }
+        });
+    }
+
+    private static bool RunUpdateDesktopDatabase(IReadOnlyList<string> arguments)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("update-desktop-database") { UseShellExecute = false };
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            using var process = System.Diagnostics.Process.Start(start);
+            if (process is null) return false;
+            if (process.WaitForExit(TimeSpan.FromSeconds(10))) return process.ExitCode == 0;
+            try { process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            return false;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false; // No desktop-file-utils: the desktop finds the file on its own, a little later.
+        }
     }
 
     /// <summary>A sandbox data folder (tests, a second profile) must not change the real sign-in start.</summary>
