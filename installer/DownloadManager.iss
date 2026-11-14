@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.7.6"
+  #define AppVersion "0.7.7"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"

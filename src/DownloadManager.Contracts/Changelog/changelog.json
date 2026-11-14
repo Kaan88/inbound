@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.7.7",
+      "date": "2026-11-14",
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Delete from TorBox is on every item in My TorBox, in the desktop window and the web UI, including items that were added on TorBox's own site. It asks first, and it can't be undone.", "tags": ["torbox", "all"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.6",
       "date": "2026-11-14",
       "sections": [
