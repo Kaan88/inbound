@@ -74,6 +74,9 @@ public sealed partial class HostConnection : IAsyncDisposable
     /// <summary>This PC's Host announced a user-requested application exit. Never raised for another server.</summary>
     public event Action? HostExiting;
 
+    /// <summary>A reply to one of this connection's commands came in (raised on the connection's thread, after the command's task is completed).</summary>
+    public event Action? CommandReplied;
+
     public bool IsConnected => _client is not null;
 
     /// <summary>The Host this connection goes to.</summary>
@@ -935,6 +938,7 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             _pending.TryRemove(message.ReplyTo, out _);
             completion.TrySetResult(message);
+            CommandReplied?.Invoke();
             return;
         }
 

@@ -76,25 +76,27 @@ public sealed partial class MainWindow
     /// <summary>Every connection's events reach the window; only the shown one's change the list.</summary>
     private void WireConnection(HostConnection connection)
     {
-        connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
+        // The list's events go through the coalescer (MainWindow.Events.cs): applied once per tick, newest per job.
+        // Which connection is shown is decided when they are applied, as before.
+        connection.SnapshotReceived += snapshot => _events.Reset(new(WindowEventFamily.Snapshot, connection, Guid.Empty), "snapshot",
+            new(snapshot, false), key => CoversJobs(key, connection));
+        connection.JobChanged += (job, type) =>
         {
-            if (connection == _local && _connection != _local) ApplyLocalSnapshot(snapshot);
-            if (connection == _connection) ApplySnapshot(snapshot);
-        });
-        connection.JobChanged += (job, type) => DispatcherQueue.TryEnqueue(() =>
+            if (job is null) return;
+            var key = new WindowEventKey(WindowEventFamily.Job, connection, job.Id);
+            if (type == "removed") _events.Remove(key, type, new(job, false));
+            // New rows keep the order the Host announced them in, however often each changed since.
+            else _events.Upsert(key, type, new(job, false), keepPlace: true);
+        };
+        connection.GroupsChanged += groups => _events.Upsert(new(WindowEventFamily.Groups, connection, Guid.Empty), "groups", new(groups, false));
+        // A connection going up or down keeps its place among the events and is applied at once.
+        connection.ConnectionChanged += (connected, error) =>
         {
-            if (connection == _connection) ApplyJobEvent(job, type);
-        });
-        connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() =>
-        {
-            if (connection != _connection) return;
-            _groups = groups;
-            RebuildVisible();
-        });
-        connection.ConnectionChanged += (connected, error) => DispatcherQueue.TryEnqueue(() =>
-        {
-            if (connection == _connection) ApplyConnection(connected, error);
-        });
+            _events.Barrier(new(WindowEventFamily.Connection, connection, Guid.NewGuid()), "connection", new((connected, error), false));
+            DispatcherQueue.TryEnqueue(FlushEvents);
+        };
+        // A reply to one of this window's commands: what the Host sent before it shows now, not up to a tick later.
+        connection.CommandReplied += () => DispatcherQueue.TryEnqueue(FlushEvents);
         // UI.R37: an update check on this PC or the shown server found another latest version.
         connection.LatestVersionChanged += latest => DispatcherQueue.TryEnqueue(() =>
         {
@@ -510,6 +512,8 @@ public sealed partial class MainWindow
             var snapshot = await _local.RefreshAsync();
             // Another switch while this PC's list was read: that one fills the window.
             if (switchNumber != _switches || _connection != _local) return;
+            // Events from before this read are applied first, so none is applied over it.
+            FlushEvents();
             ApplySnapshot(snapshot);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
