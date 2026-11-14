@@ -13,12 +13,31 @@ namespace DownloadManager.Desktop.WinUI;
 
 public sealed partial class MainWindow : Window
 {
-    private ObservableCollection<JobViewModel> _visibleJobs = new();
+    private VisibleRows _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private HostConnection _connection;
     private readonly RemoteClient _remote;
     private MenuFlyoutSubItem? _addToQueueMenu;
-    private List<DownloadGroupDto> _groups = new();
+    private List<DownloadGroupDto> _groupList = new();
+    // Job id to the groups that list it, rebuilt whenever the groups are replaced, so PackageOf doesn't scan every group.
+    private Dictionary<Guid, List<DownloadGroupDto>> _groupsByJob = new();
+
+    private List<DownloadGroupDto> _groups
+    {
+        get => _groupList;
+        set
+        {
+            _groupList = value;
+            var index = new Dictionary<Guid, List<DownloadGroupDto>>();
+            foreach (var group in value)
+                foreach (var id in group.JobIds)
+                {
+                    if (!index.TryGetValue(id, out var list)) index[id] = list = [];
+                    list.Add(group);
+                }
+            _groupsByJob = index;
+        }
+    }
     private readonly Dictionary<Guid, JobViewModel> _packageRows = new();
     private StatisticsWindow? _statisticsWindow;
     private SchedulerWindow? _schedulerWindow;
@@ -189,6 +208,7 @@ public sealed partial class MainWindow : Window
         UiTrace.Write("MainWindow chrome initialized");
         AppWindow.Closing += OnWindowClosing;
 
+        InitializeEventTick();
         WireConnection(_local);
         _local.Start();
         UiTrace.Write("MainWindow connection started");
@@ -529,8 +549,14 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
     }
 
-    private void ApplyJobEvent(JobDto job, string changeType)
+    /// <summary>
+    /// One job event, from a batch (<see cref="ApplyEventBatch"/>). The status bar, buttons, empty text and torrent views are
+    /// refreshed once after the batch, so this only sets <paramref name="syncTorrents"/> for the last of those.
+    /// <paramref name="sawUnfinished"/>: an earlier event of this job in the same batch had it unfinished.
+    /// </summary>
+    private void ApplyJobEvent(JobDto job, string changeType, bool sawUnfinished, ref bool syncTorrents)
     {
+        if (_connection.IsRemote && sawUnfinished) _remoteCompletions.Saw(job.Id, null);
         if (_connection.IsRemote && changeType != "completed") _remoteCompletions.Saw(job.Id, job.State);
         // UI.R41: the first download the extension sends puts the hint away for good.
         if (ExtensionHintOpen && changeType != "removed" && ExtensionPromoRules.FromBrowser(job.Source)) UpdateExtensionHint(true);
@@ -583,8 +609,6 @@ public sealed partial class MainWindow : Window
                 // It just left its package.
                 vm.PackageId = null;
                 RebuildVisible();
-                UpdateStatusText();
-                UpdateButtons();
                 return;
             }
             var isVisible = _visibleJobs.Contains(vm);
@@ -608,11 +632,7 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        if (job.Torrent is not null || changeType == "removed") SyncTorrentViews();
-
-        EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        UpdateStatusText();
-        UpdateButtons();
+        if (job.Torrent is not null || changeType == "removed") syncTorrents = true;
 
         // Preserve notifications for headless jobs when the main UI is already open. Only a single CLI add: a CLI
         // batch or import ("cliBatch", "cliImport") opens no completion window per job (UI.B14).
@@ -687,8 +707,13 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>The package a job is shown in; only packages with at least two listed files count.</summary>
-    private DownloadGroupDto? PackageOf(Guid jobId) =>
-        _groups.FirstOrDefault(group => group.JobIds.Contains(jobId) && group.JobIds.Count(_jobsById.ContainsKey) >= 2);
+    private DownloadGroupDto? PackageOf(Guid jobId)
+    {
+        if (!_groupsByJob.TryGetValue(jobId, out var groups)) return null;
+        foreach (var group in groups)
+            if (group.JobIds.Count(_jobsById.ContainsKey) >= 2) return group;
+        return null;
+    }
 
     private List<JobViewModel> PackageMembers(DownloadGroupDto group) => group.JobIds
         .Where(_jobsById.ContainsKey).Select(id => _jobsById[id])
@@ -917,7 +942,7 @@ public sealed partial class MainWindow : Window
         // A sort can put most of a long list out of place, and one move at a time would crawl.
         if (ListSort.ReplacesWholeList(sorting, _visibleJobs, target))
         {
-            _visibleJobs = new ObservableCollection<JobViewModel>(target);
+            _visibleJobs = new VisibleRows(target);
             JobsList.ItemsSource = _visibleJobs;
         }
 
@@ -4690,6 +4715,7 @@ public sealed partial class MainWindow : Window
             var snapshot = await connection.RefreshAsync();
             // A reply from the Host shown before a switch would put its settings and path style on the new one.
             if (connection != _connection) return;
+            FlushEvents();
             ApplySnapshot(snapshot);
         }
         catch (Exception ex)
