@@ -1,5 +1,45 @@
 # Progress — session handoff
 
+### Sites and performance, stage A started (2026-11-14)
+
+Owner: "start site/perf, delegate when you can". Four pieces were delegated to Sonnet and reviewed here.
+
+- **SITES.0, the rclone run (Linux only, rclone 1.76.0):** `docs/plans/remote-sites-rclone-run.md`. Both zips matched
+  the published hashes. What differs from `remote-sites.md` (not yet written into it): `host_keys` needs rclone
+  1.75.0 or later; rclone cannot report a host key before login, so the first-use prompt needs a small SSH handshake
+  of our own; there is no per-site CA for FTPS (only a CA file read at start, or no check at all); passphrase keys in
+  the current OpenSSH format work, so no conversion is needed; no transfer resumes after a stop or crash, and
+  "pause" is stop and restart; rclone keeps running when its parent dies, so the Host must tie it to itself.
+  Also: passwords must be obscured (`core/obscure`), rc error bodies echo secrets and must not be logged, and the rc
+  user and password go in environment variables, not flags. rclone.exe is about 86 MB unpacked (32 MB zipped).
+  Not run: anything on Windows, a real OAuth refresh, HTTPS WebDAV with a self-signed certificate, implicit FTPS.
+  Timings (24 ms to first call, 69 MB idle) were taken under load and are provisional.
+- **PERF.8 tool:** `tools/Bench` with `scripts/perf-bench.sh` and `.ps1`: engine throughput at 1, 8 and 16 segments
+  through the real engine and stores against its own static server in a second process, saves per second, and
+  start times of the CLI, native host and Host in an isolated instance. Noted: the per-host limit of 8 means a
+  16-segment job runs 8 connections, so the tool also runs that case with the limit at 16. Write-through cannot be
+  switched in product code; the no-fsync rows use a copy of the routine inside the tool.
+- **PERF.15 tools:** `scripts/perf-seed.sh`, `perf-webui.sh` (headless Chrome over CDP, no npm packages) and
+  `perf-window-linux.sh` (the Uno window on a private `kwin_wayland --virtual` display, default and software
+  rendering). How to run and what is left for Windows: `docs/plans/perf-baseline-how.md`.
+- **No baseline numbers yet.** The PC's load average was 100 to 300 from other work during this session; the owner
+  said not to run load-sensitive tests until it is quiet. Only smoke runs were made, and their numbers are not
+  recorded. The commit to measure is tagged locally `perf-baseline-a2` (`ff949a4`, before the JSON change).
+- **PERF.10, first half (merged `d5ef3ea`):** `IpcJsonContext` (160 types), `PersistenceJsonContext` (11 roots) and an
+  internal context for the saved-list file, plugged into the two shared options objects with reflection as the
+  fallback. About 20 anonymous payloads became `EmptyPayload`, `ErrorPayload` and `OkErrorPayload` with the same
+  JSON. Found: generated metadata does not run property initialisers on types with init-only members, so a member
+  missing from an old file read as 0 or null; `StoredRemoteAccount`, `RemoteJobRecord` and `RemoteAccountPacing`
+  went from `init` to `set`, and guard tests fail for a new one. 24 new tests (coverage of every public Contracts
+  type, context-only round trips, byte identity both ways) pass on Linux. Not done: the run with the reflection
+  fallback removed was cut off partway through the integration tests. Still on reflection (the list for the AOT
+  step): the server's HTTP responses, TorBox request bodies, Archives `PlacementEntry`, the Runtime stores
+  (AuthStore, WebUiConfig, ExtensionSightings, picked folders, UpdateInstallJournal), Host.Linux options, the CLI's
+  `PrettyJson`, WinUI stores, `NativeBridgePolicy`, UpdateSigner. `IsAotCompatible` is on in Contracts, Core, Cli
+  and NativeHost (about 25 IL2026/IL3050 warnings to clear) and off in Persistence (about 20).
+- **Owner, same day:** Sites sign-in kinds use rclone's shared app IDs by default with an optional own client ID
+  (written into `remote-sites.md`).
+
 ### Release 0.7.6: the four small fixes released (owner, 2026-11-14)
 
 Owner asked whether the fixes after 0.7.5 had been released; they had not, and said yes to releasing them.
