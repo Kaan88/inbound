@@ -231,8 +231,27 @@ finds itself. `autoUpdateRclone` (true or false) sets "Update rclone automatical
 Any other value must be a full path, or the reply carries `error` and nothing changes. A change to the switch or to the
 rclone path is saved first, then rclone stops if it must.
 
-`sites.kindsResult` lists each kind as `{kind, title, defaultPort, authMethods}`. Only `sftp` is listed for now
-(port 22, `password` and `key`).
+`sites.kindsResult` lists each kind as `{kind, title, defaultPort, authMethods, fields, choices, capabilities,
+userLabel?, passwordLabel?, note?}` (SITES.6; the list is `SiteKindCatalog` in Contracts, and a save is checked against
+it):
+
+| Kind | Fields | Capabilities |
+| --- | --- | --- |
+| `sftp` (port 22) | `host`, `port`, `user`, `password`, `key` | `newFolder`, `emptyFolders`, `hostKey` |
+| `ftp` (port 21) | `host`, `port`, `tls` (`explicit`, `implicit`, `none`), `user`, `password` | `newFolder`, `emptyFolders` |
+| `webdav` | `url`, `vendor` (`other`, `nextcloud`, `owncloud`), `user`, `password` | `newFolder`, `emptyFolders` |
+| `s3` | `provider` (`AWS`, `Cloudflare`, `Wasabi`, `Minio`, `Other`), `endpoint`, `region`, `user` (access key ID), `password` (secret access key) | none |
+
+`choices` maps a field to its `[{value, title}]`; the values are rclone's own. A client shows only the listed fields and
+hides a command whose capability is missing (New folder on S3). `hostKey` is the only kind that asks about the server's
+key before first use (`sites.probe` reads an SSH key, and `sites.trust` refuses other kinds). TLS certificates are checked
+against Windows' trusted roots and are never switched off. An upload to a kind without `emptyFolders` leaves empty
+folders out.
+
+`SiteDto` and `SiteSaveRequest` carry `tls`, `url`, `vendor`, `provider`, `endpoint` and `region` for the kinds that use
+them; the Host refuses a field another kind uses, a key for any kind but SFTP, a change of kind, and an address with a
+user name, query or fragment in it. A WebDAV or S3 site's `host` and `port` are filled in from its address. `SiteDto`
+also carries `capabilities` and `encrypted` (false for plain FTP and an http:// address).
 
 `sites.status` carries `SitesStatusDto`:
 

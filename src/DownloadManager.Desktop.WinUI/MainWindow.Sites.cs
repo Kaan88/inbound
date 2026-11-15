@@ -277,6 +277,9 @@ public sealed partial class MainWindow
         // SITES.5: one change at a time; Rename takes one item.
         var selected = panel.SelectedNames.Count;
         SitesNewFolderButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && !_siteChangeRunning;
+        // SITES.6: an object store has no folder until something is in it, so it offers no New folder.
+        SitesNewFolderButton.Visibility = panel.Site is { } shown && !shown.Capabilities.Contains(SiteCapabilities.NewFolder)
+            ? Visibility.Collapsed : Visibility.Visible;
         SitesRenameButton.IsEnabled = !panel.IsLoading && selected == 1 && !_siteChangeRunning;
         SitesDeleteButton.IsEnabled = !panel.IsLoading && selected > 0 && !_siteChangeRunning;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;

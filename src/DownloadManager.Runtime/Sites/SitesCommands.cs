@@ -523,16 +523,24 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 if (existing is null) return Fail("That site no longer exists.");
             }
 
+            if (SiteKindCatalog.Find(request.Kind) is null) return Fail("Choose what kind of site it is.");
+            if (existing is not null && existing.Kind != request.Kind) return Fail("A site's kind can't be changed; add a new site instead.");
+            if (request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
+                return Fail("Only SFTP sites sign in with a key.");
             if (request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
                 return Fail("Choose a password or a key file to sign in with.");
+            if (KindAddress(request) is { Problem: { } addressProblem }) return Fail(addressProblem);
             // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
             if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
                 return Fail(keyProblem);
 
-            var host = request.Host.Trim();
+            var (host, port, _) = KindAddress(request);
             var now = DateTimeOffset.UtcNow;
             // Another server is another key: a changed host or port forgets the accepted ones, and the window asks again.
-            var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == request.Port;
+            // For an address kind the address is the server: another one forgets the stars too.
+            var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == port
+                && string.Equals(existing.Url, Trimmed(request.Url), StringComparison.Ordinal)
+                && string.Equals(existing.Endpoint, Trimmed(request.Endpoint), StringComparison.Ordinal);
             try
             {
                 saved = new SiteRecord
@@ -541,8 +549,14 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     Name = request.Name.Trim(),
                     Kind = request.Kind,
                     Host = host,
-                    Port = request.Port,
+                    Port = port,
                     User = request.User.Trim(),
+                    Tls = request.Kind == SiteKinds.Ftp ? request.Tls : null,
+                    Url = request.Kind == SiteKinds.WebDav ? Trimmed(request.Url) : null,
+                    Vendor = request.Kind == SiteKinds.WebDav ? request.Vendor ?? "other" : null,
+                    Provider = request.Kind == SiteKinds.S3 ? request.Provider : null,
+                    Endpoint = request.Kind == SiteKinds.S3 ? Trimmed(request.Endpoint) : null,
+                    Region = request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null,
                     AuthMethod = request.AuthMethod,
                     SealedPassword = Seal(request.Password, existing?.SealedPassword),
                     SealedPrivateKey = Seal(request.PrivateKey, existing?.SealedPrivateKey),
@@ -557,6 +571,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 };
                 if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
                     return Fail("Choose the private key to sign in with.");
+                if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
+                    return Fail("An S3 site needs its access key ID and secret access key.");
                 await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
@@ -622,6 +638,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
                 return Fail("That site no longer exists.");
+            if (site.Kind != SiteKinds.Sftp) return Fail("Only SFTP sites have a server key to trust.");
             if (request.Entries.Count is 0 or > 16) return Fail("Accept between 1 and 16 of the server's keys.");
             saved = site with { HostKeys = [.. request.Entries.Distinct(StringComparer.Ordinal)], ModifiedAt = DateTimeOffset.UtcNow };
             try
@@ -788,7 +805,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>Lists one folder through rclone: the items sorted, or the failure as <c>sites.test</c> reports it.</summary>
     private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken)
     {
-        if (site.HostKeys.Count == 0)
+        if (site.NeedsHostKey)
             return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
 
         RcloneLease lease;
@@ -1031,10 +1048,28 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         _ => SecretProtector.ProtectSiteSecret(given),
     };
 
-    private static SiteKindsDto Kinds() => new()
+    private static SiteKindsDto Kinds() => new() { Kinds = [.. SiteKindCatalog.All] };
+
+    private static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// The host and port a site is shown and compared by: as typed for SFTP and FTP; from the address for WebDAV and S3
+    /// (Amazon S3 without an endpoint is <c>s3.amazonaws.com</c>). A problem when the address can't be used.
+    /// </summary>
+    private static (string Host, int Port, string? Problem) KindAddress(SiteSaveRequest request)
     {
-        Kinds = [new SiteKindDto { Kind = SiteKinds.Sftp, Title = "SFTP", DefaultPort = 22, AuthMethods = [SiteAuthMethods.Password, SiteAuthMethods.Key] }],
-    };
+        string? address = request.Kind switch
+        {
+            SiteKinds.WebDav => Trimmed(request.Url),
+            SiteKinds.S3 => Trimmed(request.Endpoint) ?? (request.Provider == SiteKindCatalog.AwsProvider ? "https://s3.amazonaws.com" : null),
+            _ => null,
+        };
+        if (request.Kind is not (SiteKinds.WebDav or SiteKinds.S3)) return (request.Host.Trim(), request.Port, null);
+        var what = request.Kind == SiteKinds.WebDav ? "server address" : "service address (endpoint)";
+        if (SiteKindCatalog.AddressProblem(address, what) is { } problem) return ("", 0, problem);
+        var uri = new Uri(address!);
+        return (uri.Host, uri.Port, null);
+    }
 
     private static SiteDto ToDto(SiteRecord site) => new()
     {
@@ -1052,6 +1087,14 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         RemoteFolder = site.RemoteFolder,
         LocalFolder = site.LocalFolder,
         Stars = [.. site.Stars],
+        Tls = site.Tls,
+        Url = site.Url,
+        Vendor = site.Vendor,
+        Provider = site.Provider,
+        Endpoint = site.Endpoint,
+        Region = site.Region,
+        Capabilities = [.. SiteKindCatalog.Find(site.Kind)?.Capabilities ?? []],
+        Encrypted = SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint),
     };
 
     private static SiteHostKeyDto ToDto(SshHostKey key) => new() { Type = key.KeyType, Fingerprint = key.Fingerprint, Entry = key.HostKeysEntry };

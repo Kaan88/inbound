@@ -244,7 +244,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 return Fail("A chosen name is not a file or folder in that folder.");
         }
 
-        if (site.HostKeys.Count == 0)
+        if (site.NeedsHostKey)
             return new SiteTransferResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." };
 
         var names = request.Names.Select(n => n.Name).Distinct(StringComparer.Ordinal).ToList();
@@ -253,7 +253,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         {
             items = request.Direction == SiteTransferDirections.Download
                 ? await ListDownloadAsync(site, remoteFolder, names, cancellationToken).ConfigureAwait(false)
-                : ListUpload(localFolder, names);
+                : ListUpload(localFolder, names, SiteKindCatalog.Has(site.Kind, SiteCapabilities.EmptyFolders));
         }
         catch (ItemFailure e)
         {
@@ -667,7 +667,11 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
     }
 
-    private static List<SiteTransferItem> ListUpload(string localFolder, List<string> names)
+    /// <summary>
+    /// The files to upload. <paramref name="emptyFolders"/> false (an object store, SITES.6): an empty folder can't exist
+    /// there, so it is not an item.
+    /// </summary>
+    private static List<SiteTransferItem> ListUpload(string localFolder, List<string> names, bool emptyFolders)
     {
         var items = new List<SiteTransferItem>();
         // Links and junctions are not followed: a loop or a folder elsewhere on the PC is never uploaded by surprise.
@@ -709,7 +713,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 if (items.Count > MaxItems) return items;
             }
 
-            items.AddRange(EmptyFolders(name, folders, entries));
+            if (emptyFolders) items.AddRange(EmptyFolders(name, folders, entries));
             if (items.Count > MaxItems) return items;
         }
 

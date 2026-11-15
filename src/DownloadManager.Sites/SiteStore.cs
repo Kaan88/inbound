@@ -4,10 +4,13 @@ using DownloadManager.Persistence;
 
 namespace DownloadManager.Sites;
 
+/// <summary>The kinds of site (SITES.6); <see cref="DownloadManager.Contracts.SiteKindCatalog"/> holds their fields and capabilities.</summary>
 public static class SiteKinds
 {
-    /// <summary>The first kind (SITES.2 to SITES.5); the others arrive in SITES.6.</summary>
-    public const string Sftp = "sftp";
+    public const string Sftp = DownloadManager.Contracts.SiteKindCatalog.Sftp;
+    public const string Ftp = DownloadManager.Contracts.SiteKindCatalog.Ftp;
+    public const string WebDav = DownloadManager.Contracts.SiteKindCatalog.WebDav;
+    public const string S3 = DownloadManager.Contracts.SiteKindCatalog.S3;
 }
 
 public static class SiteAuthMethods
@@ -54,6 +57,26 @@ public sealed record SiteRecord
 
     /// <summary>Starred folders: absolute paths on the server, normalised by <see cref="SitePaths.Normalize"/>.</summary>
     public List<string> Stars { get; init; } = [];
+
+    /// <summary>SITES.6, FTP: <c>explicit</c>, <c>implicit</c> or <c>none</c> (plain).</summary>
+    public string? Tls { get; init; }
+
+    /// <summary>SITES.6, WebDAV: the server's address.</summary>
+    public string? Url { get; init; }
+
+    /// <summary>SITES.6, WebDAV: rclone's vendor.</summary>
+    public string? Vendor { get; init; }
+
+    /// <summary>SITES.6, S3: rclone's provider, the endpoint (none for Amazon S3) and the region. The access key ID is <see cref="User"/>, the secret <see cref="SealedPassword"/>.</summary>
+    public string? Provider { get; init; }
+
+    public string? Endpoint { get; init; }
+
+    public string? Region { get; init; }
+
+    /// <summary>An SFTP site whose server key the user has not accepted yet: nothing reaches rclone until they do.</summary>
+    [JsonIgnore]
+    public bool NeedsHostKey => Kind == SiteKinds.Sftp && HostKeys.Count == 0;
 
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
@@ -160,11 +183,12 @@ public sealed class SiteStore
     private static void Validate(SiteRecord site)
     {
         if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A site of another version can't be saved.");
-        if (site.Kind != SiteKinds.Sftp) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported yet.");
+        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported.");
         if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A site needs a name.");
         if (string.IsNullOrWhiteSpace(site.Host) || site.Host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '?' or '#'))
             throw new SiteStoreException("A site needs a server name or address, without a path, user or password in it.");
         if (site.Port is < 1 or > 65535) throw new SiteStoreException("The port must be between 1 and 65535.");
+        ValidateKind(site);
         foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase })
             if (sealedValue is not null && !SecretProtector.IsProtected(sealedValue))
                 throw new SiteStoreException("A site secret must be sealed before it is saved.");
@@ -175,6 +199,49 @@ public sealed class SiteStore
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
             throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
+    }
+
+    /// <summary>The fields of each kind: the ones it uses are well formed, and the others are not set.</summary>
+    private static void ValidateKind(SiteRecord site)
+    {
+        static void Unused(params string?[] values)
+        {
+            if (values.Any(value => value is not null)) throw new SiteStoreException("A site has a setting its kind does not use.");
+        }
+
+        switch (site.Kind)
+        {
+            case SiteKinds.Sftp:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                break;
+            case SiteKinds.Ftp:
+                Unused(site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Tls, site.Tls))
+                    throw new SiteStoreException("Choose whether the FTP connection is encrypted.");
+                break;
+            case SiteKinds.WebDav:
+                Unused(site.Tls, site.Provider, site.Endpoint, site.Region);
+                if (DownloadManager.Contracts.SiteKindCatalog.AddressProblem(site.Url, "server address") is { } urlProblem) throw new SiteStoreException(urlProblem);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Vendor, site.Vendor))
+                    throw new SiteStoreException("Choose what kind of WebDAV server it is.");
+                break;
+            case SiteKinds.S3:
+                Unused(site.Tls, site.Url, site.Vendor);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Provider, site.Provider))
+                    throw new SiteStoreException("Choose the S3 service.");
+                if (site.Endpoint is not null || site.Provider != DownloadManager.Contracts.SiteKindCatalog.AwsProvider)
+                {
+                    if (DownloadManager.Contracts.SiteKindCatalog.AddressProblem(site.Endpoint, "service address (endpoint)") is { } endpointProblem)
+                        throw new SiteStoreException(endpointProblem);
+                }
+
+                if (site.Region is { } region && (region.Length is 0 or > 64 || !region.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+                    throw new SiteStoreException("A region is letters, digits and dashes, such as eu-central-1.");
+                break;
+        }
+
+        if (site.Kind != SiteKinds.Sftp && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
+            throw new SiteStoreException("Only SFTP sites sign in with a key.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>

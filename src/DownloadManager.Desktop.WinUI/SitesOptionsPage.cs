@@ -114,7 +114,7 @@ internal sealed class SitesOptionsPage
             _tryAgain,
             SettingsWindow.Section("Sites"),
             _enable,
-            SettingsWindow.Hint("Browse and move files on your own servers (SFTP today) through rclone. Off, nothing runs and rclone never starts."),
+            SettingsWindow.Hint("Browse and move files on your own servers (SFTP, FTP, WebDAV and S3) through rclone. Off, nothing runs and rclone never starts."),
             _switchResult.Text,
             SettingsWindow.Section("rclone"),
             _rcloneLine,
@@ -244,6 +244,7 @@ internal sealed class SitesOptionsPage
             text.Children.Add(new TextBlock { Text = site.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             text.Children.Add(SettingsWindow.Hint(SitesRules.Summary(site)));
             if (SitesRules.NeedsTrust(site)) text.Children.Add(SettingsWindow.Hint("The server's key isn't trusted yet. Test the site to check it."));
+            if (!site.Encrypted) text.Children.Add(SettingsWindow.Hint("Not encrypted: the password and the files can be read on the way."));
 
             var test = new Button { Content = "Test", MinWidth = 64, IsEnabled = enabled && !_busy };
             var edit = new Button { Content = "Edit…", MinWidth = 64, IsEnabled = enabled && !_busy };
@@ -425,8 +426,9 @@ internal sealed class SitesOptionsPage
         Render();
         _siteResult.Say($"{saved.Name} is saved.");
 
-        // A new server, or a changed host or port, has no trusted key yet: ask now, then try the site.
-        if (SitesRules.NeedsTrust(saved)) await TestSiteAsync(saved);
+        // A new server, or a changed host or port, has no trusted key yet: ask now, then try the site. A new site of any
+        // kind is tried at once, so a wrong address or key is found while it is fresh.
+        if (SitesRules.NeedsTrust(saved) || existing is null) await TestSiteAsync(saved);
     }
 
     private async Task RemoveAsync(SiteDto site)

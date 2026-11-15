@@ -254,7 +254,7 @@ public sealed partial class SitesCommands
     private async Task<(T? Value, SiteResultDto? Failure)> OnServerAsync<T>(SiteRecord site, Func<RcloneClient, JsonObject, Task<T>> work,
         CancellationToken cancellationToken)
     {
-        if (site.HostKeys.Count == 0)
+        if (site.NeedsHostKey)
             return (default, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
 
         RcloneLease lease;

@@ -250,6 +250,30 @@ public sealed class SiteDto
 
     /// <summary>Starred folders, absolute paths on the server (<c>/srv/pub</c>), in the order they were starred.</summary>
     public List<string> Stars { get; set; } = [];
+
+    /// <summary>SITES.6: FTP only: <see cref="SiteTlsModes"/> (<c>explicit</c>, <c>implicit</c> or <c>none</c>).</summary>
+    public string? Tls { get; set; }
+
+    /// <summary>SITES.6: WebDAV only: the server's address, http or https, with no user name or password in it.</summary>
+    public string? Url { get; set; }
+
+    /// <summary>SITES.6: WebDAV only: rclone's <c>vendor</c> (<c>other</c>, <c>nextcloud</c>, <c>owncloud</c>).</summary>
+    public string? Vendor { get; set; }
+
+    /// <summary>SITES.6: S3 only: rclone's <c>provider</c> (<c>AWS</c>, <c>Cloudflare</c>, <c>Wasabi</c>, <c>Minio</c>, <c>Other</c>).</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>SITES.6: S3 only: the service's address; required except for Amazon S3.</summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>SITES.6: S3 only: the region, or null for the provider's own default.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>SITES.6: the kind's <see cref="SiteCapabilities"/>, so a client hides what the site can't do.</summary>
+    public List<string> Capabilities { get; set; } = [];
+
+    /// <summary>SITES.6: false for plain FTP and for an http:// WebDAV or S3 address; the window shows "Not encrypted".</summary>
+    public bool Encrypted { get; set; } = true;
 }
 
 public sealed class SiteHostKeyDto
@@ -284,6 +308,24 @@ public sealed class SiteSaveRequest
     public string? KeyPassphrase { get; set; }
     public string RemoteFolder { get; set; } = "";
     public string? LocalFolder { get; set; }
+
+    /// <summary>SITES.6: FTP only: <see cref="SiteTlsModes"/> (<c>explicit</c>, <c>implicit</c> or <c>none</c>).</summary>
+    public string? Tls { get; set; }
+
+    /// <summary>SITES.6: WebDAV only: the server's address, http or https, with no user name or password in it.</summary>
+    public string? Url { get; set; }
+
+    /// <summary>SITES.6: WebDAV only: rclone's <c>vendor</c> (<c>other</c>, <c>nextcloud</c>, <c>owncloud</c>).</summary>
+    public string? Vendor { get; set; }
+
+    /// <summary>SITES.6: S3 only: rclone's <c>provider</c> (<c>AWS</c>, <c>Cloudflare</c>, <c>Wasabi</c>, <c>Minio</c>, <c>Other</c>).</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>SITES.6: S3 only: the service's address; required except for Amazon S3.</summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>SITES.6: S3 only: the region, or null for the provider's own default.</summary>
+    public string? Region { get; set; }
 }
 
 public sealed class SiteIdRequest
@@ -357,6 +399,29 @@ public sealed class SiteKindDto
     public string Title { get; set; } = "";
     public int DefaultPort { get; set; }
     public List<string> AuthMethods { get; set; } = [];
+
+    /// <summary>SITES.6: the <see cref="SiteFields"/> the dialog shows, in order.</summary>
+    public List<string> Fields { get; set; } = [];
+
+    /// <summary>SITES.6: the choices of a field with a fixed set of values (FTP's TLS, WebDAV's vendor, S3's provider).</summary>
+    public Dictionary<string, List<SiteChoiceDto>> Choices { get; set; } = [];
+
+    /// <summary>SITES.6: <see cref="SiteCapabilities"/> values.</summary>
+    public List<string> Capabilities { get; set; } = [];
+
+    /// <summary>SITES.6: the user and password boxes' own words, when not "User name" and "Password".</summary>
+    public string? UserLabel { get; set; }
+
+    public string? PasswordLabel { get; set; }
+
+    /// <summary>SITES.6: a line the dialog shows under the fields, or null.</summary>
+    public string? Note { get; set; }
+}
+
+public sealed class SiteChoiceDto
+{
+    public string Value { get; set; } = "";
+    public string Title { get; set; } = "";
 }
 
 public sealed class SiteKindsDto

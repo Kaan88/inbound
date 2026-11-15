@@ -148,6 +148,7 @@ public sealed partial class SitesPanel : UserControl
         _site = site;
         _openedAs = StartOf(site);
         SiteNameText.Text = site.Name;
+        PlainChip.Visibility = site.Encrypted ? Visibility.Collapsed : Visibility.Visible;
         _path = path is null ? SitesBrowseRules.Root : SitesBrowseRules.Normalize(path);
         _atStart = path is null;
         _ = LoadAsync(path, refresh: false, append: false);
@@ -167,6 +168,7 @@ public sealed partial class SitesPanel : UserControl
 
         _site = site;
         SiteNameText.Text = site.Name;
+        PlainChip.Visibility = site.Encrypted ? Visibility.Collapsed : Visibility.Visible;
         SyncChrome();
         StateChanged?.Invoke();
     }

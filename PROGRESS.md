@@ -260,6 +260,35 @@
   regenerated) and the dispatcher's request list missing the four new requests (added). **Not checked:** anything visual, light mode, the Uno window on Linux, a case-keeping
   server (the test server serves a Windows folder), Two panes after a real server switch (rule only).
 
+- **N. SITES.6a: FTP, FTPS, WebDAV and S3 sites** (2026-11-15, main). **Host:** `SiteKindCatalog` (Contracts) lists
+  each kind's fields, choices and capabilities (`newFolder`, `emptyFolders`, `hostKey`), and `sites.kinds` serves it.
+  Each kind gets its own rclone remote (`SiteRemote`): FTP with explicit or implicit TLS or plain (`tls`,
+  `explicit_tls`); WebDAV by its address and vendor; S3 by provider, endpoint and region, with `env_auth` off so only the
+  site's keys are used, and the secret key registered as a secret. A save is checked against the catalog: fields of
+  another kind, a key for anything but SFTP, a change of kind, an address with a user name, query or fragment, and an S3
+  site without both keys are refused. A WebDAV or S3 site's host and port come from its address. Only SFTP asks about a
+  host key (`NeedsHostKey`); `sites.trust` refuses other kinds. An upload to S3 leaves empty folders out. `SiteDto`
+  carries `capabilities` and `encrypted`. New plain words: certificate not trusted, FTP 530, HTTP 401, S3 bad signature,
+  unknown key and access denied, and unknown host, refused and timed-out connections. **Window (WinUI, Uno shares
+  it):** the new-site dialog starts with a Kind box and shows only that kind's fields, with S3's own labels (Access key
+  ID, Secret access key) and its object-store note. The port follows the kind (21, 22, 990 for implicit TLS). Plain FTP
+  and a finished http:// address warn while the form is filled in. Options says "Not encrypted" under such a site and
+  tests any new site straight after it is saved. The Sites pane shows a "Not encrypted" chip next to the site's name and
+  hides New folder on S3. An FTP address typed in Add URL, or pasted into Add links, now points to Options > Sites.
+  **My calls:** one Kind box in the dialog rather than a menu on Add a site; FTPS certificates are checked against
+  Windows' roots only for now (a self-signed server fails with the plain words; trusting one is SITES.6b); no `sites.probe`
+  for other kinds. **Haiku review:** two points, both fixed: the port did not follow the kind after passing through
+  WebDAV or S3 (they have none), and filling the Encryption box on a kind switch moved 990 back to 21. **Walk**
+  (published build, own test instance, `rclone serve ftp`, `webdav` and `s3` on 127.0.0.1, UI Automation only): FTP,
+  then implicit TLS (port 990), then plain (21, warning shown); plain FTP, http WebDAV and S3 ("Other", local endpoint)
+  saved and tested themselves ("connected, and its start folder was listed"); each listed "Not encrypted" in Options and
+  showed the chip in the pane; New folder hidden only on S3; a folder downloaded over FTP. Found and fixed: Options
+  still said "SFTP today". **Tests:** `SiteKindsEndToEndTests` (4, against real rclone servers: plain FTP, WebDAV, S3
+  without empty folders, the save checks), `SiteErrorTextTests` (7 new), `SitesOptionsTests` (4 new); Core 2371, Sites
+  208 and the Integration site, dispatcher and golden-frame tests (385) pass; the solution and the Uno window build.
+  **Not checked:** FTPS against a real certificate (no trusted test server here), Nextcloud and ownCloud, a real cloud
+  S3 service, anything visual, light mode, the Uno window on Linux.
+
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

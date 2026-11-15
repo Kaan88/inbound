@@ -237,8 +237,8 @@ public sealed class SitesOptionsTests
     [Fact]
     public void ASiteWithoutKeysNeedsTrustAndAReplacementMustMatchTheOfferedKey()
     {
-        Assert.True(SitesRules.NeedsTrust(new SiteDto()));
-        Assert.False(SitesRules.NeedsTrust(new SiteDto { HostKeys = [new SiteHostKeyDto { Fingerprint = "SHA256:a" }] }));
+        Assert.True(SitesRules.NeedsTrust(new SiteDto { Kind = "sftp" }));
+        Assert.False(SitesRules.NeedsTrust(new SiteDto { Kind = "sftp", HostKeys = [new SiteHostKeyDto { Fingerprint = "SHA256:a" }] }));
         var keys = new[] { new SiteHostKeyDto { Fingerprint = "SHA256:a" }, new SiteHostKeyDto { Fingerprint = "SHA256:b" } };
         Assert.True(SitesRules.OffersFingerprint(keys, "SHA256:b"));
         Assert.False(SitesRules.OffersFingerprint(keys, "SHA256:c"));
@@ -251,5 +251,73 @@ public sealed class SitesOptionsTests
         Assert.Equal("ssh-ed25519  SHA256:abc", SitesRules.KeyLine(new SiteHostKeyDto { Type = "ssh-ed25519", Fingerprint = "SHA256:abc" }));
         Assert.Equal("kaan@h:2222  /srv", SitesRules.Summary(new SiteDto { User = "kaan", Host = "h", Port = 2222, RemoteFolder = "/srv" }));
         Assert.Equal("kaan@h", SitesRules.Summary(new SiteDto { User = "kaan", Host = "h", Port = 22 }));
+    }
+
+    [Fact]
+    public void AnFtpSiteKeepsItsEncryptionChoiceAndOnlySftpAsksAboutAKey()
+    {
+        var request = SitesRules.Request(Form(v => v with { Kind = "ftp", Port = "21", Tls = SiteTlsModes.None }), null, out var problem);
+        Assert.Null(problem);
+        Assert.Equal(SiteTlsModes.None, request!.Tls);
+        Assert.Equal(21, request.Port);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "ftp", Host = "ftp://files.example.com" }), null, out problem));
+        Assert.Contains("ftp://", problem);
+        Assert.False(SitesRules.NeedsTrust(new SiteDto { Kind = "ftp" }));
+        Assert.Equal("kaan@h", SitesRules.Summary(new SiteDto { Kind = "ftp", User = "kaan", Host = "h", Port = 21 }));
+        Assert.Equal("kaan@h:22", SitesRules.Summary(new SiteDto { Kind = "ftp", User = "kaan", Host = "h", Port = 22 }));
+    }
+
+    [Fact]
+    public void AWebDavSiteNeedsAnAddressAndNotAServerName()
+    {
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "webdav", Url = "" }), null, out var problem));
+        Assert.Equal("Type the server address.", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "webdav", Url = "files.example.com" }), null, out problem));
+        Assert.StartsWith("The server address must start with https://", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "webdav", Url = "https://me:pw@files.example.com/dav" }), null, out problem));
+        Assert.Contains("Leave the user name and password out", problem);
+
+        var request = SitesRules.Request(Form(v => v with { Kind = "webdav", Host = "", Url = " https://files.example.com/dav ", Vendor = "nextcloud" }), null, out problem);
+        Assert.Null(problem);
+        Assert.Equal("https://files.example.com/dav", request!.Url);
+        Assert.Equal("nextcloud", request.Vendor);
+        Assert.Equal("", request.Host);
+        Assert.Null(request.PrivateKey);
+        Assert.Equal("https://files.example.com/dav  /home", SitesRules.Summary(new SiteDto { Kind = "webdav", Url = "https://files.example.com/dav", RemoteFolder = "/home" }));
+    }
+
+    [Fact]
+    public void AnS3SiteNeedsBothKeysAndAnEndpointUnlessItIsAmazon()
+    {
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "Wasabi" }), null, out var problem));
+        Assert.Equal("Type the service address (endpoint).", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "AWS", User = "" }), null, out problem));
+        Assert.Equal("Type the access key ID.", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "AWS", Password = "" }), null, out problem));
+        Assert.Equal("Type the secret access key.", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "AWS", Region = "eu central" }), null, out problem));
+        Assert.StartsWith("A region is", problem);
+
+        var request = SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "AWS", Region = "eu-central-1" }), null, out problem);
+        Assert.Null(problem);
+        Assert.Equal("AWS", request!.Provider);
+        Assert.Null(request.Endpoint);
+        Assert.Equal("eu-central-1", request.Region);
+        // Editing keeps the saved secret when the box is left empty.
+        Assert.NotNull(SitesRules.Request(Form(v => v with { Kind = "s3", Provider = "AWS", Password = "" }), new SiteDto { Id = "x", Kind = "s3", HasPassword = true }, out problem));
+        Assert.Equal("Amazon S3, eu-central-1", SitesRules.Summary(new SiteDto { Kind = "s3", Provider = "AWS", Region = "eu-central-1" }));
+        Assert.Equal("MinIO, http://nas:9000", SitesRules.Summary(new SiteDto { Kind = "s3", Provider = "Minio", Endpoint = "http://nas:9000" }));
+    }
+
+    [Fact]
+    public void PlainFtpAndHttpAddressesAreWarnedAbout()
+    {
+        Assert.Contains("Plain FTP is not encrypted", SitesRules.PlainWarning("ftp", SiteTlsModes.None, null, null));
+        Assert.Null(SitesRules.PlainWarning("ftp", SiteTlsModes.Explicit, null, null));
+        Assert.Contains("http://", SitesRules.PlainWarning("webdav", null, "http://nas/dav", null));
+        Assert.Null(SitesRules.PlainWarning("webdav", null, "https://nas/dav", null));
+        Assert.Contains("http://", SitesRules.PlainWarning("s3", null, null, "http://nas:9000"));
+        Assert.Null(SitesRules.PlainWarning("s3", null, null, null));
+        Assert.Null(SitesRules.PlainWarning("sftp", null, null, null));
     }
 }

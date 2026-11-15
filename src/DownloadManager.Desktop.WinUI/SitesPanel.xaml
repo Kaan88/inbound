@@ -21,8 +21,17 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="SiteNameText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="13" MaxWidth="220"
-                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <TextBlock x:Name="SiteNameText" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="13" MaxWidth="220"
+                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+                    <!-- SITES.6: plain FTP and http:// sites say so where the files are. -->
+                    <Border x:Name="PlainChip" Visibility="Collapsed" CornerRadius="9" Padding="7,1" BorderThickness="1"
+                            BorderBrush="{ThemeResource InboundErrorTextBrush}" VerticalAlignment="Center"
+                            AutomationProperties.Name="Not encrypted"
+                            ToolTipService.ToolTip="This site's connection is not encrypted: the password and the files can be read on the way.">
+                        <TextBlock Text="Not encrypted" FontSize="11" Foreground="{ThemeResource InboundErrorTextBrush}" />
+                    </Border>
+                </StackPanel>
                 <ScrollViewer Grid.Column="1" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Hidden"
                               VerticalScrollBarVisibility="Disabled" VerticalAlignment="Center">
                     <StackPanel x:Name="CrumbsPanel" Orientation="Horizontal" Spacing="2" AutomationProperties.Name="Path" />

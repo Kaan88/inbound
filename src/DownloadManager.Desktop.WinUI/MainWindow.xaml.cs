@@ -3079,7 +3079,7 @@ public sealed partial class MainWindow : Window
         var found = LinkExtractor.HttpLinks(pasteBox.Text);
         if (found.Count == 0)
         {
-            await ShowMessageAsync("Add links", LinkExtractor.HasFtpLink(pasteBox.Text) ? FtpAddresses.NotSupported : "No http or https links were found in the pasted text.");
+            await ShowMessageAsync("Add links", LinkExtractor.HasFtpLink(pasteBox.Text) ? FtpAddresses.UseSites : "No http or https links were found in the pasted text.");
             return;
         }
 
