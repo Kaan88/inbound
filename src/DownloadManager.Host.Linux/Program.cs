@@ -96,7 +96,7 @@ internal static class Program
         using var notifications = new DesktopNotifications(log.Warn);
         var completionExecutor = new LinuxCompletionActionExecutor(log.Info) { Notice = notifications.Notify };
         // One power request for downloads and site transfers (SITES.4): held while either is running.
-        using var sharedSleep = new SharedSleepPrevention(new LogindSleepPrevention(log.Info));
+        using var sharedSleep = new SharedSleepPrevention(OperatingSystem.IsMacOS() ? new MacSleepPrevention(log.Info) : new LogindSleepPrevention(log.Info));
         var sleepPrevention = sharedSleep.Share();
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
@@ -225,6 +225,7 @@ internal static class Program
             log.Warn($"Browser registration failed: {ex.GetType().Name}");
         }
 
+        using var sounds = OperatingSystem.IsMacOS() ? new MacSounds(log.Warn) : null;
         // As the Windows Host's tray balloons: the same notices on the same settings.
         using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
         {
@@ -238,7 +239,28 @@ internal static class Program
                 _ => false,
             };
             if (show) notifications.Notify(notice.Title, notice.Message);
+            // MAC.5: the event sounds, as the Windows Host plays them.
+            if (sounds is null) return;
+            if (notice.Kind == DownloadNoticeKind.Completed && current.PlayCompletionSound) sounds.Play("completed", current.EventSoundFiles);
+            if (notice.Kind == DownloadNoticeKind.Failed && current.EventSoundFiles.ContainsKey("failed")) sounds.Play("failed", current.EventSoundFiles);
         }, log.Warn);
+        if (sounds is not null)
+        {
+            // A queue's last download ended: once per run of the queue, as on Windows.
+            var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
+            service.JobChanged += (_, e) =>
+            {
+                var current = currentSettings;
+                var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
+                    (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
+                if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out _);
+                if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
+                    service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
+                        .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&
+                    finishedQueueSounds.TryAdd(e.Job.QueueId, 0))
+                    sounds.Play("queueFinished", current.EventSoundFiles);
+            };
+        }
         // [TODO D7] Whether the window is in front, so a notice it already shows isn't repeated.
         using var remoteNotices = remoteStarted
             ? RemoteNotices.Listen(remoteJobs, TimeProvider.System, () => currentSettings.NotifyOnCompletion, () => false, notice =>
@@ -288,6 +310,35 @@ internal static class Program
         service.TrayAvailable = platform.TrayAvailable = tray is not null || menuBar is not null;
         if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
         if (menuBar is not null) service.JobChanged += (_, _) => menuBar.RequestRefresh();
+        if (menuBar is not null)
+        {
+            // MAC.5: "Add links I copy": the helper reads the clipboard, by the Windows Host's rules from there on.
+            var copiedLinks = new CopiedLinks(service, remoteJobs);
+            var copiedFilter = new CopiedUrlFilter();
+            var copiedGate = new Lock();
+            menuBar.Copied = text =>
+            {
+                string? url;
+                lock (copiedGate) url = copiedFilter.Accept(text, DateTimeOffset.UtcNow);
+                if (url is null) return;
+                log.Info($"Clipboard URL detected: {copiedLinks.DescribeForLog(url)}");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var outcome = await copiedLinks.AddAsync(url).ConfigureAwait(false);
+                        if (outcome.Title is { } title) notifications.Notify(title, outcome.Words ?? string.Empty);
+                        if (outcome.Problem is { } problem) log.Warn(problem);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error($"Clipboard download failed ({copiedLinks.DescribeForLog(url)}): {DownloadManager.Core.Providers.UrlRedactor.RedactText(ex.ToString())}");
+                    }
+                });
+            };
+            menuBar.WatchClipboard(currentSettings.ClipboardMonitoring);
+            service.SettingsChanged += (_, _) => menuBar.WatchClipboard(service.GetSettings().ClipboardMonitoring);
+        }
 
         webUi.Notice = notifications.Notify;
         updateMonitor.Attach(notifications.Notify);
@@ -386,7 +437,15 @@ internal static class Program
         var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
         if (!File.Exists(keyFile))
         {
-            using var keyring = SecretServiceKeyStore.TryOpen(paths.Root, log.Info);
+            if (OperatingSystem.IsMacOS() && MacKeychainKeyStore.TryOpen(paths.Root, log.Info) is { } keychain)
+            {
+                var protector = AesGcmSecretProtector.OpenForDataFolder(keychain, paths.Root,
+                    keyFile + AesGcmSecretProtector.DiscardedFileSuffix, discardUnreadable: false, log.Warn);
+                log.Info("The secret key is kept in the login Keychain.");
+                return protector;
+            }
+
+            using var keyring = OperatingSystem.IsMacOS() ? null : SecretServiceKeyStore.TryOpen(paths.Root, log.Info);
             if (keyring is not null)
             {
                 var protector = AesGcmSecretProtector.OpenForDataFolder(keyring, paths.Root,
@@ -474,6 +533,9 @@ internal static class Program
         {
             // A sandbox data folder (tests, a second profile) must not change the real handler.
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+            // macOS opens files and links through the bundle's Info.plist and Apple events, not desktop files; the
+            // window doesn't offer the setting there (not built yet), so nothing is written for it.
+            if (OperatingSystem.IsMacOS()) return;
             lock (_sync)
             {
                 if (_applied == wanted) return;

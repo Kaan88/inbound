@@ -10,6 +10,7 @@
             { "text": "Inbound for macOS, for Apple silicon and Intel Macs: the same window, downloads, torrents, Sites and browser extension as on Windows and Linux.", "tags": ["macos"] },
             { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
             { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
+            { "text": "On the Mac too: the Mac stays awake while downloads run, a finished queue can shut down, restart or sign out, notifications and event sounds play, links you copy can be added, and saved passwords are sealed with a key in your login Keychain.", "tags": ["macos"] },
             { "text": "dm sites rclone downloads rclone for Sites from the command line.", "tags": ["all"] }
           ]
         },

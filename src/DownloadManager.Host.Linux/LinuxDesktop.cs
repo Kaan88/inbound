@@ -18,7 +18,17 @@ internal sealed class DesktopNotifications(Action<string> warn) : IDisposable
     private bool _warned;
 
     /// <summary>Shows a notice; never throws, and never waits for the desktop.</summary>
-    public void Notify(string title, string message) => _ = NotifyAsync(title, message);
+    public void Notify(string title, string message)
+    {
+        if (OperatingSystem.IsMacOS()) MacDesktop.Notify(title, message, Warn);
+        else _ = NotifyAsync(title, message);
+    }
+
+    private void Warn(string message)
+    {
+        if (!_warned) warn(message);
+        _warned = true;
+    }
 
     private async Task NotifyAsync(string title, string message)
     {
@@ -248,7 +258,7 @@ internal sealed class LinuxCompletionActionExecutor(Action<string> log) : ICompl
 
     public async Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken)
     {
-        var (program, arguments, what) = mode?.Trim().ToLowerInvariant() switch
+        var (program, arguments, what) = OperatingSystem.IsMacOS() ? MacDesktop.Shutdown(mode) : mode?.Trim().ToLowerInvariant() switch
         {
             "restart" => ("systemctl", new List<string> { "reboot" }, "restart"),
             "logoff" => ("loginctl", ["terminate-session", Environment.GetEnvironmentVariable("XDG_SESSION_ID") ?? string.Empty], "sign out"),

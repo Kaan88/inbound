@@ -155,6 +155,26 @@ jobs:
             sleep 1
           done
           "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start
+          # MAC.5: the secret key in the login Keychain (its value is never printed), and sleep held while a download runs.
+          grep -h 'secret key is kept' "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | cut -c1-160
+          if security find-generic-password -s "Inbound Download Manager secret key" -a "$DOWNLOADMANAGER_DATA" >/dev/null 2>&1; then
+            echo "--- the secret key is in the login Keychain"
+          else echo "::warning::no Inbound key in the login Keychain"; fi
+          python3 -c 'import http.server, time
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200); self.send_header("Content-Length", "100000000"); self.end_headers()
+                  for _ in range(400): self.wfile.write(b"x" * 64); self.wfile.flush(); time.sleep(0.1)
+              def log_message(self, *a): pass
+          http.server.ThreadingHTTPServer(("127.0.0.1", 8931), H).serve_forever()' &
+          slow=$!
+          sleep 1
+          "$app/Contents/Resources/host/DownloadManager.Cli" add http://127.0.0.1:8931/slow.bin --dest "$RUNNER_TEMP" --no-start
+          sleep 6
+          if pmset -g assertions | grep -i -E 'caffeinate|PreventUserIdleSystemSleep.*1' | head -5 | grep -q .; then
+            echo "--- sleep is held while downloading:"; pmset -g assertions | grep -i caffeinate | head -3
+          else echo "::warning::no sleep assertion while a download runs"; pmset -g assertions | head -30; fi
+          kill $slow 2>/dev/null
           echo "--- Host output"; cat "$RUNNER_TEMP/host.log"
           echo "--- Host logs"; find "$DOWNLOADMANAGER_DATA" -maxdepth 2 | head -40; cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -80
           echo "--- sockets"; ls -la "${TMPDIR:-/tmp}"/inbound-* 2>/dev/null

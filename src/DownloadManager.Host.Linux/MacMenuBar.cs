@@ -21,6 +21,11 @@ internal sealed class MacMenuBar : IAsyncDisposable
     private readonly Lock _write = new();
     private string _tooltip = string.Empty;
     private int _tooltipPending;
+    private bool? _watching;
+    private volatile bool _watchOn;
+
+    /// <summary>MAC.5: text copied while <see cref="WatchClipboard"/> is on.</summary>
+    public Action<string>? Copied { get; set; }
 
     private MacMenuBar(Process process, LinuxTrayActions actions, Action<string> log)
     {
@@ -68,12 +73,52 @@ internal sealed class MacMenuBar : IAsyncDisposable
         if (Interlocked.Exchange(ref _tooltipPending, 1) == 0) _tooltipTimer.Change(1000, Timeout.Infinite);
     }
 
+    /// <summary>MAC.5: the helper watches the clipboard only while Options asks for it.</summary>
+    public void WatchClipboard(bool on)
+    {
+        lock (_write)
+        {
+            if (_watching == on) return;
+            _watching = on;
+            _watchOn = on;
+            Send(on ? "clipboard on" : "clipboard off");
+        }
+    }
+
+    private void Send(string line)
+    {
+        try
+        {
+            _process.StandardInput.WriteLine(line);
+            _process.StandardInput.Flush();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            // The helper has gone; the Host runs on without its icon.
+        }
+    }
+
     private async Task ReadChoicesAsync()
     {
         try
         {
             while (await _process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
+                if (line.StartsWith("clipboard ", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        if (_watchOn) Copied?.Invoke(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(line["clipboard ".Length..].Trim())));
+                    }
+                    catch (Exception ex)
+                    {
+                        // Never the text: it may be anything the user copied.
+                        _log($"Copied text was not taken: {ex.GetType().Name}");
+                    }
+
+                    continue;
+                }
+
                 Action? action = line.Trim() switch
                 {
                     "open" => _actions.Open,
@@ -113,15 +158,7 @@ internal sealed class MacMenuBar : IAsyncDisposable
         {
             if (text == _tooltip) return;
             _tooltip = text;
-            try
-            {
-                _process.StandardInput.WriteLine("tooltip " + text);
-                _process.StandardInput.Flush();
-            }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
-            {
-                // The helper has gone; the Host runs on without its icon.
-            }
+            Send("tooltip " + text);
         }
     }
 
