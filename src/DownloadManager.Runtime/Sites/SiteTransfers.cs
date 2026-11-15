@@ -162,6 +162,12 @@ public sealed class SiteTransfers : IAsyncDisposable
         lock (_sync) return SnapshotLocked();
     }
 
+    /// <summary>The folder on this computer a batch reads or writes; null when there is no such batch.</summary>
+    public string? LocalFolderOf(string id)
+    {
+        lock (_sync) return _batches.FirstOrDefault(b => b.Record.Id == id)?.Record.LocalFolder;
+    }
+
     /// <summary>
     /// SITES.5: whether a batch that may still move files (running, paused, or stopped with files waiting) reads or writes
     /// <paramref name="path"/> on that site, or anything inside it, or lands inside it: such a path is not renamed or

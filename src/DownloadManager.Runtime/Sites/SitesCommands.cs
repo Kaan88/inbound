@@ -1092,9 +1092,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         await supervisor.DisposeAsync().ConfigureAwait(false);
     }
 
+    public string? TransferLocalFolder(string transferId) => _transfers.LocalFolderOf(transferId);
+
     /// <summary>On the Host's exit.</summary>
     public async ValueTask DisposeAsync()
     {
+        _disposing = true;
         await StopUpdateLoopAsync().ConfigureAwait(false);
         CancelSignIn(null);
         await CloseAllStreamsAsync().ConfigureAwait(false);

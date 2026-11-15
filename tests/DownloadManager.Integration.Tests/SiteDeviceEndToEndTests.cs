@@ -97,6 +97,9 @@ public sealed partial class SiteTransfersEndToEndTests
         var listing = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Path = "/pub", Refresh = true });
         Assert.DoesNotContain(listing.Items, item => item.Name is "liar.bin" or "closed.bin" && item.Size > 0);
 
+        // Every stream is closed now, and so is the idle timer (no wake-ups while nothing is open).
+        Assert.False(commands.StreamSweepRunning);
+
         // A name with a slash, or a path out of the site, is refused.
         Assert.False((await Call<SiteDeviceStreamDto>(commands, SitesMessageTypes.DeviceWriteOpen,
             new SiteDeviceOpenRequest { Id = id, Folder = "/pub", Name = "a/b", Size = 1 })).Ok);

@@ -30,15 +30,15 @@ public sealed partial class HostCommandDispatcher
             return;
         }
 
-        if ((rights.Scope?.Roots ?? SitesRoots) is { } roots && ScopedSites(roots, ref message) is { } refusal)
-        {
-            client.Enqueue(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = refusal }, message.Id));
-            return;
-        }
-
         if (Sites is not { } sites)
         {
             client.Enqueue(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = SitesUnavailable }, message.Id));
+            return;
+        }
+
+        if ((rights.Scope?.Roots ?? SitesRoots) is { } roots && ScopedSites(roots, sites, ref message) is { } refusal)
+        {
+            client.Enqueue(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = refusal }, message.Id));
             return;
         }
 
@@ -51,13 +51,21 @@ public sealed partial class HostCommandDispatcher
 
     /// <summary>
     /// A web session's request, held to its folders: the folder a site saves into and a transfer's folder on this
-    /// computer must be inside them, and Use my own rclone is not changed. The message is rewritten with the resolved
-    /// folder. The reason, or null when it may go on.
+    /// computer must be inside them, also when a batch made elsewhere (by the user at this PC) is resumed or retried, and
+    /// Use my own rclone is not changed. The message is rewritten with the resolved folder. The reason, or null when it
+    /// may go on.
     /// </summary>
-    private static string? ScopedSites(PathRoots roots, ref IpcMessage message)
+    private static string? ScopedSites(PathRoots roots, ISitesCommands sites, ref IpcMessage message)
     {
         switch (message.Type)
         {
+            case SitesMessageTypes.TransferResume or SitesMessageTypes.TransferRetry:
+            {
+                // Pause, cancel, get and clear move nothing; these start the batch's files moving again.
+                var id = message.GetPayload<SiteTransferIdRequest>()?.Id ?? "";
+                if (sites.TransferLocalFolder(id) is not { } folder) return null; // no such batch: Sites says so
+                return roots.Allowed(folder) is null ? roots.OutsideTextFor(folder) : null;
+            }
             case SitesMessageTypes.SetEnabled:
                 return message.GetPayload<SitesSetEnabledRequest>()?.OwnRclonePath is not null ? OwnRcloneHere : null;
             case SitesMessageTypes.Save:

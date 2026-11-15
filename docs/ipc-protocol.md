@@ -202,8 +202,13 @@ message?, problem?, streamId, name, size}` (`problem: exists` when the name is t
 `sites.device.read {streamId}` answers `sites.device.chunk {ok, data (base64), done}` until `done`, and
 `sites.device.write {streamId, data, last}` sends pieces of at most 1 MiB (`SiteDeviceLimits`); the answer to the
 `last` one comes when the server has the whole file. More bytes than `size`, or fewer at `last`, end the stream and
-nothing is kept. `sites.device.close {streamId}` stops one; one unused for two minutes is closed, and 8 at once is the
-most. rclone reads the file over its own served address (`--rc-serve`, named in-memory remotes) and takes an upload
+stop the upload; rclone removes what it had written where the kind of site lets it, but a stopped upload that was
+replacing a file may already have removed the old one. Any failed or aborted piece ends its stream.
+`sites.device.close {streamId}` stops one (a piece in flight is cancelled first); one unused for two minutes, or a
+piece rclone does not move for two minutes, is closed, and 8 at once is the most. Pausing a download in the browser for
+longer than that ends it. The idle timer runs only while a stream is open. A scoped session (a web session, or any
+caller on the server) can't resume or retry a transfer batch whose folder on this computer is outside its folders; it
+can still see every site and batch, folders included (it is the admin). rclone reads the file over its own served address (`--rc-serve`, named in-memory remotes) and takes an upload
 with `operations/uploadfile`, so nothing is written to a disk on the way. The browser uses the server's
 `GET /api/sites/device?id=&path=` (the file as a download) and `POST /api/sites/device?id=&folder=&replace=1` (the body,
 its name percent-encoded in `X-File-Name`, its `Content-Length` required; `409` when the name is taken), signed in or

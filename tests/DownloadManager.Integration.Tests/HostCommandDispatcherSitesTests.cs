@@ -53,6 +53,9 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     {
         public List<string> Seen { get; } = [];
         public List<IpcMessage> Messages { get; } = [];
+        public Dictionary<string, string> Folders { get; } = [];
+
+        public string? TransferLocalFolder(string transferId) => Folders.GetValueOrDefault(transferId);
 
         public Task<IpcMessage> HandleAsync(IpcMessage request, CancellationToken cancellationToken)
         {
@@ -202,6 +205,18 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             Assert.Equal(inside, sites.Messages[^2].GetPayload<SiteTransferStartRequest>().LocalFolder);
         }
 
+        // A batch the user at this PC made outside the session's folders is not set moving again from the browser; one
+        // inside them is, and pausing or cancelling either moves nothing.
+        sites.Folders["outsidebatch"] = "/srv/in";
+        sites.Folders["insidebatch"] = inside;
+        foreach (var type in new[] { SitesMessageTypes.TransferResume, SitesMessageTypes.TransferRetry })
+        {
+            Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
+            Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "insidebatch" })).Type);
+            Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, pipe, type, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
+        }
+
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferPause, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
         sites.Seen.Clear();
 
         foreach (var (type, payload) in SitesRequests)

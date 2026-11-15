@@ -17,8 +17,12 @@ public sealed partial class SitesCommands
 {
     internal static TimeSpan StreamIdle { get; set; } = TimeSpan.FromMinutes(2);
 
+    /// <summary>The most one piece may wait on rclone; a stalled server ends the stream instead of holding it.</summary>
+    internal static TimeSpan PieceTime { get; set; } = TimeSpan.FromMinutes(2);
+
     private readonly ConcurrentDictionary<string, DeviceStream> _streams = new(StringComparer.Ordinal);
     private Timer? _streamSweep;
+    private volatile bool _disposing;
 
     private sealed class DeviceStream(string siteId, RcloneLease lease) : IAsyncDisposable
     {
@@ -70,6 +74,7 @@ public sealed partial class SitesCommands
 
     private async Task<SiteDeviceStreamDto> DeviceOpenAsync(SiteDeviceOpenRequest request, bool write, CancellationToken cancellationToken)
     {
+        if (_disposing) return new SiteDeviceStreamDto { Message = "Inbound is closing." };
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
             return new SiteDeviceStreamDto { Message = "That site no longer exists." };
         if (_streams.Count >= SiteDeviceLimits.MostStreams)
@@ -119,6 +124,10 @@ public sealed partial class SitesCommands
                 var upload = pipe.Reader.AsStream();
                 var stop = stream.Stop.Token;
                 stream.Upload = Task.Run(() => lease.Client.UploadFileAsync(remote, folder!, name!, upload, stop), CancellationToken.None);
+                // An upload that ends early (the server refused it) completes the reader, so a piece waiting for room in
+                // the pipe returns at once instead of waiting forever.
+                _ = stream.Upload.ContinueWith(ended => pipe.Reader.Complete(ended.Exception?.InnerException), CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
             else
             {
@@ -127,21 +136,30 @@ public sealed partial class SitesCommands
                 stream.Body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             }
         }
-        catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException or OperationCanceledException)
+        catch (Exception e)
         {
+            // Every failure gives the lease back: a stream not yet listed is never swept.
             if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
             else lease.Dispose();
             if (e is OperationCanceledException) throw;
+            if (e is not (RcloneCallException or RcloneUnavailableException or SiteStoreException or HttpRequestException or IOException)) throw;
             return new SiteDeviceStreamDto
             {
                 Problem = e is SiteSignInNeededException ? SiteProblems.SignInNeeded
                     : SiteErrorText.IsUntrustedCertificate(e.Message) ? SiteProblems.CertificateNotTrusted : null,
-                Message = SiteErrorText.Friendly(e.Message),
+                Message = e is HttpRequestException or IOException ? "The connection to rclone was lost. Try again." : SiteErrorText.Friendly(e.Message),
             };
         }
 
         var id = Guid.NewGuid().ToString("N");
         _streams[id] = stream;
+        // Two opens can pass the count above at once, and one can finish after shutdown began: the later one gives way.
+        if (_streams.Count > SiteDeviceLimits.MostStreams || _disposing)
+        {
+            await CloseStreamAsync(id).ConfigureAwait(false);
+            return new SiteDeviceStreamDto { Message = _disposing ? "Inbound is closing." : "Too many files are being sent to or from devices at once. Try again when one has finished." };
+        }
+
         StartStreamSweep();
         return new SiteDeviceStreamDto
         {
@@ -167,21 +185,32 @@ public sealed partial class SitesCommands
         await stream.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Closed while this waited: its token source is gone too.
+            if (!_streams.ContainsKey(request.StreamId)) return new SiteDeviceChunkDto { Message = "That transfer is no longer open." };
+            using var piece = PieceToken(stream, cancellationToken);
             stream.LastUsed = Environment.TickCount64;
             var buffer = new byte[SiteDeviceLimits.ChunkBytes];
             var filled = 0;
             int read;
             // A whole piece unless the file ends: fewer round trips for the caller.
-            while (filled < buffer.Length && (read = await stream.Body.ReadAsync(buffer.AsMemory(filled), cancellationToken).ConfigureAwait(false)) > 0)
+            while (filled < buffer.Length && (read = await stream.Body.ReadAsync(buffer.AsMemory(filled), piece.Token).ConfigureAwait(false)) > 0)
                 filled += read;
             var done = filled < buffer.Length;
+            stream.LastUsed = Environment.TickCount64;
             if (done) await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
             return new SiteDeviceChunkDto { Ok = true, Data = filled == buffer.Length ? buffer : buffer[..filled], Done = done };
         }
-        catch (Exception e) when (e is IOException or HttpRequestException)
+        catch (Exception e) when (e is IOException or HttpRequestException or ObjectDisposedException
+                                      || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
+            // Closed while the piece was read, rclone stalled past PieceTime, or the server cut the file off.
             await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
             return new SiteDeviceChunkDto { Message = "The server stopped sending the file." };
+        }
+        catch (OperationCanceledException)
+        {
+            await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
+            throw;
         }
         finally
         {
@@ -194,14 +223,17 @@ public sealed partial class SitesCommands
         if (!_streams.TryGetValue(request.StreamId, out var stream) || stream.Pipe is null)
             return new SiteDeviceChunkDto { Message = "That transfer is no longer open." };
         await stream.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var finished = false;
         try
         {
+            if (!_streams.ContainsKey(request.StreamId)) return new SiteDeviceChunkDto { Message = "That transfer is no longer open." };
+            using var piece = PieceToken(stream, cancellationToken);
             stream.LastUsed = Environment.TickCount64;
             var data = request.Data ?? [];
             if (data.Length > SiteDeviceLimits.ChunkBytes || stream.Written + data.Length > stream.Expected)
             {
                 await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
-                return new SiteDeviceChunkDto { Message = "The file is larger than it said; it was not kept." };
+                return new SiteDeviceChunkDto { Message = "The file is larger than it said, so the upload was stopped." };
             }
 
             if (stream.Upload is { IsCompleted: true } ended)
@@ -212,37 +244,58 @@ public sealed partial class SitesCommands
 
             if (data.Length > 0)
             {
-                var flushed = await stream.Pipe.Writer.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                var flushed = await stream.Pipe.Writer.WriteAsync(data, piece.Token).ConfigureAwait(false);
                 stream.Written += data.Length;
-                if (flushed.IsCompleted) return new SiteDeviceChunkDto { Message = "The server stopped taking the file." };
+                if (flushed.IsCompleted)
+                {
+                    // The upload ended while this piece waited for room: its own reason, and the stream is gone.
+                    var reason = stream.Upload is { IsCompleted: true } stopped ? UploadFailure(stopped) : "The server stopped taking the file.";
+                    await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
+                    return new SiteDeviceChunkDto { Message = reason };
+                }
             }
 
-            if (!request.Last) return new SiteDeviceChunkDto { Ok = true };
+            if (!request.Last)
+            {
+                finished = true;
+                stream.LastUsed = Environment.TickCount64;
+                return new SiteDeviceChunkDto { Ok = true };
+            }
+
             if (stream.Written != stream.Expected)
             {
                 await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
-                return new SiteDeviceChunkDto { Message = "The file ended before its size; it was not kept." };
+                return new SiteDeviceChunkDto { Message = "The file ended before its size, so the upload was stopped." };
             }
 
             await stream.Pipe.Writer.CompleteAsync().ConfigureAwait(false);
             string? failure = null;
             try
             {
+                // No PieceTime here: the server may take a while to store a large file once it has all of it.
                 await stream.Upload!.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException)
+            catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or HttpRequestException or IOException)
             {
-                failure = SiteErrorText.Friendly(e.Message);
+                failure = e is RcloneCallException or RcloneUnavailableException ? SiteErrorText.Friendly(e.Message) : "The connection to rclone was lost.";
             }
 
-            _streams.TryRemove(request.StreamId, out _);
-            await stream.DisposeAsync().ConfigureAwait(false);
+            await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
             if (failure is not null) return new SiteDeviceChunkDto { Message = failure };
             ForgetListings(stream.SiteId);
             return new SiteDeviceChunkDto { Ok = true, Done = true };
         }
+        catch (Exception e) when (e is ObjectDisposedException or InvalidOperationException
+                                      || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            // Closed while this piece moved, or rclone took no bytes for PieceTime.
+            return new SiteDeviceChunkDto { Message = "The server stopped taking the file." };
+        }
         finally
         {
+            // Anything but a piece taken (or an answer that already closed it) ends the stream: an aborted request
+            // does not hold a slot and an rclone lease until the sweep.
+            if (!finished) await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
             stream.Gate.Release();
         }
     }
@@ -251,15 +304,52 @@ public sealed partial class SitesCommands
         ? SiteErrorText.Friendly(e.Message)
         : "The server stopped taking the file.";
 
+    private static CancellationTokenSource PieceToken(DeviceStream stream, CancellationToken cancellationToken)
+    {
+        var piece = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stream.Stop.Token);
+        piece.CancelAfter(PieceTime);
+        return piece;
+    }
+
     private async Task<SiteResultDto> DeviceCloseAsync(string streamId)
     {
-        await CloseStreamAsync(streamId).ConfigureAwait(false);
+        await CloseFromOutsideAsync(streamId).ConfigureAwait(false);
         return new SiteResultDto { Ok = true };
     }
 
+    /// <summary>Ends a stream when the caller holds its gate (or no piece can be moving).</summary>
     private async Task CloseStreamAsync(string streamId)
     {
         if (_streams.TryRemove(streamId, out var stream)) await stream.DisposeAsync().ConfigureAwait(false);
+        if (_streams.IsEmpty) StopStreamSweep();
+    }
+
+    /// <summary>
+    /// Ends a stream from outside a piece: a piece in flight is cancelled first and finishes (it sees the stream gone),
+    /// so nothing it reads or writes is disposed under it.
+    /// </summary>
+    private async Task CloseFromOutsideAsync(string streamId)
+    {
+        if (!_streams.TryRemove(streamId, out var stream)) return;
+        try
+        {
+            await stream.Stop.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        var gated = await stream.Gate.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        try
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            if (gated) stream.Gate.Release();
+        }
+
+        if (_streams.IsEmpty) StopStreamSweep();
     }
 
     private void StartStreamSweep()
@@ -268,6 +358,16 @@ public sealed partial class SitesCommands
         var sweep = new Timer(_ => _ = SweepStreamsAsync(), null, StreamIdle, StreamIdle);
         if (Interlocked.CompareExchange(ref _streamSweep, sweep, null) is not null) sweep.Dispose();
     }
+
+    /// <summary>No timer while no stream is open (idle wake-ups); the next open starts it again.</summary>
+    private void StopStreamSweep()
+    {
+        Interlocked.Exchange(ref _streamSweep, null)?.Dispose();
+        // A stream opened while the timer was stopped starts its own; one listed in between gets a new timer here.
+        if (!_streams.IsEmpty && !_disposing) StartStreamSweep();
+    }
+
+    internal bool StreamSweepRunning => _streamSweep is not null;
 
     /// <summary>A browser that went away leaves its stream: closed after <see cref="StreamIdle"/>.</summary>
     internal async Task SweepStreamsAsync()
@@ -290,7 +390,8 @@ public sealed partial class SitesCommands
 
     private async Task CloseAllStreamsAsync()
     {
-        _streamSweep?.Dispose();
-        foreach (var id in _streams.Keys) await CloseStreamAsync(id).ConfigureAwait(false);
+        _disposing = true;
+        Interlocked.Exchange(ref _streamSweep, null)?.Dispose();
+        foreach (var id in _streams.Keys) await CloseFromOutsideAsync(id).ConfigureAwait(false);
     }
 }

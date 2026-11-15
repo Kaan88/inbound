@@ -159,7 +159,10 @@ internal static class SiteDeviceStreams
             return null;
         }
 
-        return reply?.GetPayload<T>();
+        if (reply?.GetPayload<T>() is { } answer) return answer;
+        // An answer with nothing in it: not a success, whatever else it is.
+        if (context is not null) await FailAsync(context, StatusCodes.Status502BadGateway, "Inbound did not answer.", null).ConfigureAwait(false);
+        return null;
     }
 
     private static async Task CloseAsync(IEnvelopeBackend backend, string streamId)
