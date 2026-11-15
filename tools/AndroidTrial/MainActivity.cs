@@ -11,6 +11,13 @@ public sealed class MainActivity : Activity
 {
     private TextView? _log;
     private long _onCreateMs;
+    private SafTrial? _saf;
+
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        _saf?.OnResult(requestCode, resultCode, data);
+    }
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -34,6 +41,42 @@ public sealed class MainActivity : Activity
 
     private async Task StartAsync(Intent? intent)
     {
+        var mode = intent?.GetStringExtra("mode");
+        if (mode is "host" or "service")
+        {
+            var hr = new HostRequest(
+                intent!.GetStringExtra("runId") ?? "run", intent.GetStringExtra("phase") ?? "add", intent.GetStringExtra("url"),
+                intent.GetStringExtra("sha256"), intent.GetIntExtra("segments", 1), intent.GetBooleanExtra("resumeIfPaused", false),
+                intent.GetBooleanExtra("idle", false));
+            if (mode == "service")
+            {
+                var svc = new Intent(this, typeof(TrialService));
+                svc.PutExtra("runId", hr.RunId).PutExtra("phase", hr.Phase).PutExtra("segments", hr.Segments)
+                    .PutExtra("resumeIfPaused", hr.ResumeIfPaused).PutExtra("idle", hr.Idle);
+                if (hr.Url is not null) svc.PutExtra("url", hr.Url);
+                if (hr.Sha256 is not null) svc.PutExtra("sha256", hr.Sha256);
+                try
+                {
+                    StartForegroundService(svc);
+                    Show("StartForegroundService ok");
+                }
+                catch (Exception ex) { Show("StartForegroundService FAILED " + ex); }
+                if (intent.GetBooleanExtra("finish", false)) Finish();
+                return;
+            }
+
+            try { await Task.Run(() => HostScenario.RunAsync(this, hr, Show, CancellationToken.None, keepHost: false)); }
+            catch (Exception ex) { Log.Error("InboundTrial", ex.ToString()); Show("FATAL " + ex); }
+            return;
+        }
+
+        if (mode == "saf")
+        {
+            _saf ??= new SafTrial(this, Show);
+            _saf.Begin(intent!);
+            return;
+        }
+
         if (intent?.GetStringExtra("url") is not { Length: > 0 } url)
         {
             Show("No 'url' extra: idle. Start with: adb shell am start -n app.inbound.trial/.MainActivity --es url ... --ei segments 8 --es dest app --es runId r1");

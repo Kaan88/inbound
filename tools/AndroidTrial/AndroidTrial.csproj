@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Engine\DownloadManager.Engine.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
   </ItemGroup>
 
 </Project>
