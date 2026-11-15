@@ -21,6 +21,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 | 2026-11-13 | "uploads and all the needs that come with it are a must. if rclone can do it all, that's fantastic." |
 | 2026-11-13 | Sites in the sidebar show that a download or upload is active there. |
 | 2026-11-13 | The fourth mockup page is agreed. Sites is switchable. rclone is a separate process that runs only while needed. |
+| 2026-11-15 | rclone is checked for updates by the desktop apps, and the Docker server updates it too (replaces "the pinned rclone version changes only with Inbound releases"). |
 | 2026-11-15 | Open questions answered: site transfers have their own limit (1); a web session may add and edit sites only as admin (2); no Sites line or anything else of Sites in the extension (4); rclone is **not in Setup or the update zip**: Options > Sites downloads it, and the Docker image includes it (5, replaces "rclone is bundled in Setup" of 2026-11-12); FTPS self-signed certificates go in one CA file Inbound manages (6); no resume is accepted for now (7). Question 3: "to this device" and "from this device" are in the first web UI release, not server side only (owner, 2026-11-15). |
 
 ## The agreed design in short
@@ -253,16 +254,41 @@ transfers-at-once limit and the default view.
   `<state>\tools\rclone\<version>\` (a temp name, then a rename, so a cut download leaves nothing usable), and
   checks `rclone version` before using it. Per user, so no admin rights. Size: about 32 MB to download, 86 MB on
   disk (run point 10). Turning Sites on with no rclone offers the download first.
-- A later Inbound release that pins a newer rclone offers "Update rclone" in Options; the old folder is removed once
-  the new one works. "Use my own rclone" stays for any other version.
+- **rclone updates (owner, 2026-11-15):** the desktop apps (WinUI and Linux) check for a newer rclone, and the Docker
+  server updates its rclone too. The design below is proposed; the owner decided only that both update.
+  - **Check:** the Host reads `https://downloads.rclone.org/version.txt` (`rclone vX.Y.Z`) once a day while Sites is
+    on, and never with Sites off. The check reuses the Inbound updater's schedule and its offline handling.
+  - **Verification, since a newer rclone can't have its SHA-256 built into an older Inbound:** the release's
+    `SHA256SUMS` is fetched from `downloads.rclone.org` and from the GitHub release, and both copies must be
+    identical. Its clearsigned OpenPGP signature must verify with rclone's release key, built into Inbound
+    (`FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA`, Nick Craig-Wood). The zip's SHA-256 must match the line for this
+    OS and CPU. Checked on 2026-11-15 with gpg for 1.76.0: good signature, and the two copies are identical.
+    The key is DSA-1024 and the file is signed with a SHA-1 digest, which is weak today. So the signature is one
+    check among three, not the only one.
+  - **Not too new:** a release is offered only once it is 7 days old (proposed), so a bad or withdrawn release is
+    usually replaced first. A new major version (2.x) is never installed by itself; Options says so and asks.
+  - **Install:** unpacked into a new `<state>/tools/rclone/<version>/` folder, then `rclone version` is checked. A
+    short self-test follows: `rcd` starts, answers `core/version`, and `core/quit` ends it. Only then does it become
+    the current version, at the next rclone start, never while a transfer runs. The previous version's folder is
+    kept for a rollback: if the new one fails to start twice, the Host goes back and stops offering that version.
+    Older folders are removed.
+  - **Desktop:** a notice in Options > Sites and in the app's notifications, "Update rclone" to install, and an
+    "Update rclone automatically" switch (proposed: on). The Inbound version's own pinned rclone stays the floor:
+    an update never goes below it.
+  - **Docker:** the image keeps its pinned rclone, which is used until a newer, checked one sits in the data volume
+    (`/data/tools/rclone/<version>/`). The server checks and installs in the same way, automatically by default,
+    because nobody is there to click. The web UI shows the notice to admins. A new image resets nothing: a
+    downloaded version newer than the image's is kept, and one older than the image's is removed.
+  - "Use my own rclone" is never updated by Inbound.
 - `third_party\rclone\` holds the licence and a `SOURCE.md` with the pinned version, addresses and SHA-256 values per
-  OS and CPU, like `third_party\7-Zip\`. The licence ships with Inbound (it is shown before the download).
+  OS and CPU, like `third_party\7-Zip\`, and rclone's release signing key. The licence ships with Inbound (it is shown before the download).
 - Uninstall treats the downloaded copy like the rest of the state, which it keeps (as uninstall does today).
 - Docker: a pinned, checksummed download stage like the 7-Zip one (`Dockerfile:28-50`), linux/amd64 only (arm64 is
   on hold).
 - There is no central third-party notices file today. Add `THIRD-PARTY-NOTICES.md` (7-Zip, rclone, the torrent
   worker's libraries) and link it from Help.
-- The pinned rclone version changes only with Inbound releases. "Use my own rclone" is the way to run another one.
+- The pinned rclone version is the floor and the first download. Newer ones come through the rclone update check
+  above. "Use my own rclone" is the way to run any other version.
 
 ## FTP: undoing part of CUT.1
 
@@ -283,7 +309,7 @@ Each phase ends with evidence linked in PROGRESS; nothing is marked implemented 
 | Phase | ROADMAP | Content | Done when |
 | --- | --- | --- | --- |
 | 0 | SITES.0 | rclone run: the list below. Measure sizes. Decide the open items. | Results in `remote-sites-rclone-run.md`, the changes here, a note in PROGRESS. |
-| 1 | SITES.1 | `DownloadManager.Sites`: locate, start, supervise, stop rclone; rc client; idle stop; never outlives the Host. Download from Options (pinned version and SHA-256); in the Docker image. | Supervisor tests like `WebUiSupervisorTests`; a kill test; idle shows no process. |
+| 1 | SITES.1 | `DownloadManager.Sites`: locate, start, supervise, stop rclone; rc client; idle stop; never outlives the Host. Download from Options (pinned version and SHA-256); in the Docker image; update check on the desktop and in Docker (signed checksums, rollback). | Supervisor tests like `WebUiSupervisorTests`; a kill test; idle shows no process. |
 | 2 | SITES.2 | Site model, stores, sealed secrets, `sites.list/save/remove/test/kinds`, the Options switch, SFTP host-key trust. | Dispatcher tests; a site saved, Host restarted, tested again; changed key refused. |
 | 3 | SITES.3 | `sites.browse` and the desktop Server only view: toolbar swap, breadcrumbs, stars, sidebar section. Read-only. | Walked in the app against a local test SFTP server, dark mode. |
 | 4 | SITES.4 | Transfers: download and upload batches, stores, Transfers bar, conflicts, failures, retry, speed share, scheduler, sidebar activity, status chip. | Hash-matched files both ways; Host killed mid-batch and restarted; limits respected. |
