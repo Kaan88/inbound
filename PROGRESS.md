@@ -372,7 +372,7 @@
   and the Integration site, dispatcher and golden-frame tests pass. **Not checked:** a sign-in with a real Google,
   Microsoft or Dropbox account, a renewal by the real provider, OneDrive's drive lookup, a real B2 bucket, anything
   visual, light mode, Linux. **Question for the owner:** may a live check use your own Google, Microsoft, Dropbox or
-  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services.
+  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services. **Answered 2026-11-15 (yes); Drive, OneDrive and Dropbox checked live (AK), B2 later.**
 - **Q. SITES.7: Sites in the web UI and on the server, "this device" streams** (2026-11-15, main; commits `dad04f5`,
   `ec80948` and the web UI commit after them). **Who may:** a web session signed in with the password is the admin, so
   it is answered for `sites.*` (my reading of the owner's "admin only", 2026-11-15: there is no role system, and the
@@ -427,6 +427,17 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AK. SITES.6c live: Drive, OneDrive and Dropbox with the owner's accounts** (2026-11-15, main at `cb07f7b`). An
+  isolated test instance (own name and data folder) and the real `dm`, rclone 1.76.0. Each service: added, signed in in
+  the owner's browser through the printed `127.0.0.1:53682` address (`dm sites sign-in`, rclone's own app), tested, a
+  folder `/inbound-live-check` made, a 2,000,000-byte file uploaded (`dm sites put`), listed, downloaded
+  (`dm sites get`) with the same SHA-256 as the original, the folder deleted (`dm sites rm --yes`) and gone from the
+  listing; then the site removed. All three pass. One slip in the test script, not in Inbound: Git Bash rewrote
+  `/inbound-live-check` into `C:/Program Files/Git/inbound-live-check` for the first Drive run, so a folder `/C:` was made
+  on the owner's Drive with only the test file in it; it was listed, found to hold nothing else, and deleted; the script
+  then ran with `MSYS_NO_PATHCONV=1`. The test instance and its data (the sealed tokens) were deleted afterwards; the
+  grants stay with the providers until the owner revokes them. **Not checked:** Backblaze B2 (owner, 2026-11-15:
+  "continue without b2 for now, later"); a renewal after the token runs out.
 - **AJ. Release 0.8.0 in preparation** (2026-11-15, main). Version 0.8.0 in `Directory.Build.props`, Setup, the
   scripts and the Firefox update link; `changelog.json` has the 0.8.0 lines (date empty until release; no test status).
   **Owner's answers (2026-11-15):** question Q, "every signed-in browser is the admin", is right as built; question P,
