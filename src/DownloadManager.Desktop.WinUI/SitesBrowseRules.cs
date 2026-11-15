@@ -82,6 +82,17 @@ internal static class SitesBrowseRules
         return crumbs[^1].Name;
     }
 
+    /// <summary>
+    /// What a starred folder is called in the Starred menu: its name, or with its parent's name when another star has the
+    /// same name. The whole path is the tooltip; long paths cut at the menu's edge hid the part that tells them apart.
+    /// </summary>
+    public static string StarLabel(string star, IReadOnlyCollection<string> stars)
+    {
+        var leaf = LeafName(star);
+        if (stars.Count(other => LeafName(other) == leaf) < 2 || Parent(star) is not { } parent) return leaf;
+        return $"{leaf} (in {LeafName(parent)})";
+    }
+
     /// <summary>A folder shows no size, and neither does a file the server did not give one for (-1).</summary>
     public static string SizeText(long size, bool isFolder)
         => isFolder || size < 0 ? string.Empty : UiFormat.Bytes(size);

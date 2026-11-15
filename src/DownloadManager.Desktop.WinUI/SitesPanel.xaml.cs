@@ -68,6 +68,9 @@ public sealed partial class SitesPanel : UserControl
         InitializeComponent();
         ItemsList.ItemsSource = _rows;
         KeyDown += OnKeyDown;
+        LostFocus += OnLostFocus;
+        // The list takes Enter for itself (Uno marks it handled before it reaches the panel), so Enter is read on the way in.
+        ItemsList.PreviewKeyDown += ItemsList_PreviewKeyDown;
         AutomationProperties.SetName(this, "Site browser");
         SyncChrome();
     }
@@ -94,6 +97,14 @@ public sealed partial class SitesPanel : UserControl
 
     internal string Path => _path;
 
+    // What the shown place depends on; when it changes the place is not kept.
+    private string? _openedAs;
+
+    private static string StartOf(SiteDto site) => $"{site.Host}\n{site.Port}\n{site.User}\n{site.RemoteFolder}";
+
+    /// <summary>True when this site is shown and its server, user and start folder are the ones it was opened with.</summary>
+    internal bool ShowsSameStart(SiteDto site) => _site?.Id == site.Id && StartOf(site) == _openedAs;
+
     internal bool CanGoUp => !SitesBrowseRules.IsRoot(_path);
 
     internal bool IsStarred => SitesBrowseRules.IsStarred(_site?.Stars, _path);
@@ -104,6 +115,7 @@ public sealed partial class SitesPanel : UserControl
     internal void Open(SiteDto site, string? path = null)
     {
         _site = site;
+        _openedAs = StartOf(site);
         SiteNameText.Text = site.Name;
         _path = path is null ? SitesBrowseRules.Root : SitesBrowseRules.Normalize(path);
         _ = LoadAsync(path, refresh: false, append: false);
@@ -113,6 +125,14 @@ public sealed partial class SitesPanel : UserControl
     internal void UpdateSite(SiteDto site)
     {
         if (_site?.Id != site.Id) return;
+        // Another server, user or start folder: the folder shown may not be there, so the view starts again.
+        if (StartOf(site) != _openedAs)
+        {
+            Open(site);
+            StateChanged?.Invoke();
+            return;
+        }
+
         _site = site;
         SiteNameText.Text = site.Name;
         SyncChrome();
@@ -202,6 +222,7 @@ public sealed partial class SitesPanel : UserControl
         }
         else
         {
+            HoldKeyboard();
             _rows.Clear();
             _total = 0;
             ShowMessage("Loading…", busy: true, retry: false, options: false);
@@ -251,6 +272,7 @@ public sealed partial class SitesPanel : UserControl
             if (!append) _rows.Clear();
             var words = SitesBrowseRules.ProblemText(result.Problem, result.Message, result.OfferedFingerprint, result.AcceptedFingerprints);
             ShowMessage(words, busy: false, retry: true, options: SitesBrowseRules.PointsToOptions(result.Problem));
+            PassHeldKeyboard();
             SyncChrome();
             StateChanged?.Invoke();
             return;
@@ -292,7 +314,59 @@ public sealed partial class SitesPanel : UserControl
         _selectAfter = null;
         ItemsList.SelectedIndex = index;
         ItemsList.ScrollIntoView(_rows[index]);
-        ItemsList.Focus(FocusState.Programmatic);
+        FocusListWhenReady(_generation, tries: 5);
+    }
+
+    /// <summary>
+    /// Hiding the list while a folder loads would hand the keyboard to the menu bar, where the key that started the load
+    /// (Enter, Backspace) lands when it is let go and opens a menu. The panel holds the keyboard meanwhile; it is a tab
+    /// stop only while it does.
+    /// </summary>
+    private void HoldKeyboard()
+    {
+        if (XamlRoot is null || FocusManager.GetFocusedElement(XamlRoot) is not DependencyObject focused || !IsInside(focused, ItemsList)) return;
+        IsTabStop = true;
+        if (!Focus(FocusState.Programmatic)) IsTabStop = false;
+    }
+
+    private void OnLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, this)) IsTabStop = false;
+    }
+
+    /// <summary>A load that failed while the panel held the keyboard gives it to Try again.</summary>
+    private void PassHeldKeyboard()
+    {
+        if (XamlRoot is not null && ReferenceEquals(FocusManager.GetFocusedElement(XamlRoot), this) && RetryButton.Visibility == Visibility.Visible)
+            RetryButton.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>
+    /// The list was hidden while the folder loaded, which took the keyboard away from it (Uno gives it to the menu bar).
+    /// The selected row can take it back only once it is laid out again, and a focus moved by the hiding can land after a
+    /// first try, so it is tried again on later turns until the keyboard is in the list, a few times at most.
+    /// </summary>
+    private void FocusListWhenReady(int generation, int tries)
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (generation != _generation || ItemsList.Visibility != Visibility.Visible || XamlRoot is null) return;
+            // The selected row itself: a row scrolled away is reused for another item and loses the keyboard with it.
+            var row = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as Control : null;
+            if (row is not null && FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused && IsInside(focused, row)) return;
+            if (row?.Focus(FocusState.Programmatic) != true) ItemsList.Focus(FocusState.Programmatic);
+            if (tries > 1) FocusListWhenReady(generation, tries - 1);
+        });
+    }
+
+    private static bool IsInside(DependencyObject element, DependencyObject container)
+    {
+        for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, container)) return true;
+        }
+
+        return false;
     }
 
     private void ShowMessage(string text, bool busy, bool retry, bool options)
@@ -382,7 +456,8 @@ public sealed partial class SitesPanel : UserControl
 
         foreach (var star in stars)
         {
-            var item = new MenuFlyoutItem { Text = star, Tag = star };
+            var item = new MenuFlyoutItem { Text = SitesBrowseRules.StarLabel(star, stars), Tag = star };
+            ToolTipService.SetToolTip(item, star);
             AutomationProperties.SetName(item, $"Open starred folder {star}");
             item.Click += StarredItem_Click;
             StarredMenu.Items.Add(item);
@@ -401,6 +476,25 @@ public sealed partial class SitesPanel : UserControl
 
     private void ItemsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e) => OpenSelectedFolder();
 
+    private void ItemsList_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case VirtualKey.Enter when ItemsList.SelectedItem is SiteItemRow { IsFolder: true }:
+                OpenSelectedFolder();
+                e.Handled = true;
+                break;
+            // Uno's list does not move on Home and End; WinUI's does the same thing.
+            case VirtualKey.Home or VirtualKey.End when _rows.Count > 0:
+                var index = e.Key == VirtualKey.Home ? 0 : _rows.Count - 1;
+                ItemsList.SelectedIndex = index;
+                ItemsList.ScrollIntoView(_rows[index]);
+                FocusListWhenReady(_generation, tries: 5);
+                e.Handled = true;
+                break;
+        }
+    }
+
     private void OpenSelectedFolder()
     {
         if (ItemsList.SelectedItem is SiteItemRow { IsFolder: true } row) OpenFolder(SitesBrowseRules.Join(_path, row.Name));
@@ -410,7 +504,25 @@ public sealed partial class SitesPanel : UserControl
 
     private void OptionsButton_Click(object sender, RoutedEventArgs e) => OpenSitesOptions?.Invoke();
 
-    private void MoreButton_Click(object sender, RoutedEventArgs e) => _ = LoadAsync(_path, refresh: false, append: true);
+    private async void MoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var start = _rows.Count;
+            await LoadAsync(_path, refresh: false, append: true);
+            // The last page took the button (and the keyboard with it) away: the keyboard goes to the first new row.
+            if (MoreButton.Visibility == Visibility.Collapsed && ItemsList.Visibility == Visibility.Visible && _rows.Count > start)
+            {
+                ItemsList.SelectedIndex = start;
+                ItemsList.ScrollIntoView(_rows[start]);
+                FocusListWhenReady(_generation, tries: 5);
+            }
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"Loading more of a site folder failed: {ex.GetType().Name}");
+        }
+    }
 
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -424,10 +536,6 @@ public sealed partial class SitesPanel : UserControl
                 break;
             case VirtualKey.F5:
                 Reload();
-                e.Handled = true;
-                break;
-            case VirtualKey.Enter when e.OriginalSource is ListViewItem or ListView:
-                OpenSelectedFolder();
                 e.Handled = true;
                 break;
         }

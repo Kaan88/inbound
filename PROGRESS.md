@@ -59,9 +59,33 @@
   off, exceptions escaping two dialog handlers, an undisposed linked token, Star offered at the root), all fixed. Tests on Linux: Sites.Tests 144 pass (1 skips: the real zip),
   Integration Sites 53 (52 pass; the one failure needs the Windows Host build and failed before), the SFTP end-to-end test
   browses and pages a real sshd with rclone 1.76.0; Core.Tests: only the 31 failures that were there before on Linux.
-  `dotnet build` of the Uno window succeeds. **Not checked:** neither page has been opened in the running app (Linux or
-  Windows), so layout, dialogs, focus and the walk against a test SFTP server (the phase's "done when") are still to do;
-  the WinUI XAML compiler (Windows only).
+  `dotnet build` of the Uno window succeeds.
+- **H. SITES.3 walk in the running Linux window** (2026-11-15, main; hand-off `docs/plans/sites3-walk-handoff.md`). The Uno
+  window and Linux Host, built from this tree, on a private Xvfb display (XTEST clicks and keys, dark mode), against an
+  unprivileged OpenSSH sshd on 127.0.0.1 with a throwaway key and rclone 1.76.0. **Seen working:** Options › Sites (Use
+  Sites, own rclone path, Add a site with a pasted key, the key prompt, Test "connected", Edit with a server folder);
+  the browse view opens in the site's folder with breadcrumbs, sizes, dates; double-click, Enter, Backspace, Up into and
+  out of folders, the parent selected on the way up; a folder named `back\slash` is one folder; 1,200 files page as
+  500 / 1,000 / 1,200 with "Load more (N left)" gone at the end; Home and End; Star, the Starred menu, open from it,
+  Unstar; a changed server key refuses browsing with both fingerprints, "Open Options > Sites" opens that page, Test
+  offers "Replace the key" (Cancel is the default), and after replacing Test connects again. **Fixed from the walk:**
+  Enter in the key box saved the dialog; a stray Enter trusted a key or removed a site (both now default to Cancel);
+  turning Sites on with no rclone did not offer the download; "New SFTP site" title; a site whose server, user or
+  folder changed kept showing the old place; focus went to the menu bar after every folder load, so Enter and Backspace
+  opened menus (the panel now holds the keyboard during a load and gives it back to the selected row, retried after
+  layout); Enter did not open folders (Uno handles it in the list: now PreviewKeyDown); Home/End did nothing in Uno;
+  Load more's last page dropped the keyboard; the Starred menu showed long paths cut off (now the folder's name, with its
+  parent when names repeat, full path as tooltip). Host: a pasted text that is not a PEM private key (public key, PuTTY
+  .ppk, part of a key) is refused on save and nothing is stored (`SiteKeyText.Problem`); rclone's "passphrase
+  protected", "decryption password incorrect" and "failed to parse private key" become plain words (texts taken from
+  rclone 1.76.0 runs). Tests: `SiteKeyTextTests` (13), `SitesCommandsTests` refusal theory (3), the e2e test now checks
+  a wrong passphrase against the real sshd, `SitesBrowseRulesTests` star labels; Sites.Tests 158 pass (1 skip),
+  Integration Sites 55 of 56 (the old Windows-Host-only failure), Core browse rules 39. **Not checked:** Remove site,
+  the folder-change refresh while the view is shown (code path only), light mode, the tooltip, Windows and the WinUI
+  XAML compiler; a second quick click on Load more was lost twice (maybe the harness). **Left (minor, not fixed):** the
+  rclone line is red while Sites is off; "your own rclone" shows before the version is known; "Update rclone
+  automatically" stays enabled with an own rclone; the key box widens the dialog; the Test result line can be below the
+  fold; no "Sites" heading in the sidebar; rows are tall.
 
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 

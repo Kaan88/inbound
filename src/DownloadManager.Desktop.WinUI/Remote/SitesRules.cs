@@ -46,13 +46,19 @@ internal static class SitesRules
         _ => "found on this PC",
     };
 
+    /// <summary>
+    /// No rclone to run: the Host said so after looking, or it found none it could name. Right after the switch is turned
+    /// on the Host has not looked yet, so the second half is what tells.
+    /// </summary>
+    public static bool RcloneMissing(SitesStatusDto status) => status.Rclone == SitesRcloneStates.Missing
+        || (status.RcloneSource is null && status.RcloneVersion is null && status.RcloneInstalled is null);
+
     /// <summary>The rclone words, the update offer and the buttons for <paramref name="status"/>.</summary>
     public static SitesRcloneView Rclone(SitesStatusDto status, DateTimeOffset now, bool busy = false)
     {
         var enabled = status.Enabled;
         var installing = status.RcloneInstalling || busy;
-        var missing = status.Rclone == SitesRcloneStates.Missing
-            || (status.RcloneSource is null && status.RcloneVersion is null && status.RcloneInstalled is null);
+        var missing = RcloneMissing(status);
         var ownPath = !string.IsNullOrWhiteSpace(status.OwnRclonePath);
 
         string line;

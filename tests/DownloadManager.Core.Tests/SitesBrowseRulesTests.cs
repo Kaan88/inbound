@@ -122,4 +122,14 @@ public sealed class SitesBrowseRulesTests
         Assert.Equal("Permission denied.", SitesBrowseRules.ProblemText(null, " Permission denied. ", null, null));
         Assert.Equal("The folder could not be read.", SitesBrowseRules.ProblemText(null, null, null, null));
     }
+
+    [Fact]
+    public void AStarIsCalledByItsNameAndByItsParentWhenTheNameRepeats()
+    {
+        List<string> stars = ["/srv/pub/big", "/home/me/docs", "/srv/old/docs", "/"];
+        Assert.Equal("big", SitesBrowseRules.StarLabel("/srv/pub/big", stars));
+        Assert.Equal("docs (in me)", SitesBrowseRules.StarLabel("/home/me/docs", stars));
+        Assert.Equal("docs (in old)", SitesBrowseRules.StarLabel("/srv/old/docs", stars));
+        Assert.Equal("/", SitesBrowseRules.StarLabel("/", stars));
+    }
 }

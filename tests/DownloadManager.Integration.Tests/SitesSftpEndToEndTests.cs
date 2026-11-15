@@ -105,6 +105,27 @@ public sealed class SitesSftpEndToEndTests : IAsyncLifetime
         Assert.True(test.Ok, test.Message);
         Assert.Equal("Connected. The folder holds 2 items.", test.Message);
 
+        // A wrong passphrase is rclone's "decryption password incorrect", said in plain words; the right one works again.
+        var request = new SiteSaveRequest
+        {
+            Id = id,
+            Name = "Loopback",
+            Kind = SiteKinds.Sftp,
+            Host = "127.0.0.1",
+            Port = _port,
+            User = Environment.UserName,
+            AuthMethod = SiteAuthMethods.Key,
+            KeyPassphrase = "not-the-passphrase",
+            RemoteFolder = Path.Combine(Served, "pub"),
+        };
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Ok);
+        var wrong = await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id });
+        Assert.False(wrong.Ok);
+        Assert.Equal("The key passphrase is wrong. Enter it again in Edit site.", wrong.Message);
+        request.KeyPassphrase = Passphrase;
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Ok);
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id })).Ok);
+
         // SITES.3: the start folder in pages of one, from one listing; the parent shows pub as a folder; a star persists.
         var first = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Limit = 1 });
         Assert.True(first.Ok, first.Message);

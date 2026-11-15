@@ -447,6 +447,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
 
             if (request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
                 return Fail("Choose a password or a key file to sign in with.");
+            // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
+            if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
+                return Fail(keyProblem);
 
             var host = request.Host.Trim();
             var now = DateTimeOffset.UtcNow;
@@ -740,7 +743,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
                 // RcloneClient has already redacted the text.
-                return (null, Fail(e.Message));
+                return (null, Fail(SiteKeyText.Friendly(e.Message)));
             }
         }
     }

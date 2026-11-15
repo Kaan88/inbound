@@ -146,12 +146,17 @@ internal sealed class SiteDialog
         {
             XamlRoot = xamlRoot,
             RequestedTheme = root.ActualTheme,
-            Title = _existing is null ? $"Add a {_kind.Title} site" : $"Edit {_existing.Name}",
+            // "New SFTP site": no "a"/"an" to get wrong for a kind's name.
+            Title = _existing is null ? $"New {_kind.Title} site" : $"Edit {_existing.Name}",
             Content = DialogLayout.ScrollingContent(panel, xamlRoot),
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
+
+        // Enter in the key box is a line break, not Save (the walk found Uno's dialog saving on it, after the key's first line).
+        _privateKey.GotFocus += (_, _) => dialog.DefaultButton = ContentDialogButton.None;
+        _privateKey.LostFocus += (_, _) => dialog.DefaultButton = ContentDialogButton.Primary;
 
         SiteDto? saved = null;
         dialog.PrimaryButtonClick += async (_, args) =>

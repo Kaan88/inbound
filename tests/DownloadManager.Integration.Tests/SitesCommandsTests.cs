@@ -213,6 +213,26 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
     }
 
+    [Theory]
+    [InlineData("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample me@pc", "public key")]
+    [InlineData("PuTTY-User-Key-File-3: ssh-ed25519", "PuTTY")]
+    [InlineData("b3BlbnNzaC1rZXktdjEAAAAA", "-----BEGIN")]
+    public async Task ATextThatIsNotAPrivateKeyIsRefusedOnSaveAndNothingIsStored(string key, string expected)
+    {
+        var commands = Open();
+        await On(commands);
+
+        var keySite = Site(password: null);
+        keySite.AuthMethod = SiteAuthMethods.Key;
+        keySite.PrivateKey = key;
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+
+        Assert.False(refused.Ok);
+        Assert.Contains(expected, refused.Message);
+        Assert.DoesNotContain(key, refused.Message);
+        Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+    }
+
     [Fact]
     public async Task ARemovedSiteIsGoneAndRemovingItAgainIsRefused()
     {

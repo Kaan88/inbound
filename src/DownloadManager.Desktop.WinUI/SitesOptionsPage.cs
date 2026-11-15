@@ -298,7 +298,7 @@ internal sealed class SitesOptionsPage
             _switchResult.Say(string.IsNullOrWhiteSpace(reply.Value.Error) ? string.Empty : reply.Value.Error.Trim(), isProblem: !string.IsNullOrWhiteSpace(reply.Value.Error));
             if (on) await LoadSitesAsync();
         });
-        if (on && _status is { Enabled: true } now && now.Rclone == SitesRcloneStates.Missing && string.IsNullOrWhiteSpace(now.OwnRclonePath) && !now.RcloneInstalling)
+        if (on && _status is { Enabled: true } now && SitesRules.RcloneMissing(now) && string.IsNullOrWhiteSpace(now.OwnRclonePath) && !now.RcloneInstalling)
             await OfferDownloadAsync();
     }
 
@@ -438,7 +438,7 @@ internal sealed class SitesOptionsPage
             Text = $"Remove {site.Name}? Its saved password or key and the key you trusted are deleted from this PC. Nothing on the server is touched.",
             TextWrapping = TextWrapping.Wrap,
         };
-        if (await AskAsync($"Remove {site.Name}?", body, "Remove", "Cancel", danger: true) != ContentDialogResult.Primary) return;
+        if (await AskAsync($"Remove {site.Name}?", body, "Remove", "Cancel", danger: true, defaultClose: true) != ContentDialogResult.Primary) return;
         await RunAsync(async () =>
         {
             var result = await _client.RemoveSiteAsync(site.Id, _closing.Token);
@@ -510,7 +510,7 @@ internal sealed class SitesOptionsPage
         });
         AddKeys(body, probe.Keys);
         body.Children.Add(SettingsWindow.Hint("Compare it with the fingerprint your server's administrator gave you, or with the output of ssh-keygen -lf on the server's host key file."));
-        if (await AskAsync("Trust this key?", body, "Trust", "Cancel") != ContentDialogResult.Primary) return false;
+        if (await AskAsync("Trust this key?", body, "Trust", "Cancel", defaultClose: true) != ContentDialogResult.Primary) return false;
         return await SendTrustAsync(site, probe.Keys);
     }
 

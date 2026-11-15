@@ -178,8 +178,9 @@ public sealed partial class MainWindow
         LeaveProviderFull(selectCategory: false);
         var panel = EnsureSitesPanel();
         if (!_sitesShown) _scrollTrackBeforeSites = JobsScrollTrack.Visibility;
-        // The same site again opens in the folder it was left in; another one at its start folder.
-        var keepPlace = panel.SiteId == siteId;
+        // The same site again opens in the folder it was left in, unless its server, user or start folder changed since;
+        // another one at its start folder.
+        var keepPlace = panel.ShowsSameStart(site);
         _sitesShown = true;
         _shownSiteId = siteId;
         SitesHost.Visibility = Visibility.Visible;
