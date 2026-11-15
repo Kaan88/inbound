@@ -78,12 +78,14 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
   more.
 - Tag each line with where it applies: `desktop` (the desktop window, which is one code base for Windows and Linux:
   the list, menus, dialogs, Options; use this unless the line is about one system only), `windows` (the Windows app
-  only: Setup, the tray, Windows itself), `linux` (the Linux app only: the AppImage, packages), `webui` (the browser
+  only: Setup, the tray, Windows itself), `linux` (the Linux app only: the AppImage, packages), `macos` (the macOS app
+  only: Inbound.app, the menu-bar icon, macOS itself), `webui` (the browser
   web UI), `server` and `docker` (the headless server), `extension` (the browser extension), or `all`.
   Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
   about the TorBox account (shown only with an account set). The Windows app shows `desktop`, `windows` and `all` lines; the Linux
-  window `desktop`, `linux` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
-  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line. This can go once no
+  window `desktop`, `linux` and `all`; the macOS window `desktop`, `macos` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
+  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line; the macOS
+  manifests (`manifest-macos-<arch>.json`) keep `desktop`, as only newer apps read them. This can go once no
   such install updates directly (ROADMAP UPD.N3); `changelog.json` itself uses `desktop`. The rest is folded under "N changes in the web UI and the browser extension".
 - `dotnet test tests\DownloadManager.Core.Tests -c Release --filter ChangelogTests` checks the file: it parses, versions
   go newest first, every tag is known and each version fits a manifest.
@@ -93,7 +95,8 @@ which writes the version's lines into `manifest.json` as `notes`. They are outsi
 0.7.2 still verify the manifest. They have their own signature, `notesSignature`, over the signed text and the notes, made
 with the same key; the app shows notes only when it verifies, reads them with limits and shows them as plain text. UpdateSigner reads
 `changelog.json` with the Contracts library, so rebuild it after pulling (`dotnet build tools\UpdateSigner -c Release`).
-`prepare-appimage-release.sh` passes the same file for `manifest-linux-x64.json`.
+`prepare-appimage-release.sh` passes the same file for `manifest-linux-x64.json`, and `prepare-macos-release.sh` for
+`manifest-macos-arm64.json` and `manifest-macos-x64.json`.
 
 ## Preparing the release assets
 

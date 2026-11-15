@@ -1,6 +1,34 @@
 {
   "versions": [
     {
+      "version": "0.8.1",
+      "date": null,
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Inbound for macOS, for Apple silicon and Intel Macs: the same window, downloads, torrents, Sites and browser extension as on Windows and Linux.", "tags": ["macos"] },
+            { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
+            { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
+            { "text": "dm sites rclone downloads rclone for Sites from the command line.", "tags": ["all"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "A window that was last left very small opens at its least size, and Options can't be made smaller than its pages.", "tags": ["desktop"] },
+            { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "Inbound for macOS isn't notarized by Apple: the first time, open it with right-click, Open.", "tags": ["macos"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.8.0",
       "date": "2026-11-15",
       "sections": [
