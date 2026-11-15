@@ -34,6 +34,8 @@ internal sealed class SettingsWindow : Window
         Title = "Options — Inbound Download Manager";
         // Review 5:F5: tall enough that most pages need no scrolling; ScaledToFit keeps it inside a small screen.
         WindowLayout.ResizeForDpi(this, 900, 720);
+        // The page list and a page side by side; also the floor for a remembered size (a bad one came back tiny on macOS).
+        WindowLayout.SetMinimumSize(this, 720, 480);
         WindowPlacement.Track(this, "options");
         AppTheme.Track(_root);
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
