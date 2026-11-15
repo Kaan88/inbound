@@ -117,6 +117,34 @@ jobs:
           kill $pid 2>/dev/null
           exit $ok
 
+      - name: Sites downloads a macOS rclone and runs it (both architectures)
+        continue-on-error: true
+        run: |
+          set +e
+          case "${{ matrix.rid }}" in osx-arm64) arch=arm64 ;; *) arch=x64 ;; esac
+          host="artifacts/macos/$arch/Inbound.app/Contents/Resources/host"
+          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-sites"
+          "$host/inbound-host" --background > "$RUNNER_TEMP/sites-host.log" 2>&1 &
+          for i in $(seq 1 30); do "$host/DownloadManager.Cli" list --no-start >/dev/null 2>&1 && break; sleep 1; done
+          "$host/DownloadManager.Cli" sites on --no-start
+          for i in $(seq 1 90); do
+            status="$("$host/DownloadManager.Cli" sites status --no-start 2>&1)"
+            echo "$status" | grep -q '^rclone: .*v[0-9]' && break
+            sleep 2
+          done
+          echo "--- sites status"; echo "$status"
+          echo "--- rclone in the Host's log"; grep -i rclone "$DOWNLOADMANAGER_DATA"/logs/host-*.log | cut -c1-220 | tail -15
+          binary="$(find "$DOWNLOADMANAGER_DATA/tools/rclone" -name rclone -type f | head -n1)"
+          echo "--- downloaded: ${binary:-none}"
+          if [ -n "$binary" ]; then
+            file "$binary"
+            codesign -dv "$binary" 2>&1 | grep -E 'Format|Signature|Identifier' 
+            echo "quarantine: $(xattr -p com.apple.quarantine "$binary" 2>/dev/null || echo none)"
+            "$binary" version | head -3
+          fi
+          pkill -f "$host/inbound-host"; pkill -f "$DOWNLOADMANAGER_DATA/tools/rclone"
+          [ -n "$binary" ] && "$binary" version >/dev/null
+
       - name: The window draws and its dialogs close (arm64; screenshots and trace in the log)
         if: matrix.rid == 'osx-arm64'
         continue-on-error: true
