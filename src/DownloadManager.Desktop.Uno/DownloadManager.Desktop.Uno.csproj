@@ -1,4 +1,4 @@
-<Project Sdk="Uno.Sdk/6.7.45">
+<Project Sdk="Uno.Sdk/7.0.22">
   <!-- D7 prototype: the WinUI window's own sources compiled by Uno Platform's Skia desktop head (Windows, Linux X11).
        Every .cs/.xaml of src\DownloadManager.Desktop.WinUI is linked, not copied; Uno-only differences are #if HAS_UNO
        in those files or shims in this folder. -->

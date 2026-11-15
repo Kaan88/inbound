@@ -129,6 +129,11 @@ jobs:
           # Through LaunchServices, as Finder starts it, so the window runs with the bundle's identity.
           open -n --env DOWNLOADMANAGER_DATA="$DOWNLOADMANAGER_DATA" --env DOWNLOADMANAGER_UNO_TRACE=1 \
             --stdout "$RUNNER_TEMP/ui.log" --stderr "$RUNNER_TEMP/ui.log" "$app"
+          sleep 20
+          screencapture -x "$RUNNER_TEMP/shot1.png"
+          sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/shot1.png" --out "$RUNNER_TEMP/shot1.jpg" >/dev/null
+          echo "SCREENSHOT1-BEGIN"; base64 -i "$RUNNER_TEMP/shot1.jpg" | fold -w 1000; echo "SCREENSHOT1-END"
+          # Frames drawn over each other show here as a brighter or smeared second screenshot.
           sleep 25
           screencapture -x "$RUNNER_TEMP/shot.png"
           sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/shot.png" --out "$RUNNER_TEMP/shot.jpg" >/dev/null
