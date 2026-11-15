@@ -27,6 +27,17 @@
 - **Phone, rate over Wi-Fi (my run, 1 GiB from this PC, 5 GHz, link 433 Mbps; `phone-wifi-232723`):** `curl` on the phone 42 MB/s. Engine with 8 connections 40.2 to 40.4 MB/s into the app folder and 37.8 to 38.7 into shared Downloads; with 1 connection 34.7 to 36.0 and 32.0 to 32.2. All hashes equal. So 8 connections are within 10% of the link and 1 connection is 14 to 24% below it.
 - **Phone, CPU per GiB is the larger finding:** `curl` used 12 CPU s (1.8 user, 10.3 system). The engine used 49 (8 connections) to 58 (1 connection): about 20 user and 29 to 38 kernel. A plain HttpClient read that writes nothing already uses 43 to 46. On the emulator over loopback it was 1.3 to 5. Cause not proven; my guess is one small read per packet. This bears on the battery mark and on .NET or Rust more than start time does. **Being investigated** (Sonnet agent, phone worktree), together with parallel start-up warm-up.
 - **Correction (owner asked whether main already has Native AOT and generated JSON):** PERF.10 compiled only the browser native-messaging host with Native AOT, and added generated JSON metadata (`IpcJsonContext`, `PersistenceJsonContext`, with a reflection fallback). The trial branch was cut after it, so every figure above already includes it; "add generated JSON" is not a remaining option as I had written.
+- **Cold start on three phones (my runs, 2026-11-15/16; median of 5 cold starts, 200 jobs, ms from process start until hello and snapshot are there; raw in the phone worktrees' `artifacts/android-trial/start-*`):**
+
+  | Build | Mi 8 Lite (2018, Snapdragon 660, Android 11) | Galaxy A54 5G (2023, Exynos 1380, Android 16) | Galaxy S24 FE (2024, Exynos 2400e, Android 17) |
+  | --- | --- | --- | --- |
+  | default (Mono, profiled AOT) | 2607 | 1361 | 714 |
+  | full AOT (Mono) | 1691 | 836 | 471 |
+  | CoreCLR (experimental) | 822 | 495 | 294 |
+  | NativeAOT (experimental) | 236 | 160 | 103 |
+
+  First frame of the bare screen (`am start -W`): 0.39 to 0.52 s, 0.22 to 0.35 s, 0.14 to 0.21 s. The two Galaxies were on Wi-Fi adb (the owner's own phones; the A54 for this one test only). So the default build is under the 2 s mark on the 2023 and 2024 phones before a screen is drawn, and over it only on the 2018 phone. **Open:** which year of "mid-range" the mark means (owner).
+- **Settings I changed on the owner's phones:** S24 FE: screen timeout 30000 to 1800000, brightness 33/automatic to 1/manual (owner asked; **to do:** set back when the tests end). A54: the same for the run, set back to 600000 and 105/automatic afterwards, trial app removed.
 - **Not done:** everything that needs a phone (rate over Wi-Fi, battery, an hour-long run with the screen off, idle CPU and wake-ups, arm64), an idle memory baseline, boot-to-resume, the service rules (section 6 point 2), the Runtime project on Android, the toolkit trials, picker folders. No .NET-or-Rust decision yet.
 - **Owner (2026-11-15):** no phone yet. Continue with everything that doesn't need one; pause when the next step requires a phone.
 
