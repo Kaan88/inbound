@@ -648,7 +648,8 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - [ ] ANDROID.10 Release (signing, distribution, updates).
-- Waiting for the owner: arm64 device work (on hold project-wide; phones are arm64), the performance pass marks, the
+- arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
+- Waiting for the owner: the performance pass marks, the
   oldest Android version, how the app is handed out. Left in the mockup: re-export 9 screens at full size, the
   3 missing ones and the board (Figma's call limit ran out).
 

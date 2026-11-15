@@ -154,8 +154,8 @@ Each of these can change the design. None is checked yet.
    Options as on the desktop. It would have to ship inside the app. Check that this works and what it adds in size.
 6. **Reboot and battery.** Resume after a reboot from the checkpoints; behaviour with and without the "unrestricted"
    battery setting; what Doze does to a scheduled queue start.
-7. **Phones are arm64.** arm64 builds are on hold in this project. An emulator on x86-64 is enough for early work,
-   but a real phone needs arm64. **Needs the owner's word** before any device work.
+7. **Phones are arm64.** arm64 is on hold elsewhere in this project, but the owner allowed it for the Android app's
+   device work (2026-11-15). An emulator on x86-64 is still enough for early work.
 8. **Torrents, TorBox, archives.** TorBox is an API and should carry over. The torrent engine and archive extraction
    depend on what those use on the desktop; check each for native parts.
 
@@ -192,7 +192,7 @@ Each item is done only with evidence linked in `PROGRESS.md`.
 
 ## 9. Open questions for the owner
 
-1. arm64: may device work start (section 6, point 7)?
+1. ~~arm64: may device work start?~~ Answered 2026-11-15: yes, for the Android app.
 2. The pass marks in section 5: are they the right ones?
 3. The oldest Android version to support. Dynamic colour needs Android 12; the app can run on older ones without it.
 4. How the app is handed out: an APK from the releases page, or a store.

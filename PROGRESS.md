@@ -9,7 +9,7 @@
 - **Owner's answer (2026-11-15):** design accepted. Keep the .NET engine unless performance on a phone is a problem; port to Rust if it is. Agreed with the rest, the built-in browser tab included.
 - **Plan written:** `docs/plans/android-app.md` (decisions, feature map, architecture, the performance measurements that decide .NET or Rust, eight Android unknowns to check first, order of work ANDROID.2 to ANDROID.10). Its claims about Android's rules (service time limits, "Open with", running a downloaded rclone) are from memory and marked as to check.
 - **Mockup in the repo:** 19 screen images and a small overview of the board in `docs/plans/android-mockups/`, shown in the plan. 10 are full size; 9 are smaller captures from the build. **Not done:** B6, C6 and C8 have no image and the board image is too small to read, because Figma's call limit on the free plan ran out. **Left:** export again when it resets.
-- **Questions for the owner:** (1) arm64 is on hold and phones are arm64: may device work start? (2) Are the performance pass marks in the plan's section 5 right? (3) Oldest Android version to support? (4) APK from the releases page, or a store?
+- **Questions for the owner:** (1) answered 2026-11-15: arm64 is allowed for the Android app's device work; read here as Android only, the rest of arm64 stays on hold. (2) Are the performance pass marks in the plan's section 5 right? (3) Oldest Android version to support? (4) APK from the releases page, or a store?
 
 ### Sites and performance on Linux, continued (2026-11-15)
 
