@@ -80,6 +80,7 @@ jobs:
             echo "VERSION_OVERRIDE=$version" >> "$GITHUB_ENV"
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "${{ matrix.rid }}" in osx-arm64) echo "ARCH=arm64" >> "$GITHUB_ENV" ;; *) echo "ARCH=x64" >> "$GITHUB_ENV" ;; esac
           echo "Building ${TAG:-$GITHUB_REF_NAME} as $version for ${{ matrix.rid }}"
 
       - name: .NET SDK 10
@@ -128,14 +129,17 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Rosetta, to run the Intel build on this Apple silicon runner
+        if: matrix.rid == 'osx-x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
       - name: Build Inbound.app, the .zip and the .dmg
         run: bash scripts/package-macos.sh ${{ matrix.rid }}
 
-      - name: The Host and the CLI start (arm64)
-        if: matrix.rid == 'osx-arm64'
+      - name: The Host and the CLI start
         run: |
           set +e
-          app="artifacts/macos/arm64/Inbound.app"
+          app="artifacts/macos/$ARCH/Inbound.app"
           "$app/Contents/MacOS/InboundLauncher" --cli --version
           export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-data"
           "$app/Contents/Resources/host/inbound-host" --background > "$RUNNER_TEMP/host.log" 2>&1 &
@@ -157,8 +161,7 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          case "${{ matrix.rid }}" in osx-arm64) arch=arm64 ;; *) arch=x64 ;; esac
-          host="artifacts/macos/$arch/Inbound.app/Contents/Resources/host"
+          host="artifacts/macos/$ARCH/Inbound.app/Contents/Resources/host"
           export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-sites"
           "$host/inbound-host" --background > "$RUNNER_TEMP/sites-host.log" 2>&1 &
           for i in $(seq 1 30); do "$host/DownloadManager.Cli" list --no-start >/dev/null 2>&1 && break; sleep 1; done
@@ -178,12 +181,11 @@ jobs:
           pkill -f "$host/inbound-host"; pkill -f "$DOWNLOADMANAGER_DATA/tools/rclone"
           [ -n "$binary" ] && "$binary" version >/dev/null
 
-      - name: A newer copy of the app replaces the running Host (arm64, MAC.3)
-        if: matrix.rid == 'osx-arm64'
+      - name: A newer copy of the app replaces the running Host (MAC.3)
         continue-on-error: true
         run: |
           set +e
-          app="$PWD/artifacts/macos/arm64/Inbound.app"
+          app="$PWD/artifacts/macos/$ARCH/Inbound.app"
           export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-mac3"
           "$app/Contents/Resources/host/inbound-host" --background > /dev/null 2>&1 &
           for i in $(seq 1 30); do "$app/Contents/Resources/host/DownloadManager.Cli" host status --no-start >/dev/null 2>&1 && break; sleep 1; done
@@ -200,12 +202,11 @@ jobs:
           echo "$hosts" | grep -q 'Newer/Inbound.app' && ! echo "$hosts" | grep -q "$app/Contents" \
             && echo "--- the older Host stopped and the newer copy's Host serves" || { echo "--- MAC.3 failed"; exit 1; }
 
-      - name: The window draws and its dialogs close (arm64; screenshots and trace in the log)
-        if: matrix.rid == 'osx-arm64'
+      - name: The window draws and its dialogs close (screenshots and trace in the log)
         continue-on-error: true
         run: |
           set +e
-          app="artifacts/macos/arm64/Inbound.app"
+          app="artifacts/macos/$ARCH/Inbound.app"
           host="$app/Contents/Resources/host"
           data="$RUNNER_TEMP/inbound-ui"
           trace="$data/logs/ui-trace.log"
