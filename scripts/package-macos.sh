@@ -35,6 +35,9 @@ publish src/DownloadManager.Cli "$host"
 publish src/DownloadManager.NativeHost "$host"
 publish src/DownloadManager.Server "$host"
 publish src/DownloadManager.Desktop.Uno "$window"
+# Started from Finder the window has the bundle's identity, and Uno's macOS host then reads its ms-appx files (the
+# Fluent icon font, app.png) from Resources/ beside the program (MacOSHost.StartApp). They are beside the program itself.
+ln -s . "$window/Resources"
 
 # The torrent worker (native/torrent-worker) is optional here: without it the app runs with torrents turned off.
 worker="${TORRENT_WORKER:-$root/artifacts/torrent-worker/$rid/inbound-torrent}"
