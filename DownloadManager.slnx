@@ -16,6 +16,7 @@
     <Project Path="src/DownloadManager.Providers.TorBox/DownloadManager.Providers.TorBox.csproj" />
     <Project Path="src/DownloadManager.Runtime/DownloadManager.Runtime.csproj" />
     <Project Path="src/DownloadManager.Server/DownloadManager.Server.csproj" />
+    <Project Path="src/DownloadManager.Sites/DownloadManager.Sites.csproj" />
     <Project Path="src/DownloadManager.Torrents/DownloadManager.Torrents.csproj" />
     <Project Path="src/DownloadManager.Tray/DownloadManager.Tray.csproj" />
   </Folder>
@@ -26,6 +27,7 @@
     <Project Path="tests/DownloadManager.Engine.Tests/DownloadManager.Engine.Tests.csproj" />
     <Project Path="tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj" />
     <Project Path="tests/DownloadManager.Server.Tests/DownloadManager.Server.Tests.csproj" />
+    <Project Path="tests/DownloadManager.Sites.Tests/DownloadManager.Sites.Tests.csproj" />
     <Project Path="tests/DownloadManager.TestSupport/DownloadManager.TestSupport.csproj" />
     <Project Path="tests/DownloadManager.TorBox.LiveTests/DownloadManager.TorBox.LiveTests.csproj" />
     <Project Path="tests/DownloadManager.TorBox.Tests/DownloadManager.TorBox.Tests.csproj" />
@@ -34,6 +36,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Bench/Bench.csproj" />
+    <Project Path="tools/RcloneProbe/RcloneProbe.csproj" />
     <Project Path="tools/TestServer/TestServer.csproj" />
     <Project Path="tools/TorrentWorkerProbe/TorrentWorkerProbe.csproj" />
   </Folder>
