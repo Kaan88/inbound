@@ -2863,8 +2863,8 @@ public sealed partial class DownloadManagerService
             };
         }
 
-        // The old bundle's files stay open in the running programs; removing their names takes nothing from them.
-        TryDeleteDirectory(aside);
+        // The running Host and window still load assemblies and resources from the old bundle as they need them, so it
+        // stays until the Host is gone: the restarter removes it then (and a next update removes one left over).
         TryDeleteDirectory(staging);
         var journal = UpdateJournal;
         journal.ClearForNewInstall();
@@ -2872,7 +2872,7 @@ public sealed partial class DownloadManagerService
         RemoveUpdatePackages();
         try
         {
-            MacAppRestarter.Start(bundle, Environment.ProcessId);
+            MacAppRestarter.Start(bundle, Environment.ProcessId, aside);
         }
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {

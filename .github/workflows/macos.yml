@@ -136,6 +136,10 @@ jobs:
       - name: Build Inbound.app, the .zip and the .dmg
         run: bash scripts/package-macos.sh ${{ matrix.rid }}
 
+      - name: Darwin-only unit tests (hard-link count for extraction)
+        if: matrix.rid == 'osx-arm64'
+        run: dotnet test tests/DownloadManager.Archives.Tests/DownloadManager.Archives.Tests.csproj -c Release --filter "FullyQualifiedName~TheLinkCountIsReadOnly"
+
       - name: The Host and the CLI start
         run: |
           set +e
@@ -262,6 +266,10 @@ jobs:
           open -n -a "$PWD/$app" --env DOWNLOADMANAGER_DATA="$data" --env DOWNLOADMANAGER_UNO_TRACE=1
           sleep 12; shot reopened
           echo "--- window processes now: $(pgrep -fl 'DownloadManager.Desktop.Uno' | wc -l)"
+          # The updater's own check (MacAppRestarter.WindowRunning): this user's window, by its path under the bundle.
+          bundle="$(cd "$app" && pwd)"
+          pattern="$(printf '%s' "$bundle/Contents/Resources/window/DownloadManager.Desktop.Uno" | sed 's/[][\\.()*+?{}|^$]/\\&/g')"
+          if pgrep -U "$(id -u)" -f "$pattern" >/dev/null; then echo "--- the updater finds the window by its path"; else echo "::warning::the updater's window check (pgrep -f on the bundle path) found no window"; fi
           echo "--- menu-bar helper: $(pgrep -fl inbound-menu || echo 'not running')"
           echo "--- window output"; tail -40 "$RUNNER_TEMP/ui.log"
           echo "--- ui trace"; grep -v -E 'first chance|selftest heartbeat' "$trace" | tail -40

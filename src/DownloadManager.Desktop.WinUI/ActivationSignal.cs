@@ -226,7 +226,8 @@ internal sealed class ActivationSignal : IDisposable
     /// </summary>
     private static void Release(Socket listener, string path)
     {
-        try
+        // Only macOS needs it; on Linux a connection to a name another window has taken since would wake that window.
+        if (OperatingSystem.IsMacOS()) try
         {
             using var wake = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             wake.Connect(new UnixDomainSocketEndPoint(path));

@@ -103,7 +103,7 @@ public sealed class BridgeApp : IAsyncDisposable
             Urls = urls,
             SignInRequired = true,
             AllowedHostNames = hosts,
-            HostKind = OperatingSystem.IsLinux() ? HostKinds.Linux : HostKinds.Windows,
+            HostKind = OperatingSystem.IsWindows() ? HostKinds.Windows : HostKinds.Linux, // macOS: Unix paths, as Linux
             Bridge = true,
             TicketKey = key,
             SessionCookieName = $"{ServerAuth.CookieName}_{port}",

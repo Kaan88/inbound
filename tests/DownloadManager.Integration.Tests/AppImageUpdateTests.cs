@@ -34,8 +34,13 @@ public sealed class AppImageUpdateTests
     public void TheMacRestarterWaitsForTheHostAndOpensTheAppOnlyWhenAWindowWasOpen()
     {
         var withWindow = MacAppRestarter.Arguments("/Applications/My Apps/Inbound.app", 4242, reopenWindow: true);
-        Assert.Equal(["-c", MacAppRestarter.Script, "inbound-restart", "4242", "/Applications/My Apps/Inbound.app", "open"], withWindow);
-        Assert.Equal("", MacAppRestarter.Arguments("/a", 1, reopenWindow: false)[^1]);
+        Assert.Equal(["-c", MacAppRestarter.Script, "inbound-restart", "4242", "/Applications/My Apps/Inbound.app", "open", ""], withWindow);
+        Assert.Equal("", MacAppRestarter.Arguments("/a", 1, reopenWindow: false)[^2]);
+        // The old bundle is removed by the shell, after the Host is gone, not while it still loads from it.
+        Assert.Equal("/Applications/.Inbound.app.0.8.0.old", MacAppRestarter.Arguments("/a", 1, false, "/Applications/.Inbound.app.0.8.0.old")[^1]);
+        Assert.True(MacAppRestarter.Script.IndexOf("rm -rf", StringComparison.Ordinal) > MacAppRestarter.Script.IndexOf("kill -0", StringComparison.Ordinal));
+        // pgrep's pattern: the bundle's dots and brackets are literal.
+        Assert.Equal(@"/Apps \(x\)/Inbound\.app/Contents/Resources/window/DownloadManager\.Desktop\.Uno", MacAppRestarter.Pattern("/Apps (x)/Inbound.app"));
         Assert.DoesNotContain("My Apps", MacAppRestarter.Script);
     }
 

@@ -535,6 +535,8 @@ public sealed partial class MainWindow : Window
     private bool _firstListTraced;
 
 #if HAS_UNO
+    private ScrollViewer? _sidebarScroller;
+
     /// <summary>
     /// Uno's ListBox doesn't scroll its items: with every feature on (torrents, providers, Extractions, Queues) the
     /// sidebar ran past the bottom of a small window (a 13-inch Mac) and its last entries couldn't be reached. Its own
@@ -542,10 +544,16 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ScrollSidebarOnUno()
     {
-        if (CategoryList.Parent is not Grid sidebar) return;
+        // By name: Uno may not have set CategoryList.Parent yet here, and the first try, which asked it, did nothing.
+        var sidebar = SidebarGrid;
+        if (!sidebar.Children.Remove(CategoryList))
+        {
+            UiTrace.Write("sidebar: the category list is not in the sidebar grid; it stays without a scroll bar");
+            return;
+        }
+
         var row = Grid.GetRow(CategoryList);
-        sidebar.Children.Remove(CategoryList);
-        var scroller = new ScrollViewer
+        var scroller = _sidebarScroller = new ScrollViewer
         {
             Content = CategoryList,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,

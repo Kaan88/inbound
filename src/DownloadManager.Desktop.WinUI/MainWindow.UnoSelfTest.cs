@@ -94,7 +94,7 @@ public sealed partial class MainWindow
             await Task.Delay(1000);
             AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = AppWindow.Size.Width, Height = (int)Math.Round(420 * UnoScreens.Scale()) });
             await Task.Delay(1500);
-            if (CategoryList.Parent is ScrollViewer sidebar)
+            if (_sidebarScroller is { } sidebar)
             {
                 UiTrace.Write($"selftest: sidebar extent {sidebar.ExtentHeight:0}, viewport {sidebar.ViewportHeight:0}, scrollable {sidebar.ScrollableHeight:0}");
                 sidebar.ChangeView(null, sidebar.ScrollableHeight, null, disableAnimation: true);

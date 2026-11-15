@@ -57,8 +57,10 @@ cat > "$macos/InboundLauncher" <<'EOF'
 #!/bin/sh
 # Inbound.app's program. A second Host asks the running one and exits, so starting it every time is safe.
 macos="$(cd "$(dirname "$0")" && pwd)"
-host="$macos/../Resources/host"
-export DOWNLOADMANAGER_UI="$macos/../Resources/window/DownloadManager.Desktop.Uno"
+# Plain paths, without MacOS/..: the updater finds the window by its path under the bundle.
+contents="$(cd "$macos/.." && pwd)"
+host="$contents/Resources/host"
+export DOWNLOADMANAGER_UI="$contents/Resources/window/DownloadManager.Desktop.Uno"
 export DOWNLOADMANAGER_HOST="$host/inbound-host"
 case "$1" in
   --cli) shift; exec "$host/DownloadManager.Cli" "$@" ;;
@@ -69,7 +71,7 @@ esac
 case "$1" in -psn_*) shift ;; esac
 # MAC.3: the Host keeps running after its window closes, so a copy of Inbound.app put in place of an older one would
 # be served by the older Host. One of another version is asked to stop first (its downloads go on with the new one).
-mine="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$macos/../Info.plist" 2>/dev/null)"
+mine="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$contents/Info.plist" 2>/dev/null)"
 running="$("$host/DownloadManager.Cli" host status --no-start 2>/dev/null | sed -n 's/^host \([^ ]*\) .*/\1/p')"
 if [ -n "$mine" ] && [ -n "$running" ] && [ "$running" != "$mine" ]; then
   "$host/DownloadManager.Cli" host shutdown --no-start >/dev/null 2>&1
