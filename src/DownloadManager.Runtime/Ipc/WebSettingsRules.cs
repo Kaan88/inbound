@@ -78,6 +78,7 @@ public static class WebSettingsRules
         nameof(SettingsDto.ShowCompletionDialog),
         nameof(SettingsDto.AllowLocalNetwork),
         nameof(SettingsDto.PreventSleepWhileDownloading),
+        nameof(SettingsDto.PauseOnCostlyNetworkOrLowPower),
         // Turning torrents on makes the PC take connections from peers, and the handler is Windows' own setting; the
         // port and the router request open the PC to the network (and a firewall rule is made for that port).
         nameof(SettingsDto.TorrentsEnabled),

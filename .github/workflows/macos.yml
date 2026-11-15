@@ -181,6 +181,24 @@ jobs:
             echo "--- sleep is held while downloading:"; pmset -g assertions | grep -i caffeinate | head -3
           else echo "::warning::no sleep assertion while a download runs"; pmset -g assertions | head -30; fi
           kill $slow 2>/dev/null
+          # MAC.6: a download from the internet gets the quarantine and "Where from" marks Safari gives one.
+          mkdir -p "$RUNNER_TEMP/marks"
+          "$app/Contents/Resources/host/DownloadManager.Cli" add https://www.example.com/ --dest "$RUNNER_TEMP/marks"
+          marked=""
+          for i in $(seq 1 30); do
+            marked="$(find "$RUNNER_TEMP/marks" -type f ! -name '*.part' | head -1)"
+            [ -n "$marked" ] && break; sleep 1
+          done
+          sleep 2 # the marks follow the rename
+          if [ -n "$marked" ] && xattr -p com.apple.quarantine "$marked" 2>/dev/null | grep -q ';Inbound;'; then
+            echo "--- quarantine: $(xattr -p com.apple.quarantine "$marked")"
+            xattr -p -x com.apple.metadata:kMDItemWhereFroms "$marked" | xxd -r -p > "$RUNNER_TEMP/wf.plist"
+            echo "--- where from:"; plutil -p "$RUNNER_TEMP/wf.plist"
+            plutil -p "$RUNNER_TEMP/wf.plist" 2>/dev/null | grep -q 'https://www.example.com/' || { echo "::error::Where from is not the site"; ok=1; }
+          else echo "::error::the download from the internet has no Inbound quarantine mark (${marked:-no file})"; xattr -l "$marked" 2>/dev/null; ok=1; fi
+          # MAC.6: the menu-bar helper is its own app with the Services entry, and the Host started it.
+          plutil -p "$app/Contents/Helpers/Inbound Menu.app/Contents/Info.plist" | grep -E 'NSMenuItem|downloadWithInbound|LSUIElement' -A1 | head -12
+          grep -h 'Menu-bar icon\|menu-bar helper' "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | cut -c1-160
           echo "--- Host output"; cat "$RUNNER_TEMP/host.log"
           echo "--- Host logs"; find "$DOWNLOADMANAGER_DATA" -maxdepth 2 | head -40; cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -80
           echo "--- sockets"; ls -la "${TMPDIR:-/tmp}"/inbound-* 2>/dev/null

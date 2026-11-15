@@ -11,6 +11,9 @@
             { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
             { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
             { "text": "On the Mac too: the Mac stays awake while downloads run, a finished queue can shut down, restart or sign out, notifications and event sounds play, links you copy can be added, and saved passwords are sealed with a key in your login Keychain.", "tags": ["macos"] },
+            { "text": "Mac touches: the menu-bar icon shows what is downloading and lets you pause or show each download, takes links and .torrent files dropped on it, and Services > Download with Inbound sends a selected link. Notifications let you open a finished file, show it in Finder or retry a failed one.", "tags": ["macos"] },
+            { "text": "On the Mac, ⌘ shortcuts, the usual Inbound and Window menus, and the number of running downloads and their progress on the Dock icon.", "tags": ["macos"] },
+            { "text": "Finished downloads on a Mac are marked as from the internet, as Safari does, and Finder shows the site they came from. Options can pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode.", "tags": ["macos"] },
             { "text": "dm sites rclone downloads rclone for Sites from the command line.", "tags": ["all"] }
           ]
         },

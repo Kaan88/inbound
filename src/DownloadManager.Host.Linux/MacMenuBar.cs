@@ -1,17 +1,32 @@
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 
 namespace DownloadManager.Host;
 
+/// <summary>What the Mac's menu-bar helper can ask of the Host besides the tray's own actions (MAC.6).</summary>
+internal sealed class MacMenuRequests
+{
+    public Action<string>? Copied { get; set; }
+    public Action<string>? AddText { get; set; }
+    public Action<string>? AddFile { get; set; }
+    public Action? OpenFolder { get; set; }
+    public Action<string, Guid>? Job { get; set; }
+    public Action? Wake { get; set; }
+    public Action<string>? Network { get; set; }
+    public Action<string>? Power { get; set; }
+}
+
 /// <summary>
-/// The menu-bar icon on macOS, the tray's counterpart: a small native helper (<c>inbound-menu</c>, from
-/// native/macos-menu, built into Inbound.app beside the Host) shows the icon and its menu. The Host is its only peer, over
-/// the helper's stdin and stdout: a menu choice comes back as one line, and the tooltip (the active count) goes out as
-/// "tooltip &lt;text&gt;". Optional, as the tray is on Linux: without the helper the Host runs as before. Disposing it
-/// closes the helper's stdin, which ends it.
+/// The menu-bar icon on macOS, the tray's counterpart: a small native helper (native/macos-menu, built as
+/// Inbound.app/Contents/Helpers/Inbound Menu.app) shows the icon and its menu. The Host is its only peer, over the
+/// helper's stdin and stdout, one line per message (the protocol is described in main.swift). Optional, as the tray is
+/// on Linux: without the helper the Host runs as before. Disposing it closes the helper's stdin, which ends it.
 /// </summary>
 internal sealed class MacMenuBar : IAsyncDisposable
 {
     public const string HelperName = "inbound-menu";
+    public const string HelperApp = "Inbound Menu.app";
 
     private readonly LinuxTrayActions _actions;
     private readonly Action<string> _log;
@@ -20,12 +35,10 @@ internal sealed class MacMenuBar : IAsyncDisposable
     private readonly Task _reader;
     private readonly Lock _write = new();
     private string _tooltip = string.Empty;
+    private string _status = string.Empty;
     private int _tooltipPending;
     private bool? _watching;
     private volatile bool _watchOn;
-
-    /// <summary>MAC.5: text copied while <see cref="WatchClipboard"/> is on.</summary>
-    public Action<string>? Copied { get; set; }
 
     private MacMenuBar(Process process, LinuxTrayActions actions, Action<string> log)
     {
@@ -37,15 +50,36 @@ internal sealed class MacMenuBar : IAsyncDisposable
         SendTooltip();
     }
 
+    public MacMenuRequests Requests { get; } = new();
+
+    /// <summary>The menu's activity: the active count, total speed and the newest active downloads, as JSON.</summary>
+    public Func<string>? Status { get; set; }
+
+    /// <summary>Whether the helper may show notifications (the user allowed them); until it says, no.</summary>
+    public bool NotificationsOn { get; private set; }
+
+    /// <summary>The helper couldn't use the notification center at all (an unsigned or moved helper): use another way.</summary>
+    public bool NotificationsBroken { get; private set; }
+
+    /// <summary>The helper's program: in its own bundle under Contents/Helpers, else beside the Host (older layout).</summary>
+    public static string? FindHelper(string baseDirectory)
+    {
+        var contents = Path.GetFullPath(Path.Combine(baseDirectory, "..", ".."));
+        var bundled = Path.Combine(contents, "Helpers", HelperApp, "Contents", "MacOS", HelperName);
+        if (File.Exists(bundled)) return bundled;
+        var beside = Path.Combine(baseDirectory, HelperName);
+        return File.Exists(beside) ? beside : null;
+    }
+
     public static MacMenuBar? TryStart(LinuxTrayActions actions, Action<string> log)
     {
-        var helper = Path.Combine(AppContext.BaseDirectory, HelperName);
-        if (!File.Exists(helper))
+        if (FindHelper(AppContext.BaseDirectory) is not { } helper)
         {
-            log($"No menu-bar icon: {HelperName} is not beside the Host.");
+            log($"No menu-bar icon: {HelperName} is not in the bundle.");
             return null;
         }
 
+        RegisterServices(helper, log);
         try
         {
             var start = new ProcessStartInfo(helper)
@@ -55,6 +89,7 @@ internal sealed class MacMenuBar : IAsyncDisposable
                 RedirectStandardOutput = true,
                 RedirectStandardError = false,
             };
+            start.ArgumentList.Add("--host");
             var process = Process.Start(start);
             if (process is null) return null;
             log("Menu-bar icon started.");
@@ -67,7 +102,30 @@ internal sealed class MacMenuBar : IAsyncDisposable
         }
     }
 
-    /// <summary>The tooltip follows the active count; sent at most once a second, and only when it changed.</summary>
+    /// <summary>
+    /// Services > Download with Inbound comes from the helper's Info.plist, which macOS reads once LaunchServices knows
+    /// the bundle. A nested bundle started as a program isn't registered by itself, so it is here (quick, no prompt).
+    /// </summary>
+    private static void RegisterServices(string helper, Action<string> log)
+    {
+        const string lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+        var bundle = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(helper)!, "..", ".."));
+        if (!bundle.EndsWith(".app", StringComparison.Ordinal) || !File.Exists(lsregister)) return;
+        try
+        {
+            var start = new ProcessStartInfo(lsregister) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            start.ArgumentList.Add("-f");
+            start.ArgumentList.Add(bundle);
+            using var process = Process.Start(start);
+            process?.WaitForExit(10_000);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            log($"The Services entry was not registered: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>The tooltip and menu follow the downloads; sent at most once a second, and only when they changed.</summary>
     public void RequestRefresh()
     {
         if (Interlocked.Exchange(ref _tooltipPending, 1) == 0) _tooltipTimer.Change(1000, Timeout.Infinite);
@@ -83,6 +141,13 @@ internal sealed class MacMenuBar : IAsyncDisposable
             _watchOn = on;
             Send(on ? "clipboard on" : "clipboard off");
         }
+    }
+
+    /// <summary>MAC.6: a notification as Inbound's own, with Open and Show in Finder (finished) or Retry (failed).</summary>
+    public void Notify(string title, string body, Guid? job, string? kind)
+    {
+        var json = JsonSerializer.Serialize(new NoticeLine(title, body, job?.ToString("D"), kind), MacMenuJson.Default.NoticeLine);
+        lock (_write) Send("notify " + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)));
     }
 
     private void Send(string line)
@@ -102,39 +167,17 @@ internal sealed class MacMenuBar : IAsyncDisposable
     {
         try
         {
-            while (await _process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
+            while (await _process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } raw)
             {
-                if (line.StartsWith("clipboard ", StringComparison.Ordinal))
-                {
-                    try
-                    {
-                        if (_watchOn) Copied?.Invoke(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(line["clipboard ".Length..].Trim())));
-                    }
-                    catch (Exception ex)
-                    {
-                        // Never the text: it may be anything the user copied.
-                        _log($"Copied text was not taken: {ex.GetType().Name}");
-                    }
-
-                    continue;
-                }
-
-                Action? action = line.Trim() switch
-                {
-                    "open" => _actions.Open,
-                    "settings" => _actions.OpenSettings,
-                    "pause" => _actions.PauseAll,
-                    "resume" => _actions.ResumeAll,
-                    "exit" => _actions.Exit,
-                    _ => null,
-                };
+                var line = raw.Trim();
                 try
                 {
-                    action?.Invoke();
+                    Handle(line);
                 }
                 catch (Exception ex)
                 {
-                    _log($"Menu-bar choice '{line.Trim()}' failed: {ex.GetType().Name}");
+                    // Never the line itself: it may carry what the user copied or dropped.
+                    _log($"Menu-bar request '{line.Split(' ')[0]}' failed: {ex.GetType().Name}");
                 }
             }
         }
@@ -143,6 +186,40 @@ internal sealed class MacMenuBar : IAsyncDisposable
             // The helper has gone.
         }
     }
+
+    private void Handle(string line)
+    {
+        var space = line.IndexOf(' ');
+        var verb = space < 0 ? line : line[..space];
+        var rest = space < 0 ? string.Empty : line[(space + 1)..];
+        var requests = Requests;
+        switch (verb)
+        {
+            case "open": _actions.Open(); break;
+            case "settings": _actions.OpenSettings(); break;
+            case "pause": _actions.PauseAll(); break;
+            case "resume": _actions.ResumeAll(); break;
+            case "exit": _actions.Exit(); break;
+            case "folder": requests.OpenFolder?.Invoke(); break;
+            case "clipboard" when _watchOn: requests.Copied?.Invoke(Decode(rest)); break;
+            case "add": requests.AddText?.Invoke(Decode(rest)); break;
+            case "addfile": requests.AddFile?.Invoke(Decode(rest)); break;
+            case "wake" or "clock": requests.Wake?.Invoke(); break;
+            case "network": requests.Network?.Invoke(rest); break;
+            case "power": requests.Power?.Invoke(rest); break;
+            case "notifications":
+                NotificationsOn = rest == "on";
+                NotificationsBroken = rest == "error";
+                _log($"Notifications through the menu-bar helper: {rest}.");
+                break;
+            case "job":
+                var parts = rest.Split(' ', 2);
+                if (parts.Length == 2 && Guid.TryParse(parts[1], out var id)) requests.Job?.Invoke(parts[0], id);
+                break;
+        }
+    }
+
+    private static string Decode(string base64) => Encoding.UTF8.GetString(Convert.FromBase64String(base64));
 
     private void SendTooltip()
     {
@@ -154,12 +231,33 @@ internal sealed class MacMenuBar : IAsyncDisposable
             1 => "1 download running",
             _ => $"{active} downloads running",
         };
+        string? status = null;
+        try
+        {
+            status = Status?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log($"Menu-bar status failed: {ex.GetType().Name}");
+        }
+
         lock (_write)
         {
-            if (text == _tooltip) return;
-            _tooltip = text;
-            Send("tooltip " + text);
+            if (text != _tooltip)
+            {
+                _tooltip = text;
+                Send("tooltip " + text);
+            }
+
+            if (status is not null && status != _status)
+            {
+                _status = status;
+                Send("status " + Convert.ToBase64String(Encoding.UTF8.GetBytes(status)));
+            }
         }
+
+        // Speeds change while the count stays: keep the menu current while anything runs.
+        if (active > 0) RequestRefresh();
     }
 
     public async ValueTask DisposeAsync()
@@ -179,4 +277,64 @@ internal sealed class MacMenuBar : IAsyncDisposable
         catch (Exception) { /* the reader only ends */ }
         _process.Dispose();
     }
+
+    /// <summary>The menu's status line: what <see cref="Status"/> returns.</summary>
+    public static string StatusJson(IEnumerable<DownloadManager.Contracts.JobDto> jobs)
+    {
+        var active = jobs.Where(job => job.State is "connecting" or "downloading" or "retryWaiting" or "verifying").ToList();
+        var speed = active.Sum(job => job.BytesPerSecond ?? 0);
+        var items = active.OrderByDescending(job => job.BytesPerSecond ?? 0).Take(5)
+            .Select(job => new StatusItem(job.Id.ToString("D"), job.FileName,
+                job.Progress is { } progress ? (int)Math.Clamp(Math.Floor(progress * 100), 0, 100) : null, job.State))
+            .ToList();
+        return JsonSerializer.Serialize(new StatusLine(active.Count, speed > 0 ? Speed(speed) : null, items), MacMenuJson.Default.StatusLine);
+    }
+
+    /// <summary>The http and https addresses in dropped or sent text, one per word, at most 100.</summary>
+    public static IReadOnlyList<string> WebLinks(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => word.Trim('<', '>', '"', '\'', '(', ')', ','))
+            .Where(word => Uri.TryCreate(word, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" && uri.Host.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .Take(100)
+            .ToList();
+
+    /// <summary>A link added from the menu bar wasn't copied: its notice says so without "Clipboard".</summary>
+    public static string AddedTitle(string title) => title switch
+    {
+        "Clipboard download added" => "Download added",
+        "Copied link not added" => "Link not added",
+        "Copied link not started" => "Link not started",
+        "Copied link is waiting" => "Link is waiting",
+        _ => title,
+    };
+
+    public static string Speed(double bytesPerSecond) => bytesPerSecond switch
+    {
+        >= 1024 * 1024 * 1024 => $"{bytesPerSecond / (1024 * 1024 * 1024):0.0} GB/s",
+        >= 1024 * 1024 => $"{bytesPerSecond / (1024 * 1024):0.0} MB/s",
+        >= 1024 => $"{bytesPerSecond / 1024:0} KB/s",
+        _ => $"{bytesPerSecond:0} B/s",
+    };
 }
+
+internal sealed record NoticeLine(
+    [property: System.Text.Json.Serialization.JsonPropertyName("title")] string Title,
+    [property: System.Text.Json.Serialization.JsonPropertyName("body")] string Body,
+    [property: System.Text.Json.Serialization.JsonPropertyName("job")] string? Job,
+    [property: System.Text.Json.Serialization.JsonPropertyName("kind")] string? Kind);
+
+internal sealed record StatusItem(
+    [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id,
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string Name,
+    [property: System.Text.Json.Serialization.JsonPropertyName("percent")] int? Percent,
+    [property: System.Text.Json.Serialization.JsonPropertyName("state")] string State);
+
+internal sealed record StatusLine(
+    [property: System.Text.Json.Serialization.JsonPropertyName("active")] int Active,
+    [property: System.Text.Json.Serialization.JsonPropertyName("speed")] string? Speed,
+    [property: System.Text.Json.Serialization.JsonPropertyName("items")] IReadOnlyList<StatusItem> Items);
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(NoticeLine))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(StatusLine))]
+internal sealed partial class MacMenuJson : System.Text.Json.Serialization.JsonSerializerContext;

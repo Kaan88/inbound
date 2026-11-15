@@ -4,15 +4,17 @@
 # Output: artifacts/macos/Inbound-<version>-macos-<arch>.zip and .dmg
 #
 # Not signed with a Developer ID and not notarized: every Mach-O file is signed ad hoc (Apple Silicon runs nothing
-# unsigned), so Gatekeeper asks on first open. Right-click > Open, or: xattr -dr com.apple.quarantine /Applications/Inbound.app
+# unsigned), so Gatekeeper refuses the first open: then System Settings > Privacy & Security > Open Anyway, or:
+# xattr -dr com.apple.quarantine /Applications/Inbound.app
 #
 # Layout:
 #   Contents/MacOS/InboundLauncher       the bundle's program: starts the Host, then becomes the window. Only Mach-O
 #                                        files and scripts may sit in Contents/MacOS, or codesign refuses the bundle.
 #   Contents/Resources/window/           the Uno window (DownloadManager.Desktop.Uno)
 #   Contents/Resources/host/             inbound-host, DownloadManager.Cli, DownloadManager.NativeHost,
-#                                        DownloadManager.Server, inbound-menu (the menu-bar icon),
-#                                        inbound-torrent (when built)
+#                                        DownloadManager.Server, inbound-torrent (when built)
+#   Contents/Helpers/Inbound Menu.app    the menu-bar icon (native/macos-menu), a bundle of its own so its
+#                                        notifications are Inbound's and it offers Services > Download with Inbound
 set -euo pipefail
 rid="${1:-osx-arm64}"
 case "$rid" in osx-arm64) arch=arm64 ;; osx-x64) arch=x64 ;; *) echo "Unknown runtime $rid" >&2; exit 1 ;; esac
@@ -49,9 +51,39 @@ else
   echo "No torrent worker at $worker: packing without torrents."
 fi
 
-# The menu-bar icon (native/macos-menu): the tray's counterpart, started by the Host from beside it.
+# The menu-bar icon (native/macos-menu): the tray's counterpart, started by the Host (MacMenuBar.cs).
 case "$arch" in arm64) swift_target=arm64-apple-macos12 ;; *) swift_target=x86_64-apple-macos12 ;; esac
-swiftc -O -target "$swift_target" -o "$host/inbound-menu" "$root/native/macos-menu/main.swift"
+menu_app="$app/Contents/Helpers/Inbound Menu.app"
+mkdir -p "$menu_app/Contents/MacOS" "$menu_app/Contents/Resources"
+swiftc -O -target "$swift_target" -o "$menu_app/Contents/MacOS/inbound-menu" "$root/native/macos-menu/main.swift"
+cat > "$menu_app/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Inbound</string>
+  <key>CFBundleDisplayName</key><string>Inbound</string>
+  <key>CFBundleIdentifier</key><string>local.inbound.menu</string>
+  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleShortVersionString</key><string>$version</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleExecutable</key><string>inbound-menu</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Download with Inbound</string></dict>
+      <key>NSMessage</key><string>downloadWithInbound</string>
+      <key>NSPortName</key><string>Inbound</string>
+      <key>NSSendTypes</key><array><string>public.url</string><string>public.utf8-plain-text</string></array>
+      <key>NSRequiredContext</key><dict/>
+    </dict>
+  </array>
+</dict>
+</plist>
+EOF
 
 cat > "$macos/InboundLauncher" <<'EOF'
 #!/bin/sh
@@ -91,6 +123,7 @@ for size in 16 32 128 256 512; do
   sips -z $((size * 2)) $((size * 2)) "$root/assets/inbound-icon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
+cp "$app/Contents/Resources/AppIcon.icns" "$menu_app/Contents/Resources/AppIcon.icns"
 rm -rf "$iconset"
 
 cat > "$app/Contents/Info.plist" <<EOF
@@ -118,6 +151,7 @@ EOF
 find "$app/Contents" -type f | while read -r f; do
   if file -b "$f" | grep -q 'Mach-O'; then codesign --force --sign - "$f"; fi
 done
+codesign --force --sign - "$menu_app" # a nested bundle before the one around it
 codesign --force --sign - "$app"
 codesign --verify --strict --verbose=2 "$app"
 

@@ -86,6 +86,11 @@ public sealed partial class MainWindow : Window
         UiTrace.Write("MainWindow InitializeComponent complete");
 #if HAS_UNO
         ScrollSidebarOnUno();
+        // MAC.6: the Mac's own app and Window menus; queued so a choice runs as a click on the window's menu would.
+        MacAppChrome.InstallMenu(
+            about: () => DispatcherQueue.TryEnqueue(() => MenuAbout_Click(this, new RoutedEventArgs())),
+            settings: () => DispatcherQueue.TryEnqueue(() => MenuOptions_Click(this, new RoutedEventArgs())),
+            quit: () => DispatcherQueue.TryEnqueue(() => MenuExit_Click(this, new RoutedEventArgs())));
 #endif
         // The progress, package and completion windows open on this window's screen (U-WL-4).
         WindowCascade.MarkMain(this);
@@ -227,40 +232,40 @@ public sealed partial class MainWindow : Window
 
         // Otherwise WinUI floats a shortcut's name over the window whenever the pointer rests on the root.
         RootGrid.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+        AddShortcut(
             Windows.System.VirtualKey.N,
             Windows.System.VirtualKeyModifiers.Control,
-            () => AddButton_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => AddButton_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.F,
             Windows.System.VirtualKeyModifiers.Control,
-            () => MenuFind_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuFind_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.F3,
             Windows.System.VirtualKeyModifiers.None,
-            () => MenuFindNext_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuFindNext_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.M,
             Windows.System.VirtualKeyModifiers.Control,
-            () => MenuMoveRename_Click(this, new RoutedEventArgs())));
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            () => MenuMoveRename_Click(this, new RoutedEventArgs()));
+        AddShortcut(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () => ApplySort("size", ascending: false)));
+            () => ApplySort("size", ascending: false));
         // UI.R26: Ctrl+Shift+O opens the server switcher; Ctrl+0 shows this PC and Ctrl+1 to Ctrl+9 the saved servers.
-        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+        AddShortcut(
             Windows.System.VirtualKey.O,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            OpenServerMenuFromKeyboard));
+            OpenServerMenuFromKeyboard);
         InitializeProviderViews();
         foreach (var accelerator in ProviderAccelerators()) RootGrid.KeyboardAccelerators.Add(accelerator);
         for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
         {
             var chosen = number;
-            RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            AddShortcut(
                 Windows.System.VirtualKey.Number0 + number,
                 Windows.System.VirtualKeyModifiers.Control,
-                () => SwitchToNumber(chosen)));
+                () => SwitchToNumber(chosen));
         }
 
         _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
@@ -300,6 +305,26 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
         UiTrace.Write("MainWindow ctor end");
     }
+
+    /// <summary>
+    /// A window-wide shortcut. MAC.6: on a Mac a Ctrl shortcut is also ⌘ (Uno's macOS window reports Command as the
+    /// Windows key), as Mac apps use it; Ctrl stays too.
+    /// </summary>
+    private void AddShortcut(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers, Action action)
+    {
+        foreach (var accelerator in Shortcuts(key, modifiers, action)) RootGrid.KeyboardAccelerators.Add(accelerator);
+    }
+
+    private static IEnumerable<KeyboardAccelerator> Shortcuts(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers, Action action)
+    {
+        yield return CreateAccelerator(key, modifiers, action);
+        // ⌘M is the Mac's Minimize (the Window menu): Move/Rename keeps Ctrl+M there.
+        if (OperatingSystem.IsMacOS() && modifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control) && key != Windows.System.VirtualKey.M)
+            yield return CreateAccelerator(key, MacCommand(modifiers), action);
+    }
+
+    private static Windows.System.VirtualKeyModifiers MacCommand(Windows.System.VirtualKeyModifiers modifiers) =>
+        (modifiers & ~Windows.System.VirtualKeyModifiers.Control) | Windows.System.VirtualKeyModifiers.Windows;
 
     private static KeyboardAccelerator CreateAccelerator(
         Windows.System.VirtualKey key,
@@ -857,6 +882,11 @@ public sealed partial class MainWindow : Window
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "verifying");
         var retrying = _jobsById.Values.Count(j => j.State == "retryWaiting");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
+#if HAS_UNO
+        // MAC.6: the Dock icon shows this Mac's running downloads; another server's list leaves it plain.
+        var running = _connection.IsRemote ? [] : _jobsById.Values.Where(j => j.State is "connecting" or "downloading" or "verifying").ToList();
+        MacAppChrome.ShowActivity(running.Count, MacAppChrome.OverallProgress(running));
+#endif
         var host = _status?.HostVersion;
         StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
@@ -1381,7 +1411,7 @@ public sealed partial class MainWindow : Window
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
-        moveRename.KeyboardAcceleratorTextOverride = "Ctrl+M";
+        moveRename.KeyboardAcceleratorTextOverride = OperatingSystem.IsMacOS() ? "⌃M" : "Ctrl+M"; // ⌘M minimizes on a Mac
         var moveShortcut = new KeyboardAccelerator
         {
             Key = Windows.System.VirtualKey.M,
@@ -3846,6 +3876,9 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
+            // MAC.6: only where the Host sees the network's cost and Low Power Mode (the Mac's menu-bar helper).
+            var savingPausesKnown = !_connection.IsRemote && _connection.Hello?.Capabilities.Contains("savingPauses", StringComparer.Ordinal) == true;
+            var pauseWhenSaving = new CheckBox { Content = "Pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode", IsChecked = settings.PauseOnCostlyNetworkOrLowPower };
             var closeCompletely = new CheckBox { Content = "Close the window completely (it opens a moment slower next time)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var providerOpens = ProviderOpensBox();
@@ -4135,7 +4168,10 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
                 SettingsWindow.Section("Per-site limits"),
                 SettingsWindow.Hint("Most connections a download may open to these sites. *.example.com covers its subdomains."),
-                siteLimitEmpty, siteLimitPanel, addSiteLimit);
+                siteLimitEmpty, siteLimitPanel, addSiteLimit,
+                savingPausesKnown ? SettingsWindow.Section("Saving data and power") : null,
+                savingPausesKnown ? pauseWhenSaving : null,
+                savingPausesKnown ? SettingsWindow.Hint("They resume on their own when the Mac is back on an ordinary network and out of Low Power Mode.") : null);
             window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
             window.AddPage("Site logins", "\uE8D7", loginHelp, loginEmpty, loginPanel, addLogin);
             // The update source (channel, manifest URL, signing key) is set by the installer and is
@@ -4283,6 +4319,7 @@ public sealed partial class MainWindow : Window
                     settings.TorrentCategoryFoldersRoot = torrentFolderBox.Text.Trim();
                 }
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
+                if (savingPausesKnown) settings.PauseOnCostlyNetworkOrLowPower = pauseWhenSaving.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
                 settings.NotifyOnCompletion = notify.IsChecked == true;
                 settings.PlayCompletionSound = sound.IsChecked == true;
@@ -4579,6 +4616,7 @@ public sealed partial class MainWindow : Window
             AutoResumeUnfinishedOnStartup = source.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = source.AllowLocalNetwork,
             PreventSleepWhileDownloading = source.PreventSleepWhileDownloading,
+            PauseOnCostlyNetworkOrLowPower = source.PauseOnCostlyNetworkOrLowPower,
             TorrentsEnabled = source.TorrentsEnabled,
             TorrentRoute = source.TorrentRoute,
             TorrentChooseFiles = source.TorrentChooseFiles,

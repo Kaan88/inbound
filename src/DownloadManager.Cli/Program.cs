@@ -1876,6 +1876,9 @@ internal static partial class Program
                     case "preventsleep":
                         settings.PreventSleepWhileDownloading = ParseBool(value);
                         break;
+                    case "pausewhensaving":
+                        settings.PauseOnCostlyNetworkOrLowPower = ParseBool(value);
+                        break;
                     case "postdownload":
                         settings.PostDownloadCommand =
                             string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
@@ -1934,7 +1937,7 @@ internal static partial class Program
         "defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard, usecategoryfolders, " +
         "usetorrentcategoryfolders, torrentdir, " +
         "closewindowcompletely, browserintegration, speedlimit, proxymode, proxyaddress, proxyuser, proxypass, " +
-        "allowsystemcompletionactions, preventsleep, postdownload, updatemanifest, updatekey, updatekeyfile, " +
+        "allowsystemcompletionactions, preventsleep, pausewhensaving, postdownload, updatemanifest, updatekey, updatekeyfile, " +
         "updatechannel, autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir";
 
     /// <summary>
@@ -2124,6 +2127,7 @@ internal static partial class Program
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
         Console.WriteLine($"computer actions:  {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
+        Console.WriteLine($"pause when saving: {settings.PauseOnCostlyNetworkOrLowPower}");
         Console.WriteLine($"post-download:     {settings.PostDownloadCommand ?? "none"}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
@@ -2233,7 +2237,7 @@ internal static partial class Program
               | settings export <file.json> | settings import <file.json>
                           keys: defaultdir, maxconcurrent, defaultconnections, launchatstartup, clipboard,
                           usecategoryfolders, closewindowcompletely, browserintegration, speedlimit, proxymode,
-                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep,
+                          proxyaddress, proxyuser, allowsystemcompletionactions, preventsleep, pausewhensaving (Mac),
                           postdownload, updatemanifest, updatekey, updatekeyfile, updatechannel,
                           autocheckupdates, compresseddir, documentsdir, musicdir, programsdir, videodir,
                           usetorrentcategoryfolders, torrentdir (none: the same folders as other downloads)

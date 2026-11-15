@@ -33,6 +33,14 @@
   completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
   the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
   notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
+- **MAC.6, better on a Mac (owner: "implement fable suggestions except number 10"):** quarantine and "Where from" on
+  finished files, the scheduler woken after sleep and clock changes, ⌘ shortcuts, a menu-bar icon that shows activity
+  and the running downloads, drops on it and a Services entry, Inbound's own notifications with Open / Show in Finder /
+  Retry, the Mac app and Window menus, the Dock badge and progress bar, and an Options choice to pause on a phone
+  hotspot, Low Data Mode or Low Power Mode. **Checked:** unit tests; in the macOS workflow, the marks on a real HTTPS
+  download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
+  real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
+  (2026-11-15).
 - **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
   window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
   started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);

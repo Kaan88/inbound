@@ -227,6 +227,8 @@ internal static class Program
         }
 
         using var sounds = OperatingSystem.IsMacOS() ? new MacSounds(log.Warn) : null;
+        // MAC.6: set once the menu-bar helper runs; its notifications are Inbound's own, with Open, Show in Finder and Retry.
+        MacMenuBar? macMenu = null;
         // As the Windows Host's tray balloons: the same notices on the same settings.
         using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
         {
@@ -239,7 +241,20 @@ internal static class Program
                 DownloadNoticeKind.Failed or DownloadNoticeKind.Extraction => true,
                 _ => false,
             };
-            if (show) notifications.Notify(notice.Title, notice.Message);
+            if (show && macMenu is { NotificationsOn: true } helper)
+            {
+                var kind = notice.Kind switch
+                {
+                    DownloadNoticeKind.Completed => "completed",
+                    DownloadNoticeKind.Failed => "failed",
+                    _ => null,
+                };
+                helper.Notify(notice.Title, notice.Message, kind is null ? null : notice.JobId, kind);
+            }
+            else if (show)
+            {
+                notifications.Notify(notice.Title, notice.Message);
+            }
             // MAC.5: the event sounds, as the Windows Host plays them.
             if (sounds is null) return;
             if (notice.Kind == DownloadNoticeKind.Completed && current.PlayCompletionSound) sounds.Play("completed", current.EventSoundFiles);
@@ -317,7 +332,7 @@ internal static class Program
             var copiedLinks = new CopiedLinks(service, remoteJobs);
             var copiedFilter = new CopiedUrlFilter();
             var copiedGate = new Lock();
-            menuBar.Copied = text =>
+            menuBar.Requests.Copied = text =>
             {
                 string? url;
                 lock (copiedGate) url = copiedFilter.Accept(text, DateTimeOffset.UtcNow);
@@ -339,6 +354,8 @@ internal static class Program
             };
             menuBar.WatchClipboard(currentSettings.ClipboardMonitoring);
             service.SettingsChanged += (_, _) => menuBar.WatchClipboard(service.GetSettings().ClipboardMonitoring);
+            WireMacMenu(menuBar, service, platform, copiedLinks, notifications, log);
+            macMenu = menuBar;
         }
 
         webUi.Notice = notifications.Notify;
@@ -606,6 +623,79 @@ internal static class Program
         {
             log.Error($"{name}: {ex.GetType().Name}");
         }
+    }
+
+    /// <summary>
+    /// MAC.6: what the menu-bar helper asks besides the tray's actions: a download's own menu and notification buttons,
+    /// links and files dropped on the icon or sent by Services, the downloads folder, the Mac waking or its clock
+    /// changing, and the network and power state for "Pause downloads on a phone hotspot…".
+    /// </summary>
+    private static void WireMacMenu(MacMenuBar menuBar, DownloadManagerService service, LinuxHostPlatform platform,
+        CopiedLinks copiedLinks, DesktopNotifications notifications, FileLogger log)
+    {
+        var requests = menuBar.Requests;
+        menuBar.Status = () => MacMenuBar.StatusJson(service.GetSnapshot().Jobs);
+        menuBar.RequestRefresh();
+        requests.Job = (action, id) =>
+        {
+            switch (action)
+            {
+                case "pause": Observe(service.PauseAsync(id), log, "Pause"); break;
+                case "resume" or "retry": Observe(service.ResumeAsync(id), log, "Resume"); break;
+                case "show": platform.ShowJob(id); break;
+                case "open" or "reveal":
+                    // A notification can outlive its download, or the file can have been moved.
+                    if (service.GetJob(id) is not { } job || string.IsNullOrEmpty(job.FinalFilePath)) break;
+                    if (action == "open" && File.Exists(job.FinalFilePath)) platform.OpenFile(job.FinalFilePath);
+                    else if (File.Exists(job.FinalFilePath) || Directory.Exists(Path.GetDirectoryName(job.FinalFilePath))) platform.RevealFile(job.FinalFilePath);
+                    break;
+            }
+        };
+        requests.AddText = text =>
+        {
+            // A drop, Services or Add from Clipboard: asked for, so not the copied-link filter; the same routing after it.
+            foreach (var url in MacMenuBar.WebLinks(text))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var outcome = await copiedLinks.AddAsync(url).ConfigureAwait(false);
+                        if (outcome.Title is { } title) notifications.Notify(MacMenuBar.AddedTitle(title), outcome.Words ?? string.Empty);
+                        if (outcome.Problem is { } problem) log.Warn(problem);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error($"Menu-bar add failed ({copiedLinks.DescribeForLog(url)}): {ex.GetType().Name}");
+                    }
+                });
+            }
+        };
+        requests.AddFile = path =>
+        {
+            if (path.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && File.Exists(path)) platform.OpenTorrentFiles([path]);
+            else log.Info("A file dropped on the menu-bar icon was not a .torrent file; nothing was added.");
+        };
+        requests.OpenFolder = () =>
+        {
+            var folder = service.GetSettings().DefaultDownloadDirectory;
+            if (Directory.Exists(folder)) platform.OpenFile(folder);
+        };
+        // As the Windows Host's resume and time-change events (audit 2 M18): timers count only time awake.
+        requests.Wake = () =>
+        {
+            TimeZoneInfo.ClearCachedData();
+            service.NotifyClockChanged();
+        };
+        var saving = new SavingPauses(
+            () => service.GetSnapshot().Jobs.Select(job => (job.Id, job.State)).ToList(),
+            id => service.PauseAsync(id),
+            id => service.ResumeAsync(id),
+            log.Info);
+        requests.Network = kind => Observe(saving.NetworkAsync(kind), log, "Network change");
+        requests.Power = state => Observe(saving.PowerAsync(state), log, "Power change");
+        Observe(saving.EnabledAsync(service.GetSettings().PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
+        service.SettingsChanged += (_, next) => Observe(saving.EnabledAsync(next.PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
     }
 
     private static void Observe(Task task, FileLogger log, string what) => _ = task.ContinueWith(

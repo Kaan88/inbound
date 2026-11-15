@@ -190,7 +190,8 @@ app runs with torrents off.
 | --- | --- |
 | `Contents/MacOS/InboundLauncher` | The bundle's program: starts the Host, then becomes the window (`--cli`, `--host`, `--background` as AppRun) |
 | `Contents/Resources/window/` | The Uno window. `Resources -> .` beside it, as Uno's macOS host reads its files from there when started from Finder |
-| `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server, `inbound-menu` (the menu-bar icon, `native/macos-menu`) and the torrent worker |
+| `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server and the torrent worker |
+| `Contents/Helpers/Inbound Menu.app` | `inbound-menu` (the menu-bar icon, `native/macos-menu`) as its own LSUIElement app (`local.inbound.menu`), so its notifications are Inbound's and it offers Services > Download with Inbound; signed before the outer bundle |
 
 The app is signed ad hoc only, not with a Developer ID, and not notarized: Gatekeeper asks on the first open
 (open it once, then System Settings > Privacy & Security > Open Anyway; macOS 15 dropped the right-click > Open way.

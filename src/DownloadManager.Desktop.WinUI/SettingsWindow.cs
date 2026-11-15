@@ -114,7 +114,7 @@ internal sealed class SettingsWindow : Window
     private static bool TitleMatches(string added, string title) =>
         added == title || added.StartsWith(title + " ", StringComparison.Ordinal);
 
-    public void AddPage(string title, string glyph, params UIElement[] controls)
+    public void AddPage(string title, string glyph, params UIElement?[] controls)
     {
         var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(4, 2, 4, 2) };
         item.Children.Add(new FontIcon { Glyph = glyph, FontSize = 15 });
@@ -125,7 +125,7 @@ internal sealed class SettingsWindow : Window
 
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(24, 18, 28, 24), MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left };
         panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 4) });
-        foreach (var control in controls) panel.Children.Add(control);
+        foreach (var control in controls) if (control is not null) panel.Children.Add(control); // a null is a control this Host lacks
         var scroller = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
 
         // Tab stops on it, to scroll with the keys.

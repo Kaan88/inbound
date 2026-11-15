@@ -37,7 +37,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
 
     public PlatformCapabilities Capabilities => TrayAvailable ? WithTray : LinuxCapabilities;
 
-    private static readonly PlatformCapabilities WithTray = LinuxCapabilities with { SupportsTray = true };
+    /// <summary>On a Mac the tray is the menu-bar helper, which also reports the network and Low Power Mode (MAC.6).</summary>
+    private static readonly PlatformCapabilities WithTray = LinuxCapabilities with { SupportsTray = true, SupportsSavingPauses = OperatingSystem.IsMacOS() };
 
     /// <summary>Cancelled when a client or a signal asks the Host to exit.</summary>
     public CancellationToken ExitRequested => _exit.Token;
