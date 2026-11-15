@@ -413,6 +413,15 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **S. SITES.9: third-party notices and Sites in the docs** (2026-11-15, main). New `THIRD-PARTY-NOTICES.md` at the
+  repo root: what ships next to Inbound (7-Zip, libtorrent with Boost and OpenSSL, .NET, Windows App SDK, Uno with
+  SkiaSharp, Tmds.DBus.Protocol, Svelte, Tailwind) and what is downloaded on use (rclone), each with version, licence
+  and where its text is; build-only tools listed apart. `scripts\publish.ps1` copies it into the app folder (and fails
+  without it), so Setup and the update zip carry it; the Docker image has it in `/app`, the AppImage next to the
+  programs; Help › About links it when the file is there. Docs: `architecture.md` (the rclone child process, the
+  Sites project, its files, its security), `new-frontend-guide.md` (Sites in the checklist), `docker.md` (a Sites
+  section), and a release-notes draft in `docs/plans/remote-sites.md`. **Checked:** the solution builds. **Not
+  checked:** the About link in the running window, the notices in a built Setup, AppImage or image.
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

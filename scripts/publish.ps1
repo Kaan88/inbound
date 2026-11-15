@@ -217,7 +217,11 @@ if (Test-Path (Join-Path $extensionDestination "dist")) {
 # The torrent worker was checked at the start.
 Copy-Item -LiteralPath $TorrentWorker (Join-Path $Output "inbound-torrent.exe") -Force
 
+# SITES.9: what others made that ships here, next to the programs (Help > About links it).
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\THIRD-PARTY-NOTICES.md") (Join-Path $Output "THIRD-PARTY-NOTICES.md") -Force
+
 $required = @(
+    "THIRD-PARTY-NOTICES.md",
     "DownloadManager.Host.exe",
     "inbound-torrent.exe",
     "DownloadManager.Desktop.WinUI.exe",

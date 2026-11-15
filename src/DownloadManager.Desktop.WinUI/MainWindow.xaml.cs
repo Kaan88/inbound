@@ -2915,6 +2915,25 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 8, 0, 0),
         });
 
+        // SITES.9: what others made that ships with Inbound, in the file next to the program.
+        var notices = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.md");
+        if (File.Exists(notices))
+        {
+            var link = new HyperlinkButton { Content = "Third-party notices", Padding = new Thickness(0), Margin = new Thickness(0, 8, 0, 0) };
+            link.Click += (_, _) =>
+            {
+                try
+                {
+                    ShellActions.Start(ShellActions.OpenFile(notices))?.Dispose();
+                }
+                catch (Exception)
+                {
+                    ShowPassingStatus($"The notices are in {notices}");
+                }
+            };
+            text.Children.Add(link);
+        }
+
         // A grid, not a horizontal stack: a stack gives the text unlimited width, so it would never wrap.
         var row = new Grid { ColumnSpacing = 16, Padding = InboundTheme.DialogScrollPadding, MaxWidth = 520 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

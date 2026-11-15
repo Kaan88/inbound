@@ -14,6 +14,7 @@
 !src/DownloadManager.Runtime/
 !src/DownloadManager.Sites/
 !third_party/rclone/COPYING
+!THIRD-PARTY-NOTICES.md
 !src/DownloadManager.Archives/
 !src/DownloadManager.Containers/
 !src/DownloadManager.Providers.TorBox/
