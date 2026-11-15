@@ -4578,6 +4578,11 @@ public sealed partial class DownloadManagerService
 
         var lastProgressEvent = DateTimeOffset.MinValue;
         var lastProgressSave = DateTimeOffset.MinValue;
+        var lastQuotaSave = DateTimeOffset.MinValue;
+        // PERF.12: an HTTP download's byte count after a restart comes from the engine's checkpoint (written and synced
+        // every 5 s; ReconcileAsync takes it over the job's), so its job file needs the progress only now and then. Every
+        // state change is still saved at once. A torrent has no such checkpoint and keeps the 5 s.
+        var progressSaveEvery = job.Torrent is null ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(5);
         var progress = new InlineProgress<TransferProgress>(p =>
         {
             JobDto? dto = null;
@@ -4652,11 +4657,16 @@ public sealed partial class DownloadManagerService
                 AnnounceJobChange(dto, "progress");
             }
 
-            if (now - lastProgressSave >= TimeSpan.FromSeconds(5))
+            if (now - lastQuotaSave >= TimeSpan.FromSeconds(5))
+            {
+                lastQuotaSave = now;
+                _ = SaveQuotaUseQuietlyAsync();
+            }
+
+            if (now - lastProgressSave >= progressSaveEvery)
             {
                 lastProgressSave = now;
                 _ = PersistQuietlyAsync(runtime);
-                _ = SaveQuotaUseQuietlyAsync();
             }
         });
 

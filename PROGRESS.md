@@ -413,6 +413,13 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **W. PERF.12: fewer synced saves** (2026-11-15, main). `DownloadManagerService` saves an HTTP download's job file
+  for progress every 30 s instead of 5 s (the engine's checkpoint, synced every 5 s, decides the bytes after a restart);
+  torrents keep 5 s, the queue quota keeps its own 5 s, state changes are saved at once. Jobs and checkpoints are
+  serialised straight to UTF-8 bytes. Compact JSON was tried and dropped: 11 integration tests read job files as text,
+  and the bench shows serialising is about 2 µs of a 2.5 ms save. **Tests:** Core 2,373 pass; the full integration run
+  (2,014) had only those 11, which pass with the indented files, and no hang; the kill-matrix and recovery tests pass.
+  **Not checked:** a power cut (the checkpoint's sync is unchanged); Linux.
 - **V. PERF.9 and PERF.11** (2026-11-15, main; numbers in `docs/plans/perf-baseline-windows.md`). PERF.9: new
   `Engine/TransferReader` reads both transfer loops' response bodies with one pooled buffer and one linked
   cancellation source re-armed per read (a stalled read is still a retryable `Timeout`, and is now cancelled rather than

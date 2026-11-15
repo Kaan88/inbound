@@ -39,9 +39,10 @@ a browser job and for checkpoints of 1, 8 and 16 segments, the same as a plain w
 would take 0.43 ms, without any durability step 0.25 ms. Serialising takes about 2 µs. So on Windows a save's cost is
 the sync, not the JSON (PERF.12).
 
-The first record in the run (a plain job, `product`) averaged 38.7 ms (p95 47 ms), ten times the others. It is the first
-save to the fresh folder, but why each of its 300 saves is slow is not established; rerun `Bench saves` alone before
-reading anything into it.
+The first record in the run (a plain job, `product`) averaged 38.7 ms (p95 47 ms), ten times the others. Rerun alone
+(`artifacts/perf-bench/saves-perf12`), the plain job took 2.4 ms and the stalls hit other records instead (a 1-segment
+checkpoint averaging 25.6 ms with a p95 of 3.5 ms; a replica averaging 51 ms): the disk stalls now and then, whatever is
+written. A normal synced save on this disk takes 2.3 to 2.6 ms.
 
 ## Start times (PERF.8)
 
@@ -143,6 +144,15 @@ inside a long-running loop, and it cannot inline across libraries, which is the 
 off a browser handoff, and a window that is faster with a short list but slower with a long one. `-ReadyToRun` stays as
 an opt-in switch for measuring. Worth trying again with the window in its own folder, or with Native AOT for the native
 host and the CLI (PERF.10).
+
+## PERF.12: fewer synced saves (2026-11-15)
+
+While an HTTP download runs, its job file was rewritten and synced every 5 s next to the engine's checkpoint, also every
+5 s. After a restart the checkpoint's byte count wins over the job's (`ReconcileAsync`), so the job's progress save is now
+every 30 s for HTTP downloads (torrents, which have no checkpoint, keep 5 s; the queue quota keeps its own 5 s; every
+state change is saved at once as before). That is 14 synced writes a minute per active download instead of 24, counted
+from the code, not measured. Job and checkpoint files are serialised straight to UTF-8 bytes; they stay indented, since
+compact JSON would save only bytes (serialising takes about 2 µs of a 2.5 ms save), and tests and people read these files.
 
 ## Not measured
 
