@@ -280,7 +280,7 @@ internal static class LinuxApp
     /// <summary>A file or folder with the desktop's default program (<c>xdg-open</c>).</summary>
     public static void Open(string path)
     {
-        var start = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+        var start = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
         start.ArgumentList.Add(path);
         using var _ = Process.Start(start);
     }

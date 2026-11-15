@@ -24,11 +24,15 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            Console.Error.WriteLine("This is the Linux Host; on Windows, run DownloadManager.Host.");
+            Console.Error.WriteLine("This is the Linux and macOS Host; on Windows, run DownloadManager.Host.");
             return 1;
         }
+
+        // macOS has no setsid(1): DetachedProcess starts the Host in the background, and the Host leaves its starter's
+        // session here, so a browser that ends the native host's process group doesn't end the Host.
+        if (OperatingSystem.IsMacOS()) DetachedProcess.LeaveSession();
 
         // What the Host opens inherits this; the program's own folder (an AppImage mount) isn't one to hold.
         Environment.CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

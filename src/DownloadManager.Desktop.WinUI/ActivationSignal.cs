@@ -46,7 +46,7 @@ internal sealed class ActivationSignal : IDisposable
 
     public static ActivationSignal Create(string name, out bool createdNew)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             var show = new EventWaitHandle(false, EventResetMode.AutoReset, name, out createdNew);
             var settings = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
@@ -67,7 +67,7 @@ internal sealed class ActivationSignal : IDisposable
     /// </summary>
     public static bool IsOwned(string name)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             if (!EventWaitHandle.TryOpenExisting(name, out var existing)) return false;
             existing.Dispose();
@@ -83,7 +83,7 @@ internal sealed class ActivationSignal : IDisposable
     /// </summary>
     public static bool TryShowOwner(string name)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             if (!EventWaitHandle.TryOpenExisting(name, out var existing)) return false;
             using (existing) existing.Set();
