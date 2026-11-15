@@ -181,7 +181,7 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
-### Sites: `sites.*` (SITES.2 and SITES.3, on main since 2026-11-15, not released)
+### Sites: `sites.*` (SITES.2 to SITES.4, on main since 2026-11-15, not released)
 
 Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
 `SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
@@ -207,7 +207,7 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | Request | Payload | Reply |
 | --- | --- | --- |
 | `sites.get` | `{}` | `sites.status` |
-| `sites.setEnabled` | `{enabled, ownRclonePath?, autoUpdateRclone?}` | `sites.status` |
+| `sites.setEnabled` | `{enabled, ownRclonePath?, autoUpdateRclone?, maxTransfers?}` | `sites.status` |
 | `sites.list` | `{}` | `sites.listResult` `{sites}` |
 | `sites.kinds` | `{}` | `sites.kindsResult` `{kinds}` |
 | `sites.save` | `SiteSaveRequest` (below) | `sites.result` |
@@ -320,6 +320,78 @@ install cut off that way leaves nothing behind).
 `sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
 The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
 removed, trusted or starred, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
+
+Transfers (SITES.4, Host side only; no window shows them yet): a batch is one user action that downloads files from a
+site into a folder on this PC, or uploads the other way. The payloads are `SiteTransferDtos.cs`; the Host side is
+`SiteTransfers` (`src/DownloadManager.Runtime/Sites/`).
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.transfer.start` | `{siteId, direction, remoteFolder, localFolder?, names, conflict?}` | `sites.transfer.result` |
+| `sites.transfer.pause` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.resume` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.cancel` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.retry` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.clear` | `{id?}` | `sites.transfer.result` |
+| `sites.transfer.list` | `{}` | `sites.transfer.listResult` `{transfers}` |
+| `sites.transfer.get` | `{id}` | `sites.transfer.result` with `items` |
+
+`sites.transfer.start`: `direction` is `download` or `upload`. `remoteFolder` is the folder on the server (normalised
+as for `sites.browse`) and `localFolder` a full path on this PC; left out, it is the site's `localFolder`. A folder
+inside Inbound's data folder is refused. `names` are `{name, isFolder}` entries in the source folder (the server folder
+for a download, the PC folder for an upload), one name each, never a path; a folder brings every file inside it,
+listed when the batch starts. Empty folders are not copied, and links and junctions on this PC are not followed. A
+name the server no longer has, or one not in the PC folder, refuses the whole start. At most 20,000 files.
+`conflict` decides what a file does when its target is already there: `skip` (the default), `replace`, or
+`keepBoth`, which writes `name (2).ext` (the first free number). A server file whose name this PC can't hold (on
+Windows `\ : * ? " < > |`, a trailing dot or space, a device name such as `CON`), or one that differs from another
+in the batch only by upper and lower case on Windows, fails on its own with a message saying so; it is never renamed.
+A file that would land inside Inbound's data folder fails the same way. The reply carries the new batch in `transfer`. It is written to
+`sites/transfers/{id}.json` in the Host's data folder before anything moves. Failures are as for `sites.test`,
+including `hostKeyNotAccepted` and `hostKeyChanged`. Like `sites.browse`, a start lists folders on the server and
+ends when its client disconnects.
+
+Running: files move one rclone job each, at most "transfers at once" (`maxTransfers` in `sites.status`, 1 to 10,
+default 3, set with `sites.setEnabled`; it does not count against "downloads at once") across every batch, oldest
+batch first. A download is written as rclone's `name.<token>.partial` next to its target and renamed in place, so no
+bytes go through a temporary folder. A failed file does not stop its batch: it is tried again after 2, 4, 8 and 16
+seconds, then fails with a plain `error`. A file that is gone from its source fails at once. A changed host key
+stops the whole batch with `state: "failed"`, `problem: "hostKeyChanged"` and the warning in `message`; a refused
+sign-in stops it at once with the plain reason in `message` (each further file would be refused too, and a server may
+lock the account). When the server can't be reached, or rclone stopped, the batch waits (2 s, doubling up to a minute)
+and its files keep their tries; after five such waits in a row it stops with the reason in `message`. Nothing more goes
+to that server until `resume` or `retry`.
+
+`pause` stops the files in flight; rclone removes their partial files. `resume` starts them again from zero: no
+transfer resumes inside a file. `cancel` stops a batch for good; files already moved stay. `retry` tries every failed
+file again from scratch, and goes on with a batch a problem stopped; a paused batch stays paused (its failed files run
+at `resume`), and a canceled one is refused. `clear` removes one finished batch (`done`, `failed` or `canceled`) from the list, or every
+finished batch when `id` is empty; the files moved are never touched. Turning Sites off pauses every running batch
+with `message: "Paused when Sites was turned off."`; removing a site cancels its batches. With Sites off,
+`sites.transfer.list` and `.get` are still answered, and the other transfer requests get `sites.transfer.result`
+`{ok: false, problem: "off"}`.
+
+After a Host restart a running batch goes on by itself. Which file was moving is not saved, so before any of its files
+runs again, each folder that holds one of its unfinished files is looked at once, and rclone's partial files for those
+files (`name.` plus eight hex digits plus `.partial`, on this PC for a download, on the server for an upload) are
+removed; nothing else moves meanwhile. The same is done after rclone itself stopped mid-batch. The files that were
+moving start again from zero. Progress is saved at most every two seconds and each change of state at once, so a killed
+Host may move a file that had just finished once more. With Keep both, a name chosen because the first was taken is
+saved before the copy starts, so a restart writes to that name; but a file that had just arrived under its own name
+and was not yet saved as done is copied again as `name (2)`.
+
+A running batch keeps the PC awake, as a download does, when Options › "Prevent sleep while downloading" is on.
+
+`SiteTransferDto`: `{id, siteId, siteName, direction, remoteFolder, localFolder, conflict, state, problem?, message?,
+files, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytesDone, speed, createdAt, finishedAt?}`. `state` is
+`running` (moving, or waiting for a free place), `paused`, `done`, `failed` (something failed, or a problem stopped
+it) or `canceled`. `bytes` counts files of unknown size as 0, and `bytesDone` includes the files in flight and the
+skipped ones. `speed` is bytes a second now. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
+tries, error?}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
+
+`sites.transfer.changed` (the same sessions as `sites.changed`) carries `{transfers}`, every batch. It is sent after
+each change of state and about once a second while files move, at most about twice a second. Nothing is sent, and
+nothing runs, while no batch is running.
 
 ### The server's transports (D1b)
 

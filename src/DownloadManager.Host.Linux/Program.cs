@@ -91,7 +91,9 @@ internal static class Program
         log.Secrets = remote.Registry;
         using var notifications = new DesktopNotifications(log.Warn);
         var completionExecutor = new LinuxCompletionActionExecutor(log.Info) { Notice = notifications.Notify };
-        using var sleepPrevention = new LogindSleepPrevention(log.Info);
+        // One power request for downloads and site transfers (SITES.4): held while either is running.
+        using var sharedSleep = new SharedSleepPrevention(new LogindSleepPrevention(log.Info));
+        var sleepPrevention = sharedSleep.Share();
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
             completionActions: completionExecutor,
@@ -161,7 +163,8 @@ internal static class Program
             paths.Root, PipeNames.HostHelloPipe(), log);
         // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs and nothing is checked for updates.
         var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
-            updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info));
+            updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info),
+            sleepPrevention: sharedSleep.Share(), preventSleep: () => service.GetSettings().PreventSleepWhileDownloading);
         var dispatcher = new HostCommandDispatcher(service, platform, log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
@@ -171,6 +174,7 @@ internal static class Program
         };
         webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
         sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
+        sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
         webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         completionExecutor.ExitHost = () => _ = Task.Run(async () =>

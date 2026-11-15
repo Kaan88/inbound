@@ -140,6 +140,42 @@
   Not taken: "the window may hide the view without Stop" (it hides it in one place, after Stop). Not checked: a focus ring
   shown after a mouse click on Load more, and whether an open dialog's popup child is the dialog's ancestor on Uno.
 
+- **J. SITES.4 started: transfers on the Host side** (2026-11-15, main; no window shows them yet). A batch downloads
+  files and folders from a site into a folder on this PC, or uploads the other way: `sites.transfer.start/pause/resume/
+  cancel/retry/clear/list/get` and the `sites.transfer.changed` push (`docs/ipc-protocol.md`, Transfers). Each file is
+  one rclone `operations/copyfile` async job in a stats group per batch, polled with `job/status`, stopped with
+  `job/stop` (and `job/stopgroup` when a batch stops). Batches are `sites/transfers/{id}.json`, written before anything
+  moves; progress is saved every 2 s, changes of state at once. "Transfers at once" (1 to 10, default 3, `maxTransfers`
+  in `sites.setEnabled`; owner decision of 2026-11-15) across all sites, oldest batch first, apart from downloads at
+  once. Conflicts Skip, Replace, Keep both (`name (2).ext`). A failed file retries after 2, 4, 8, 16 s, then fails with
+  a plain reason; a file gone from its source fails at once; a changed host key or a refused sign-in stops the batch; a
+  server that can't be reached makes the batch wait (files keep their tries) and stop after five waits. Pause stops the
+  files in flight (rclone removes its partial file) and Resume starts them from zero. Turning Sites off pauses running
+  batches; removing a site cancels its batches. After a kill, a running batch removes rclone's partial files for its
+  unfinished files (exactly `name.<8 hex>.partial`, seen over six rclone copies) before going on. Server names this PC
+  can't hold (`..\x`, `a:b`, `CON`, trailing dot, names equal but for case on Windows) fail on their own and are never
+  renamed; nothing lands in Inbound's data folder. A running batch keeps the PC awake through one power request shared
+  with downloads (`SharedSleepPrevention`), under the same option. **Fable review** (concurrency, durability, safety,
+  secrets): nine findings checked against the code and fixed. "Running" was never saved, so the crash sweep rarely ran
+  (now a batch-level sweep). Retry revived canceled and paused batches. A stop during the copy call could orphan an rclone
+  job. Connection failures were spent per file (up to 5 sign-ins per file). The data-folder check covered only the
+  batch root. Pause-all came before validation. A start refused while stopping left its file. Case-only duplicates
+  collided on Windows. The partial-name pattern was too wide. Also fixed: cancels now run outside the lock, and missing
+  reserved names were added. Not changed: "done" is saved up to 2 s late, so with Keep both a kill in that window copies a
+  just-finished file again as `name (2)` (documented); junctions or `subst` drives leading into the data folder are not
+  resolved. **Tests:** `SiteTransfersEndToEndTests` (7, against `rclone serve sftp` on loopback, which runs on Windows;
+  every file compared by SHA-256): folder and file download with the three conflict choices and Clear; folder upload;
+  pause and resume mid-file (sleep held, then let go); a Host stopped mid-file with a stray partial file left removed at
+  the next start while the user's own `slow.bin.old.partial` stays; Sites off pauses, a vanished file fails alone, Retry;
+  a password changed mid-batch stops it with the plain reason and spends no tries, no password in logs or the batch file,
+  canceled can't be retried; the server killed mid-batch makes it wait, then stop, with no file failed. Unit tests:
+  `SiteTransferPathsTests`, `SiteTransferStoreTests`, `SharedSleepPreventionTests`; the dispatcher test lists every new
+  request. Run on Windows with rclone 1.76.0: those 7 pass, Sites.Tests 194 pass and 20 skip (sshd), Sites integration
+  44 pass, the solution builds. **Not done in SITES.4:** the Transfers bar and the Download/Upload commands in the
+  windows; the speed share (`core/bwlimit`); scheduler stop and start; the tray tooltip; sidebar activity and the status
+  chip; empty folders; a CLI. **Not checked:** Linux (the Linux Host builds on Windows only), a real OpenSSH server for
+  transfers (the SITES.2 sshd test is Linux-only), batches of thousands of files (each save rewrites the whole batch).
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on

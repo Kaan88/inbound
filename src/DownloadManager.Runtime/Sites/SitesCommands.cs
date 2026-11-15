@@ -27,6 +27,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private readonly Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>> _probe;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly RcloneUpdater? _updater;
+    private readonly SiteTransfers _transfers;
     private readonly TimeProvider _time;
     private readonly TimeSpan _firstCheckDelay;
     private readonly TimeSpan _updateTick;
@@ -74,10 +75,14 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <param name="updater">Downloads and updates rclone; null where Inbound can't (then only an own or shipped rclone is used).</param>
     /// <param name="firstCheckDelay">How long after Sites starts the first update check waits (two minutes by default).</param>
     /// <param name="updateTick">How often the update loop looks (hourly by default; it asks rclone's server about once a day).</param>
+    /// <param name="transferRetryDelay">The wait before a failed file's second try (tests); 2 s by default.</param>
+    /// <param name="sleepPrevention">Keeps the PC awake while a transfer runs: a share of the Host's power request.</param>
+    /// <param name="preventSleep">Options › "Prevent sleep while downloading".</param>
     public SitesCommands(string stateDirectory, Action<string> log, Func<string?, string?>? findRclone = null,
         Func<string, string, RcloneSupervisor>? createSupervisor = null,
         Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null,
-        RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null)
+        RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null,
+        TimeSpan? transferRetryDelay = null, DownloadManager.Core.ISleepPrevention? sleepPrevention = null, Func<bool>? preventSleep = null)
     {
         _stateDirectory = stateDirectory;
         _configStore = new SitesConfigStore(stateDirectory);
@@ -92,7 +97,15 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         _probe = probe ?? ((host, port, ct) => SshHostKeyProbe.ProbeAllAsync(host, port, null, ct));
         _config = _configStore.Load(out _configProblem);
         if (_configProblem is not null) log(_configProblem);
-        if (_config.Enabled) StartUpdateLoop();
+        _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), AcquireAsync,
+            () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention, preventSleep);
+        _transfers.Changed += change => TransfersChanged?.Invoke(this, change);
+        if (_config.Enabled)
+        {
+            StartUpdateLoop();
+            // Batches that were running when the Host stopped go on.
+            _transfers.Pump();
+        }
     }
 
     /// <summary>
@@ -110,6 +123,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>After the switch, "Use my own rclone", rclone's state or a saved site changed; for <c>sites.changed</c>.</summary>
     public event EventHandler<SitesChangedDto>? Changed;
 
+    /// <summary>A batch changed or moved bytes; for <c>sites.transfer.changed</c>.</summary>
+    public event EventHandler<SiteTransfersDto>? TransfersChanged;
+
     public async Task<IpcMessage> HandleAsync(IpcMessage request, CancellationToken cancellationToken)
     {
         switch (request.Type)
@@ -119,6 +135,11 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.SetEnabled:
                 return IpcMessage.Create(SitesMessageTypes.Status,
                     await SetEnabledAsync(request.GetPayload<SitesSetEnabledRequest>() ?? new SitesSetEnabledRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            // The batches stay readable with Sites off: they were paused when it was turned off.
+            case SitesMessageTypes.TransferList:
+                return IpcMessage.Create(SitesMessageTypes.TransferListResult, _transfers.List(), request.Id);
+            case SitesMessageTypes.TransferGet:
+                return IpcMessage.Create(SitesMessageTypes.TransferResult, _transfers.Get(TransferId(request)), request.Id);
         }
 
         if (!_config.Enabled)
@@ -131,6 +152,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.Browse => IpcMessage.Create(SitesMessageTypes.BrowseResult,
                     new SiteBrowseResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
+                SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
+                    or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear => IpcMessage.Create(SitesMessageTypes.TransferResult,
+                    new SiteTransferResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
             };
         }
@@ -162,12 +186,27 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                     await InstallRcloneAsync(request.GetPayload<SitesRcloneInstallRequest>()?.Version, cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.RcloneCheck:
                 return IpcMessage.Create(SitesMessageTypes.Status, await CheckRcloneAsync(cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.TransferStart:
+                return Transfer(request, await _transfers.StartAsync(request.GetPayload<SiteTransferStartRequest>() ?? new SiteTransferStartRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.TransferPause:
+                return Transfer(request, await _transfers.PauseAsync(TransferId(request)).ConfigureAwait(false));
+            case SitesMessageTypes.TransferResume:
+                return Transfer(request, await _transfers.ResumeAsync(TransferId(request)).ConfigureAwait(false));
+            case SitesMessageTypes.TransferCancel:
+                return Transfer(request, await _transfers.CancelAsync(TransferId(request)).ConfigureAwait(false));
+            case SitesMessageTypes.TransferRetry:
+                return Transfer(request, await _transfers.RetryAsync(TransferId(request)).ConfigureAwait(false));
+            case SitesMessageTypes.TransferClear:
+                return Transfer(request, await _transfers.ClearAsync(TransferId(request)).ConfigureAwait(false));
             default:
                 return Result(request, new SiteResultDto { Ok = false, Message = $"Unknown Sites request {request.Type}." });
         }
 
         static IpcMessage Result(IpcMessage request, SiteResultDto result) => IpcMessage.Create(SitesMessageTypes.Result, result, request.Id);
+        static IpcMessage Transfer(IpcMessage request, SiteTransferResultDto result) => IpcMessage.Create(SitesMessageTypes.TransferResult, result, request.Id);
     }
+
+    private static string TransferId(IpcMessage request) => request.GetPayload<SiteTransferIdRequest>()?.Id ?? "";
 
     public SitesStatusDto Status()
     {
@@ -205,6 +244,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 : null,
             RcloneLastCheck = _updater?.State.LastCheck,
             RcloneUpdateError = _updater?.State.LastError,
+            MaxTransfers = _config.TransfersAtOnce,
         };
     }
 
@@ -220,6 +260,13 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SitesStatusDto> SetEnabledAsync(SitesSetEnabledRequest request, CancellationToken cancellationToken)
     {
         var changed = false;
+        if (request.MaxTransfers is < 1 or > SitesConfig.MostTransfers)
+            return WithError(Status(), $"\"Transfers at once\" must be between 1 and {SitesConfig.MostTransfers}.");
+        if (request.OwnRclonePath is { Length: > 0 } ownPath && !Path.IsPathFullyQualified(ownPath))
+            return WithError(Status(), "\"Use my own rclone\" needs the full path of the rclone program.");
+        // Before the gate: a file being stopped may still need a lease, and leases are taken under the gate. A start or
+        // resume that slips in before the switch is saved only waits: nothing runs while Sites is off.
+        if (!request.Enabled && _config.Enabled) await _transfers.PauseAllAsync("Paused when Sites was turned off.").ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -229,7 +276,13 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             if (own is not null && !Path.IsPathFullyQualified(own))
                 return WithError(Status(), "\"Use my own rclone\" needs the full path of the rclone program.");
 
-            var next = _config with { Enabled = request.Enabled, OwnRclonePath = own, AutoUpdateRclone = request.AutoUpdateRclone ?? _config.AutoUpdateRclone };
+            var next = _config with
+            {
+                Enabled = request.Enabled,
+                OwnRclonePath = own,
+                AutoUpdateRclone = request.AutoUpdateRclone ?? _config.AutoUpdateRclone,
+                MaxTransfers = request.MaxTransfers ?? _config.MaxTransfers,
+            };
             changed = next != _config;
             if (changed)
             {
@@ -248,8 +301,16 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             _gate.Release();
         }
 
-        if (_config.Enabled) StartUpdateLoop();
-        else await StopUpdateLoopAsync().ConfigureAwait(false);
+        if (_config.Enabled)
+        {
+            StartUpdateLoop();
+            _transfers.Pump(); // a higher "transfers at once" starts more at once
+        }
+        else
+        {
+            await StopUpdateLoopAsync().ConfigureAwait(false);
+        }
+
         if (changed) await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return Status();
     }
@@ -504,6 +565,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteResultDto> RemoveAsync(string id, CancellationToken cancellationToken)
     {
         bool removed;
+        if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -903,6 +965,8 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopUpdateLoopAsync().ConfigureAwait(false);
+        // Files in flight stop first (they hold leases), and their batches go on at the next start.
+        await _transfers.DisposeAsync().ConfigureAwait(false);
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {

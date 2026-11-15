@@ -40,4 +40,14 @@ public sealed partial class HostCommandDispatcher
             if (RightsOf(client) is { Role: ClientRoles.Desktop, Scope: null }) client.Enqueue(message);
         }
     }
+
+    /// <summary><c>sites.transfer.changed</c> to the same sessions as <see cref="BroadcastSitesChanged"/>.</summary>
+    public void BroadcastSiteTransfersChanged(SiteTransfersDto change)
+    {
+        var message = IpcMessage.Create(SitesMessageTypes.TransferChanged, change);
+        foreach (var client in _sessions.Values)
+        {
+            if (RightsOf(client) is { Role: ClientRoles.Desktop, Scope: null }) client.Enqueue(message);
+        }
+    }
 }

@@ -76,6 +76,14 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.RcloneCheck, new { }),
         (SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteId, Path = "/pub" }),
         (SitesMessageTypes.Star, new SiteStarRequest { Id = SiteId, Path = "/pub" }),
+        (SitesMessageTypes.TransferStart, new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = "/srv/in", Names = [new SiteTransferNameDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.TransferPause, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferResume, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferCancel, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferRetry, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferClear, new SiteTransferIdRequest()),
+        (SitesMessageTypes.TransferList, new { }),
+        (SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = SiteId }),
     ];
 
     /// <summary>The Host's own messages: replies and the push. Every other name in <see cref="SitesMessageTypes"/> is a request.</summary>
@@ -83,6 +91,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     [
         SitesMessageTypes.Status, SitesMessageTypes.List, SitesMessageTypes.Result, SitesMessageTypes.Kinds,
         SitesMessageTypes.ProbeResult, SitesMessageTypes.BrowseResult, SitesMessageTypes.Changed,
+        SitesMessageTypes.TransferResult, SitesMessageTypes.TransferListResult, SitesMessageTypes.TransferChanged,
     ];
 
     [Fact]

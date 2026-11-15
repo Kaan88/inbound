@@ -148,7 +148,9 @@ internal static class Program
                 },
                 checkpoints: checkpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
-            var sleepPrevention = new WindowsSleepPrevention(log.Info);
+            // One power request for downloads and site transfers (SITES.4): held while either is running.
+            var sharedSleep = new SharedSleepPrevention(new WindowsSleepPrevention(log.Info));
+            var sleepPrevention = sharedSleep.Share();
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;
@@ -231,7 +233,8 @@ internal static class Program
                 paths.Root, PipeNames.HostHelloPipe(), log);
             // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs and nothing is checked for updates.
             var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
-                updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info));
+                updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info),
+                sleepPrevention: sharedSleep.Share(), preventSleep: () => service.GetSettings().PreventSleepWhileDownloading);
             var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
             {
                 Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
@@ -241,6 +244,7 @@ internal static class Program
             };
             webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
             sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
+            sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
             webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
@@ -487,7 +491,7 @@ internal static class Program
 
             webSessions.Dispose();
             remoteCommands.Dispose();
-            sleepPrevention.Dispose();
+            sharedSleep.Dispose();
             remote.Dispose();
             engine.Dispose();
             tray.ExitNow();

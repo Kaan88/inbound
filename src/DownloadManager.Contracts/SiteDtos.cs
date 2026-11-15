@@ -58,19 +58,55 @@ public static class SitesMessageTypes
     /// <summary><see cref="SiteStarRequest"/>: stars or unstars a folder of a site; answered with <see cref="Result"/> (its <c>Site</c> set).</summary>
     public const string Star = "sites.star";
 
+    /// <summary>
+    /// <see cref="SiteTransferStartRequest"/>: a download or upload batch (SITES.4). Stored before anything moves; answered
+    /// with <see cref="TransferResult"/> (its <c>Transfer</c> set).
+    /// </summary>
+    public const string TransferStart = "sites.transfer.start";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: stops the batch's files in flight; answered with <see cref="TransferResult"/>.</summary>
+    public const string TransferPause = "sites.transfer.pause";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: a paused batch goes on; files that were cut start again from zero.</summary>
+    public const string TransferResume = "sites.transfer.resume";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: stops the batch for good; files already done stay.</summary>
+    public const string TransferCancel = "sites.transfer.cancel";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: the batch's failed files are tried again.</summary>
+    public const string TransferRetry = "sites.transfer.retry";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: removes a finished batch from the list, or every finished batch when the id is empty.</summary>
+    public const string TransferClear = "sites.transfer.clear";
+
+    /// <summary><c>{}</c>: the batches; answered with <see cref="TransferListResult"/>. Answered with Sites off too.</summary>
+    public const string TransferList = "sites.transfer.list";
+
+    /// <summary><see cref="SiteTransferIdRequest"/>: one batch with its files; answered with <see cref="TransferResult"/> (its <c>Items</c> set).</summary>
+    public const string TransferGet = "sites.transfer.get";
+
     public const string Status = "sites.status";
     public const string List = "sites.listResult";
     public const string Result = "sites.result";
     public const string Kinds = "sites.kindsResult";
     public const string ProbeResult = "sites.probeResult";
     public const string BrowseResult = "sites.browseResult";
+    public const string TransferResult = "sites.transfer.result";
+    public const string TransferListResult = "sites.transfer.listResult";
+
+    /// <summary>
+    /// Host push to the desktop role's sessions: a <see cref="SiteTransfersDto"/> with every batch, at most about twice a
+    /// second while files move, and after each change of state.
+    /// </summary>
+    public const string TransferChanged = "sites.transfer.changed";
 
     /// <summary>Host push to the desktop role's sessions: a <see cref="SitesChangedDto"/> after the switch or a site changed.</summary>
     public const string Changed = "sites.changed";
 
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
-        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star;
+        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
+            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -123,6 +159,9 @@ public sealed class SitesStatusDto
     public DateTimeOffset? RcloneLastCheck { get; set; }
 
     public string? RcloneUpdateError { get; set; }
+
+    /// <summary>Options › Sites › "Transfers at once": files moving at the same time across all sites (1 to 10, default 3).</summary>
+    public int MaxTransfers { get; set; } = 3;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.RcloneSource"/>.</summary>
@@ -165,6 +204,9 @@ public sealed class SitesSetEnabledRequest
 
     /// <summary>"Update rclone automatically"; null leaves it.</summary>
     public bool? AutoUpdateRclone { get; set; }
+
+    /// <summary>"Transfers at once" (1 to 10); null leaves it.</summary>
+    public int? MaxTransfers { get; set; }
 }
 
 /// <summary>A saved site as clients see it: never a secret, only whether one is stored.</summary>
