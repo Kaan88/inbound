@@ -89,6 +89,10 @@ public sealed partial class MainWindow
             UiTrace.Write($"selftest: closing Options ({(_settingsWindow is null ? "not open" : "open")})");
             _settingsWindow?.Close();
             UiTrace.Write("selftest: Options closed");
+
+            // Last, the main window itself, by its close button: the workflow then checks that the process ends.
+            await Task.Delay(2000);
+            UiTrace.Write($"selftest: click main close at {CloseButtonPoint(this)}");
             UiTrace.Write("selftest: done");
         }
         catch (Exception ex)

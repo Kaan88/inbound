@@ -163,6 +163,26 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
 
     private void LaunchUi(IReadOnlyList<string> arguments)
     {
+        // macOS: through Inbound.app, as Finder starts it, so the window is the app's (its Dock icon and name). Started
+        // as a program of its own it was another app with Uno's icon. -n starts a new process even while one runs,
+        // which hands the request to the window that is open and ends, as a second launch does on Linux.
+        if (OperatingSystem.IsMacOS() && AppBundle() is { } bundle)
+        {
+            try
+            {
+                var open = new ProcessStartInfo("open") { UseShellExecute = false };
+                foreach (var argument in new[] { "-n", "-a", bundle, "--args" }) open.ArgumentList.Add(argument);
+                foreach (var argument in arguments) open.ArgumentList.Add(argument);
+                using var _ = Process.Start(open);
+                log.Info($"Opened the window through '{bundle}'.");
+                return;
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                log.Warn($"Could not open Inbound.app ({ex.Message}); starting the window program directly.");
+            }
+        }
+
         var executable = FindUiExecutable();
         if (executable is null)
         {
@@ -185,6 +205,15 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         {
             log.Error($"Could not open the window: {ex.Message}");
         }
+    }
+
+    /// <summary>macOS: the Inbound.app this Host is in (Contents/Resources/host), or null outside one.</summary>
+    internal static string? AppBundle()
+    {
+        var bundle = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
+        return bundle.EndsWith(".app", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(bundle, "Contents", "Info.plist"))
+            ? bundle
+            : null;
     }
 
     internal static string? FindUiExecutable()
