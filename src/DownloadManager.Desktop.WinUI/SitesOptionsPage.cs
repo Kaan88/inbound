@@ -68,6 +68,8 @@ internal sealed class SitesOptionsPage
         _rcloneControls = [_download, _check, _update, _auto, _ownPath, _browseOwn, _useOwn];
         SetEnabledAll(false);
         _add.IsEnabled = false;
+        // Until the Host has said whether Sites is on, the switch has nothing to change.
+        _enable.IsEnabled = false;
 
         _enable.Checked += (_, _) => OnSwitch(true);
         _enable.Unchecked += (_, _) => OnSwitch(false);
@@ -235,6 +237,8 @@ internal sealed class SitesOptionsPage
     private void RenderSites(bool enabled)
     {
         _siteList.Children.Clear();
+        // With Sites off the Host lists none, though the saved sites stay.
+        _noSites.Text = enabled ? "No sites yet." : "Turn Sites on to see your saved sites.";
         _noSites.Visibility = _sites.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var site in _sites)
         {
@@ -405,8 +409,11 @@ internal sealed class SitesOptionsPage
         SiteDto? saved;
         try
         {
-            saved = await SiteDialog.ShowAsync(_window, _kinds, existing, (request, cancel) =>
-                _client.SaveSiteAsync(request, CancellationTokenSource.CreateLinkedTokenSource(_closing.Token, cancel).Token));
+            saved = await SiteDialog.ShowAsync(_window, _kinds, existing, async (request, cancel) =>
+            {
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token, cancel);
+                return await _client.SaveSiteAsync(request, linked.Token);
+            });
         }
         catch (OperationCanceledException)
         {

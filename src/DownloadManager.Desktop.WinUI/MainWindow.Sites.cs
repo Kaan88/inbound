@@ -157,7 +157,15 @@ public sealed partial class MainWindow
     /// Where a host-key or "Sites is off" message sends the user. Options > Sites (the switch, host-key trust, Add a site)
     /// is built apart from this view; when its dialogs can be opened directly, this is the one place to change.
     /// </summary>
-    private void OpenSitesOptionsHook() => _ = OpenOptionsAsync();
+    private void OpenSitesOptionsHook()
+    {
+        if (_settingsWindow is { } open) open.ShowPage("Sites");
+        else _sitesPageWanted = true;
+        _ = OpenOptionsAsync();
+    }
+
+    // Options › Sites was asked for before the Options window existed; it goes there when the window is created.
+    private bool _sitesPageWanted;
 
     private void ShowSite(string siteId)
     {
@@ -219,7 +227,8 @@ public sealed partial class MainWindow
         if (_sitesPanel is not { } panel || !_sitesShown) return;
         SitesUpButton.IsEnabled = panel.CanGoUp;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;
-        SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
+        // The Host refuses a star on the root, so the button is off there.
+        SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && panel.CanGoUp;
         var starred = panel.IsStarred;
         SitesStarIcon.Glyph = starred ? "" : "";
         SitesStarLabel.Text = starred ? "Unstar" : "Star";

@@ -80,7 +80,18 @@ internal sealed class SiteDialog
         AutomationProperties.SetLiveSetting(_error, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Assertive);
 
         _auth.SelectionChanged += (_, _) => ShowAuth();
-        _chooseKey.Click += async (_, _) => await ChooseKeyAsync();
+        _chooseKey.Click += async (_, _) =>
+        {
+            try
+            {
+                await ChooseKeyAsync();
+            }
+            catch (Exception)
+            {
+                // An event handler's exception would end the app; the words stay in the dialog instead.
+                ShowError("The key file could not be read.");
+            }
+        };
         ShowAuth();
     }
 
@@ -150,7 +161,18 @@ internal sealed class SiteDialog
             {
                 args.Cancel = true;
                 dialog.IsPrimaryButtonEnabled = false;
-                var site = await TrySaveAsync();
+                SiteDto? site;
+                try
+                {
+                    site = await TrySaveAsync();
+                }
+                catch (Exception)
+                {
+                    // An event handler's exception would end the app; no exception words are shown, a secret may be in them.
+                    ShowError("The site could not be saved.");
+                    site = null;
+                }
+
                 if (site is not null)
                 {
                     saved = site;

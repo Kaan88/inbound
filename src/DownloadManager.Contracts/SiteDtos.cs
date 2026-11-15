@@ -70,7 +70,7 @@ public static class SitesMessageTypes
 
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
-        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck;
+        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>

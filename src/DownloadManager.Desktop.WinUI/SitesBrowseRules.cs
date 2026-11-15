@@ -19,13 +19,14 @@ internal static class SitesBrowseRules
 
     /// <summary>
     /// An absolute path in one spelling: a leading slash, single slashes, no trailing one (but the root), "." and ".."
-    /// resolved ("/.." stays the root). Backslashes are taken as slashes. Null or blank is the root.
+    /// resolved ("/.." stays the root). Only "/" separates: a backslash is part of a name on an SFTP server, as the Host
+    /// takes it. Null or blank is the root.
     /// </summary>
     public static string Normalize(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return Root;
         var kept = new List<string>();
-        foreach (var part in path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             if (part == ".") continue;
             if (part == "..")

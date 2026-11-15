@@ -13,7 +13,7 @@ public sealed class SitesBrowseRulesTests
     [InlineData("home", "/home")]
     [InlineData("/home/", "/home")]
     [InlineData("//home///user//", "/home/user")]
-    [InlineData("\\home\\user", "/home/user")]
+    [InlineData("/backup\\2026", "/backup\\2026")]
     [InlineData("/a/./b", "/a/b")]
     [InlineData("/a/b/../c", "/a/c")]
     [InlineData("/..", "/")]

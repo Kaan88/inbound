@@ -870,6 +870,11 @@ public sealed partial class MainWindow
     {
         _settingsWindow = window;
         _optionsOpening = false;
+        if (_sitesPageWanted)
+        {
+            _sitesPageWanted = false;
+            window.ShowPage("Sites");
+        }
         window.Closed += (_, _) =>
         {
             if (_settingsWindow == window) _settingsWindow = null;

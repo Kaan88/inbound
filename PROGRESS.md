@@ -42,6 +42,27 @@
   (the server was published from the context's files instead, and the rclone stage's steps were run with GNU tools, not
   busybox), the window UI (not built), anything on Windows.
 
+- **G. SITES.3 browsing, and the Options › Sites page** (2026-11-15, main). Host: `sites.browse`
+  (one folder through rclone `operations/list`, folders first then by name, paged from one listing per site named by a
+  `listing` token; a later page of a gone listing gets `listingChanged`, never a slice of a newer one) and `sites.star`
+  (stars on the site, kept on edit, dropped with a new server); the hello offers `sites` to the desktop user at this PC.
+  Window (two Sonnet agents on worktree branches, merged): Options › Sites (switch, rclone download, update check and
+  offer, automatic updates, own rclone, sites list, Add/Edit dialog, first-use and changed host-key prompts) and the
+  browse view (sidebar entries per site, panel with breadcrumbs, Load more, stars dropdown, toolbar swap, speed graph
+  hidden). A Fable review of the Host side found no path or secret problem (rclone treats `remote` as a plain path; checked
+  with the real 1.76.0) and seven others (pages from two listings, a listing re-cached after a site changed, listings kept
+  without bound, browse holding the window's main connection, a bad site folder only refused on use, a null star path
+  throwing, refusals echoing `/`); all fixed with tests. A Haiku review of the window code then found that `sites.browse` and `sites.star` never reached the
+  Sites handler (missing from `SitesMessageTypes.IsRequest`; the Host tests had called the handler directly), now covered
+  by a dispatcher test that checks every request name; and seven window faults (backslashes taken as slashes, "Open
+  Options › Sites" not opening that page, a switch clickable before the status is read, "No sites yet." while Sites is
+  off, exceptions escaping two dialog handlers, an undisposed linked token, Star offered at the root), all fixed. Tests on Linux: Sites.Tests 144 pass (1 skips: the real zip),
+  Integration Sites 52 (51 pass; the one failure needs the Windows Host build and failed before), the SFTP end-to-end test
+  browses and pages a real sshd with rclone 1.76.0; Core.Tests: only the 31 failures that were there before on Linux.
+  `dotnet build` of the Uno window succeeds. **Not checked:** neither page has been opened in the running app (Linux or
+  Windows), so layout, dialogs, focus and the walk against a test SFTP server (the phase's "done when") are still to do;
+  the WinUI XAML compiler (Windows only).
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on

@@ -95,6 +95,23 @@ internal sealed class SettingsWindow : Window
 
     public Task WaitClosedAsync() => _closed.Task;
 
+    private readonly List<string> _titles = [];
+    private string? _wantedTitle;
+
+    /// <summary>
+    /// Goes to the page of that title, or one whose title starts with it and a space ("Sites" finds "Sites on this PC").
+    /// A page not added yet is gone to when it is.
+    /// </summary>
+    public void ShowPage(string title)
+    {
+        var index = _titles.FindIndex(added => TitleMatches(added, title));
+        if (index >= 0) _nav.SelectedIndex = index;
+        else _wantedTitle = title;
+    }
+
+    private static bool TitleMatches(string added, string title) =>
+        added == title || added.StartsWith(title + " ", StringComparison.Ordinal);
+
     public void AddPage(string title, string glyph, params UIElement[] controls)
     {
         var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(4, 2, 4, 2) };
@@ -112,7 +129,13 @@ internal sealed class SettingsWindow : Window
         // Tab stops on it, to scroll with the keys.
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(scroller, $"{title} page");
         _pages.Add(scroller);
+        _titles.Add(title);
         if (_nav.SelectedIndex < 0) _nav.SelectedIndex = 0;
+        if (_wantedTitle is { } wanted && TitleMatches(title, wanted))
+        {
+            _wantedTitle = null;
+            _nav.SelectedIndex = _pages.Count - 1;
+        }
     }
 
     /// <summary>Takes back what the footer says, once what it complained about is dealt with.</summary>

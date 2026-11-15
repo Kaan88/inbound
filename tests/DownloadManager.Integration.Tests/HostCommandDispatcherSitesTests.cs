@@ -72,7 +72,32 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.Probe, new SiteProbeRequest { Host = "srv.example", Port = 22 }),
         (SitesMessageTypes.Trust, new SiteTrustRequest { Id = SiteId, Entries = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA"] }),
         (SitesMessageTypes.Test, new SiteIdRequest { Id = SiteId }),
+        (SitesMessageTypes.RcloneInstall, new SitesRcloneInstallRequest()),
+        (SitesMessageTypes.RcloneCheck, new { }),
+        (SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteId, Path = "/pub" }),
+        (SitesMessageTypes.Star, new SiteStarRequest { Id = SiteId, Path = "/pub" }),
     ];
+
+    /// <summary>The Host's own messages: replies and the push. Every other name in <see cref="SitesMessageTypes"/> is a request.</summary>
+    private static readonly string[] SitesReplies =
+    [
+        SitesMessageTypes.Status, SitesMessageTypes.List, SitesMessageTypes.Result, SitesMessageTypes.Kinds,
+        SitesMessageTypes.ProbeResult, SitesMessageTypes.BrowseResult, SitesMessageTypes.Changed,
+    ];
+
+    [Fact]
+    public void EveryRequestNameReachesSitesAndIsTestedHere()
+    {
+        // A request missing from IsRequest falls through to "unknown message type" (SITES.3 shipped that way once).
+        var names = typeof(SitesMessageTypes).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => (string)field.GetRawConstantValue()!)
+            .Except(SitesReplies)
+            .ToList();
+        Assert.All(names, name => Assert.True(SitesMessageTypes.IsRequest(name), name));
+        Assert.All(SitesReplies, name => Assert.False(SitesMessageTypes.IsRequest(name), name));
+        Assert.Equal(names.Order(), SitesRequests.Select(request => request.Type).Order());
+    }
 
     [Fact]
     public async Task TheHelloOffersSitesOnlyToThePipeOfAHostWithSites()
