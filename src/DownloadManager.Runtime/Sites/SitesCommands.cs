@@ -188,6 +188,17 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.Certificate:
                 return IpcMessage.Create(SitesMessageTypes.CertificateResult,
                     await CertificateAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen:
+                return IpcMessage.Create(SitesMessageTypes.DeviceStream, await DeviceOpenAsync(request.GetPayload<SiteDeviceOpenRequest>() ?? new SiteDeviceOpenRequest(),
+                    request.Type == SitesMessageTypes.DeviceWriteOpen, cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.DeviceRead:
+                return IpcMessage.Create(SitesMessageTypes.DeviceChunk,
+                    await DeviceReadAsync(request.GetPayload<SiteDeviceChunkRequest>() ?? new SiteDeviceChunkRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.DeviceWrite:
+                return IpcMessage.Create(SitesMessageTypes.DeviceChunk,
+                    await DeviceWriteAsync(request.GetPayload<SiteDeviceChunkRequest>() ?? new SiteDeviceChunkRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.DeviceClose:
+                return Result(request, await DeviceCloseAsync(request.GetPayload<SiteDeviceChunkRequest>()?.StreamId ?? "").ConfigureAwait(false));
             case SitesMessageTypes.SignIn:
                 return IpcMessage.Create(SitesMessageTypes.SignInResult,
                     await SignInAsync(request.GetPayload<SiteSignInRequest>() ?? new SiteSignInRequest(), cancellationToken).ConfigureAwait(false), request.Id);
@@ -1086,6 +1097,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         await StopUpdateLoopAsync().ConfigureAwait(false);
         CancelSignIn(null);
+        await CloseAllStreamsAsync().ConfigureAwait(false);
         // Files in flight stop first (they hold leases), and their batches go on at the next start.
         await _transfers.DisposeAsync().ConfigureAwait(false);
         await _gate.WaitAsync().ConfigureAwait(false);

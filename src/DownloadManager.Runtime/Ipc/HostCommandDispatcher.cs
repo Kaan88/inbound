@@ -97,8 +97,7 @@ public sealed partial class HostCommandDispatcher
     private List<string> HelloCapabilities(SessionRights rights)
     {
         var capabilities = CapabilitiesOf(rights);
-        if (Sites is not null && string.Equals(rights.Role, ClientRoles.Desktop, StringComparison.Ordinal) && rights.Scope is null)
-            capabilities.Add("sites");
+        if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         return capabilities;
     }
 
@@ -179,6 +178,8 @@ public sealed partial class HostCommandDispatcher
         || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust
         // SITES.6c: waits for rclone to print the sign-in address, or for OneDrive to name the drive.
         || type is SitesMessageTypes.SignIn
+        // SITES.7: each waits on rclone and the server for the next piece.
+        || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
         || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
 
     /// <summary>

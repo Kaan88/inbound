@@ -169,6 +169,63 @@ public sealed class RcloneClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// SITES.7: a file of the named remote <paramref name="remoteName"/>, as rclone serves it (<c>--rc-serve</c>). The caller
+    /// disposes the response; its body is the file. A missing file or a refusal throws <see cref="RcloneCallException"/>.
+    /// </summary>
+    public async Task<HttpResponseMessage> OpenFileAsync(string remoteName, string remotePath, CancellationToken cancellationToken = default)
+    {
+        var path = "[" + remoteName + ":]/" + string.Join('/', remotePath.TrimStart('/').Split('/').Select(Uri.EscapeDataString));
+        using var request = new HttpRequestMessage(HttpMethod.Get, path.Replace("[", "%5B", StringComparison.Ordinal).Replace("]", "%5D", StringComparison.Ordinal));
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException e)
+        {
+            throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone could not be reached: {e.Message}", e);
+        }
+
+        if (response.IsSuccessStatusCode) return response;
+        using (response)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new RcloneCallException("serve", (int)response.StatusCode,
+                response.StatusCode == HttpStatusCode.NotFound ? "The file is not on the server." : Redact(ErrorText(body)));
+        }
+    }
+
+    /// <summary>
+    /// SITES.7: <c>operations/uploadfile</c> into <paramref name="folder"/> of the named remote, the file's bytes read from
+    /// <paramref name="content"/> as rclone takes them (nothing is buffered here).
+    /// </summary>
+    /// The remote's root is "/", as in the fs objects: absolute paths on SFTP and FTP servers.
+    public async Task UploadFileAsync(string remoteName, string folder, string name, Stream content, CancellationToken cancellationToken = default)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new StreamContent(content, 256 * 1024);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(file, "file0", name);
+        var query = "operations/uploadfile?fs=" + Uri.EscapeDataString(remoteName + ":/") + "&remote=" + Uri.EscapeDataString(folder.Trim('/'));
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.PostAsync(query, form, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException e)
+        {
+            throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone could not be reached: {e.Message}", e);
+        }
+
+        using (response)
+        {
+            if (response.IsSuccessStatusCode) return;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new RcloneCallException("operations/uploadfile", (int)response.StatusCode, Redact(ErrorText(body)));
+        }
+    }
+
     /// <summary>rclone's "obscured" form of a password, which its backends expect in <c>pass</c>-type options (SITES.0).</summary>
     public async Task<string> ObscureAsync(string clear, CancellationToken cancellationToken = default)
     {

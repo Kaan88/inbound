@@ -50,8 +50,8 @@ started: 7-Zip found; one installed later shows on the next connection, and at o
 `tool`), and `uploads` (the server takes `POST /api/upload/torrent` and `/api/upload/container`, and the `remote.*`
 commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
 installed, since the bridge serves both uploads into the Host's data folder), and `sites` (the `sites.*` messages are
-answered for this session: the Host has Sites and the session is the desktop user at this PC; sent with the switch on
-or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+answered for this session: the Host has Sites and the session is the desktop user at this PC or, since SITES.7, a web
+session or the server's own; sent with the switch on or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -182,16 +182,33 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
-### Sites: `sites.*` (SITES.2 to SITES.4, on main since 2026-11-15, not released)
+### Sites: `sites.*` (SITES.2 to SITES.7, on main since 2026-11-15, not released)
 
 Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
 `SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
 `SitesCommands` (`src/DownloadManager.Runtime/Sites/`) and `HostCommandDispatcher.Sites.cs`.
 
-Who may send: only the user at this PC. That is a `desktop` session (role left out or `desktop`) with no web scope.
-A `web` session, or a session with a scope, gets `host.actionResult` `{ok: false, message: "Sites can only be used
-from the app on this PC for now."}` and nothing changes. A Host built without Sites says "Sites are not available
-here." in the same shape.
+Who may send: the user at this PC (a `desktop` session) and, since SITES.7, a web session (a browser signed in with the
+password: the admin, owner 2026-11-15) and the server's clients. A web session's folders on the computer Inbound runs
+on are held to its own: a site's `localFolder` and a transfer's `localFolder` outside them get `host.actionResult`
+`{ok: false, message}` with the folder words, and one inside is passed on resolved. On the server every caller is held
+to the server's roots the same way (`HostCommandDispatcher.SitesRoots`). Neither may change Use my own rclone
+(`ownRclonePath` set): that names a program to run, chosen only in the app on that computer. A Host built without Sites
+says "Sites are not available here." in the same shape.
+
+"This device" (SITES.7): `sites.device.readOpen {id, path}` and `sites.device.writeOpen {id, folder, name, size,
+replace}` open a stream between a site and the device the web UI runs on, answered with `sites.device.stream {ok,
+message?, problem?, streamId, name, size}` (`problem: exists` when the name is taken and `replace` is not set). Then
+`sites.device.read {streamId}` answers `sites.device.chunk {ok, data (base64), done}` until `done`, and
+`sites.device.write {streamId, data, last}` sends pieces of at most 1 MiB (`SiteDeviceLimits`); the answer to the
+`last` one comes when the server has the whole file. More bytes than `size`, or fewer at `last`, end the stream and
+nothing is kept. `sites.device.close {streamId}` stops one; one unused for two minutes is closed, and 8 at once is the
+most. rclone reads the file over its own served address (`--rc-serve`, named in-memory remotes) and takes an upload
+with `operations/uploadfile`, so nothing is written to a disk on the way. The browser uses the server's
+`GET /api/sites/device?id=&path=` (the file as a download) and `POST /api/sites/device?id=&folder=&replace=1` (the body,
+its name percent-encoded in `X-File-Name`, its `Content-Length` required; `409` when the name is taken), signed in or
+with a paired desktop app's token; both go through the same backend as `/api/ipc`, so through the pipe in the Windows
+app's bridge.
 
 Off: when the switch is off, rclone never starts and nothing runs on a timer. Only `sites.get` and
 `sites.setEnabled` are answered in full. The other requests get:
@@ -404,7 +421,7 @@ never contents.
 `sites.probe`, `sites.test`, `sites.browse`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
 install cut off that way leaves nothing behind).
 
-`sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
+`sites.changed` (the sessions `sites.*` is answered for) carries `SitesChangedDto` `{status, sites}`.
 The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
 removed, trusted or starred, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
 

@@ -71,6 +71,9 @@ public sealed class ServerApp : IAsyncDisposable
 
     public DownloadManagerService Service => _service;
 
+    /// <summary>SITES.7: the server's Sites.</summary>
+    private DownloadManager.Runtime.Sites.SitesCommands? Sites { get; init; }
+
     /// <summary>Sign-in, sessions and paired browsers (D2).</summary>
     public ServerAuth Auth { get; private init; } = null!;
 
@@ -201,18 +204,30 @@ public sealed class ServerApp : IAsyncDisposable
 
         service.TrayAvailable = false;
 
+        // SITES.7: Sites on the server. Off until an admin turns it on; the image's rclone (tools/rclone) is found next to
+        // the program, and a newer one is downloaded into the data folder. Folders on this computer are the roots.
+        var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
+            updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new DownloadManager.Core.ProxiedClientHandler(engine), log.Info));
         var dispatcher = new HostCommandDispatcher(service, new ServerPlatform(), log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives, roots) : null,
             Folders = new FolderBrowser(roots),
+            Sites = sites,
+            SitesRoots = roots,
         };
+        sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
+        sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
+        sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
+        sites.Transfers.Measured += service.OnSiteTransfersMeasured;
+        service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
+        service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         service.SettingsChanged += (_, _) => log.Info("Settings updated.");
         dispatcher.Start();
 
         var auth = await ServerAuth.CreateAsync(options, paths.Root, log, cancellationToken).ConfigureAwait(false);
         var web = WebFront.Build(options, new DispatcherBackend(dispatcher, log), log, auth, uploads);
-        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock) { Auth = auth };
+        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock) { Auth = auth, Sites = sites };
         try
         {
             await web.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -267,6 +282,7 @@ public sealed class ServerApp : IAsyncDisposable
             _log.Warn($"Web shutdown: {ex.GetType().Name}");
         }
 
+        if (Sites is { } sites) await Step(() => sites.DisposeAsync().AsTask(), "Sites shutdown").ConfigureAwait(false);
         await Step(() => _archives.ShutdownAsync(CancellationToken.None), "Archive shutdown").ConfigureAwait(false);
         await Step(() => _remoteJobs.StopAsync(), "Remote jobs shutdown").ConfigureAwait(false);
         await Step(() => _service.ShutdownAsync(CancellationToken.None), "Service shutdown").ConfigureAwait(false);

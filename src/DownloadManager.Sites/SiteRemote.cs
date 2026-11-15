@@ -138,6 +138,29 @@ public static class SiteRemote
     public static string RemoteName(SiteRecord site) => "site-" + site.Id;
 
     /// <summary>
+    /// SITES.7: the site as a named in-memory remote (<c>config/create</c>), which rclone's file serving and
+    /// <c>operations/uploadfile</c> need. A sign-in site already is one; another kind is made (again) from its fs object,
+    /// whose secrets are already obscured or registered. Returns the remote's name.
+    /// </summary>
+    public static async Task<string> NamedAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken = default)
+    {
+        var fs = await BuildAsync(site, client, cancellationToken).ConfigureAwait(false);
+        if (fs["_name"]?.GetValue<string>() is { } named) return named;
+        var name = RemoteName(site);
+        var parameters = new JsonObject();
+        foreach (var (key, value) in fs)
+            if (key is not ("type" or "_root")) parameters[key] = value?.DeepClone();
+        await client.CallAsync("config/create", new JsonObject
+        {
+            ["name"] = name,
+            ["type"] = fs["type"]!.GetValue<string>(),
+            ["parameters"] = parameters,
+            ["opt"] = new JsonObject { ["nonInteractive"] = true, ["noObscure"] = true },
+        }, cancellationToken).ConfigureAwait(false);
+        return name;
+    }
+
+    /// <summary>
     /// SITES.6c: Drive, OneDrive and Dropbox. Each is a named in-memory remote (<c>config/create</c> with
     /// <c>--config ""</c>), because rclone writes a renewed token back only to a named remote; an <c>fs</c> object with
     /// <c>_name</c> uses it. Before it is used again the token rclone holds is compared with the one it was given: a renewed

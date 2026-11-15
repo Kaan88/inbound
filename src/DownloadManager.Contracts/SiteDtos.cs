@@ -61,6 +61,28 @@ public static class SitesMessageTypes
     public const string SignInResult = "sites.signInResult";
 
     /// <summary>
+    /// SITES.7, "to this device": <see cref="SiteDeviceOpenRequest"/> with <c>path</c>, a file; answered with
+    /// <see cref="DeviceStream"/>. Then <see cref="DeviceRead"/> until <c>done</c>. The server's web front streams it to
+    /// the browser; a stream unused for two minutes is closed.
+    /// </summary>
+    public const string DeviceReadOpen = "sites.device.readOpen";
+
+    /// <summary>SITES.7, "from this device": <see cref="SiteDeviceOpenRequest"/> with <c>folder</c>, <c>name</c> and <c>size</c>.</summary>
+    public const string DeviceWriteOpen = "sites.device.writeOpen";
+
+    /// <summary><see cref="SiteDeviceChunkRequest"/>: the next piece of a read stream, answered with <see cref="DeviceChunk"/>.</summary>
+    public const string DeviceRead = "sites.device.read";
+
+    /// <summary><see cref="SiteDeviceChunkRequest"/> with <c>data</c>: a piece of a write stream; <c>last</c> ends it.</summary>
+    public const string DeviceWrite = "sites.device.write";
+
+    /// <summary><see cref="SiteDeviceChunkRequest"/>: stops a stream (an upload is not kept); answered with <see cref="Result"/>.</summary>
+    public const string DeviceClose = "sites.device.close";
+
+    public const string DeviceStream = "sites.device.stream";
+    public const string DeviceChunk = "sites.device.chunk";
+
+    /// <summary>
     /// <see cref="SitesRcloneInstallRequest"/>: downloads, checks and installs rclone (Options › Sites › Download rclone, or
     /// Update rclone); answered with <see cref="Status"/> when done. Not for "Use my own rclone", which Inbound never touches.
     /// </summary>
@@ -142,7 +164,8 @@ public static class SitesMessageTypes
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
             or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
-            or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel;
+            or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
+            or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -378,6 +401,68 @@ public sealed class SiteSignInRequest
     public string? Token { get; set; }
 }
 
+/// <summary>SITES.7: opens a stream between a site and the device the web UI runs on.</summary>
+public sealed class SiteDeviceOpenRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>Read: the file on the server.</summary>
+    public string? Path { get; set; }
+
+    /// <summary>Write: the folder on the server, the new file's name and its size in bytes.</summary>
+    public string? Folder { get; set; }
+
+    public string? Name { get; set; }
+    public long Size { get; set; }
+
+    /// <summary>Write: replaces a file of that name; otherwise the answer is <see cref="SiteProblems.Exists"/>.</summary>
+    public bool Replace { get; set; }
+}
+
+public sealed class SiteDeviceStreamDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+    public string? StreamId { get; set; }
+    public string? Name { get; set; }
+
+    /// <summary>The file's size, or -1 when the server did not say.</summary>
+    public long Size { get; set; } = -1;
+}
+
+public sealed class SiteDeviceChunkRequest
+{
+    public string StreamId { get; set; } = "";
+
+    /// <summary>Write only: the bytes (base64 on the wire), at most <see cref="SiteDeviceLimits.ChunkBytes"/>.</summary>
+    public byte[]? Data { get; set; }
+
+    /// <summary>Write only: the last piece; the answer comes when the server has the whole file.</summary>
+    public bool Last { get; set; }
+}
+
+public sealed class SiteDeviceChunkDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+
+    /// <summary>Read: the next bytes (empty at the end).</summary>
+    public byte[]? Data { get; set; }
+
+    /// <summary>Read: no more bytes. Write: the file is on the server.</summary>
+    public bool Done { get; set; }
+}
+
+public static class SiteDeviceLimits
+{
+    /// <summary>One piece: 1 MiB, well inside a frame (<see cref="Protocol.MaxFrameBytes"/>) as base64.</summary>
+    public const int ChunkBytes = 1024 * 1024;
+
+    /// <summary>Streams open at once on a Host.</summary>
+    public const int MostStreams = 8;
+}
+
 public sealed class SiteSignInResultDto
 {
     public bool Ok { get; set; }
@@ -482,6 +567,9 @@ public static class SiteProblems
 
     /// <summary>SITES.6c: a sign-in kind with no token, or one the provider no longer accepts (<c>invalid_grant</c>): sign in again.</summary>
     public const string SignInNeeded = "signInNeeded";
+
+    /// <summary>SITES.7: an upload from this device would replace a file of that name; it is sent again with <c>replace</c>.</summary>
+    public const string Exists = "exists";
 
     /// <summary>Sites is off.</summary>
     public const string Off = "off";

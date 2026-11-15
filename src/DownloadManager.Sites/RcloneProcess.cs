@@ -135,6 +135,9 @@ public sealed class RcloneProcess : IRcloneInstance
             "--cache-dir", cache,
             "--temp-dir", temp,
             "--rc-job-expire-duration", "10m",
+            // SITES.7: a file of a named remote is read over HTTP (GET /[name:]path), for "to this device". Only the
+            // Host has the credentials, and only named remotes the Host made exist (--config "").
+            "--rc-serve",
             "--log-level", "NOTICE",
             "--use-json-log=false",
         }) info.ArgumentList.Add(argument);

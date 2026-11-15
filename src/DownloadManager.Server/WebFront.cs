@@ -119,6 +119,7 @@ internal static class WebFront
         web.MapGet("/health", () => Results.Json(new { status = "ok", version = Protocol.HostVersion }));
         auth.Map(web);
         uploads.Map(web);
+        SiteDeviceStreams.Map(web, backend, stopping);
 
         web.Map(ServerAuth.WebSocketPath, async context =>
         {
