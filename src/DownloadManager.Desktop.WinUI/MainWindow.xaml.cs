@@ -556,13 +556,36 @@ public sealed partial class MainWindow : Window
         var scroller = _sidebarScroller = new ScrollViewer
         {
             Content = CategoryList,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            // Hidden still scrolls (wheel, trackpad); the bar shows only while the pointer moves over the sidebar.
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
             VerticalScrollMode = ScrollMode.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalScrollMode = ScrollMode.Disabled,
         };
         Grid.SetRow(scroller, row);
         sidebar.Children.Add(scroller);
+
+        // Owner: "scrollbar should disappear when there is no mouse movement in the sidebar". As WinUI's own scroll
+        // indicators fade: shown on movement or a scroll, hidden again 1.5 s after the last one or when the pointer leaves.
+        var hide = DispatcherQueue.CreateTimer();
+        hide.Interval = TimeSpan.FromSeconds(1.5);
+        hide.IsRepeating = false;
+        hide.Tick += (_, _) => scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        void Show(object sender, PointerRoutedEventArgs e)
+        {
+            if (scroller.ScrollableHeight <= 0) return;
+            scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            hide.Stop();
+            hide.Start();
+        }
+
+        scroller.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Show), handledEventsToo: true);
+        scroller.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Show), handledEventsToo: true);
+        scroller.PointerExited += (_, _) =>
+        {
+            hide.Stop();
+            scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        };
     }
 #endif
 
