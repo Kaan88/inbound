@@ -20,6 +20,8 @@ public sealed class MacMenuBarTests
             $$"""{"active":2,"speed":"3.0 MB/s","items":[{"id":"{{fast.Id:D}}","name":"fast.bin","percent":null,"state":"downloading"},{"id":"{{slow.Id:D}}","name":"slow.bin","percent":25,"state":"downloading"}]}""",
             json);
         Assert.Equal("""{"active":0,"speed":null,"items":[]}""", MacMenuBar.StatusJson([done]));
+        var paused = new JobDto { Id = Guid.NewGuid(), FileName = "paused.bin", State = "paused", Progress = 0.5 };
+        Assert.Contains($$"""{"id":"{{paused.Id:D}}","name":"paused.bin","percent":50,"state":"paused"}""", MacMenuBar.StatusJson([fast, paused]));
     }
 
     [Theory]
@@ -82,11 +84,16 @@ public sealed class MacMenuBarTests
         Assert.Equal("downloading", states[running]); // off: nothing happens
 
         await saving.EnabledAsync(true);
+        saving.Observe(running, "downloading"); // a progress event from before the pause took effect
+        saving.Observe(running, "paused");
+        saving.Observe(resumedByUser, "paused");
         Assert.Equal("paused", states[running]);
         Assert.Equal("paused", states[resumedByUser]);
         Assert.Equal(2, saving.Paused.Count);
 
-        states[resumedByUser] = "downloading"; // the user resumed it on the hotspot
+        states[resumedByUser] = "downloading"; // the user resumed it on the hotspot, then paused it again
+        saving.Observe(resumedByUser, "downloading");
+        states[resumedByUser] = "paused";
         await saving.PowerAsync("low");
         await saving.NetworkAsync("normal"); // still in Low Power Mode
         Assert.Empty(resumed);

@@ -279,11 +279,14 @@ internal sealed class MacMenuBar : IAsyncDisposable
     }
 
     /// <summary>The menu's status line: what <see cref="Status"/> returns.</summary>
-    public static string StatusJson(IEnumerable<DownloadManager.Contracts.JobDto> jobs)
+    public static string StatusJson(IReadOnlyCollection<DownloadManager.Contracts.JobDto> jobs)
     {
         var active = jobs.Where(job => job.State is "connecting" or "downloading" or "retryWaiting" or "verifying").ToList();
         var speed = active.Sum(job => job.BytesPerSecond ?? 0);
-        var items = active.OrderByDescending(job => job.BytesPerSecond ?? 0).Take(5)
+        // Running ones first, fastest first; then paused ones, so one can be resumed from the menu.
+        var items = active.OrderByDescending(job => job.BytesPerSecond ?? 0)
+            .Concat(jobs.Where(job => job.State == "paused").OrderByDescending(job => job.ReceivedBytes))
+            .Take(5)
             .Select(job => new StatusItem(job.Id.ToString("D"), job.FileName,
                 job.Progress is { } progress ? (int)Math.Clamp(Math.Floor(progress * 100), 0, 100) : null, job.State))
             .ToList();

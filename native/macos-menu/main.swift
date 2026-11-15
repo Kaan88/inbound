@@ -121,12 +121,12 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         }
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "completed", actions: [
-                UNNotificationAction(identifier: "open", title: "Open"),
-                UNNotificationAction(identifier: "reveal", title: "Show in Finder"),
-            ], intentIdentifiers: []),
+                UNNotificationAction(identifier: "open", title: "Open", options: []),
+                UNNotificationAction(identifier: "reveal", title: "Show in Finder", options: []),
+            ], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: "failed", actions: [
-                UNNotificationAction(identifier: "retry", title: "Retry"),
-            ], intentIdentifiers: []),
+                UNNotificationAction(identifier: "retry", title: "Retry", options: []),
+            ], intentIdentifiers: [], options: []),
         ])
 
         Thread {
@@ -162,7 +162,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
             let name = job.name.count > 40 ? String(job.name.prefix(39)) + "…" : job.name
             let entry = NSMenuItem(title: name + percent, action: nil, keyEquivalent: "")
             let sub = NSMenu()
-            let paused = job.state == "paused" || job.state == "stopped"
+            let paused = job.state == "paused"
             sub.addItem(choice(paused ? "Resume" : "Pause", "job \(paused ? "resume" : "pause") \(job.id)"))
             sub.addItem(choice("Show in Inbound", "job show \(job.id)"))
             entry.submenu = sub
@@ -311,8 +311,12 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
             let task = Process()
             task.executableURL = cli
             task.arguments = ["add", link]
-            try? task.run()
-            task.waitUntilExit()
+            do {
+                try task.run()
+                task.waitUntilExit()
+            } catch {
+                continue // no CLI to hand it to: nothing else can take it
+            }
         }
         NSApp.terminate(nil)
     }

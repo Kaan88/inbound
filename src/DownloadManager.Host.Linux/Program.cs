@@ -692,6 +692,7 @@ internal static class Program
             id => service.PauseAsync(id),
             id => service.ResumeAsync(id),
             log.Info);
+        service.JobChanged += (_, e) => saving.Observe(e.Job.Id, e.Job.State);
         requests.Network = kind => Observe(saving.NetworkAsync(kind), log, "Network change");
         requests.Power = state => Observe(saving.PowerAsync(state), log, "Power change");
         Observe(saving.EnabledAsync(service.GetSettings().PauseOnCostlyNetworkOrLowPower), log, "Saving setting");

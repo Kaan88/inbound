@@ -16,6 +16,7 @@ public sealed class SavingPauses
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _order = new(1, 1); // one change's pauses and resumes before the next's
     private readonly HashSet<Guid> _paused = [];
+    private readonly HashSet<Guid> _settled = []; // paused by this and seen paused; until then a late progress event is ignored
     private bool _costly;
     private bool _lowPower;
     private bool _enabled;
@@ -33,6 +34,19 @@ public sealed class SavingPauses
     public IReadOnlyCollection<Guid> Paused
     {
         get { lock (_gate) return _paused.ToArray(); }
+    }
+
+    /// <summary>
+    /// A download's state changed. One this paused that runs again was the user's doing (or a schedule's), so it is
+    /// theirs from then on: a later pause of theirs is not undone when saving ends.
+    /// </summary>
+    public void Observe(Guid id, string state)
+    {
+        lock (_gate)
+        {
+            if (state == "paused") { if (_paused.Contains(id)) _settled.Add(id); }
+            else if (_settled.Remove(id)) _paused.Remove(id);
+        }
     }
 
     /// <summary>The helper's <c>network expensive|constrained|normal</c>.</summary>
@@ -87,6 +101,7 @@ public sealed class SavingPauses
                 // Only those still paused: one the user resumed or deleted meanwhile is left alone.
                 resume.AddRange(_paused.Where(id => states.TryGetValue(id, out var state) && state == "paused"));
                 _paused.Clear();
+                _settled.Clear();
             }
         }
 
