@@ -84,7 +84,6 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
-        if (!WhatsNewApplies) WhatsNewMenuItem.Visibility = Visibility.Collapsed;
         // The progress, package and completion windows open on this window's screen (U-WL-4).
         WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
@@ -820,7 +819,7 @@ public sealed partial class MainWindow : Window
                 _versionLinkUpdates = version.UpdateLink is not null;
                 if (version.UpdateLink is not null)
                     ShowConnectionWords($"Connected · {version.Text}", version.UpdateLink, integration);
-                else if (WhatsNewApplies && version.Text.Length > 0)
+                else if (version.Text.Length > 0)
                     ShowConnectionWords("Connected", version.Text, integration);
                 else
                     ShowConnectionWords("Connected" + (version.Text.Length == 0 ? string.Empty : $" · {version.Text}"), null, integration);

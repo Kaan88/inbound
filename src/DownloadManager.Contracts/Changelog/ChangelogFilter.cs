@@ -1,10 +1,11 @@
 namespace DownloadManager.Contracts;
 
-/// <summary>Which app shows the notes: the Windows window, or the web UI of a server (or of the Windows app's bridge).</summary>
+/// <summary>Which app shows the notes: the Windows window, the web UI of a server (or of the Windows app's bridge), or the Linux window.</summary>
 public enum ChangelogSurface
 {
     Windows,
     WebUi,
+    Linux,
 }
 
 /// <summary>
@@ -36,8 +37,9 @@ public sealed record ChangelogView(IReadOnlyList<ChangelogShownVersion> Versions
 /// <summary>
 /// UPD.N1: which changelog lines an app shows. The Windows app shows lines tagged <c>windows</c> or <c>all</c>; the web UI
 /// <c>webui</c>, <c>server</c>, <c>docker</c> or <c>all</c>. Lines about torrents show only while torrents are on, about
-/// a provider only while an account of it is set, and Linux lines never. What is left (the extension, the other app) is folded
-/// under one line. The web UI has the same rules in <c>webui/src/lib/whatsNew.ts</c>.
+/// a provider only while an account of it is set. The Linux window shows <c>linux</c> or <c>all</c>; the other two never
+/// show or count Linux lines. What is left (the extension, the other app) is folded under one line. The web UI has the
+/// same rules in <c>webui/src/lib/whatsNew.ts</c>.
 /// </summary>
 public static class ChangelogFilter
 {
@@ -98,11 +100,14 @@ public static class ChangelogFilter
         if (tags.Any(tag => ChangelogTags.IsProvider(tag) && !features.HasProvider(tag))) return null;
         var places = tags.Where(tag => ChangelogTags.Places.Contains(tag, StringComparer.Ordinal)).ToList();
         if (places.Count == 0 || places.Contains(ChangelogTags.All)) return Here;
-        var mine = surface == ChangelogSurface.Windows
-            ? new[] { ChangelogTags.Windows }
-            : new[] { ChangelogTags.WebUi, ChangelogTags.Server, ChangelogTags.Docker };
+        var mine = surface switch
+        {
+            ChangelogSurface.Windows => new[] { ChangelogTags.Windows },
+            ChangelogSurface.Linux => new[] { ChangelogTags.Linux },
+            _ => new[] { ChangelogTags.WebUi, ChangelogTags.Server, ChangelogTags.Docker },
+        };
         if (places.Any(place => mine.Contains(place))) return Here;
-        // Linux lines are for the Linux app, which shows none of this (yet).
+        // Linux lines are for the Linux window only: the Windows app and the web UI neither show nor count them.
         return places.Where(place => place != ChangelogTags.Linux).Select(Label).FirstOrDefault();
     }
 

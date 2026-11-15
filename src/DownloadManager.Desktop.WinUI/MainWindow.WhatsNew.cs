@@ -16,8 +16,8 @@ public sealed partial class MainWindow
 {
     private bool _whatsNewDecided;
 
-    /// <summary>What's new is the Windows app's; the Linux window built from this code has none yet (out of UPD.N1).</summary>
-    private static bool WhatsNewApplies => OperatingSystem.IsWindows();
+    /// <summary>Whose lines show: the Windows app's, or the Linux window's when this code is built for it.</summary>
+    private static ChangelogSurface WhatsNewSurface => OperatingSystem.IsWindows() ? ChangelogSurface.Windows : ChangelogSurface.Linux;
 
     /// <summary>The version link in the status bar runs Check for updates (true) or What's new (false).</summary>
     private bool _versionLinkUpdates;
@@ -40,12 +40,12 @@ public sealed partial class MainWindow
     {
         if (_whatsNewDecided || _connection.IsRemote) return;
         _whatsNewDecided = true;
-        // The Linux window (the same code under Uno) has no What's new yet: its lines are tagged linux, which this hides.
-        if (!WhatsNewApplies) return;
         try
         {
             var decision = WhatsNewRules.Decide(InstalledBuild.TryLoad()?.Version, _uiState.WhatsNewSeen,
-                UiStateStore.ExistedAtStart || _jobsById.Count > 0);
+                UiStateStore.ExistedAtStart || _jobsById.Count > 0,
+                // The Linux window kept no mark before it had notes, so a missing one there says nothing about the version before.
+                guessWithoutMarker: OperatingSystem.IsWindows());
             UiTrace.Write($"What's new at start: installed={InstalledBuild.TryLoad()?.Version ?? "-"} seen={_uiState.WhatsNewSeen ?? "-"} " +
                           $"open={decision.Open} after={decision.After ?? "-"} record={decision.Record ?? "-"}");
             if (!decision.Open)
@@ -60,7 +60,7 @@ public sealed partial class MainWindow
             for (var wait = 0; wait < 40 && (RootGrid.XamlRoot is null || !RootGrid.IsLoaded); wait++) await Task.Delay(250);
             var current = decision.Record!;
             var versions = Changelog.Between(Changelog.Embedded, decision.After, current);
-            var view = ChangelogFilter.For(versions, ChangelogSurface.Windows, WhatsNewFeatures());
+            var view = ChangelogFilter.For(versions, WhatsNewSurface, WhatsNewFeatures());
             var previous = _uiState.WhatsNewSeen;
             // Kept before it shows, so a window that closes or fails while it is open doesn't show it again.
             RecordWhatsNewSeen(current);
@@ -93,7 +93,7 @@ public sealed partial class MainWindow
     {
         var version = ThisAppVersion();
         var entry = Changelog.Find(Changelog.Embedded, version);
-        var view = entry is null ? null : ChangelogFilter.For([entry], ChangelogSurface.Windows, WhatsNewFeatures());
+        var view = entry is null ? null : ChangelogFilter.For([entry], WhatsNewSurface, WhatsNewFeatures());
         if (view is null || view.IsEmpty)
         {
             await ShowMessageAsync("What's new", $"There are no notes about this app for version {Changelog.Display(version)}.");
@@ -202,7 +202,7 @@ public sealed partial class MainWindow
     /// </summary>
     private FrameworkElement? UpdateNotesBox(UpdateCheckResult check)
     {
-        var words = WhatsNewRules.UpdateNotes(check.Notes, check.AvailableVersion, WhatsNewFeatures(), WhatsNewApplies);
+        var words = WhatsNewRules.UpdateNotes(check.Notes, check.AvailableVersion, WhatsNewFeatures(), WhatsNewSurface);
         if (words.Header is null) return null;
         var theme = RootGrid.ActualTheme;
         var lines = new StackPanel { Spacing = 4 };

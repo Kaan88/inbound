@@ -188,11 +188,38 @@ public sealed class ChangelogTests
         Assert.Null(none.Header);
         Assert.Empty(none.Lines);
 
-        // The Linux window (same code) keeps the question as it was: these are the Windows app's lines, not its own.
-        var linux = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []), windowsApp: false);
-        Assert.Null(linux.Header);
-        Assert.Empty(linux.Lines);
-        Assert.Null(linux.Also);
+        // The Linux window (same code) lists its own lines and counts the Windows app's with the others.
+        var linux = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.Linux);
+        Assert.Equal("What 9.1.0 changes in this app", linux.Header);
+        Assert.Equal(["Everywhere", "Linux only"], linux.Lines);
+        Assert.Equal("Also 5 changes in the Windows app, the web UI, the server and the browser extension.", linux.Also);
+    }
+
+    [Fact]
+    public void TheLinuxWindowShowsLinuxLinesAndFoldsTheWindowsOnes()
+    {
+        var view = ChangelogFilter.For([Sample()], ChangelogSurface.Linux, new ChangelogFeatures(true, ["torbox"]));
+        // A line tagged windows and torrents is the Windows app's; one with no place tag is everyone's.
+        Assert.Equal(["Everywhere", "Linux only", "No place tag"], view.Versions[0].Sections[0].Lines);
+        Assert.Contains(view.Elsewhere, line => line.Place == "Windows" && line.Text == "Window only");
+        Assert.DoesNotContain(view.Elsewhere, line => line.Text == "Linux only");
+        // The Windows app still neither shows nor counts Linux lines.
+        var windows = ChangelogFilter.For([Sample()], ChangelogSurface.Windows, new ChangelogFeatures(false, []));
+        Assert.DoesNotContain("Linux only", windows.Versions[0].Sections[0].Lines);
+        Assert.DoesNotContain(windows.Elsewhere, line => line.Text == "Linux only");
+    }
+
+    [Fact]
+    public void TheLinuxWindowDoesNotGuessWhereItCameFrom()
+    {
+        // It kept no mark before it had notes: state and no mark records the version and opens nothing.
+        var first = WhatsNewRules.Decide("0.7.8", null, hadStateBefore: true, guessWithoutMarker: false);
+        Assert.False(first.Open);
+        Assert.Equal("0.7.8", first.Record);
+        // With a mark it opens after an upgrade like the Windows app.
+        var next = WhatsNewRules.Decide("0.7.9", "0.7.8", hadStateBefore: true, guessWithoutMarker: false);
+        Assert.True(next.Open);
+        Assert.Equal("0.7.8", next.After);
     }
 
     private static (UpdateManifest Manifest, string PublicKey) SignedManifest(string notesJson)

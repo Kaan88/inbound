@@ -1,5 +1,15 @@
 # Progress — session handoff
 
+### Linux window: release notes (UI.B39, owner report 2026-11-15)
+
+Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on
+purpose, so the update question's notes box was never built there, Help > What's New… was hidden and the version in
+the status bar was not a link. Fixed: `ChangelogSurface.Linux` (lines tagged `linux` or `all`; the Windows app's lines
+are counted with the others), used by the update question, Help > What's New…, the version link and the once-after-
+an-update dialog. The Linux window kept no last-seen mark before, so its first start after this only records the
+version. Core `ChangelogTests` 33 pass (3 new or changed); the Uno project builds on Linux. Not seen in a running
+window; the WinUI build was not run (the change is shared code, built here only through Uno and the tests).
+
 ### Release 0.7.7: Delete from TorBox on every item in My TorBox (owner, 2026-11-14)
 
 The owner did not find Delete from TorBox in My TorBox on 0.7.6: TB.F16 had put it in the main list's menu, and in My

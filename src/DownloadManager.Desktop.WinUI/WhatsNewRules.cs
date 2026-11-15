@@ -25,14 +25,16 @@ internal static class WhatsNewRules
     /// <param name="installed">The installed version (install.json); null for a development or portable build.</param>
     /// <param name="lastSeen">The version whose notes were last shown or skipped; null when none was kept.</param>
     /// <param name="hadStateBefore">ui-state.json was there when this window process started, or the Host has downloads.</param>
-    public static WhatsNewDecision Decide(string? installed, string? lastSeen, bool hadStateBefore)
+    /// <param name="guessWithoutMarker">False in the Linux window, which kept no mark before it had notes at all: with
+    /// state and no mark it records the version and shows nothing, instead of the notes since <see cref="LastWithoutMarker"/>.</param>
+    public static WhatsNewDecision Decide(string? installed, string? lastSeen, bool hadStateBefore, bool guessWithoutMarker = true)
     {
         if (Changelog.Normal(installed) is null) return new WhatsNewDecision(false, null, false, null);
         var current = Changelog.Display(installed!);
         if (Changelog.Normal(lastSeen) is null)
         {
             // A fresh install: nothing to tell; from now on the version is kept.
-            if (!hadStateBefore) return new WhatsNewDecision(false, null, false, current);
+            if (!hadStateBefore || !guessWithoutMarker) return new WhatsNewDecision(false, null, false, current);
             return Changelog.Compare(current, LastWithoutMarker) > 0
                 ? new WhatsNewDecision(true, LastWithoutMarker, false, current)
                 : new WhatsNewDecision(false, null, false, current);
@@ -66,12 +68,12 @@ internal static class WhatsNewRules
     /// The notes box of the Update available question: this app's lines of <paramref name="version"/> and a count of the
     /// others. No header when the manifest had no notes, or none for this app, so the question looks as it did before.
     /// </summary>
-    /// <param name="windowsApp">False in the Linux window built from the same code: its notes are not the Windows app's
-    /// lines, and the Linux window has no notes of its own yet (out of scope), so its question stays as it was.</param>
-    public static UpdateNotesWords UpdateNotes(IReadOnlyList<ChangelogItem>? notes, string? version, ChangelogFeatures features, bool windowsApp = true)
+    /// <param name="surface">The Windows window, or the Linux window built from the same code, which shows its own lines.</param>
+    public static UpdateNotesWords UpdateNotes(IReadOnlyList<ChangelogItem>? notes, string? version, ChangelogFeatures features,
+        ChangelogSurface surface = ChangelogSurface.Windows)
     {
-        if (!windowsApp || notes is not { Count: > 0 }) return new UpdateNotesWords(null, [], null);
-        var (here, elsewhere) = ChangelogFilter.Lines(notes, ChangelogSurface.Windows, features);
+        if (notes is not { Count: > 0 }) return new UpdateNotesWords(null, [], null);
+        var (here, elsewhere) = ChangelogFilter.Lines(notes, surface, features);
         if (here.Count == 0) return new UpdateNotesWords(null, [], null);
         var also = elsewhere.Count == 0 ? null : $"Also {elsewhere.Count} change{(elsewhere.Count == 1 ? string.Empty : "s")} in {ChangelogFilter.Places(elsewhere)}.";
         var name = Changelog.Normal(version) is null ? "the update" : Changelog.Display(version!);

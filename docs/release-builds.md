@@ -77,7 +77,7 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
   HTML, which would show as typed. At most 400 characters a line and 40 lines a version, since the manifest carries no
   more.
 - Tag each line with where it applies: `windows` (the Windows app), `webui` (the browser web UI), `server` and `docker`
-  (the headless server), `linux` (the Linux app; shown nowhere yet), `extension` (the browser extension), or `all`.
+  (the headless server), `linux` (the Linux app's window), `extension` (the browser extension), or `all`.
   Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
   about the TorBox account (shown only with an account set). The Windows app shows `windows` and `all` lines; the web UI
   `webui`, `server`, `docker` and `all`. The rest is folded under "N changes in the web UI and the browser extension".
