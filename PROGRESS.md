@@ -53,7 +53,10 @@
   The suites were taken off the macOS workflow again because it took too long (owner: "end ci, it takes forever. it's
   redundant too"). A second run with the fixes on the owner's Mac (`--filter "Platform!=Windows"`, 2026-11-15) passed: 1704 passed,
   0 failed, 70 skipped. The skipped tests need tools a source checkout doesn't bundle: 7-Zip for 60 archive tests, rclone
-  for 6 Sites tests and the torrent worker for 4. ⌘Q stays File > Exit
+  for 6 Sites tests and the torrent worker for 4.
+  The final build of the PR branch (2026-11-15) failed one Windows test: the golden IPC frames lacked the new MAC.6
+  setting. With that fixed (`d1b5cb1`), it passed: macOS packages on both architectures (run 43769913069) and CI on
+  Windows and Linux (run 43771417513). ⌘Q stays File > Exit
   (owner: "leave as is").
 - **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
   and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
