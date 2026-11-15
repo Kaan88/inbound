@@ -171,6 +171,8 @@
             <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="ToolbarPanel" Orientation="Horizontal" Padding="8,4" Spacing="0">
+                    <!-- SITES.3: the download buttons and the Sites buttons are two sets; one shows. -->
+                    <StackPanel x:Name="DownloadToolSet" Orientation="Horizontal">
                     <Button x:Name="AddButton" AutomationProperties.Name="Add URL" Style="{StaticResource InboundToolButtonStyle}" Click="AddButton_Click"
                             ToolTipService.ToolTip="Add a new download URL">
                         <StackPanel>
@@ -270,6 +272,31 @@
                             <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
+                    </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="SitesToolSet" Orientation="Horizontal" Visibility="Collapsed">
+                        <Button x:Name="SitesUpButton" AutomationProperties.Name="Up" Style="{StaticResource InboundToolButtonStyle}" Click="SitesUpButton_Click"
+                                AutomationProperties.AcceleratorKey="Backspace" ToolTipService.ToolTip="Go to the folder above (Backspace)">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE74A;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Up" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SitesRefreshButton" AutomationProperties.Name="Refresh" Style="{StaticResource InboundToolButtonStyle}" Click="SitesRefreshButton_Click"
+                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the site again (F5)">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE72C;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
+                                <TextBlock Text="Refresh" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                        <Button x:Name="SitesStarButton" AutomationProperties.Name="Star folder" Style="{StaticResource InboundToolButtonStyle}" Click="SitesStarButton_Click"
+                                ToolTipService.ToolTip="Star this folder to find it again in this site's Starred list">
+                            <StackPanel>
+                                <FontIcon x:Name="SitesStarIcon" Glyph="&#xE734;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
+                                <TextBlock x:Name="SitesStarLabel" Text="Star" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
@@ -833,6 +860,8 @@
             </Border>
                 <!-- UI.R32, A: the sidebar's My provider entry shows the panel here, in place of the list. -->
                 <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
+                <!-- SITES.3: a saved site's folders, in place of the list. -->
+                <Grid x:Name="SitesHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
             </Grid>
             </SplitView>
         </Grid>

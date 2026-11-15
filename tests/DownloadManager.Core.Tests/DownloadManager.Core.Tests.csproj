@@ -77,6 +77,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedGraphModel.cs" Link="WinUI\SpeedGraphModel.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressOverviewText.cs" Link="WinUI\ProgressOverviewText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UiFormat.cs" Link="WinUI\UiFormat.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesBrowseRules.cs" Link="WinUI\SitesBrowseRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />
@@ -89,6 +90,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowFrontRules.cs" Link="WinUI\WindowFrontRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.Sites.cs" Link="WinUI\HostConnection.Sites.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellWords.cs" Link="WinUI\ShellWords.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\OptionsSettingsRebase.cs" Link="WinUI\OptionsSettingsRebase.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SchedulerFileRules.cs" Link="WinUI\SchedulerFileRules.cs" />

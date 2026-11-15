@@ -1201,10 +1201,19 @@ public sealed partial class MainWindow : Window
         {
             if (tag == "queues")
             {
+                LeaveSites(selectCategory: false);
                 _ = ShowQueuesSafelyAsync();
                 return;
             }
 
+            if (tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal))
+            {
+                // SITES.3: a saved site's folders take the list's place.
+                ShowSite(tag[SiteTagPrefix.Length..]);
+                return;
+            }
+
+            LeaveSites(selectCategory: false);
             if (tag.StartsWith(RemoteBrowseTag, StringComparison.Ordinal))
             {
                 // UI.R32, A: My provider takes the list's place; the category shown before stays the one to go back to.
@@ -1235,7 +1244,8 @@ public sealed partial class MainWindow : Window
             foreach (var category in _settings.CustomCategories)
                 CategoryList.Items.Insert(insertion++, new ListBoxItem { Tag = "category:" + category.Id,
                     Content = category.Name, Padding = new Thickness(38, 2, 8, 2) });
-            var selected = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == _category);
+            var shownTag = _sitesShown ? SiteTag(_shownSiteId ?? string.Empty) : _category;
+            var selected = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == shownTag);
             if (selected is not null) CategoryList.SelectedItem = selected;
             else if (_category.StartsWith("category:", StringComparison.Ordinal))
             {
@@ -2036,8 +2046,7 @@ public sealed partial class MainWindow : Window
 
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
     {
-        SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
-        UpdateSpeedTimer();
+        UpdateSpeedGraphVisibility();
         SaveUiState();
     }
 
@@ -2754,12 +2763,24 @@ public sealed partial class MainWindow : Window
     private void MenuLargeToolbar_Click(object sender, RoutedEventArgs e) => SetToolbarScale(large: true);
     private void MenuSmallToolbar_Click(object sender, RoutedEventArgs e) => SetToolbarScale(large: false);
 
+    /// <summary>Every button of the toolbar, whatever group or button set (download or Sites) it sits in.</summary>
+    private static IEnumerable<Button> ToolbarButtons(Panel panel)
+    {
+        foreach (var child in panel.Children)
+        {
+            if (child is Button button) yield return button;
+            else if (child is Panel inner)
+            {
+                foreach (var nested in ToolbarButtons(inner)) yield return nested;
+            }
+        }
+    }
+
     private void SetToolbarScale(bool large)
     {
         _toolbarLarge = large;
         // Some buttons sit in a panel of their own (My TorBox, shown only with an account), one level down.
-        var buttons = ToolbarPanel.Children.OfType<Button>()
-            .Concat(ToolbarPanel.Children.OfType<Panel>().SelectMany(panel => panel.Children.OfType<Button>()));
+        var buttons = ToolbarButtons(ToolbarPanel);
         foreach (var button in buttons)
         {
             button.Width = large ? double.NaN : 34;

@@ -89,6 +89,7 @@ public sealed partial class MainWindow
             else _events.Upsert(key, type, new(job, false), keepPlace: true);
         };
         connection.GroupsChanged += groups => _events.Upsert(new(WindowEventFamily.Groups, connection, Guid.Empty), "groups", new(groups, false));
+        WireSites(connection);
         // A connection going up or down keeps its place among the events and is applied at once.
         connection.ConnectionChanged += (connected, error) =>
         {
@@ -491,6 +492,7 @@ public sealed partial class MainWindow
         _shownEverConnected = _connection.IsConnected;
         _shownConnectionError = null;
         UpdateServerSwitchers();
+        SyncSitesForConnection();
         ShowConnectionWords(target.IsLocal ? "Connecting…" : $"Connecting to {target.Name}…");
         RebuildVisible();
         UpdateStatusText();
