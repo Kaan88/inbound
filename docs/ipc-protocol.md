@@ -205,7 +205,7 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | Request | Payload | Reply |
 | --- | --- | --- |
 | `sites.get` | `{}` | `sites.status` |
-| `sites.setEnabled` | `{enabled, ownRclonePath?}` | `sites.status` |
+| `sites.setEnabled` | `{enabled, ownRclonePath?, autoUpdateRclone?}` | `sites.status` |
 | `sites.list` | `{}` | `sites.listResult` `{sites}` |
 | `sites.kinds` | `{}` | `sites.kindsResult` `{kinds}` |
 | `sites.save` | `SiteSaveRequest` (below) | `sites.result` |
