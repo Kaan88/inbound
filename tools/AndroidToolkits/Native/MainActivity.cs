@@ -1,6 +1,9 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using Android.App;
+using AndroidX.AppCompat.App;
+using AndroidX.Transitions;
+using Google.Android.Material.Transition;
 using Android.Content;
 using Android.OS;
 using Android.Views;
@@ -17,10 +20,16 @@ namespace AndroidTrial.Native;
 
 [Activity(Name = "app.inbound.tk.nativeui.MainActivity", Label = "Inbound (Native)", MainLauncher = true, Exported = true,
     LaunchMode = Android.Content.PM.LaunchMode.SingleTop, WindowSoftInputMode = SoftInput.AdjustResize)]
-public sealed class MainActivity : Activity
+public sealed class MainActivity : AppCompatActivity
 {
     private DownloadsModel? _model;
     private RowAdapter? _adapter;
+    private ViewGroup? _root;
+    private View? _details, _openCard;
+    private JobRow? _detailsRow;
+    private SpeedGraphView? _graph;
+    private bool _detailsOpen;
+    private AndroidX.Activity.OnBackPressedCallback? _back;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -35,24 +44,111 @@ public sealed class MainActivity : Activity
         var nav = FindViewById<BottomNavigationView>(Resource.Id.nav)!;
         var fab = FindViewById<View>(Resource.Id.fab)!;
         var list = FindViewById<RecyclerView>(Resource.Id.list)!;
+        _root = FindViewById<ViewGroup>(Resource.Id.root)!;
+        _details = FindViewById<View>(Resource.Id.details)!;
+        _graph = FindViewById<SpeedGraphView>(Resource.Id.d_graph)!;
         var baseFabMargin = ((ViewGroup.MarginLayoutParams)fab.LayoutParameters!).BottomMargin;
         ViewCompat.SetOnApplyWindowInsetsListener(FindViewById<View>(Resource.Id.root)!, new InsetsListener((v, insets) =>
         {
             var bars = insets.GetInsets(WindowInsetsCompat.Type.SystemBars());
             appbar.SetPadding(bars.Left, bars.Top, bars.Right, 0);
             nav.SetPadding(bars.Left, 0, bars.Right, bars.Bottom);
+            _details!.SetPadding(bars.Left, bars.Top, bars.Right, bars.Bottom);
             ((ViewGroup.MarginLayoutParams)fab.LayoutParameters!).BottomMargin = baseFabMargin + bars.Bottom;
             return insets;
         }));
         nav.SelectedItemId = Resource.Id.nav_downloads;
 
         _model = new DownloadsModel(a => RunOnUiThread(a));
-        _adapter = new RowAdapter(_model, list);
+        _adapter = new RowAdapter(_model, list, OpenDetails);
         list.SetLayoutManager(new LinearLayoutManager(this));
         list.SetAdapter(_adapter);
         var animator = new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false };
         list.SetItemAnimator(animator);
+        FindViewById<Google.Android.Material.AppBar.MaterialToolbar>(Resource.Id.details_toolbar)!.NavigationClick += (_, _) => CloseDetails();
+        _back = new BackCallback(CloseDetails);
+        OnBackPressedDispatcher.AddCallback(this, _back);
+        fab.Click += (_, _) => ShowAddSheet();
         TrialSupport.Begin(this, _model, options);
+    }
+
+    private void ShowAddSheet()
+    {
+        Android.Util.Log.Info(TrialSupport.Tag, "fab: show add sheet");
+        if (SupportFragmentManager.FindFragmentByTag("add") is not null) return;
+        AddSheet.OnAdd = url => _ = Task.Run(async () =>
+        {
+            try { await _model!.AddUrlAsync(url, TrialSupport.Destination(this), CancellationToken.None).ConfigureAwait(false); }
+            catch (System.Exception ex) { Android.Util.Log.Error(TrialSupport.Tag, "add: " + ex); }
+        });
+        new AddSheet().Show(SupportFragmentManager, "add");
+    }
+
+    private MaterialContainerTransform NewTransform(View start, View end)
+    {
+        var surface = new Android.Graphics.Color(MaterialColors.GetColor(_root!, Resource.Attribute.colorSurface));
+        var t = new MaterialContainerTransform();
+        t.SetDuration(450);
+        t.StartView = start;
+        t.EndView = end;
+        t.AddTarget(end);
+        t.SetAllContainerColors(surface);
+        t.ScrimColor = Android.Graphics.Color.Transparent;
+        return t;
+    }
+
+    private void OpenDetails(JobRow row, View card)
+    {
+        if (_detailsOpen) return;
+        _detailsOpen = true;
+        _back!.Enabled = true;
+        _detailsRow = row;
+        _openCard = card;
+        row.PropertyChanged += OnDetailsRowChanged;
+        BindDetails();
+        TransitionManager.BeginDelayedTransition(_root!, NewTransform(card, _details!));
+        card.Visibility = ViewStates.Invisible;
+        _details!.Visibility = ViewStates.Visible;
+    }
+
+    private void CloseDetails()
+    {
+        if (!_detailsOpen) return;
+        _detailsOpen = false;
+        _back!.Enabled = false;
+        if (_detailsRow is not null) _detailsRow.PropertyChanged -= OnDetailsRowChanged;
+        var card = _openCard!;
+        if (card.IsAttachedToWindow) // the row may have been recycled or removed meanwhile: then the screen only fades out
+        {
+            TransitionManager.BeginDelayedTransition(_root!, NewTransform(_details!, card));
+            card.Visibility = ViewStates.Visible;
+        }
+        else TransitionManager.BeginDelayedTransition(_root!, new Fade());
+        _details!.Visibility = ViewStates.Gone;
+        _detailsRow = null;
+    }
+
+    private sealed class BackCallback(Action close) : AndroidX.Activity.OnBackPressedCallback(false)
+    {
+        public override void HandleOnBackPressed() => close();
+    }
+
+    private void OnDetailsRowChanged(object? s, PropertyChangedEventArgs e) => BindDetails();
+
+    private void BindDetails()
+    {
+        var row = _detailsRow;
+        if (row is null) return;
+        _details!.FindViewById<TextView>(Resource.Id.d_name)!.Text = row.Name;
+        _details.FindViewById<TextView>(Resource.Id.d_state)!.Text = row.Subtitle;
+        _details.FindViewById<TextView>(Resource.Id.d_percent)!.Text = $"{(int)(row.Progress * 100)}%";
+        var rate = row.RateHistory.Count > 0 && row.Kind == StatusKind.Active ? row.RateHistory[^1] : 0;
+        _details.FindViewById<TextView>(Resource.Id.d_rate)!.Text = rate > 0 ? Fmt.Rate(rate) : "";
+        var bar = _details.FindViewById<LinearProgressIndicator>(Resource.Id.d_bar)!;
+        bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Invisible;
+        if (row.Indeterminate) { if (!bar.Indeterminate) bar.Indeterminate = true; }
+        else { if (bar.Indeterminate) bar.Indeterminate = false; bar.SetProgressCompat((int)(row.Progress * 1000), true); }
+        _graph!.SetSamples(row.RateHistory);
     }
 
     private sealed class InsetsListener(Func<View, WindowInsetsCompat, WindowInsetsCompat> f) : Java.Lang.Object, IOnApplyWindowInsetsListener
@@ -71,8 +167,11 @@ public sealed class MainActivity : Activity
 
         private readonly RecyclerView _list;
 
-        public RowAdapter(DownloadsModel model, RecyclerView list)
+        private readonly Action<JobRow, View> _open;
+
+        public RowAdapter(DownloadsModel model, RecyclerView list, Action<JobRow, View> open)
         {
+            _open = open;
             _model = model;
             _list = list;
             model.Rows.CollectionChanged += OnRows;
@@ -98,7 +197,9 @@ public sealed class MainActivity : Activity
         public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
         {
             var v = LayoutInflater.From(parent.Context)!.Inflate(Resource.Layout.row, parent, false)!;
-            return new Holder(v, this);
+            var h = new Holder(v, this);
+            v.Click += (_, _) => { var i = h.BindingAdapterPosition; if (i >= 0) _open(_model.Rows[i], v); };
+            return h;
         }
 
         public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) => ((Holder)holder).Bind(_model.Rows[position], false);

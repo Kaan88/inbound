@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/details" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical"
+    android:background="?android:colorBackground" android:elevation="24dp" android:visibility="gone" android:clickable="true" android:focusable="true">
+  <com.google.android.material.appbar.MaterialToolbar android:id="@+id/details_toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+      app:navigationIcon="@drawable/ic_back" app:title="Details" />
+  <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:clipToPadding="false" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingBottom="24dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+      <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:cardBackgroundColor="?attr/colorPrimaryContainer" app:strokeWidth="0dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="bottom">
+            <TextView android:id="@+id/d_percent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceDisplayMedium" android:textColor="?attr/colorOnPrimaryContainer" />
+            <TextView android:id="@+id/d_rate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="14dp" android:layout_marginBottom="8dp" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnPrimaryContainer" />
+          </LinearLayout>
+          <TextView android:id="@+id/d_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:maxLines="2" android:ellipsize="middle"
+              android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnPrimaryContainer" />
+          <TextView android:id="@+id/d_state" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp"
+              android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnPrimaryContainer" />
+          <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/d_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp"
+              android:max="1000" app:trackThickness="10dp" app:trackCornerRadius="5dp" />
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+      <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+          app:cardCornerRadius="24dp" app:cardElevation="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer" app:strokeWidth="0dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Transfer rate" android:textAppearance="?attr/textAppearanceTitleSmall" android:textColor="?attr/colorOnSurface" />
+          <app.inbound.tk.nativeui.SpeedGraphView android:id="@+id/d_graph" android:layout_width="match_parent" android:layout_height="180dp" android:layout_marginTop="8dp" />
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+  </ScrollView>
+</LinearLayout>

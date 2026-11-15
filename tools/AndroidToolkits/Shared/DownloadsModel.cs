@@ -18,6 +18,9 @@ public sealed class JobRow : INotifyPropertyChanged
     private bool _indeterminate;
 
     public Guid Id { get; init; }
+    /// <summary>Recent transfer rates in bytes/s, one sample per update while the job transfers (newest last, at most <see cref="MaxRates"/>).</summary>
+    public List<float> RateHistory { get; } = new();
+    public const int MaxRates = 120;
     public string Name { get; set; } = "";
     public string Subtitle { get => _subtitle; set => Set(ref _subtitle, value, nameof(Subtitle)); }
     public StatusKind Kind { get => _kind; set => Set(ref _kind, value, nameof(Kind)); }
@@ -46,6 +49,8 @@ public sealed class JobRow : INotifyPropertyChanged
             case "downloading":
             case "connecting":
             case "verifying":
+                RateHistory.Add((float)rate);
+                if (RateHistory.Count > MaxRates) RateHistory.RemoveAt(0);
                 Kind = StatusKind.Active;
                 ShowBar = true;
                 Indeterminate = state != "downloading" || total is null or 0;
@@ -218,11 +223,14 @@ public sealed class DownloadsModel
         }
     }
 
+    /// <summary>Adds one URL through the host (job.add), starting it now.</summary>
+    public Task AddUrlAsync(string url, string destination, CancellationToken ct) => AddAsync(url, "", destination, "startNow", ct);
+
     private async Task AddAsync(string url, string fileName, string destination, string startMode, CancellationToken ct)
     {
         var add = IpcMessage.Create(MessageTypes.JobAdd, new AddJobRequest
         {
-            Url = url, DestinationDirectory = destination, FileName = fileName, Connections = 1, StartMode = startMode, Source = "androidtk", ConflictPolicy = "rename",
+            Url = url, DestinationDirectory = destination, FileName = fileName.Length == 0 ? null : fileName, Connections = 1, StartMode = startMode, Source = "androidtk", ConflictPolicy = "rename",
         });
         await _host!.RequestAsync(_session!, add, ct).ConfigureAwait(false);
     }
