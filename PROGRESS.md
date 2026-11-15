@@ -41,6 +41,16 @@
   download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
   real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
   (2026-11-15).
+- **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
+  and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
+  integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second
+  (now after it closes); notifications the user turned off came back through osascript, and other notices weren't
+  Inbound's (one route now); Services registers its port explicitly and hands off to the CLI off the main thread; the
+  helper's first network/power lines could be lost (the Host asks again); a helper that ends releases the hold; an Edit
+  menu for the file panels; the Dock view is made once; the helper is only used from its bundle. Open: ⌘Q ends the Host
+  and its downloads (owner's call); an update zip's architecture isn't checked against the Mac; a notification clicked
+  with no Host running is lost; a Services link is on the CLI's argv while it runs; plus the earlier audit's items
+  below.
 - **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
   window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
   started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);

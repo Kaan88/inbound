@@ -241,7 +241,7 @@ internal static class Program
                 DownloadNoticeKind.Failed or DownloadNoticeKind.Extraction => true,
                 _ => false,
             };
-            if (show && macMenu is { NotificationsOn: true } helper)
+            if (show && macMenu is { Notifications: "on" } helper)
             {
                 var kind = notice.Kind switch
                 {
@@ -634,8 +634,6 @@ internal static class Program
         CopiedLinks copiedLinks, DesktopNotifications notifications, FileLogger log)
     {
         var requests = menuBar.Requests;
-        menuBar.Status = () => MacMenuBar.StatusJson(service.GetSnapshot().Jobs);
-        menuBar.RequestRefresh();
         requests.Job = (action, id) =>
         {
             switch (action)
@@ -687,16 +685,23 @@ internal static class Program
             TimeZoneInfo.ClearCachedData();
             service.NotifyClockChanged();
         };
-        var saving = new SavingPauses(
-            () => service.GetSnapshot().Jobs.Select(job => (job.Id, job.State)).ToList(),
-            id => service.PauseAsync(id),
-            id => service.ResumeAsync(id),
-            log.Info);
-        service.JobChanged += (_, e) => saving.Observe(e.Job.Id, e.Job.State);
+        var saving = new SavingPauses(hold => service.SetSavingHoldAsync(hold));
         requests.Network = kind => Observe(saving.NetworkAsync(kind), log, "Network change");
         requests.Power = state => Observe(saving.PowerAsync(state), log, "Power change");
+        requests.Ended = () => Observe(saving.HelperEndedAsync(), log, "Menu-bar helper ended");
         Observe(saving.EnabledAsync(service.GetSettings().PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
         service.SettingsChanged += (_, next) => Observe(saving.EnabledAsync(next.PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
+        menuBar.Status = () => MacMenuBar.StatusJson(service.GetSnapshot().Jobs, saving.Reason);
+        // The helper's first network and power lines may have come before these handlers: it says them again.
+        menuBar.AskForState();
+        menuBar.RequestRefresh();
+        // Every other notice (updates, copied links, the web UI) as Inbound's too; none once the user turned them off.
+        notifications.MacRoute = (title, message) => menuBar.Notifications switch
+        {
+            "on" => menuBar.Notify(title, message, null, null),
+            "off" => true,
+            _ => false,
+        };
     }
 
     private static void Observe(Task task, FileLogger log, string what) => _ = task.ContinueWith(

@@ -8,7 +8,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// underneath, and this runs on its main thread):
 /// <list type="bullet">
 /// <item>The menu bar's own menus in place of Uno's two-item default: Inbound (About, Settings… ⌘,, Services, Hide ⌘H,
-/// Hide Others ⌥⌘H, Show All, Quit ⌘Q, which is File > Exit) and Window (Minimize ⌘M, Zoom, Close ⌘W, Bring All to
+/// Hide Others ⌥⌘H, Show All, Quit ⌘Q, which is File > Exit), Edit (for the file panels) and Window (Minimize ⌘M, Zoom, Close ⌘W, Bring All to
 /// Front). The window's own menu bar stays: it has everything else.</item>
 /// <item>The Dock icon: the number of running downloads as its badge, and their overall progress as a bar.</item>
 /// </list>
@@ -28,6 +28,7 @@ internal static class MacAppChrome
     private static string? _badge;
     private static int _progressStep = -1;
     private static IntPtr _progressBar;
+    private static IntPtr _progressView; // made once and kept: AppKit's own references are what free a view
 
     /// <summary>Puts the app menu in place. <paramref name="about"/>, <paramref name="settings"/> and <paramref name="quit"/> run on the UI thread.</summary>
     public static void InstallMenu(Action about, Action settings, Action quit)
@@ -54,6 +55,15 @@ internal static class MacAppChrome
             Add(appMenu, Item("Show All", "unhideAllApplications:", string.Empty, IntPtr.Zero));
             Add(appMenu, Separator());
             Add(appMenu, Item("Quit Inbound", "inboundQuit:", "q", _target));
+
+            // Edit, aimed at whatever has the keyboard (a nil target): the file panels' fields take ⌘C and ⌘V from it.
+            // Where nothing answers an item it is off and the key goes on to the window, which handles it itself.
+            var edit = Submenu(main, "Edit");
+            // No Undo: the window may answer undo: itself, and ⌘Z belongs to the window's own text boxes.
+            Add(edit, Item("Cut", "cut:", "x", IntPtr.Zero));
+            Add(edit, Item("Copy", "copy:", "c", IntPtr.Zero));
+            Add(edit, Item("Paste", "paste:", "v", IntPtr.Zero));
+            Add(edit, Item("Select All", "selectAll:", "a", IntPtr.Zero));
 
             var window = Submenu(main, "Window");
             Add(window, Item("Minimize", "performMiniaturize:", "m", IntPtr.Zero));
@@ -94,11 +104,11 @@ internal static class MacAppChrome
             if (step < 0)
             {
                 Send(dock, Sel("setContentView:"), IntPtr.Zero); // the plain icon again
-                _progressBar = IntPtr.Zero;
             }
             else
             {
-                if (_progressBar == IntPtr.Zero) _progressBar = ProgressView(dock);
+                if (_progressBar == IntPtr.Zero) (_progressView, _progressBar) = ProgressView(dock);
+                Send(dock, Sel("setContentView:"), _progressView);
                 SendDouble(_progressBar, Sel("setDoubleValue:"), step);
             }
 
@@ -124,8 +134,8 @@ internal static class MacAppChrome
         return total > 0 ? (double)received / total : null;
     }
 
-    /// <summary>The Dock tile's view: the app's icon with a bar over its foot. Returns the bar.</summary>
-    private static IntPtr ProgressView(IntPtr dock)
+    /// <summary>The Dock tile's view: the app's icon with a bar over its foot.</summary>
+    private static (IntPtr View, IntPtr Bar) ProgressView(IntPtr dock)
     {
         var size = SendSize(dock, Sel("size"));
         var view = Send(Send(Class("NSImageView"), Sel("alloc")), Sel("initWithFrame:"), new CGRect(0, 0, size.Width, size.Height));
@@ -138,8 +148,7 @@ internal static class MacAppChrome
         SendDouble(bar, Sel("setMinValue:"), 0);
         SendDouble(bar, Sel("setMaxValue:"), 100);
         Send(view, Sel("addSubview:"), bar);
-        Send(dock, Sel("setContentView:"), view);
-        return bar;
+        return (view, bar);
     }
 
     private const nuint CommandMask = 1 << 20, OptionMask = 1 << 19;

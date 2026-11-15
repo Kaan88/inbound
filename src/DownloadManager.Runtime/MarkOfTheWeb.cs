@@ -21,7 +21,8 @@ public static class MarkOfTheWeb
         // A torrent's magnet has no site to name: the file is quarantined without a "Where from".
         if (OperatingSystem.IsMacOS())
         {
-            if (!Applies(address) || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            var magnet = address?.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) == true;
+            if (!(Applies(address) || magnet) || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
             var from = Uri.TryCreate(address, UriKind.Absolute, out var site) && site.Scheme is "http" or "https"
                 ? $"{site.Scheme}://{site.IdnHost}/"
                 : null;

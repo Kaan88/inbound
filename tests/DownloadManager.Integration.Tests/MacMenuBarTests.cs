@@ -17,9 +17,10 @@ public sealed class MacMenuBarTests
         var json = MacMenuBar.StatusJson([slow, done, fast]);
 
         Assert.Equal(
-            $$"""{"active":2,"speed":"3.0 MB/s","items":[{"id":"{{fast.Id:D}}","name":"fast.bin","percent":null,"state":"downloading"},{"id":"{{slow.Id:D}}","name":"slow.bin","percent":25,"state":"downloading"}]}""",
+            $$"""{"active":2,"speed":"3.0 MB/s","items":[{"id":"{{fast.Id:D}}","name":"fast.bin","percent":null,"state":"downloading"},{"id":"{{slow.Id:D}}","name":"slow.bin","percent":25,"state":"downloading"}],"note":null}""",
             json);
-        Assert.Equal("""{"active":0,"speed":null,"items":[]}""", MacMenuBar.StatusJson([done]));
+        Assert.Equal("""{"active":0,"speed":null,"items":[],"note":null}""", MacMenuBar.StatusJson([done]));
+        Assert.EndsWith(""","note":"Downloads wait: Low Power Mode"}""", MacMenuBar.StatusJson([done], "Low Power Mode"));
         var paused = new JobDto { Id = Guid.NewGuid(), FileName = "paused.bin", State = "paused", Progress = 0.5 };
         Assert.Contains($$"""{"id":"{{paused.Id:D}}","name":"paused.bin","percent":50,"state":"paused"}""", MacMenuBar.StatusJson([fast, paused]));
     }
@@ -45,7 +46,7 @@ public sealed class MacMenuBarTests
     }
 
     [Fact]
-    public void TheHelperIsFoundInItsOwnBundleFirst()
+    public void TheHelperIsFoundOnlyInItsOwnBundle()
     {
         var root = Directory.CreateTempSubdirectory("inbound-menu-");
         try
@@ -55,7 +56,7 @@ public sealed class MacMenuBarTests
             Directory.CreateDirectory(host);
             Assert.Null(MacMenuBar.FindHelper(host));
             File.WriteAllText(Path.Combine(host, MacMenuBar.HelperName), string.Empty);
-            Assert.Equal(Path.Combine(host, MacMenuBar.HelperName), MacMenuBar.FindHelper(host));
+            Assert.Null(MacMenuBar.FindHelper(host)); // outside a bundle it couldn't notify, so it isn't used
             Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
             File.WriteAllText(bundled, string.Empty);
             Assert.Equal(Path.GetFullPath(bundled), MacMenuBar.FindHelper(host));
@@ -67,57 +68,37 @@ public sealed class MacMenuBarTests
     }
 
     [Fact]
-    public async Task SavingPausesWhatRunsAndResumesOnlyThat()
+    public async Task SavingHoldsWhileEnabledAndCostlyOrLowPower()
     {
-        var running = Guid.NewGuid();
-        var userPaused = Guid.NewGuid();
-        var resumedByUser = Guid.NewGuid();
-        var states = new Dictionary<Guid, string> { [running] = "downloading", [userPaused] = "paused", [resumedByUser] = "connecting" };
-        var resumed = new List<Guid>();
-        var saving = new SavingPauses(
-            () => states.Select(pair => (pair.Key, pair.Value)).ToList(),
-            id => { states[id] = "paused"; return Task.CompletedTask; },
-            id => { resumed.Add(id); states[id] = "downloading"; return Task.CompletedTask; },
-            _ => { });
+        var holds = new List<bool>();
+        var saving = new SavingPauses(hold => { holds.Add(hold); return Task.CompletedTask; });
 
         await saving.NetworkAsync("expensive");
-        Assert.Equal("downloading", states[running]); // off: nothing happens
-
+        Assert.Null(saving.Reason); // off: no hold
         await saving.EnabledAsync(true);
-        saving.Observe(running, "downloading"); // a progress event from before the pause took effect
-        saving.Observe(running, "paused");
-        saving.Observe(resumedByUser, "paused");
-        Assert.Equal("paused", states[running]);
-        Assert.Equal("paused", states[resumedByUser]);
-        Assert.Equal(2, saving.Paused.Count);
-
-        states[resumedByUser] = "downloading"; // the user resumed it on the hotspot, then paused it again
-        saving.Observe(resumedByUser, "downloading");
-        states[resumedByUser] = "paused";
+        Assert.Equal("a costly network", saving.Reason);
         await saving.PowerAsync("low");
-        await saving.NetworkAsync("normal"); // still in Low Power Mode
-        Assert.Empty(resumed);
-
+        Assert.Equal("Low Power Mode", saving.Reason);
+        await saving.NetworkAsync("normal");
+        Assert.True(holds[^1]); // still in Low Power Mode
         await saving.PowerAsync("normal");
-        Assert.Equal([running], resumed);
-        Assert.Equal("paused", states[userPaused]);
-        Assert.Empty(saving.Paused);
+        Assert.False(holds[^1]);
+        Assert.Equal([false, true, true, true, false], holds);
     }
 
     [Fact]
-    public async Task TurningTheSettingOffResumesWhatItPaused()
+    public async Task ALostHelperOrTheSettingTurnedOffEndsTheHold()
     {
-        var id = Guid.NewGuid();
-        var states = new Dictionary<Guid, string> { [id] = "downloading" };
-        var saving = new SavingPauses(
-            () => states.Select(pair => (pair.Key, pair.Value)).ToList(),
-            job => { states[job] = "paused"; return Task.CompletedTask; },
-            job => { states[job] = "downloading"; return Task.CompletedTask; },
-            _ => { });
+        var hold = false;
+        var saving = new SavingPauses(next => { hold = next; return Task.CompletedTask; });
         await saving.EnabledAsync(true);
         await saving.NetworkAsync("constrained");
-        Assert.Equal("paused", states[id]);
+        Assert.True(hold);
+        await saving.HelperEndedAsync();
+        Assert.False(hold);
+        await saving.PowerAsync("low");
+        Assert.True(hold);
         await saving.EnabledAsync(false);
-        Assert.Equal("downloading", states[id]);
+        Assert.False(hold);
     }
 }

@@ -10,7 +10,7 @@
 //     from Add from Clipboard),
 //     "addfile <base64 path>" (a file dropped on the icon), "job <pause|resume|show|open|reveal|retry> <id>",
 //     "wake", "clock", "network <expensive|constrained|normal>", "power <low|normal>",
-//     "notifications <on|off|error>".
+//     "notifications <on|off|error>". Host -> helper also "report": say the network and power state again.
 //   When the Host ends, stdin closes and this ends too.
 // - Started by macOS for Services > Download with Inbound while no Host-run copy is up: no icon; it hands the text
 //   to the CLI beside the Host and quits.
@@ -40,6 +40,7 @@ struct Status: Decodable {
     let active: Int
     let speed: String?
     let items: [Item]
+    let note: String? // why downloads wait (a costly network, Low Power Mode), when they do
 }
 
 struct Notice: Decodable {
@@ -80,11 +81,12 @@ final class DropView: NSView {
     }
 }
 
-final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private let hosted = CommandLine.arguments.contains("--host")
     private var item: NSStatusItem?
     private let menu = NSMenu()
-    private var status = Status(active: 0, speed: nil, items: [])
+    private var status = Status(active: 0, speed: nil, items: [], note: nil)
+    private var menuOpen = false // a status that comes while the menu is open waits until it closes
     private var clipboardTimer: Timer?
     private var lastChange = NSPasteboard.general.changeCount
     private let pathMonitor = NWPathMonitor()
@@ -92,11 +94,12 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
     private var notificationsOn = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.servicesProvider = self
+        // The port the Info.plist's NSPortName names: this copy answers Services, not the window's process.
+        NSRegisterServicesProvider(self, NSServiceProviderName("Inbound"))
         NSUpdateDynamicServices()
         guard hosted else {
             // Started by macOS for a Services request: answer it, then quit.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { NSApp.terminate(nil) } // if no request comes
             return
         }
 
@@ -108,6 +111,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         }
         setIcon(active: false)
         rebuildMenu()
+        menu.delegate = self
         statusItem.menu = menu
 
         watchSystem()
@@ -146,7 +150,15 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         item?.button?.image = image
     }
 
+    func menuWillOpen(_ menu: NSMenu) { menuOpen = true }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        rebuildMenu() // what came while it was open
+    }
+
     private func rebuildMenu() {
+        guard !menuOpen else { return } // never under the pointer: a submenu being used would be torn down
         menu.removeAllItems()
         let summary: String
         switch status.active {
@@ -157,6 +169,11 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         let header = NSMenuItem(title: status.speed.map { "\(summary) · \($0)" } ?? summary, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if let note = status.note {
+            let waiting = NSMenuItem(title: note, action: nil, keyEquivalent: "")
+            waiting.isEnabled = false
+            menu.addItem(waiting)
+        }
         for job in status.items.prefix(5) {
             let percent = job.percent.map { " — \($0)%" } ?? ""
             let name = job.name.count > 40 ? String(job.name.prefix(39)) + "…" : job.name
@@ -212,6 +229,9 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         } else if line.hasPrefix("notify "), let json = unb64(line.dropFirst("notify ".count)),
                   let notice = try? JSONDecoder().decode(Notice.self, from: Data(json.utf8)) {
             post(notice)
+        } else if line == "report" {
+            if !lastNetwork.isEmpty { send("network " + lastNetwork) }
+            send("power " + (ProcessInfo.processInfo.isLowPowerModeEnabled ? "low" : "normal"))
         } else if line == "clipboard on" {
             guard clipboardTimer == nil else { return }
             lastChange = NSPasteboard.general.changeCount // what was copied before stays out
@@ -305,20 +325,24 @@ final class MenuBar: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
             return
         }
         // No Host-run copy: through the CLI beside the Host (Contents/Helpers/Inbound Menu.app -> Contents/Resources/host).
+        // Answered at once: the CLI (and perhaps a Host it starts) can take longer than Services waits for.
         let cli = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Resources/host/DownloadManager.Cli")
-        for link in texts.flatMap(webLinks) {
-            let task = Process()
-            task.executableURL = cli
-            task.arguments = ["add", link]
-            do {
-                try task.run()
-                task.waitUntilExit()
-            } catch {
-                continue // no CLI to hand it to: nothing else can take it
+        let links = texts.flatMap(webLinks)
+        DispatchQueue.global(qos: .userInitiated).async {
+            for link in links {
+                let task = Process()
+                task.executableURL = cli
+                task.arguments = ["add", link]
+                do {
+                    try task.run()
+                    task.waitUntilExit()
+                } catch {
+                    continue // no CLI to hand it to: nothing else can take it
+                }
             }
+            DispatchQueue.main.async { NSApp.terminate(nil) }
         }
-        NSApp.terminate(nil)
     }
 }
 

@@ -43,6 +43,8 @@ public sealed partial class DownloadManagerService
     private readonly SemaphoreSlim _updateDownloadGate = new(1, 1);
     private bool _updateInstallScheduled;
     private bool _updateQuiescing;
+    // MAC.6: while the Mac saves data or power, nothing starts and what runs waits in the queue (SavingHold.cs).
+    private bool _savingHold;
     public event EventHandler? UpdateShutdownRequested;
     public event EventHandler<UpdateProgressDto>? UpdateProgressChanged;
     private UpdateProgressDto? _updateProgress;
@@ -4464,7 +4466,7 @@ public sealed partial class DownloadManagerService
                 .Where(r => r.Starting || r.Runner is { IsCompleted: false })
                 .ToList();
             var activeTotal = running.Count;
-            var slots = _settings.MaxConcurrentDownloads - activeTotal;
+            var slots = (_savingHold ? 0 : _settings.MaxConcurrentDownloads) - activeTotal;
             if (slots <= 0)
             {
                 return;

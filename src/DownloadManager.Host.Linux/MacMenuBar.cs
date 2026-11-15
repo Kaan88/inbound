@@ -15,6 +15,8 @@ internal sealed class MacMenuRequests
     public Action? Wake { get; set; }
     public Action<string>? Network { get; set; }
     public Action<string>? Power { get; set; }
+    /// <summary>The helper has gone (it crashed, or the Host is ending): nothing will report the network or power.</summary>
+    public Action? Ended { get; set; }
 }
 
 /// <summary>
@@ -55,20 +57,23 @@ internal sealed class MacMenuBar : IAsyncDisposable
     /// <summary>The menu's activity: the active count, total speed and the newest active downloads, as JSON.</summary>
     public Func<string>? Status { get; set; }
 
-    /// <summary>Whether the helper may show notifications (the user allowed them); until it says, no.</summary>
-    public bool NotificationsOn { get; private set; }
+    /// <summary>
+    /// MAC.6: what the helper said of its notifications: "on" (allowed), "off" (the user turned them off: none are
+    /// shown another way), "error" (the notification center can't be used: another way), or null before it answers.
+    /// </summary>
+    public string? Notifications => Volatile.Read(ref _notifications);
 
-    /// <summary>The helper couldn't use the notification center at all (an unsigned or moved helper): use another way.</summary>
-    public bool NotificationsBroken { get; private set; }
+    private string? _notifications;
 
-    /// <summary>The helper's program: in its own bundle under Contents/Helpers, else beside the Host (older layout).</summary>
+    /// <summary>
+    /// The helper's program, in its own bundle under Contents/Helpers. Only there: outside a bundle the notification
+    /// center can't be used, and the helper would end at start.
+    /// </summary>
     public static string? FindHelper(string baseDirectory)
     {
         var contents = Path.GetFullPath(Path.Combine(baseDirectory, "..", ".."));
         var bundled = Path.Combine(contents, "Helpers", HelperApp, "Contents", "MacOS", HelperName);
-        if (File.Exists(bundled)) return bundled;
-        var beside = Path.Combine(baseDirectory, HelperName);
-        return File.Exists(beside) ? beside : null;
+        return File.Exists(bundled) ? bundled : null;
     }
 
     public static MacMenuBar? TryStart(LinuxTrayActions actions, Action<string> log)
@@ -144,22 +149,30 @@ internal sealed class MacMenuBar : IAsyncDisposable
     }
 
     /// <summary>MAC.6: a notification as Inbound's own, with Open and Show in Finder (finished) or Retry (failed).</summary>
-    public void Notify(string title, string body, Guid? job, string? kind)
+    public bool Notify(string title, string body, Guid? job, string? kind)
     {
         var json = JsonSerializer.Serialize(new NoticeLine(title, body, job?.ToString("D"), kind), MacMenuJson.Default.NoticeLine);
-        lock (_write) Send("notify " + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)));
+        lock (_write) return Send("notify " + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)));
     }
 
-    private void Send(string line)
+    /// <summary>Asks the helper to say the network and power state again (L2: its first lines can come too early).</summary>
+    public void AskForState()
+    {
+        lock (_write) Send("report");
+    }
+
+    private bool Send(string line)
     {
         try
         {
             _process.StandardInput.WriteLine(line);
             _process.StandardInput.Flush();
+            return true;
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
             // The helper has gone; the Host runs on without its icon.
+            return false;
         }
     }
 
@@ -185,6 +198,10 @@ internal sealed class MacMenuBar : IAsyncDisposable
         {
             // The helper has gone.
         }
+
+        Volatile.Write(ref _notifications, "error"); // no helper to show them: the other way from now on
+        try { Requests.Ended?.Invoke(); }
+        catch (Exception ex) { _log($"After the menu-bar helper ended: {ex.GetType().Name}"); }
     }
 
     private void Handle(string line)
@@ -208,8 +225,7 @@ internal sealed class MacMenuBar : IAsyncDisposable
             case "network": requests.Network?.Invoke(rest); break;
             case "power": requests.Power?.Invoke(rest); break;
             case "notifications":
-                NotificationsOn = rest == "on";
-                NotificationsBroken = rest == "error";
+                Volatile.Write(ref _notifications, rest is "on" or "off" ? rest : "error");
                 _log($"Notifications through the menu-bar helper: {rest}.");
                 break;
             case "job":
@@ -279,7 +295,7 @@ internal sealed class MacMenuBar : IAsyncDisposable
     }
 
     /// <summary>The menu's status line: what <see cref="Status"/> returns.</summary>
-    public static string StatusJson(IReadOnlyCollection<DownloadManager.Contracts.JobDto> jobs)
+    public static string StatusJson(IReadOnlyCollection<DownloadManager.Contracts.JobDto> jobs, string? waitingFor = null)
     {
         var active = jobs.Where(job => job.State is "connecting" or "downloading" or "retryWaiting" or "verifying").ToList();
         var speed = active.Sum(job => job.BytesPerSecond ?? 0);
@@ -290,7 +306,8 @@ internal sealed class MacMenuBar : IAsyncDisposable
             .Select(job => new StatusItem(job.Id.ToString("D"), job.FileName,
                 job.Progress is { } progress ? (int)Math.Clamp(Math.Floor(progress * 100), 0, 100) : null, job.State))
             .ToList();
-        return JsonSerializer.Serialize(new StatusLine(active.Count, speed > 0 ? Speed(speed) : null, items), MacMenuJson.Default.StatusLine);
+        var note = waitingFor is null ? null : $"Downloads wait: {waitingFor}";
+        return JsonSerializer.Serialize(new StatusLine(active.Count, speed > 0 ? Speed(speed) : null, items, note), MacMenuJson.Default.StatusLine);
     }
 
     /// <summary>The http and https addresses in dropped or sent text, one per word, at most 100.</summary>
@@ -336,7 +353,8 @@ internal sealed record StatusItem(
 internal sealed record StatusLine(
     [property: System.Text.Json.Serialization.JsonPropertyName("active")] int Active,
     [property: System.Text.Json.Serialization.JsonPropertyName("speed")] string? Speed,
-    [property: System.Text.Json.Serialization.JsonPropertyName("items")] IReadOnlyList<StatusItem> Items);
+    [property: System.Text.Json.Serialization.JsonPropertyName("items")] IReadOnlyList<StatusItem> Items,
+    [property: System.Text.Json.Serialization.JsonPropertyName("note")] string? Note);
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(NoticeLine))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(StatusLine))]

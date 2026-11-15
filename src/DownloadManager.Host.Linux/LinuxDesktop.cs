@@ -18,8 +18,12 @@ internal sealed class DesktopNotifications(Action<string> warn) : IDisposable
     private bool _warned;
 
     /// <summary>Shows a notice; never throws, and never waits for the desktop.</summary>
+    /// <summary>MAC.6: the menu-bar helper's notifications; true when it took the notice (or the user turned them off).</summary>
+    public Func<string, string, bool>? MacRoute { get; set; }
+
     public void Notify(string title, string message)
     {
+        if (MacRoute?.Invoke(title, message) == true) return;
         if (OperatingSystem.IsMacOS()) MacDesktop.Notify(title, message, Warn);
         else _ = NotifyAsync(title, message);
     }
