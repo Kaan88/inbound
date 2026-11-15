@@ -126,7 +126,9 @@ jobs:
           echo "--- fonts in the bundle"; find "$app" -iname '*.ttf' -o -iname '*.otf' | sed "s|$app/||"
           export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-ui"
           export DOWNLOADMANAGER_UNO_TRACE=1
-          "$app/Contents/MacOS/InboundLauncher" > "$RUNNER_TEMP/ui.log" 2>&1 &
+          # Through LaunchServices, as Finder starts it, so the window runs with the bundle's identity.
+          open -n --env DOWNLOADMANAGER_DATA="$DOWNLOADMANAGER_DATA" --env DOWNLOADMANAGER_UNO_TRACE=1 \
+            --stdout "$RUNNER_TEMP/ui.log" --stderr "$RUNNER_TEMP/ui.log" "$app"
           sleep 25
           screencapture -x "$RUNNER_TEMP/shot.png"
           sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/shot.png" --out "$RUNNER_TEMP/shot.jpg" >/dev/null
