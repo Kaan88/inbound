@@ -5858,6 +5858,7 @@ public sealed partial class DownloadManagerService
                 ShutdownWhenDone = s.ShutdownWhenDone,
                 ShutdownMode = s.ShutdownMode,
                 ForceShutdown = s.ForceShutdown,
+                SiteTransfers = s.SiteTransfers,
                 StartOnHostStartup = s.StartOnHostStartup, TimedStartEnabled = s.TimedStartEnabled,
                 RepeatEveryMinutes = s.RepeatEveryMinutes,
                 LastRunAt = s.LastRunAt, LastRunError = s.LastRunError,

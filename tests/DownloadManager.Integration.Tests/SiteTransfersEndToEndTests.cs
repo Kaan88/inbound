@@ -135,6 +135,27 @@ public sealed class SiteTransfersEndToEndTests : IAsyncLifetime
     }
 
     [SiteTransfersFact]
+    public async Task TheSpeedShareSlowsRclone()
+    {
+        var port = StartServer(slow: false);
+        var (commands, siteId) = await OpenSiteAsync(port);
+        Assert.False(commands.Transfers.Demand().Active);
+        // 256 KiB/s for a 1 MiB file: about three seconds after rclone's first burst, where the server alone takes well
+        // under one.
+        commands.Transfers.SetSpeedLimit(256 * 1024);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var started = await StartAsync(commands, siteId, Path.Combine(Local, "limited"), SiteTransferConflicts.Skip, "one-mb.bin");
+        await WaitForAsync(commands, started.Id, t => t.FilesRunning == 1);
+        Assert.True(commands.Transfers.Demand().Active);
+        var done = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        clock.Stop();
+        Assert.Equal(SiteTransferStates.Done, done.State);
+        Assert.True(clock.Elapsed >= TimeSpan.FromSeconds(2.5), $"took {clock.Elapsed}");
+        AssertSame(Path.Combine(Served, "pub", "one-mb.bin"), Path.Combine(Local, "limited", "one-mb.bin"));
+        Assert.False(commands.Transfers.Demand().Active);
+    }
+
+    [SiteTransfersFact]
     public async Task PauseStopsTheFileInFlightAndResumeStartsItAgainFromZero()
     {
         var port = StartServer(slow: true);
@@ -265,10 +286,18 @@ public sealed class SiteTransfersEndToEndTests : IAsyncLifetime
         lock (_log) Assert.DoesNotContain(_log, line => line.Contains("not-the-password", StringComparison.Ordinal) || line.Contains(Password, StringComparison.Ordinal));
         Assert.DoesNotContain("not-the-password", await File.ReadAllTextAsync(Path.Combine(State, "sites", "transfers", started.Id + ".json")));
 
-        // Canceled, it can't be retried: Retry would start the files nobody asked for any more.
-        await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferCancel, new SiteTransferIdRequest { Id = started.Id });
-        var retry = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferRetry, new SiteTransferIdRequest { Id = started.Id });
-        Assert.False(retry.Ok);
+        // With the right password back, Resume goes on with the files that were waiting.
+        saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Id = siteId, Name = site.Name, Kind = site.Kind, Host = site.Host, Port = site.Port, User = site.User,
+            AuthMethod = SiteAuthMethods.Password, Password = Password,
+        });
+        Assert.True(saved.Ok, saved.Message);
+        var resumed = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferResume, new SiteTransferIdRequest { Id = started.Id });
+        Assert.True(resumed.Ok, resumed.Message);
+        var done = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        Assert.Equal(SiteTransferStates.Done, done.State);
+        AssertSame(Path.Combine(Served, "pub", "readme.txt"), Path.Combine(Local, "signin", "readme.txt"));
     }
 
     [SiteTransfersFact]
@@ -284,12 +313,21 @@ public sealed class SiteTransfersEndToEndTests : IAsyncLifetime
 
         var stopped = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(90));
         Assert.Equal(SiteTransferStates.Failed, stopped.State);
-        Assert.Contains("The transfer stopped after 5 tries; Retry goes on.", stopped.Message);
+        Assert.Contains("The transfer stopped after 5 failed connections in a row; Retry goes on.", stopped.Message);
         Assert.Equal(0, stopped.FilesFailed);
         var detail = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = started.Id });
         // The file cut by the server going away spent one try at most; the connection failures after it spent none.
         Assert.All(detail.Items!, item => Assert.True(item.Tries <= 1, $"{item.Path}: {item.Tries} tries"));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(Local, "away"), "*.partial"));
+
+        // Retry goes on with the waiting files (the server is still away, so they wait again).
+        var retried = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferRetry, new SiteTransferIdRequest { Id = started.Id });
+        Assert.True(retried.Ok, retried.Message);
+        Assert.Equal(SiteTransferStates.Running, retried.Transfer!.State);
+        // Canceled, it can't be retried: Retry would start the files nobody asked for any more.
+        await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferCancel, new SiteTransferIdRequest { Id = started.Id });
+        var again = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferRetry, new SiteTransferIdRequest { Id = started.Id });
+        Assert.False(again.Ok);
     }
 
     // ---- Helpers --------------------------------------------------------------------------------------------------

@@ -1054,6 +1054,7 @@ internal static partial class Program
                 ShutdownWhenDone = shutdownMode is not null,
                 ShutdownMode = shutdownMode ?? "shutdown",
                 ForceShutdown = CliArgs.HasFlag(args, "--force"),
+                SiteTransfers = CliArgs.HasFlag(args, "--site-transfers"),
             };
             return await ChangeSettingsAsync(client, settings =>
             {
@@ -2216,7 +2217,7 @@ internal static partial class Program
               dm queue list | add <name> [max] | start|stop <queue-id> | max <queue-id> <1-16>
               dm queue move <job-id> <queue-id> | quota <queue-id> <megabytes> <hours> | quota <queue-id> off
               dm schedule list|add|remove|enable|disable
-                          [--open] [--exit]
+                          [--open] [--exit] [--site-transfers]
                           [--shutdown shutdown|restart|logoff] [--force]
               dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
                           (the password is read from standard input unless --password-env names it)

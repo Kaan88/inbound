@@ -107,7 +107,8 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
   `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are, and
   a schedule that has any of those actions can't be changed at all (its queue, times, days, on/off); it can be removed.
-  A schedule's "open the file when done" never opens a file a web session added.
+  A schedule's "open the file when done" never opens a file a web session added. A schedule's `siteTransfers` stays as
+  this PC set it (false for a schedule the web session adds): web sessions have no say over site transfers.
   `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
   those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
 - What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
@@ -355,16 +356,17 @@ Running: files move one rclone job each, at most "transfers at once" (`maxTransf
 default 3, set with `sites.setEnabled`; it does not count against "downloads at once") across every batch, oldest
 batch first. A download is written as rclone's `name.<token>.partial` next to its target and renamed in place, so no
 bytes go through a temporary folder. A failed file does not stop its batch: it is tried again after 2, 4, 8 and 16
-seconds, then fails with a plain `error`. A file that is gone from its source fails at once. A changed host key
-stops the whole batch with `state: "failed"`, `problem: "hostKeyChanged"` and the warning in `message`; a refused
+seconds (five tries in all), then fails with a plain `error`. A file that is gone from its source fails at once. A
+changed host key, or a server that no longer offers the kind of key that was accepted, stops the whole batch with `state: "failed"`, `problem: "hostKeyChanged"` and the warning in `message`; a refused
 sign-in stops it at once with the plain reason in `message` (each further file would be refused too, and a server may
-lock the account). When the server can't be reached, or rclone stopped, the batch waits (2 s, doubling up to a minute)
-and its files keep their tries; after five such waits in a row it stops with the reason in `message`. Nothing more goes
-to that server until `resume` or `retry`.
+lock the account). When the server can't be reached, or rclone stopped, the batch waits before its next file (2 s,
+doubling up to a minute) and its files keep their tries; the fifth such failure in a row stops it with the reason in
+`message`. A stopped batch is `failed` with its unmoved files still `waiting`; nothing more goes to that server until
+`resume` or `retry`.
 
 `pause` stops the files in flight; rclone removes their partial files. `resume` starts them again from zero: no
 transfer resumes inside a file. `cancel` stops a batch for good; files already moved stay. `retry` tries every failed
-file again from scratch, and goes on with a batch a problem stopped; a paused batch stays paused (its failed files run
+file again from scratch, and goes on with a stopped batch; a paused batch stays paused (its failed files run
 at `resume`), and a canceled one is refused. `clear` removes one finished batch (`done`, `failed` or `canceled`) from the list, or every
 finished batch when `id` is empty; the files moved are never touched. Turning Sites off pauses every running batch
 with `message: "Paused when Sites was turned off."`; removing a site cancels its batches. With Sites off,
@@ -375,22 +377,27 @@ After a Host restart a running batch goes on by itself. Which file was moving is
 runs again, each folder that holds one of its unfinished files is looked at once, and rclone's partial files for those
 files (`name.` plus eight hex digits plus `.partial`, on this PC for a download, on the server for an upload) are
 removed; nothing else moves meanwhile. The same is done after rclone itself stopped mid-batch. The files that were
-moving start again from zero. Progress is saved at most every two seconds and each change of state at once, so a killed
-Host may move a file that had just finished once more. With Keep both, a name chosen because the first was taken is
+moving start again from zero. A batch's own changes of state (paused, canceled, stopped, done) are saved at once; a
+file's progress and its own state at most every two seconds, so a killed Host may move a file that had just finished
+once more. With Keep both, a name chosen because the first was taken is
 saved before the copy starts, so a restart writes to that name; but a file that had just arrived under its own name
 and was not yet saved as done is copied again as `name (2)`.
 
-A running batch keeps the PC awake, as a download does, when Options › "Prevent sleep while downloading" is on.
+A running batch keeps the PC awake, as a download does, when Options › "Prevent sleep while downloading" is on. Site
+transfers share the overall speed limit with downloads (see T2, speed). A schedule with `siteTransfers: true` pauses the
+running batches at its stop (with `message: "Paused by a schedule."`, whether or not its queue was running) and at its
+start resumes the batches a schedule paused; batches paused by hand or by turning Sites off stay paused.
 
 `SiteTransferDto`: `{id, siteId, siteName, direction, remoteFolder, localFolder, conflict, state, problem?, message?,
 files, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytesDone, speed, createdAt, finishedAt?}`. `state` is
-`running` (moving, or waiting for a free place), `paused`, `done`, `failed` (something failed, or a problem stopped
-it) or `canceled`. `bytes` counts files of unknown size as 0, and `bytesDone` includes the files in flight and the
-skipped ones. `speed` is bytes a second now. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
+`running` (moving, or waiting for a free place, a file's retry or the server), `paused`, `done`, `failed` (a file
+failed, or the batch was stopped) or `canceled`. `problem` is `hostKeyChanged` or absent. `files` counts every file,
+`filesRunning` those moving now. `bytes` counts files of unknown size (an item `size` of -1) as 0, and `bytesDone` includes the files in flight and the
+skipped ones. `speed` is bytes a second, as rclone measures it over its last few seconds. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
 tries, error?}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
 
 `sites.transfer.changed` (the same sessions as `sites.changed`) carries `{transfers}`, every batch. It is sent after
-each change of state and about once a second while files move, at most about twice a second. Nothing is sent, and
+each change of state and about once a second while files move, never more than once every 400 ms. Nothing is sent, and
 nothing runs, while no batch is running.
 
 ### The server's transports (D1b)
@@ -969,11 +976,13 @@ by `jobId` except `torrent.inspect` and `torrent.add`.
   A seeding job stays `completed` and takes no download slot; `job.torrent` carries `seeding`, `seedingSince`,
   `uploaded` (bytes, the torrent's life), `ratio` (uploaded over the downloaded size) and `uploadRate`. When extraction
   deletes a seeding torrent's archive, its seeding stops first.
-- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP downloads, torrent downloads and torrent
-  uploads together. While the torrent engine runs, the Host splits it again on each torrent progress report (at most
+- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP downloads, torrent downloads, torrent uploads
+  and site transfers (SITES.4, through rclone's `core/bwlimit`) together. While the torrent engine or a site transfer
+  runs, the Host splits it again on each torrent progress report and each second of a site transfer's progress (at most
   once a second; no timer of its own): a kind that used most of its share gets more, one that used less keeps what it
-  used plus a quarter, and each keeps at least a twentieth even while idle. With the engine stopped, HTTP downloads have
-  the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
+  used plus a quarter, and each keeps at least a twentieth even while idle. Site transfers take part only while a batch
+  runs; otherwise rclone is held to a twentieth, so a batch that starts can't overshoot before the split it causes. With
+  neither running, HTTP downloads have the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
   without an overall limit it is the only cap.
 - T2, details: `torrent.peers`, `torrent.trackers` and `torrent.pieces`, each `{jobId}`, answer `torrent.peersResult`,
   `torrent.trackersResult` and `torrent.piecesResult` with `ok`, `error` and `running`. `running` is false when the

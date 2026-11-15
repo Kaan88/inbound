@@ -245,6 +245,11 @@ internal static class Program
             webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
             sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
             sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
+            // Site transfers take a share of the overall speed limit, as torrents do (SITES.4).
+            sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
+            sites.Transfers.Measured += service.OnSiteTransfersMeasured;
+            service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
+            service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
             webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);

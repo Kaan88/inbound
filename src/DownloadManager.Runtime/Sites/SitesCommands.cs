@@ -121,6 +121,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     }
 
     /// <summary>After the switch, "Use my own rclone", rclone's state or a saved site changed; for <c>sites.changed</c>.</summary>
+    /// <summary>The transfer runner, for the Host to share the overall speed limit with it.</summary>
+    public SiteTransfers Transfers => _transfers;
+
     public event EventHandler<SitesChangedDto>? Changed;
 
     /// <summary>A batch changed or moved bytes; for <c>sites.transfer.changed</c>.</summary>

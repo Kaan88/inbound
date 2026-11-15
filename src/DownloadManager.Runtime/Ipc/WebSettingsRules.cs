@@ -177,6 +177,14 @@ public static class WebSettingsRules
         requested.UseTorrentCategoryFolders ??= current.UseTorrentCategoryFolders;
         requested.TorrentCategoryFoldersRoot ??= current.TorrentCategoryFoldersRoot;
 
+        // SITES.4: a web session has no say over site transfers, so a schedule's hold on them stays as this PC set it
+        // (and a schedule the browser adds has none).
+        foreach (var schedule in requested.Schedules ?? [])
+        {
+            if (schedule is null) continue;
+            schedule.SiteTransfers = current.Schedules?.FirstOrDefault(saved => saved?.Id == schedule.Id)?.SiteTransfers ?? false;
+        }
+
         foreach (var name in KeptByHost)
         {
             var property = typeof(SettingsDto).GetProperty(name)!;

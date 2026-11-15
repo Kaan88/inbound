@@ -1273,7 +1273,7 @@ public sealed class SchedulerWindow : Window
            left.StartOnHostStartup == right.StartOnHostStartup && left.TimedStartEnabled == right.TimedStartEnabled &&
            left.RepeatEveryMinutes == right.RepeatEveryMinutes && left.OpenFileWhenDone == right.OpenFileWhenDone &&
            left.ExitWhenDone == right.ExitWhenDone && left.ShutdownWhenDone == right.ShutdownWhenDone &&
-           left.ShutdownMode == right.ShutdownMode && left.ForceShutdown == right.ForceShutdown;
+           left.ShutdownMode == right.ShutdownMode && left.ForceShutdown == right.ForceShutdown && left.SiteTransfers == right.SiteTransfers;
 
     private static void CopyScheduleConfig(ScheduleDto source, ScheduleDto target)
     {
@@ -1283,6 +1283,7 @@ public sealed class SchedulerWindow : Window
         target.RepeatEveryMinutes = source.RepeatEveryMinutes; target.OpenFileWhenDone = source.OpenFileWhenDone;
         target.ExitWhenDone = source.ExitWhenDone; target.ShutdownWhenDone = source.ShutdownWhenDone;
         target.ShutdownMode = source.ShutdownMode; target.ForceShutdown = source.ForceShutdown;
+        target.SiteTransfers = source.SiteTransfers;
     }
 
     private static T Clone<T>(T value)

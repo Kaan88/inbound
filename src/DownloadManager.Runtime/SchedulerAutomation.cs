@@ -9,6 +9,14 @@ public sealed partial class DownloadManagerService
     private readonly SemaphoreSlim _scheduleEvaluationGate = new(1, 1);
     private bool _startupSchedulesEvaluated;
     private readonly HashSet<Guid> _startupSchedulesPending = new();
+    /// <summary>SITES.4: pauses (false) or resumes (true) site transfers for a schedule that asks for it.</summary>
+    private Func<bool, Task>? _siteSchedule;
+
+    /// <summary>
+    /// SITES.4: a schedule with <see cref="ScheduleRule.SiteTransfers"/> pauses the running site transfers at its stop and
+    /// resumes the ones a schedule paused at its start. <paramref name="apply"/> gets false to pause and true to resume.
+    /// </summary>
+    public void AttachSiteSchedule(Func<bool, Task> apply) => _siteSchedule = apply;
 
     public async Task<IReadOnlyList<ScheduleAction>> EvaluateSchedulesAsync(DateTimeOffset localNow, CancellationToken cancellationToken = default)
     {
@@ -21,6 +29,9 @@ public sealed partial class DownloadManagerService
             var due = new List<(Guid Id, int QueueId, string Action, DateOnly Window, bool Timed, bool Synchronize)>();
             // Stops that came due while their queue was idle: recorded as done, so a later start isn't stopped (M8).
             var passedStops = new List<(Guid Id, DateOnly StopDate)>();
+            // SITES.4: what the schedules of this pass do to site transfers. A stop pauses them whether or not its queue
+            // ran (they are in no queue), once, when the stop is first seen, as a queue's stop acts.
+            bool sitePause = false, siteResume = false;
             lock (_sync)
             {
                 if (!_initialized || _shuttingDown) return Array.Empty<ScheduleAction>();
@@ -71,6 +82,7 @@ public sealed partial class DownloadManagerService
                         var notThisStops = schedule.SetAfterStopDate == stopDay ||
                             plans.Any(other => other.Schedule.Id != schedule.Id && other.Queue.Id == queue.Id &&
                                                other.Schedule.TimedStartEnabled && other.Window is not null);
+                        if (!notThisStops && schedule.SiteTransfers) sitePause = true;
                         // A stopped queue may still have torrents seeding from before its stop time: the stop stops them
                         // too (T2). Seeding started after the stop time (by hand) is left alone.
                         if (!notThisStops && (queue.IsRunning || QueueSeededBeforeLocked(queue.Id, LocalInstant(stopDay, stop))))
@@ -84,7 +96,10 @@ public sealed partial class DownloadManagerService
                         (schedule.LastStartDate != day || schedule.RepeatEveryMinutes is { } interval &&
                          (schedule.LastRunAt is null || localNow - schedule.LastRunAt >= TimeSpan.FromMinutes(interval)));
                     if (timed || _startupSchedulesPending.Contains(schedule.Id) && !stopDue)
+                    {
                         due.Add((schedule.Id, queue.Id, "start", window ?? today, timed, schedule.RepeatEveryMinutes is not null));
+                        if (schedule.SiteTransfers) siteResume = true;
+                    }
                 }
             }
             if (passedStops.Count > 0) await RecordPassedStopsAsync(passedStops, cancellationToken).ConfigureAwait(false);
@@ -144,6 +159,26 @@ public sealed partial class DownloadManagerService
                 }
                 finally { _settingsUpdateGate.Release(); }
             }
+
+            // Stops before starts, as for queues: a window that opens as another closes leaves them running.
+            if (_siteSchedule is { } siteSchedule && (sitePause || siteResume))
+            {
+                bool stopping;
+                lock (_sync) stopping = _shuttingDown;
+                if (!stopping)
+                {
+                    try
+                    {
+                        if (sitePause) await siteSchedule(false).ConfigureAwait(false);
+                        if (siteResume) await siteSchedule(true).ConfigureAwait(false);
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        _log?.Invoke($"Scheduler: site transfers could not be {(siteResume ? "resumed" : "paused")}: {e.Message}");
+                    }
+                }
+            }
+
             return results;
         }
         finally

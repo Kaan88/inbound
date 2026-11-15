@@ -176,6 +176,33 @@
   chip; empty folders; a CLI. **Not checked:** Linux (the Linux Host builds on Windows only), a real OpenSSH server for
   transfers (the SITES.2 sshd test is Linux-only), batches of thousands of files (each save rewrites the whole batch).
 
+- **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
+  **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
+  (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the
+  split is redone when one starts or all end and with each second of their progress, as for torrents; their share goes
+  to rclone with `core/bwlimit` (`<bytes>B`, read as bytes; checked against rclone 1.76.0), sent before each file and
+  each second while files move, and again when rclone was restarted. With no batch running rclone keeps a twentieth, so a
+  starting batch can't overshoot before its split. **Schedules:** a schedule gets `siteTransfers` (off by default; CLI
+  `dm schedule add ... --site-transfers`): its stop pauses the running batches ("Paused by a schedule.") whether or not
+  its queue ran, once, as a queue's stop acts; its start resumes only the batches a schedule paused. Site transfers are
+  in no queue, so a schedule touches them only when asked (my call; the plan said "too" without saying which schedule).
+  A web session can't change the flag (`WebSettingsRules.KeepHostOwned` puts this PC's value back). The WinUI scheduler
+  keeps the field when it saves; it has no box for it yet. **Fixed (Haiku doc review of J):** a batch stopped by five
+  failed connections or by a refused sign-in left `problem` empty, so Resume refused it and Retry did nothing: it could
+  only be cleared. Both now go on with any batch that is `failed` with files still waiting. The stop message now says
+  "after 5 failed connections in a row". The protocol notes were corrected where the review found them off (what is
+  saved at once, the other host-key case, `files`/`filesRunning`, size -1, how often the push comes). **Tests:**
+  `TheSpeedShareSlowsRclone` (a 1 MiB file at 256 KiB/s takes over 2.5 s through `rclone serve sftp`); the sign-in test
+  now puts the password back and resumes to done; the server-gone test retries the stopped batch, then cancels it and
+  checks Retry is refused; `SiteTransfersTakeAShareOnlyWhileOneRuns` and `SiteTransfersShareTheLimitWithHttpWhileOneRuns`
+  (the split and the service's hand-off); `AScheduleThatAsksForItPausesSiteTransfersAtItsStopAndResumesThemAtItsStart`
+  (also when the queue was stopped by hand first); `AWebSessionCannotChangeWhetherAScheduleHoldsSiteTransfers`. The
+  test helper `DeleteWhenReleasedAsync` now also retries on `UnauthorizedAccessException` (a settings temp file mid
+  replace; `AScheduleSavedInsideItsWindowStartsTheQueueAtOnce` failed on it about one run in four). Run on Windows with
+  rclone 1.76.0: the 8 transfer end-to-end tests, 301 dispatcher tests, 41 scheduler, web-rights and settings tests (three runs), 77
+  Site integration tests (6 skip) and Sites.Tests 194 (20 skip) pass; the solution builds. **Left in SITES.4:** the Transfers bar and Download/Upload commands in the windows (and the
+  schedule's box), the tray tooltip, sidebar activity and status chip, empty folders, a `dm sites` CLI.
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on

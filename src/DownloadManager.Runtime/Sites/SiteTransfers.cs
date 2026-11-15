@@ -92,6 +92,18 @@ public sealed class SiteTransfers : IAsyncDisposable
     private ITimer? _broadcastTimer;
     private Task? _progress;
     private bool _disposed;
+    /// <summary>A batch is running and Sites is on, as last reported through <see cref="ActivityChanged"/>.</summary>
+    private bool _active;
+    /// <summary>The share of the overall speed limit (bytes/s; null for none), and what rclone was last told, by process.</summary>
+    private long? _speedLimit;
+    private (int ProcessId, long? Limit)? _speedApplied;
+    private readonly SemaphoreSlim _speedGate = new(1, 1);
+
+    /// <summary>A batch started running, or none runs any more (Host: the overall speed limit is split again).</summary>
+    public event Action? ActivityChanged;
+
+    /// <summary>The speeds were read from rclone (about once a second while files move).</summary>
+    public event Action? Measured;
 
     /// <param name="getSite">The saved site by id, or null when it is gone.</param>
     /// <param name="acquire">A lease on rclone (starting it when needed).</param>
@@ -300,8 +312,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         {
             if (Find(id) is not { } found) return Fail("That transfer is no longer listed.");
             batch = found;
-            var stoppedByProblem = batch.Record.State == SiteTransferStates.Failed && batch.Record.Problem is not null;
-            if (batch.Record.State != SiteTransferStates.Paused && !stoppedByProblem)
+            if (batch.Record.State != SiteTransferStates.Paused && !StoppedLocked(batch))
                 return batch.Record.State == SiteTransferStates.Running ? Ok(batch) : Fail("Only a paused transfer can be resumed.");
             batch.Record.State = SiteTransferStates.Running;
             batch.Record.Problem = null;
@@ -338,7 +349,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 any = true;
             }
 
-            if (!any && batch.Record.Problem is null) return Ok(batch);
+            if (!any && !StoppedLocked(batch)) return Ok(batch);
             if (batch.Record.State != SiteTransferStates.Paused)
             {
                 batch.Record.State = SiteTransferStates.Running;
@@ -355,6 +366,14 @@ public sealed class SiteTransfers : IAsyncDisposable
         RequestBroadcast();
         lock (_sync) return Ok(batch);
     }
+
+    /// <summary>
+    /// Failed because something stopped the whole batch (a host key, a refused sign-in, a server out of reach), not
+    /// because its files ran out of tries: files are still waiting, or a problem is set.
+    /// </summary>
+    private static bool StoppedLocked(Batch batch) =>
+        batch.Record.State == SiteTransferStates.Failed
+        && (batch.Record.Problem is not null || batch.Record.Items.Any(i => i.State == SiteTransferItemStates.Waiting));
 
     /// <summary>Removes one finished batch, or every finished batch for an empty id. The files moved stay where they are.</summary>
     public async Task<SiteTransferResultDto> ClearAsync(string id)
@@ -409,6 +428,27 @@ public sealed class SiteTransfers : IAsyncDisposable
         List<string> ids;
         lock (_sync) ids = [.. _batches.Where(b => b.Record.State == SiteTransferStates.Running).Select(b => b.Record.Id)];
         foreach (var id in ids) await StopAsync(id, SiteTransferStates.Paused, message).ConfigureAwait(false);
+    }
+
+    /// <summary>The message of a batch a schedule paused; a schedule's start resumes only those.</summary>
+    public const string ScheduledPauseMessage = "Paused by a schedule.";
+
+    /// <summary>A schedule's stop (SITES.4): every running batch is paused.</summary>
+    public Task PauseForScheduleAsync() => PauseAllAsync(ScheduledPauseMessage);
+
+    /// <summary>A schedule's start: the batches a schedule paused go on; ones paused by hand, or when Sites was turned off,
+    /// stay paused. Nothing while Sites is off.</summary>
+    public async Task ResumeForScheduleAsync()
+    {
+        List<string> ids;
+        lock (_sync)
+        {
+            if (_disposed || !_enabled()) return;
+            ids = [.. _batches.Where(b => b.Record.State == SiteTransferStates.Paused && b.Record.Message == ScheduledPauseMessage)
+                .Select(b => b.Record.Id)];
+        }
+
+        foreach (var id in ids) await ResumeAsync(id).ConfigureAwait(false);
     }
 
     /// <summary>The site was removed: its batches that are not finished are canceled.</summary>
@@ -588,6 +628,8 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// <summary>Starts waiting files while there is room, oldest batch first, and sets the timer for the next retry.</summary>
     public void Pump()
     {
+        // Before any file starts, so the speed share for a batch that just started is in place before its first copy.
+        UpdateActivity();
         var started = false;
         lock (_sync)
         {
@@ -657,12 +699,77 @@ public sealed class SiteTransfers : IAsyncDisposable
         UpdateSleep();
     }
 
+    /// <summary>Whether a batch runs and how fast all of them go together: their demand in the overall speed limit's split.</summary>
+    public SpeedDemand Demand()
+    {
+        lock (_sync)
+        {
+            var active = !_disposed && _enabled() && _batches.Any(b => b.Record.State == SiteTransferStates.Running);
+            return new SpeedDemand(active, _batches.Where(b => b.Active.Count > 0).Sum(b => (double)b.Speed));
+        }
+    }
+
+    /// <summary>Site transfers' share of the overall speed limit (bytes/s), or null for none. rclone is told before the next
+    /// file starts, or within a second while files move.</summary>
+    public void SetSpeedLimit(long? bytesPerSecond)
+    {
+        lock (_sync) _speedLimit = bytesPerSecond is > 0 ? bytesPerSecond : null;
+    }
+
+    /// <summary>Tells this rclone process the speed share when it differs from what it was last told.</summary>
+    private async Task ApplySpeedLimitAsync(RcloneLease lease, CancellationToken token)
+    {
+        await _speedGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            long? limit;
+            lock (_sync) limit = _speedLimit;
+            if (_speedApplied == (lease.ProcessId, limit)) return;
+            // A plain number would be read as KiB; the B suffix makes it bytes. "off" lifts the limit.
+            var rate = limit is { } bytes ? bytes.ToString(CultureInfo.InvariantCulture) + "B" : "off";
+            await lease.Client.CallAsync("core/bwlimit", new JsonObject { ["rate"] = rate }, token).ConfigureAwait(false);
+            _speedApplied = (lease.ProcessId, limit);
+        }
+        catch (RcloneCallException e)
+        {
+            // The copy still runs; the next file or second tries again.
+            _log($"Site transfers: the speed limit could not be set: {e.Message}");
+        }
+        finally
+        {
+            _speedGate.Release();
+        }
+    }
+
+    /// <summary>Raises <see cref="ActivityChanged"/> when a batch starts running or none runs any more.</summary>
+    private void UpdateActivity()
+    {
+        bool changed;
+        lock (_sync)
+        {
+            var active = !_disposed && _enabled() && _batches.Any(b => b.Record.State == SiteTransferStates.Running);
+            changed = active != _active;
+            _active = active;
+        }
+
+        if (!changed) return;
+        try
+        {
+            ActivityChanged?.Invoke();
+        }
+        catch (Exception e)
+        {
+            _log($"Site transfers: a listener failed: {e.Message}");
+        }
+    }
+
     /// <summary>
     /// The PC stays awake while a batch is running (moving, or waiting for a retry or a free place) and Sites is on, as
     /// downloads do; not for a paused one.
     /// </summary>
     private void UpdateSleep()
     {
+        UpdateActivity();
         lock (_sleepGate)
         {
             bool hold;
@@ -766,7 +873,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 batch.ConnectionFailures++;
                 if (batch.ConnectionFailures >= MaxConnectionFailures)
                 {
-                    stopBatch = $"{error} The transfer stopped after {MaxConnectionFailures} tries; Retry goes on.";
+                    stopBatch = $"{error} The transfer stopped after {MaxConnectionFailures} failed connections in a row; Retry goes on.";
                 }
                 else
                 {
@@ -847,6 +954,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         using var lease = await _acquire(token).ConfigureAwait(false);
         var client = lease.Client;
         var fs = await SiteRemote.BuildAsync(site, client, token).ConfigureAwait(false);
+        await ApplySpeedLimitAsync(lease, token).ConfigureAwait(false);
         var local = new JsonObject { ["type"] = "local", ["_root"] = record.LocalFolder };
 
         string? target;
@@ -1106,6 +1214,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             {
                 using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 using var lease = await _acquire(limit.Token).ConfigureAwait(false);
+                await ApplySpeedLimitAsync(lease, limit.Token).ConfigureAwait(false);
                 foreach (var batch in active)
                 {
                     var stats = await lease.Client.CallAsync("core/stats", new JsonObject { ["group"] = batch.Group }, limit.Token).ConfigureAwait(false);
@@ -1129,6 +1238,14 @@ public sealed class SiteTransfers : IAsyncDisposable
             }
 
             RequestBroadcast();
+            try
+            {
+                Measured?.Invoke();
+            }
+            catch (Exception e)
+            {
+                _log($"Site transfers: a listener failed: {e.Message}");
+            }
         }
 
         RequestBroadcast();
