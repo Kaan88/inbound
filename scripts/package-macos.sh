@@ -7,8 +7,9 @@
 # unsigned), so Gatekeeper asks on first open. Right-click > Open, or: xattr -dr com.apple.quarantine /Applications/Inbound.app
 #
 # Layout:
-#   Contents/MacOS/InboundLauncher       the bundle's program: starts the Host, then becomes the window
-#   Contents/MacOS/                      the Uno window (DownloadManager.Desktop.Uno), so macOS sees it as this app
+#   Contents/MacOS/InboundLauncher       the bundle's program: starts the Host, then becomes the window. Only Mach-O
+#                                        files and scripts may sit in Contents/MacOS, or codesign refuses the bundle.
+#   Contents/Resources/window/           the Uno window (DownloadManager.Desktop.Uno)
 #   Contents/Resources/host/             inbound-host, DownloadManager.Cli, DownloadManager.NativeHost,
 #                                        DownloadManager.Server, inbound-torrent (when built)
 set -euo pipefail
@@ -21,9 +22,10 @@ version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$root/Directory.Build.
 app="$out/$arch/Inbound.app"
 macos="$app/Contents/MacOS"
 host="$app/Contents/Resources/host"
+window="$app/Contents/Resources/window"
 
 rm -rf "$out/$arch"
-mkdir -p "$macos" "$host"
+mkdir -p "$macos" "$host" "$window"
 publish() {
   dotnet publish "$root/$1" -c "$config" -r "$rid" --self-contained true -p:PublishSingleFile=false \
     -p:DebugType=none -p:UseAppHost=true -o "$2" -nologo -v q
@@ -32,7 +34,7 @@ publish src/DownloadManager.Host.Linux "$host"
 publish src/DownloadManager.Cli "$host"
 publish src/DownloadManager.NativeHost "$host"
 publish src/DownloadManager.Server "$host"
-publish src/DownloadManager.Desktop.Uno "$macos"
+publish src/DownloadManager.Desktop.Uno "$window"
 
 # The torrent worker (native/torrent-worker) is optional here: without it the app runs with torrents turned off.
 worker="${TORRENT_WORKER:-$root/artifacts/torrent-worker/$rid/inbound-torrent}"
@@ -47,7 +49,7 @@ cat > "$macos/InboundLauncher" <<'EOF'
 # Inbound.app's program. A second Host asks the running one and exits, so starting it every time is safe.
 macos="$(cd "$(dirname "$0")" && pwd)"
 host="$macos/../Resources/host"
-export DOWNLOADMANAGER_UI="$macos/DownloadManager.Desktop.Uno"
+export DOWNLOADMANAGER_UI="$macos/../Resources/window/DownloadManager.Desktop.Uno"
 export DOWNLOADMANAGER_HOST="$host/inbound-host"
 case "$1" in
   --cli) shift; exec "$host/DownloadManager.Cli" "$@" ;;

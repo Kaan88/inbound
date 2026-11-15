@@ -189,8 +189,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         {
             AppContext.BaseDirectory,
             Path.Combine(AppContext.BaseDirectory, "desktop"),
-            // macOS: Inbound.app keeps the Host in Contents/Resources/host and the window in Contents/MacOS.
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "MacOS"),
+            // macOS: Inbound.app keeps the Host in Contents/Resources/host and the window in Contents/Resources/window.
+            Path.Combine(AppContext.BaseDirectory, "..", "window"),
             // A build from the source tree (Host and window in their own bin folders).
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Debug", "net10.0-desktop"),
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Release", "net10.0-desktop"),
