@@ -153,25 +153,30 @@ jobs:
               case "$clicked" in *"$line"*) continue ;; esac
               point="${line##* at }"
               echo "clicking: $line"
-              case "$line" in *About*) shot about ;; *close*) shot progress ;; esac
+              case "$line" in *About*) shot about ;; *"Progress Details close"*) shot progress ;; esac
               cliclick "m:$point" "w:200" "c:$point"
             done
             clicked="$(grep -o 'selftest: click .* at [0-9-]*,[0-9-]*' "$trace" 2>/dev/null)"
-            grep -q 'selftest: opening Options' "$trace" && break
+            grep -q 'selftest: click main close' "$trace" && [ -n "$(echo "$clicked" | grep 'main close')" ] && break
             sleep 0.5
           done
-          sleep 2; shot options
-          for i in $(seq 1 20); do grep -q 'selftest: done' "$trace" && break; sleep 1; done
-          sleep 3; shot last
+          # The main window was closed by its button (the self-test's last click): its process should end.
+          sleep 6; shot closed
           pid="$(pgrep -f 'Resources/window/DownloadManager.Desktop.Uno' | head -n1)"
           last="$(grep 'selftest heartbeat' "$trace" | tail -n1)"
-          beat_age=$(( $(date -u +%s) - $(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$(echo "$last" | cut -c1-19)" +%s 2>/dev/null || echo 0) ))
-          echo "--- last heartbeat ${beat_age}s ago: $last"
-          if [ -n "$pid" ] && [ "$beat_age" -gt 3 ]; then
-            echo "--- the UI thread has stopped: managed stacks of every thread"
+          echo "--- after closing the main window: last heartbeat: $last"
+          if [ -n "$pid" ]; then
+            echo "--- the window process $pid is still running after its window closed: managed stacks of every thread"
             dotnet-dump collect -p "$pid" -o "$RUNNER_TEMP/ui.dmp" --type Mini >/dev/null 2>&1
             dotnet-dump analyze "$RUNNER_TEMP/ui.dmp" -c "clrstack -all" -c exit 2>&1 | head -400
+          else
+            echo "--- the window process ended after its window closed"
           fi
+
+          # Opened again as the menu-bar icon's Open Inbound does now (LinuxHostPlatform.LaunchUi on macOS).
+          open -n -a "$PWD/$app" --env DOWNLOADMANAGER_DATA="$data" --env DOWNLOADMANAGER_UNO_TRACE=1
+          sleep 12; shot reopened
+          echo "--- window processes now: $(pgrep -fl 'DownloadManager.Desktop.Uno' | wc -l)"
           echo "--- menu-bar helper: $(pgrep -fl inbound-menu || echo 'not running')"
           echo "--- window output"; tail -40 "$RUNNER_TEMP/ui.log"
           echo "--- ui trace"; grep -v -E 'first chance|selftest heartbeat' "$trace" | tail -40
