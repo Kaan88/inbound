@@ -57,7 +57,7 @@
   by a dispatcher test that checks every request name; and seven window faults (backslashes taken as slashes, "Open
   Options › Sites" not opening that page, a switch clickable before the status is read, "No sites yet." while Sites is
   off, exceptions escaping two dialog handlers, an undisposed linked token, Star offered at the root), all fixed. Tests on Linux: Sites.Tests 144 pass (1 skips: the real zip),
-  Integration Sites 52 (51 pass; the one failure needs the Windows Host build and failed before), the SFTP end-to-end test
+  Integration Sites 53 (52 pass; the one failure needs the Windows Host build and failed before), the SFTP end-to-end test
   browses and pages a real sshd with rclone 1.76.0; Core.Tests: only the 31 failures that were there before on Linux.
   `dotnet build` of the Uno window succeeds. **Not checked:** neither page has been opened in the running app (Linux or
   Windows), so layout, dialogs, focus and the walk against a test SFTP server (the phase's "done when") are still to do;
