@@ -105,6 +105,29 @@ public sealed class SitesSftpEndToEndTests : IAsyncLifetime
         Assert.True(test.Ok, test.Message);
         Assert.Equal("Connected. The folder holds 2 items.", test.Message);
 
+        // SITES.3: the start folder in pages of one, from one listing; the parent shows pub as a folder; a star persists.
+        var first = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Limit = 1 });
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal(Path.Combine(Served, "pub"), first.Path);
+        Assert.Equal(2, first.Total);
+        var a = Assert.Single(first.Items);
+        Assert.Equal(("a.txt", false, 1L), (a.Name, a.IsFolder, a.Size));
+        Assert.NotNull(a.Modified);
+        var second = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Offset = 1, Limit = 1 });
+        Assert.Equal("b.txt", Assert.Single(second.Items).Name);
+
+        var parent = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Path = Served + "/" });
+        Assert.True(parent.Ok, parent.Message);
+        var pub = Assert.Single(parent.Items);
+        Assert.Equal(("pub", true, -1L), (pub.Name, pub.IsFolder, pub.Size));
+
+        var missing = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Path = Served + "/nothing-here" });
+        Assert.False(missing.Ok);
+        Assert.Null(missing.Problem);
+
+        var starred = await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = id, Path = first.Path });
+        Assert.Equal([first.Path], starred.Site!.Stars);
+
         // The same address now answers with another key: refused, with what it offers and what was accepted.
         StopSshd();
         await StartSshdAsync("other-host");
@@ -113,6 +136,10 @@ public sealed class SitesSftpEndToEndTests : IAsyncLifetime
         Assert.Equal(SiteProblems.HostKeyChanged, changed.Problem);
         Assert.Equal(await Fingerprint("other-host.pub"), changed.OfferedFingerprint);
         Assert.Equal([key.Fingerprint], changed.AcceptedFingerprints);
+        var changedBrowse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Refresh = true });
+        Assert.False(changedBrowse.Ok);
+        Assert.Equal(SiteProblems.HostKeyChanged, changedBrowse.Problem);
+        Assert.Empty(changedBrowse.Items);
 
         // Neither the key nor its passphrase reached the log, the replies or any file under the state folder in the clear.
         var keyLines = (await File.ReadAllLinesAsync(Path.Combine(Ssh, "user"))).Where(line => !line.StartsWith("-----", StringComparison.Ordinal) && line.Length > 0).ToArray();

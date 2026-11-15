@@ -295,6 +295,86 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         Assert.Equal(4, changes);
     }
 
+    [Fact]
+    public async Task StarsAreKeptInOrderSurviveARestartAndAnEditButNotAnotherServer()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        Assert.Empty(saved.Stars);
+
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "/srv/pub/" })).Ok);
+        var two = await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "home/tester" });
+        Assert.Equal(["/srv/pub", "/home/tester"], two.Site!.Stars);
+        // Starring again changes nothing; unstarring removes only that one.
+        var again = await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "/srv/pub" });
+        Assert.Equal(["/srv/pub", "/home/tester"], again.Site!.Stars);
+        var unstarred = await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "/srv/pub", Starred = false });
+        Assert.Equal(["/home/tester"], unstarred.Site!.Stars);
+
+        var reopened = Open();
+        Assert.Equal(["/home/tester"], Assert.Single((await Call<SitesListDto>(reopened, SitesMessageTypes.ListRequest)).Sites).Stars);
+
+        var renamed = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, name: "Renamed", password: null));
+        Assert.Equal(["/home/tester"], renamed.Site!.Stars);
+        var moved = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: null));
+        Assert.Empty(moved.Site!.Stars);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/a/../b")]
+    [InlineData("/a\0b")]
+    public async Task AStarNeedsAFolderPath(string path)
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = path.Replace("\\0", "\0") });
+        Assert.False(refused.Ok);
+        Assert.Empty(Assert.Single((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites).Stars);
+    }
+
+    [Fact]
+    public async Task BrowseRefusesBeforeRcloneIsAsked()
+    {
+        var commands = Open();
+        var off = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteStore.NewId() });
+        Assert.False(off.Ok);
+        Assert.Equal(SiteProblems.Off, off.Problem);
+
+        await On(commands);
+        var unknown = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteStore.NewId() });
+        Assert.False(unknown.Ok);
+        Assert.Equal("That site no longer exists.", unknown.Message);
+
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var dots = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id, Path = "/pub/../etc" });
+        Assert.False(dots.Ok);
+        Assert.Null(dots.Problem);
+
+        var untrusted = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id });
+        Assert.False(untrusted.Ok);
+        Assert.Equal(SiteProblems.HostKeyNotAccepted, untrusted.Problem);
+        Assert.Equal("/pub", untrusted.Path);
+    }
+
+    [Fact]
+    public async Task BrowseWithNoRcloneSaysSoForATrustedSite()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var probe = await Call<SiteProbeResultDto>(commands, SitesMessageTypes.Probe, new SiteProbeRequest { Host = Host, Port = 22 });
+        await Call<SiteResultDto>(commands, SitesMessageTypes.Trust, new SiteTrustRequest { Id = saved.Id, Entries = [probe.Keys[0].Entry] });
+
+        var missing = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id, Path = "/x" });
+        Assert.False(missing.Ok);
+        Assert.Null(missing.Problem);
+        Assert.Contains("rclone", missing.Message);
+    }
+
     private SitesCommands Open(Func<string?, string?>? findRclone = null,
         Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null)
     {

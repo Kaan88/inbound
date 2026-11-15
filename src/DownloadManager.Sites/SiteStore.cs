@@ -52,6 +52,9 @@ public sealed record SiteRecord
     /// <summary>The linked folder on this PC (two panes, "On this PC"), or null.</summary>
     public string? LocalFolder { get; init; }
 
+    /// <summary>Starred folders: absolute paths on the server, normalised by <see cref="SitePaths.Normalize"/>.</summary>
+    public List<string> Stars { get; init; } = [];
+
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
 }
@@ -167,6 +170,9 @@ public sealed class SiteStore
                 throw new SiteStoreException("A site secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
+        if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
+        foreach (var star in site.Stars)
+            if (SitePaths.Normalize(star) != star) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>

@@ -179,7 +179,7 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
-### Sites: `sites.*` (SITES.2, on main since 2026-11-15, not released)
+### Sites: `sites.*` (SITES.2 and SITES.3, on main since 2026-11-15, not released)
 
 Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
 `SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
@@ -196,7 +196,8 @@ Off: when the switch is off, rclone never starts and nothing runs on a timer. On
 - `sites.list`: `sites.listResult` with an empty `sites` list;
 - `sites.kinds`: `sites.kindsResult`, as when on;
 - `sites.probe`: `sites.probeResult` `{ok: false, message: "Sites is off. Turn it on in Options › Sites."}`;
-- `sites.save`, `sites.remove`, `sites.trust` and `sites.test`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
+- `sites.browse`: `sites.browseResult` `{ok: false, problem: "off", message: ...}`, the same message;
+- `sites.save`, `sites.remove`, `sites.trust`, `sites.test` and `sites.star`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
 - `sites.rclone.install` and `sites.rclone.check`: `sites.status` with that `error`, and nothing is downloaded.
 
 Turning Sites off stops rclone. The saved sites and their sealed secrets stay on disk.
@@ -212,6 +213,8 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | `sites.probe` | `{host, port?}` | `sites.probeResult` |
 | `sites.trust` | `{id, entries}` | `sites.result` |
 | `sites.test` | `{id}` | `sites.result` |
+| `sites.browse` | `{id, path?, offset?, limit?, refresh?}` | `sites.browseResult` |
+| `sites.star` | `{id, path, starred?}` | `sites.result` |
 | `sites.rclone.install` | `{version?}` | `sites.status` |
 | `sites.rclone.check` | `{}` | `sites.status` |
 
@@ -266,7 +269,7 @@ that is null keeps the stored value, and an empty string removes it. A changed h
 keys, so the new server is asked about again.
 
 `SiteDto` also has `id`, `name`, `kind`, `host`, `port`, `user`, `authMethod`, `hostKeys` (each
-`{type, fingerprint, entry}`), `remoteFolder` and `localFolder?`.
+`{type, fingerprint, entry}`), `remoteFolder`, `localFolder?` and `stars` (starred folders, absolute paths, in the order they were starred).
 
 Host keys: `sites.probe` reads the server's host keys with the SSH key exchange only. It does not log in. The reply is
 `sites.probeResult` `{ok, message?, keys}`, with every key the server offers and ed25519 first. Each key is
@@ -288,12 +291,27 @@ the window handles on their own screens, with `problem` set:
 On success, `message` says how many items the folder holds. A missing rclone or a failed connection carries `ok: false`
 with `message` and no `problem`.
 
-`sites.probe`, `sites.test`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
+Browsing (SITES.3, read-only): `sites.browse` lists one folder. `path` is absolute on the server with `/` separators
+(`/srv/pub`); left out or empty, it is the site's `remoteFolder` (or `/`). Empty segments and a trailing slash are
+dropped; a `.` or `..` segment, a control character or more than 4096 characters is refused with `ok: false` and no
+`problem`. A backslash is part of a name. The reply `SiteBrowseResultDto` is `{ok, message?, problem?,
+offeredFingerprint?, acceptedFingerprints, path, items, total, offset}`: `path` normalised, `items` each `{name,
+isFolder, size, modified?}` (`size` is -1 for folders and when the server does not say; `modified` is left out when the
+server gives none), sorted folders first, then by name ignoring case. `limit` is 1 to 2000 (500 when left out or below
+1). Pages after the first (`offset` above 0) come from the listing the Host read for that folder in the last minute,
+so the pages agree; `offset` 0 or `refresh: true` reads the folder again. The Host keeps one listing per site. Failures
+are as for `sites.test`, including `hostKeyNotAccepted` and `hostKeyChanged` with their fingerprints.
+
+`sites.star` takes `{id, path, starred}` (`starred` true when left out): the path is normalised as above and must not be
+empty. Starring a starred folder keeps its place; unstarring removes it. A site has at most 100 stars. Editing a site
+keeps its stars unless the host or port changes, which forgets them with the host keys.
+
+`sites.probe`, `sites.test`, `sites.browse`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
 install cut off that way leaves nothing behind).
 
 `sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
 The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
-removed or trusted, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
+removed, trusted or starred, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
 
 ### The server's transports (D1b)
 

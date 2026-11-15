@@ -42,6 +42,17 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>Checks rclone's server about once a day.</summary>
     public static readonly TimeSpan CheckInterval = TimeSpan.FromHours(23);
 
+    /// <summary>A folder's listing is paged from memory for this long, then read again.</summary>
+    public static readonly TimeSpan ListingLifetime = TimeSpan.FromMinutes(1);
+
+    public const int DefaultPageSize = 500;
+    public const int MaxPageSize = 2000;
+
+    private sealed record Listing(string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At);
+
+    // The last folder listed per site: enough for paging, and nothing grows with browsing.
+    private readonly Dictionary<string, Listing> _listings = new(StringComparer.Ordinal);
+
     private SitesConfig _config;
     private string? _configProblem;
     private RcloneSupervisor? _supervisor;
@@ -111,6 +122,8 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.ListRequest => IpcMessage.Create(SitesMessageTypes.List, new SitesListDto(), request.Id),
                 SitesMessageTypes.KindsRequest => IpcMessage.Create(SitesMessageTypes.Kinds, Kinds(), request.Id),
                 SitesMessageTypes.Probe => IpcMessage.Create(SitesMessageTypes.ProbeResult, new SiteProbeResultDto { Ok = false, Message = OffMessage }, request.Id),
+                SitesMessageTypes.Browse => IpcMessage.Create(SitesMessageTypes.BrowseResult,
+                    new SiteBrowseResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
             };
@@ -133,6 +146,11 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 return Result(request, await TrustAsync(request.GetPayload<SiteTrustRequest>() ?? new SiteTrustRequest(), cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Test:
                 return Result(request, await TestAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Browse:
+                return IpcMessage.Create(SitesMessageTypes.BrowseResult,
+                    await BrowseAsync(request.GetPayload<SiteBrowseRequest>() ?? new SiteBrowseRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.Star:
+                return Result(request, await StarAsync(request.GetPayload<SiteStarRequest>() ?? new SiteStarRequest(), cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.RcloneInstall:
                 return IpcMessage.Create(SitesMessageTypes.Status,
                     await InstallRcloneAsync(request.GetPayload<SitesRcloneInstallRequest>()?.Version, cancellationToken).ConfigureAwait(false), request.Id);
@@ -444,6 +462,8 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                     HostKeys = sameServer ? existing!.HostKeys : [],
                     RemoteFolder = request.RemoteFolder.Trim(),
                     LocalFolder = string.IsNullOrWhiteSpace(request.LocalFolder) ? null : request.LocalFolder.Trim(),
+                    // Stars are folders on the same server; another server forgets them with its keys.
+                    Stars = sameServer ? existing!.Stars : [],
                     CreatedAt = existing?.CreatedAt ?? now,
                     ModifiedAt = now,
                 };
@@ -466,6 +486,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             _gate.Release();
         }
 
+        ForgetListings(saved.Id);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true, Site = ToDto(saved) };
     }
@@ -483,6 +504,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             _gate.Release();
         }
 
+        ForgetListings(id);
         if (!removed) return Fail("That site no longer exists.");
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true };
@@ -527,6 +549,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             _gate.Release();
         }
 
+        ForgetListings(saved.Id);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true, Site = ToDto(saved) };
     }
@@ -535,8 +558,78 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         if (!SiteStore.IsId(id) || await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is not { } site)
             return Fail("That site no longer exists.");
+        var path = SitePaths.Normalize(site.RemoteFolder);
+        if (path is null) return Fail("The site's remote folder is not a usable path; change it in Edit site.");
+        var (items, failure) = await ListFolderAsync(site, path, cancellationToken).ConfigureAwait(false);
+        if (failure is not null) return failure;
+        var count = items!.Count;
+        return new SiteResultDto { Ok = true, Message = $"Connected. The folder holds {count} item{(count == 1 ? "" : "s")}." };
+    }
+
+    /// <summary>
+    /// One folder, sorted folders first then by name, paged (SITES.3). A page after the first comes from the listing the
+    /// Host read for that folder in the last <see cref="ListingLifetime"/>, so the pages of one folder agree with each other.
+    /// </summary>
+    private async Task<SiteBrowseResultDto> BrowseAsync(SiteBrowseRequest request, CancellationToken cancellationToken)
+    {
+        if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
+            return new SiteBrowseResultDto { Ok = false, Message = "That site no longer exists." };
+        var path = SitePaths.Normalize(string.IsNullOrEmpty(request.Path) ? site.RemoteFolder : request.Path);
+        if (path is null) return new SiteBrowseResultDto { Ok = false, Message = "That is not a folder path on the server." };
+        var limit = request.Limit is < 1 ? DefaultPageSize : Math.Min(request.Limit, MaxPageSize);
+        var offset = Math.Max(0, request.Offset);
+
+        var items = request.Refresh || offset == 0 ? null : CachedListing(site.Id, path);
+        if (items is null)
+        {
+            var (listed, failure) = await ListFolderAsync(site, path, cancellationToken).ConfigureAwait(false);
+            if (failure is not null)
+            {
+                return new SiteBrowseResultDto
+                {
+                    Ok = false,
+                    Message = failure.Message,
+                    Problem = failure.Problem,
+                    OfferedFingerprint = failure.OfferedFingerprint,
+                    AcceptedFingerprints = failure.AcceptedFingerprints,
+                    Path = path,
+                };
+            }
+
+            items = listed!;
+            lock (_listings) _listings[site.Id] = new Listing(path, items, _time.GetUtcNow());
+        }
+
+        return new SiteBrowseResultDto
+        {
+            Ok = true,
+            Path = path,
+            Total = items.Count,
+            Offset = offset,
+            Items = [.. items.Skip(offset).Take(limit)],
+        };
+    }
+
+    private IReadOnlyList<SiteItemDto>? CachedListing(string siteId, string path)
+    {
+        lock (_listings)
+        {
+            return _listings.TryGetValue(siteId, out var listing) && listing.Path == path && _time.GetUtcNow() - listing.At < ListingLifetime
+                ? listing.Items
+                : null;
+        }
+    }
+
+    private void ForgetListings(string siteId)
+    {
+        lock (_listings) _listings.Remove(siteId);
+    }
+
+    /// <summary>Lists one folder through rclone: the items sorted, or the failure as <c>sites.test</c> reports it.</summary>
+    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken)
+    {
         if (site.HostKeys.Count == 0)
-            return new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." };
+            return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
 
         RcloneLease lease;
         try
@@ -545,7 +638,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         }
         catch (RcloneUnavailableException e)
         {
-            return Fail(e.Message);
+            return (null, Fail(e.Message));
         }
 
         using (lease)
@@ -556,14 +649,13 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 var listing = await lease.Client.CallAsync("operations/list", new JsonObject
                 {
                     ["fs"] = fs,
-                    ["remote"] = site.RemoteFolder.TrimStart('/'),
+                    ["remote"] = SitePaths.ToRemote(path),
                 }, cancellationToken).ConfigureAwait(false);
-                var count = listing["list"] is JsonArray items ? items.Count : 0;
-                return new SiteResultDto { Ok = true, Message = $"Connected. The folder holds {count} item{(count == 1 ? "" : "s")}." };
+                return (SiteListing.Read(listing), null);
             }
             catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
             {
-                return new SiteResultDto
+                return (null, new SiteResultDto
                 {
                     Ok = false,
                     Problem = SiteProblems.HostKeyChanged,
@@ -572,14 +664,47 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                         : "The server no longer offers the kind of key that was accepted. Do not continue unless the server's owner confirms the change.",
                     OfferedFingerprint = problem.OfferedFingerprint,
                     AcceptedFingerprints = [.. problem.PinnedFingerprints],
-                };
+                });
             }
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
                 // RcloneClient has already redacted the text.
+                return (null, Fail(e.Message));
+            }
+        }
+    }
+
+    private async Task<SiteResultDto> StarAsync(SiteStarRequest request, CancellationToken cancellationToken)
+    {
+        SiteRecord saved;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
+                return Fail("That site no longer exists.");
+            if (SitePaths.Normalize(request.Path) is not { } path || request.Path.Length == 0) return Fail("That is not a folder path on the server.");
+            // Starring a starred folder again keeps its place.
+            var stars = site.Stars.Where(s => s != path).ToList();
+            if (request.Starred) stars = site.Stars.Contains(path) ? [.. site.Stars] : [.. site.Stars, path];
+            if (stars.Count > SitePaths.MaxStars) return Fail($"A site can have at most {SitePaths.MaxStars} starred folders.");
+            if (stars.SequenceEqual(site.Stars)) return new SiteResultDto { Ok = true, Site = ToDto(site) };
+            saved = site with { Stars = stars, ModifiedAt = DateTimeOffset.UtcNow };
+            try
+            {
+                await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SiteStoreException e)
+            {
                 return Fail(e.Message);
             }
         }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
+        return new SiteResultDto { Ok = true, Site = ToDto(saved) };
     }
 
     /// <summary>
@@ -759,6 +884,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         HostKeys = [.. site.HostKeys.Select(EntryToDto).OfType<SiteHostKeyDto>()],
         RemoteFolder = site.RemoteFolder,
         LocalFolder = site.LocalFolder,
+        Stars = [.. site.Stars],
     };
 
     private static SiteHostKeyDto ToDto(SshHostKey key) => new() { Type = key.KeyType, Fingerprint = key.Fingerprint, Entry = key.HostKeysEntry };
