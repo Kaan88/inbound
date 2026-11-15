@@ -207,6 +207,16 @@ Sign-in to a usable list at 5,000 jobs: 1,223 ms before, 712 to 761 ms after. Th
 What is left at 5,000 jobs and 8 downloads is mostly script (583 ms a second): every update still filters and sorts all
 jobs and Svelte compares 5,000 keyed rows. A windowed list (render only the rows on screen) is the next step.
 
+## PERF.20: the web UI's own files (2026-11-15)
+
+The publish step already leaves a Brotli and a gzip copy of each built file; the server never sent them. Now, under
+`/assets/` only (hashed names, no secrets in them), the server sends the copy the browser accepts and marks the file
+`private, max-age=31536000, immutable` (private, since the files are behind the sign-in). The main script went from
+645 KB to 162 KB with Brotli (205 KB with gzip), checked against a published server with curl: the decoded bytes equal
+the plain file, a copy asked for by its own name is a 404, and without a session the request is still sent to the
+sign-in. The snapshot and the WebSocket stay uncompressed (the compression side channel in
+`ui-performance-areas.md`), and serialising once per broadcast was dropped with PERF.13.
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

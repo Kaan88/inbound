@@ -257,7 +257,10 @@ internal static class WebFront
         if (Directory.Exists(builder.Environment.WebRootPath))
         {
             web.UseDefaultFiles();
-            web.UseStaticFiles(new StaticFileOptions { FileProvider = new PhysicalFileProvider(builder.Environment.WebRootPath) });
+            var webRoot = new PhysicalFileProvider(builder.Environment.WebRootPath);
+            // PERF.20: the hashed files under /assets/ go compressed when the browser takes it, and are kept for good.
+            web.UseCompressedAssets(webRoot);
+            web.UseStaticFiles(new StaticFileOptions { FileProvider = webRoot, ContentTypeProvider = new StaticAssetCompression.ContentTypes() });
         }
 
         return web;

@@ -413,6 +413,13 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AA. PERF.20: compressed, cached web UI files** (2026-11-15, main). New `Server/StaticAssetCompression`: for
+  `/assets/` the server sends the publish step's `.br` or `.gz` copy when the browser accepts it (Brotli first), with
+  the original content type, `Vary: Accept-Encoding` and `Cache-Control: private, max-age=31536000, immutable`; a copy
+  asked for by its own name is a 404. **Checked:** 9 new tests (Accept-Encoding with q values, the choice, the types, a
+  path out of the folder) and all 202 server tests pass; against a published server with curl the main script is
+  162 KB with Brotli instead of 645 KB, the decoded bytes are the same, and without a session it still redirects.
+  **Not checked:** the Docker image (its publish makes the same copies); a real slow link.
 - **Z. PERF.19: the web UI's list** (2026-11-15, main). `ProgressBar.svelte` clips a full-width fill instead of
   animating its width (the page was laid out on nearly every frame while progress came in); list rows have
   `content-visibility: auto`; `buildRows` keeps a download's cells and row object per job object (not for torrents, which
