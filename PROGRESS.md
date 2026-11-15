@@ -427,8 +427,8 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
-- **AS. Firefox add-on approved** (2026-11-16, owner: "finally firefox got approved"). The listed add-on's review at
-  addons.mozilla.org has passed (ROADMAP EXT.S5). Not checked here: the approved version and the public page.
+- **AS. Firefox add-on approved** (2026-11-16, owner: "finally firefox got approved"). The listed add-on, version 0.6.5 (owner),
+  passed review at addons.mozilla.org (ROADMAP EXT.S5). Not checked here: the public page.
 - **AR. Owner on Sites in 0.8.0: the UI is not finished** (2026-11-16). "current implementation is TERRIBLE ... a tacked
   on feature that is borderline unusable"; "backend seems sound and it seems to work but ui is not finished"; "I agreed
   on mockups for the design USE THEM"; "don't start the work yet, create a proper bulletproof plan first". Reported:
