@@ -105,6 +105,24 @@ status bar redraw every tick, whatever changed. That is where PERF.16 and PERF.1
 The Host is quiet. The hidden window wakes about 126 times a second while doing nothing: PERF.4's remaining
 wake-ups, now measured. With the option on (the default since PERF.5) there is no window process after closing.
 
+## The window's list bars (2026-11-15)
+
+With the graph hidden, one download cost the window's UI thread 2.3 % of a core; a test build with the row's progress bar
+collapsed took that to 0.08 %. WinUI's `ProgressBar` template plays a `RepositionThemeAnimation` on every value change
+(its Updating to Determinate transition), frame by frame on the UI thread. The list rows now use
+`InboundListProgressBarStyle`: the same parts and look, no visual states, so the control sets the indicator's width
+itself and nothing animates; screen readers still read a progress bar with its value. Same runs, graph hidden, quiet
+machine:
+
+| Downloads | UI thread % of a core, before / after | Window process % |
+| ---: | --- | --- |
+| 1 | 2.31 / 0.42 | 3.74 / 1.98 |
+| 8 | 7.72 / 0.60 | 9.51 / 1.58 |
+
+With the graph shown (the default) the UI thread also dropped (1 download, 500 jobs: 4.1 to 1.1-2.1 %), but those runs
+were taken while a Rust build loaded the machine (60 % total CPU) and swing too much to quote; to measure again on a quiet
+machine.
+
 ## PERF.9: the transfer loop (2026-11-15)
 
 `TransferReader` gives each response one pooled buffer and one cancellation source re-armed per read, instead of a

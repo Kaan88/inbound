@@ -427,6 +427,16 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AI. The window's list bars** (2026-11-15, main; PERF.16 follow-up). WinUI's `ProgressBar` animates every value
+  change (a `RepositionThemeAnimation` in its template), which was nearly all of the window's UI-thread work with
+  downloads running. The list rows use the new `InboundListProgressBarStyle` (same parts and look, no visual states).
+  Graph hidden, quiet machine: one download 2.31 to 0.42 % of a core on the UI thread, eight 7.72 to 0.60 %; the
+  window process 9.5 to 1.6 % with eight. **Not checked:** the bars on screen (they draw from the same parts; not
+  looked at), the default view on a quiet machine (the runs with the graph shown were taken during a Rust build), Uno.
+- **AH. UI.B40 (owner report, 2026-11-15): numbers in the main list jump around.** The download window's rows set
+  `Typography.NumeralAlignment="Tabular"` on each text; the main list's row template set nothing and relied on the
+  implicit TextBlock style in App.xaml, which doesn't reach into it. All 16 texts of the row template now set tabular
+  digits. **Not yet seen on screen.**
 - **AG. SITES.7: the Docker image with Sites, run** (2026-11-15, main at `8666b73`, the owner's test VM, linux/amd64).
   Built on the VM from `git archive` of that commit, with the 0.7.1 image's torrent worker passed in through
   `--build-context torrent-worker=` (the rest built from source); the image is 490 MB. Run with sign-in from the

@@ -665,6 +665,9 @@
                         </ListView.ItemContainerTransitions>
 
                         <ListView.ItemTemplate>
+                            <!-- UI.B40: every text in a row has digits of one width (tabular figures), set here because the
+                                 implicit TextBlock style of App.xaml doesn't reach into this template; without it size,
+                                 speed and time left moved sideways as their digits changed. -->
                             <DataTemplate>
                                 <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="{Binding RowHighlight}"
                                       BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="{Binding RowBorder}"
@@ -715,22 +718,22 @@
                                     <FontIcon Grid.Column="1" Glyph="{Binding FileGlyph}" FontSize="14" Foreground="{ThemeResource InboundIconMediaBrush}"
                                               Visibility="{Binding TorrentNameGlyphVisibility}" Width="16"
                                               VerticalAlignment="Center" HorizontalAlignment="Left" />
-                                    <TextBlock Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                ToolTipService.ToolTip="{Binding QueueName}" />
                                     <!-- UI.R6: live counters line up on the right in their fixed columns, with tabular figures, so
                                          the units hold still when the digit count changes. The margin matches the header's. -->
-                                    <TextBlock Grid.Column="3" Text="{Binding SizeText}" FontSize="11" AutomationProperties.AutomationId="SizeCell"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="3" Text="{Binding SizeText}" FontSize="11" AutomationProperties.AutomationId="SizeCell"
                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="1">
-                                        <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
-                                        <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
+                                        <TextBlock Typography.NumeralAlignment="Tabular" Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
+                                        <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundListProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
                                         <!-- DT-6: a seeding torrent's way to its seeding goal (ratio or time, whichever comes first). -->
-                                        <ProgressBar Value="{Binding SeedGoalPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
+                                        <ProgressBar Value="{Binding SeedGoalPercent}" Maximum="100" Style="{StaticResource InboundListProgressBarStyle}" Margin="0,1,6,0"
                                                      Foreground="{ThemeResource InboundStatusDoneBrush}" Visibility="{Binding SeedGoalVisibility}"
                                                      ToolTipService.ToolTip="{Binding SeedGoalToolTip}" />
                                     </StackPanel>
@@ -740,7 +743,7 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding ArchiveText}" FontSize="11" Foreground="{Binding ArchiveBrush}"
+                                        <TextBlock Typography.NumeralAlignment="Tabular" Text="{Binding ArchiveText}" FontSize="11" Foreground="{Binding ArchiveBrush}"
                                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                         <Button Grid.Column="1" Width="22" Height="20" Padding="0" MinWidth="0" MinHeight="0" BorderThickness="0"
                                                 Background="Transparent" VerticalAlignment="Center"
@@ -751,37 +754,37 @@
                                         </Button>
                                     </Grid>
                                     <!-- DT-6: Seeds and Peers. The header shows and hides the cells of a column (UI.R42). -->
-                                    <TextBlock Grid.Column="6" Text="{Binding SeedsText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="6" Text="{Binding SeedsText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="7" Text="{Binding PeersText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="7" Text="{Binding PeersText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="8" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="8" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="9" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="9" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <!-- DT-6: Up and Ratio. -->
-                                    <TextBlock Grid.Column="10" Text="{Binding UpText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="10" Text="{Binding UpText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="11" Text="{Binding RatioText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="11" Text="{Binding RatioText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <!-- UI.R42: Uploaded, Seeding time and Seeding goal, where chosen from the header's menu. -->
-                                    <TextBlock Grid.Column="12" Text="{Binding UploadedText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="12" Text="{Binding UploadedText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="13" Text="{Binding SeedTimeText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="13" Text="{Binding SeedTimeText}" FontSize="11"
                                                 HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="14" Text="{Binding SeedGoalText}" FontSize="11" Margin="0,0,6,0"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="14" Text="{Binding SeedGoalText}" FontSize="11" Margin="0,0,6,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="15" Text="{Binding LastTryText}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="15" Text="{Binding LastTryText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="16" Text="{Binding Description}" FontSize="11"
+                                    <TextBlock Typography.NumeralAlignment="Tabular" Grid.Column="16" Text="{Binding Description}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
