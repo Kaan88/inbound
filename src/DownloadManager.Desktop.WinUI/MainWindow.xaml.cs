@@ -885,7 +885,7 @@ public sealed partial class MainWindow : Window
 #if HAS_UNO
         // MAC.6: the Dock icon shows this Mac's running downloads; another server's list leaves it plain.
         var running = _connection.IsRemote ? [] : _jobsById.Values.Where(j => j.State is "connecting" or "downloading" or "verifying").ToList();
-        MacAppChrome.ShowActivity(running.Count, MacAppChrome.OverallProgress(running));
+        MacAppChrome.ShowActivity(running.Count, MacAppChrome.OverallProgress(running.Select(j => j.Dto).OfType<DownloadManager.Contracts.JobDto>()));
 #endif
         var host = _status?.HostVersion;
         StatusText.Text = $"{_jobsById.Count} download{(_jobsById.Count == 1 ? string.Empty : "s")} · {active} active · {queued} queued" +
