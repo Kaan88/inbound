@@ -38,8 +38,10 @@ public static class DownloadScan
         var thread = new Thread(() =>
         {
             try { done.TrySetResult(Save(path, source, log)); }
-            catch (Exception ex) when (ex is COMException or InvalidCastException or UnauthorizedAccessException or IOException)
+            catch (Exception ex)
             {
+                // Audit 2026-11-15: anything at all. This is a thread of its own, so an exception left here (an HRESULT
+                // mapped to ArgumentException, say) would end the Host as a download completes.
                 log?.Invoke($"Windows could not check the download ({ex.GetType().Name}); it is marked as from the internet only.");
                 done.TrySetResult(ScanOutcome.NotRun);
             }

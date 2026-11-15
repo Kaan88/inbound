@@ -576,6 +576,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == port
                 && string.Equals(existing.Url, Trimmed(request.Url), StringComparison.Ordinal)
                 && string.Equals(existing.Endpoint, Trimmed(request.Endpoint), StringComparison.Ordinal);
+            // Audit 2026-11-15: a saved password is sent only to the server it was saved for. Pointing a site at another
+            // server keeps the saved key (signing in with a key gives the server nothing of it) but not the password,
+            // which rclone would send there: it has to be typed again.
+            if (existing is not null && !sameServer && existing.SealedPassword is not null && request.Password is null
+                && request.AuthMethod == SiteAuthMethods.Password)
+                return Fail("The server changed, so type the password again: a saved password is only sent to the server it was saved for.");
             try
             {
                 saved = new SiteRecord
@@ -593,7 +599,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     Endpoint = request.Kind == SiteKinds.S3 ? Trimmed(request.Endpoint) : null,
                     Region = request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null,
                     AuthMethod = request.AuthMethod,
-                    SealedPassword = Seal(request.Password, existing?.SealedPassword),
+                    // Audit 2026-11-15: never carried to another server, whatever the sign-in method, so a site moved
+                    // with key sign-in and switched back to a password can't take the old server's password along.
+                    SealedPassword = Seal(request.Password, sameServer ? existing?.SealedPassword : null),
                     SealedPrivateKey = Seal(request.PrivateKey, existing?.SealedPrivateKey),
                     SealedKeyPassphrase = Seal(request.KeyPassphrase, existing?.SealedKeyPassphrase),
                     HostKeys = sameServer ? existing!.HostKeys : [],

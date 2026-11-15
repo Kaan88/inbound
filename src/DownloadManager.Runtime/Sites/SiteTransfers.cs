@@ -973,16 +973,22 @@ public sealed class SiteTransfers : IAsyncDisposable
             {
                 // rclone died mid-copy without tidying up: its partial files are looked for before going on.
                 if (rcloneGone) record.SweepPending = true;
-                batch.ConnectionFailures++;
-                if (batch.ConnectionFailures >= MaxConnectionFailures)
+                // Audit 2026-11-15: the files in flight all fail in the same outage. Only the first counts and sets the
+                // wait; the others fail while the batch already waits for that wait, so the five waits (doubling to a
+                // minute) are five outages, not one outage seen by five files.
+                var now = _time.GetUtcNow();
+                if (batch.RetryAt is null || now >= batch.RetryAt)
                 {
-                    stopBatch = $"{error} The transfer stopped after {MaxConnectionFailures} failed connections in a row; Retry goes on.";
-                }
-                else
-                {
-                    var delay = TimeSpan.FromTicks(Math.Min(TimeSpan.FromMinutes(1).Ticks, _firstRetryDelay.Ticks << (batch.ConnectionFailures - 1)));
-                    var at = _time.GetUtcNow() + delay;
-                    if (batch.RetryAt is null || at > batch.RetryAt) batch.RetryAt = at;
+                    batch.ConnectionFailures++;
+                    if (batch.ConnectionFailures >= MaxConnectionFailures)
+                    {
+                        stopBatch = $"{error} The transfer stopped after {MaxConnectionFailures} failed connections in a row; Retry goes on.";
+                    }
+                    else
+                    {
+                        var delay = TimeSpan.FromTicks(Math.Min(TimeSpan.FromMinutes(1).Ticks, _firstRetryDelay.Ticks << (batch.ConnectionFailures - 1)));
+                        batch.RetryAt = now + delay;
+                    }
                 }
             }
             else if (state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped)
@@ -1038,11 +1044,10 @@ public sealed class SiteTransfers : IAsyncDisposable
         RequestBroadcast();
     }
 
-    private static bool SignInRefused(string message) =>
-        message.Contains("couldn't connect SSH", StringComparison.OrdinalIgnoreCase)
-        && message.Contains("unable to authenticate", StringComparison.OrdinalIgnoreCase);
+    // Audit 2026-11-15: every kind of site, not only SFTP (SiteErrorText reads rclone's and Go's fixed phrases).
+    private static bool SignInRefused(string message) => SiteErrorText.RefusesTheSite(message);
 
-    private static bool CantReach(string message) => message.Contains("couldn't connect SSH", StringComparison.OrdinalIgnoreCase);
+    private static bool CantReach(string message) => SiteErrorText.CantReach(message);
 
     /// <summary>One file through rclone. Returns its new state (done or skipped); throws when it fails or is stopped.</summary>
     private async Task<string> MoveAsync(Batch batch, SiteTransferItem item, CancellationToken token)

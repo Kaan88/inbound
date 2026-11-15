@@ -21,6 +21,39 @@ public static class SiteErrorText
     public static bool IsSignInRefused(string message) =>
         Has(message, "invalid_grant") || Has(message, "token expired and there's no refresh token");
 
+    /// <summary>
+    /// Audit 2026-11-15: the server refuses this site as a whole (a wrong password or key, a refused or revoked sign-in,
+    /// a certificate this PC doesn't trust), for every kind of site. Every file of a transfer would be refused the same
+    /// way, and a server may lock the account after many tries, so a transfer stops instead of trying each file.
+    /// </summary>
+    public static bool RefusesTheSite(string message)
+    {
+        if (IsSignInRefused(message) || IsUntrustedCertificate(message)) return true;
+        var at = message.IndexOf(CouldNotConnect, StringComparison.OrdinalIgnoreCase);
+        if (at >= 0 && Has(message[(at + CouldNotConnect.Length)..], "unable to authenticate")) return true;
+        var ftp = message.IndexOf(FtpConnection, StringComparison.OrdinalIgnoreCase);
+        if (ftp >= 0 && message[(ftp + FtpConnection.Length)..].Contains(": 530 ", StringComparison.Ordinal)) return true;
+        return Has(message, "401 Unauthorized") || Has(message, "api error SignatureDoesNotMatch") || Has(message, "api error InvalidAccessKeyId");
+    }
+
+    /// <summary>
+    /// Audit 2026-11-15: the server could not be reached at all (SFTP, FTP, or a connection any kind makes over TCP), as
+    /// opposed to a failure of one file. A transfer waits for the server to come back instead of using up each file's tries.
+    /// </summary>
+    public static bool CantReach(string message)
+    {
+        if (RefusesTheSite(message)) return false;
+        if (Has(message, CouldNotConnect) || Has(message, FtpConnection) || Has(message, "TLS handshake timeout")) return true;
+        var dial = message.IndexOf("dial tcp", StringComparison.OrdinalIgnoreCase);
+        if (dial < 0) return false;
+        var cause = message[dial..];
+        // "unreachable network" and "unreachable host" are Windows' words for no route; Linux says the other two.
+        return Has(cause, "no such host") || Has(cause, "actively refused") || Has(cause, "connection refused")
+            || Has(cause, "did not properly respond") || Has(cause, "i/o timeout") || Has(cause, "timed out")
+            || Has(cause, "no route to host") || Has(cause, "network is unreachable")
+            || Has(cause, "unreachable network") || Has(cause, "unreachable host");
+    }
+
     public static string Friendly(string message)
     {
         if (IsSignInRefused(message)) return "The service no longer accepts this site's sign-in. Sign in again in Options > Sites.";

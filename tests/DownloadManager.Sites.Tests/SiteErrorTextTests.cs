@@ -31,4 +31,27 @@ public sealed class SiteErrorTextTests
     [InlineData("rclone operations/list failed (500): NewFs: couldn't connect SSH: something new")]
     [InlineData("rclone operations/list failed (500): directory not found in /srv/x: permission denied")]
     public void OtherTextsStayAsTheyWere(string message) => Assert.Equal(message, SiteErrorText.Friendly(message));
+
+    // Audit 2026-11-15: what stops a transfer at once (every file would be refused the same way) and what makes it wait
+    // for the server, for every kind of site, not only SFTP.
+    [Theory]
+    [InlineData("rclone operations/copyfile failed (500): NewFs: couldn't connect SSH: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password], no supported methods remain", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): NewFs: failed to make FTP connection to \"127.0.0.1:52121\": 530 \"Incorrect password, not logged in\"", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): 401 Unauthorized: ", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): operation error S3: PutObject, https response error StatusCode: 403, api error SignatureDoesNotMatch: The request signature we calculated does not match", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): couldn't fetch token: oauth2: \"invalid_grant\" \"Token has been expired or revoked.\"", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): Get \"https://dav.example/\": tls: failed to verify certificate: x509: certificate signed by unknown authority", true, false)]
+    [InlineData("rclone operations/copyfile failed (500): NewFs: couldn't connect SSH: dial tcp 127.0.0.1:52299: connect: connection refused", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): NewFs: failed to make FTP connection to \"127.0.0.1:52999\": dial tcp 127.0.0.1:52999: connectex: No connection could be made because the target machine actively refused it.", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): Put \"https://dav.example/pub/a.bin\": dial tcp: lookup dav.example: no such host", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): Get \"https://s3.example/b\": dial tcp 10.0.0.9:443: i/o timeout", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): Get \"https://10.0.0.9/b\": dial tcp 10.0.0.9:443: connectex: A socket operation was attempted to an unreachable network.", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): Get \"https://dav.example/\": net/http: TLS handshake timeout", false, true)]
+    [InlineData("rclone operations/copyfile failed (500): permission denied: /srv/connection refused", false, false)]
+    [InlineData("rclone operations/copyfile failed (500): api error AccessDenied: Access Denied", false, false)]
+    public void ATransferStopsOrWaitsForTheWholeSiteOnly(string message, bool refuses, bool cantReach)
+    {
+        Assert.Equal(refuses, SiteErrorText.RefusesTheSite(message));
+        Assert.Equal(cantReach, SiteErrorText.CantReach(message));
+    }
 }

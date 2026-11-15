@@ -73,9 +73,11 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id })).Ok);
 
         // Another address is another server: its certificate is not carried over, and the file goes when none is left.
+        // Its password is typed again (audit 2026-11-15: a saved password is only sent to the server it was saved for).
         var moved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
         {
             Id = id, Name = "DAVS", Kind = SiteKinds.WebDav, Url = $"https://localhost:{port}/", Vendor = "other", User = User,
+            Password = Password,
         });
         Assert.True(moved.Ok, moved.Message);
         Assert.Empty(moved.Site!.TrustedCertificates);

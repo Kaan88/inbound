@@ -427,6 +427,32 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AP. Fable audit of v0.7.7..HEAD before 0.8.0** (2026-11-15, owner's request; one Fable agent, read-only). No
+  high-severity finding. Fixed after checking each against the code:
+  - **Outage counted per file** (`SiteTransfers.RunItemAsync`): every file in flight added one to the batch's failed
+    connections, so one drop with 3 at once stopped a batch after about 10 s. Now only the first failure of an outage
+    counts and sets the wait; files failing while the batch already waits are the same outage.
+  - **Stop and wait rules only knew SFTP**: a wrong FTP/WebDAV/S3 password, a revoked sign-in or an untrusted
+    certificate tried every file 5 times (a lockout risk), and an unreachable FTP/WebDAV/S3/cloud server failed files
+    instead of waiting. New `SiteErrorText.RefusesTheSite` and `CantReach` read the same fixed phrases as the friendly
+    texts, for every kind; 12 new cases in `SiteErrorTextTests`.
+  - **A saved password could be sent to another server**: saving a site with a new host, port, URL or endpoint kept its
+    sealed password, which a test would then send there. Such a save is now refused until the password is typed again
+    ("a saved password is only sent to the server it was saved for"); a key is kept (key sign-in gives the server
+    nothing of it). `SitesCommandsTests` checks the refusal leaves the site as it was.
+  - **The antivirus check's thread could end the Host** on an exception it didn't list: it now catches everything.
+  - **The year-long cache header went on misses too** (`StaticAssetCompression`): now only on a 200.
+  **Fable checked the fixes** (same agent): 1, 5 and 9 right and complete. Fix 4 had a two-step bypass (save the moved
+  site with key sign-in, which carried the password over, then switch back to password sign-in); a saved password is
+  now never carried to another server whatever the sign-in method, and `SitesCommandsTests` covers the two steps. Fix 2
+  missed Windows' "unreachable network/host" and a TLS handshake timeout; added, with cases. Its other notes (a stopped
+  batch carries no problem code for Sign in again or Trust; five waits come to about 30 s; a matched phrase anywhere in
+  the text) go to SITES.10.
+  **Left as follow-ups** (ROADMAP SITES.10): a trusted self-signed certificate that can sign others (`openssl req -x509`
+  makes them so by default, as many NAS do) also vouches for other sites' names, since rclone takes one CA file for
+  all sites; a user's own OAuth client secret is on `rclone authorize`'s command line for up to 10 minutes; "Keep both"
+  can make a duplicate when the Host is killed within 2 s of a file finishing; a hung `operations/copyfile` answer
+  fails the file for good; a web edit of a site whose linked folder is outside the server's folders is refused.
 - **AO. Owner on the remaining live checks** (2026-11-15): S3 against a real service is left for later and does not
   block the release; B2 file transfers stay noted as unchecked (AN); WebDAV tested against local servers is enough.
 - **AN. B2 live, and the app's own rclone download** (2026-11-15). The owner added a B2 site in a fresh test instance's
