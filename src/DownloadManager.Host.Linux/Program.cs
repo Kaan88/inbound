@@ -275,15 +275,19 @@ internal static class Program
         }
 
         // Optional: without a tray the Host runs as before, and the window and the CLI reach it as always.
-        await using var tray = await StatusNotifierTray.TryStartAsync(new LinuxTrayActions(
+        var trayActions = new LinuxTrayActions(
             Open: () => platform.OpenUi(),
             OpenSettings: () => platform.OpenUi("settings"),
             PauseAll: () => Observe(service.PauseAllAsync(), log, "Pause all"),
             ResumeAll: () => Observe(service.ResumeAllAsync(), log, "Resume all"),
             Exit: () => completionExecutor.ExitHost?.Invoke(),
-            ActiveCount: () => service.ActiveDownloadCount()), log.Info).ConfigureAwait(false);
-        service.TrayAvailable = platform.TrayAvailable = tray is not null;
+            ActiveCount: () => service.ActiveDownloadCount());
+        // macOS: the menu-bar icon (inbound-menu) in place of the StatusNotifierItem, which needs a D-Bus session.
+        await using var tray = OperatingSystem.IsMacOS() ? null : await StatusNotifierTray.TryStartAsync(trayActions, log.Info).ConfigureAwait(false);
+        await using var menuBar = OperatingSystem.IsMacOS() ? MacMenuBar.TryStart(trayActions, log.Info) : null;
+        service.TrayAvailable = platform.TrayAvailable = tray is not null || menuBar is not null;
         if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
+        if (menuBar is not null) service.JobChanged += (_, _) => menuBar.RequestRefresh();
 
         webUi.Notice = notifications.Notify;
         updateMonitor.Attach(notifications.Notify);

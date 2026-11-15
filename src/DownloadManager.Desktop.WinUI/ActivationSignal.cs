@@ -18,7 +18,7 @@ internal sealed class ActivationSignal : IDisposable
     private readonly EventWaitHandle _open;
     private readonly EventWaitHandle _updates;
     private readonly string? _socketPath;
-    private Socket? _listener;
+    private volatile Socket? _listener;
     private EventHandler? _exitHandler;
 
     private ActivationSignal(EventWaitHandle show, EventWaitHandle settings, EventWaitHandle open, EventWaitHandle updates, string? socketPath)
@@ -182,7 +182,8 @@ internal sealed class ActivationSignal : IDisposable
         {
             // Given back already (Dispose): the file may be another window's by now.
             if (!ReferenceEquals(_listener, listener)) return;
-            listener.Dispose();
+            _listener = null;
+            Release(listener, path);
             try { File.Delete(path); }
             catch (IOException) { /* the next window replaces it */ }
         };
@@ -206,8 +207,7 @@ internal sealed class ActivationSignal : IDisposable
         if (_listener is { } listener)
         {
             _listener = null;
-            // Accept returns with ObjectDisposedException, which ends the listening thread.
-            listener.Dispose();
+            Release(listener, _socketPath!);
             try { File.Delete(_socketPath!); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the next window replaces it */ }
         }
@@ -216,6 +216,27 @@ internal sealed class ActivationSignal : IDisposable
         _settings.Dispose();
         _open.Dispose();
         _updates.Dispose();
+    }
+
+    /// <summary>
+    /// Ends the listening thread and closes its socket. Disposing a socket that a thread is blocked in Accept on wakes it
+    /// on Linux, but not on macOS: there .NET's Dispose waits for that Accept, which never returns, and the UI thread
+    /// hung (closing Progress Details froze the app). One connection first lets Accept return; the thread sees the
+    /// listener is no longer this window's and ends, and the Dispose after it doesn't wait.
+    /// </summary>
+    private static void Release(Socket listener, string path)
+    {
+        try
+        {
+            using var wake = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            wake.Connect(new UnixDomainSocketEndPoint(path));
+        }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+        {
+            // Nothing listening there any more: no thread to wake.
+        }
+
+        listener.Dispose();
     }
 
     private void Listen(Socket listener)
@@ -230,6 +251,13 @@ internal sealed class ActivationSignal : IDisposable
             }
             catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
             {
+                return;
+            }
+
+            // Release's wake-up: this window has given its name back.
+            if (!ReferenceEquals(_listener, listener))
+            {
+                client.Dispose();
                 return;
             }
 
