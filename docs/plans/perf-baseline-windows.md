@@ -176,6 +176,12 @@ So:
   between samples with a storyboard on a `TranslateTransform` and is rebuilt every second; which of the two costs is
   not established (a trace with native stacks, WPR, would show it).
 
+  **Done the same day:** the graph drew its whole grid again with every sample (8 dashed lines, 8 labels, a clip). It
+  now keeps them until the size, scale, period or theme changes and rebuilds only the lines. Same run as above, graph
+  shown, one 60 s run each: 1 download, UI thread 4.1 % to 2.8 % of a core (window 6.1 % to 4.9 %); 8 downloads,
+  8.2 % to 7.4 %. With the graph hidden it was 2.3 %, so about a quarter of the graph's cost is left (the lines and the
+  slide). The labels were read through UI Automation while downloads ran: each once, the summary updating.
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

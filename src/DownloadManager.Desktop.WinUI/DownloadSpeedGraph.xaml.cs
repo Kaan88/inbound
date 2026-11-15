@@ -52,6 +52,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private double _left, _upper, _chartWidth, _chartHeight, _top;
     private DateTimeOffset _start;
     private bool _drawn;
+    // The grid, its labels and the clip were drawn for this size, scale, period and theme; kept until one changes.
+    private (double Width, double Height, double Top, int Seconds, ElementTheme Theme)? _gridDrawnFor;
     private double? _pointerX;
 
     public DownloadSpeedGraph()
@@ -355,13 +357,18 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (_showUpload) ShowUploadFigure();
 
         if (!_expanded) { StopSlide(); return; }
-        Plot.Children.Clear();
         Lines.Children.Clear();
         StopSlide();
         _drawn = false;
         var width = Plot.ActualWidth;
         var height = Plot.ActualHeight;
-        if (width < 150 || height < 60) { DrawHover(); return; }
+        if (width < 150 || height < 60)
+        {
+            Plot.Children.Clear();
+            _gridDrawnFor = null;
+            DrawHover();
+            return;
+        }
         const double left = 62, upper = 8, lower = 16;
         const int rows = 2, columns = 4;
         var chartWidth = width - left - 8;
@@ -387,29 +394,39 @@ public sealed partial class DownloadSpeedGraph : UserControl
         // UI.B23: grows at once, shrinks only after a hold and a step at a time, always to a round figure.
         var top = _refit ? _scale.Reset(peaks.Shown) : _scale.Update(peaks.Shown, now);
         _refit = false;
-        LineClip.Clip = new RectangleGeometry { Rect = new Rect(left, 0, chartWidth, height) };
         (_left, _upper, _chartWidth, _chartHeight, _top, _start, _drawn) = (left, upper, chartWidth, chartHeight, top, start, true);
         var foreground = InboundTheme.Brush("InboundSecondaryTextBrush", this);
         var gridBrush = InboundTheme.Brush("InboundDividerBrush", this);
-        void Label(string text, double x, double y)
+        // PERF.16: the grid and its labels don't move with time (the time axis is relative: "−5 min" ... "Now"), so they
+        // are drawn again only when the size, the scale, the period or the theme changes, not with every sample. A new
+        // sample then rebuilds only the lines (about 1.8 % of a core on the window's UI thread before, measured
+        // 2026-11-15 in docs/plans/perf-baseline-windows.md).
+        var gridFor = (width, height, top, _seconds, ActualTheme);
+        if (_gridDrawnFor != gridFor)
         {
-            var label = new TextBlock { Text = text, FontSize = 10, Foreground = foreground };
-            Canvas.SetLeft(label, x); Canvas.SetTop(label, y); Plot.Children.Add(label);
-        }
-        for (var row = 0; row <= rows; row++)
-        {
-            var y = upper + row * chartHeight / rows;
-            Plot.Children.Add(new Line { X1 = left, X2 = left + chartWidth, Y1 = y, Y2 = y,
-                Stroke = gridBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 } });
-            Label(RateText(top * (rows - row) / rows), 0, y - 7);
-        }
-        for (var column = 0; column <= columns; column++)
-        {
-            var x = left + column * chartWidth / columns;
-            Plot.Children.Add(new Line { X1 = x, X2 = x, Y1 = upper, Y2 = upper + chartHeight,
-                Stroke = gridBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 } });
-            var minutes = _seconds * (columns - column) / (60d * columns);
-            Label(column == columns ? "Now" : $"−{minutes:0.#} min", Math.Clamp(x - 18, left, width - 40), upper + chartHeight + 1);
+            _gridDrawnFor = gridFor;
+            Plot.Children.Clear();
+            LineClip.Clip = new RectangleGeometry { Rect = new Rect(left, 0, chartWidth, height) };
+            void Label(string text, double x, double y)
+            {
+                var label = new TextBlock { Text = text, FontSize = 10, Foreground = foreground };
+                Canvas.SetLeft(label, x); Canvas.SetTop(label, y); Plot.Children.Add(label);
+            }
+            for (var row = 0; row <= rows; row++)
+            {
+                var y = upper + row * chartHeight / rows;
+                Plot.Children.Add(new Line { X1 = left, X2 = left + chartWidth, Y1 = y, Y2 = y,
+                    Stroke = gridBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 } });
+                Label(RateText(top * (rows - row) / rows), 0, y - 7);
+            }
+            for (var column = 0; column <= columns; column++)
+            {
+                var x = left + column * chartWidth / columns;
+                Plot.Children.Add(new Line { X1 = x, X2 = x, Y1 = upper, Y2 = upper + chartHeight,
+                    Stroke = gridBrush, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 } });
+                var minutes = _seconds * (columns - column) / (60d * columns);
+                Label(column == columns ? "Now" : $"−{minutes:0.#} min", Math.Clamp(x - 18, left, width - 40), upper + chartHeight + 1);
+            }
         }
         // UI.B23: every point sits at a fixed place on the time axis and is never chosen again, so a new sample adds
         // to the right and moves nothing already drawn. Points past either edge are clipped, not squeezed onto it.

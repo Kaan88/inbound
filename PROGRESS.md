@@ -413,6 +413,12 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **Y. Speed graph: the grid is kept between samples** (2026-11-15, main; PERF.16 follow-up). `DownloadSpeedGraph.Draw`
+  rebuilt its grid, labels and clip with every sample; now only when the size, scale, period or theme changes. One
+  download: the window's UI thread 4.1 % to 2.8 % of a core; eight: 8.2 % to 7.4 % (single 60 s runs). Checked through UI
+  Automation (each label once, the summary updating); WinUI and Uno build; Core tests (the graph rules) passed before the
+  change and it touches no rule. **Not seen on screen** (a screen copy picked up other windows, so it was deleted and not
+  used); a scale change redrawing the labels is not walked.
 - **X. Step 7 of the performance order: measured, then decided** (2026-11-15, main). `dotnet-trace` (installed as a
   .NET global tool) on the window with one download and on the Host with eight: our managed code is under 0.1 % of the
   window's UI-thread samples, and no event building or sending shows in the Host. PERF.13 and PERF.17 are decided
