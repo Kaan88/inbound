@@ -11,7 +11,9 @@ export interface SitesStatus {
   rcloneInstalled?: string | null;
   autoUpdateRclone: boolean;
   rcloneInstalling: boolean;
-  rcloneUpdate?: { version: string; state: string; note: string } | null;
+  rcloneUpdate?: { version: string; state: string; waitUntil?: string | null; note: string } | null;
+  rcloneLastCheck?: string | null;
+  rcloneUpdateError?: string | null;
 }
 
 export interface SiteHostKey {
@@ -78,6 +80,8 @@ export interface SiteItem {
   isFolder: boolean;
   size: number;
   modified?: string | null;
+  /** How the item compares with the same place in the site's linked folder (SITES.5); left out when not compared. */
+  here?: string | null;
 }
 
 export interface SiteBrowseResult extends SiteResult {
@@ -395,4 +399,53 @@ export function rcloneLine(status: SitesStatus): string {
       // On, not started yet: it starts with the first site used.
       return status.enabled ? 'rclone starts when a site is used.' : '';
   }
+}
+
+/** The newer rclone the Host found, in the desktop's words, and the version Install offers (null: nothing to install). */
+export function rcloneOffer(status: SitesStatus): { line: string; version: string | null; lastCheck: string | null } {
+  const own = status.rcloneSource === 'own';
+  let lastCheck: string | null = null;
+  if (!own && status.rcloneUpdateError?.trim()) lastCheck = `Couldn't check for a newer rclone. ${status.rcloneUpdateError.trim()}`;
+  else if (!own && status.rcloneLastCheck) lastCheck = `Last checked ${new Date(status.rcloneLastCheck).toLocaleString()}.`;
+  const update = status.rcloneUpdate;
+  if (!update || own || !update.version) return { line: '', version: null, lastCheck };
+  const version = update.version;
+  let line: string;
+  switch (update.state) {
+    case 'ready':
+      line = status.autoUpdateRclone ? `rclone ${version} is ready and installs by itself.` : `rclone ${version} is ready.`;
+      break;
+    case 'waiting':
+      line = update.waitUntil
+        ? `rclone ${version} is out. It waits until ${new Date(update.waitUntil).toLocaleDateString()}, a week after its release.`
+        : `rclone ${version} is out. It waits a week after its release.`;
+      break;
+    case 'needsAsk':
+      line = `rclone ${version} is a new major version. It isn't installed by itself.`;
+      break;
+    default:
+      line = `rclone ${version} is available.`;
+  }
+  return { line, version: update.state === 'ready' || update.state === 'needsAsk' ? version : null, lastCheck };
+}
+
+/** The "On this PC" words for an item's here value, as the desktop's column says them; empty when not compared. */
+export function hereText(here: string | null | undefined): string {
+  switch (here) {
+    case 'same': return 'Same';
+    case 'olderHere': return 'Older here';
+    case 'someOfIt': return 'Partly here';
+    case 'notHere': return 'Not here';
+    case 'different': return 'Different here';
+    case 'folderHere': return 'Folder here';
+    default: return '';
+  }
+}
+
+/** A starred folder's name, with its parent's when two stars share a name. */
+export function starLabel(star: string, stars: string[]): string {
+  const leaf = (path: string) => crumbs(path).at(-1)!.name;
+  const name = leaf(star);
+  if (stars.filter((other) => leaf(other) === name).length < 2 || star === '/') return name;
+  return `${name} (in ${leaf(parentPath(star))})`;
 }

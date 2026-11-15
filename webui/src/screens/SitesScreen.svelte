@@ -5,7 +5,7 @@
   import { bytes, speed } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import {
-    problems, rcloneLine, siteSummary, transferFraction, transferLine,
+    problems, rcloneLine, rcloneOffer, siteSummary, transferFraction, transferLine,
     type Site, type SiteKind, type SiteResult, type SitesStatus,
   } from '../lib/sites';
   import SiteBrowser from './sites/SiteBrowser.svelte';
@@ -49,10 +49,31 @@
 
   onMount(() => void loadKinds());
 
-  async function setEnabled(enabled: boolean) {
+  /**
+   * A request answered with sites.status. Its `error` is either rclone's own trouble or this request's refusal, so it is
+   * read here and said, as Options › Sites does on the desktop, rather than taken as a failed request; null when the
+   * request itself did not get through.
+   */
+  async function statusRequest(type: string, payload: Record<string, unknown>): Promise<SitesStatus | null> {
+    try {
+      return (await store.raw<SitesStatus>(type, payload)).payload ?? null;
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : String(error), 'error');
+      return null;
+    }
+  }
+
+  async function setEnabled(enabled: boolean, box: HTMLInputElement) {
     switching = true;
-    await store.attempt<SitesStatus>('sites.setEnabled', { enabled });
+    const result = await statusRequest('sites.setEnabled', { enabled });
     switching = false;
+    // The box follows what the server kept, not the click, when the change did not go through.
+    box.checked = (result ?? status)?.enabled ?? !enabled;
+  }
+
+  async function setAutoUpdate(on: boolean, box: HTMLInputElement) {
+    const result = await statusRequest('sites.setEnabled', { enabled: true, autoUpdateRclone: on });
+    box.checked = (result ?? status)?.autoUpdateRclone ?? !on;
   }
 
   async function test(item: Site) {
@@ -73,6 +94,33 @@
     const result = await store.attempt<SiteResult>('sites.remove', { id: item.id });
     if (result && !result.ok) store.toast(result.message ?? 'The site was not removed.', 'error');
     removing = null;
+  }
+
+  // SITES.6b: a way back from trusting a server's own certificate.
+  let forgetting = $state<Site | null>(null);
+  async function forget(item: Site) {
+    const result = await store.attempt<SiteResult>('sites.trust', { id: item.id, forgetCertificates: true });
+    if (result && !result.ok) store.toast(result.message ?? "The certificate couldn't be forgotten.", 'error');
+    else if (result) store.toast(result.message?.trim() || `${item.name} no longer trusts its server's certificate.`);
+    forgetting = null;
+  }
+
+  // The rclone update the Host found, as Options › Sites offers it on the desktop.
+  const offer = $derived(status ? rcloneOffer(status) : null);
+  let checking = $state(false);
+  async function checkRclone() {
+    checking = true;
+    const result = await statusRequest('sites.rclone.check', {});
+    checking = false;
+    // A failed check is said under the button (rcloneUpdateError); only "nothing newer" needs words here.
+    if (result && !result.rcloneUpdateError && !result.rcloneUpdate) store.toast('rclone is up to date.');
+  }
+
+  async function installRclone(version?: string) {
+    const result = await statusRequest('sites.rclone.install', version ? { version } : {});
+    if (!result) return;
+    if (result.error?.trim()) store.toast(result.error.trim(), 'error');
+    else store.toast(result.rcloneVersion ? `rclone ${result.rcloneVersion} is installed.` : 'rclone is installed.');
   }
 
   async function transfer(type: string, id: string) {
@@ -103,14 +151,37 @@
     {:else}
       <section class="card mt-4 space-y-2 px-3 py-3 text-[13px]">
         <label class="flex items-center gap-2">
-          <input type="checkbox" checked={status.enabled} disabled={switching} onchange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
+          <input type="checkbox" checked={status.enabled} disabled={switching} onchange={(event) => setEnabled(event.currentTarget.checked, event.currentTarget)} />
           Use Sites
         </label>
         {#if status.enabled}
           <p class="hint">{rcloneLine(status)}</p>
           {#if status.rclone === 'missing' && !status.rcloneInstalling}
-            <button class="btn" onclick={() => store.attempt('sites.rclone.install', {})}><Icon name="download" size={15} /> Download rclone</button>
+            <button class="btn" onclick={() => installRclone()}><Icon name="download" size={15} /> Download rclone</button>
           {/if}
+          {#if offer?.line}
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="hint flex-1">{offer.line}</p>
+              {#if offer.version}
+                {@const version = offer.version}
+                <button class="btn" disabled={status.rcloneInstalling} onclick={() => installRclone(version)}><Icon name="download" size={15} /> Install rclone {version}</button>
+              {/if}
+            </div>
+          {/if}
+          {#if status.rcloneSource !== 'own' && !status.ownRclonePath}
+            <!-- Inbound never updates an rclone the user chose. -->
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="flex flex-1 items-center gap-2">
+                <input type="checkbox" checked={status.autoUpdateRclone} disabled={status.rcloneInstalling}
+                  onchange={(event) => setAutoUpdate(event.currentTarget.checked, event.currentTarget)} />
+                Update rclone automatically
+              </label>
+              {#if status.rclone !== 'missing'}
+                <button class="btn" disabled={checking || status.rcloneInstalling} onclick={checkRclone}><Icon name="refresh" size={15} /> {checking ? 'Checking…' : 'Check now'}</button>
+              {/if}
+            </div>
+          {/if}
+          {#if offer?.lastCheck}<p class="hint">{offer.lastCheck}</p>{/if}
         {:else}
           <p class="hint">Off, nothing runs for Sites. On, Inbound starts rclone when a site is used.</p>
         {/if}
@@ -138,6 +209,9 @@
                   </a>
                   {#if item.capabilities.includes('signIn') && !item.signedIn}
                     <button class="btn" onclick={() => (fixing = { site: item, problem: problems.signInNeeded })}>Sign in…</button>
+                  {/if}
+                  {#if item.trustedCertificates.length}
+                    <button class="btn" onclick={() => (forgetting = item)} aria-label="Forget the certificate trusted for {item.name}">Forget certificate</button>
                   {/if}
                   <button class="btn" disabled={testing === item.id} onclick={() => test(item)}>{testing === item.id ? 'Testing…' : 'Test'}</button>
                   <button class="btn-icon" title="Edit" aria-label="Edit {item.name}" onclick={() => edit(item)}><Icon name="settings" size={16} /></button>
@@ -206,6 +280,13 @@
   <AskDialog title="Remove {item.name}?" danger confirm="Remove"
     text="Inbound forgets this site and what it keeps for it (the password or sign-in). Nothing on the server is deleted."
     onconfirm={() => remove(item)} onclose={() => (removing = null)} />
+{/if}
+
+{#if forgetting}
+  {@const item = forgetting}
+  <AskDialog title={item.trustedCertificates.length === 1 ? 'Forget the certificate?' : 'Forget the certificates?'} confirm="Forget"
+    text="Stop trusting {item.trustedCertificates.length === 1 ? 'the certificate' : `the ${item.trustedCertificates.length} certificates`} saved for {item.host || item.url || item.name}? The site then can't be used until you trust its certificate again (Test asks)."
+    onconfirm={() => forget(item)} onclose={() => (forgetting = null)} />
 {/if}
 
 {#if fixing}

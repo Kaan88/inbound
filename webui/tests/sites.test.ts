@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { apply, emptyModel } from '../src/lib/model';
 import {
-  crumbs, deviceDownloadUrl, deviceUploadUrl, joinPath, nameProblem, newForm, parentPath, rcloneLine, saveRequest, siteSummary,
+  crumbs, deviceDownloadUrl, deviceUploadUrl, hereText, joinPath, nameProblem, newForm, parentPath, rcloneLine, rcloneOffer, saveRequest, siteSummary, starLabel,
   transferFraction, transferLine, uploadToSite, type Site, type SiteKind, type SiteTransfer, type UploadLike,
 } from '../src/lib/sites';
 
@@ -113,6 +113,30 @@ describe('Sites in the web UI (SITES.7)', () => {
     expect(rcloneLine({ ...status, rclone: 'running', rcloneVersion: 'v1.76.0' })).toBe('rclone v1.76.0 is running.');
     expect(rcloneLine({ ...status, rclone: 'stopping' })).toBe('rclone is stopping.');
     expect(rcloneLine({ ...status, rclone: 'off' })).toBe('rclone starts when a site is used.');
+  });
+
+  it('offers a newer rclone in the words of Options › Sites', () => {
+    const status = { enabled: true, rclone: 'running', autoUpdateRclone: true, rcloneInstalling: false, rcloneSource: 'downloaded' };
+    expect(rcloneOffer(status)).toEqual({ line: '', version: null, lastCheck: null });
+    const ready = rcloneOffer({ ...status, rcloneUpdate: { version: '1.77.0', state: 'ready', note: '' } });
+    expect(ready).toMatchObject({ line: 'rclone 1.77.0 is ready and installs by itself.', version: '1.77.0' });
+    expect(rcloneOffer({ ...status, autoUpdateRclone: false, rcloneUpdate: { version: '1.77.0', state: 'ready', note: '' } }).line).toBe('rclone 1.77.0 is ready.');
+    const waiting = rcloneOffer({ ...status, rcloneUpdate: { version: '1.77.0', state: 'waiting', waitUntil: '2026-11-20T00:00:00Z', note: '' } });
+    expect(waiting.line).toContain('It waits until');
+    expect(waiting.version).toBeNull();
+    expect(rcloneOffer({ ...status, rcloneUpdate: { version: '2.0.0', state: 'needsAsk', note: '' } })).toMatchObject({ version: '2.0.0' });
+    // Inbound never updates an rclone the user chose.
+    expect(rcloneOffer({ ...status, rcloneSource: 'own', rcloneUpdate: { version: '1.77.0', state: 'ready', note: '' } }).version).toBeNull();
+    expect(rcloneOffer({ ...status, rcloneUpdateError: ' offline ' }).lastCheck).toBe("Couldn't check for a newer rclone. offline");
+  });
+
+  it('names the "On this PC" marks and the starred folders as the desktop does', () => {
+    expect(hereText('same')).toBe('Same');
+    expect(hereText('someOfIt')).toBe('Partly here');
+    expect(hereText(undefined)).toBe('');
+    expect(starLabel('/a/pub', ['/a/pub', '/b'])).toBe('pub');
+    expect(starLabel('/a/pub', ['/a/pub', '/b/pub'])).toBe('pub (in a)');
+    expect(starLabel('/pub', ['/pub', '/b/pub'])).toBe('pub (in /)');
   });
 
   it('keeps the sites, their status and every batch from the server', () => {

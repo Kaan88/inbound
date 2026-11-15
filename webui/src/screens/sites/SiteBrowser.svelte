@@ -7,7 +7,7 @@
   import { bytes, dateTime } from '../../lib/format';
   import { store } from '../../lib/store.svelte';
   import {
-    crumbs, deviceDownloadUrl, joinPath, nameProblem, parentPath, problems, uploadToSite,
+    crumbs, deviceDownloadUrl, hereText, joinPath, nameProblem, parentPath, problems, starLabel, uploadToSite,
     type Site, type SiteBrowseResult, type SiteItem, type SiteResult,
   } from '../../lib/sites';
   import SiteFix from './SiteFix.svelte';
@@ -60,6 +60,28 @@
   const fixable = (value: string | null | undefined) =>
     value === problems.hostKeyNotAccepted || value === problems.hostKeyChanged || value === problems.certificateNotTrusted || value === problems.signInNeeded;
   const chosen = $derived(items.filter((item) => selected.has(item.name)));
+  // SITES.5 on the web: how each item compares with the site's linked folder, where it has one.
+  const showsHere = $derived(!!site.localFolder?.trim());
+  const starred = $derived(site.stars.includes(path));
+  let starring = $state(false);
+
+  /** Stars or unstars the folder shown; the site comes back through sites.changed with its new stars. */
+  async function toggleStar() {
+    starring = true;
+    try {
+      const result = await store.ask<SiteResult>('sites.star', { id: site.id, path, starred: !starred });
+      if (!result.ok) store.toast(result.message ?? 'The star was not changed.', 'error');
+      // The reply carries the site as saved: show its stars now rather than when sites.changed arrives.
+      else if (result.site) {
+        const saved = result.site;
+        store.model.sites = store.model.sites.map((item) => (item.id === saved.id ? saved : item));
+      }
+    } catch (failure) {
+      store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
+    } finally {
+      starring = false;
+    }
+  }
 
   // Only the newest browse is shown: a slow answer for a folder left since must not replace the one asked for after it.
   let round = 0;
@@ -228,7 +250,22 @@
       {#if index > 1}<span class="text-muted">/</span>{/if}
       <button class="link max-w-[12rem] truncate" onclick={() => open(crumb.path)}>{crumb.name}</button>
     {/each}
+    {#if path !== '/'}
+      <button class="btn-icon {starred ? 'text-accent' : ''}" disabled={starring} aria-pressed={starred}
+        title={starred ? 'Remove the star' : 'Star this folder'} aria-label={starred ? 'Remove the star from this folder' : 'Star this folder'}
+        onclick={toggleStar}><Icon name="star" size={16} class={starred ? 'fill-current' : ''} /></button>
+    {/if}
   </nav>
+
+  {#if site.stars.length}
+    <div class="flex flex-wrap items-center gap-1.5 text-[12.5px]" aria-label="Starred folders">
+      {#each site.stars as star (star)}
+        <button class="btn {star === path ? 'text-accent' : ''}" title={star} aria-current={star === path ? 'page' : undefined} onclick={() => open(star)}>
+          <Icon name="star" size={13} class="fill-current" /> {starLabel(star, site.stars)}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <div class="flex flex-wrap gap-2">
     <button class="btn" disabled={loading} onclick={() => open(path, true)}><Icon name="refresh" size={15} /> Refresh</button>
@@ -276,6 +313,7 @@
       <span class="flex-1">Name</span>
       <span class="hidden w-24 text-right sm:block">Size</span>
       <span class="hidden w-40 md:block">Modified</span>
+      {#if showsHere}<span class="hidden w-28 sm:block" title="Compared with {site.localFolder}">On {store.texts.hostName}</span>{/if}
       <span class="w-28"></span>
     </div>
     {#if loading && !items.length}
@@ -294,9 +332,11 @@
             {:else}
               <span class="truncate">{item.name}</span>
             {/if}
+            {#if showsHere && hereText(item.here)}<span class="shrink-0 text-[12px] text-muted sm:hidden">· {hereText(item.here)}</span>{/if}
           </span>
           <span class="tabular hidden w-24 text-right text-muted sm:block">{item.isFolder ? '' : bytes(item.size)}</span>
           <span class="hidden w-40 text-muted md:block">{item.modified ? dateTime(item.modified) : ''}</span>
+          {#if showsHere}<span class="hidden w-28 truncate sm:block {item.here === 'same' ? 'tone-done' : 'text-muted'}">{hereText(item.here)}</span>{/if}
           <span class="flex w-28 shrink-0 justify-end gap-0.5">
             {#if !item.isFolder}
               <a class="btn-icon" href={deviceDownloadUrl(site.id, joinPath(path, item.name))} download={item.name} title="Download to this device" aria-label="Download {item.name} to this device"><Icon name="download" size={15} /></a>

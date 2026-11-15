@@ -413,6 +413,22 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **U. SITES.7: what the web UI left for later** (2026-11-15, main). The site browser stars and unstars the folder it
+  shows (`sites.star`) and lists the starred folders as buttons (with the parent's name when two share one, as the
+  desktop does); a site with a linked folder gets an "On the server" / "On the PC" column from each item's `here`
+  (Same, Older here, Partly here, Not here, Different here, Folder here; inline on a phone); a site that trusts a
+  certificate has Forget certificate (asks first; `sites.trust` with `forgetCertificates`); Sites shows the rclone
+  update the Host found in the desktop's words, Install for a ready or new-major one, Update rclone automatically,
+  Check now and when it last checked (none of it for "Use my own rclone"). **Checked:** svelte-check, 715 web UI tests;
+  walked in the browser pane against the headless server and a local WebDAV site: the marks (Same, Partly here, Not
+  here, Folder here), star and unstar, and phone width. **Not walked:** Forget certificate and the update offer (no
+  certificate site or newer rclone at hand; the helpers are tested). **Haiku review**, fixed after the walk: a
+  `sites.status` reply carries rclone's own `error`, which the page took as a failed request, so a working install,
+  check or switch could show as an error (the Use Sites switch and Download rclone had this before too); they now read
+  the reply as the desktop does. The two switches go back when a change did not go through; a star shows at once from
+  the reply; the waiting line always gives its date; Forget names how many certificates and passes on the Host's note;
+  Update rclone automatically and the last check show while rclone is missing, and not with a chosen rclone path.
+  These fixes were checked by svelte-check and the tests, not walked again.
 - **T. PERF.8 and PERF.15 on Windows** (2026-11-15, main, at `b45b7ca`; the owner said the PC was idle): numbers in
   `docs/plans/perf-baseline-windows.md`. Engine on NTFS 357 to 606 MB/s (1 to 16 segments) at about 1 CPU s per GB, a
   third to a half of the Linux figures, cause not established; a save costs its sync (about 3.8 ms); Host ready in
