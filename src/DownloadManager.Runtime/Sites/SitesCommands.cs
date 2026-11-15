@@ -10,6 +10,9 @@ namespace DownloadManager.Runtime.Sites;
 /// Answers <c>sites.*</c> (SITES.2; remote-sites.md "The switch", "Credentials and trust"). Owns the switch, the saved
 /// sites and rclone's supervisor. With Sites off nothing runs: no rclone process, no timer, and only <c>sites.get</c> and
 /// <c>sites.setEnabled</c> are answered. Turning Sites off stops rclone; the saved sites and their sealed secrets stay.
+/// <para>With Sites on, an rclone Inbound downloaded is checked for updates once a day and, with "Update rclone
+/// automatically" on, updated while rclone is idle (remote-sites.md, "rclone updates"). A new version is used from the
+/// next rclone start; it counts as proven after its first good use, and one that fails before that is rolled back.</para>
 /// </summary>
 public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
 {
@@ -23,6 +26,21 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private readonly Func<string, string, RcloneSupervisor> _createSupervisor;
     private readonly Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>> _probe;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly RcloneUpdater? _updater;
+    private readonly TimeProvider _time;
+    private readonly TimeSpan _firstCheckDelay;
+    private readonly TimeSpan _updateTick;
+    private readonly Lock _loopSync = new();
+    private CancellationTokenSource? _updateLoop;
+    private Task? _updateTask;
+    private bool _shippedChecked;
+    private int _unprovenFailures;
+
+    /// <summary>A freshly installed rclone that fails this many starts before it ever worked is rolled back.</summary>
+    public const int UnprovenStartFailures = 2;
+
+    /// <summary>Checks rclone's server about once a day.</summary>
+    public static readonly TimeSpan CheckInterval = TimeSpan.FromHours(23);
 
     private SitesConfig _config;
     private string? _configProblem;
@@ -36,19 +54,40 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <param name="findRclone">The rclone to run for an own path (tests); <see cref="RcloneSetup.Find(string?, string?)"/> by default.</param>
     /// <param name="createSupervisor">A supervisor for (rclone, state folder) (tests).</param>
     /// <param name="probe">Reads a server's host keys (tests); <see cref="SshHostKeyProbe.ProbeAllAsync"/> by default.</param>
+    /// <param name="updater">Downloads and updates rclone; null where Inbound can't (then only an own or shipped rclone is used).</param>
+    /// <param name="firstCheckDelay">How long after Sites starts the first update check waits (two minutes by default).</param>
+    /// <param name="updateTick">How often the update loop looks (hourly by default; it asks rclone's server about once a day).</param>
     public SitesCommands(string stateDirectory, Action<string> log, Func<string?, string?>? findRclone = null,
         Func<string, string, RcloneSupervisor>? createSupervisor = null,
-        Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null)
+        Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null,
+        RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null)
     {
         _stateDirectory = stateDirectory;
         _configStore = new SitesConfigStore(stateDirectory);
         _sites = new SiteStore(stateDirectory, log);
         _log = log;
-        _findRclone = findRclone ?? (own => RcloneSetup.Find(own));
+        _updater = updater;
+        _time = time ?? TimeProvider.System;
+        _firstCheckDelay = firstCheckDelay ?? TimeSpan.FromMinutes(2);
+        _updateTick = updateTick ?? TimeSpan.FromHours(1);
+        _findRclone = findRclone ?? (own => RcloneSetup.Find(own, downloaded: _updater?.CurrentExecutable));
         _createSupervisor = createSupervisor ?? ((rclone, state) => RcloneSupervisor.ForExecutable(rclone, state, null, log));
         _probe = probe ?? ((host, port, ct) => SshHostKeyProbe.ProbeAllAsync(host, port, null, ct));
         _config = _configStore.Load(out _configProblem);
         if (_configProblem is not null) log(_configProblem);
+        if (_config.Enabled) StartUpdateLoop();
+    }
+
+    /// <summary>
+    /// The rclone updater for a Host: downloads go through <paramref name="handler"/> (the Host's proxied handler, so the
+    /// proxy in Options applies). Null on a system rclone has no build for.
+    /// </summary>
+    public static RcloneUpdater? CreateUpdater(string stateDirectory, HttpMessageHandler handler, Action<string> log)
+    {
+        if (RclonePlatform.Current is not { } platform) return null;
+        var http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(15) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Inbound-rclone-updater");
+        return new RcloneUpdater(stateDirectory, new RcloneDownloads(http), platform, log);
     }
 
     /// <summary>After the switch, "Use my own rclone", rclone's state or a saved site changed; for <c>sites.changed</c>.</summary>
@@ -72,6 +111,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.ListRequest => IpcMessage.Create(SitesMessageTypes.List, new SitesListDto(), request.Id),
                 SitesMessageTypes.KindsRequest => IpcMessage.Create(SitesMessageTypes.Kinds, Kinds(), request.Id),
                 SitesMessageTypes.Probe => IpcMessage.Create(SitesMessageTypes.ProbeResult, new SiteProbeResultDto { Ok = false, Message = OffMessage }, request.Id),
+                SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
             };
         }
@@ -93,6 +133,11 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 return Result(request, await TrustAsync(request.GetPayload<SiteTrustRequest>() ?? new SiteTrustRequest(), cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Test:
                 return Result(request, await TestAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.RcloneInstall:
+                return IpcMessage.Create(SitesMessageTypes.Status,
+                    await InstallRcloneAsync(request.GetPayload<SitesRcloneInstallRequest>()?.Version, cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.RcloneCheck:
+                return IpcMessage.Create(SitesMessageTypes.Status, await CheckRcloneAsync(cancellationToken).ConfigureAwait(false), request.Id);
             default:
                 return Result(request, new SiteResultDto { Ok = false, Message = $"Unknown Sites request {request.Type}." });
         }
@@ -121,7 +166,31 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             },
             RcloneVersion = _rcloneVersion,
             Error = _configProblem ?? _rcloneProblem ?? state?.Error,
+            RcloneSource = SourceOf(Volatile.Read(ref _supervisorFor) ?? _findRclone(_config.OwnRclonePath)),
+            RcloneInstalled = _updater?.State.Current,
+            AutoUpdateRclone = _config.AutoUpdateRclone,
+            RcloneInstalling = _updater?.Busy ?? false,
+            RcloneUpdate = _updater?.Offer is { } offer
+                ? new SitesRcloneUpdateDto
+                {
+                    Version = offer.Version.ToString(3),
+                    State = offer.State switch { RcloneOfferState.Ready => "ready", RcloneOfferState.Waiting => "waiting", _ => "needsAsk" },
+                    WaitUntil = offer.WaitUntil,
+                    Note = offer.Note,
+                }
+                : null,
+            RcloneLastCheck = _updater?.State.LastCheck,
+            RcloneUpdateError = _updater?.State.LastError,
         };
+    }
+
+    private string? SourceOf(string? path)
+    {
+        if (path is null) return null;
+        if (path == _config.OwnRclonePath) return SitesRcloneSources.Own;
+        if (path == Environment.GetEnvironmentVariable(RcloneSetup.RcloneVariable)) return SitesRcloneSources.Environment;
+        if (_updater is not null && path == _updater.CurrentExecutable) return SitesRcloneSources.Downloaded;
+        return SitesRcloneSources.Shipped;
     }
 
     private async Task<SitesStatusDto> SetEnabledAsync(SitesSetEnabledRequest request, CancellationToken cancellationToken)
@@ -136,7 +205,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             if (own is not null && !Path.IsPathFullyQualified(own))
                 return WithError(Status(), "\"Use my own rclone\" needs the full path of the rclone program.");
 
-            var next = _config with { Enabled = request.Enabled, OwnRclonePath = own };
+            var next = _config with { Enabled = request.Enabled, OwnRclonePath = own, AutoUpdateRclone = request.AutoUpdateRclone ?? _config.AutoUpdateRclone };
             changed = next != _config;
             if (changed)
             {
@@ -146,7 +215,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 _configProblem = null;
                 // Off, or another rclone: the running one stops. With Sites on it starts again when something needs it.
                 if (!next.Enabled || rcloneChanged) await StopRcloneLockedAsync().ConfigureAwait(false);
-                _log(next.Enabled ? "Sites turned on." : "Sites turned off; rclone stopped.");
+                if (next.Enabled != _config.Enabled || changed) _log(next.Enabled ? "Sites settings saved; Sites is on." : "Sites turned off; rclone stopped.");
             }
         }
         finally
@@ -154,8 +223,184 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             _gate.Release();
         }
 
+        if (_config.Enabled) StartUpdateLoop();
+        else await StopUpdateLoopAsync().ConfigureAwait(false);
         if (changed) await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return Status();
+    }
+
+    private async Task<SitesStatusDto> InstallRcloneAsync(string? versionText, CancellationToken cancellationToken)
+    {
+        if (_updater is null) return WithError(Status(), "This Inbound can't download rclone; choose your own rclone in Options › Sites.");
+        if (_config.OwnRclonePath is not null)
+            return WithError(Status(), "You chose your own rclone in Options › Sites; Inbound does not download or update it.");
+        Version? version = null;
+        if (!string.IsNullOrWhiteSpace(versionText) && (!Version.TryParse(versionText, out version) || version.Build < 0 || version.Revision >= 0))
+            return WithError(Status(), "That is not an rclone version (like 1.76.0).");
+
+        var install = _updater.InstallAsync(version, cancellationToken);
+        await RaiseChangedAsync(CancellationToken.None).ConfigureAwait(false); // shows "installing"
+        string? problem = null;
+        try
+        {
+            await install.ConfigureAwait(false);
+        }
+        catch (RcloneReleaseException e)
+        {
+            problem = e.Message;
+            _log($"rclone was not installed: {e.Message}");
+        }
+
+        await SwapIfIdleAsync(cancellationToken).ConfigureAwait(false);
+        await RaiseChangedAsync(CancellationToken.None).ConfigureAwait(false);
+        return problem is null ? Status() : WithError(Status(), problem);
+    }
+
+    private async Task<SitesStatusDto> CheckRcloneAsync(CancellationToken cancellationToken)
+    {
+        if (_updater is null) return WithError(Status(), "This Inbound can't download rclone.");
+        string? problem = null;
+        try
+        {
+            await _updater.CheckAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (RcloneReleaseException e)
+        {
+            problem = e.Message;
+        }
+
+        await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
+        return problem is null ? Status() : WithError(Status(), problem);
+    }
+
+    /// <summary>
+    /// One look of the update loop (tests call it directly): an rclone shipped with this build retires downloaded ones at
+    /// or below it; rclone's server is asked about once a day; a ready update installs while rclone is idle when
+    /// automatic updates are on. Never with Sites off or with the user's own rclone.
+    /// </summary>
+    public async Task UpdateTickAsync(CancellationToken cancellationToken)
+    {
+        if (!_config.Enabled || _updater is null || _config.OwnRclonePath is not null) return;
+        if (!_shippedChecked)
+        {
+            _shippedChecked = true;
+            if (RcloneSetup.Shipped() is { } shipped
+                && (await RcloneSetup.ReadVersionAsync(shipped, cancellationToken).ConfigureAwait(false)).Version is { } shippedVersion)
+                await _updater.RemoveAtOrBelowAsync(shippedVersion, cancellationToken).ConfigureAwait(false);
+        }
+
+        var changed = false;
+        if (_updater.State.LastCheck is not { } last || _time.GetUtcNow() - last >= CheckInterval)
+        {
+            try
+            {
+                await _updater.CheckAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (RcloneReleaseException)
+            {
+                // Logged and kept by the updater; tried again at the next check.
+            }
+
+            changed = true;
+        }
+
+        // Updates replace an rclone Inbound manages: one it downloaded, or one shipped with this build (the Docker
+        // image). Never a first download on the desktop: that is the user's "Download rclone".
+        if (_config.AutoUpdateRclone && _updater.Offer is { State: RcloneOfferState.Ready } offer && RcloneIdle()
+            && SourceOf(_findRclone(_config.OwnRclonePath)) is SitesRcloneSources.Downloaded or SitesRcloneSources.Shipped)
+        {
+            try
+            {
+                await _updater.InstallAsync(offer.Version, cancellationToken).ConfigureAwait(false);
+                await SwapIfIdleAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (RcloneReleaseException e)
+            {
+                _log($"rclone {offer.Version.ToString(3)} was not installed: {e.Message}");
+            }
+
+            changed = true;
+        }
+
+        if (changed) await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool RcloneIdle() => Volatile.Read(ref _supervisor) is not { } supervisor || supervisor.Status.State == RcloneState.Off;
+
+    /// <summary>After an install: an idle rclone of the old version is let go, so the next use starts the new one.</summary>
+    private async Task SwapIfIdleAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _unprovenFailures, 0); // a new version gets its own two tries
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_supervisor is null)
+            {
+                _rcloneProblem = null;
+                _rcloneMissing = false;
+            }
+            else if (_supervisor.Status.State == RcloneState.Off && _supervisorFor != _findRclone(_config.OwnRclonePath))
+            {
+                await StopRcloneLockedAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private void StartUpdateLoop()
+    {
+        if (_updater is null) return;
+        lock (_loopSync)
+        {
+            if (_updateLoop is not null) return;
+            var loop = new CancellationTokenSource();
+            _updateLoop = loop;
+            _updateTask = Task.Run(() => UpdateLoopAsync(loop.Token));
+        }
+    }
+
+    private async Task StopUpdateLoopAsync()
+    {
+        CancellationTokenSource? loop;
+        Task? task;
+        lock (_loopSync)
+        {
+            (loop, task) = (_updateLoop, _updateTask);
+            (_updateLoop, _updateTask) = (null, null);
+        }
+
+        if (loop is null) return;
+        await loop.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            if (task is not null) await task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        loop.Dispose();
+    }
+
+    private async Task UpdateLoopAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(_firstCheckDelay, _time, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            try
+            {
+                await UpdateTickAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                _log($"rclone update check failed: {e.GetType().Name}: {e.Message}");
+            }
+
+            await Task.Delay(_updateTick, _time, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task<List<SiteDto>> ListAsync(CancellationToken cancellationToken) =>
@@ -344,17 +589,24 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<RcloneLease> AcquireAsync(CancellationToken cancellationToken)
     {
         RcloneSupervisor supervisor;
+        string path;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // An update installed while rclone ran: the old one is let go once idle, and the new one starts here.
+            if (_supervisor is { Status.State: RcloneState.Off } && _supervisorFor != _findRclone(_config.OwnRclonePath))
+                await StopRcloneLockedAsync().ConfigureAwait(false);
+
             if (_supervisor is null)
             {
                 var rclone = _findRclone(_config.OwnRclonePath);
+                if (rclone is not null && await RollBackIfBrokenAsync(rclone, cancellationToken).ConfigureAwait(false))
+                    rclone = _findRclone(_config.OwnRclonePath);
                 if (rclone is null)
                 {
-                    _rcloneProblem = _config.OwnRclonePath is null
-                        ? "rclone is not on this PC yet. Choose your own rclone in Options › Sites."
-                        : "The rclone chosen in Options › Sites was not found.";
+                    _rcloneProblem = _config.OwnRclonePath is not null ? "The rclone chosen in Options › Sites was not found."
+                        : _updater is not null ? "rclone is not on this PC yet. Download it in Options › Sites, or choose your own rclone."
+                        : "rclone is not on this PC yet. Choose your own rclone in Options › Sites.";
                     _rcloneMissing = true;
                     throw new RcloneUnavailableException(_rcloneProblem);
                 }
@@ -377,13 +629,59 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             }
 
             supervisor = _supervisor;
+            path = _supervisorFor!;
         }
         finally
         {
             _gate.Release();
         }
 
-        return await supervisor.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        var unproven = _updater is not null && path == _updater.CurrentExecutable && !_updater.State.Proven;
+        RcloneLease lease;
+        try
+        {
+            lease = await supervisor.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (RcloneUnavailableException e) when (unproven && !cancellationToken.IsCancellationRequested
+                                                   && (Interlocked.Increment(ref _unprovenFailures) >= UnprovenStartFailures || supervisor.Status.State == RcloneState.Failed))
+        {
+            // A freshly installed rclone that fails twice before it ever worked: back to the one before.
+            Interlocked.Exchange(ref _unprovenFailures, 0);
+            if (await _updater!.RollBackAsync(e.Message, CancellationToken.None).ConfigureAwait(false))
+            {
+                await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    if (ReferenceEquals(_supervisor, supervisor)) await StopRcloneLockedAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+
+                await RaiseChangedAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
+        if (unproven)
+        {
+            Interlocked.Exchange(ref _unprovenFailures, 0);
+            await _updater!.MarkProvenAsync(CancellationToken.None).ConfigureAwait(false);
+            await RaiseChangedAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return lease;
+    }
+
+    /// <summary>A freshly installed rclone that can't even report its version is rolled back before it is used.</summary>
+    private async Task<bool> RollBackIfBrokenAsync(string rclone, CancellationToken cancellationToken)
+    {
+        if (_updater is null || rclone != _updater.CurrentExecutable || _updater.State.Proven) return false;
+        var (version, problem) = await RcloneSetup.ReadVersionAsync(rclone, cancellationToken).ConfigureAwait(false);
+        if (version is not null) return false;
+        return await _updater.RollBackAsync(problem ?? "its version could not be read", cancellationToken).ConfigureAwait(false);
     }
 
     private void OnSupervisorChanged(object? sender, RcloneStatus status) => _ = RaiseChangedAsync(CancellationToken.None);
@@ -404,6 +702,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>On the Host's exit.</summary>
     public async ValueTask DisposeAsync()
     {
+        await StopUpdateLoopAsync().ConfigureAwait(false);
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {

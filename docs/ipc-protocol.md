@@ -196,7 +196,8 @@ Off: when the switch is off, rclone never starts and nothing runs on a timer. On
 - `sites.list`: `sites.listResult` with an empty `sites` list;
 - `sites.kinds`: `sites.kindsResult`, as when on;
 - `sites.probe`: `sites.probeResult` `{ok: false, message: "Sites is off. Turn it on in Options › Sites."}`;
-- `sites.save`, `sites.remove`, `sites.trust` and `sites.test`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`.
+- `sites.save`, `sites.remove`, `sites.trust` and `sites.test`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
+- `sites.rclone.install` and `sites.rclone.check`: `sites.status` with that `error`, and nothing is downloaded.
 
 Turning Sites off stops rclone. The saved sites and their sealed secrets stay on disk.
 
@@ -211,8 +212,11 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | `sites.probe` | `{host, port?}` | `sites.probeResult` |
 | `sites.trust` | `{id, entries}` | `sites.result` |
 | `sites.test` | `{id}` | `sites.result` |
+| `sites.rclone.install` | `{version?}` | `sites.status` |
+| `sites.rclone.check` | `{}` | `sites.status` |
 
-`sites.setEnabled`: `ownRclonePath` left out keeps the current path. An empty string goes back to the bundled rclone.
+`sites.setEnabled`: `ownRclonePath` left out keeps the current path. An empty string goes back to the rclone Inbound
+finds itself. `autoUpdateRclone` (true or false) sets "Update rclone automatically"; left out, it stays.
 Any other value must be a full path, or the reply carries `error` and nothing changes. A change to the switch or to the
 rclone path is saved first, then rclone stops if it must.
 
@@ -226,7 +230,29 @@ rclone path is saved first, then rclone stops if it must.
   found (not downloaded yet, or the chosen path is wrong). An rclone that was found but can't be used (too old for SFTP,
   not rclone, no answer to `rclone version`) is `failed`. Both carry `error` with the reason, and so does a `failed`
   after repeated crashes;
-- `rcloneVersion` (once read; null before the first start or when missing) and `error` (plain words, or null).
+- `rcloneVersion` (once read; null before the first start or when missing) and `error` (plain words, or null);
+- `rcloneSource`: where the rclone in use comes from, `own`, `environment` (`INBOUND_RCLONE`), `downloaded` or
+  `shipped` (next to the program, as in the Docker image); null when none is found;
+- `rcloneInstalled`: the version Inbound downloaded and uses (it may not have started yet), or null;
+- `autoUpdateRclone` (true by default) and `rcloneInstalling` (true while a download or its checks run);
+- `rcloneUpdate`: a newer rclone the last check found, `{version, state, waitUntil?, note}`, with `state` `ready`
+  (installs by itself when automatic updates are on), `waiting` (out less than a week; `waitUntil` says when) or
+  `needsAsk` (a new major version, installed only through `sites.rclone.install` with that version); null otherwise;
+- `rcloneLastCheck` and `rcloneUpdateError` (the last check's time and what went wrong, or null).
+
+rclone downloads (remote-sites.md, "Getting rclone" and "rclone updates"): `sites.rclone.install` with no `version`
+installs the newest release that is a week old and of the tested major version; with none, it keeps a newer one already
+installed (never a downgrade) or else installs the tested one (1.76.0);
+with a `version` it installs that one (a `waiting` or `needsAsk` one too, since the user asked). Every install
+checks that rclone's `SHA256SUMS` is identical on `downloads.rclone.org` and GitHub, its signature (rclone's release key,
+built in), the zip's line in it, the binary's own version, and that it starts and answers. The reply comes when that
+is done, with `error` when it was refused. It is refused for "Use my own rclone", which Inbound never downloads or
+updates, and where Inbound can't download rclone. A new version is used from rclone's next start. If it fails to start
+twice before it has worked once, the version before comes back and the new one is never offered again.
+`sites.rclone.check` asks rclone's server now and only reports; with Sites on the Host also asks about once a day and,
+with `autoUpdateRclone`, installs a `ready` update while rclone is idle. That replaces an rclone Inbound downloaded or
+one shipped with the build (the Docker image); the first download on a desktop is always the user's. A `waiting`
+update counts as `ready` once its `waitUntil` has passed. Neither runs with Sites off.
 
 `sites.save` takes `SiteSaveRequest`: `id` (left out for a new site), `name`, `kind` (`sftp`), `host`, `port`
 (22 when left out), `user`, `authMethod` (`password` or `key`), `password?`, `privateKey?`, `keyPassphrase?`,
@@ -262,11 +288,12 @@ the window handles on their own screens, with `problem` set:
 On success, `message` says how many items the folder holds. A missing rclone or a failed connection carries `ok: false`
 with `message` and no `problem`.
 
-`sites.probe` and `sites.test` end when their client disconnects.
+`sites.probe`, `sites.test`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
+install cut off that way leaves nothing behind).
 
 `sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
-The Host sends it after the switch changes, the rclone path changes, rclone's state changes, or a saved site is saved,
-removed or trusted. `sites` is empty while Sites is off.
+The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
+removed or trusted, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
 
 ### The server's transports (D1b)
 

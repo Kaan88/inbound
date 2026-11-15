@@ -40,6 +40,15 @@ public static class SitesMessageTypes
     /// <summary><see cref="SiteIdRequest"/>: connects through rclone and lists the start folder; answered with <see cref="Result"/>.</summary>
     public const string Test = "sites.test";
 
+    /// <summary>
+    /// <see cref="SitesRcloneInstallRequest"/>: downloads, checks and installs rclone (Options › Sites › Download rclone, or
+    /// Update rclone); answered with <see cref="Status"/> when done. Not for "Use my own rclone", which Inbound never touches.
+    /// </summary>
+    public const string RcloneInstall = "sites.rclone.install";
+
+    /// <summary><c>{}</c>: asks rclone's server for a newer release now; answered with <see cref="Status"/>.</summary>
+    public const string RcloneCheck = "sites.rclone.check";
+
     public const string Status = "sites.status";
     public const string List = "sites.listResult";
     public const string Result = "sites.result";
@@ -51,7 +60,7 @@ public static class SitesMessageTypes
 
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
-        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test;
+        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -84,14 +93,68 @@ public sealed class SitesStatusDto
 
     /// <summary>Why rclone is missing or failed, or why the last request was refused. Null otherwise.</summary>
     public string? Error { get; set; }
+
+    /// <summary>Where the rclone in use comes from: <see cref="SitesRcloneSources"/>; null when none was found.</summary>
+    public string? RcloneSource { get; set; }
+
+    /// <summary>The version Inbound downloaded and uses (it may not have started yet); null when none is downloaded.</summary>
+    public string? RcloneInstalled { get; set; }
+
+    /// <summary>Options › Sites › "Update rclone automatically" (on by default).</summary>
+    public bool AutoUpdateRclone { get; set; } = true;
+
+    /// <summary>True while rclone is being downloaded and checked.</summary>
+    public bool RcloneInstalling { get; set; }
+
+    /// <summary>A newer rclone found by the last check, or null.</summary>
+    public SitesRcloneUpdateDto? RcloneUpdate { get; set; }
+
+    /// <summary>When rclone's server was last asked, and what went wrong if it failed.</summary>
+    public DateTimeOffset? RcloneLastCheck { get; set; }
+
+    public string? RcloneUpdateError { get; set; }
+}
+
+/// <summary>The values of <see cref="SitesStatusDto.RcloneSource"/>.</summary>
+public static class SitesRcloneSources
+{
+    /// <summary>"Use my own rclone": never updated by Inbound.</summary>
+    public const string Own = "own";
+
+    /// <summary>INBOUND_RCLONE (tests, development builds).</summary>
+    public const string Environment = "environment";
+
+    /// <summary>Downloaded by Inbound into its data folder; updated by Inbound.</summary>
+    public const string Downloaded = "downloaded";
+
+    /// <summary>Shipped with this build (the Docker image); a newer downloaded one replaces it.</summary>
+    public const string Shipped = "shipped";
+}
+
+/// <summary>A newer rclone: <c>ready</c> (installs by itself when automatic updates are on), <c>waiting</c> (out less than a week), or <c>needsAsk</c> (a new major version).</summary>
+public sealed class SitesRcloneUpdateDto
+{
+    public string Version { get; set; } = "";
+    public string State { get; set; } = "";
+    public DateTimeOffset? WaitUntil { get; set; }
+    public string Note { get; set; } = "";
+}
+
+public sealed class SitesRcloneInstallRequest
+{
+    /// <summary>A version (e.g. <c>1.77.0</c>), or null for the best one: the newest a week old of the same major version, else the tested one.</summary>
+    public string? Version { get; set; }
 }
 
 public sealed class SitesSetEnabledRequest
 {
     public bool Enabled { get; set; }
 
-    /// <summary>Set to change "Use my own rclone"; an empty string goes back to the bundled one; null leaves it.</summary>
+    /// <summary>Set to change "Use my own rclone"; an empty string goes back to the one Inbound finds itself; null leaves it.</summary>
     public string? OwnRclonePath { get; set; }
+
+    /// <summary>"Update rclone automatically"; null leaves it.</summary>
+    public bool? AutoUpdateRclone { get; set; }
 }
 
 /// <summary>A saved site as clients see it: never a secret, only whether one is stored.</summary>

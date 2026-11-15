@@ -159,8 +159,9 @@ internal static class Program
             new WebUiPlatform(bridgeLauncher, new LinuxFirewall(), new ProcListenerCheck(),
                 new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
             paths.Root, PipeNames.HostHelloPipe(), log);
-        // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs.
-        var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info);
+        // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs and nothing is checked for updates.
+        var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
+            updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info));
         var dispatcher = new HostCommandDispatcher(service, platform, log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,

@@ -49,6 +49,33 @@ RUN set -eu; \
     cp /tmp/7z/7zz /tmp/7z/License.txt /tmp/7z/readme.txt /out/tools/7-Zip/; \
     chmod 755 /out/tools/7-Zip/7zz; chmod 644 /out/tools/7-Zip/License.txt /out/tools/7-Zip/readme.txt
 
+# ---- rclone for Sites: the official build, checked against its published SHA-256 -------------------------------------
+# Source: https://downloads.rclone.org/v1.76.0/rclone-v1.76.0-linux-<arch>.zip (rclone 1.76.0, the version Inbound was
+# tested with; RclonePinned in src/DownloadManager.Sites). The hashes are lines of rclone's signed SHA256SUMS for that
+# release, whose signature was checked with rclone's release key on 2026-11-15 (third_party/rclone/SOURCE.md). The
+# server uses /app/tools/rclone/rclone until it has downloaded and checked a newer one into /data (remote-sites.md,
+# "rclone updates"). Only the binary is kept.
+FROM node-base AS rclone
+ARG TARGETARCH
+ARG RCLONE_VERSION=1.76.0
+ARG RCLONE_SHA256_AMD64=b00f00b3266c3764413afe599d3ec316f6f43b3e0ea8a0bc1d186d2133e46df7
+ARG RCLONE_SHA256_ARM64=ee169016675e23a69d77240565133ff7dbc9b33d16fa8f7053d4af39f1eaeb78
+COPY third_party/rclone/COPYING /tmp/rclone-COPYING
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) sum="$RCLONE_SHA256_AMD64" ;; \
+      arm64) sum="$RCLONE_SHA256_ARM64" ;; \
+      *) echo "No rclone build is pinned for $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    name="rclone-v${RCLONE_VERSION}-linux-${TARGETARCH}"; \
+    wget -q -O /tmp/rclone.zip "https://downloads.rclone.org/v${RCLONE_VERSION}/${name}.zip"; \
+    echo "$sum  /tmp/rclone.zip" | sha256sum -c -; \
+    mkdir -p /out/tools/rclone /tmp/rclone; \
+    unzip -q /tmp/rclone.zip "${name}/rclone" -d /tmp/rclone; \
+    cp "/tmp/rclone/${name}/rclone" /out/tools/rclone/rclone; \
+    cp /tmp/rclone-COPYING /out/tools/rclone/COPYING; \
+    chmod 755 /out/tools/rclone/rclone; chmod 644 /out/tools/rclone/COPYING
+
 # ---- The server ---------------------------------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS server
 ARG TARGETARCH
@@ -118,7 +145,8 @@ LABEL org.opencontainers.image.title="Inbound Download Manager" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT"
-# The bundled 7-Zip keeps its own terms in /app/tools/7-Zip/License.txt (GNU LGPL with the unRAR restriction).
+# The bundled 7-Zip keeps its own terms in /app/tools/7-Zip/License.txt (GNU LGPL with the unRAR restriction), and
+# rclone (for Sites) its MIT licence in /app/tools/rclone/COPYING.
 
 ENV DOWNLOADMANAGER_DATA=/data \
     DOWNLOADMANAGER_ROOTS=/downloads \
@@ -132,6 +160,7 @@ ENV DOWNLOADMANAGER_DATA=/data \
 
 COPY --from=server /out/ /app/
 COPY --from=sevenzip /out/tools/ /app/tools/
+COPY --from=rclone /out/tools/ /app/tools/
 # The Server looks for the torrent worker next to itself (TorrentSetup.FindWorker). DOWNLOADMANAGER_TORRENTS=off turns
 # torrents off without it ever starting.
 COPY --from=torrent-worker --chmod=755 /inbound-torrent /app/inbound-torrent

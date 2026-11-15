@@ -9,6 +9,9 @@ public sealed record SitesConfig
 {
     public bool Enabled { get; init; }
     public string? OwnRclonePath { get; init; }
+
+    /// <summary>"Update rclone automatically": on by default (owner, 2026-11-15).</summary>
+    public bool AutoUpdateRclone { get; init; } = true;
 }
 
 [JsonSourceGenerationOptions(

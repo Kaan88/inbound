@@ -6,8 +6,8 @@ namespace DownloadManager.Sites;
 
 /// <summary>
 /// Which rclone the Host runs and whether it is new enough (remote-sites.md, "Which binary"). Order: the path the user set
-/// in Options ("Use my own rclone"), <see cref="RcloneVariable"/> (tests, development builds), then the bundled copy in
-/// <c>tools/rclone/</c> next to the Host.
+/// in Options ("Use my own rclone"), <see cref="RcloneVariable"/> (tests, development builds), the copy Inbound downloaded
+/// (<see cref="RcloneUpdater"/>), then one shipped in <c>tools/rclone/</c> next to the program (the Docker image).
 /// </summary>
 public static partial class RcloneSetup
 {
@@ -23,16 +23,29 @@ public static partial class RcloneSetup
     public static string FileNameFor(bool windows) => windows ? "rclone.exe" : "rclone";
 
     /// <summary>The rclone to run, or null when none is there.</summary>
-    public static string? Find(string? ownPath = null, string? baseDirectory = null) => Find(baseDirectory ?? AppContext.BaseDirectory,
-        ownPath, Environment.GetEnvironmentVariable(RcloneVariable), OperatingSystem.IsWindows(), File.Exists);
+    public static string? Find(string? ownPath = null, string? baseDirectory = null, string? downloaded = null) => Find(baseDirectory ?? AppContext.BaseDirectory,
+        ownPath, Environment.GetEnvironmentVariable(RcloneVariable), downloaded, OperatingSystem.IsWindows(), File.Exists);
 
     /// <summary>The same lookup with everything given (tests).</summary>
-    public static string? Find(string baseDirectory, string? ownPath, string? fromEnvironment, bool windows, Func<string, bool> exists)
+    public static string? Find(string baseDirectory, string? ownPath, string? fromEnvironment, bool windows, Func<string, bool> exists) =>
+        Find(baseDirectory, ownPath, fromEnvironment, null, windows, exists);
+
+    /// <summary>The same lookup with everything given (tests).</summary>
+    public static string? Find(string baseDirectory, string? ownPath, string? fromEnvironment, string? downloaded, bool windows, Func<string, bool> exists)
     {
         // A path that was set (in Options or INBOUND_RCLONE) but is missing is not replaced by another rclone: that one
         // was asked for, and silently running a different version would hide the mistake.
         if (!string.IsNullOrWhiteSpace(ownPath)) return exists(ownPath) ? ownPath : null;
         if (!string.IsNullOrWhiteSpace(fromEnvironment)) return exists(fromEnvironment) ? fromEnvironment : null;
+        if (!string.IsNullOrWhiteSpace(downloaded) && exists(downloaded)) return downloaded;
+        return Shipped(baseDirectory, windows, exists);
+    }
+
+    /// <summary>The rclone shipped next to the program (the Docker image), or null.</summary>
+    public static string? Shipped(string? baseDirectory = null) => Shipped(baseDirectory ?? AppContext.BaseDirectory, OperatingSystem.IsWindows(), File.Exists);
+
+    private static string? Shipped(string baseDirectory, bool windows, Func<string, bool> exists)
+    {
         var separator = windows ? '\\' : '/';
         var folder = baseDirectory.EndsWith('/') || baseDirectory.EndsWith('\\') ? baseDirectory : baseDirectory + separator;
         var candidate = folder + "tools" + separator + "rclone" + separator + FileNameFor(windows);
