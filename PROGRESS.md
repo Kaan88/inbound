@@ -427,6 +427,16 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AQ. 0.8.0 published** (2026-11-15, owner: "make a full release"). `v0.8.0` at `7fa8a8c` (the audited commit): the
+  Windows build made the draft, which was published as the latest release with a summary, the extension line (0.6.4,
+  unchanged) and two known issues (a trusted certificate counts for every site; a transfer stops after about half a
+  minute of an unreachable server). Publishing built the Linux packages (AppImage, .deb, .rpm, pacman, tar.gz) and the
+  Docker image; both succeeded. CI on `main` after the tag: a ranged stall case added in PERF.9 was wrong about the test
+  server (it sends 64 KB before throttling, so a range keeps its tries by UI.B15) and was dropped (`dd0a797`, test only);
+  then Linux passed and Windows failed once on `IpcOperationLifetimeTests.DisconnectCancelsTheRunningOperation`, a
+  2-second wait on a busy runner in a test this release doesn't touch, which passes locally in milliseconds.
+  **Next, open:** ROADMAP SITES.10 (audit follow-ups), S3 on a real service and B2 file transfers (owner: later), the
+  window's default view measured on a quiet machine, ANDROID.2.
 - **AP. Fable audit of v0.7.7..HEAD before 0.8.0** (2026-11-15, owner's request; one Fable agent, read-only). No
   high-severity finding. Fixed after checking each against the code:
   - **Outage counted per file** (`SiteTransfers.RunItemAsync`): every file in flight added one to the batch's failed
