@@ -19,7 +19,8 @@ case "$rid" in osx-arm64) arch=arm64 ;; osx-x64) arch=x64 ;; *) echo "Unknown ru
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/artifacts/macos"
 config="${CONFIGURATION:-Release}"
-version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$root/Directory.Build.props" | head -n1)"
+# VERSION_OVERRIDE: build as another version (the workflow's test updates); else Directory.Build.props's.
+version="${VERSION_OVERRIDE:-$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$root/Directory.Build.props" | head -n1)}"
 app="$out/$arch/Inbound.app"
 macos="$app/Contents/MacOS"
 host="$app/Contents/Resources/host"
@@ -29,7 +30,7 @@ rm -rf "$out/$arch"
 mkdir -p "$macos" "$host" "$window"
 publish() {
   dotnet publish "$root/$1" -c "$config" -r "$rid" --self-contained true -p:PublishSingleFile=false \
-    -p:DebugType=none -p:UseAppHost=true -o "$2" -nologo -v q
+    -p:DebugType=none -p:UseAppHost=true -p:Version="$version" -o "$2" -nologo -v q
 }
 publish src/DownloadManager.Host.Linux "$host"
 publish src/DownloadManager.Cli "$host"

@@ -18,7 +18,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         SupportsFolderPicker = true,
         SupportsTray = false,
         SupportsShutdown = true,
-        SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null,
+        SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null || DownloadManager.Core.InstalledBuild.MacApp() is not null,
         SupportsProgramSettings = true,
         SupportsCompletionActions = true,
         // EXT.R11 review: only with a desktop to show a file manager on. A Host without a display has nowhere to open it.
