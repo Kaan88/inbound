@@ -47,10 +47,14 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="100" />
                 <ColumnDefinition Width="170" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="1" Text="Name" Style="{StaticResource InboundHeaderTextStyle}" />
             <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" HorizontalTextAlignment="Right" />
             <TextBlock Grid.Column="3" Text="Modified" Style="{StaticResource InboundHeaderTextStyle}" />
+            <!-- SITES.5: only for a site with a linked folder on this PC (Edit site). -->
+            <TextBlock x:Name="HereHeader" Grid.Column="4" Width="96" Text="On this PC" Style="{StaticResource InboundHeaderTextStyle}"
+                       Visibility="Collapsed" ToolTipService.ToolTip="Compared with the site's folder on this PC by name, size and time" />
         </Grid>
 
         <Grid Grid.Row="2">
@@ -71,6 +75,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="100" />
                                 <ColumnDefinition Width="170" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <FontIcon Glyph="{Binding Glyph}" FontSize="15" VerticalAlignment="Center"
                                       Foreground="{ThemeResource InboundIconInfoBrush}" />
@@ -80,6 +85,8 @@
                                        HorizontalTextAlignment="Right" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                             <TextBlock Grid.Column="3" Text="{Binding ModifiedText}" FontSize="12" VerticalAlignment="Center"
                                        Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            <TextBlock Grid.Column="4" Width="96" Text="{Binding HereText}" FontSize="12" VerticalAlignment="Center"
+                                       Visibility="{Binding HereVisibility}" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

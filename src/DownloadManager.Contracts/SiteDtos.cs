@@ -103,10 +103,26 @@ public static class SitesMessageTypes
     /// <summary>Host push to the desktop role's sessions: a <see cref="SitesChangedDto"/> after the switch or a site changed.</summary>
     public const string Changed = "sites.changed";
 
+    /// <summary>SITES.5: <see cref="SiteMakeFolderRequest"/>; replies <see cref="Result"/>.</summary>
+    public const string MakeFolder = "sites.mkdir";
+
+    /// <summary>SITES.5: <see cref="SiteRenameRequest"/>; replies <see cref="Result"/>.</summary>
+    public const string Rename = "sites.rename";
+
+    /// <summary>SITES.5: <see cref="SiteChangeRequest"/>; replies <see cref="CountResult"/> with what a delete would remove.</summary>
+    public const string Count = "sites.count";
+
+    /// <summary>SITES.5: <see cref="SiteChangeRequest"/>; replies <see cref="ChangeResult"/>, a result per item.</summary>
+    public const string Delete = "sites.delete";
+
+    public const string CountResult = "sites.countResult";
+    public const string ChangeResult = "sites.changeResult";
+
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
-            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet;
+            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
+            or MakeFolder or Rename or Count or Delete;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -388,6 +404,34 @@ public sealed class SiteItemDto
     public long Size { get; set; } = -1;
 
     public DateTimeOffset? Modified { get; set; }
+
+    /// <summary>
+    /// SITES.5, "On this PC": a <see cref="SiteHereStates"/> value comparing the item with the same place under the
+    /// site's linked folder; null when it is not compared (no linked folder, or a folder outside the site's start folder).
+    /// </summary>
+    public string? Here { get; set; }
+}
+
+/// <summary>The values of <see cref="SiteItemDto.Here"/>. Name, size and time only.</summary>
+public static class SiteHereStates
+{
+    /// <summary>Same size, and not older here.</summary>
+    public const string Same = "same";
+
+    /// <summary>A copy here that is older than the server's.</summary>
+    public const string OlderHere = "olderHere";
+
+    /// <summary>A smaller file here, as from a copy that was cut.</summary>
+    public const string SomeOfIt = "someOfIt";
+
+    /// <summary>Nothing of that name here.</summary>
+    public const string NotHere = "notHere";
+
+    /// <summary>A file here that is bigger or newer and not the same size, or a folder where the server has a file.</summary>
+    public const string Different = "different";
+
+    /// <summary>A folder of that name is here; what is inside is not compared.</summary>
+    public const string FolderHere = "folderHere";
 }
 
 public sealed class SiteBrowseResultDto
@@ -413,6 +457,77 @@ public sealed class SiteBrowseResultDto
 
     /// <summary>Names the listing these items come from; sent back in <see cref="SiteBrowseRequest.Listing"/> for the next page.</summary>
     public string? Listing { get; set; }
+}
+
+/// <summary><c>sites.mkdir</c>: a folder named <see cref="Name"/> in <see cref="Path"/>.</summary>
+public sealed class SiteMakeFolderRequest
+{
+    public string Id { get; set; } = "";
+    public string Path { get; set; } = "/";
+    public string Name { get; set; } = "";
+}
+
+/// <summary><c>sites.rename</c>: the item <see cref="Name"/> in <see cref="Path"/> becomes <see cref="NewName"/>, in the same folder.</summary>
+public sealed class SiteRenameRequest
+{
+    public string Id { get; set; } = "";
+    public string Path { get; set; } = "/";
+    public string Name { get; set; } = "";
+    public string NewName { get; set; } = "";
+}
+
+/// <summary><c>sites.count</c> and <c>sites.delete</c>: items of one folder by name.</summary>
+public sealed class SiteChangeRequest
+{
+    public string Id { get; set; } = "";
+    public string Path { get; set; } = "/";
+    public List<SiteChangeItemDto> Items { get; set; } = [];
+}
+
+public sealed class SiteChangeItemDto
+{
+    public string Name { get; set; } = "";
+
+    /// <summary>What the client showed; the Host looks again before it acts.</summary>
+    public bool IsFolder { get; set; }
+}
+
+/// <summary>What a delete of those items would remove.</summary>
+public sealed class SiteCountResultDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+
+    /// <summary>Files, counting those inside the chosen folders.</summary>
+    public long Files { get; set; }
+
+    /// <summary>Chosen folders (not the folders inside them).</summary>
+    public int Folders { get; set; }
+
+    public long Bytes { get; set; }
+
+    /// <summary>Some file's size is not known, so <see cref="Bytes"/> is at least that much.</summary>
+    public bool SizeUnknown { get; set; }
+
+    /// <summary>Chosen items no longer there.</summary>
+    public int Missing { get; set; }
+}
+
+public sealed class SiteChangeResultDto
+{
+    /// <summary>False when any item failed, or the whole request did (then <see cref="Items"/> is empty).</summary>
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+    public List<SiteChangeItemResultDto> Items { get; set; } = [];
+}
+
+public sealed class SiteChangeItemResultDto
+{
+    public string Name { get; set; } = "";
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
 }
 
 public sealed class SiteStarRequest

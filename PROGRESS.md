@@ -217,6 +217,49 @@
   (unit tested), the Uno window on Linux. The Done tab never says "checked" (the plan's hash note): whether rclone
   compared a hash is not reported to us yet.
 
+- **M. SITES.5: remote changes, "On this PC", Two panes, linked folders** (2026-11-15, main). **Host:** `sites.mkdir`,
+  `sites.rename`, `sites.count` and `sites.delete` (`SitesCommands.Changes.cs`; protocol in `docs/ipc-protocol.md`).
+  Names follow `SiteNameRules` (Contracts, shared with `SitePaths`). Rename refuses a name already there; a change of case
+  only goes through a name of its own (`.inbound-rename-…`, put back on failure) because a server that ignores case
+  takes "a" to "A" as no change. Delete gives a result per item; a name already gone counts as deleted. Rename and
+  delete refuse anything a running, paused or still-resumable batch uses (`SiteTransfers.Uses`). Each change forgets the
+  site's kept listing. Browse items carry `here` (`SiteHere`): same, older here, partly here, different, not here, folder
+  here, against the site's linked folder (the start folder matches it; outside it nothing is compared; name, size, time
+  with 2 s slack, never contents). **Window (WinUI, Uno shares it):** New folder, Rename (F2) and Delete on server
+  (Delete key) on the Sites toolbar; names are checked as typed; Delete counts first, then asks with Cancel focused and
+  says it can't be undone. The "On this PC" column shows for a site with a linked folder. **Two panes** (toolbar,
+  remembered in `ui-state.json` as `sitesTwoPanes`): this PC on the left (Up, a path box, Refresh, Enter/Backspace/F5),
+  arrows in the middle that start the same Host transfers, the server on the right. It follows the server folder into
+  the matching folder under the linked folder when that exists; otherwise it stays where it is (a new site opens at its
+  linked folder, else the default download folder). Delete in the left pane sends to the Recycle Bin on Windows only,
+  after asking, and refuses a folder a batch writes into or reads from. Both panes re-read when a transfer lands. Two
+  panes is off while the window shows another server (its sites move files on that server's disks). **My calls**
+  (recorded here, as the goal said to decide): folders say only "Folder here", contents are not compared; I added
+  "Different here" (bigger here, or a file on one side and a folder on the other); only paths inside the site's start
+  folder are compared; Two panes is not offered for another server; the left pane has no rename or new folder (Explorer
+  does that). **Haiku review:** ten points, checked. Fixed: a case-only rename could replace another file on a server
+  that keeps case (now an exact-name check, and the in-between name above, which the walk showed was needed); Two panes
+  stayed on, and its Delete live, after switching to another server; a server folder with a file of that name here said
+  "Not here"; "Some of it" is now "Partly here"; misplaced doc comments; an unverified comment about folder renames. Not
+  changed: deleting a file inside a download's folder on this PC is allowed (only the batch's folder and the folders
+  holding it are refused; a file rclone is writing is held open, so Windows refuses it anyway); the busy check runs
+  just before the rclone lease (one Host; a batch starts through the same commands); the left pane accepts names the
+  column would compare though Windows can't open them (rare; the pane says why). **Walk** (published build, own test
+  instance, `rclone serve sftp`, UI Automation only; screen capture draws black, UI.B9, and screen control was not
+  granted): Two panes remembered across a restart; the left pane followed the server into `docs` and back; ← downloaded
+  `readme.txt` into the left folder and both panes re-read (the column went from "Not here" to "Same"; first walk found
+  the server pane did not re-read, fixed); → uploaded a file into `/pub`; Delete in the left pane asked (Cancel focused)
+  and sent the file to the Recycle Bin; a folder a running download wrote into was refused with "A site transfer still
+  uses deep"; New folder (suggested "New folder", made, selected), Rename refused a slash as typed, a case-only folder
+  rename `walk5` → `Walk5` took effect, Delete on server asked with Cancel focused and removed it. Found and fixed: the
+  delete question said "removes 0 files (0 B) … inside the folders" for an empty folder. **Tests:**
+  `SiteChangesEndToEndTests` (2, against real rclone: new folder, renames including case only, count, delete, busy
+  refusals), `SiteHereTests`, `SitePathNameTests`, `SiteChangeRulesTests`, `LocalListingTests`; Core 2367, Sites and
+  the whole Integration suite (1991, 10 skip, with rclone 1.76.0) pass; the solution builds. The full Integration run
+  found the recorded Host frames out of date since SITES.3 added the `sites` hello capability (only that word differs;
+  regenerated) and the dispatcher's request list missing the four new requests (added). **Not checked:** anything visual, light mode, the Uno window on Linux, a case-keeping
+  server (the test server serves a Windows folder), Two panes after a real server switch (rule only).
+
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

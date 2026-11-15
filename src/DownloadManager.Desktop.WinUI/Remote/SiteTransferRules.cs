@@ -76,6 +76,55 @@ internal static class SiteTransferRules
         return false;
     }
 
+    /// <summary>
+    /// SITES.5: true when a download into <paramref name="localFolder"/> on this PC finished since
+    /// <paramref name="before"/> with something copied, so the This PC pane showing it is out of date.
+    /// </summary>
+    public static bool DownloadLanded(IReadOnlyList<SiteTransferDto> before, IReadOnlyList<SiteTransferDto> now, string localFolder)
+    {
+        static string Clean(string path) => path.TrimEnd('\\', '/');
+        var shown = Clean(localFolder);
+        return DownloadLanded(before, now, t => string.Equals(Clean(t.LocalFolder ?? ""), shown, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// SITES.5: true when a download from the site finished since <paramref name="before"/> with something copied, so its
+    /// "On this PC" column is out of date.
+    /// </summary>
+    public static bool DownloadLandedFrom(IReadOnlyList<SiteTransferDto> before, IReadOnlyList<SiteTransferDto> now, string siteId) =>
+        DownloadLanded(before, now, t => t.SiteId == siteId);
+
+    private static bool DownloadLanded(IReadOnlyList<SiteTransferDto> before, IReadOnlyList<SiteTransferDto> now, Func<SiteTransferDto, bool> matches)
+    {
+        foreach (var t in now)
+        {
+            if (!IsDownload(t) || t.FilesDone == 0 || t.State is "running" or "paused") continue;
+            if (!matches(t)) continue;
+            var earlier = before.FirstOrDefault(b => b.Id == t.Id);
+            if (earlier is null || earlier.State is "running" or "paused") return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// SITES.5: true when deleting <paramref name="path"/> on this PC would take away the folder of a batch that runs, is
+    /// paused or can still go on: the folder itself or one holding it.
+    /// </summary>
+    public static bool LocalInUse(IReadOnlyList<SiteTransferDto> transfers, string path)
+    {
+        var target = path.TrimEnd('\\', '/');
+        foreach (var t in transfers)
+        {
+            if (CanClear(t) && !CanResume(t) || string.IsNullOrEmpty(t.LocalFolder)) continue;
+            var folder = t.LocalFolder.TrimEnd('\\', '/');
+            if (string.Equals(folder, target, StringComparison.OrdinalIgnoreCase)
+                || folder.StartsWith(target + "\\", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>A line of a batch's Files list: what happened to it.</summary>
     public static string ItemText(SiteTransferItemDto item)
     {

@@ -47,8 +47,9 @@ Stream downloading (HLS/DASH, FFmpeg muxing, DRM/live checks) and FTP were cut i
 `docs\plans\feature-cuts.md`): a playlist address or HLS/DASH response fails at start with "Streaming playlists
 aren't downloaded; use a video downloader.", and ftp:// or ftps:// is refused with "FTP addresses aren't supported."
 A Sites view (remote file browsing, uploads and downloads for FTP, SFTP, WebDAV and cloud storage through a bundled
-rclone child process) is in progress: SFTP sites can be browsed and files moved both ways (SITES.0 to SITES.4, done
-on Windows); SITES.5 to SITES.9 remain. `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
+rclone child process) is in progress: SFTP sites can be browsed, changed (new folder, rename, delete) and files moved
+both ways, with an "On this PC" column and a Two panes view (SITES.0 to SITES.5, done on Windows); SITES.6 to SITES.9
+remain. `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
 Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
 a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect

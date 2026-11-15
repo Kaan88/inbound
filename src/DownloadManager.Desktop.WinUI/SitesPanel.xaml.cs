@@ -12,13 +12,20 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>One line of the folder list. Public because the list's bindings read it by reflection.</summary>
 public sealed class SiteItemRow
 {
-    internal SiteItemRow(SiteItemDto item)
+    internal SiteItemRow(SiteItemDto item, bool showsHere = false)
     {
         Name = item.Name;
         IsFolder = item.IsFolder;
         SizeText = SitesBrowseRules.SizeText(item.Size, item.IsFolder);
         ModifiedText = SitesBrowseRules.ModifiedText(item.Modified);
+        HereText = SitesBrowseRules.HereText(item.Here);
+        HereVisibility = showsHere ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    /// <summary>SITES.5: "On this PC", against the site's linked folder.</summary>
+    public string HereText { get; }
+
+    public Visibility HereVisibility { get; }
 
     public string Name { get; }
 
@@ -38,6 +45,7 @@ public sealed class SiteItemRow
             var parts = new List<string> { IsFolder ? $"Folder {Name}" : Name };
             if (SizeText.Length > 0) parts.Add(SizeText);
             if (ModifiedText.Length > 0) parts.Add($"modified {ModifiedText}");
+            if (HereText.Length > 0) parts.Add($"on this PC: {HereText}");
             return string.Join(", ", parts);
         }
     }
@@ -99,6 +107,13 @@ public sealed partial class SitesPanel : UserControl
 
     /// <summary>The site shown, as last saved.</summary>
     internal SiteDto? Site => _site;
+
+    /// <summary>The names listed so far in the folder shown (for a free "New folder" name).</summary>
+    internal IEnumerable<string> ShownNames => _rows.Select(row => row.Name);
+
+    /// <summary>SITES.5: F2 and Delete on the list; the window asks and acts.</summary>
+    internal event Action? RenameRequested;
+    internal event Action? DeleteRequested;
 
     /// <summary>SITES.4: the selected files and folders of the folder shown, for Download.</summary>
     internal List<SiteTransferNameDto> SelectedNames =>
@@ -162,6 +177,13 @@ public sealed partial class SitesPanel : UserControl
     }
 
     internal void Reload() => _ = LoadAsync(ReopenPath, refresh: true, append: false);
+
+    /// <summary>Lists the folder again and selects <paramref name="selectName"/> in it (a new folder, a renamed item).</summary>
+    internal void Reload(string? selectName)
+    {
+        _selectAfter = selectName;
+        Reload();
+    }
 
     internal async Task ToggleStarAsync()
     {
@@ -313,7 +335,9 @@ public sealed partial class SitesPanel : UserControl
         _atStart = false;
         _listing = result.Listing;
         _path = SitesBrowseRules.Normalize(string.IsNullOrEmpty(result.Path) ? path : result.Path);
-        foreach (var item in result.Items) _rows.Add(new SiteItemRow(item));
+        var showsHere = SitesBrowseRules.ShowsHere(_site);
+        HereHeader.Visibility = showsHere ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var item in result.Items) _rows.Add(new SiteItemRow(item, showsHere));
         _total = Math.Max(result.Total, _rows.Count);
         // A page with nothing in it ends paging, so a Host that miscounts cannot keep the button asking forever.
         if (result.Items.Count == 0) _total = _rows.Count;
@@ -563,6 +587,14 @@ public sealed partial class SitesPanel : UserControl
     {
         switch (e.Key)
         {
+            case VirtualKey.F2 when ItemsList.SelectedItems.Count == 1:
+                RenameRequested?.Invoke();
+                e.Handled = true;
+                break;
+            case VirtualKey.Delete when ItemsList.SelectedItems.Count > 0:
+                DeleteRequested?.Invoke();
+                e.Handled = true;
+                break;
             case VirtualKey.Enter when ItemsList.SelectedItems.Count == 1 && ItemsList.SelectedItem is SiteItemRow { IsFolder: true }:
                 OpenSelectedFolder();
                 e.Handled = true;

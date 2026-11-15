@@ -297,6 +297,32 @@
                                 </MenuFlyout>
                             </DropDownButton.Flyout>
                         </DropDownButton>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                        <!-- SITES.5: changes on the server; Delete always asks with the count. -->
+                        <Button x:Name="SitesNewFolderButton" AutomationProperties.Name="New folder" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesNewFolderButton_Click" IsEnabled="False" ToolTipService.ToolTip="Make a folder in the folder shown">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE8F4;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="New folder" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SitesRenameButton" AutomationProperties.Name="Rename" AutomationProperties.AcceleratorKey="F2"
+                                Style="{StaticResource InboundToolButtonStyle}" Click="SitesRenameButton_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Rename the selected item (F2)">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE8AC;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Rename" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SitesDeleteButton" AutomationProperties.Name="Delete on server" AutomationProperties.AcceleratorKey="Delete"
+                                Style="{StaticResource InboundToolButtonStyle}" Click="SitesDeleteButton_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Delete the selected items on the server; it asks first (Delete)">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE74D;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                                <TextBlock Text="Delete on server" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                         <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
                         <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
                                 Click="SitesPauseAllButton_Click" IsEnabled="False"
@@ -327,6 +353,15 @@
                             <StackPanel>
                                 <FontIcon x:Name="SitesStarIcon" Glyph="&#xE734;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock x:Name="SitesStarLabel" Text="Star" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                        <!-- SITES.5: this PC's folders beside the server's, with arrows between them. Remembered. -->
+                        <Button x:Name="SitesTwoPanesButton" AutomationProperties.Name="Two panes" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesTwoPanesButton_Click" ToolTipService.ToolTip="Show a folder of this PC beside the server's">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE89F;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock x:Name="SitesTwoPanesLabel" Text="Two panes" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
                     </StackPanel>

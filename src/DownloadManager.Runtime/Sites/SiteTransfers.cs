@@ -162,6 +162,38 @@ public sealed class SiteTransfers : IAsyncDisposable
         lock (_sync) return SnapshotLocked();
     }
 
+    /// <summary>
+    /// SITES.5: whether a batch that may still move files (running, paused, or stopped with files waiting) reads or writes
+    /// <paramref name="path"/> on that site, or anything inside it, or lands inside it: such a path is not renamed or
+    /// deleted under the batch.
+    /// </summary>
+    public bool Uses(string siteId, string path)
+    {
+        static bool Within(string candidate, string root) =>
+            root == "/" || candidate == root || candidate.StartsWith(root + "/", StringComparison.Ordinal);
+
+        lock (_sync)
+        {
+            foreach (var batch in _batches)
+            {
+                var record = batch.Record;
+                if (record.SiteId != siteId) continue;
+                if (record.State is not (SiteTransferStates.Running or SiteTransferStates.Paused) && !StoppedLocked(batch)) continue;
+                if (Within(record.RemoteFolder, path)) return true;
+                foreach (var item in record.Items)
+                {
+                    if (!NotFinished(item)) continue;
+                    if (Within(SiteTransferPaths.Remote(record.RemoteFolder, item.Path), path)) return true;
+                    // An upload kept both under a new name writes that name.
+                    if (record.Direction == SiteTransferDirections.Upload && item.Target is { } target
+                        && Within(SiteTransferPaths.Remote(record.RemoteFolder, target), path)) return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Batches running now (moving or waiting their turn), for the tray.</summary>
     public int RunningCount()
     {

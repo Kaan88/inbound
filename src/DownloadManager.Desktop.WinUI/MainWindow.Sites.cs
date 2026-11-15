@@ -82,6 +82,8 @@ public sealed partial class MainWindow
     private void SyncSitesForConnection()
     {
         if (_sitesShown && !SitesOffered) LeaveSites(selectCategory: true);
+        // Two panes shows this PC's folders: it goes while another server is shown, and comes back with this PC.
+        ApplyTwoPanes();
         SyncSiteEntryPoints();
         UpdateSitesChip();
     }
@@ -180,6 +182,8 @@ public sealed partial class MainWindow
             OpenSitesOptions = OpenSitesOptionsHook,
         };
         panel.StateChanged += UpdateSitesToolbar;
+        WireSiteChanges(panel);
+        panel.StateChanged += FollowServerFolder;
         panel.SiteUpdated += updated =>
         {
             var at = _sites.FindIndex(site => site.Id == updated.Id);
@@ -188,6 +192,7 @@ public sealed partial class MainWindow
         };
         SitesHost.Children.Add(panel);
         _sitesPanel = panel;
+        ApplyTwoPanes();
         return panel;
     }
 
@@ -230,6 +235,7 @@ public sealed partial class MainWindow
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
         panel.Open(site, keepPlace ? panel.ReopenPath : null);
+        ApplyTwoPanes();
         UpdateSitesToolbar();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, panel.FocusList);
     }
@@ -268,9 +274,15 @@ public sealed partial class MainWindow
         SitesUpButton.IsEnabled = panel.CanGoUp;
         SitesDownloadButton.IsEnabled = !panel.IsLoading && panel.SelectedNames.Count > 0;
         SitesUploadButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
+        // SITES.5: one change at a time; Rename takes one item.
+        var selected = panel.SelectedNames.Count;
+        SitesNewFolderButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && !_siteChangeRunning;
+        SitesRenameButton.IsEnabled = !panel.IsLoading && selected == 1 && !_siteChangeRunning;
+        SitesDeleteButton.IsEnabled = !panel.IsLoading && selected > 0 && !_siteChangeRunning;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;
         // The Host refuses a star on the root, so the button is off there.
         SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && panel.CanGoUp;
+        UpdateTwoPanesArrows();
         var starred = panel.IsStarred;
         SitesStarIcon.Glyph = starred ? "" : "";
         SitesStarLabel.Text = starred ? "Unstar" : "Star";

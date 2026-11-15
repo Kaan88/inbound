@@ -14,7 +14,7 @@ namespace DownloadManager.Integration.Tests;
 /// against <c>rclone serve sftp</c> on a loopback port, which runs on Windows and Linux alike. The server is slowed with
 /// <c>--bwlimit</c> where a test needs a file to be in flight. Every file is compared by SHA-256. Skipped without rclone.
 /// </summary>
-public sealed class SiteTransfersEndToEndTests : IAsyncLifetime
+public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
 {
     private const string User = "inbound";
     private const string Password = "transfer-e2e-pass-5521";

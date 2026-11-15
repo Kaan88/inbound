@@ -75,6 +75,32 @@ internal sealed partial class RemoteClient
     public async Task<SiteResultDto> StarSiteFolderAsync(SiteStarRequest request, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteStarRequest, SiteResultDto>(SitesMessageTypes.Star, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>SITES.5: a new folder on the server. Slow: the Host looks first, then makes it.</summary>
+    public async Task<SiteResultDto> MakeSiteFolderAsync(SiteMakeFolderRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteMakeFolderRequest, SiteResultDto>(SitesMessageTypes.MakeFolder, request,
+            SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.5: renames one item in its folder.</summary>
+    public async Task<SiteResultDto> RenameSiteItemAsync(SiteRenameRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteRenameRequest, SiteResultDto>(SitesMessageTypes.Rename, request,
+            SitesMessageTypes.Result, SitesBrowseTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.5: what a delete would remove, counted on the server (folders are walked, so it can take a while).</summary>
+    public async Task<SiteCountResultDto> CountSiteItemsAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteChangeRequest, SiteCountResultDto>(SitesMessageTypes.Count, request,
+            SitesMessageTypes.CountResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteCountResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>SITES.5: deletes on the server, with a result per item.</summary>
+    public async Task<SiteChangeResultDto> DeleteSiteItemsAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteChangeRequest, SiteChangeResultDto>(SitesMessageTypes.Delete, request,
+            SitesMessageTypes.ChangeResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteChangeResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
     /// <summary>
     /// SITES.4: starts a download or upload batch. On a connection of its own, as browsing is: the Host lists the chosen
     /// folders first, which can take a while on a far server.

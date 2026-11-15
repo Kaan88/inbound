@@ -40,6 +40,8 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.Sites.cs" Link="WinUI\RemoteClient.Sites.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SitesRules.cs" Link="WinUI\SitesRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SiteTransferRules.cs" Link="WinUI\SiteTransferRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SiteChangeRules.cs" Link="WinUI\SiteChangeRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\LocalListing.cs" Link="WinUI\LocalListing.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiForm.cs" Link="WinUI\WebUiForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiFirewall.cs" Link="WinUI\WebUiFirewall.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentFirewall.cs" Link="WinUI\TorrentFirewall.cs" />

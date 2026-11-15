@@ -200,7 +200,8 @@ Off: when the switch is off, rclone never starts and nothing runs on a timer. On
 - `sites.kinds`: `sites.kindsResult`, as when on;
 - `sites.probe`: `sites.probeResult` `{ok: false, message: "Sites is off. Turn it on in Options › Sites."}`;
 - `sites.browse`: `sites.browseResult` `{ok: false, problem: "off", message: ...}`, the same message;
-- `sites.save`, `sites.remove`, `sites.trust`, `sites.test` and `sites.star`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
+- `sites.count`: `sites.countResult` and `sites.delete`: `sites.changeResult`, each `{ok: false, problem: "off", message: ...}`;
+- `sites.save`, `sites.remove`, `sites.trust`, `sites.test`, `sites.star`, `sites.mkdir` and `sites.rename`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
 - `sites.rclone.install` and `sites.rclone.check`: `sites.status` with that `error`, and nothing is downloaded.
 
 Turning Sites off stops rclone. The saved sites and their sealed secrets stay on disk.
@@ -218,6 +219,10 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | `sites.test` | `{id}` | `sites.result` |
 | `sites.browse` | `{id, path?, offset?, limit?, refresh?}` | `sites.browseResult` |
 | `sites.star` | `{id, path, starred?}` | `sites.result` |
+| `sites.mkdir` | `{id, path, name}` | `sites.result` |
+| `sites.rename` | `{id, path, name, newName}` | `sites.result` |
+| `sites.count` | `{id, path, items}` | `sites.countResult` |
+| `sites.delete` | `{id, path, items}` | `sites.changeResult` |
 | `sites.rclone.install` | `{version?}` | `sites.status` |
 | `sites.rclone.check` | `{}` | `sites.status` |
 
@@ -314,6 +319,30 @@ runs one command per connection at a time and closing the connection is how a li
 `sites.star` takes `{id, path, starred}` (`starred` true when left out): the path is normalised as above and must not be
 empty or `/`, or hold format or line-separator characters (such as a right-to-left override). Starring a starred folder keeps its place; unstarring removes it. A site has at most 100 stars. Editing a site
 keeps its stars unless the host or port changes, which forgets them with the host keys.
+
+Remote changes (SITES.5): `path` is the folder on the server, normalised as for `sites.browse`; `name`, `newName` and
+each item's `name` are one name, never a path (`SiteNameRules`: not empty, no `/`, not `.` or `..`, no control
+characters, not spaces only, at most 255 characters). `sites.mkdir` makes `name` in `path` and is refused when something of that
+name is already there. `sites.rename` renames `name` to `newName` in the same folder (a file with rclone's
+`operations/movefile`, a folder with one `sync/move` of the tree); it is refused when `name` is gone or `newName` is
+already there (for a change of case only, another item of exactly the new name; such a rename goes through a name of its own, `.inbound-rename-…`, so a server that ignores case takes it too). `sites.count` takes `items` `[{name, isFolder}]` (1 to 1,000,
+no name twice) and replies `SiteCountResultDto` `{ok, message?, problem?, files, folders, bytes, sizeUnknown,
+missing}`: the files inside the chosen folders count too, `sizeUnknown` is true when some size was not given, and
+`missing` counts names no longer there. `sites.delete` takes the same and deletes each item (a folder with all inside
+it); the reply `SiteChangeResultDto` `{ok, message?, problem?, items}` has one `{name, ok, message?}` per item, so one
+item that can't go does not stop the others, and a name already gone counts as deleted with a message. `sites.rename`
+and `sites.delete` are refused as a whole, with nothing done, when a transfer that runs, is paused or can still go on
+uses the item: the batch's server folder, a file it has still to move, or a folder holding either. Failures are as for
+`sites.test`, including `hostKeyNotAccepted` and `hostKeyChanged`. Every change forgets the site's kept listing, so
+the next `sites.browse` reads the server again.
+
+"On this PC" (SITES.5): for a site with a `localFolder`, each `sites.browse` item carries `here`, how the item compares
+with the same place under that folder. The site's `remoteFolder` matches `localFolder`; items outside it, and names
+this PC can't hold, have no `here`. Values: `same` (same size, and not older here than on the server, with 2 seconds
+of slack), `olderHere` (the copy here is older), `someOfIt` (smaller here, as a stopped download leaves it),
+`different` (bigger here, or a folder on one side and a file on the other), `notHere`, and, for a folder, `folderHere`
+(its contents are not compared). A server that gives no size is compared by time only. Name, size and time only,
+never contents.
 
 `sites.probe`, `sites.test`, `sites.browse`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
 install cut off that way leaves nothing behind).

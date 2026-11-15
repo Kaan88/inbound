@@ -1,4 +1,5 @@
 using System.Globalization;
+using DownloadManager.Contracts;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -93,7 +94,23 @@ internal static class SitesBrowseRules
         return $"{leaf} (in {LeafName(parent)})";
     }
 
+    /// <summary>SITES.5: the "On this PC" words for a <see cref="SiteHereStates"/> value; empty when not compared.</summary>
+    public static string HereText(string? here) => here switch
+    {
+        SiteHereStates.Same => "Same",
+        SiteHereStates.OlderHere => "Older here",
+        SiteHereStates.SomeOfIt => "Partly here",
+        SiteHereStates.NotHere => "Not here",
+        SiteHereStates.Different => "Different here",
+        SiteHereStates.FolderHere => "Folder here",
+        _ => "",
+    };
+
+    /// <summary>The column shows for a site with a linked folder on this PC.</summary>
+    public static bool ShowsHere(SiteDto? site) => !string.IsNullOrWhiteSpace(site?.LocalFolder);
+
     /// <summary>A folder shows no size, and neither does a file the server did not give one for (-1).</summary>
+
     public static string SizeText(long size, bool isFolder)
         => isFolder || size < 0 ? string.Empty : UiFormat.Bytes(size);
 

@@ -46,11 +46,19 @@ public sealed partial class MainWindow
     {
         var before = _siteTransfers;
         _siteTransfers = transfers;
-        // An upload into the folder on show finished: list it again so the new files appear.
+        // An upload into the folder on show finished, or a download that changes its "On this PC" column: list it again.
         if (_sitesPanel is { Site: { } shown } panel && panel.Visibility == Visibility.Visible
-            && SiteTransferRules.UploadLanded(before, transfers, shown.Id, panel.Path))
+            && (SiteTransferRules.UploadLanded(before, transfers, shown.Id, panel.Path)
+                || SitesBrowseRules.ShowsHere(shown) && SiteTransferRules.DownloadLandedFrom(before, transfers, shown.Id)))
         {
             panel.Reload();
+        }
+
+        // A download into the folder the This PC pane shows finished: read it again.
+        if (_localPane is { } local && TwoPanesShown && _sitesShown && local.Path.Length > 0
+            && SiteTransferRules.DownloadLanded(before, transfers, local.Path))
+        {
+            local.Reload();
         }
 
         TransfersBar.Show(transfers);
@@ -217,7 +225,7 @@ public sealed partial class MainWindow
     private async Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names)
     {
         var choice = await AskTransferAsync($"Upload {SiteTransferRules.WhatText(names)} to {site.Name}", remoteFolder, folderEditable: false,
-            $"From {localFolder}");
+            $"From {localFolder}", primary: "Upload");
         if (choice is not { } chosen) return;
         await StartSiteTransferAsync(new SiteTransferStartRequest
         {
@@ -252,13 +260,14 @@ public sealed partial class MainWindow
     }
 
     /// <summary>The target folder (editable for a download) and "If a file is already there"; null when cancelled.</summary>
-    private async Task<(string Folder, string Conflict)?> AskTransferAsync(string title, string folder, bool folderEditable, string from)
+    private async Task<(string Folder, string Conflict)?> AskTransferAsync(string title, string folder, bool folderEditable, string from,
+        string primary = "Download", string? header = null)
     {
         var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
         panel.Children.Add(new TextBlock { Text = from, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 });
         var folderBox = new TextBox
         {
-            Header = folderEditable ? "Save in this folder on this PC" : "Into this folder on the site",
+            Header = header ?? (folderEditable ? "Save in this folder on this PC" : "Into this folder on the site"),
             Text = folder, IsReadOnly = !folderEditable,
         };
         if (folderEditable)
@@ -304,7 +313,7 @@ public sealed partial class MainWindow
             XamlRoot = Content.XamlRoot,
             Title = title,
             Content = panel,
-            PrimaryButtonText = folderEditable ? "Download" : "Upload",
+            PrimaryButtonText = primary,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };

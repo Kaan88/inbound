@@ -14,7 +14,7 @@ namespace DownloadManager.Runtime.Sites;
 /// automatically" on, updated while rclone is idle (remote-sites.md, "rclone updates"). A new version is used from the
 /// next rclone start; it counts as proven after its first good use, and one that fails before that is rolled back.</para>
 /// </summary>
-public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
+public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 {
     private const string OffMessage = "Sites is off. Turn it on in Options › Sites.";
 
@@ -155,6 +155,10 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.Browse => IpcMessage.Create(SitesMessageTypes.BrowseResult,
                     new SiteBrowseResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
+                SitesMessageTypes.Count => IpcMessage.Create(SitesMessageTypes.CountResult,
+                    new SiteCountResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
+                SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
+                    new SiteChangeResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
                     or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear => IpcMessage.Create(SitesMessageTypes.TransferResult,
                     new SiteTransferResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
@@ -184,6 +188,16 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                     await BrowseAsync(request.GetPayload<SiteBrowseRequest>() ?? new SiteBrowseRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.Star:
                 return Result(request, await StarAsync(request.GetPayload<SiteStarRequest>() ?? new SiteStarRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.MakeFolder:
+                return Result(request, await MakeFolderAsync(request.GetPayload<SiteMakeFolderRequest>() ?? new SiteMakeFolderRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Rename:
+                return Result(request, await RenameAsync(request.GetPayload<SiteRenameRequest>() ?? new SiteRenameRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Count:
+                return IpcMessage.Create(SitesMessageTypes.CountResult,
+                    await CountAsync(request.GetPayload<SiteChangeRequest>() ?? new SiteChangeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.Delete:
+                return IpcMessage.Create(SitesMessageTypes.ChangeResult,
+                    await DeleteAsync(request.GetPayload<SiteChangeRequest>() ?? new SiteChangeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.RcloneInstall:
                 return IpcMessage.Create(SitesMessageTypes.Status,
                     await InstallRcloneAsync(request.GetPayload<SitesRcloneInstallRequest>()?.Version, cancellationToken).ConfigureAwait(false), request.Id);
@@ -701,9 +715,20 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             Total = listing.Items.Count,
             Offset = offset,
             Listing = listing.Token,
-            Items = [.. listing.Items.Skip(offset).Take(limit)],
+            // "On this PC" is read for the page only, so a long folder costs one look per item shown.
+            Items = [.. listing.Items.Skip(offset).Take(limit).Select(item => WithHere(item, site, path))],
         };
     }
+
+    /// <summary>A copy of the cached item with its "On this PC" state as it is now.</summary>
+    private static SiteItemDto WithHere(SiteItemDto item, SiteRecord site, string path) => new()
+    {
+        Name = item.Name,
+        IsFolder = item.IsFolder,
+        Size = item.Size,
+        Modified = item.Modified,
+        Here = SiteHere.Of(site.LocalFolder, site.RemoteFolder, path, item),
+    };
 
     /// <summary>The site's listing of that folder when it is the one asked for and still fresh; each page read keeps it a minute longer.</summary>
     private Listing? CachedListing(string siteId, string path, string? token)

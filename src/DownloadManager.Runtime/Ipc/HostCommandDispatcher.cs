@@ -174,7 +174,8 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
         || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
-        || type is SitesMessageTypes.TransferStart;
+        || type is SitesMessageTypes.TransferStart
+        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that
