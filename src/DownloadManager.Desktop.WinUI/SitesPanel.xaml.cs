@@ -197,7 +197,10 @@ public sealed partial class SitesPanel : UserControl
         }
         else
         {
-            Focus(FocusState.Programmatic);
+            // Still loading or empty: the panel itself holds the keyboard. Focusing it while it is not a tab stop would
+            // give it to its first button (Starred, seen on WinUI); the load hands it on to the list or to Try again.
+            IsTabStop = true;
+            if (!Focus(FocusState.Programmatic)) IsTabStop = false;
         }
     }
 
@@ -229,6 +232,14 @@ public sealed partial class SitesPanel : UserControl
         _loading = true;
         if (append)
         {
+            // WinUI moves the keyboard off a button that is disabled (to the next tab stop, the status bar here); the
+            // panel holds it while the page loads and Load more gets it back.
+            if (XamlRoot is not null && ReferenceEquals(FocusManager.GetFocusedElement(XamlRoot), MoreButton))
+            {
+                IsTabStop = true;
+                if (!Focus(FocusState.Programmatic)) IsTabStop = false;
+            }
+
             MoreButton.IsEnabled = false;
         }
         else
@@ -336,7 +347,9 @@ public sealed partial class SitesPanel : UserControl
     /// </summary>
     private void HoldKeyboard()
     {
-        if (XamlRoot is null || FocusManager.GetFocusedElement(XamlRoot) is not DependencyObject focused || !IsInside(focused, ItemsList)) return;
+        // The list, or Try again and the message about to be replaced by "Loading…" (Try again starts a load).
+        if (XamlRoot is null || FocusManager.GetFocusedElement(XamlRoot) is not DependencyObject focused
+            || !(IsInside(focused, ItemsList) || IsInside(focused, MessagePanel))) return;
         IsTabStop = true;
         if (!Focus(FocusState.Programmatic)) IsTabStop = false;
     }
@@ -361,21 +374,51 @@ public sealed partial class SitesPanel : UserControl
     /// The selected row can take it back only once it is laid out again, and a focus moved by the hiding can land after a
     /// first try, so it is tried again on later turns until the keyboard is in the list, a few times at most.
     /// </summary>
-    private void FocusListWhenReady(int generation, int tries)
+    private void FocusListWhenReady(int generation, int tries, DependencyObject? seen = null)
     {
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FocusRowStep(generation, tries, seen));
+    }
+
+    private void FocusRowStep(int generation, int tries, DependencyObject? seen)
+    {
+        if (generation != _generation || ItemsList.Visibility != Visibility.Visible || XamlRoot is null) return;
+        var focused = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+        // A dialog or an open menu holds the keyboard: it is the user's.
+        if (focused is not null && IsInOpenPopup(focused)) return;
+        // The first step takes the keyboard back from wherever hiding the list or Load more sent it (Uno: the menu bar;
+        // WinUI: the next tab stop, the sidebar or the status bar). A later step finding it outside the panel somewhere
+        // the earlier step did not leave it means the user moved it: it stays there. Leaving the view or opening another
+        // place ends the chain through the generation.
+        if (seen is not null && focused is not null && !ReferenceEquals(focused, seen) && !IsInside(focused, this)) return;
+        // The selected row itself: a row scrolled away is reused for another item and loses the keyboard with it.
+        var row = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as Control : null;
+        if (row is null && ItemsList.SelectedIndex >= 0 && tries > 1)
         {
-            if (generation != _generation || ItemsList.Visibility != Visibility.Visible || XamlRoot is null) return;
-            var focused = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
-            // The user moved on without a load (a dialog, an open menu, a click in the sidebar): the keyboard is theirs.
-            // Only the menu bar, where hiding the list sends it, is taken back.
-            if (focused is not null && !IsInside(focused, this) && !IsInMenuBar(focused)) return;
-            // The selected row itself: a row scrolled away is reused for another item and loses the keyboard with it.
-            var row = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as Control : null;
-            if (row is not null && focused is not null && IsInside(focused, row)) return;
-            if (row?.Focus(FocusState.Programmatic) != true) ItemsList.Focus(FocusState.Programmatic);
-            if (tries > 1) FocusListWhenReady(generation, tries - 1);
-        });
+            // Not laid out yet (a list shown for the first time has no rows until its first layout pass, which can come
+            // after several turns): try again after the next layout pass, or after a short wait if none comes.
+            var done = false;
+            var timer = DispatcherQueue.CreateTimer();
+            void Next()
+            {
+                if (done) return;
+                done = true;
+                ItemsList.LayoutUpdated -= Laid;
+                timer.Stop();
+                FocusListWhenReady(generation, tries - 1, focused);
+            }
+
+            void Laid(object? sender, object args) => Next();
+            ItemsList.LayoutUpdated += Laid;
+            timer.Interval = TimeSpan.FromMilliseconds(100);
+            timer.IsRepeating = false;
+            timer.Tick += (_, _) => Next();
+            timer.Start();
+            return;
+        }
+
+        if (row is not null && focused is not null && IsInside(focused, row)) return;
+        if (row?.Focus(FocusState.Programmatic) != true) ItemsList.Focus(FocusState.Programmatic);
+        if (tries > 1) FocusListWhenReady(generation, tries - 1, XamlRoot is null ? null : FocusManager.GetFocusedElement(XamlRoot) as DependencyObject);
     }
 
     private static bool IsInside(DependencyObject element, DependencyObject container)
@@ -388,12 +431,13 @@ public sealed partial class SitesPanel : UserControl
         return false;
     }
 
-    // A menu bar item, not an open menu: an open menu's items live in a popup, outside the bar.
-    private static bool IsInMenuBar(DependencyObject element)
+    // Dialogs, menus and flyouts are shown in popups, each with its own tree.
+    private bool IsInOpenPopup(DependencyObject element)
     {
-        for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        if (XamlRoot is null) return false;
+        foreach (var popup in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(XamlRoot))
         {
-            if (node is MenuBar) return true;
+            if (popup.Child is { } child && IsInside(element, child)) return true;
         }
 
         return false;
@@ -543,6 +587,14 @@ public sealed partial class SitesPanel : UserControl
             await LoadAsync(_path, refresh: false, append: true);
             // Another folder or site was opened meanwhile: its rows are not the ones this page added.
             if (generation != _generation) return;
+            // More is left and the panel held the keyboard for the load: back to Load more, for the next page.
+            if (MoreButton.Visibility == Visibility.Visible && MoreButton.IsEnabled && XamlRoot is not null
+                && ReferenceEquals(FocusManager.GetFocusedElement(XamlRoot), this))
+            {
+                MoreButton.Focus(FocusState.Programmatic);
+                return;
+            }
+
             // The last page took the button (and the keyboard with it) away: the keyboard goes to the first new row.
             if (MoreButton.Visibility == Visibility.Collapsed && ItemsList.Visibility == Visibility.Visible && _rows.Count > start)
             {

@@ -87,6 +87,49 @@
   automatically" stays enabled with an own rclone; the key box widens the dialog; the Test result line can be below the
   fold; no "Sites" heading in the sidebar; rows are tall.
 
+- **I. SITES.3 on Windows: Fable review, walk leftovers, WinUI walk** (2026-11-15, main). **Fable review** of the Linux walk
+  round (`9885b46..43a4bbf`, owed in the hand-off) found six points, all checked against the code and fixed (`f583ee9`):
+  Try again, or reopening a site whose start folder never loaded, asked for `/` instead of the site's folder
+  (`SitesPanel.ReopenPath`); the window refused `.pub` and `.ppk` text with a generic line, because its own looser check
+  ran first (the rule moved to Contracts, `SiteKeyRules`, used by the window and the Host); `SiteKeyText.Friendly` read
+  key words anywhere in a message (now only after rclone's "failed to parse private key"); a superseded Load more moved
+  the selection; `IsTabStop` could stay true (cleared on Stop, not by a late LostFocus); queued focus retries could take
+  the keyboard from a dialog. No secret path found: refused keys are never quoted, the check runs before sealing.
+  **Walk leftovers fixed:** the rclone line is not red while Sites is off ("rclone is looked for when Sites is on.") and
+  the off message is said once; before its version is read the line says so; "Update rclone automatically" is disabled
+  for an own rclone; Server and Port share a row and the dialog keeps 440 px with a 400-character key line; a Test result
+  scrolls into view; a "Sites" heading (not selectable) above the sites in the sidebar. **Windows:** the solution and the
+  WinUI XAML compiler build; Sites.Tests 141 pass, 20 skip (they need sshd, which this PC lacks) with the real rclone
+  1.76.0 (zip hash equal to the signed list); Integration Sites 50 pass, 6 skip; Core Sites rules 71 pass. The signed
+  rclone fixture failed on a CRLF checkout; it now keeps its bytes (`.gitattributes -text`). **WinUI walk** (published
+  build, own test instance, `rclone serve sftp` on 127.0.0.1 with throwaway keys as the server, driven through UI
+  Automation and window messages to the test window only; no screenshots, because the window draws black when
+  captured): Use Sites off and on; the download offer; **rclone downloaded, verified and installed by the app on
+  Windows**; Add site with a `.pub` paste (the new specific message), the real key with a passphrase, the key prompt
+  (fingerprint equal to `ssh-keygen -lf`, Cancel focused); Test connected; open from the sidebar; Enter, Backspace (parent
+  selected), Down, Home, End, F5; Up; 1,200 files paged 500 / 1,000 / 1,200, two quick Load more presses both count
+  (hand-off point 5 was the Linux harness); Star, Starred menu (label `big`), open from it, Unstar; the folder changed
+  while shown restarts the view (hand-off point 2); a wrong passphrase with a new start folder, then fixed, and Try again
+  lists the start folder (the Fable fix); a changed server key refused with both fingerprints, "Open Options > Sites",
+  Replace the key (Cancel and "Keep the old key" focused); Remove site (Cancel focused; sidebar entry, heading and view
+  go; the site file deleted, hand-off point 1). No passphrase or key text in the test data or logs. **Found by the walk and
+  fixed** (WinUI only): the first open left the keyboard on "Starred folders" (the panel was focused while not a tab stop,
+  and the retries ran out before a new list's first layout; now the panel holds it and the retry waits for the next layout
+  pass); Load more's keyboard went to the status bar on a middle page (WinUI moves focus off a disabled button; the panel
+  holds it during the load and gives it back) and on the last page (the new guard; it now stands down only for a dialog
+  or menu). **Not checked:** anything visual (row height, colours, light mode, the Starred tooltip), the guard with a
+  dialog opened during a load (code path only), the SFTP end-to-end test on Windows (no sshd), the Uno window on Linux
+  after these focus changes (built on Windows only). **Left:** rows in the browse view still look tall on Linux (not
+  measured; the row style already sets 27 px, so the cause is not known); F5 selects the first row rather than the one
+  that was selected; a server that refuses the connection shows rclone's own text ("rclone operations/list failed (500):
+  NewFs: couldn't connect …") rather than plain words.
+  **Haiku review of the focus fixes:** three points held and are fixed. A later retry no longer takes the keyboard from
+  somewhere the user moved it (a status-bar click; sidebar clicks already end the chain by leaving or reopening the view).
+  The wait for a first layout has a 100 ms fallback. Try again pressed from the keyboard no longer leaves the keyboard in
+  the status bar while it loads; seen in the app: the panel holds it through an 11 s failing load, then Try again gets it.
+  Not taken: "the window may hide the view without Stop" (it hides it in one place, after Stop). Not checked: a focus ring
+  shown after a mouse click on Load more, and whether an open dialog's popup child is the dialog's ancestor on Uno.
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on

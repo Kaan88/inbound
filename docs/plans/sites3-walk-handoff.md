@@ -3,6 +3,11 @@
 What was walked, fixed and left, plus how to run the walk again. Status lives in `PROGRESS.md` item H; this note is
 for the next person picking it up.
 
+> **Update (2026-11-15, later):** the Fable review below was done and its findings fixed; the walk was repeated in the
+> WinUI window on Windows (Remove site, the folder change while shown and quick Load more presses included), and most
+> of the "Left" points were fixed. See `PROGRESS.md` item I. Still open: light mode and anything visual, the Uno window
+> after the last focus changes, tall rows on Linux.
+
 ## Where things stand
 
 - SITES.1 to SITES.3 (Host `sites.*`, Options › Sites, the browse view) are on `main`, with the walk fixes in the
