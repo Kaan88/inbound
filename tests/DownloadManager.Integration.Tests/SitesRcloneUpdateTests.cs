@@ -174,6 +174,9 @@ public sealed class SitesRcloneUpdateTests : IAsyncLifetime
             new RcloneDownloads(new HttpClient(_server), verify: text => new RcloneSignedText(text, _signedAt[text])),
             Platform, Log, _time, (_, _, _) => Task.FromResult<string?>(null));
         created?.Invoke(updater);
+        // As the Host finds rclone, minus INBOUND_RCLONE: a developer's real rclone set for the end-to-end tests must not win here.
+        findRclone ??= own => RcloneSetup.Find(AppContext.BaseDirectory, own, fromEnvironment: null, updater.CurrentExecutable,
+            OperatingSystem.IsWindows(), File.Exists);
         var commands = new SitesCommands(State, Log, findRclone: findRclone, createSupervisor: createSupervisor,
             probe: (_, _, _) => Task.FromResult<IReadOnlyList<SshHostKey>>([]), updater: updater, time: _time,
             firstCheckDelay: TimeSpan.FromDays(1));
