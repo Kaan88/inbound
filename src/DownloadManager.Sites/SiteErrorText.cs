@@ -17,8 +17,13 @@ public static class SiteErrorText
     public static bool IsUntrustedCertificate(string message) =>
         Has(message, "x509: certificate signed by unknown authority") || Has(message, "x509: certificate is not trusted");
 
+    /// <summary>SITES.6c: the provider refused the stored token for good (revoked, expired refresh token); signing in again helps.</summary>
+    public static bool IsSignInRefused(string message) =>
+        Has(message, "invalid_grant") || Has(message, "token expired and there's no refresh token");
+
     public static string Friendly(string message)
     {
+        if (IsSignInRefused(message)) return "The service no longer accepts this site's sign-in. Sign in again in Options > Sites.";
         var key = SiteKeyText.Friendly(message);
         if (!ReferenceEquals(key, message)) return key;
 

@@ -11,12 +11,19 @@ public static class SiteKinds
     public const string Ftp = DownloadManager.Contracts.SiteKindCatalog.Ftp;
     public const string WebDav = DownloadManager.Contracts.SiteKindCatalog.WebDav;
     public const string S3 = DownloadManager.Contracts.SiteKindCatalog.S3;
+    public const string Drive = DownloadManager.Contracts.SiteKindCatalog.Drive;
+    public const string OneDrive = DownloadManager.Contracts.SiteKindCatalog.OneDrive;
+    public const string Dropbox = DownloadManager.Contracts.SiteKindCatalog.Dropbox;
+    public const string B2 = DownloadManager.Contracts.SiteKindCatalog.B2;
 }
 
 public static class SiteAuthMethods
 {
     public const string Password = "password";
     public const string Key = "key";
+
+    /// <summary>SITES.6c: a browser sign-in (OAuth) instead of a password.</summary>
+    public const string SignIn = "signIn";
 }
 
 /// <summary>
@@ -80,6 +87,22 @@ public sealed record SiteRecord
     /// </summary>
     public List<SiteCertificateRecord> TrustedCertificates { get; init; } = [];
 
+    /// <summary>SITES.6c, sign-in kinds: the user's own app registration (public), or null for rclone's shared one.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>SITES.6c: the secret of <see cref="ClientId"/>, sealed.</summary>
+    public string? SealedClientSecret { get; init; }
+
+    /// <summary>
+    /// SITES.6c: rclone's settings for the signed-in remote (the token, and for OneDrive the drive's id and type), as a
+    /// JSON object, sealed. Null until the first sign-in. Written back when rclone renews the token.
+    /// </summary>
+    public string? SealedSignIn { get; init; }
+
+    /// <summary>SITES.6c: a sign-in kind with a token.</summary>
+    [JsonIgnore]
+    public bool SignedIn => SealedSignIn is not null;
+
     /// <summary>An SFTP site whose server key the user has not accepted yet: nothing reaches rclone until they do.</summary>
     [JsonIgnore]
     public bool NeedsHostKey => Kind == SiteKinds.Sftp && HostKeys.Count == 0;
@@ -131,7 +154,10 @@ public sealed record SiteCertificateRecord
 [JsonSerializable(typeof(SiteRecord))]
 internal sealed partial class SitesJsonContext : JsonSerializerContext;
 
-public sealed class SiteStoreException(string message, Exception? inner = null) : Exception(message, inner);
+/// <summary>SITES.6c: a sign-in site has no token, or the provider no longer accepts it: the user signs in again.</summary>
+public sealed class SiteSignInNeededException(string message) : SiteStoreException(message);
+
+public class SiteStoreException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
 /// The saved sites, one file each under <c>&lt;state&gt;/sites/</c>, written atomically (temp file, flush to disk,
@@ -226,7 +252,7 @@ public sealed class SiteStore
             throw new SiteStoreException("A site needs a server name or address, without a path, user or password in it.");
         if (site.Port is < 1 or > 65535) throw new SiteStoreException("The port must be between 1 and 65535.");
         ValidateKind(site);
-        foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase })
+        foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase, site.SealedClientSecret, site.SealedSignIn })
             if (sealedValue is not null && !SecretProtector.IsProtected(sealedValue))
                 throw new SiteStoreException("A site secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
@@ -291,9 +317,24 @@ public sealed class SiteStore
                 if (site.Region is { } region && (region.Length is 0 or > 64 || !region.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
                     throw new SiteStoreException("A region is letters, digits and dashes, such as eu-central-1.");
                 break;
+            case SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region, site.SealedPassword);
+                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of site signs in through the browser.");
+                if (site.ClientId is { } clientId && (clientId.Length is 0 or > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')))
+                    throw new SiteStoreException("A client ID is letters, digits, dots, dashes and underscores.");
+                if (site.ClientId is null && site.SealedClientSecret is not null) throw new SiteStoreException("A client secret needs its client ID.");
+                break;
+            case SiteKinds.B2:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                break;
         }
 
-        if (site.Kind != SiteKinds.Sftp && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
+        if (!DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.ClientId is not null || site.SealedClientSecret is not null || site.SealedSignIn is not null))
+            throw new SiteStoreException("Only a site that signs in through the browser has an app registration or a token.");
+        if (site.Kind != SiteKinds.Sftp && !DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind)
+            && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
+            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+        if (DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
             throw new SiteStoreException("Only SFTP sites sign in with a key.");
     }
 

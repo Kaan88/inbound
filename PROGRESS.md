@@ -327,6 +327,38 @@
   FTPS with a real server, a Windows root that is fetched only on demand while a certificate is trusted (documented in
   `docs/ipc-protocol.md`), anything visual, light mode, Linux.
 
+- **P. SITES.6c: Drive, OneDrive and Dropbox sign in through the browser; Backblaze B2** (2026-11-15, main). **Host:**
+  new kinds `drive`, `onedrive`, `dropbox` (auth method `signIn`, no password or key; optional own client ID and
+  secret, sealed) and `b2` (application key ID and key). `sites.signIn` runs `rclone authorize <kind>
+  --auth-no-open-browser` (cleaned environment, no config), reads the 127.0.0.1:53682 address from its output and
+  answers with it; the token rclone prints when it ends is sealed into the site (`SealedSignIn`, the rclone settings as
+  JSON: token, `scope: drive` for Drive, and for OneDrive the `drive_id` and `drive_type` read from Graph `/me/drive`).
+  One sign-in at a time (rclone's port is fixed), 10 minutes at most, `sites.signInCancel`, and a removed site or a
+  Host shutdown stops it. The paste flow takes `rclone authorize`'s output from another computer. The site becomes a
+  named in-memory rclone remote (`config/create`); a token rclone renews is noticed at the next use (`config/get`) and
+  sealed back, unless the site was signed in again meanwhile. No token: `signInNeeded`; `invalid_grant` too. A new
+  client ID drops the old secret and the sign-in. **Window:** the dialog shows only the optional client fields for
+  these kinds; saving starts the sign-in, opens the address in the browser and shows "Signing in to …" with the
+  address, Cancel and "Paste a token…", which closes by itself when the Host's sign-in ends; then the site is tested.
+  The row says "Not signed in yet." and offers "Sign in…" or "Sign in again…"; a test that needs a sign-in offers it;
+  the Sites pane explains `signInNeeded`. **Haiku review:** twelve points. Fixed: two sign-ins starting at once could
+  both start rclone (the start is now one step); a new client ID kept the old secret; Cancel while Options closed did
+  not reach the Host; a failed poll closed the waiting dialog as if done; "couldn't fetch token" (also a network error)
+  read as a refused sign-in; a renewal of an older grant could overwrite a new sign-in; shutdown left rclone authorize
+  running; a token printed just before a cancel was still stored; the output was read before it was complete; a
+  failed store was not logged. Not changed: a renewed token whose store fails is used until the next restart (logged);
+  an own client secret is on `rclone authorize`'s command line for its run (rclone takes it no other way).
+  **Walk** (published build, own test instance, UI Automation): the kind list has the four new kinds; a Dropbox site
+  shows only name, client ID and secret, and folders; Save opened the browser and the "Signing in to Walk box" dialog
+  with a 127.0.0.1:53682 address; Cancel said the sign-in was cancelled; the row showed "Not signed in yet." and
+  "Sign in…"; the Sites pane explained the missing sign-in. **Tests:** `SiteSignInRemoteTests` (real rclone: named
+  remote, renewal handed back, a new sign-in replaces it, own client ID, secrets withheld, B2 fs),
+  `SiteSignInEndToEndTests` (real `rclone authorize`: address, one at a time, cancel, port free again, remove cancels;
+  paste flow, sealed on disk, client-ID rules, B2 save), `SitesOptionsTests`, dispatcher lists; Core 2373, Sites 223
+  and the Integration site, dispatcher and golden-frame tests pass. **Not checked:** a sign-in with a real Google,
+  Microsoft or Dropbox account, a renewal by the real provider, OneDrive's drive lookup, a real B2 bucket, anything
+  visual, light mode, Linux. **Question for the owner:** may a live check use your own Google, Microsoft, Dropbox or
+  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services.
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

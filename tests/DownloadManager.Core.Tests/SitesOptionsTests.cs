@@ -337,4 +337,30 @@ public sealed class SitesOptionsTests
         Assert.True(SitesBrowseRules.PointsToOptions(SiteProblems.CertificateNotTrusted));
         Assert.Contains("Test the site", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
     }
+
+    [Fact]
+    public void SignInKindsSaveWithoutAPasswordAndB2NeedsBothKeys()
+    {
+        var drive = SitesRules.Request(new SiteFormValues("drive", "Drive", "", "", "", "password", "", "", "", false, "", ""), null, out var problem);
+        Assert.Null(problem);
+        Assert.Equal("signIn", drive!.AuthMethod);
+        Assert.Null(drive.ClientId);
+        Assert.Null(drive.Password);
+
+        var own = SitesRules.Request(new SiteFormValues("onedrive", "One", "", "", "", "password", "", "", "", false, "", "", ClientId: " app-1 ", ClientSecret: "s"), null, out problem);
+        Assert.Equal("app-1", own!.ClientId);
+        Assert.Equal("s", own.ClientSecret);
+        Assert.Null(SitesRules.Request(new SiteFormValues("dropbox", "Box", "", "", "", "password", "", "", "", false, "", "", ClientId: "bad id"), null, out problem));
+        Assert.Null(SitesRules.Request(new SiteFormValues("dropbox", "Box", "", "", "", "password", "", "", "", false, "", "", ClientSecret: "s"), null, out problem));
+
+        Assert.Null(SitesRules.Request(new SiteFormValues("b2", "B", "", "", "keyid", "password", "", "", "", false, "", ""), null, out problem));
+        Assert.Equal("Type the application key.", problem);
+        var b2 = SitesRules.Request(new SiteFormValues("b2", "B", "", "", "keyid", "password", "k", "", "", false, "", ""), null, out problem);
+        Assert.Equal("keyid", b2!.User);
+
+        Assert.Equal("Google Drive", SitesRules.Summary(new SiteDto { Kind = "drive", Host = "www.googleapis.com" }));
+        Assert.Equal("Backblaze B2, key keyid", SitesRules.Summary(new SiteDto { Kind = "b2", User = "keyid" }));
+        Assert.True(SitesBrowseRules.PointsToOptions(SiteProblems.SignInNeeded));
+        Assert.Contains("Sign in", SitesBrowseRules.ProblemText(SiteProblems.SignInNeeded, null, null, null));
+    }
 }

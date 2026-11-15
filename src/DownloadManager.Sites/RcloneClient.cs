@@ -51,6 +51,18 @@ public sealed class RcloneClient : IDisposable
     public Uri BaseAddress => _http.BaseAddress!;
 
     /// <summary>
+    /// SITES.6c: the named in-memory remotes of sign-in sites this rclone holds (<c>config/create</c>), each with the token
+    /// it was last given or seen with, so a token rclone renewed can be told apart and written back.
+    /// </summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, string> SignedInRemotes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// SITES.6c: told the site id and rclone's settings for it when rclone renewed a site's token, so the Host seals and
+    /// stores them. Set by the Host for each rclone.
+    /// </summary>
+    public Func<string, string, JsonObject, CancellationToken, Task>? SignInRenewed { get; set; }
+
+    /// <summary>
     /// A value that must never appear in an error message or a log line. One under four characters is not replaced
     /// inside the text: a text that contains it is withheld whole (<see cref="Redact"/>).
     /// </summary>

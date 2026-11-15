@@ -14,6 +14,9 @@ public static class SiteFields
     public const string Provider = "provider";
     public const string Endpoint = "endpoint";
     public const string Region = "region";
+
+    /// <summary>SITES.6c: signs in through the browser instead of a password; the dialog shows the optional app fields.</summary>
+    public const string SignIn = "signIn";
 }
 
 /// <summary>What a kind of site can do (<see cref="SiteKindDto.Capabilities"/>); a client hides a command its kind lacks.</summary>
@@ -27,6 +30,9 @@ public static class SiteCapabilities
 
     /// <summary>The server's SSH host key is asked about before first use.</summary>
     public const string HostKey = "hostKey";
+
+    /// <summary>SITES.6c: the site is used after a browser sign-in (<c>sites.signIn</c>), not with a password.</summary>
+    public const string SignIn = "signIn";
 }
 
 /// <summary>The values of <see cref="SiteDto.Tls"/> for FTP.</summary>
@@ -53,6 +59,13 @@ public static class SiteKindCatalog
     public const string Ftp = "ftp";
     public const string WebDav = "webdav";
     public const string S3 = "s3";
+    public const string Drive = "drive";
+    public const string OneDrive = "onedrive";
+    public const string Dropbox = "dropbox";
+    public const string B2 = "b2";
+
+    /// <summary>SITES.6c: the kinds that sign in through the browser (OAuth, with rclone's own flow).</summary>
+    public static bool SignsIn(string? kind) => kind is Drive or OneDrive or Dropbox;
 
     /// <summary>S3 providers whose endpoint rclone knows without one being typed.</summary>
     public const string AwsProvider = "AWS";
@@ -113,7 +126,34 @@ public static class SiteKindCatalog
                 ],
             },
         },
+        new()
+        {
+            Kind = Drive, Title = "Google Drive", AuthMethods = ["signIn"], Fields = [SiteFields.SignIn],
+            Capabilities = [SiteCapabilities.NewFolder, SiteCapabilities.EmptyFolders, SiteCapabilities.SignIn],
+            Note = SignInNote,
+        },
+        new()
+        {
+            Kind = OneDrive, Title = "OneDrive", AuthMethods = ["signIn"], Fields = [SiteFields.SignIn],
+            Capabilities = [SiteCapabilities.NewFolder, SiteCapabilities.EmptyFolders, SiteCapabilities.SignIn],
+            Note = SignInNote,
+        },
+        new()
+        {
+            Kind = Dropbox, Title = "Dropbox", AuthMethods = ["signIn"], Fields = [SiteFields.SignIn],
+            Capabilities = [SiteCapabilities.NewFolder, SiteCapabilities.EmptyFolders, SiteCapabilities.SignIn],
+            Note = SignInNote,
+        },
+        new()
+        {
+            Kind = B2, Title = "Backblaze B2", AuthMethods = ["password"], UserLabel = "Application key ID", PasswordLabel = "Application key",
+            Fields = [SiteFields.User, SiteFields.Password], Capabilities = [],
+            Note = "Buckets are the top folders. Folders exist only while they hold something, and a rename copies and then deletes.",
+        },
     ];
+
+    private const string SignInNote =
+        "You sign in through your browser after saving; Inbound keeps only the access it is given, sealed on this PC. It uses rclone's own app registration unless you give your own client ID.";
 
     public static SiteKindDto? Find(string? kind) => All.FirstOrDefault(k => k.Kind == kind);
 
@@ -133,6 +173,7 @@ public static class SiteKindCatalog
         Ftp => tls != SiteTlsModes.None,
         WebDav => IsHttps(url),
         S3 => string.IsNullOrWhiteSpace(endpoint) || IsHttps(endpoint),
+        Drive or OneDrive or Dropbox or B2 => true,
         _ => false,
     };
 

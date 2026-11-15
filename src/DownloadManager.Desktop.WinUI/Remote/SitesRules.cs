@@ -36,7 +36,9 @@ internal sealed record SiteFormValues(
     string? Vendor = null,
     string? Provider = null,
     string Endpoint = "",
-    string Region = "");
+    string Region = "",
+    string ClientId = "",
+    string ClientSecret = "");
 
 /// <summary>The checks and the words of Options > Sites that need no window.</summary>
 internal static class SitesRules
@@ -157,6 +159,15 @@ internal static class SitesRules
             return string.IsNullOrEmpty(site.RemoteFolder) ? s3 : $"{s3}  {site.RemoteFolder}";
         }
 
+        if (SiteKindCatalog.SignsIn(site.Kind) || site.Kind == SiteKindCatalog.B2)
+        {
+            // SITES.6c: the service by name; its fixed API address says nothing.
+            var service = SiteKindCatalog.Find(site.Kind)?.Title ?? site.Kind;
+            if (site.ClientId is not null) service += ", your own app registration";
+            else if (site.Kind == SiteKindCatalog.B2 && site.User.Length > 0) service += $", key {site.User}";
+            return string.IsNullOrEmpty(site.RemoteFolder) ? service : $"{service}  {site.RemoteFolder}";
+        }
+
         var defaultPort = SiteKindCatalog.Find(site.Kind)?.DefaultPort ?? 22;
         var where = site.Port > 0 && site.Port != defaultPort ? $"{site.Host}:{site.Port}" : site.Host;
         var line = $"{(string.IsNullOrEmpty(site.User) ? "" : site.User + "@")}{where}";
@@ -222,6 +233,8 @@ internal static class SitesRules
         var user = values.User.Trim();
         if (name.Length == 0) { problem = "Give the site a name."; return null; }
         if (values.Kind is SiteKindCatalog.WebDav or SiteKindCatalog.S3) return AddressRequest(values, existing, name, user, out problem);
+        if (SiteKindCatalog.SignsIn(values.Kind)) return SignInRequest(values, existing, name, out problem);
+        if (values.Kind == SiteKindCatalog.B2) return KeyRequest(values, existing, name, user, out problem);
         if (host.Length == 0) { problem = "Type the server's name or address."; return null; }
         if (host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '\\'))
         {
@@ -325,6 +338,51 @@ internal static class SitesRules
             Provider = s3 ? values.Provider : null,
             Endpoint = s3 && endpoint.Length > 0 ? endpoint : null,
             Region = s3 && region.Length > 0 ? region : null,
+        };
+    }
+
+    /// <summary>SITES.6c: Drive, OneDrive, Dropbox. No password; an own app registration is optional.</summary>
+    private static SiteSaveRequest? SignInRequest(SiteFormValues values, SiteDto? existing, string name, out string? problem)
+    {
+        problem = null;
+        var clientId = values.ClientId.Trim();
+        if (clientId.Length > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_'))
+        {
+            problem = "A client ID is letters, digits, dots, dashes and underscores.";
+            return null;
+        }
+
+        if (clientId.Length == 0 && values.ClientSecret.Length > 0) { problem = "A client secret needs its client ID."; return null; }
+        return new SiteSaveRequest
+        {
+            Id = existing?.Id,
+            Name = name,
+            Kind = values.Kind,
+            AuthMethod = "signIn",
+            RemoteFolder = values.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
+            ClientId = clientId.Length == 0 ? null : clientId,
+            // Empty keeps the stored secret (null on the wire) while the ID stays; the Host drops it with a new ID.
+            ClientSecret = values.ClientSecret.Length > 0 ? values.ClientSecret : clientId.Length == 0 ? "" : null,
+        };
+    }
+
+    /// <summary>SITES.6c, Backblaze B2: an application key ID and key, no address.</summary>
+    private static SiteSaveRequest? KeyRequest(SiteFormValues values, SiteDto? existing, string name, string user, out string? problem)
+    {
+        problem = null;
+        if (user.Length == 0) { problem = "Type the application key ID."; return null; }
+        if (values.Password.Length == 0 && (existing is null || !existing.HasPassword)) { problem = "Type the application key."; return null; }
+        return new SiteSaveRequest
+        {
+            Id = existing?.Id,
+            Name = name,
+            Kind = values.Kind,
+            User = user,
+            AuthMethod = "password",
+            Password = values.Password.Length > 0 ? values.Password : null,
+            RemoteFolder = values.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
         };
     }
 

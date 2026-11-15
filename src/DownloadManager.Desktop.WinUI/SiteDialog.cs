@@ -29,6 +29,9 @@ internal sealed class SiteDialog
     private readonly ComboBox _provider = new() { Header = "Service", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _endpoint = new() { Header = "Service address (endpoint)", PlaceholderText = "https://s3.example.com" };
     private readonly TextBox _region = new() { Header = "Region (optional)", PlaceholderText = "eu-central-1" };
+    // SITES.6c: an own app registration, for those who don't want rclone's shared one.
+    private readonly TextBox _clientId = new() { Header = "Your own client ID (optional)" };
+    private readonly PasswordBox _clientSecret = new() { Header = "Its client secret (optional)", PasswordRevealMode = PasswordRevealMode.Hidden };
     private readonly TextBlock _plainWarning = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly TextBlock _note = SettingsWindow.Hint(string.Empty);
     private readonly TextBlock _keyHint = SettingsWindow.Hint("Changing the server or the port asks about the server's key again.");
@@ -64,6 +67,8 @@ internal sealed class SiteDialog
         _host.Text = existing?.Host ?? string.Empty;
         _port.Text = (existing?.Port is > 0 ? existing.Port : kind.DefaultPort > 0 ? kind.DefaultPort : 22).ToString(System.Globalization.CultureInfo.InvariantCulture);
         _user.Text = existing?.User ?? string.Empty;
+        _clientId.Text = existing?.ClientId ?? string.Empty;
+        if (existing?.HasClientSecret == true) _clientSecret.PlaceholderText = "Saved; type to replace";
         _url.Text = existing?.Url ?? string.Empty;
         _endpoint.Text = existing?.Endpoint ?? string.Empty;
         _region.Text = existing?.Region ?? string.Empty;
@@ -182,6 +187,9 @@ internal sealed class SiteDialog
         _vendor.Visibility = Visible(Shows(SiteFields.Vendor));
         _provider.Visibility = Visible(Shows(SiteFields.Provider));
         _region.Visibility = Visible(Shows(SiteFields.Region));
+        var signIn = Shows(SiteFields.SignIn);
+        _clientId.Visibility = Visible(signIn);
+        _clientSecret.Visibility = Visible(signIn);
         _keyHint.Visibility = Visible(_existing is not null && _kind.Capabilities.Contains(SiteCapabilities.HostKey));
 
         _user.Header = _kind.UserLabel ?? (_kind.Kind == SiteKindCatalog.WebDav ? "User name (if the server asks for one)" : "User name");
@@ -249,6 +257,14 @@ internal sealed class SiteDialog
         _passphrase.Visibility = key ? Visibility.Visible : Visibility.Collapsed;
         _removePassphrase.Visibility = key && _existing?.HasKeyPassphrase == true ? Visibility.Visible : Visibility.Collapsed;
         _auth.Visibility = _methods.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (Shows(SiteFields.SignIn))
+        {
+            // SITES.6c: no user name or password; the browser sign-in follows the save.
+            _user.Visibility = Visibility.Collapsed;
+            _password.Visibility = Visibility.Collapsed;
+            _auth.Visibility = Visibility.Collapsed;
+        }
+        else _user.Visibility = Visibility.Visible;
     }
 
     /// <summary>
@@ -288,6 +304,8 @@ internal sealed class SiteDialog
         panel.Children.Add(_region);
         panel.Children.Add(_plainWarning);
         panel.Children.Add(_note);
+        panel.Children.Add(_clientId);
+        panel.Children.Add(_clientSecret);
         panel.Children.Add(_user);
         panel.Children.Add(_auth);
         panel.Children.Add(_password);
@@ -368,7 +386,8 @@ internal sealed class SiteDialog
             _privateKey.Text, _passphrase.Password, _removePassphrase.IsChecked == true && _removePassphrase.Visibility == Visibility.Visible,
             _remoteFolder.Text, _localFolder.Text, Choice(_tls, SiteFields.Tls), Shows(SiteFields.Url) ? _url.Text : string.Empty,
             Choice(_vendor, SiteFields.Vendor), Choice(_provider, SiteFields.Provider), Shows(SiteFields.Endpoint) ? _endpoint.Text : string.Empty,
-            Shows(SiteFields.Region) ? _region.Text : string.Empty);
+            Shows(SiteFields.Region) ? _region.Text : string.Empty,
+            Shows(SiteFields.SignIn) ? _clientId.Text : string.Empty, Shows(SiteFields.SignIn) ? _clientSecret.Password : string.Empty);
         var request = SitesRules.Request(values, _existing, out var problem);
         if (request is null)
         {
@@ -445,5 +464,6 @@ internal sealed class SiteDialog
         _password.Password = string.Empty;
         _passphrase.Password = string.Empty;
         _privateKey.Text = string.Empty;
+        _clientSecret.Password = string.Empty;
     }
 }

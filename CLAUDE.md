@@ -49,8 +49,8 @@ aren't downloaded; use a video downloader.", and ftp:// or ftps:// is refused wi
 A Sites view (remote file browsing, uploads and downloads for FTP, SFTP, WebDAV and cloud storage through a bundled
 rclone child process) is in progress: SFTP sites can be browsed, changed (new folder, rename, delete) and files moved
 both ways, with an "On this PC" column and a Two panes view (SITES.0 to SITES.5, done on Windows). FTP, FTPS, WebDAV
-and S3 sites work too, and a server's own certificate can be trusted (SITES.6a, 6b); cloud sign-in kinds and B2 (rest
-of SITES.6) and SITES.7 to SITES.9 remain. `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
+and S3 sites work too, a server's own certificate can be trusted, and Drive, OneDrive and Dropbox sign in through the
+browser (`rclone authorize`), with B2 by key (SITES.6a to 6c; no real cloud account tried yet). SITES.7 to SITES.9 remain. `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
 Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
 a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect

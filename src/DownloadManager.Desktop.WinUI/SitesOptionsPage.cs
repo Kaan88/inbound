@@ -13,7 +13,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// given a client of this PC's Host, also while the window shows another server. Secrets are written in the site dialog
 /// and are never shown here.
 /// </summary>
-internal sealed class SitesOptionsPage
+internal sealed partial class SitesOptionsPage
 {
     private readonly RemoteClient _client;
     private readonly SettingsWindow _window;
@@ -246,6 +246,8 @@ internal sealed class SitesOptionsPage
             if (SitesRules.NeedsTrust(site)) text.Children.Add(SettingsWindow.Hint("The server's key isn't trusted yet. Test the site to check it."));
             if (!site.Encrypted) text.Children.Add(SettingsWindow.Hint("Not encrypted: the password and the files can be read on the way."));
             if (SitesRules.TrustedCertificateLine(site) is { } trustLine) text.Children.Add(SettingsWindow.Hint(trustLine));
+            var signsIn = SiteKindCatalog.SignsIn(site.Kind);
+            if (signsIn && !site.SignedIn) text.Children.Add(SettingsWindow.Hint("Not signed in yet."));
 
             var test = new Button { Content = "Test", MinWidth = 64, IsEnabled = enabled && !_busy };
             var edit = new Button { Content = "Edit…", MinWidth = 64, IsEnabled = enabled && !_busy };
@@ -265,6 +267,15 @@ internal sealed class SitesOptionsPage
                 AutomationProperties.SetName(forget, $"Forget the certificate trusted for {site.Name}");
                 forget.Click += (_, _) => _ = ForgetCertificateAsync(captured);
                 buttons.Children.Add(forget);
+            }
+
+            if (signsIn)
+            {
+                // SITES.6c: the first sign-in, or a new one when the service no longer accepts the old.
+                var signIn = new Button { Content = site.SignedIn ? "Sign in again…" : "Sign in…", IsEnabled = enabled && !_busy };
+                AutomationProperties.SetName(signIn, $"{(site.SignedIn ? "Sign in again to" : "Sign in to")} {site.Name}");
+                signIn.Click += (_, _) => _ = SignInAsync(captured);
+                buttons.Children.Add(signIn);
             }
 
             buttons.Children.Add(test);
@@ -438,7 +449,9 @@ internal sealed class SitesOptionsPage
 
         // A new server, or a changed host or port, has no trusted key yet: ask now, then try the site. A new site of any
         // kind is tried at once, so a wrong address or key is found while it is fresh.
-        if (SitesRules.NeedsTrust(saved) || existing is null) await TestSiteAsync(saved);
+        // A site that signs in through the browser does that first (and again after a new client ID); the test follows.
+        if (SiteKindCatalog.SignsIn(saved.Kind) && !saved.SignedIn) await SignInAsync(saved);
+        else if (SitesRules.NeedsTrust(saved) || existing is null) await TestSiteAsync(saved);
     }
 
     private async Task RemoveAsync(SiteDto site)
@@ -463,7 +476,7 @@ internal sealed class SitesOptionsPage
         });
     }
 
-    private async Task TestSiteAsync(SiteDto site)
+    private async Task TestSiteAsync(SiteDto site, bool afterSignIn = false)
     {
         // Twice at most: once, and again after the key was trusted or replaced.
         for (var attempt = 0; attempt < 2; attempt++)
@@ -487,6 +500,14 @@ internal sealed class SitesOptionsPage
             {
                 if (attempt == 0 && await TrustCertificateAsync(site)) continue;
                 SayTestResult($"{site.Name} wasn't used: its server's certificate isn't trusted.", isProblem: true);
+                return;
+            }
+
+            if (result.Problem == SiteProblems.SignInNeeded)
+            {
+                // Once: a sign-in that was just made is not offered again at once.
+                if (!afterSignIn && attempt == 0 && await AskSignInAsync(site, result.Message)) return;
+                SayTestResult($"{site.Name}: {result.Message ?? "sign in to use it."}", isProblem: true);
                 return;
             }
 

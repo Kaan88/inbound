@@ -64,6 +64,17 @@ internal sealed partial class RemoteClient
         return reply.Value ?? new SiteCertificateResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
     }
 
+    /// <summary>SITES.6c: starts a browser sign-in (the answer has the address to open), or, with a token, stores a pasted one.</summary>
+    public async Task<SiteSignInResultDto> SignInSiteAsync(string id, string? token = null, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteSignInRequest, SiteSignInResultDto>(SitesMessageTypes.SignIn,
+            new SiteSignInRequest { Id = id, Token = token }, SitesMessageTypes.SignInResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteSignInResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    public async Task<SiteResultDto> CancelSiteSignInAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
     public async Task<SiteResultDto> TestSiteAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesSlowAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Test, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
 

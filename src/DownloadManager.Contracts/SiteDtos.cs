@@ -50,6 +50,17 @@ public static class SitesMessageTypes
     public const string CertificateResult = "sites.certificateResult";
 
     /// <summary>
+    /// SITES.6c, <see cref="SiteSignInRequest"/>: starts a browser sign-in (one at a time) or takes a pasted token; answered
+    /// with <see cref="SignInResult"/>. The site changes (<see cref="Changed"/>) when the sign-in ends.
+    /// </summary>
+    public const string SignIn = "sites.signIn";
+
+    /// <summary><see cref="SiteIdRequest"/>: stops a browser sign-in that is waiting; answered with <see cref="Result"/>.</summary>
+    public const string SignInCancel = "sites.signInCancel";
+
+    public const string SignInResult = "sites.signInResult";
+
+    /// <summary>
     /// <see cref="SitesRcloneInstallRequest"/>: downloads, checks and installs rclone (Options › Sites › Download rclone, or
     /// Update rclone); answered with <see cref="Status"/> when done. Not for "Use my own rclone", which Inbound never touches.
     /// </summary>
@@ -131,7 +142,7 @@ public static class SitesMessageTypes
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
             or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
-            or MakeFolder or Rename or Count or Delete or Certificate;
+            or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -284,6 +295,17 @@ public sealed class SiteDto
     /// <summary>SITES.6: false for plain FTP and for an http:// WebDAV or S3 address; the window shows "Not encrypted".</summary>
     public bool Encrypted { get; set; } = true;
 
+    /// <summary>SITES.6c, sign-in kinds: the site holds a token (it may still have to be renewed by signing in again).</summary>
+    public bool SignedIn { get; set; }
+
+    /// <summary>SITES.6c: the user's own app registration, or null for rclone's shared one.</summary>
+    public string? ClientId { get; set; }
+
+    public bool HasClientSecret { get; set; }
+
+    /// <summary>SITES.6c: a browser sign-in of this site is waiting on the Host; <c>sites.changed</c> follows when it ends.</summary>
+    public bool SigningIn { get; set; }
+
     /// <summary>SITES.6b: the server certificates this site trusts beyond the system's (FTPS and https sites).</summary>
     public List<SiteTrustedCertificateDto> TrustedCertificates { get; set; } = [];
 }
@@ -338,6 +360,36 @@ public sealed class SiteSaveRequest
 
     /// <summary>SITES.6: S3 only: the region, or null for the provider's own default.</summary>
     public string? Region { get; set; }
+
+    /// <summary>SITES.6c, sign-in kinds: the user's own app registration, or null for rclone's shared one.</summary>
+    public string? ClientId { get; set; }
+
+    /// <summary>SITES.6c: the secret of <see cref="ClientId"/>; null keeps the stored one, empty removes it.</summary>
+    public string? ClientSecret { get; set; }
+}
+
+/// <summary>
+/// SITES.6c, <c>sites.signIn</c>: starts the browser sign-in of a Drive, OneDrive or Dropbox site, or, with
+/// <see cref="Token"/>, takes the token <c>rclone authorize</c> printed on another computer (the paste flow).
+/// </summary>
+public sealed class SiteSignInRequest
+{
+    public string Id { get; set; } = "";
+    public string? Token { get; set; }
+}
+
+public sealed class SiteSignInResultDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+
+    /// <summary>The address to open in a browser on the Host's computer; the site becomes signed in when it is done.</summary>
+    public string? Url { get; set; }
+
+    /// <summary>The <c>rclone authorize</c> command for the paste flow, for a browser on another computer.</summary>
+    public string? AuthorizeCommand { get; set; }
+
+    public SiteDto? Site { get; set; }
 }
 
 public sealed class SiteIdRequest
@@ -427,6 +479,9 @@ public static class SiteProblems
 
     /// <summary>SITES.6b: the server's TLS certificate is not trusted; the window reads it (<c>sites.certificate</c>) and asks.</summary>
     public const string CertificateNotTrusted = "certificateNotTrusted";
+
+    /// <summary>SITES.6c: a sign-in kind with no token, or one the provider no longer accepts (<c>invalid_grant</c>): sign in again.</summary>
+    public const string SignInNeeded = "signInNeeded";
 
     /// <summary>Sites is off.</summary>
     public const string Off = "off";

@@ -22,6 +22,8 @@ public static class SiteRemote
         SiteKinds.Ftp => await FtpAsync(site, client, cancellationToken).ConfigureAwait(false),
         SiteKinds.WebDav => await WebDavAsync(site, client, cancellationToken).ConfigureAwait(false),
         SiteKinds.S3 => S3(site, client),
+        SiteKinds.B2 => B2(site, client),
+        SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox => await SignedInAsync(site, client, cancellationToken).ConfigureAwait(false),
         _ => throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported."),
     };
 
@@ -120,6 +122,113 @@ public static class SiteRemote
         if (!string.IsNullOrEmpty(site.Endpoint)) fs["endpoint"] = site.Endpoint;
         if (!string.IsNullOrEmpty(site.Region)) fs["region"] = site.Region;
         return fs;
+    }
+
+    /// <summary>SITES.6c, Backblaze B2: the application key is not one of rclone's obscured options, so it is registered as a secret.</summary>
+    private static JsonObject B2(SiteRecord site, RcloneClient client)
+    {
+        var key = site.SealedPassword is null
+            ? throw new SiteStoreException("No application key is saved for this site; type it in Edit site.")
+            : Open(site.SealedPassword, "application key");
+        client.AddSecret(key);
+        return new JsonObject { ["type"] = "b2", ["account"] = site.User, ["key"] = key, ["_root"] = "/" };
+    }
+
+    /// <summary>The name of a sign-in site's in-memory remote in rclone (never written to a config file).</summary>
+    public static string RemoteName(SiteRecord site) => "site-" + site.Id;
+
+    /// <summary>
+    /// SITES.6c: Drive, OneDrive and Dropbox. Each is a named in-memory remote (<c>config/create</c> with
+    /// <c>--config ""</c>), because rclone writes a renewed token back only to a named remote; an <c>fs</c> object with
+    /// <c>_name</c> uses it. Before it is used again the token rclone holds is compared with the one it was given: a renewed
+    /// one is handed to <see cref="RcloneClient.SignInRenewed"/> to be sealed and stored.
+    /// </summary>
+    private static async Task<JsonObject> SignedInAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken)
+    {
+        if (site.SealedSignIn is null) throw new SiteSignInNeededException("Sign in to this site first (Options > Sites).");
+        var stored = ParseSignIn(Open(site.SealedSignIn, "sign-in"), client);
+        var storedToken = stored["token"]?.GetValue<string>() ?? throw new SiteSignInNeededException("The site's sign-in is incomplete; sign in again.");
+        var name = RemoteName(site);
+
+        if (client.SignedInRemotes.TryGetValue(name, out var given))
+        {
+            var held = await client.CallAsync("config/get", new JsonObject { ["name"] = name }, cancellationToken).ConfigureAwait(false);
+            var heldToken = held["token"]?.GetValue<string>();
+            if (heldToken is not null) RegisterToken(heldToken, client);
+            if (heldToken is not null && heldToken != given && storedToken == given)
+            {
+                // rclone renewed the token since it was given: that one is kept, here and in the site.
+                client.SignedInRemotes[name] = heldToken;
+                stored["token"] = heldToken;
+                if (client.SignInRenewed is { } renewed) await renewed(site.Id, given, stored, cancellationToken).ConfigureAwait(false);
+                return Named(name);
+            }
+
+            if (storedToken == given && heldToken == given) return Named(name);
+        }
+
+        // New to this rclone, or signed in again since: the remote is made from the stored settings.
+        var parameters = (JsonObject)stored.DeepClone();
+        if (site.ClientId is { } clientId)
+        {
+            parameters["client_id"] = clientId;
+            if (site.SealedClientSecret is not null)
+            {
+                var secret = Open(site.SealedClientSecret, "client secret");
+                client.AddSecret(secret);
+                parameters["client_secret"] = secret;
+            }
+        }
+
+        await client.CallAsync("config/create", new JsonObject
+        {
+            ["name"] = name,
+            ["type"] = site.Kind,
+            ["parameters"] = parameters,
+            // Values are given as they are, and rclone asks nothing: it would otherwise start its own setup questions.
+            ["opt"] = new JsonObject { ["nonInteractive"] = true, ["noObscure"] = true },
+        }, cancellationToken).ConfigureAwait(false);
+        client.SignedInRemotes[name] = storedToken;
+        return Named(name);
+    }
+
+    private static JsonObject Named(string name) => new() { ["_name"] = name, ["_root"] = "/" };
+
+    /// <summary>The sealed settings of a sign-in site as a JSON object, with every token in them registered as a secret.</summary>
+    public static JsonObject ParseSignIn(string json, RcloneClient client)
+    {
+        client.AddSecret(json);
+        JsonObject parsed;
+        try
+        {
+            parsed = JsonNode.Parse(json) as JsonObject ?? throw new SiteSignInNeededException("The site's sign-in can't be read; sign in again.");
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw new SiteSignInNeededException("The site's sign-in can't be read; sign in again.");
+        }
+
+        if (parsed["token"]?.GetValue<string>() is { } token) RegisterToken(token, client);
+        return parsed;
+    }
+
+    /// <summary>The token JSON, its access and refresh tokens, and the JSON-escaped form rclone may print, as secrets.</summary>
+    public static void RegisterToken(string token, RcloneClient client)
+    {
+        client.AddSecret(token);
+        client.AddSecret(System.Text.Json.JsonSerializer.Serialize(token)[1..^1]);
+        try
+        {
+            if (JsonNode.Parse(token) is JsonObject fields)
+            {
+                foreach (var field in new[] { "access_token", "refresh_token" })
+                    if (fields[field]?.GetValue<string>() is { Length: > 0 } value) client.AddSecret(value);
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not JSON: the whole text is already registered.
+        }
     }
 
     private static string Open(string? sealedValue, string what) =>

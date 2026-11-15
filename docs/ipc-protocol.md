@@ -242,6 +242,8 @@ it):
 | `ftp` (port 21) | `host`, `port`, `tls` (`explicit`, `implicit`, `none`), `user`, `password` | `newFolder`, `emptyFolders` |
 | `webdav` | `url`, `vendor` (`other`, `nextcloud`, `owncloud`), `user`, `password` | `newFolder`, `emptyFolders` |
 | `s3` | `provider` (`AWS`, `Cloudflare`, `Wasabi`, `Minio`, `Other`), `endpoint`, `region`, `user` (access key ID), `password` (secret access key) | none |
+| `drive`, `onedrive`, `dropbox` | `signIn` (optional `clientId`, `clientSecret`) | `newFolder`, `emptyFolders`, `signIn` |
+| `b2` | `user` (application key ID), `password` (application key) | none |
 
 `choices` maps a field to its `[{value, title}]`; the values are rclone's own. A client shows only the listed fields and
 hides a command whose capability is missing (New folder on S3). `hostKey` is the only kind that asks about the server's
@@ -271,6 +273,23 @@ start, so after a change the running rclone is stopped at once if idle, or when 
 then carries a `message` saying the certificate is used after the running transfers. rclone's own check is never
 switched off. A root Windows would fetch only when first needed is not in the file, so while a certificate is trusted a
 service whose root this PC has never fetched can fail as untrusted.
+
+Browser sign-in (SITES.6c). Drive, OneDrive and Dropbox sites have `authMethod: "signIn"` and no password or key; a save
+with one is refused, and so is a `clientId` on any other kind. `clientId` and `clientSecret` are the user's own app
+registration (optional; rclone's shared one otherwise); a new `clientId` drops the stored secret and the sign-in.
+`SiteDto` carries `signedIn`, `clientId`, `hasClientSecret` and `signingIn`. `sites.signIn {id}` starts
+`rclone authorize <kind> [clientId clientSecret] --auth-no-open-browser` on the Host and answers `sites.signInResult
+{ok, message?, url?, authorizeCommand?, site?}` once rclone prints its address (`http://127.0.0.1:53682/auth?state=…`):
+the client opens `url` in a browser on the Host's PC. rclone listens on that one port, so one sign-in runs at a time
+(another site's is refused) and gives up after 10 minutes. The site shows `signingIn` until rclone ends; a token it
+printed is sealed into the site, and `sites.changed` follows. `sites.signInCancel {id}` stops it. `sites.signIn {id,
+token}` is the paste flow, for a browser on another computer: `token` is what `rclone authorize` printed (the part
+between `--->` and `<---End paste`, or the whole output), a JSON object with an `access_token`. The stored settings are
+the token, plus `scope: drive` for Drive and the `drive_id` and `drive_type` OneDrive's Graph `/me/drive` names, read
+with the new token at sign-in. rclone gets the site as a named in-memory remote (`site-<id>`, `config/create`); when
+it renews the token the Host notices at the next use and seals the new one, unless the site was signed in again
+meanwhile. A site with no token, or one the provider refuses (`invalid_grant`), carries `problem: signInNeeded`. No
+token, client secret or B2 key is logged or returned.
 
 `sites.status` carries `SitesStatusDto`:
 

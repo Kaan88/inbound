@@ -26,6 +26,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private readonly Func<string, string, RcloneSupervisor> _createSupervisor;
     private readonly Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>> _probe;
     private readonly Func<SiteRecord, CancellationToken, Task<TlsCertificateInfo>> _certificateProbe = ProbeCertificateAsync;
+
+    /// <summary>SITES.6c: the OneDrive a token opens (Graph <c>/me/drive</c>); tests give their own.</summary>
+    internal Func<string, CancellationToken, Task<(string? Id, string? Type, string? Problem)>> _oneDriveDrive = ReadOneDriveDriveAsync;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly RcloneUpdater? _updater;
     private readonly SiteTransfers _transfers;
@@ -185,6 +188,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.Certificate:
                 return IpcMessage.Create(SitesMessageTypes.CertificateResult,
                     await CertificateAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.SignIn:
+                return IpcMessage.Create(SitesMessageTypes.SignInResult,
+                    await SignInAsync(request.GetPayload<SiteSignInRequest>() ?? new SiteSignInRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.SignInCancel:
+                return Result(request, await SignInCancelAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "").ConfigureAwait(false));
             case SitesMessageTypes.Test:
                 return Result(request, await TestAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Browse:
@@ -511,7 +519,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     }
 
     private async Task<List<SiteDto>> ListAsync(CancellationToken cancellationToken) =>
-        [.. (await _sites.ListAsync(cancellationToken).ConfigureAwait(false)).Select(ToDto)];
+        [.. (await _sites.ListAsync(cancellationToken).ConfigureAwait(false)).Select(ToDto).Select(MarkSigningIn)];
 
     private async Task<SiteResultDto> SaveAsync(SiteSaveRequest request, CancellationToken cancellationToken)
     {
@@ -530,9 +538,20 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
             if (SiteKindCatalog.Find(request.Kind) is null) return Fail("Choose what kind of site it is.");
             if (existing is not null && existing.Kind != request.Kind) return Fail("A site's kind can't be changed; add a new site instead.");
-            if (request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
+            var signsIn = SiteKindCatalog.SignsIn(request.Kind);
+            // SITES.6c: a sign-in kind has no password or key of its own; its access comes from sites.signIn.
+            if (signsIn)
+            {
+                if (!string.IsNullOrEmpty(request.Password) || !string.IsNullOrEmpty(request.PrivateKey) || !string.IsNullOrEmpty(request.KeyPassphrase))
+                    return Fail("This kind of site signs in through the browser, not with a password or key.");
+                request.AuthMethod = SiteAuthMethods.SignIn;
+                request.Password = null;
+            }
+            else if (!string.IsNullOrEmpty(request.ClientId) || !string.IsNullOrEmpty(request.ClientSecret))
+                return Fail("Only a site that signs in through the browser has a client ID.");
+            if (!signsIn && request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
                 return Fail("Only SFTP sites sign in with a key.");
-            if (request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
+            if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
                 return Fail("Choose a password or a key file to sign in with.");
             if (KindAddress(request) is { Problem: { } addressProblem }) return Fail(addressProblem);
             // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
@@ -578,11 +597,27 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     CreatedAt = existing?.CreatedAt ?? now,
                     ModifiedAt = now,
                 };
+                if (signsIn)
+                {
+                    var clientId = Trimmed(request.ClientId);
+                    saved = saved with
+                    {
+                        ClientId = clientId,
+                        // A secret belongs to its client ID: a new ID without one has none.
+                        SealedClientSecret = clientId is null ? null
+                            : Seal(request.ClientSecret, existing?.ClientId == clientId ? existing.SealedClientSecret : null),
+                        // Another app registration is another grant: the site signs in again.
+                        SealedSignIn = existing is not null && existing.ClientId == clientId ? existing.SealedSignIn : null,
+                    };
+                }
+
                 droppedCertificates = existing is { TrustedCertificates.Count: > 0 } && saved.TrustedCertificates.Count == 0;
                 if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
                     return Fail("Choose the private key to sign in with.");
                 if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
                     return Fail("An S3 site needs its access key ID and secret access key.");
+                if (saved.Kind == SiteKinds.B2 && (saved.User.Length == 0 || saved.SealedPassword is null))
+                    return Fail("A B2 site needs its application key ID and application key.");
                 await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
@@ -612,6 +647,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         bool removed;
         var hadCertificates = false;
         if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
+        CancelSignIn(id);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -866,6 +902,18 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     AcceptedFingerprints = [.. problem.PinnedFingerprints],
                 });
             }
+            catch (SiteSignInNeededException e)
+            {
+                return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.SignInNeeded, Message = e.Message });
+            }
+            catch (RcloneCallException e) when (SiteErrorText.IsSignInRefused(e.Message))
+            {
+                return (null, new SiteResultDto
+                {
+                    Ok = false, Problem = SiteProblems.SignInNeeded,
+                    Message = "The service no longer accepts this site's sign-in. Sign in again in Options > Sites.",
+                });
+            }
             catch (RcloneCallException e) when (SiteErrorText.IsUntrustedCertificate(e.Message))
             {
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.CertificateNotTrusted, Message = SiteErrorText.Friendly(e.Message) });
@@ -997,6 +1045,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             throw;
         }
 
+        // SITES.6c: a token rclone renewed is sealed into its site (SiteRemote.SignedInAsync notices it).
+        lease.Client.SignInRenewed ??= (siteId, previous, settings, ct) => SaveRenewedSignInAsync(siteId, previous, settings, ct);
         if (unproven)
         {
             Interlocked.Exchange(ref _unprovenFailures, 0);
@@ -1035,6 +1085,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopUpdateLoopAsync().ConfigureAwait(false);
+        CancelSignIn(null);
         // Files in flight stop first (they hold leases), and their batches go on at the next start.
         await _transfers.DisposeAsync().ConfigureAwait(false);
         await _gate.WaitAsync().ConfigureAwait(false);
@@ -1087,9 +1138,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             SiteKinds.WebDav => Trimmed(request.Url),
             SiteKinds.S3 => Trimmed(request.Endpoint) ?? (request.Provider == SiteKindCatalog.AwsProvider ? "https://s3.amazonaws.com" : null),
+            // SITES.6c: the service's own address; nothing is typed for these kinds.
+            SiteKinds.Drive => "https://www.googleapis.com",
+            SiteKinds.OneDrive => "https://graph.microsoft.com",
+            SiteKinds.Dropbox => "https://api.dropboxapi.com",
+            SiteKinds.B2 => "https://api.backblazeb2.com",
             _ => null,
         };
-        if (request.Kind is not (SiteKinds.WebDav or SiteKinds.S3)) return (request.Host.Trim(), request.Port, null);
+        if (request.Kind is not (SiteKinds.WebDav or SiteKinds.S3 or SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox or SiteKinds.B2))
+            return (request.Host.Trim(), request.Port, null);
         var what = request.Kind == SiteKinds.WebDav ? "server address" : "service address (endpoint)";
         if (SiteKindCatalog.AddressProblem(address, what) is { } problem) return ("", 0, problem);
         var uri = new Uri(address!);
@@ -1121,6 +1178,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         Region = site.Region,
         Capabilities = [.. SiteKindCatalog.Find(site.Kind)?.Capabilities ?? []],
         Encrypted = SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint),
+        SignedIn = site.SignedIn,
+        ClientId = site.ClientId,
+        HasClientSecret = site.SealedClientSecret is not null,
     };
 
     private static SiteHostKeyDto ToDto(SshHostKey key) => new() { Type = key.KeyType, Fingerprint = key.Fingerprint, Entry = key.HostKeysEntry };

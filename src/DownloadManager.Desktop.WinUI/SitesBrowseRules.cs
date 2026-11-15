@@ -160,11 +160,13 @@ internal static class SitesBrowseRules
                 return "Sites is off. Turn it on in Options > Sites.";
             case "certificateNotTrusted":
                 return "This server's certificate is not signed by an authority this PC trusts, so Inbound did not connect. If it is your own server, open Options > Sites and Test the site to see the certificate and choose whether to trust it.";
+            case "signInNeeded":
+                return "This site is not signed in, or the service no longer accepts its sign-in. Open Options > Sites and choose Sign in.";
             default:
                 return host.Length > 0 ? host : "The folder could not be read.";
         }
     }
 
     /// <summary>A problem the user fixes in Options > Sites, so the view offers to open it.</summary>
-    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "certificateNotTrusted" or "off";
+    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "certificateNotTrusted" or "signInNeeded" or "off";
 }

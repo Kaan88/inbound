@@ -217,6 +217,8 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(SiteChangeItemResultDto))]
 [JsonSerializable(typeof(SiteProbeResultDto))]
 [JsonSerializable(typeof(SiteCertificateResultDto))]
+[JsonSerializable(typeof(SiteSignInRequest))]
+[JsonSerializable(typeof(SiteSignInResultDto))]
 [JsonSerializable(typeof(SiteTrustRequest))]
 [JsonSerializable(typeof(SiteResultDto))]
 [JsonSerializable(typeof(SiteKindDto))]

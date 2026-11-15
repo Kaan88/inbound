@@ -177,6 +177,8 @@ public sealed partial class HostCommandDispatcher
         || type is SitesMessageTypes.TransferStart
         // SITES.6b: both read a server's certificate first.
         || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust
+        // SITES.6c: waits for rclone to print the sign-in address, or for OneDrive to name the drive.
+        || type is SitesMessageTypes.SignIn
         || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
 
     /// <summary>
