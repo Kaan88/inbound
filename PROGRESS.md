@@ -413,6 +413,20 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AE. What waits for the owner** (2026-11-15). Everything else on the roadmap that could be done here is done or
+  decided with numbers. Left, each needing the owner:
+  - **Docker image with Sites (SITES.7):** not built here: WSL is not installed (installing it needs admin and a restart)
+    and the test VM's password is not in this session. Either give the VM's password again, or push a branch for the
+    Docker workflow to build.
+  - **Walks in the running app:** the T rows, UI.B24, UI.B26, UI.R37, T13 (scaling), AUDIT.1, SITES.1 to 3 visuals, the
+    About link to the third-party notices, the AOT native host from a real browser download (PERF.10).
+  - **Accounts and stores:** a real Google, Microsoft, Dropbox or B2 sign-in for Sites (SITES.6, question P); whether every
+    signed-in browser counts as the admin (question Q); the Edge store review (EXT.S1); extension 0.6.3 not uploaded
+    (EXT.R12).
+  - **Linux** (deferred): the quiet PERF.8/PERF.15 re-run, PERF.18, D7.W.
+  - **Ideas L1 to L5:** not started; none has been asked for, so none is begun without the owner choosing.
+  - **UPD.N3:** waits until no install at 0.7.7 or older updates directly.
+  - **Nothing is pushed** (this session's commits are on local main).
 - **AD. PERF.19 finished** (2026-11-15, main). A CPU profile of the web UI at 5,000 jobs and 8 downloads
   (`perf-webui.mjs --profile`, `PERF_NO_MINIFY=1 perf-seed.sh build`) found Svelte measuring every row for `animate:flip`
   and its proxy traps over the 5,000 jobs. Now rows slide only in lists of 200 or fewer (the row's attributes are one
