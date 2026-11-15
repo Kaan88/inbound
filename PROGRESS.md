@@ -41,6 +41,10 @@
   download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
   real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
   (2026-11-15).
+- **The engine's test suites on a Mac (owner, 2026-11-15: "do it immediately"):** the macOS workflow runs Engine, TorBox,
+  Containers and Torrents on both builds (the Intel one with an x64 SDK under Rosetta) and fails on them, as Linux does;
+  Core, Archives, Sites and the full Integration suite (until now run only on Windows; Linux runs its Linux tests only)
+  run and are reported, not yet gating. ⌘Q stays File > Exit (owner: "leave as is").
 - **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
   and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
   integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second

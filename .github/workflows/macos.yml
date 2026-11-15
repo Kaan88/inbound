@@ -44,7 +44,7 @@ jobs:
   app:
     if: github.repository == 'Kaan88/inbound'
     runs-on: macos-15
-    timeout-minutes: 150
+    timeout-minutes: 210
     permissions:
       contents: write
     strategy:
@@ -145,6 +145,50 @@ jobs:
       - name: Darwin-only unit tests (hard-link count for extraction)
         if: matrix.rid == 'osx-arm64'
         run: dotnet test tests/DownloadManager.Archives.Tests/DownloadManager.Archives.Tests.csproj -c Release --filter "FullyQualifiedName~TheLinkCountIsReadOnly"
+
+      # The engine's own suites on a Mac (owner, 2026-11-15: "do it immediately"). The Intel build's run under Rosetta
+      # with an x64 SDK, so its tests run as Intel code. Gating: what Linux gates on. Reported, not yet gating: the
+      # suites that so far ran only on Windows, until their failures are sorted into Mac bugs and Windows-only tests.
+      - name: .NET SDK 10 for Intel (Rosetta)
+        if: matrix.rid == 'osx-x64'
+        run: |
+          arch -x86_64 bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --architecture x64 --install-dir "$HOME/.dotnet-x64"
+          arch -x86_64 "$HOME/.dotnet-x64/dotnet" --info | head -20
+
+      - name: Engine, TorBox, Containers and Torrents tests on macOS
+        run: |
+          if [ "$ARCH" = x64 ]; then dotnet() { DOTNET_ROOT="$HOME/.dotnet-x64" arch -x86_64 "$HOME/.dotnet-x64/dotnet" "$@"; }; fi
+          for project in Engine TorBox Containers Torrents; do
+            echo "::group::$project ($ARCH)"
+            dotnet test "tests/DownloadManager.$project.Tests/DownloadManager.$project.Tests.csproj" -c Release --logger "console;verbosity=minimal" || failed="$failed $project"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then echo "::error::failed on macOS ($ARCH):$failed"; exit 1; fi
+
+      - name: Core, Archives, Sites and Integration tests on macOS (reported)
+        continue-on-error: true
+        run: |
+          if [ "$ARCH" = x64 ]; then dotnet() { DOTNET_ROOT="$HOME/.dotnet-x64" arch -x86_64 "$HOME/.dotnet-x64/dotnet" "$@"; }; fi
+          for project in Core Archives Sites Integration; do
+            echo "::group::$project ($ARCH)"
+            dotnet test "tests/DownloadManager.$project.Tests/DownloadManager.$project.Tests.csproj" -c Release \
+              --logger "console;verbosity=minimal" --logger "trx;LogFileName=$project-$ARCH.trx" --results-directory "$RUNNER_TEMP/trx" \
+              || failed="$failed $project"
+            echo "::endgroup::"
+          done
+          # One line per failed test, for sorting them out.
+          python3 - "$RUNNER_TEMP/trx" <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          for f in sorted(glob.glob(sys.argv[1] + "/*.trx")):
+              root = ET.parse(f).getroot()
+              for r in root.iterfind(".//t:UnitTestResult", ns):
+                  if r.get("outcome") == "Failed":
+                      msg = r.find(".//t:Message", ns)
+                      first = (msg.text or "").strip().splitlines()[0][:220] if msg is not None and msg.text else ""
+                      print(f"FAILED {f.rsplit('/', 1)[-1]} {r.get('testName')} :: {first}")
+          PY
+          if [ -n "$failed" ]; then echo "::warning::failed on macOS ($ARCH):$failed"; exit 1; fi
 
       - name: The Host and the CLI start
         run: |
