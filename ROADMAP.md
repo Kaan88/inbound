@@ -630,6 +630,28 @@ Open for the owner (also in the plan): whether site transfers count against "dow
 session may add and edit sites; "this device" transfers in the first web UI release; the extension popup line;
 whether rclone is a Setup component that can be unticked.
 
+## Android app (owner, 2026-11-15: design asked for; design done, nothing built)
+
+- [x] ANDROID.0 Design in Figma: Material You, default colours from the web UI tokens, a downloader in its own right
+  that can also manage another Inbound host, with prototype flows and a "How it works" board.
+  https://www.figma.com/design/OOujeLSw6cddv52YlnzVm1 . Evidence: PROGRESS "Android app design in Figma (2026-11-15)".
+- [x] ANDROID.1 Owner review of the design (2026-11-15): accepted. The engine stays .NET unless performance on a phone
+  is a problem; then it is ported to Rust. The built-in browser tab is agreed. Plan: `docs/plans/android-app.md`,
+  with the screens as images in `docs/plans/android-mockups/`.
+- [ ] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
+  picker grant, how long a service may run, the toolkit. Decides .NET or Rust. Not started.
+- [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
+- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
+- [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
+- [ ] ANDROID.6 Queues, scheduler and settings.
+- [ ] ANDROID.7 Other hosts (pairing, host switcher).
+- [ ] ANDROID.8 Sites, if rclone can ship inside the app.
+- [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
+- [ ] ANDROID.10 Release (signing, distribution, updates).
+- Waiting for the owner: arm64 device work (on hold project-wide; phones are arm64), the performance pass marks, the
+  oldest Android version, how the app is handed out. Left in the mockup: re-export 9 screens at full size, the
+  3 missing ones and the board (Figma's call limit ran out).
+
 ## Possible later features (owner, 2026-11-12: recorded for later reference, not started)
 
 A gap check against other download managers after the torrent work. None of these is planned yet; the owner decides

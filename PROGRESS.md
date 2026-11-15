@@ -1,5 +1,16 @@
 # Progress — session handoff
 
+### Android app design in Figma (2026-11-15)
+
+- **Owner request:** design an Android app for Inbound: Material You, default colours from the web UI, a full downloader on the phone (not only a remote for another host), animated, and clear about how it works. Done in Figma.
+- **Done (design only, no code):** file "Inbound for Android — Material You", https://www.figma.com/design/OOujeLSw6cddv52YlnzVm1 (in the Figma account's drafts). 22 screens in three rows (A downloading on the phone, B catching links, C queues, sites, hosts, settings), colour variables mapped from `webui/src/tokens.css` to Material 3 roles, the glyphs from `webui/src/lib/icons.ts`, three prototype flows with 71 interactions, and a "How it works" board (pipeline, background behaviour, phone as host and as remote, motion, colour).
+- **Limits of the Figma plan:** one variable mode per collection, so dark and light are two collections; the screens are dark, with one light screen (C8).
+- **Not checked:** the prototype was not played through in Figma's Present view; the interactions were set by script and reported no errors. Nothing was tried on a device.
+- **Owner's answer (2026-11-15):** design accepted. Keep the .NET engine unless performance on a phone is a problem; port to Rust if it is. Agreed with the rest, the built-in browser tab included.
+- **Plan written:** `docs/plans/android-app.md` (decisions, feature map, architecture, the performance measurements that decide .NET or Rust, eight Android unknowns to check first, order of work ANDROID.2 to ANDROID.10). Its claims about Android's rules (service time limits, "Open with", running a downloaded rclone) are from memory and marked as to check.
+- **Mockup in the repo:** 19 screen images and a small overview of the board in `docs/plans/android-mockups/`, shown in the plan. 10 are full size; 9 are smaller captures from the build. **Not done:** B6, C6 and C8 have no image and the board image is too small to read, because Figma's call limit on the free plan ran out. **Left:** export again when it resets.
+- **Questions for the owner:** (1) arm64 is on hold and phones are arm64: may device work start? (2) Are the performance pass marks in the plan's section 5 right? (3) Oldest Android version to support? (4) APK from the releases page, or a store?
+
 ### Sites and performance on Linux, continued (2026-11-15)
 
 - **A. Quiet re-runs still pending:** the PERF.8 and PERF.15 baselines and the SITES.0 timings were not re-run, because the machine was busy (two VirtualBox VMs and another project's test run; load average 7 to 17 on 28 cores). **Left:** the re-runs on a quiet machine.
