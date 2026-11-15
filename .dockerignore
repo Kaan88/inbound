@@ -12,6 +12,8 @@
 !src/DownloadManager.Engine/
 !src/DownloadManager.Persistence/
 !src/DownloadManager.Runtime/
+!src/DownloadManager.Sites/
+!third_party/rclone/COPYING
 !src/DownloadManager.Archives/
 !src/DownloadManager.Containers/
 !src/DownloadManager.Providers.TorBox/
