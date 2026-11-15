@@ -26,7 +26,17 @@
   is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
   Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
   Mac: the window, downloads, the extension and the menu-bar icon. **Not checked:** a Retina screen in CI (the runner's
-  scale is 1); the last sizing and reopening fixes on the owner's Mac; the Intel build beyond building.
+  scale is 1); the last sizing and reopening fixes on the owner's Mac. The Intel build runs every check under
+  Rosetta, and MAC.3 (a newer copy replaces the running Host) passes on both builds; Rosetta's rclone is the arm64 one,
+  as .NET reports the machine's arm64 there.
+- **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
+  hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
+  loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS
+  cuts to 16 characters (now `pgrep -f` on the bundle path, with plain launcher paths); the web bridge said "windows" on
+  a Mac; the activation wake-up connection now runs on macOS only. Not a fault: "the launcher stops when no Host runs"
+  (it is `/bin/sh` without `set -e`). Left, named: the update signing key is usable by any branch's manual run (one
+  owner; a protected environment would close it); a Host started from the native host is in the browser's process
+  group until its own `setsid` at start.
 
 ### Android app design in Figma (2026-11-15)
 
