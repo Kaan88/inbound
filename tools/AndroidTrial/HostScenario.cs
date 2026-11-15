@@ -7,7 +7,7 @@ using SystemClock = Android.OS.SystemClock;
 
 namespace AndroidTrial;
 
-public sealed record HostRequest(string RunId, string Phase, string? Url, string? Sha256, int Segments, bool ResumeIfPaused, bool Idle);
+public sealed record HostRequest(string RunId, string Phase, string? Url, string? Sha256, int Segments, bool ResumeIfPaused, bool Idle, int Count = 0);
 
 /// <summary>
 /// mode=host / mode=service: the Host core (<see cref="AndroidHost"/>) driven only through the dispatcher's envelopes.
@@ -26,6 +26,7 @@ internal static class HostScenario
 
     public static async Task<AndroidHost> RunAsync(Context context, HostRequest request, Action<string> say, CancellationToken ct, bool keepHost)
     {
+        StartupTrace.Mark("scenario.begin");
         var ext = ExtDir(context);
         var resultFile = Path.Combine(ext, $"host-result-{request.RunId}-{request.Phase}.json");
         var json = new JsonObject
@@ -81,11 +82,13 @@ internal static class HostScenario
             var inner = session.OnFrame;
             session.OnFrame = m =>
             {
-                if (m.Type == MessageTypes.ServerHello) hello = m.GetPayload<HostHelloDto>();
-                else if (m.Type == MessageTypes.JobsSnapshot) snapshotTcs.TrySetResult(m.GetPayload<SnapshotDto>());
+                if (m.Type == MessageTypes.ServerHello) { StartupTrace.Mark("session.hello.frame"); hello = m.GetPayload<HostHelloDto>(); StartupTrace.Mark("session.hello.parsed"); }
+                else if (m.Type == MessageTypes.JobsSnapshot) { StartupTrace.Mark("session.snapshot.frame"); var dto = m.GetPayload<SnapshotDto>(); StartupTrace.Mark("session.snapshot.parsed"); snapshotTcs.TrySetResult(dto); }
                 inner(m);
             };
+            StartupTrace.Mark("session.open.begin");
             await host.OpenAsync(session, ct).ConfigureAwait(false);
+            StartupTrace.Mark("session.open.returned");
             var snapshot = await snapshotTcs.Task.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
             json["hello"] = new JsonObject
             {
@@ -102,7 +105,11 @@ internal static class HostScenario
             json["snapshotMs"] = Since();
             say($"hello ok, caps=[{string.Join(",", hello?.Capabilities ?? [])}], snapshot jobs={snapshot.Jobs.Count}; " + string.Join(" ", snapshot.Jobs.Select(j => $"{j.Id:N}:{j.State}:{j.ReceivedBytes}")));
 
-            if (request.Idle)
+            if (request.Phase == "seed")
+            {
+                json["seeded"] = await SeedAsync(context, host, session, request.Count, say, ct).ConfigureAwait(false);
+            }
+            else if (request.Idle)
             {
                 json["idle"] = true;
             }
@@ -176,12 +183,14 @@ internal static class HostScenario
             }
 
             json["otherFrameTypes"] = frames;
+            json["trace"] = StartupTrace.ToJson();
             json["doneMs"] = Since();
             return host;
         }
         catch (Exception ex)
         {
             json["fatal"] = ex.ToString();
+            json["trace"] = StartupTrace.ToJson();
             say("FATAL " + ex);
             return host!;
         }
@@ -191,5 +200,39 @@ internal static class HostScenario
             say("RESULT " + json.ToJsonString());
             if (!keepHost && host is not null) await host.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// mode=host phase=seed: one job through the dispatcher (job.add, start mode "later", an unreachable address, so nothing is
+    /// fetched), then its job file copied <paramref name="count"/> - 1 times with a new id and file name. The state this leaves is
+    /// what a user with that many saved jobs has on disk. All jobs are unfinished ("later"), none completed.
+    /// </summary>
+    private static async Task<int> SeedAsync(Context context, AndroidHost host, InProcessSession session, int count, Action<string> say, CancellationToken ct)
+    {
+        var add = IpcMessage.Create(MessageTypes.JobAdd, new AddJobRequest
+        {
+            Url = "http://127.0.0.1:9/seed.bin",
+            DestinationDirectory = ExtDir(context),
+            FileName = "seed-0.bin",
+            StartMode = "later",
+            Source = "androidtrial",
+            ConflictPolicy = "overwrite",
+        });
+        var reply = await host.RequestAsync(session, add, ct).ConfigureAwait(false);
+        var job = reply.GetPayload<AddJobResponse>().Job ?? throw new InvalidOperationException("seed job.add returned no job");
+        var file = Path.Combine(host.Paths.JobsDirectory, job.Id + ".json");
+        if (!File.Exists(file)) file = Path.Combine(host.Paths.JobsDirectory, job.Id.ToString("N") + ".json");
+        var text = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+        var made = 1;
+        for (var i = 1; i < count; i++)
+        {
+            var id = Guid.NewGuid();
+            var copy = text.Replace(job.Id.ToString(), id.ToString()).Replace(job.Id.ToString("N"), id.ToString("N")).Replace("seed-0.bin", $"seed-{i}.bin");
+            await File.WriteAllTextAsync(Path.Combine(host.Paths.JobsDirectory, Path.GetFileName(file).Replace(job.Id.ToString("N"), id.ToString("N")).Replace(job.Id.ToString(), id.ToString())), copy, ct).ConfigureAwait(false);
+            made++;
+        }
+
+        say($"seeded {made} job files ({text.Length} chars each) in {host.Paths.JobsDirectory}");
+        return made;
     }
 }

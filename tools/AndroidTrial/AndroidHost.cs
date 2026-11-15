@@ -101,8 +101,10 @@ internal sealed class AndroidHost : IAsyncDisposable
 
     public static async Task<AndroidHost> StartAsync(string stateRoot, Action<string> say, CancellationToken ct)
     {
+        StartupTrace.Mark("host.begin");
         var paths = new StoragePaths(stateRoot);
         paths.EnsureCreated();
+        StartupTrace.Mark("host.paths");
         if (Interlocked.Exchange(ref _protectorSet, 1) == 0)
         {
             var keyDir = Path.Combine(stateRoot, "key");
@@ -111,10 +113,14 @@ internal sealed class AndroidHost : IAsyncDisposable
                 Path.Combine(keyDir, AesGcmSecretProtector.DefaultFileName), keyDir, discardUnreadable: false));
         }
 
+        StartupTrace.Mark("host.protector");
+
         var log = new DelegateLog(say);
-        var jobStore = new JsonJobStore(paths, log.Info);
-        var checkpoints = new JsonCheckpointStore(paths);
-        var settingsStore = new JsonSettingsStore(paths);
+        IJobStore jobStore = new TimedJobStore(new JsonJobStore(paths, log.Info));
+        var checkpointStore = new JsonCheckpointStore(paths);
+        IDownloadCheckpointStore checkpoints = new TimedCheckpointStore(checkpointStore);
+        ISettingsStore settingsStore = new TimedSettingsStore(new JsonSettingsStore(paths));
+        StartupTrace.Mark("host.stores");
         var engine = new HttpDownloadEngine(
             new EngineOptions
             {
@@ -125,12 +131,17 @@ internal sealed class AndroidHost : IAsyncDisposable
                 ReadTimeout = TimeSpan.FromSeconds(90),
                 AllowLocalNetwork = true,
             },
-            checkpoints: checkpoints);
+            checkpoints: checkpointStore);
+        StartupTrace.Mark("host.engine");
         var service = new DownloadManagerService(paths, jobStore, checkpoints, settingsStore, engine, log.Info);
+        StartupTrace.Mark("host.service.constructed");
         await service.InitializeAsync(ct).ConfigureAwait(false);
+        StartupTrace.Mark("host.service.initialized");
         service.TrayAvailable = false;
         var dispatcher = new HostCommandDispatcher(service, new AndroidTrialPlatform(), log);
+        StartupTrace.Mark("host.dispatcher.constructed");
         dispatcher.Start();
+        StartupTrace.Mark("host.dispatcher.started");
         return new AndroidHost(paths, service, dispatcher, engine, say);
     }
 

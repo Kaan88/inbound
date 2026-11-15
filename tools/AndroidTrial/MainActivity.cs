@@ -21,6 +21,7 @@ public sealed class MainActivity : Activity
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        StartupTrace.Mark("activity.OnCreate.enter");
         base.OnCreate(savedInstanceState);
         // Time from the process being forked to the first line of our code in the Activity.
         _onCreateMs = SystemClock.ElapsedRealtime() - Android.OS.Process.StartElapsedRealtime;
@@ -29,6 +30,7 @@ public sealed class MainActivity : Activity
         _log.SetTextIsSelectable(true);
         scroll.AddView(_log);
         SetContentView(scroll);
+        StartupTrace.Mark("activity.contentSet");
         Show($"process start -> OnCreate: {_onCreateMs} ms");
         _ = StartAsync(Intent);
     }
@@ -47,7 +49,7 @@ public sealed class MainActivity : Activity
             var hr = new HostRequest(
                 intent!.GetStringExtra("runId") ?? "run", intent.GetStringExtra("phase") ?? "add", intent.GetStringExtra("url"),
                 intent.GetStringExtra("sha256"), intent.GetIntExtra("segments", 1), intent.GetBooleanExtra("resumeIfPaused", false),
-                intent.GetBooleanExtra("idle", false));
+                intent.GetBooleanExtra("idle", false), intent.GetIntExtra("count", 0));
             if (mode == "service")
             {
                 var svc = new Intent(this, typeof(TrialService));
@@ -66,6 +68,13 @@ public sealed class MainActivity : Activity
             }
 
             try { await Task.Run(() => HostScenario.RunAsync(this, hr, Show, CancellationToken.None, keepHost: false)); }
+            catch (Exception ex) { Log.Error("InboundTrial", ex.ToString()); Show("FATAL " + ex); }
+            return;
+        }
+
+        if (mode == "probe")
+        {
+            try { await Task.Run(() => JsonProbe.RunAsync(this, intent!.GetStringExtra("runId") ?? "probe", Show)); }
             catch (Exception ex) { Log.Error("InboundTrial", ex.ToString()); Show("FATAL " + ex); }
             return;
         }

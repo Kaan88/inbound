@@ -2,7 +2,7 @@
 # Shared helpers for run-host.sh / run-service.sh / run-saf.sh (expects ROOT, SDK, ADB, PKG, PORT, OUT set).
 build_install() {
   if [ -z "${SKIP_BUILD:-}" ]; then
-    dotnet build "$ROOT/tools/AndroidTrial/AndroidTrial.csproj" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=android-x64 2>&1 | grep -E "error|Error\(s\)"
+    dotnet build "$ROOT/tools/AndroidTrial/AndroidTrial.csproj" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=android-x64 ${TRIAL_VARIANT:+-p:TrialVariant=$TRIAL_VARIANT} ${TRIAL_MSBUILD:-} 2>&1 | grep -E "error|Error\(s\)"
     dotnet build "$ROOT/tools/AndroidTrialServer/AndroidTrialServer.csproj" -c Release 2>&1 | tail -1
   fi
   APK="$(find "$ROOT/tools/AndroidTrial/bin/Release" -name "$PKG-Signed.apk" -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"

@@ -17,6 +17,20 @@
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
   </PropertyGroup>
 
+  <!-- Build variants for the start-up trial (run-start.sh): -p:TrialVariant=<name>. No value = the default build, unchanged.
+       Property names are from https://learn.microsoft.com/en-us/dotnet/android/building-apps/build-properties -->
+  <PropertyGroup Condition="'$(TrialVariant)' == 'noaot'"><RunAOTCompilation>false</RunAOTCompilation></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'fullaot'"><RunAOTCompilation>true</RunAOTCompilation><AndroidEnableProfiledAot>false</AndroidEnableProfiledAot></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'fullaot-llvm'"><RunAOTCompilation>true</RunAOTCompilation><AndroidEnableProfiledAot>false</AndroidEnableProfiledAot><EnableLLVM>true</EnableLLVM></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'trimfull'"><PublishTrimmed>true</PublishTrimmed><TrimMode>full</TrimMode></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'fullaot-trimfull'"><RunAOTCompilation>true</RunAOTCompilation><AndroidEnableProfiledAot>false</AndroidEnableProfiledAot><PublishTrimmed>true</PublishTrimmed><TrimMode>full</TrimMode></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'marshal'"><AndroidEnableMarshalMethods>true</AndroidEnableMarshalMethods></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'coreclr'"><UseMonoRuntime>false</UseMonoRuntime></PropertyGroup>
+  <PropertyGroup Condition="'$(TrialVariant)' == 'nativeaot'"><PublishAot>true</PublishAot></PropertyGroup>
+  <!-- A start-up profile recorded from this app's own start (aprofutil), added on top of the default profile. -->
+  <PropertyGroup Condition="'$(TrialVariant)' == 'customprofile'"><AndroidEnableProfiledAot>true</AndroidEnableProfiledAot></PropertyGroup>
+  <ItemGroup Condition="'$(TrialVariant)' == 'customprofile' And '$(TrialProfile)' != ''"><AndroidAotProfile Include="$(TrialProfile)" /></ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\DownloadManager.Core\DownloadManager.Core.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
