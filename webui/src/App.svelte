@@ -21,6 +21,7 @@
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
   import SettingsScreen from './screens/SettingsScreen.svelte';
+  import SitesScreen from './screens/SitesScreen.svelte';
   import StatisticsScreen from './screens/StatisticsScreen.svelte';
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
   import TorrentAdd from './screens/TorrentAdd.svelte';
@@ -33,7 +34,7 @@
   import { dragMayHoldTorrents, intake, intakeStep, isEditableTarget, pageTakes, uploadTorrent } from './lib/torrentIntake';
 
   // The shell: header, sidebar of views, the screen picked by the address's #hash, and the toasts.
-  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider'; provider: string } | { kind: 'statistics' };
+  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider'; provider: string } | { kind: 'statistics' } | { kind: 'sites'; site?: string };
 
   function parse(hash: string): Screen {
     const key = hash.replace(/^#\/?/, '');
@@ -42,6 +43,8 @@
     // `#/provider/<id>` is that account's My provider; `#/provider` alone is the first one that can browse.
     if (key === 'provider' || key.startsWith('provider/')) return { kind: 'provider', provider: decodeURIComponent(key.slice('provider/'.length)) };
     if (key === 'statistics') return { kind: 'statistics' };
+    if (key === 'sites') return { kind: 'sites' };
+    if (key.startsWith('sites/')) return { kind: 'sites', site: decodeURIComponent(key.slice('sites/'.length)) };
     return { kind: 'list', view: parseViewKey(key) ?? 'all' };
   }
 
@@ -413,6 +416,7 @@
         {/each}
       {/if}
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
+      {#if store.has('sites')}{@render link('#/sites', 'sites', 'server', 'Sites')}{/if}
       {@render link('#/statistics', 'statistics', 'chart', 'Statistics')}
       {@render link('#/settings', 'settings', 'settings', 'Options')}
     </nav>
@@ -428,6 +432,8 @@
         <TorBoxScreen provider={screen.provider} />
       {:else if screen.kind === 'statistics'}
         <StatisticsScreen />
+      {:else if screen.kind === 'sites'}
+        <SitesScreen siteId={screen.site} />
       {:else}
         <SettingsScreen />
       {/if}

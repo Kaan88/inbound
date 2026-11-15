@@ -2,6 +2,7 @@
 // the tests feed it envelopes; the Svelte store holds one of these in reactive state.
 
 import type { Envelope } from './protocol';
+import type { Site, SitesStatus, SiteTransfer } from './sites';
 import type { ArchiveSet, DownloadGroup, Hello, HostStatus, Job, RemoteAccount, RemoteJob, Settings, Snapshot } from './types';
 
 export interface Model {
@@ -18,6 +19,10 @@ export interface Model {
   /** Grows with each snapshot, so views can tell a fresh start from an update. */
   snapshots: number;
   exiting: boolean;
+  /** Sites (SITES.7): null until the server has said; the list and every transfer batch, as it last sent them. */
+  sitesStatus: SitesStatus | null;
+  sites: Site[];
+  siteTransfers: SiteTransfer[];
 }
 
 export function emptyModel(): Model {
@@ -33,6 +38,9 @@ export function emptyModel(): Model {
     archivesAnswered: false,
     snapshots: 0,
     exiting: false,
+    sitesStatus: null,
+    sites: [],
+    siteTransfers: [],
   };
 }
 
@@ -162,6 +170,28 @@ export function apply(model: Model, message: Envelope): boolean {
       }
       return false;
     }
+
+    case 'sites.changed': {
+      const change = message.payload as { status?: SitesStatus; sites?: Site[] };
+      if (!change?.status) return false;
+      model.sitesStatus = change.status;
+      model.sites = change.sites ?? [];
+      return true;
+    }
+
+    case 'sites.status':
+      if (!message.payload) return false;
+      model.sitesStatus = message.payload as SitesStatus;
+      return true;
+
+    case 'sites.listResult':
+      model.sites = (message.payload as { sites?: Site[] })?.sites ?? [];
+      return true;
+
+    case 'sites.transfer.changed':
+    case 'sites.transfer.listResult':
+      model.siteTransfers = (message.payload as { transfers?: SiteTransfer[] })?.transfers ?? [];
+      return true;
 
     case 'host.exiting':
       model.exiting = true;

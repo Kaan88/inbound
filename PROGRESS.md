@@ -359,6 +359,40 @@
   Microsoft or Dropbox account, a renewal by the real provider, OneDrive's drive lookup, a real B2 bucket, anything
   visual, light mode, Linux. **Question for the owner:** may a live check use your own Google, Microsoft, Dropbox or
   Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services.
+- **Q. SITES.7: Sites in the web UI and on the server, "this device" streams** (2026-11-15, main; commits `dad04f5`,
+  `ec80948` and the web UI commit after them). **Who may:** a web session signed in with the password is the admin, so
+  it is answered for `sites.*` (my reading of the owner's "admin only", 2026-11-15: there is no role system, and the
+  password is the only way in). It is held to its folders on the computer Inbound runs on (a site's or a transfer's
+  folder outside them is refused; resuming or retrying a batch made there with an outside folder is refused too) and
+  can't choose Use my own rclone (a program to run). On the server every caller is held to the server's roots the same
+  way. **Question for the owner:** is "every signed-in browser is the admin" right, or should a second, lesser
+  password (or the setup code) be asked before Sites can be changed from a browser? **Host:** `sites.device.*` streams
+  a file between a site and the browser's device in 1 MiB pieces through rclone's served files (`--rc-serve`, named
+  in-memory remotes) and `operations/uploadfile`, nothing on a disk on the way; 8 at once, closed after two idle minutes
+  (the timer runs only while one is open). **Server:** Sites runs in the headless server (and in the image, whose
+  rclone it finds), and `GET`/`POST /api/sites/device` carry the bytes (the name in `X-File-Name`, 409 when it is
+  taken). **Web UI:** Sites in the sidebar (Manage) when the host offers it: the switch and rclone's state, Download
+  rclone, the site list (add, edit, test, remove, sign in), a site's files (breadcrumbs, more than 500 items in pages,
+  download to this device as a plain link, upload from this device with progress and a Replace question, download to
+  the server or PC with a folder and the conflict choice, new folder, rename, delete), host-key, certificate and
+  sign-in questions (the sign-in link works only when the browser is on the same computer; otherwise the paste flow),
+  and the transfers with pause, resume, cancel, retry and Clear finished. **Haiku review of the Host and server
+  commit:** eleven points. Fixed: a web session could set a batch from outside its folders moving again; a failed open
+  or piece could keep an rclone lease; an upload that ended early could leave a piece waiting forever; a close during
+  a piece disposed what it used; the idle timer never stopped; opens over the cap or after shutdown; an empty answer
+  was a 200. Documented instead: a stopped upload that was replacing a file may already have removed the old one; a
+  browser that pauses a download for over two minutes ends it; a web session sees every site and batch (it is the
+  admin). **Walk** (the server built here on Windows, a WebDAV site served by rclone 1.76.0, the browser pane):
+  turned Sites on, added the site (shown Not encrypted), tested it, browsed `/pub`, a 3,000,000-byte file came to the
+  page whole, an upload from the page landed byte for byte, a taken name asked first and Replace replaced it (the walk
+  found that Replace did nothing: fixed and walked again), a file and a folder downloaded to the server equal the
+  originals, a folder outside the roots was refused in the server's words, new folder, rename and delete worked, and
+  the screen fits a phone. **Tests:** `SiteDeviceEndToEndTests` (SFTP and S3, real rclone), `SiteDeviceStreamTests`
+  (the HTTP endpoints against WebDAV), dispatcher tests (web answered, held to its folders, batches outside refused),
+  `webui/tests/sites.test.ts`; Integration (site, dispatcher) 391, Server 193 and the web UI's 713 pass, `npm run
+  check` clean. **Not checked:** the Windows app's bridge with a real browser (tested only through the dispatcher), the
+  sign-in flows in the web UI against a real provider, the Docker image with Sites (not built here; linux/amd64 only),
+  light mode, Linux.
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the
