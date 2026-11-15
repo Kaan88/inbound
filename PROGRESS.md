@@ -427,6 +427,16 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AN. B2 live, and the app's own rclone download** (2026-11-15). The owner added a B2 site in a fresh test instance's
+  window with a key limited to one bucket. **rclone download:** Options › Sites, Download rclone, fetched, checked and
+  installed rclone 1.76.0 in 3 seconds (the first live run of SITES.1's download). **B2:** test, listing the buckets,
+  making a folder and deleting it all worked; the upload failed with "failed to HEAD for download ... server gave HTTP
+  response to HTTPS client" on `f003.backblazeb2.com`. On this network that name resolves to 45.11.36.16, not a
+  Backblaze address (`api.backblazeb2.com` resolves to Backblaze's 104.153.233.180), and HTTPS to it fails
+  (`curl`: SEC_E_INVALID_TOKEN): a DNS-level block of B2's file host on this connection, outside Inbound. A file
+  transfer to or from B2 is therefore unchecked here; it needs another network or DNS. The bucket was left empty, the
+  site and the test instance removed. (A test-setup quirk on the way: `INBOUND_RCLONE` pointing at a file that is gone
+  wins over a downloaded rclone and reports it missing; it is a developer override, so left as it is.)
 - **AM. PERF.9 fix: bytes before a reset were lost** (2026-11-15, main). CI on Linux failed
   `EngineRecoveryTests.ASegmentThatGetsBytesOnItsLastAllowedAttemptStillRetries` after the 0.8.0 tag: the reader now
   gathers up to 64 KB before a write, and when a read failed (a server resetting the connection) the bytes already
