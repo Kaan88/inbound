@@ -12,7 +12,7 @@
 - **Storage (plan section 6, point 1), emulator:** `FileStream`, writes at offsets, flush and the in-place rename work by path in the app's own external folder and in shared `/storage/emulated/0/Download` **with no storage permission**, target 35 and 36. All-files access changes nothing. So the part-file-in-destination rule holds for Downloads without an engine change. **One failure (agent's run, `own1.json`, not repeated by me):** overwriting a file in Downloads that the app did not create fails with an access-denied error and leaves the finished part file behind. The same is likely for the app's own files after a reinstall (the agent's check of that was inconclusive). Folders chosen with the system picker and MediaStore were not tried.
 - **Size and start (emulator, agent's figures, not repeated):** APK 11.4 MB with x86-64 and arm64 libraries, 23 MB installed. Process start to first code 100 to 150 ms; cold start of the screen about 0.45 to 0.49 s. First use of the job store costs about 0.6 s in Release against 0.2 s in Debug; cause not found, and it counts against the 2 s cold-start mark.
 - **Not done:** everything that needs a phone (rate over Wi-Fi, battery, an hour-long run with the screen off, idle CPU and wake-ups, arm64), an idle memory baseline, boot-to-resume, the service rules (section 6 point 2), the Runtime project on Android, the toolkit trials, picker folders. No .NET-or-Rust decision yet.
-- **Question for the owner:** a phone with USB debugging is needed for the pass marks. Which phone, and when can it be plugged in?
+- **Owner (2026-11-15):** no phone yet. Continue with everything that doesn't need one; pause when the next step requires a phone.
 
 ### Android app design in Figma (2026-11-15)
 
