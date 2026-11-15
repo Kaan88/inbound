@@ -25,7 +25,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 ## The agreed design in short
 
 - Selecting a site in the sidebar replaces the download toolbar with a site toolbar: Download, Upload, New folder,
-  Rename, Delete on server, Refresh, Pause transfers, Edit site, Options.
+  Rename, Delete on server, Refresh, Pause transfers (stop and restart: rclone has no pause), Edit site, Options.
 - There is no Connect or Disconnect. Selecting a site lists it. Trouble shows in the pane with Retry and Edit site.
 - Two views: Server only (the default) and Two panes, with arrow buttons between the panes, breadcrumbs, starred
   folders and a linked local folder per site.
@@ -86,17 +86,25 @@ The price is that these places must be taught about it on purpose:
 - **Separate process, not a library.** rclone can be built as a DLL (`librclone`), but a crash or hang would take the
   Host down, we would have to build it ourselves, and "use your own rclone" would not work. Rejected.
 - **Start:** `rclone rcd --rc-addr 127.0.0.1:0`-style loopback bind with a random user and password made for each
-  start, `--config ""` so nothing is read from or written to a config file, and no web GUI. The docs call rc access
-  "equivalent to shell access", so the secret never goes on the command line where another process can read it; it is
-  passed by environment variable or an htpasswd file in the state folder (to be settled in the rclone run).
+  start, `--config ""` so nothing is read from or written to a config file (confirmed in the run, on Linux), and no web GUI.
+  The docs call rc access "equivalent to shell access", so the secret never goes on the command line where another
+  process's command line shows it: it is passed in `RCLONE_RC_USER` and `RCLONE_RC_PASS` (run point 2). On Linux
+  the environment is readable by the owner only; on Windows other processes of the same user can read it (from the
+  docs, not run), so this guards against other users and process lists, not malware running as the user. rclone is never started
+  with `-vv`, which logs the password. `--cache-dir` and `--temp-dir` point into our state folder.
 - **Lifetime:** started when a site is selected, when a transfer is running or waiting to retry, or when the
   scheduler starts one. Stopped after an idle delay once no client has a site open and nothing is transferring. With
   Sites off it never starts. Restart with growing delays and a cap, as `WebUiSupervisor` does (`MaxRestarts = 5`).
-- **Never outlives the Host:** a Windows job object (kill on close) plus stopping it at shutdown; on Linux the parent
-  death signal. `TorrentWorkerSupervisor` is the pattern to copy.
+- **Never outlives the Host:** rclone itself keeps running, and keeps transferring, when its parent dies (seen in the
+  run), so the Host must tie it: a Windows job object (kill on close; not yet run on Windows) and on Linux
+  `PR_SET_PDEATHSIG` (the run used `setpriv --pdeathsig`; by the man page it fires when the spawning *thread*
+  exits, so rclone is started from a long-lived thread).
+  At shutdown: `core/quit`, wait a few seconds, then kill. At start the Host stops an rclone left by a crashed Host
+  (pid file). `TorrentWorkerSupervisor` is the pattern to copy.
 - **Which binary:** `tools\rclone\rclone.exe` next to the Host, or the path set in Options ("Use my own rclone"), or
   `INBOUND_RCLONE` for tests, as `TorrentSetup.cs` does for the worker. A version check at start; too old shows a
-  clear message, not a broken view.
+  clear message, not a broken view. The oldest accepted for SFTP is 1.75.0, the first with `host_keys` by the
+  changelog (run point 3; 1.75.0 itself was not run). An older rclone is refused for SFTP, never used unchecked.
 - **Idle cost:** none when not running. No polling of sites in the background. Sidebar activity comes from the
   Host's own transfer records, not from asking rclone.
 
@@ -106,26 +114,42 @@ The price is that these places must be taught about it on purpose:
   access keys) are sealed with `SecretProtector` (DPAPI on Windows, AES-GCM with `secrets.key` or the keyring
   elsewhere). No password is ever part of an address; an address with one is refused, as today.
 - For each call the Host builds the remote from the stored site and passes it in the rc call's `fs` field as a JSON
-  object of backend options. rclone's documentation allows this. Secrets exist in rclone's memory only.
+  object of backend options, with absolute paths through `_root` (run point 1). Secrets exist in rclone's memory
+  only. Every password and key passphrase is obscured with `core/obscure` first. rc error bodies repeat the secrets
+  they were given, so they are never logged or shown as they are.
 - **The user's own `rclone.conf` is never read or written in version one.** Importing remotes from it can come later
   as an explicit action.
 - **SFTP host keys.** rclone does not check the host key by default and never asks. So Inbound does it:
-  1. On first use the Host fetches the server's public key (how: see "To settle in the rclone run").
-  2. The window shows the fingerprint and asks. Nothing is sent to the server before the user says yes.
+  1. On first use the Host reads the server's public key with a small SSH handshake of its own (key exchange only,
+     no login). rclone cannot report a key before a login, and its pin flag sends the credentials first (run
+     point 4; a 50-line probe did this in the run).
+  2. The window shows the fingerprint and asks. No credentials are sent, and nothing is stored, before the user
+     says yes (the handshake itself sends only the key exchange).
   3. The key is stored with the site and passed to rclone as `host_keys` on every call.
   4. If rclone reports a different key, the site stops with both fingerprints and a hard warning. There is no
-     "continue anyway" button; the user must open Edit site and replace the key.
-- **FTPS certificates.** rclone offers a CA file or "do not verify", not pinning. Plan: a certificate that fails
-  verification is shown with its fingerprint; if the user trusts it, it is stored with the site and passed as that
-  site's CA. "Do not verify" is never offered. To be tried in the run.
+     "continue anyway" button; the user must open Edit site and replace the key. rclone's refusal has two message
+     forms, one for a changed key and one when the key's algorithm no longer matches; both must be recognised.
+- **FTPS certificates.** rclone offers a CA file or "do not verify", not pinning, and there is **no per-site CA**:
+  the CA file is read once when rclone starts (`RCLONE_CA_CERT`; run point 6). A certificate that fails verification
+  is shown with its fingerprint; if the user trusts it, it is stored with the site. How it then reaches rclone is
+  open question 6: either one Host-managed CA file of accepted certificates, read by rclone at start and rclone
+  restarted when it changes (proposed), or rclone's check turned off for that site (`no_check_certificate`) with
+  the Host checking the fingerprint itself before each connection. A CA file trusts the certificate for every
+  remote of that rclone process, though name checking still applies (run point 6). "Do not verify" is never offered
+  to the user.
 - **Plain FTP** is a per-site choice with a warning in the dialog and a permanent "Not encrypted" chip in the pane.
 - **OAuth kinds** (Drive, OneDrive, Dropbox): sign-in through the browser with rclone's own flow; on a server with no
   browser, the `rclone authorize` paste flow from the earlier mockups. The Host stores the token sealed and must
-  write back a refreshed token after each use. How it learns of a refresh is not documented; see the run list.
+  write back a refreshed token after each use. Each such site is one **named** in-memory remote (`config/create`
+  with `--config ""`; an on-the-fly `fs` object has no name to write a new token back to). After each batch and
+  before rclone stops, the Host reads the token with `config/get` and re-seals it if it changed. That a real refresh
+  appears there is not yet seen (run point 9).
   App registration (owner, 2026-11-14): rclone's shared app IDs are used by default, and the site's settings have an
   optional field for the user's own client ID and secret. Other providers are added one at a time.
-- **Key files:** rclone reads passphrase-protected keys only in the old PEM format. The Add a site dialog must detect
-  the current OpenSSH format with a passphrase and say what to do, or the Host converts a copy in memory. Open.
+- **Key files:** passphrase-protected keys in the current OpenSSH format work in 1.76.0, as do old PEM and
+  unencrypted keys (run point 5, Linux), so the bundled rclone needs no conversion step. Which version made the
+  new format work is not known; "Use my own rclone" with a version between 1.75.0 and 1.76.0 needs a test first. A key passed inline (`key_pem`) needs its line
+  breaks as literal `\n`.
 - **Web sessions** keep their folder limit: local paths in any `sites.*` command go through `CallerScope` and
   `PathRoots` (`WebSessionProfile.cs:85`). Remote paths are not limited. Whether a web session may add or edit sites
   follows `SessionRights`; the default proposed is admin only.
@@ -144,12 +168,15 @@ from the earlier mockups: folders exist only while they hold something, and rena
   restarts it.
 - **Who moves the bytes:** rclone, in both directions (`operations/copyfile` and `sync/copy` as async rc jobs,
   progress from `core/stats` grouped per batch). This is one code path, and uploads need it anyway.
-- **Payload placement.** Downloads land in the destination folder under a temporary name and are renamed in place
-  (rclone's partial-file behaviour for local disks), so there is still no temp directory and no cross-volume copy.
-  The name is rclone's, not `<final>.<jobId>.part`; that convention stays as it is for download jobs. Uploads use a
-  temporary name on servers that can rename. Both to be confirmed in the run.
-- **Resume.** A stopped batch continues with the files not yet done. Whether a half-done large file continues or
-  starts over depends on rclone and the site kind; to be measured in the run and stated honestly in the UI.
+- **Payload placement.** Downloads land in the destination folder as `name.<hex>.partial` and are renamed in place,
+  so there is still no temp directory and no cross-volume copy. The name is rclone's, not `<final>.<jobId>.part`;
+  that convention stays as it is for download jobs. SFTP and FTP uploads also use `.partial` and a rename; WebDAV
+  uploads have no temporary name, so a cut WebDAV upload leaves a truncated file under the final name until the
+  next try overwrites it (run point 7); the Host marks that file as not done and never reports it as complete.
+  After a crash the Host removes stray `.partial` files of its batches.
+- **Resume.** A stopped batch continues with the files not yet done. A half-done file starts again from zero
+  (run point 7: SFTP, FTP, WebDAV and local, mostly against `rclone serve`; cloud kinds not tried); "Pause" is stop and start again, and the UI says so. Open question 7. rc job results
+  expire after a minute by default, so the Host reads them promptly and keeps its own record.
 - **Conflicts** are decided before the batch starts where possible (the listing is already known), with the dialog
   from the mockups: Skip first, then Replace, then Keep both, and "do this for the others".
 - **Failures.** A failed file does not stop its batch. It goes to the Failed tab with a plain reason and Retry all.
@@ -172,7 +199,7 @@ New `sites.*` messages, routed early in `DispatchAsync` (`HostCommandDispatcher.
 | `sites.kinds` | The tiles and each kind's fields, so every client draws the same dialog. |
 | `sites.browse` | One folder listing, paged for large folders, with the "on this PC" state per item. |
 | `sites.trust` | Answer to a host-key or certificate question. |
-| `sites.transfer.start`, `.pause`, `.resume`, `.cancel`, `.retry`, `.clear` | Batches. |
+| `sites.transfer.start`, `.pause`, `.resume`, `.cancel`, `.retry`, `.clear` | Batches. `.pause` stops the files in flight and `.resume` starts them again from zero. |
 | `sites.mkdir`, `sites.rename`, `sites.delete`, `sites.count` | Remote changes and the count for the delete dialog. |
 | `sites.authorize.start`, `.finish` | OAuth sign-in. |
 | events `sites.changed`, `sites.activity`, `sites.transfer.changed`, `sites.trust.needed` | `sites.activity` is the small per-site summary the sidebar and status chip use; batched like the groups broadcast (`ScheduleGroupsBroadcast`). |
@@ -214,8 +241,8 @@ transfers-at-once limit and the default view.
   and SHA-256, like `third_party\7-Zip\`. It is linked into `tools\rclone\` and added to the required-file list in
   `scripts\publish.ps1:220`. The installer copies the whole publish folder, so no `.iss` change is needed for the
   file itself; a Setup component tick ("Sites support, rclone") is optional.
-- The update zip (`scripts\package.ps1`) carries it like any other app file. Size against the 200 MB install is to
-  be measured; the zip is about a third of the unpacked exe, by rclone's usual numbers, not ours.
+- The update zip (`scripts\package.ps1`) carries it like any other app file. Measured in the run: rclone.exe 1.76.0
+  is about 86 MB unpacked and 32 MB zipped, about 43% on top of the current 200 MB install (open question 5).
 - Docker: a pinned, checksummed download stage like the 7-Zip one (`Dockerfile:28-50`), linux/amd64 only (arm64 is
   on hold).
 - There is no central third-party notices file today. Add `THIRD-PARTY-NOTICES.md` (7-Zip, rclone, the torrent
@@ -240,7 +267,7 @@ Each phase ends with evidence linked in PROGRESS; nothing is marked implemented 
 
 | Phase | ROADMAP | Content | Done when |
 | --- | --- | --- | --- |
-| 0 | SITES.0 | rclone run: the list below. Measure sizes. Decide the open items. | Results written here and in PROGRESS. |
+| 0 | SITES.0 | rclone run: the list below. Measure sizes. Decide the open items. | Results in `remote-sites-rclone-run.md`, the changes here, a note in PROGRESS. |
 | 1 | SITES.1 | `DownloadManager.Sites`: locate, start, supervise, stop rclone; rc client; idle stop; never outlives the Host. Bundled in publish. | Supervisor tests like `WebUiSupervisorTests`; a kill test; idle shows no process. |
 | 2 | SITES.2 | Site model, stores, sealed secrets, `sites.list/save/remove/test/kinds`, the Options switch, SFTP host-key trust. | Dispatcher tests; a site saved, Host restarted, tested again; changed key refused. |
 | 3 | SITES.3 | `sites.browse` and the desktop Server only view: toolbar swap, breadcrumbs, stars, sidebar section. Read-only. | Walked in the app against a local test SFTP server, dark mode. |
@@ -257,34 +284,41 @@ batch durability, the IPC surface) stay with the main model; dialogs, CLI text a
 ## Tests
 
 - **A test SFTP, FTP and WebDAV server without new tools:** rclone can serve all three from a local folder
-  (`rclone serve sftp|ftp|webdav`), so integration tests start a second rclone as the server. Fault injection
-  (slow, drop mid-file, refuse writes) needs either a small proxy in `tools\TestServer` or read-only folders; to be
-  decided in phase 1.
+  (`rclone serve sftp|ftp|webdav`), so integration tests start a second rclone as the server; this was enough for
+  most run checks. A host-key change and key formats need an OpenSSH `sshd` (an unprivileged one works, key auth
+  only); explicit FTPS needs a real FTP server (pure-ftpd in a container worked; `rclone serve ftp --cert` is
+  implicit TLS). Fault injection (slow, drop mid-file, refuse writes) needs either a small proxy in
+  `tools\TestServer` or read-only folders; to be decided in phase 1.
 - Host-level tests follow `HostCommandDispatcherTests.cs` (real service over temporary `StoragePaths`) and
   `HostCommandDispatcherTorrentWorkerTests.cs` (a real child process).
 - Tests that need rclone skip with a reason when the binary is absent, as the TorBox live tests do without a key.
 
-## To settle in the rclone run (phase 0)
+## The rclone run's questions (phase 0, answered)
 
 Read from rclone's documentation on 2026-11-13. Run on Linux on 2026-11-14 with rclone 1.76.0: the answers, with what
 was run and seen, are in `remote-sites-rclone-run.md`. Nothing was run on Windows.
 
-1. `fs` as a JSON object with a password, with `--config ""`: works, and no file appears anywhere.
-2. How the rc user and password are best passed so they are not visible to other processes.
-3. Host keys: unchecked by default; `host_keys` accepted; a changed key refused, and what the error looks like over
-   rc. Which rclone version added `host_keys`.
-4. How to fetch the host key for the first prompt: `ssh-keyscan` is not on every Windows PC, so either rclone's
-   one-shot pin flag against an in-memory remote and then reading the key back, or a small SSH handshake of our own.
-5. Key files: unencrypted, old PEM with a passphrase, current OpenSSH with a passphrase.
-6. FTPS with a self-signed certificate passed as that site's CA.
-7. Partial files on download and upload; what an interrupted large file does on resume.
-8. Progress and per-batch stats over rc; pausing and cancelling one batch; `core/bwlimit` while running.
-9. OAuth token refresh with an in-memory config: where the new token can be read.
-10. Start time, idle memory, and the size of the exe unpacked and in the Setup.
+Each question with its answer (run point in brackets) and where the plan now says it.
+
+1. `fs` as a JSON object with a password, with `--config ""`: works, and no file appears anywhere (1; "Credentials").
+2. How the rc user and password are passed unseen: `RCLONE_RC_USER`/`RCLONE_RC_PASS`, never flags (2; "Start").
+3. Host keys: unchecked by default; `host_keys` works from 1.75.0; a changed key is refused, in two message forms
+   (3; "SFTP host keys", "Which binary").
+4. Reading the host key for the first prompt: a small SSH handshake of our own; rclone's pin flag logs in first
+   (4; "SFTP host keys").
+5. Key files: unencrypted, old PEM and current OpenSSH with a passphrase all work in 1.76.0 (5; "Key files").
+6. FTPS with a self-signed certificate: there is no per-site CA, only one CA file per rclone process or no check
+   (6; "FTPS certificates", open question 6).
+7. Partial files: `.partial` and rename except WebDAV uploads; nothing resumes (7; "Transfers", open question 7).
+8. Progress per group, stopping one batch, `core/bwlimit` live: all work; there is no pause; per-batch speed limits
+   not settled (8; "Transfers", IPC).
+9. OAuth refresh with an in-memory config: a named remote and `config/get`; a real refresh not yet seen (9; "OAuth").
+10. Start about 25 ms, idle about 69 MB, no idle CPU; 86 MB unpacked, 32 MB zipped; Linux, loaded machine
+    (10; "Lifetime", "Setup").
 
 ## What the run changed (2026-11-14)
 
-Where this differs from the sections above, this section stands until they are rewritten in SITES.1 and SITES.2.
+Summary. Since 2026-11-15 the sections above carry these changes; this list is kept as the record.
 
 - **Version:** rclone 1.75.0 is the oldest that has `host_keys`. Inbound refuses an older rclone for SFTP.
 - **Start:** the rc user and password go in `RCLONE_RC_USER` and `RCLONE_RC_PASS`, never in flags (flags show in the
