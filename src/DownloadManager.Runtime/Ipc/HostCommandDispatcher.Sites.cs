@@ -9,8 +9,8 @@ public sealed partial class HostCommandDispatcher
 
     /// <summary>
     /// Answers <c>sites.*</c> (SITES.2). Null (a Host built without Sites) refuses them. Only the user at this PC gets an
-    /// answer: a web session is refused until the owner settles whether it may add and edit sites (remote-sites.md, open
-    /// question 2; proposed: admin only).
+    /// answer for now: a web session will be answered as admin only (owner, 2026-11-15), which comes with the web UI
+    /// (SITES.7).
     /// </summary>
     public ISitesCommands? Sites { get; init; }
 

@@ -195,6 +195,8 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(WebBridgeStartDto))]
 [JsonSerializable(typeof(SitesStatusDto))]
 [JsonSerializable(typeof(SitesSetEnabledRequest))]
+[JsonSerializable(typeof(SitesRcloneUpdateDto))]
+[JsonSerializable(typeof(SitesRcloneInstallRequest))]
 [JsonSerializable(typeof(SiteDto))]
 [JsonSerializable(typeof(SiteHostKeyDto))]
 [JsonSerializable(typeof(SitesListDto))]

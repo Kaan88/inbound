@@ -160,7 +160,7 @@ public sealed partial class HostCommandDispatcher
     /// lifetime that ends when their client goes away (<see cref="IpcOperationLifetime"/>). The rest are quick.
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
-        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test;
+        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that
