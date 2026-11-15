@@ -427,6 +427,13 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AJ. Release 0.8.0 in preparation** (2026-11-15, main). Version 0.8.0 in `Directory.Build.props`, Setup, the
+  scripts and the Firefox update link; `changelog.json` has the 0.8.0 lines (date empty until release; no test status).
+  **Owner's answers (2026-11-15):** question Q, "every signed-in browser is the admin", is right as built; question P,
+  a live check may use the owner's own accounts with the owner signing in; release: push main and tag v0.8.0 once tests
+  pass and Setup builds (Firefox signing stays the owner's step). **Tests before release:** Core 2,373, Engine 210,
+  Server 202, Sites 223 (20 skipped: need an SSH server), Torrents 94 (29 skipped), TorBox 323, Archives 401,
+  Containers 188, Tray 3, Integration 2,008 (10 skipped), web UI 717, extension 339; all pass.
 - **AI. The window's list bars** (2026-11-15, main; PERF.16 follow-up). WinUI's `ProgressBar` animates every value
   change (a `RepositionThemeAnimation` in its template), which was nearly all of the window's UI-thread work with
   downloads running. The list rows use the new `InboundListProgressBarStyle` (same parts and look, no visual states).

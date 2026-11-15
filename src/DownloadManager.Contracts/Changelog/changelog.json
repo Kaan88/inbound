@@ -1,6 +1,33 @@
 {
   "versions": [
     {
+      "version": "0.8.0",
+      "date": null,
+      "sections": [
+        {
+          "title": "New",
+          "items": [
+            { "text": "Sites: browse and change files on your own servers and cloud storage (SFTP, FTP and FTPS, WebDAV, S3 and S3-compatible storage, Google Drive, OneDrive, Dropbox and Backblaze B2), and move files between them and this PC. Turn it on in Options, Sites; Inbound downloads rclone, which does the work, the first time.", "tags": ["desktop"] },
+            { "text": "Sites in the web UI, on a phone too: browse a site, move files between it and the server, and send files straight to and from the device the browser runs on.", "tags": ["webui", "server"] },
+            { "text": "The Docker image includes rclone, so Sites works without a download. Turn it on in the web UI.", "tags": ["docker"] },
+            { "text": "dm sites adds, tests, browses and changes sites, and starts and controls transfers.", "tags": ["all"] },
+            { "text": "Each finished download is checked by your antivirus before anything opens or extracts it, as a browser's own downloads are. A file the antivirus removes ends the download with a note, and it is not downloaded again by itself.", "tags": ["windows"] },
+            { "text": "Help, About links the notices of the software Inbound is built with.", "tags": ["desktop"] }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            { "text": "The numbers in the download list hold still as they change, as in the other windows.", "tags": ["desktop"] },
+            { "text": "The download list uses much less processor time while downloads run: its progress bars no longer animate each change, and the speed graph no longer redraws its grid every second.", "tags": ["windows"] },
+            { "text": "The web UI's download list stays quick with thousands of downloads: it uses a fraction of the processor time it did, and its files load compressed.", "tags": ["webui", "server"] },
+            { "text": "The browser extension hands a download to Inbound faster.", "tags": ["windows"] },
+            { "text": "Downloads write their progress to disk less often, with the same protection against a crash or power cut.", "tags": ["all"] }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.7.7",
       "date": "2026-11-14",
       "sections": [
