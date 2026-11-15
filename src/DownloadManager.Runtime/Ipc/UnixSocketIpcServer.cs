@@ -11,6 +11,7 @@ namespace DownloadManager.Runtime.Ipc;
 /// Start it only while holding the single-instance lock: it replaces socket files a Host that has gone left behind.
 /// </summary>
 [SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
 public sealed class UnixSocketIpcServer : IAsyncDisposable
 {
     /// <summary>How many clients can be connected at once on each socket; as on the Windows pipes, a guard against a runaway.</summary>

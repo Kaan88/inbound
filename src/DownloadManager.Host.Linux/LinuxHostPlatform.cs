@@ -143,7 +143,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
             }
         }
 
-        var open = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+        var open = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
         open.ArgumentList.Add(path);
         using var _ = Process.Start(open);
     }
@@ -189,6 +189,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         {
             AppContext.BaseDirectory,
             Path.Combine(AppContext.BaseDirectory, "desktop"),
+            // macOS: Inbound.app keeps the Host in Contents/Resources/host and the window in Contents/MacOS.
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "MacOS"),
             // A build from the source tree (Host and window in their own bin folders).
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Debug", "net10.0-desktop"),
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Release", "net10.0-desktop"),
@@ -211,11 +213,19 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
             var start = string.IsNullOrWhiteSpace(initialPath) ? service.GetSettings().DefaultDownloadDirectory : initialPath;
             if (!Directory.Exists(start)) start = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             const string title = "Choose the destination for this download";
-            foreach (var (program, arguments) in new (string, string[])[]
+            // macOS: Finder's own folder dialog through AppleScript; it answers 1 for Cancel too.
+            var dialogs = OperatingSystem.IsMacOS()
+                ? new (string, string[])[]
+                {
+                    ("osascript", ["-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv) default location (POSIX file (item 2 of argv)))",
+                        "-e", "end run", title, start]),
+                }
+                : new (string, string[])[]
                      {
                          ("kdialog", ["--title", title, "--getexistingdirectory", start]),
                          ("zenity", ["--file-selection", "--directory", "--title", title, "--filename", start.TrimEnd('/') + "/"]),
-                     })
+                     };
+            foreach (var (program, arguments) in dialogs)
             {
                 var result = await RunDialogAsync(program, arguments, cancellationToken).ConfigureAwait(false);
                 if (result is not null) return result;

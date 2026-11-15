@@ -183,15 +183,11 @@ internal static class Program
 
         try
         {
-            if (OperatingSystem.IsLinux())
+            if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
             {
                 // In a session of its own: the browser ends this bridge (and may end its process group) when the port
                 // closes, and the Host must outlive it.
-                var start = new ProcessStartInfo("setsid") { UseShellExecute = false };
-                start.ArgumentList.Add("-f");
-                start.ArgumentList.Add(hostExe);
-                start.ArgumentList.Add("--background");
-                using var _ = Process.Start(start);
+                DetachedProcess.Start(hostExe, "--background");
             }
             else
             {
@@ -277,7 +273,7 @@ internal static class HostLocator
 {
     public static string? FindHostExecutable()
     {
-        var candidates = OperatingSystem.IsLinux()
+        var candidates = (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             ? new List<string>
             {
                 Path.Combine(AppContext.BaseDirectory, "inbound-host"),

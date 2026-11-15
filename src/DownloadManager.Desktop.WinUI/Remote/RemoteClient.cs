@@ -1353,7 +1353,7 @@ internal sealed class HostPipeBusyException : TimeoutException
     internal static bool PipeExists(string name)
     {
         // The Linux Host's sockets are files; one that is left behind is found stale on connecting.
-        if (OperatingSystem.IsLinux()) return File.Exists(UnixSockets.PathFor(name));
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())) return File.Exists(UnixSockets.PathFor(name));
         if (WaitNamedPipe($@"\\.\pipe\{name}", 1)) return true;
         return Marshal.GetLastPInvokeError() != FileNotFound;
     }
