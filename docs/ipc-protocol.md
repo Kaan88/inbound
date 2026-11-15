@@ -179,7 +179,7 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
-### Sites: `sites.*` (SITES.2, on branch sites-1, not released)
+### Sites: `sites.*` (SITES.2, on main since 2026-11-15, not released)
 
 Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
 `SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
