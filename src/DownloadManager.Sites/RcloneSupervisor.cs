@@ -150,6 +150,14 @@ public sealed class RcloneSupervisor : IAsyncDisposable
                     throw e as RcloneUnavailableException ?? new RcloneUnavailableException(e.Message, e);
                 }
 
+                if (_stopping.IsCancellationRequested)
+                {
+                    // StopAsync came while this start ran: no lease on an rclone that is about to be stopped.
+                    await instance.StopAsync(_options.StopGrace).ConfigureAwait(false);
+                    await DisposeQuietlyAsync(instance).ConfigureAwait(false);
+                    throw new RcloneUnavailableException("Sites are stopping.");
+                }
+
                 _instance = instance;
                 _startedAt = _time.GetUtcNow();
                 _retryAt = null;
@@ -171,10 +179,11 @@ public sealed class RcloneSupervisor : IAsyncDisposable
     }
 
     /// <summary>Clears <see cref="RcloneState.Failed"/> and the crash count (repair, a new rclone path).</summary>
-    public void Reset()
+    public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
         RcloneStatus changed;
-        _gate.Wait();
+        // Not a blocking wait: a start or a backoff can hold the gate for many seconds, and repair runs from a window.
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             _crashes = 0;

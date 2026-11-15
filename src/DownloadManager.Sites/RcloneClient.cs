@@ -27,6 +27,8 @@ public sealed class RcloneUnavailableException(string message, Exception? inner 
 public sealed class RcloneClient : IDisposable
 {
     private const string Redacted = "***";
+    private const string Withheld = "(rclone's text was withheld because it may contain a password)";
+    private const int MinimumReplaceable = 4;
     private readonly HttpClient _http;
     private readonly Func<bool> _exited;
     private readonly object _secretsLock = new();
@@ -47,15 +49,16 @@ public sealed class RcloneClient : IDisposable
 
     public Uri BaseAddress => _http.BaseAddress!;
 
-    /// <summary>A value that must never appear in an error message or a log line. Empty and very short values are ignored.</summary>
+    /// <summary>
+    /// A value that must never appear in an error message or a log line. One under four characters is not replaced
+    /// inside the text: a text that contains it is withheld whole (<see cref="Redact"/>).
+    /// </summary>
     public void AddSecret(string? secret)
     {
-        // Under four characters a replacement would mangle ordinary words and still hide almost nothing.
-        if (string.IsNullOrEmpty(secret) || secret.Length < 4) return;
+        if (string.IsNullOrEmpty(secret)) return;
         lock (_secretsLock)
         {
             if (_secrets.Contains(secret, StringComparer.Ordinal)) return;
-            // Longest first, so a secret that contains another is replaced whole.
             _secrets = [.. _secrets.Append(secret).OrderByDescending(s => s.Length)];
         }
     }
@@ -68,10 +71,16 @@ public sealed class RcloneClient : IDisposable
     {
         var secrets = Volatile.Read(ref _secrets);
         if (text.Length == 0 || secrets.Length == 0) return text;
+        // A secret under four characters (a short site password) can't be replaced without mangling ordinary words, and
+        // a partial job would point at it. If one occurs at all, none of the text is passed on.
+        foreach (var secret in secrets)
+            if (secret.Length < MinimumReplaceable && text.Contains(secret, StringComparison.Ordinal)) return Withheld;
+
         var hidden = new bool[text.Length];
         var any = false;
         foreach (var secret in secrets)
         {
+            if (secret.Length < MinimumReplaceable) continue;
             for (var at = text.IndexOf(secret, StringComparison.Ordinal); at >= 0; at = text.IndexOf(secret, at + 1, StringComparison.Ordinal))
             {
                 Array.Fill(hidden, true, at, secret.Length);
@@ -107,7 +116,17 @@ public sealed class RcloneClient : IDisposable
 
         using (response)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            string body;
+            try
+            {
+                body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is HttpRequestException or IOException)
+            {
+                // rclone went away half way through its answer (it quits, or crashed).
+                throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone's answer was cut off: {e.Message}", e);
+            }
+
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 try

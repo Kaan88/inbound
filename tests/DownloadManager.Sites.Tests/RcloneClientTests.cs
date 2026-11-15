@@ -108,15 +108,19 @@ public sealed class RcloneClientTests
     }
 
     [Fact]
-    public void AddSecret_ignores_null_empty_and_short_values()
+    public void A_short_secret_withholds_any_text_that_contains_it()
     {
         using var client = new RcloneClient(Base, User, RcPassword, handler: new FakeHandler(_ => Reply(HttpStatusCode.OK, "{}")));
 
         client.AddSecret(null);
         client.AddSecret("");
-        client.AddSecret("abc");
+        Assert.Equal("no secret here", client.Redact("no secret here"));
 
-        Assert.Equal("abc", client.Redact("abc"));
+        client.AddSecret("q7z");
+        Assert.Equal("no secret here", client.Redact("no secret here"));
+        var withheld = client.Redact("login failed for pass=q7z");
+        Assert.DoesNotContain("q7z", withheld);
+        Assert.Contains("withheld", withheld);
     }
 
     [Fact]

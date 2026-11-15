@@ -48,7 +48,8 @@ public sealed class RcloneProcessTests : IDisposable
         Assert.Contains("rcd", cmdline);
         Assert.DoesNotContain("rc-pass", cmdline);
         Assert.DoesNotContain("rc-user", cmdline);
-        Assert.Equal("", rclone.Client.Redact(""));
+        // The client knows the per-start user and password as secrets: a command line holding either would be changed.
+        Assert.Equal(cmdline, rclone.Client.Redact(cmdline));
 
         await rclone.Client.CallAsync("core/version");
         Assert.Empty(Directory.EnumerateFiles(_state, "*.conf", SearchOption.AllDirectories));
@@ -140,9 +141,22 @@ public sealed class RcloneProcessTests : IDisposable
 
         await using var next = await RcloneProcess.StartAsync(RcloneBinary.Path!, _state, Log);
         Assert.False(IsRunning(oldPid));
-        Assert.Contains(_log, l => l.Contains($"pid {oldPid}"));
+        Assert.Contains(_log, l => l.Contains($"Ended an rclone left by an earlier run (pid {oldPid})"));
         Assert.NotEqual(saved, await File.ReadAllTextAsync(pidFile));
         await leftover.DisposeAsync();
+    }
+
+    [RcloneFact]
+    public async Task A_pid_file_whose_start_time_differs_is_left_alone()
+    {
+        // The pid is an rclone, but not the one recorded (as after a pid was reused): it must not be ended.
+        await using var other = await RcloneProcess.StartAsync(RcloneBinary.Path!, _state, Log);
+        var pidFile = Path.Combine(_state, RcloneProcess.PidFileName);
+        var record = RcloneProcess.ReadPidFile(pidFile)!.Value;
+        await File.WriteAllTextAsync(pidFile, $"{record.Pid}\n{record.StartTicks + 1}");
+        RcloneProcess.EndLeftover(pidFile, Log);
+        Assert.True(IsRunning(other.ProcessId));
+        Assert.False(File.Exists(pidFile));
     }
 
     [RcloneFact]

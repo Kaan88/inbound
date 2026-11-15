@@ -129,7 +129,7 @@ public sealed class RcloneSupervisorTests
         Assert.Contains("5 times in a row", error.Message);
         Assert.Equal(RcloneSupervisor.MaxRestarts, factory.Started);
 
-        supervisor.Reset();
+        await supervisor.ResetAsync();
         Assert.Equal(RcloneState.Off, supervisor.Status.State);
         using (await supervisor.AcquireAsync()) { }
         Assert.Equal(RcloneSupervisor.MaxRestarts + 1, factory.Started);

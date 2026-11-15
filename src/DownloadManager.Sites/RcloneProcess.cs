@@ -44,9 +44,11 @@ public sealed class RcloneProcess : IRcloneInstance
     private readonly string _pidFile;
     private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Queue<string> _recentLines = new();
+    private readonly Action<string>? _log;
 
-    private RcloneProcess(Process process, ChildLifetime lifetime, RcloneClient client, string pidFile)
+    private RcloneProcess(Process process, ChildLifetime lifetime, RcloneClient client, string pidFile, Action<string>? log)
     {
+        _log = log;
         _process = process;
         _lifetime = lifetime;
         Client = client;
@@ -156,11 +158,10 @@ public sealed class RcloneProcess : IRcloneInstance
         var client = new RcloneClient(new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/"), user, password,
             () => Volatile.Read(ref exitedFlag) == 1);
         client.AddSecret(user);
-        var rclone = new RcloneProcess(process, lifetime, client, pidFile)
+        var rclone = new RcloneProcess(process, lifetime, client, pidFile, log)
         {
             TiedByKernel = setpriv is not null || lifetime.InJob,
         };
-        rclone.WritePidFile();
         _ = rclone.PumpAsync(process.StandardError, log);
         _ = rclone.PumpAsync(process.StandardOutput, log);
         _ = Task.Run(async () =>
@@ -173,8 +174,14 @@ public sealed class RcloneProcess : IRcloneInstance
 
         try
         {
+            // Inside the try: a pid file that can't be written must not leave a started rclone behind unwatched.
+            rclone.WritePidFile();
             await rclone.WaitReadyAsync(startTimeout, cancellationToken).ConfigureAwait(false);
-            log?.Invoke($"rclone started (pid {process.Id}, port {port}{(rclone.TiedByKernel ? "" : ", not tied by the system")}).");
+            log?.Invoke($"rclone started (pid {process.Id}, port {port}).");
+            if (!rclone.TiedByKernel)
+                log?.Invoke(OperatingSystem.IsLinux()
+                    ? "Warning: setpriv (util-linux) was not found, so rclone is not ended by the system if the Host crashes; the next start ends it."
+                    : "Warning: rclone could not be put in a job object, so it is not ended by the system if the Host crashes; the next start ends it.");
             return rclone;
         }
         catch
@@ -238,34 +245,37 @@ public sealed class RcloneProcess : IRcloneInstance
 
     public async Task<bool> StopAsync(TimeSpan grace)
     {
-        var quit = false;
-        if (!_exited.Task.IsCompleted && grace > TimeSpan.Zero)
+        var quit = _exited.Task.IsCompleted;
+        try
         {
-            try
+            if (!quit && grace > TimeSpan.Zero)
             {
-                using var ask = new CancellationTokenSource(grace);
-                await Client.CallAsync("core/quit", null, ask.Token).ConfigureAwait(false);
+                try
+                {
+                    using var ask = new CancellationTokenSource(grace);
+                    await Client.CallAsync("core/quit", null, ask.Token).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Anything: it may close the connection as it quits. The wait below decides, and the kill follows.
+                }
+
+                quit = await Task.WhenAny(_exited.Task, Task.Delay(grace)).ConfigureAwait(false) == _exited.Task;
             }
-            catch (Exception e) when (e is RcloneUnavailableException or RcloneCallException or OperationCanceledException)
+        }
+        finally
+        {
+            if (!quit)
             {
-                // It may close the connection as it quits; the wait below decides.
+                try { _process.Kill(entireProcessTree: true); }
+                catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+                if (await Task.WhenAny(_exited.Task, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false) != _exited.Task)
+                    _log?.Invoke($"rclone (pid {_process.Id}) did not end 10 s after it was killed.");
             }
 
-            quit = await Task.WhenAny(_exited.Task, Task.Delay(grace)).ConfigureAwait(false) == _exited.Task;
-        }
-        else if (_exited.Task.IsCompleted)
-        {
-            quit = true;
+            DeletePidFile();
         }
 
-        if (!quit)
-        {
-            try { _process.Kill(entireProcessTree: true); }
-            catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
-            await _exited.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-        }
-
-        DeletePidFile();
         return quit;
     }
 
@@ -278,10 +288,16 @@ public sealed class RcloneProcess : IRcloneInstance
 
     public async ValueTask DisposeAsync()
     {
-        if (!_exited.Task.IsCompleted) await StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        _lifetime.Dispose();
-        Client.Dispose();
-        _process.Dispose();
+        try
+        {
+            if (!_exited.Task.IsCompleted) await StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifetime.Dispose();
+            Client.Dispose();
+            _process.Dispose();
+        }
     }
 
     private async Task PumpAsync(StreamReader reader, Action<string>? log)
@@ -317,8 +333,15 @@ public sealed class RcloneProcess : IRcloneInstance
 
     private void WritePidFile()
     {
-        var text = string.Join('\n', _process.Id.ToString(CultureInfo.InvariantCulture),
-            StartTicks(_process)?.ToString(CultureInfo.InvariantCulture) ?? "0");
+        // Without a start time a later sweep could not tell this rclone from a process that reused its pid, so it would
+        // never end it; say so instead of writing a record that can't match.
+        if (StartTicks(_process) is not { } ticks)
+        {
+            _log?.Invoke("rclone's start time could not be read; a copy left by a crash will not be ended at the next start.");
+            return;
+        }
+
+        var text = string.Join('\n', _process.Id.ToString(CultureInfo.InvariantCulture), ticks.ToString(CultureInfo.InvariantCulture));
         var temp = _pidFile + ".tmp";
         File.WriteAllText(temp, text);
         File.Move(temp, _pidFile, overwrite: true);
