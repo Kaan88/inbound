@@ -58,7 +58,13 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     public void ShowJob(Guid jobId) => LaunchUi([UiArguments.ShowJob, jobId.ToString("D")]);
 
     /// <summary>Whether this Host runs in a desktop session (X11 or Wayland), where a file manager can be shown.</summary>
+    /// <remarks>
+    /// macOS has no DISPLAY: a Mac's Host runs in the user's own session with Finder there, so it has one. Without this
+    /// the extension's double-click (job.open) and Open containing folder (job.reveal) were refused on a Mac with
+    /// "Opening a file is not available here." (EXT.B9).
+    /// </remarks>
     internal static bool HasDesktopSession() =>
+        OperatingSystem.IsMacOS() ||
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) ||
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY"));
 
