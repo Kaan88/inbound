@@ -1,0 +1,86 @@
+using DownloadManager.Contracts;
+
+namespace DownloadManager.Desktop.WinUI;
+
+/// <summary>What a Sites call came to: the Host's answer, or words for the user when none came.</summary>
+internal sealed record SitesReply<T>(T? Value, string? Error) where T : class
+{
+    public bool Reached => Value is not null;
+}
+
+// The Sites commands of the Host (sites.*, remote-sites.md). The Host answers them to this PC's desktop role only, so a
+// client that follows another server must use a client of this PC's Host (the Options window does).
+internal sealed partial class RemoteClient
+{
+    /// <summary>The switch, the rclone state or a saved site changed on the Host. Raised on the UI thread.</summary>
+    public event Action<SitesChangedDto>? SitesChanged;
+
+    private static readonly TimeSpan SitesTestTime = TimeSpan.FromSeconds(75);
+    private static readonly TimeSpan SitesInstallTime = TimeSpan.FromMinutes(10);
+
+    public Task<SitesReply<SitesStatusDto>> GetSitesAsync(CancellationToken cancellationToken = default)
+        => SitesQuickAsync<EmptyPayload, SitesStatusDto>(SitesMessageTypes.Get, new EmptyPayload(), SitesMessageTypes.Status, cancellationToken);
+
+    public Task<SitesReply<SitesStatusDto>> SetSitesAsync(SitesSetEnabledRequest request, CancellationToken cancellationToken = default)
+        => SitesQuickAsync<SitesSetEnabledRequest, SitesStatusDto>(SitesMessageTypes.SetEnabled, request, SitesMessageTypes.Status, cancellationToken);
+
+    public Task<SitesReply<SitesStatusDto>> CheckRcloneAsync(CancellationToken cancellationToken = default)
+        => SitesSlowAsync<EmptyPayload, SitesStatusDto>(SitesMessageTypes.RcloneCheck, new EmptyPayload(), SitesMessageTypes.Status, SitesTestTime, cancellationToken);
+
+    /// <summary>Downloads and installs rclone; <paramref name="version"/> null is the best one. Returns when it is done.</summary>
+    public Task<SitesReply<SitesStatusDto>> InstallRcloneAsync(string? version, CancellationToken cancellationToken = default)
+        => SitesSlowAsync<SitesRcloneInstallRequest, SitesStatusDto>(SitesMessageTypes.RcloneInstall,
+            new SitesRcloneInstallRequest { Version = version }, SitesMessageTypes.Status, SitesInstallTime, cancellationToken);
+
+    public Task<SitesReply<SitesListDto>> ListSitesAsync(CancellationToken cancellationToken = default)
+        => SitesQuickAsync<EmptyPayload, SitesListDto>(SitesMessageTypes.ListRequest, new EmptyPayload(), SitesMessageTypes.List, cancellationToken);
+
+    public Task<SitesReply<SiteKindsDto>> GetSiteKindsAsync(CancellationToken cancellationToken = default)
+        => SitesQuickAsync<EmptyPayload, SiteKindsDto>(SitesMessageTypes.KindsRequest, new EmptyPayload(), SitesMessageTypes.Kinds, cancellationToken);
+
+    /// <summary>The secrets in <paramref name="request"/> go into this one message and are not kept here.</summary>
+    public async Task<SiteResultDto> SaveSiteAsync(SiteSaveRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteSaveRequest, SiteResultDto>(SitesMessageTypes.Save, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    public async Task<SiteResultDto> RemoveSiteAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Remove, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    public async Task<SiteResultDto> TrustSiteAsync(string id, IEnumerable<string> entries, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteTrustRequest, SiteResultDto>(SitesMessageTypes.Trust,
+            new SiteTrustRequest { Id = id, Entries = entries.ToList() }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    public async Task<SiteResultDto> TestSiteAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Test, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
+
+    public async Task<SiteProbeResultDto> ProbeSiteAsync(string host, int port, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteProbeRequest, SiteProbeResultDto>(SitesMessageTypes.Probe,
+            new SiteProbeRequest { Host = host, Port = port }, SitesMessageTypes.ProbeResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteProbeResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    private static SiteResultDto SiteResult(SitesReply<SiteResultDto> reply)
+        => reply.Value ?? new SiteResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+
+    private async Task<SitesReply<TResult>> SitesQuickAsync<TRequest, TResult>(string type, TRequest request, string replyType, CancellationToken cancellationToken)
+        where TResult : class
+    {
+        string? failure = null;
+        var value = await QuickAsync<TRequest, TResult?>(type, request, replyType, error => { failure = error; return null; }, cancellationToken).ConfigureAwait(false);
+        return new SitesReply<TResult>(value, value is null ? failure ?? RemoteText.HostUnreadable : null);
+    }
+
+    private async Task<SitesReply<TResult>> SitesSlowAsync<TRequest, TResult>(string type, TRequest request, string replyType, TimeSpan timeout, CancellationToken cancellationToken)
+        where TResult : class
+    {
+        string? failure = null;
+        var value = await SlowAsync<TRequest, TResult?>(type, request, replyType, error => { failure = error; return null; }, cancellationToken, timeout).ConfigureAwait(false);
+        return new SitesReply<TResult>(value, value is null ? failure ?? RemoteText.HostUnreadable : null);
+    }
+
+    private void RaiseSitesChanged(IpcMessage message)
+    {
+        var change = message.GetPayload<SitesChangedDto>();
+        _post(() => SitesChanged?.Invoke(change));
+    }
+}

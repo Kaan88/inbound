@@ -1172,6 +1172,10 @@ internal sealed partial class RemoteClient : IAsyncDisposable
             {
                 RaiseWebUiChanged(message);
             }
+            else if (message.Type == SitesMessageTypes.Changed)
+            {
+                RaiseSitesChanged(message);
+            }
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
