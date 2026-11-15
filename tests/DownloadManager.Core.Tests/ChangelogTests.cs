@@ -19,7 +19,7 @@ public sealed class ChangelogTests
     private static readonly string ChangelogPath = Path.Combine("src", "DownloadManager.Contracts", "Changelog", "changelog.json");
 
     /// <summary>The tags changelog.json may use (docs\release-builds.md); a provider's id is the provider tag.</summary>
-    public static readonly string[] AllowedTags = ["all", "windows", "webui", "server", "docker", "linux", "extension", "torrents", "torbox"];
+    public static readonly string[] AllowedTags = ["all", "desktop", "windows", "webui", "server", "docker", "linux", "extension", "torrents", "torbox"];
 
     [Fact]
     public void EveryAllowedTagIsAPlaceTorrentsOrAProvider()
@@ -83,6 +83,7 @@ public sealed class ChangelogTests
                 [
                     new ChangelogItem { Text = "Everywhere", Tags = ["all"] },
                     new ChangelogItem { Text = "Window only", Tags = ["windows"] },
+                    new ChangelogItem { Text = "Both windows", Tags = ["desktop"] },
                     new ChangelogItem { Text = "Web only", Tags = ["webui"] },
                     new ChangelogItem { Text = "Docker only", Tags = ["docker"] },
                     new ChangelogItem { Text = "Extension only", Tags = ["extension"] },
@@ -103,7 +104,7 @@ public sealed class ChangelogTests
         var shown = Assert.Single(view.Versions);
         var section = Assert.Single(shown.Sections);
         Assert.Equal("New", section.Title);
-        Assert.Equal(["Everywhere", "Window only"], section.Lines);
+        Assert.Equal(["Everywhere", "Window only", "Both windows"], section.Lines);
         Assert.Equal(["Web UI · Web only", "Server · Docker only", "Extension · Extension only", "Extension · Extension fix"],
             view.Elsewhere.Select(line => $"{line.Place} · {line.Text}"));
         Assert.Equal("4 changes in the web UI, the server and the browser extension", view.ElsewhereText);
@@ -113,7 +114,7 @@ public sealed class ChangelogTests
     public void TorrentAndTorBoxLinesShowOnlyWhenTurnedOn()
     {
         var view = ChangelogFilter.For([Sample()], ChangelogSurface.Windows, new ChangelogFeatures(true, ["torbox"]));
-        Assert.Equal(["Everywhere", "Window only", "Window torrents", "Window TorBox", "No place tag"], view.Versions[0].Sections[0].Lines);
+        Assert.Equal(["Everywhere", "Window only", "Both windows", "Window torrents", "Window TorBox", "No place tag"], view.Versions[0].Sections[0].Lines);
     }
 
     [Fact]
@@ -123,6 +124,8 @@ public sealed class ChangelogTests
         Assert.Equal(["Everywhere", "Web only", "Docker only"], view.Versions[0].Sections[0].Lines);
         Assert.DoesNotContain(view.Elsewhere, line => line.Text.Contains("Linux"));
         Assert.Contains(view.Elsewhere, line => line.Place == "Windows" && line.Text == "Window only");
+        Assert.Contains(view.Elsewhere, line => line.Place == "Desktop" && line.Text == "Both windows");
+        Assert.Contains("the desktop app", view.ElsewhereText);
     }
 
     [Fact]
@@ -181,7 +184,7 @@ public sealed class ChangelogTests
         var notes = UpdateNotes.From(Sample());
         var words = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []));
         Assert.Equal("What 9.1.0 changes in this app", words.Header);
-        Assert.Equal(["Everywhere", "Window only"], words.Lines);
+        Assert.Equal(["Everywhere", "Window only", "Both windows"], words.Lines);
         Assert.Equal("Also 4 changes in the web UI, the server and the browser extension.", words.Also);
 
         var none = WhatsNewRules.UpdateNotes(null, "9.1.0", new ChangelogFeatures(true, ["torbox"]));
@@ -191,7 +194,10 @@ public sealed class ChangelogTests
         // The Linux window (same code) lists its own lines and counts the Windows app's with the others.
         var linux = WhatsNewRules.UpdateNotes(notes, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.Linux);
         Assert.Equal("What 9.1.0 changes in this app", linux.Header);
-        Assert.Equal(["Everywhere", "Linux only"], linux.Lines);
+        Assert.Equal(["Everywhere", "Both windows", "Linux only"], linux.Lines);
+        // A manifest carries no desktop tag: an app from before it would take it for a provider and hide the line.
+        Assert.DoesNotContain(notes, line => line.Tags.Contains("desktop"));
+        Assert.Equal(["windows", "linux"], notes.Single(line => line.Text == "Both windows").Tags);
         Assert.Equal("Also 5 changes in the Windows app, the web UI, the server and the browser extension.", linux.Also);
     }
 
@@ -200,7 +206,7 @@ public sealed class ChangelogTests
     {
         var view = ChangelogFilter.For([Sample()], ChangelogSurface.Linux, new ChangelogFeatures(true, ["torbox"]));
         // A line tagged windows and torrents is the Windows app's; one with no place tag is everyone's.
-        Assert.Equal(["Everywhere", "Linux only", "No place tag"], view.Versions[0].Sections[0].Lines);
+        Assert.Equal(["Everywhere", "Both windows", "Linux only", "No place tag"], view.Versions[0].Sections[0].Lines);
         Assert.Contains(view.Elsewhere, line => line.Place == "Windows" && line.Text == "Window only");
         Assert.DoesNotContain(view.Elsewhere, line => line.Text == "Linux only");
         // The Windows app still neither shows nor counts Linux lines.

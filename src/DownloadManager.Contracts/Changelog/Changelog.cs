@@ -43,6 +43,9 @@ public sealed class ChangelogDto
 public static class ChangelogTags
 {
     public const string All = "all";
+    /// <summary>The desktop window on both systems (one code base): the Windows app and the Linux window show it.</summary>
+    public const string Desktop = "desktop";
+    /// <summary>The Windows app only (Setup, the tray, Windows itself).</summary>
     public const string Windows = "windows";
     public const string WebUi = "webui";
     public const string Server = "server";
@@ -53,7 +56,7 @@ public static class ChangelogTags
     /// <summary>A line about torrents downloaded by the app: shown only while torrents are on.</summary>
     public const string Torrents = "torrents";
 
-    public static readonly IReadOnlyList<string> Places = [All, Windows, WebUi, Server, Docker, Linux, Extension];
+    public static readonly IReadOnlyList<string> Places = [All, Desktop, Windows, WebUi, Server, Docker, Linux, Extension];
 
     /// <summary>
     /// Any other tag is a provider's id (as <c>RemoteAccountDto.Provider</c> names it): a line about that provider's

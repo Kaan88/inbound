@@ -35,10 +35,10 @@ public sealed record ChangelogView(IReadOnlyList<ChangelogShownVersion> Versions
 }
 
 /// <summary>
-/// UPD.N1: which changelog lines an app shows. The Windows app shows lines tagged <c>windows</c> or <c>all</c>; the web UI
-/// <c>webui</c>, <c>server</c>, <c>docker</c> or <c>all</c>. Lines about torrents show only while torrents are on, about
-/// a provider only while an account of it is set. The Linux window shows <c>linux</c> or <c>all</c>; the other two never
-/// show or count Linux lines. What is left (the extension, the other app) is folded under one line. The web UI has the
+/// UPD.N1: which changelog lines an app shows. The Windows app shows lines tagged <c>desktop</c>, <c>windows</c> or
+/// <c>all</c>; the Linux window <c>desktop</c>, <c>linux</c> or <c>all</c>; the web UI <c>webui</c>, <c>server</c>,
+/// <c>docker</c> or <c>all</c>. Lines about torrents show only while torrents are on, about
+/// a provider only while an account of it is set. The Windows app and the web UI never show or count Linux-only lines. What is left (the extension, the other app) is folded under one line. The web UI has the
 /// same rules in <c>webui/src/lib/whatsNew.ts</c>.
 /// </summary>
 public static class ChangelogFilter
@@ -102,8 +102,8 @@ public static class ChangelogFilter
         if (places.Count == 0 || places.Contains(ChangelogTags.All)) return Here;
         var mine = surface switch
         {
-            ChangelogSurface.Windows => new[] { ChangelogTags.Windows },
-            ChangelogSurface.Linux => new[] { ChangelogTags.Linux },
+            ChangelogSurface.Windows => new[] { ChangelogTags.Desktop, ChangelogTags.Windows },
+            ChangelogSurface.Linux => new[] { ChangelogTags.Desktop, ChangelogTags.Linux },
             _ => new[] { ChangelogTags.WebUi, ChangelogTags.Server, ChangelogTags.Docker },
         };
         if (places.Any(place => mine.Contains(place))) return Here;
@@ -115,6 +115,7 @@ public static class ChangelogFilter
 
     private static string Label(string place) => place switch
     {
+        ChangelogTags.Desktop => "Desktop",
         ChangelogTags.Windows => "Windows",
         ChangelogTags.WebUi => "Web UI",
         ChangelogTags.Extension => "Extension",
@@ -123,6 +124,7 @@ public static class ChangelogFilter
 
     private static string PlaceName(string label) => label switch
     {
+        "Desktop" => "the desktop app",
         "Windows" => "the Windows app",
         "Web UI" => "the web UI",
         "Extension" => "the browser extension",

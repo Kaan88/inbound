@@ -10,6 +10,15 @@ an-update dialog. The Linux window kept no last-seen mark before, so its first s
 version. Core `ChangelogTests` 33 pass (3 new or changed); the Uno project builds on Linux. Not seen in a running
 window; the WinUI build was not run (the change is shared code, built here only through Uno and the tests).
 
+Owner, same day: the two windows share most of the changelog, so the lines should be tagged for both. Done: a
+`desktop` tag (both windows). 54 of the 62 lines tagged `windows` are now `desktop`; 8 stay `windows`. The filter,
+the web UI's copy (`whatsNew.ts`, folds it as "the desktop app") and `docs/release-builds.md` know it. An update
+manifest writes `desktop` as `windows` and `linux` (`UpdateNotes.From`): a 0.7.7 or older app would read `desktop` as
+a provider's id and hide the line. `ChangelogTests` 33 pass, `whats-new.test.ts` 11 pass, web UI type check clean,
+the AppImage builds. The whole Core test project has 31 failures on Linux in tests about Windows paths and commands,
+none in the changelog tests; not looked into. A temporary AppImage of this state was put on the owner's Desktop to
+look at; not a release.
+
 ### Release 0.7.7: Delete from TorBox on every item in My TorBox (owner, 2026-11-14)
 
 The owner did not find Delete from TorBox in My TorBox on 0.7.6: TB.F16 had put it in the main list's menu, and in My

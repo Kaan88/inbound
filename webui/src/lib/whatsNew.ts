@@ -1,6 +1,7 @@
 // UPD.N1: What's new in the web UI. The server sends its changelog (changelog.get); the page shows the lines about the
 // web UI and the server (tagged webui, server, docker or all), folds the rest under one line, and hides torrent lines
-// while torrents are off, TorBox lines without an account and Linux lines always. The desktop window has the same rules
+// while torrents are off, TorBox lines without an account and Linux-only lines always. A desktop line (both windows) is
+// folded as the desktop app's. The desktop window has the same rules
 // (src/DownloadManager.Contracts/Changelog/ChangelogFilter.cs).
 //
 // It opens by itself once per browser per server, after the server's version changed. The version last seen is kept in
@@ -56,10 +57,10 @@ export interface WhatsNewView {
   elsewhere: ElsewhereLine[];
 }
 
-const places = ['all', 'windows', 'webui', 'server', 'docker', 'linux', 'extension'];
+const places = ['all', 'desktop', 'windows', 'webui', 'server', 'docker', 'linux', 'extension'];
 const mine = ['webui', 'server', 'docker'];
-const labels: Record<string, string> = { windows: 'Windows', webui: 'Web UI', extension: 'Extension' };
-const placeNames: Record<string, string> = { Windows: 'the Windows app', 'Web UI': 'the web UI', Extension: 'the browser extension', Server: 'the server' };
+const labels: Record<string, string> = { desktop: 'Desktop', windows: 'Windows', webui: 'Web UI', extension: 'Extension' };
+const placeNames: Record<string, string> = { Desktop: 'the desktop app', Windows: 'the Windows app', 'Web UI': 'the web UI', Extension: 'the browser extension', Server: 'the server' };
 
 /** 'here', the label of the place it is folded under, or null when it is hidden. */
 function placeOf(tags: readonly string[], features: Features): string | null {

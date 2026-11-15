@@ -48,6 +48,14 @@ describe("what's new", () => {
     expect(filterChangelog([sample], { torrents: false, providers: ['torbox'] }).versions[0].sections[0].lines).toContain('Web TorBox');
   });
 
+  it('folds a line for both desktop windows as the desktop app, and shows it when it is also the web UI\'s', () => {
+    const both: ChangelogVersion = { version: '9.3.0', sections: [{ title: 'New', items: [{ text: 'a', tags: ['desktop'] }, { text: 'b', tags: ['desktop', 'webui'] }] }] };
+    const view = filterChangelog([both], { torrents: false, providers: [] });
+    expect(view.versions[0].sections[0].lines).toEqual(['b']);
+    expect(view.elsewhere).toEqual([{ place: 'Desktop', text: 'a' }]);
+    expect(elsewhereText(view.elsewhere)).toBe('1 change in the desktop app');
+  });
+
   it('opens nothing when no line is about the web UI', () => {
     const only: ChangelogVersion = { version: '9.2.0', sections: [{ title: 'New', items: [{ text: 'x', tags: ['windows'] }, { text: 'y', tags: ['linux'] }] }] };
     expect(filterChangelog([only], { torrents: true, providers: ['torbox'] }).versions).toEqual([]);

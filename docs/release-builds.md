@@ -76,11 +76,14 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
 - One or two plain sentences per line, as the app talks (`docs/design-guidelines.md`). Plain text only: no Markdown or
   HTML, which would show as typed. At most 400 characters a line and 40 lines a version, since the manifest carries no
   more.
-- Tag each line with where it applies: `windows` (the Windows app), `webui` (the browser web UI), `server` and `docker`
-  (the headless server), `linux` (the Linux app's window), `extension` (the browser extension), or `all`.
+- Tag each line with where it applies: `desktop` (the desktop window, which is one code base for Windows and Linux:
+  the list, menus, dialogs, Options; use this unless the line is about one system only), `windows` (the Windows app
+  only: Setup, the tray, Windows itself), `linux` (the Linux app only: the AppImage, packages), `webui` (the browser
+  web UI), `server` and `docker` (the headless server), `extension` (the browser extension), or `all`.
   Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
-  about the TorBox account (shown only with an account set). The Windows app shows `windows` and `all` lines; the web UI
-  `webui`, `server`, `docker` and `all`. The rest is folded under "N changes in the web UI and the browser extension".
+  about the TorBox account (shown only with an account set). The Windows app shows `desktop`, `windows` and `all` lines; the Linux
+  window `desktop`, `linux` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
+  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line. The rest is folded under "N changes in the web UI and the browser extension".
 - `dotnet test tests\DownloadManager.Core.Tests -c Release --filter ChangelogTests` checks the file: it parses, versions
   go newest first, every tag is known and each version fits a manifest.
 

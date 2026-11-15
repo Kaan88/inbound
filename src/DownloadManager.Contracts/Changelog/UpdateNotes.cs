@@ -48,11 +48,30 @@ public static class UpdateNotes
         return lines.Count == 0 ? null : lines;
     }
 
-    /// <summary>One version's changelog lines, in order, as a manifest carries them.</summary>
+    /// <summary>
+    /// One version's changelog lines, in order, as a manifest carries them. A <c>desktop</c> tag is written as
+    /// <c>windows</c> and <c>linux</c>: the apps that read the manifest are the installed, older ones, and one from before
+    /// the desktop tag (0.7.7 or older) would take it for a provider's id and hide the line. Both windows show a line
+    /// tagged that way, so nothing is lost.
+    /// </summary>
     public static List<ChangelogItem> From(ChangelogVersion version)
         => version.Sections.SelectMany(section => section.Items)
-            .Select(item => new ChangelogItem { Text = item.Text, Tags = item.Tags.ToList() })
+            .Select(item => new ChangelogItem { Text = item.Text, Tags = ForManifest(item.Tags) })
             .ToList();
+
+    private static List<string> ForManifest(IEnumerable<string> tags)
+    {
+        var written = new List<string>();
+        foreach (var tag in tags)
+        {
+            foreach (var one in tag == ChangelogTags.Desktop ? new[] { ChangelogTags.Windows, ChangelogTags.Linux } : [tag])
+            {
+                if (!written.Contains(one)) written.Add(one);
+            }
+        }
+
+        return written;
+    }
 
     /// <summary>Why these lines can't go into a manifest as they are (too many, too long, unknown tags); null when they can.</summary>
     public static string? Problem(IReadOnlyList<ChangelogItem> lines)
