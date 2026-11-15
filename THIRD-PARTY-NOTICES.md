@@ -14,7 +14,7 @@ licence text is. Inbound's own licence is in `LICENSE`.
 | OpenSSL | as pinned by the vcpkg baseline in `native/torrent-worker` | Apache License 2.0 | built into `inbound-torrent` (encrypted torrent connections) | https://www.openssl.org/source/license.html |
 | .NET runtime and ASP.NET Core, by Microsoft and the .NET Foundation | 10.0 | MIT | every program (self-contained where it is published that way), the Docker base image | https://github.com/dotnet/runtime/blob/main/LICENSE.TXT |
 | Windows App SDK (WinUI 3), by Microsoft | 2.6.5 | MIT | the Windows window | https://github.com/microsoft/WindowsAppSDK/blob/main/LICENSE |
-| Uno Platform, with SkiaSharp and HarfBuzzSharp | Uno.Sdk 6.7.45 | Apache License 2.0 (Uno); MIT (SkiaSharp, HarfBuzzSharp); BSD-3-Clause (Skia) | the Linux window (AppImage) | https://github.com/unoplatform/uno/blob/master/License.md |
+| Uno Platform, with SkiaSharp and HarfBuzzSharp | Uno.Sdk 6.7.49 | Apache License 2.0 (Uno); MIT (SkiaSharp, HarfBuzzSharp); BSD-3-Clause (Skia) | the Linux window (AppImage) | https://github.com/unoplatform/uno/blob/master/License.md |
 | Tmds.DBus.Protocol, by Tom Deseyn | 0.95.2 | MIT | the Linux window and Host (tray, key store, desktop settings) | https://github.com/tmds/Tmds.DBus/blob/main/LICENSE |
 | Svelte, by the Svelte contributors | 5.57.3 | MIT | the web UI's script (`wwwroot`) | https://github.com/sveltejs/svelte/blob/main/LICENSE.md |
 | Tailwind CSS, by Tailwind Labs | 4.3.5 | MIT | the web UI's style sheet | https://github.com/tailwindlabs/tailwindcss/blob/main/LICENSE |
