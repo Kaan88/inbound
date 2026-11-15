@@ -652,8 +652,8 @@ whether rclone is a Setup component that can be unticked.
 - Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
   signed APK on the releases page with an update check. Nothing waits for the owner.
 - Was waiting for the owner (answered above): the performance pass marks, the
-  oldest Android version, how the app is handed out. Left in the mockup: re-export 9 screens at full size, the
-  3 missing ones and the board (Figma's call limit ran out).
+  oldest Android version, how the app is handed out. Left in the mockup: all 22 screens now have an image; re-export
+  12 of them and the board at full size (Figma's call limit ran out).
 
 ## Possible later features (owner, 2026-11-12: recorded for later reference, not started)
 

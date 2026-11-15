@@ -17,13 +17,14 @@ found out first, and the order of work. ROADMAP section "Android app" tracks the
 ## 2. The mockup
 
 Figma file: <https://www.figma.com/design/OOujeLSw6cddv52YlnzVm1> ("Inbound for Android — Material You", in the
-Figma account's drafts; share it from Figma to let others open it). Press Present for the three animated flows:
+Figma account's drafts; the link opened in a browser that was not signed in, so anyone who has it can view the file).
+Press Present for the three animated flows:
 1 Download on the phone, 2 Catch a link from a browser, 3 Queues, sites and hosts.
 
-The images below are exports of the Figma screens, in `docs/plans/android-mockups/`. Ten are full size. Nine are
-smaller captures taken while building, because Figma's call limit on the free plan ran out during export. Three
-screens (B6 Expired link, C6 Managing another host, C8 Light theme) and a readable "How it works" board have no image
-yet; see them in Figma. **Left:** export those again when the limit resets.
+The images below are exports of the Figma screens, in `docs/plans/android-mockups/`. Ten are full size. Twelve are
+smaller captures (nine taken while building, three taken from the Figma page in a browser), because Figma's call
+limit on the free plan ran out during export. The "How it works" board has only a small overview; read it in Figma.
+**Left:** export the twelve and the board at full size when the limit resets.
 
 ### A. Downloading on the phone
 
@@ -37,15 +38,19 @@ yet; see them in Figma. **Left:** export those again when the limit resets.
 
 ### B. Catching links
 
-| B1 Share to Inbound | B2 Caught | B3 Signed-in downloads | B4 All links on a page | B5 Select several |
-| --- | --- | --- | --- | --- |
-| <img src="android-mockups/b1-share.png" width="200"> | <img src="android-mockups/b2-caught.png" width="200"> | <img src="android-mockups/b3-signed-in.png" width="200"> | <img src="android-mockups/b4-all-links.png" width="200"> | <img src="android-mockups/b5-select.png" width="200"> |
+| B1 Share to Inbound | B2 Caught | B3 Signed-in downloads | B4 All links on a page | B5 Select several | B6 Expired link |
+| --- | --- | --- | --- | --- | --- |
+| <img src="android-mockups/b1-share.png" width="200"> | <img src="android-mockups/b2-caught.png" width="200"> | <img src="android-mockups/b3-signed-in.png" width="200"> | <img src="android-mockups/b4-all-links.png" width="200"> | <img src="android-mockups/b5-select.png" width="200"> | <img src="android-mockups/b6-expired-link.png" width="200"> |
 
 ### C. Queues, sites, hosts and settings
 
-| C1 Queues | C2 Schedule | C3 Sites | C4 Browse a site | C5 Switch host | C7 Settings |
-| --- | --- | --- | --- | --- | --- |
-| <img src="android-mockups/c1-queues.png" width="200"> | <img src="android-mockups/c2-schedule.png" width="200"> | <img src="android-mockups/c3-sites.png" width="200"> | <img src="android-mockups/c4-site-browser.png" width="200"> | <img src="android-mockups/c5-switch-host.png" width="200"> | <img src="android-mockups/c7-settings.png" width="200"> |
+| C1 Queues | C2 Schedule | C3 Sites | C4 Browse a site |
+| --- | --- | --- | --- |
+| <img src="android-mockups/c1-queues.png" width="200"> | <img src="android-mockups/c2-schedule.png" width="200"> | <img src="android-mockups/c3-sites.png" width="200"> | <img src="android-mockups/c4-site-browser.png" width="200"> |
+
+| C5 Switch host | C6 Managing another host | C7 Settings | C8 Light theme |
+| --- | --- | --- | --- |
+| <img src="android-mockups/c5-switch-host.png" width="200"> | <img src="android-mockups/c6-remote-host.png" width="200"> | <img src="android-mockups/c7-settings.png" width="200"> | <img src="android-mockups/c8-light.png" width="200"> |
 
 ### How it works (overview of the Figma board)
 
