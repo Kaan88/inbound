@@ -427,6 +427,13 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AM. PERF.9 fix: bytes before a reset were lost** (2026-11-15, main). CI on Linux failed
+  `EngineRecoveryTests.ASegmentThatGetsBytesOnItsLastAllowedAttemptStillRetries` after the 0.8.0 tag: the reader now
+  gathers up to 64 KB before a write, and when a read failed (a server resetting the connection) the bytes already
+  gathered were dropped, so a segment that only ever got a little before each reset made no progress and ran out of
+  attempts. `TransferReader.FillAsync` now hands over what it has and gives the failure with the next call. New
+  `TransferReaderTests` (4) force the case; engine tests 214 pass on Windows. The unpublished 0.8.0 draft is to be made
+  again from this commit once CI passes on Linux.
 - **AL. Release 0.8.0 tagged** (2026-11-15). `main` and `v0.8.0` at `aac4b82`, pushed with the owner's go-ahead; the
   Windows workflow makes the draft release for the owner to finish and publish (Firefox add-on from the earlier
   release, as before). Setup built locally first: 68.2 MB, the install folder 253 MB with the notices, the Native AOT

@@ -37,17 +37,39 @@ internal sealed class TransferReader : IDisposable
     /// </summary>
     public async ValueTask<int> FillAsync(int atLeast)
     {
+        // A read that failed after earlier bytes came in was held back (below); it is the answer now.
+        if (_heldBack is { } held)
+        {
+            _heldBack = null;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(held).Throw();
+        }
+
         atLeast = Math.Clamp(atLeast, 1, Buffer.Length);
         var filled = 0;
         while (filled < atLeast)
         {
-            var read = await ReadOnceAsync(Buffer[filled..]).ConfigureAwait(false);
+            int read;
+            try
+            {
+                read = await ReadOnceAsync(Buffer[filled..]).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (filled > 0)
+            {
+                // The bytes that came before the failure (a connection reset, a stall) are handed over first, so they
+                // are written and count as progress, as they did when every read was written at once; the failure
+                // comes with the next call. A failed read only ever wrote past `filled`, so they are intact.
+                _heldBack = ex;
+                return filled;
+            }
+
             if (read == 0) break;
             filled += read;
         }
 
         return filled;
     }
+
+    private Exception? _heldBack;
 
     private async ValueTask<int> ReadOnceAsync(Memory<byte> into)
     {
