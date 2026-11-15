@@ -58,6 +58,9 @@ internal static class UnoScreens
     // (uno_desktop_top: NSMaxY(NSScreen.screens[0].frame)). Without this the window opened at the unknown-screen size in
     // pixels, which a Retina screen halves (550 by 350 points), and grew to its minimum at the first resize.
 
+    /// <summary>A standard macOS title bar, in points.</summary>
+    private const double MacTitleBarPoints = 28;
+
     private static ScreenRect? MacWorkArea(int? x, int? y)
     {
         var screens = ObjC.Send(ObjC.Class("NSScreen"), ObjC.Selector("screens"));
@@ -74,11 +77,13 @@ internal static class UnoScreens
         {
             var screen = ObjC.SendIndex(screens, ObjC.Selector("objectAtIndex:"), (nuint)i);
             var visible = ObjC.SendRect(screen, ObjC.Selector("visibleFrame")); // less the menu bar and the Dock
+            // Uno's macOS AppWindow sizes are the content's, below the title bar (uno_window_resize adds it): a window
+            // as tall as the visible frame ran a title bar's height under the Dock. The work area leaves room for it.
             monitors.Add(new ScreenRect(
                 (int)Math.Round(visible.X * scale),
                 (int)Math.Round((desktopTop - (visible.Y + visible.Height)) * scale),
                 (int)Math.Round(visible.Width * scale),
-                (int)Math.Round(visible.Height * scale)));
+                (int)Math.Round(Math.Max(0, visible.Height - MacTitleBarPoints) * scale)));
         }
 
         if (x is null || y is null)

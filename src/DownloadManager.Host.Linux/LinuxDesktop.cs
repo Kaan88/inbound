@@ -182,6 +182,13 @@ internal static class AutostartEntry
 
     public static void Apply(bool enabled)
     {
+        // MAC.1: macOS doesn't read XDG autostart entries; a LaunchAgent starts the Host there.
+        if (OperatingSystem.IsMacOS())
+        {
+            MacLoginItem.Apply(enabled);
+            return;
+        }
+
         var path = PathOf();
         if (!enabled)
         {

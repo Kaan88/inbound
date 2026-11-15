@@ -90,6 +90,21 @@ public sealed partial class MainWindow
             _settingsWindow?.Close();
             UiTrace.Write("selftest: Options closed");
 
+            // A short window: the sidebar scrolls (ScrollSidebarOnUno) and its last entry can be reached.
+            await Task.Delay(1000);
+            AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = AppWindow.Size.Width, Height = (int)Math.Round(420 * UnoScreens.Scale()) });
+            await Task.Delay(1500);
+            if (CategoryList.Parent is ScrollViewer sidebar)
+            {
+                UiTrace.Write($"selftest: sidebar extent {sidebar.ExtentHeight:0}, viewport {sidebar.ViewportHeight:0}, scrollable {sidebar.ScrollableHeight:0}");
+                sidebar.ChangeView(null, sidebar.ScrollableHeight, null, disableAnimation: true);
+                await Task.Delay(800);
+                UiTrace.Write($"selftest: sidebar scrolled to {sidebar.VerticalOffset:0} of {sidebar.ScrollableHeight:0}");
+            }
+            else UiTrace.Write("selftest: the sidebar has no ScrollViewer");
+            UiTrace.Write("selftest: short window");
+            await Task.Delay(3000);
+
             // Last, the main window itself, by its close button: the workflow then checks that the process ends.
             await Task.Delay(2000);
             UiTrace.Write($"selftest: click main close at {CloseButtonPoint(this)}");

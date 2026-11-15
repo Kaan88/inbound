@@ -84,6 +84,9 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+#if HAS_UNO
+        ScrollSidebarOnUno();
+#endif
         // The progress, package and completion windows open on this window's screen (U-WL-4).
         WindowCascade.MarkMain(this);
         // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
@@ -530,6 +533,30 @@ public sealed partial class MainWindow : Window
     }
 
     private bool _firstListTraced;
+
+#if HAS_UNO
+    /// <summary>
+    /// Uno's ListBox doesn't scroll its items: with every feature on (torrents, providers, Extractions, Queues) the
+    /// sidebar ran past the bottom of a small window (a 13-inch Mac) and its last entries couldn't be reached. Its own
+    /// ScrollViewer does it here. The Windows ListBox scrolls by itself, so the Windows window is left as it is.
+    /// </summary>
+    private void ScrollSidebarOnUno()
+    {
+        if (CategoryList.Parent is not Grid sidebar) return;
+        var row = Grid.GetRow(CategoryList);
+        sidebar.Children.Remove(CategoryList);
+        var scroller = new ScrollViewer
+        {
+            Content = CategoryList,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled,
+        };
+        Grid.SetRow(scroller, row);
+        sidebar.Children.Add(scroller);
+    }
+#endif
 
     /// <summary>
     /// PERF.5: the cold-open time is measured to the first frame drawn with the list in it, so a start is timed the

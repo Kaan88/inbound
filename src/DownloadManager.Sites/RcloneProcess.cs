@@ -196,7 +196,10 @@ public sealed class RcloneProcess : IRcloneInstance
             if (!rclone.TiedByKernel)
                 log?.Invoke(OperatingSystem.IsLinux()
                     ? "Warning: setpriv (util-linux) was not found, so rclone is not ended by the system if the Host crashes; the next start ends it."
-                    : "Warning: rclone could not be put in a job object, so it is not ended by the system if the Host crashes; the next start ends it.");
+                    : OperatingSystem.IsMacOS()
+                        // macOS has no parent-death signal or job object: rclone outlives a crashed Host until the next start.
+                        ? "rclone is not ended by macOS if the Host crashes; the next start ends it."
+                        : "Warning: rclone could not be put in a job object, so it is not ended by the system if the Host crashes; the next start ends it.");
             return rclone;
         }
         catch

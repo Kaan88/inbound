@@ -67,6 +67,15 @@ case "$1" in
 esac
 # Finder adds -psn_... on old systems; the window doesn't want it.
 case "$1" in -psn_*) shift ;; esac
+# MAC.3: the Host keeps running after its window closes, so a copy of Inbound.app put in place of an older one would
+# be served by the older Host. One of another version is asked to stop first (its downloads go on with the new one).
+mine="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$macos/../Info.plist" 2>/dev/null)"
+running="$("$host/DownloadManager.Cli" host status --no-start 2>/dev/null | sed -n 's/^host \([^ ]*\) .*/\1/p')"
+if [ -n "$mine" ] && [ -n "$running" ] && [ "$running" != "$mine" ]; then
+  "$host/DownloadManager.Cli" host shutdown --no-start >/dev/null 2>&1
+  i=0
+  while [ $i -lt 50 ] && "$host/DownloadManager.Cli" host status --no-start >/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done
+fi
 "$host/inbound-host" --background >/dev/null 2>&1 </dev/null &
 exec "$DOWNLOADMANAGER_UI" "$@"
 EOF

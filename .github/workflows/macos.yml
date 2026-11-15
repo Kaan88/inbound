@@ -178,6 +178,28 @@ jobs:
           pkill -f "$host/inbound-host"; pkill -f "$DOWNLOADMANAGER_DATA/tools/rclone"
           [ -n "$binary" ] && "$binary" version >/dev/null
 
+      - name: A newer copy of the app replaces the running Host (arm64, MAC.3)
+        if: matrix.rid == 'osx-arm64'
+        continue-on-error: true
+        run: |
+          set +e
+          app="$PWD/artifacts/macos/arm64/Inbound.app"
+          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-mac3"
+          "$app/Contents/Resources/host/inbound-host" --background > /dev/null 2>&1 &
+          for i in $(seq 1 30); do "$app/Contents/Resources/host/DownloadManager.Cli" host status --no-start >/dev/null 2>&1 && break; sleep 1; done
+          echo "--- before: $(pgrep -fl 'inbound-host' | sed "s|$PWD/||")"
+          # The same app as another version, put elsewhere: what dragging a new release over Applications leaves.
+          newer="$RUNNER_TEMP/Newer/Inbound.app"
+          mkdir -p "$(dirname "$newer")" && ditto "$app" "$newer"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 9.9.9' "$newer/Contents/Info.plist"
+          "$newer/Contents/MacOS/InboundLauncher" > "$RUNNER_TEMP/mac3.log" 2>&1 &
+          sleep 15
+          hosts="$(pgrep -fl 'inbound-host')"
+          echo "--- after: $hosts"
+          pkill -f 'Newer/Inbound.app/Contents/'; pkill -f "$app/Contents/"
+          echo "$hosts" | grep -q 'Newer/Inbound.app' && ! echo "$hosts" | grep -q "$app/Contents" \
+            && echo "--- the older Host stopped and the newer copy's Host serves" || { echo "--- MAC.3 failed"; exit 1; }
+
       - name: The window draws and its dialogs close (arm64; screenshots and trace in the log)
         if: matrix.rid == 'osx-arm64'
         continue-on-error: true
@@ -218,6 +240,7 @@ jobs:
               cliclick "m:$point" "w:200" "c:$point"
             done
             clicked="$(grep -o 'selftest: click .* at [0-9-]*,[0-9-]*' "$trace" 2>/dev/null)"
+            if grep -q 'selftest: short window' "$trace" && [ ! -f "$RUNNER_TEMP/short.jpg" ]; then shot short; fi
             grep -q 'selftest: click main close' "$trace" && [ -n "$(echo "$clicked" | grep 'main close')" ] && break
             sleep 0.5
           done
