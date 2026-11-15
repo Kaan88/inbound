@@ -172,7 +172,9 @@ public sealed class SiteStore
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
         if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
-            if (SitePaths.Normalize(star) != star) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
+            if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
+        if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
+            throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>
@@ -194,6 +196,8 @@ public sealed class SiteStore
             var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
             var site = JsonSerializer.Deserialize(bytes, SitesJsonContext.Default.SiteRecord);
             if (site is null) return null;
+            // A hand-edited file with "stars": null or "hostKeys": null reads as empty lists, not as a site that breaks sites.list.
+            if (site.Stars is null || site.HostKeys is null) site = site with { Stars = site.Stars ?? [], HostKeys = site.HostKeys ?? [] };
             if (site.SchemaVersion > SiteRecord.CurrentSchemaVersion)
             {
                 _log?.Invoke($"Site file {Path.GetFileName(path)} is from a newer version of Inbound; it is left as it is.");

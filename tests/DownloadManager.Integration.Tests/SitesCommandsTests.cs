@@ -337,6 +337,51 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AStarWithNoPathAndARootStarAreRefused()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+
+        var nullPath = await Send(commands, SitesMessageTypes.Star, new { id = saved.Id, path = (string?)null });
+        Assert.Equal(SitesMessageTypes.Result, nullPath.Type);
+        Assert.False(nullPath.GetPayload<SiteResultDto>().Ok);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "/" })).Ok);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Star, new SiteStarRequest { Id = saved.Id, Path = "/evil\u202Etxt.exe" })).Ok);
+    }
+
+    [Theory]
+    [InlineData("./pub")]
+    [InlineData("/a/../b")]
+    public async Task ASiteFolderWithDotSegmentsIsRefusedOnSave(string folder)
+    {
+        var commands = Open();
+        await On(commands);
+        var request = Site();
+        request.RemoteFolder = folder;
+
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request);
+        Assert.False(refused.Ok);
+        Assert.Contains("folder on the server", refused.Message);
+        Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+    }
+
+    [Fact]
+    public async Task ALaterPageWithoutItsListingIsAskedToStartAgain()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var probe = await Call<SiteProbeResultDto>(commands, SitesMessageTypes.Probe, new SiteProbeRequest { Host = Host, Port = 22 });
+        await Call<SiteResultDto>(commands, SitesMessageTypes.Trust, new SiteTrustRequest { Id = saved.Id, Entries = [probe.Keys[0].Entry] });
+
+        var page = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id, Offset = 500, Listing = "abc" });
+        Assert.False(page.Ok);
+        Assert.Equal(SiteProblems.ListingChanged, page.Problem);
+        Assert.Equal("/pub", page.Path);
+    }
+
+    [Fact]
     public async Task BrowseRefusesBeforeRcloneIsAsked()
     {
         var commands = Open();

@@ -75,6 +75,33 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     ];
 
     [Fact]
+    public async Task TheHelloOffersSitesOnlyToThePipeOfAHostWithSites()
+    {
+        var service = await ServiceAsync();
+        var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
+        _cleanup.Add(new Disposer(profile.Dispose));
+        var with = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            WebSessions = profile.Rights,
+            Sites = new RecordingSites(),
+        };
+        var without = Dispatcher(service);
+        var web = Session();
+        var pipe = Session();
+        var plain = Session();
+        await with.OpenSessionAsync(web, new ClientHelloDto { Role = ClientRoles.Web }, CancellationToken.None);
+        await with.OpenSessionAsync(pipe, new ClientHelloDto(), CancellationToken.None);
+        await without.OpenSessionAsync(plain, new ClientHelloDto(), CancellationToken.None);
+
+        List<string> Offered(MemorySession session) => session.Frames.First(f => f.Type == MessageTypes.ServerHello).GetPayload<HostHelloDto>().Capabilities;
+        Assert.Contains("sites", Offered(pipe));
+        Assert.Equal("sites", Offered(pipe)[^1]);
+        Assert.DoesNotContain("sites", Offered(web));
+        Assert.DoesNotContain("sites", Offered(plain));
+        Assert.Contains("sites", with.Capabilities);
+    }
+
+    [Fact]
     public async Task TheSitesRequestsAreRefusedForAWebSessionAndAnsweredForThePipe()
     {
         var service = await ServiceAsync();

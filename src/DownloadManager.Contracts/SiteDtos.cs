@@ -267,6 +267,12 @@ public static class SiteProblems
 
     /// <summary>Sites is off.</summary>
     public const string Off = "off";
+
+    /// <summary>
+    /// <c>sites.browse</c>: the listing a later page asked for is gone (over a minute old, another folder was listed, or the
+    /// site changed). The client reads the folder again from offset 0.
+    /// </summary>
+    public const string ListingChanged = "listingChanged";
 }
 
 public sealed class SiteResultDto
@@ -323,6 +329,12 @@ public sealed class SiteBrowseRequest
 
     /// <summary>Lists the folder again instead of paging a listing the Host read in the last minute.</summary>
     public bool Refresh { get; set; }
+
+    /// <summary>
+    /// For a page after the first: the <see cref="SiteBrowseResultDto.Listing"/> of the first page. When the Host no longer
+    /// has that listing the reply is <see cref="SiteProblems.ListingChanged"/>, and the client starts again at offset 0.
+    /// </summary>
+    public string? Listing { get; set; }
 }
 
 public sealed class SiteItemDto
@@ -356,6 +368,9 @@ public sealed class SiteBrowseResultDto
     public int Total { get; set; }
 
     public int Offset { get; set; }
+
+    /// <summary>Names the listing these items come from; sent back in <see cref="SiteBrowseRequest.Listing"/> for the next page.</summary>
+    public string? Listing { get; set; }
 }
 
 public sealed class SiteStarRequest

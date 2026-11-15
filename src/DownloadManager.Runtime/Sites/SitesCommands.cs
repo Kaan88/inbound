@@ -48,10 +48,16 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     public const int DefaultPageSize = 500;
     public const int MaxPageSize = 2000;
 
-    private sealed record Listing(string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At);
+    /// <summary>A folder with more items than this is refused rather than held in the Host's memory.</summary>
+    public const int MaxListingItems = 100_000;
 
-    // The last folder listed per site: enough for paging, and nothing grows with browsing.
+    private sealed record Listing(string Token, string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At);
+
+    // The last folder listed per site, dropped after a minute unread: enough for paging, and nothing grows with browsing.
     private readonly Dictionary<string, Listing> _listings = new(StringComparer.Ordinal);
+
+    // Bumped when a site changes, so a listing read before the change is not kept after it.
+    private readonly Dictionary<string, int> _generations = new(StringComparer.Ordinal);
 
     private SitesConfig _config;
     private string? _configProblem;
@@ -233,6 +239,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 _configProblem = null;
                 // Off, or another rclone: the running one stops. With Sites on it starts again when something needs it.
                 if (!next.Enabled || rcloneChanged) await StopRcloneLockedAsync().ConfigureAwait(false);
+                if (!next.Enabled) ForgetAllListings();
                 if (next.Enabled != _config.Enabled || changed) _log(next.Enabled ? "Sites settings saved; Sites is on." : "Sites turned off; rclone stopped.");
             }
         }
@@ -573,15 +580,34 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteBrowseResultDto> BrowseAsync(SiteBrowseRequest request, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteBrowseResultDto { Ok = false, Message = "That site no longer exists." };
-        var path = SitePaths.Normalize(string.IsNullOrEmpty(request.Path) ? site.RemoteFolder : request.Path);
-        if (path is null) return new SiteBrowseResultDto { Ok = false, Message = "That is not a folder path on the server." };
+            return new SiteBrowseResultDto { Ok = false, Message = "That site no longer exists.", Path = request.Path ?? "" };
+        var fromSite = string.IsNullOrEmpty(request.Path);
+        var path = SitePaths.Normalize(fromSite ? site.RemoteFolder : request.Path);
+        if (path is null)
+        {
+            return new SiteBrowseResultDto
+            {
+                Ok = false,
+                Path = request.Path ?? "",
+                Message = fromSite ? "The site's folder on the server is not a usable path; change it in Edit site." : "That is not a folder path on the server.",
+            };
+        }
+
         var limit = request.Limit is < 1 ? DefaultPageSize : Math.Min(request.Limit, MaxPageSize);
         var offset = Math.Max(0, request.Offset);
 
-        var items = request.Refresh || offset == 0 ? null : CachedListing(site.Id, path);
-        if (items is null)
+        Listing listing;
+        if (offset > 0 && !request.Refresh)
         {
+            // A later page comes from the first page's listing or not at all: a fresh listing sliced at the old offset could
+            // repeat or skip items.
+            if (CachedListing(site.Id, path, request.Listing) is not { } cached)
+                return new SiteBrowseResultDto { Ok = false, Problem = SiteProblems.ListingChanged, Path = path, Message = "The folder is read again." };
+            listing = cached;
+        }
+        else
+        {
+            var generation = GenerationOf(site.Id);
             var (listed, failure) = await ListFolderAsync(site, path, cancellationToken).ConfigureAwait(false);
             if (failure is not null)
             {
@@ -596,33 +622,74 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 };
             }
 
-            items = listed!;
-            lock (_listings) _listings[site.Id] = new Listing(path, items, _time.GetUtcNow());
+            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow());
+            StoreListing(site.Id, generation, listing);
         }
 
         return new SiteBrowseResultDto
         {
             Ok = true,
             Path = path,
-            Total = items.Count,
+            Total = listing.Items.Count,
             Offset = offset,
-            Items = [.. items.Skip(offset).Take(limit)],
+            Listing = listing.Token,
+            Items = [.. listing.Items.Skip(offset).Take(limit)],
         };
     }
 
-    private IReadOnlyList<SiteItemDto>? CachedListing(string siteId, string path)
+    /// <summary>The site's listing of that folder when it is the one asked for and still fresh; each page read keeps it a minute longer.</summary>
+    private Listing? CachedListing(string siteId, string path, string? token)
     {
         lock (_listings)
         {
-            return _listings.TryGetValue(siteId, out var listing) && listing.Path == path && _time.GetUtcNow() - listing.At < ListingLifetime
-                ? listing.Items
-                : null;
+            DropExpiredListingsLocked();
+            if (!_listings.TryGetValue(siteId, out var listing) || listing.Path != path || listing.Token != token) return null;
+            _listings[siteId] = listing with { At = _time.GetUtcNow() };
+            return listing;
         }
+    }
+
+    private int GenerationOf(string siteId)
+    {
+        lock (_listings) return _generations.GetValueOrDefault(siteId);
+    }
+
+    /// <summary>
+    /// Keeps a listing unless the site changed (saved, trusted, removed) while it was read: one read from the old server or
+    /// with the old login must not be paged after the change.
+    /// </summary>
+    private void StoreListing(string siteId, int generation, Listing listing)
+    {
+        lock (_listings)
+        {
+            DropExpiredListingsLocked();
+            if (_generations.GetValueOrDefault(siteId) == generation) _listings[siteId] = listing;
+        }
+    }
+
+    private void DropExpiredListingsLocked()
+    {
+        var now = _time.GetUtcNow();
+        foreach (var (id, listing) in _listings.ToArray())
+            if (now - listing.At >= ListingLifetime) _listings.Remove(id);
     }
 
     private void ForgetListings(string siteId)
     {
-        lock (_listings) _listings.Remove(siteId);
+        lock (_listings)
+        {
+            _listings.Remove(siteId);
+            _generations[siteId] = _generations.GetValueOrDefault(siteId) + 1;
+        }
+    }
+
+    private void ForgetAllListings()
+    {
+        lock (_listings)
+        {
+            foreach (var id in _listings.Keys.ToArray()) _generations[id] = _generations.GetValueOrDefault(id) + 1;
+            _listings.Clear();
+        }
     }
 
     /// <summary>Lists one folder through rclone: the items sorted, or the failure as <c>sites.test</c> reports it.</summary>
@@ -650,7 +717,11 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 {
                     ["fs"] = fs,
                     ["remote"] = SitePaths.ToRemote(path),
+                    // Without MIME types rclone need not look at each file's name; Sites shows none.
+                    ["opt"] = new JsonObject { ["noMimeType"] = true },
                 }, cancellationToken).ConfigureAwait(false);
+                if (listing["list"] is JsonArray { Count: > MaxListingItems } big)
+                    return (null, Fail($"The folder holds {big.Count:N0} items, more than Sites can show ({MaxListingItems:N0})."));
                 return (SiteListing.Read(listing), null);
             }
             catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
@@ -682,7 +753,8 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
                 return Fail("That site no longer exists.");
-            if (SitePaths.Normalize(request.Path) is not { } path || request.Path.Length == 0) return Fail("That is not a folder path on the server.");
+            if (string.IsNullOrEmpty(request.Path) || SitePaths.Normalize(request.Path) is not { } path || !SitePaths.IsStarrable(path))
+                return Fail("That folder can't be starred.");
             // Starring a starred folder again keeps its place.
             var stars = site.Stars.Where(s => s != path).ToList();
             if (request.Starred) stars = site.Stars.Contains(path) ? [.. site.Stars] : [.. site.Stars, path];

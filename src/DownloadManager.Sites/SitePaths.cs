@@ -22,6 +22,15 @@ public static class SitePaths
         return "/" + string.Join('/', segments);
     }
 
+    /// <summary>
+    /// A path that may be starred: normalised, not the root, and without format or line/paragraph separator characters
+    /// (right-to-left overrides and the like), which could make a starred name in the sidebar read as another.
+    /// </summary>
+    public static bool IsStarrable(string? path) =>
+        path is { Length: > 1 } && Normalize(path) == path
+        && !path.Any(c => char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.Format
+            or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator);
+
     /// <summary>The <c>remote</c> argument for rclone: the path without its leading slash (<c>""</c> for the root).</summary>
     public static string ToRemote(string normalized) => normalized.TrimStart('/');
 }

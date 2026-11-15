@@ -113,8 +113,18 @@ public sealed class SitesSftpEndToEndTests : IAsyncLifetime
         var a = Assert.Single(first.Items);
         Assert.Equal(("a.txt", false, 1L), (a.Name, a.IsFolder, a.Size));
         Assert.NotNull(a.Modified);
-        var second = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Offset = 1, Limit = 1 });
+        Assert.NotNull(first.Listing);
+        var second = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Offset = 1, Limit = 1, Listing = first.Listing });
+        Assert.True(second.Ok, second.Message);
         Assert.Equal("b.txt", Assert.Single(second.Items).Name);
+        Assert.Equal(first.Listing, second.Listing);
+        // A later page of another listing, or of none, is never served from a fresh one.
+        foreach (var listing in new[] { null, "0123" })
+        {
+            var stale = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Offset = 1, Limit = 1, Listing = listing });
+            Assert.Equal(SiteProblems.ListingChanged, stale.Problem);
+            Assert.Empty(stale.Items);
+        }
 
         var parent = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = id, Path = Served + "/" });
         Assert.True(parent.Ok, parent.Message);

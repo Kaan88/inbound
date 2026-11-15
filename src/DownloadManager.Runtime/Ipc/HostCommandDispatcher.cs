@@ -87,7 +87,20 @@ public sealed partial class HostCommandDispatcher
     };
 
     /// <summary>What the hello offers a session with the platform's own rights. See <see cref="CapabilitiesOf"/>.</summary>
-    public List<string> Capabilities => CapabilitiesOf(PlatformRights);
+    public List<string> Capabilities => HelloCapabilities(PlatformRights);
+
+    /// <summary>
+    /// <see cref="CapabilitiesOf"/> plus <c>sites</c> (SITES.3) when this Host answers <c>sites.*</c> for that session: Sites
+    /// is built in and the session is the desktop user at this PC (<see cref="AnswerSitesAsync"/>). Sent whether the
+    /// switch is on or off; <c>sites.get</c> says which.
+    /// </summary>
+    private List<string> HelloCapabilities(SessionRights rights)
+    {
+        var capabilities = CapabilitiesOf(rights);
+        if (Sites is not null && string.Equals(rights.Role, ClientRoles.Desktop, StringComparison.Ordinal) && rights.Scope is null)
+            capabilities.Add("sites");
+        return capabilities;
+    }
 
     /// <summary>
     /// What the hello offers a session with these rights. It is a set: clients look a name up (<c>Contains</c>) and never
@@ -210,7 +223,7 @@ public sealed partial class HostCommandDispatcher
             HostVersion = Protocol.HostVersion,
             ProtocolVersion = Protocol.Version,
             StartedAt = _service.StartedAt,
-            Capabilities = CapabilitiesOf(rights),
+            Capabilities = HelloCapabilities(rights),
             HostKind = _platform.Capabilities.HostKind,
         }), cancellationToken).ConfigureAwait(false);
 

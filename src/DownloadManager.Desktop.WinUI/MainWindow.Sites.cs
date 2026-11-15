@@ -136,8 +136,9 @@ public sealed partial class MainWindow
         if (_sitesPanel is { } existing) return existing;
         var panel = new SitesPanel
         {
-            Browse = (request, token) => _local.BrowseSiteAsync(request, token),
-            Star = request => _local.StarSiteFolderAsync(request),
+            // On the provider client's connections of their own: a slow listing never holds up the window's main connection.
+            Browse = (request, token) => _remote.BrowseSiteAsync(request, token),
+            Star = request => _remote.StarSiteFolderAsync(request),
             OpenSitesOptions = OpenSitesOptionsHook,
         };
         panel.StateChanged += UpdateSitesToolbar;

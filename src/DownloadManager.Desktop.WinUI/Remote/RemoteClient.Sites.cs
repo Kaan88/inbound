@@ -16,6 +16,7 @@ internal sealed partial class RemoteClient
     public event Action<SitesChangedDto>? SitesChanged;
 
     private static readonly TimeSpan SitesTestTime = TimeSpan.FromSeconds(75);
+    private static readonly TimeSpan SitesBrowseTime = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan SitesInstallTime = TimeSpan.FromMinutes(10);
 
     public Task<SitesReply<SitesStatusDto>> GetSitesAsync(CancellationToken cancellationToken = default)
@@ -58,6 +59,21 @@ internal sealed partial class RemoteClient
             new SiteProbeRequest { Host = host, Port = port }, SitesMessageTypes.ProbeResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
         return reply.Value ?? new SiteProbeResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
     }
+
+    /// <summary>
+    /// One page of a folder (SITES.3), on a connection of its own: a far server or a big folder can take a while, and
+    /// cancelling <paramref name="cancellationToken"/> closes that connection, which ends the listing on the Host.
+    /// </summary>
+    public async Task<SiteBrowseResultDto> BrowseSiteAsync(SiteBrowseRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteBrowseRequest, SiteBrowseResultDto>(SitesMessageTypes.Browse, request,
+            SitesMessageTypes.BrowseResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteBrowseResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>Stars or unstars a folder; the answer's <c>Site</c> has the new list of stars.</summary>
+    public async Task<SiteResultDto> StarSiteFolderAsync(SiteStarRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteStarRequest, SiteResultDto>(SitesMessageTypes.Star, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
     private static SiteResultDto SiteResult(SitesReply<SiteResultDto> reply)
         => reply.Value ?? new SiteResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };

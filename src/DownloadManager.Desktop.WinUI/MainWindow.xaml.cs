@@ -4618,6 +4618,8 @@ public sealed partial class MainWindow : Window
         // The toolbar can still be invoked behind an open dialog (UI Automation, a screen reader), so a Delete then
         // does nothing (UI.B8); ShowDialogAsync below refuses it too.
         if (IsContentDialogOpen()) return;
+        // In the Sites view the download list is hidden: Downloads › Delete must not act on rows the user can't see.
+        if (_sitesShown) return;
         var selection = DeleteRules.Targets(SelectedJobs, RecordDownload, fromContextMenu);
         if (selection.Count == 0)
         {

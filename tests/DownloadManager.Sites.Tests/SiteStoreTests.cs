@@ -89,6 +89,23 @@ public sealed class SiteStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_with_null_stars_and_host_keys_reads_as_empty_lists()
+    {
+        var site = Site();
+        await _store.SaveAsync(site);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(FileOf(site.Id)))!.AsObject();
+        json["stars"] = null;
+        json["hostKeys"] = null;
+        await File.WriteAllTextAsync(FileOf(site.Id), json.ToJsonString());
+
+        var loaded = await _store.GetAsync(site.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded.Stars);
+        Assert.Empty(loaded.HostKeys);
+    }
+
+    [Fact]
     public async Task Save_then_Get_returns_an_equal_record()
     {
         var site = Site();

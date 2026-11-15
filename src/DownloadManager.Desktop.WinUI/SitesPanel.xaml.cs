@@ -54,6 +54,9 @@ public sealed partial class SitesPanel : UserControl
     private SiteDto? _site;
     private string _path = SitesBrowseRules.Root;
     private int _total;
+
+    // The Host's name for the listing the rows came from; a later page asks for that listing.
+    private string? _listing;
     private int _generation;
     private bool _loading;
     private CancellationTokenSource? _cts;
@@ -217,6 +220,7 @@ public sealed partial class SitesPanel : UserControl
                 Offset = offset,
                 Limit = SitesBrowseRules.PageSize,
                 Refresh = refresh,
+                Listing = append ? _listing : null,
             }, cts.Token);
         }
         catch (OperationCanceledException)
@@ -232,6 +236,14 @@ public sealed partial class SitesPanel : UserControl
         if (generation != _generation || _site?.Id != site.Id) return;
         _loading = false;
 
+        // The Host no longer has the listing the shown rows came from: the folder is read again from the top rather than
+        // mixing two listings.
+        if (append && !result.Ok && result.Problem == SiteProblems.ListingChanged)
+        {
+            _ = LoadAsync(path, refresh: false, append: false);
+            return;
+        }
+
         if (!result.Ok)
         {
             _failed = true;
@@ -245,6 +257,7 @@ public sealed partial class SitesPanel : UserControl
         }
 
         _failed = false;
+        _listing = result.Listing;
         _path = SitesBrowseRules.Normalize(string.IsNullOrEmpty(result.Path) ? path : result.Path);
         foreach (var item in result.Items) _rows.Add(new SiteItemRow(item));
         _total = Math.Max(result.Total, _rows.Count);

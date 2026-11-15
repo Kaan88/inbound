@@ -49,7 +49,9 @@ machine down), `archives` (the `archive.*` messages are answered, and an extract
 started: 7-Zip found; one installed later shows on the next connection, and at once in `archive.settings.get`'s
 `tool`), and `uploads` (the server takes `POST /api/upload/torrent` and `/api/upload/container`, and the `remote.*`
 commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
-installed, since the bridge serves both uploads into the Host's data folder). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+installed, since the bridge serves both uploads into the Host's data folder), and `sites` (the `sites.*` messages are
+answered for this session: the Host has Sites and the session is the desktop user at this PC; sent with the switch on
+or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -298,12 +300,18 @@ dropped; a `.` or `..` segment, a control character or more than 4096 characters
 offeredFingerprint?, acceptedFingerprints, path, items, total, offset}`: `path` normalised, `items` each `{name,
 isFolder, size, modified?}` (`size` is -1 for folders and when the server does not say; `modified` is left out when the
 server gives none), sorted folders first, then by name ignoring case. `limit` is 1 to 2000 (500 when left out or below
-1). Pages after the first (`offset` above 0) come from the listing the Host read for that folder in the last minute,
-so the pages agree; `offset` 0 or `refresh: true` reads the folder again. The Host keeps one listing per site. Failures
-are as for `sites.test`, including `hostKeyNotAccepted` and `hostKeyChanged` with their fingerprints.
+1). `offset` 0 or `refresh: true` reads the folder again, and the reply's `listing` names that listing. A later page
+(`offset` above 0) sends that `listing` back and is served from it; when the Host no longer has it (unread for a
+minute, another folder of the site listed since, the site saved, trusted or removed, or Sites turned off) the reply
+is `ok: false` with `problem: "listingChanged"` and no items, and the client starts again at offset 0. Pages are
+never sliced from a newer listing. The Host keeps one listing per site; a folder of more than 100,000 items is refused
+with a message. Failures are as for `sites.test`, including `hostKeyNotAccepted` and `hostKeyChanged` with their
+fingerprints. On a refusal `path` is the path as sent. A site's `remoteFolder` with a `.` or `..` segment is refused
+on save. A listing can take long: send `sites.browse` on a connection of its own (as the window does), since the Host
+runs one command per connection at a time and closing the connection is how a listing is cancelled.
 
 `sites.star` takes `{id, path, starred}` (`starred` true when left out): the path is normalised as above and must not be
-empty. Starring a starred folder keeps its place; unstarring removes it. A site has at most 100 stars. Editing a site
+empty or `/`, or hold format or line-separator characters (such as a right-to-left override). Starring a starred folder keeps its place; unstarring removes it. A site has at most 100 stars. Editing a site
 keeps its stars unless the host or port changes, which forgets them with the host keys.
 
 `sites.probe`, `sites.test`, `sites.browse`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an

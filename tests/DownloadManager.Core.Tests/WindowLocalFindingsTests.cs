@@ -13,8 +13,9 @@ public sealed class WindowLocalFindingsTests
     [Fact]
     public void U_WL_6_the_package_button_comes_after_every_other_toolbar_button()
     {
+        // The download buttons are one set; the Sites view (SITES.3) swaps it for a set of its own, shown alone.
         var toolbar = XDocument.Load(WinUiFile("MainWindow.xaml")).Descendants(Xaml + "StackPanel")
-            .First(panel => (string?)panel.Attribute(X + "Name") == "ToolbarPanel");
+            .First(panel => (string?)panel.Attribute(X + "Name") == "DownloadToolSet");
         var buttons = toolbar.Descendants(Xaml + "Button").Select(button => (string?)button.Attribute(X + "Name")).ToList();
         Assert.Equal("CancelPackageButton", buttons[^1]);
         Assert.Equal("StopQueueButton", buttons[^2]);
