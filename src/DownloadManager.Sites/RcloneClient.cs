@@ -30,6 +30,7 @@ public sealed class RcloneClient : IDisposable
     private const string Withheld = "(rclone's text was withheld because it may contain a password)";
     private const int MinimumReplaceable = 4;
     private readonly HttpClient _http;
+    private volatile bool _disposed;
     private readonly Func<bool> _exited;
     private readonly object _secretsLock = new();
     private string[] _secrets;
@@ -113,6 +114,13 @@ public sealed class RcloneClient : IDisposable
             // The exception text can hold the address, never a secret; still, nothing of the request body is in it.
             throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone could not be reached: {e.Message}", e);
         }
+        catch (Exception e) when (_disposed && !cancellationToken.IsCancellationRequested && e is ObjectDisposedException or OperationCanceledException)
+        {
+            // The instance behind this client was stopped (it crashed, went idle, or Sites is stopping) while a lease
+            // still held it, before or during the call: the same as rclone being gone. Only when this client was
+            // disposed, so a caller's own disposed token source is not mistaken for it.
+            throw new RcloneUnavailableException("rclone has stopped.", e);
+        }
 
         using (response)
         {
@@ -120,6 +128,10 @@ public sealed class RcloneClient : IDisposable
             try
             {
                 body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e) when (_disposed && !cancellationToken.IsCancellationRequested && e is ObjectDisposedException or OperationCanceledException)
+            {
+                throw new RcloneUnavailableException("rclone has stopped.", e);
             }
             catch (Exception e) when (e is HttpRequestException or IOException)
             {
@@ -171,5 +183,9 @@ public sealed class RcloneClient : IDisposable
         return "rclone gave no error text.";
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _disposed = true;
+        _http.Dispose();
+    }
 }

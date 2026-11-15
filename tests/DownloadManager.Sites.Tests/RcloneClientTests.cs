@@ -32,6 +32,47 @@ public sealed class RcloneClientTests
     }
 
     [Fact]
+    public async Task A_call_on_a_client_whose_rclone_was_stopped_is_unavailable_not_disposed()
+    {
+        // A lease can outlive its instance: rclone crashed or went idle and the supervisor disposed the client.
+        var client = new RcloneClient(Base, User, RcPassword, handler: new FakeHandler(_ => Reply(HttpStatusCode.OK, "{}")));
+        client.Dispose();
+
+        await Assert.ThrowsAsync<RcloneUnavailableException>(() => client.CallAsync("core/version"));
+    }
+
+    [Fact]
+    public async Task A_call_in_flight_when_the_client_is_disposed_is_unavailable()
+    {
+        var started = new TaskCompletionSource();
+        var handler = new FakeHandler(async (_, ct) =>
+        {
+            started.SetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return Reply(HttpStatusCode.OK, "{}");
+        });
+        var client = new RcloneClient(Base, User, RcPassword, handler: handler);
+        var call = client.CallAsync("core/version");
+        await started.Task;
+        client.Dispose();
+
+        await Assert.ThrowsAsync<RcloneUnavailableException>(() => call);
+    }
+
+    [Fact]
+    public async Task A_disposed_token_source_of_the_caller_is_not_reported_as_rclone_stopping()
+    {
+        using var client = new RcloneClient(Base, User, RcPassword, handler: new FakeHandler(_ => Reply(HttpStatusCode.OK, "{}")));
+        var source = new CancellationTokenSource();
+        var token = source.Token;
+        source.Dispose();
+
+        // Whatever the HTTP stack makes of it, it is not "rclone has stopped".
+        var error = await Record.ExceptionAsync(() => client.CallAsync("core/version", cancellationToken: token));
+        Assert.IsNotType<RcloneUnavailableException>(error);
+    }
+
+    [Fact]
     public async Task A_null_input_is_sent_as_an_empty_object()
     {
         var handler = new FakeHandler(_ => Reply(HttpStatusCode.OK, "{}"));
@@ -156,8 +197,13 @@ public sealed class RcloneClientTests
     private sealed record Sent(string Method, string Path, string? ContentType, AuthenticationHeaderValue? Authorization, string Body);
 
     /// <summary>Records each request (copied out before the handler returns) and answers with <paramref name="respond"/>.</summary>
-    private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    private sealed class FakeHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
+        public FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+            : this((request, _) => Task.FromResult(respond(request)))
+        {
+        }
+
         public List<Sent> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -169,7 +215,7 @@ public sealed class RcloneClientTests
                 request.Content?.Headers.ContentType?.MediaType,
                 request.Headers.Authorization,
                 body));
-            return respond(request);
+            return await respond(request, cancellationToken);
         }
     }
 
