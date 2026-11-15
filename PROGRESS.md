@@ -29,6 +29,10 @@
   scale is 1); the last sizing and reopening fixes on the owner's Mac. The Intel build runs every check under
   Rosetta, and MAC.3 (a newer copy replaces the running Host) passes on both builds; Rosetta's rclone is the arm64 one,
   as .NET reports the machine's arm64 there.
+- **MAC.5, parity with the Windows Host (owner: "is that all for parity with windows?"):** sleep prevention, the
+  completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
+  the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
+  notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
 - **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
   hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
   loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS
