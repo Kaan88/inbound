@@ -58,7 +58,7 @@ internal static partial class Program
     {
         "doctor", "add-batch", "add", "list", "status", "profile", "update", "export", "import", "open", "reveal",
         "describe", "priority", "package", "pause", "resume", "retry", "refresh", "cancel", "remove", "pause-all",
-        "resume-all", "queue", "schedule", "site", "settings", "folders", "host", "torrent",
+        "resume-all", "queue", "schedule", "site", "sites", "settings", "folders", "host", "torrent",
     };
 
     private static async Task<int> RunAsync(string[] args)
@@ -605,6 +605,8 @@ internal static partial class Program
                 return await ScheduleAsync(client, args, json).ConfigureAwait(false);
             case "site":
                 return await SiteAsync(client, args, json).ConfigureAwait(false);
+            case "sites":
+                return await SitesAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
             case "folders":
@@ -2219,6 +2221,8 @@ internal static partial class Program
               dm schedule list|add|remove|enable|disable
                           [--open] [--exit] [--site-transfers]
                           [--shutdown shutdown|restart|logoff] [--force]
+              dm sites list | transfers | get <site> <path>... --to <folder> | put <site> <folder> <path>...
+                          | pause|resume|cancel|retry <transfer-id> | clear [<transfer-id>]   (saved sites, SITES.4)
               dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
                           (the password is read from standard input unless --password-env names it)
               dm settings [get] | settings set <key> <value> [<key> <value>...]
@@ -2420,7 +2424,9 @@ internal sealed class CliClient : IAsyncDisposable
         // remote.classify (the provider check before an add), dm torrent and the torrent list export and import.
         _ when type.StartsWith("remote.", StringComparison.Ordinal) || type.StartsWith("torrent.", StringComparison.Ordinal) ||
                type == MessageTypes.UpdateCheck ||
-               type == MessageTypes.JobRefreshUrl || type == MessageTypes.JobAdd => TimeSpan.FromMinutes(5),
+               type == MessageTypes.JobRefreshUrl || type == MessageTypes.JobAdd ||
+               // SITES.4: a start lists the chosen folders on the server first; a pause or cancel waits for files to stop.
+               type.StartsWith("sites.transfer.", StringComparison.Ordinal) => TimeSpan.FromMinutes(5),
         _ => TimeSpan.FromMinutes(1),
     };
 

@@ -162,6 +162,12 @@ public sealed class SiteTransfers : IAsyncDisposable
         lock (_sync) return SnapshotLocked();
     }
 
+    /// <summary>Batches running now (moving or waiting their turn), for the tray.</summary>
+    public int RunningCount()
+    {
+        lock (_sync) return _batches.Count(b => b.Record.State == SiteTransferStates.Running);
+    }
+
     public SiteTransferResultDto Get(string id)
     {
         lock (_sync)
@@ -179,6 +185,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                     State = i.State,
                     Tries = i.Tries,
                     Error = i.Error,
+                    IsFolder = i.Folder,
                 })],
             };
         }
@@ -233,7 +240,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             return Fail($"The folder on this PC could not be read: {e.Message}");
         }
 
-        if (items.Count == 0) return Fail("There are no files in that choice (empty folders are not copied yet).");
+        if (items.Count == 0) return Fail("Nothing was chosen.");
         if (items.Count > MaxItems) return Fail($"That is {items.Count:N0} files; a transfer can hold at most {MaxItems:N0}.");
 
         if (request.Direction == SiteTransferDirections.Download)
@@ -568,22 +575,64 @@ public sealed class SiteTransfers : IAsyncDisposable
             {
                 ["fs"] = fs.DeepClone(),
                 ["remote"] = inside,
-                ["opt"] = new JsonObject { ["recurse"] = true, ["filesOnly"] = true, ["noMimeType"] = true },
+                ["opt"] = new JsonObject { ["recurse"] = true, ["noMimeType"] = true },
             }, cancellationToken).ConfigureAwait(false);
-            if (listing["list"] is not JsonArray files) continue;
-            foreach (var node in files)
+            var entries = new List<string>();
+            var folders = new List<string>();
+            if (listing["list"] is JsonArray files)
             {
-                if (node is not JsonObject file || file["Path"]?.GetValue<string>() is not { } path) continue;
-                if (!path.StartsWith(inside + "/", StringComparison.Ordinal)) continue;
-                var relative = name + "/" + path[(inside.Length + 1)..];
-                if (!SiteTransferPaths.IsRelative(relative)) continue;
-                var size = file["Size"] is JsonValue s && s.TryGetValue<long>(out var bytes) && bytes >= 0 ? bytes : -1;
-                items.Add(new SiteTransferItem { Path = relative, Size = size });
-                if (items.Count > MaxItems) return items;
+                foreach (var node in files)
+                {
+                    if (node is not JsonObject file || file["Path"]?.GetValue<string>() is not { } path) continue;
+                    if (!path.StartsWith(inside + "/", StringComparison.Ordinal)) continue;
+                    var relative = name + "/" + path[(inside.Length + 1)..];
+                    if (!SiteTransferPaths.IsRelative(relative)) continue;
+                    entries.Add(relative);
+                    if (file["IsDir"] is JsonValue dir && dir.TryGetValue<bool>(out var isDir) && isDir)
+                    {
+                        folders.Add(relative);
+                        continue;
+                    }
+
+                    var size = file["Size"] is JsonValue s && s.TryGetValue<long>(out var bytes) && bytes >= 0 ? bytes : -1;
+                    items.Add(new SiteTransferItem { Path = relative, Size = size });
+                    if (items.Count > MaxItems) return items;
+                }
             }
+
+            items.AddRange(EmptyFolders(name, folders, entries));
+            if (items.Count > MaxItems) return items;
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// The folders with nothing inside, as items that are made at the target: only the deepest ones, since making those
+    /// makes the ones above. <paramref name="top"/> itself when it holds nothing at all.
+    /// </summary>
+    private static IEnumerable<SiteTransferItem> EmptyFolders(string top, List<string> folders, List<string> entries)
+    {
+        if (entries.Count == 0)
+        {
+            yield return new SiteTransferItem { Path = top, Size = 0, Folder = true };
+            yield break;
+        }
+
+        // Every folder that holds something: each entry's parents.
+        var holding = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            for (var cut = entry.LastIndexOf('/'); cut > 0; cut = entry.LastIndexOf('/', cut - 1))
+            {
+                if (!holding.Add(entry[..cut])) break;
+            }
+        }
+
+        foreach (var folder in folders)
+        {
+            if (!holding.Contains(folder)) yield return new SiteTransferItem { Path = folder, Size = 0, Folder = true };
+        }
     }
 
     private static List<SiteTransferItem> ListUpload(string localFolder, List<string> names)
@@ -611,13 +660,25 @@ public sealed class SiteTransfers : IAsyncDisposable
             var folder = new DirectoryInfo(full);
             if (!folder.Exists) throw new ItemFailure($"\"{name}\" is no longer in that folder.");
             if (folder.Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new ItemFailure($"\"{name}\" is a link; choose the folder it points to.");
-            foreach (var file in folder.EnumerateFiles("*", options))
+            var entries = new List<string>();
+            var folders = new List<string>();
+            foreach (var entry in folder.EnumerateFileSystemInfos("*", options))
             {
-                var relative = Path.GetRelativePath(localFolder, file.FullName).Replace(Path.DirectorySeparatorChar, '/');
+                var relative = Path.GetRelativePath(localFolder, entry.FullName).Replace(Path.DirectorySeparatorChar, '/');
                 if (!SiteTransferPaths.IsRelative(relative)) continue;
-                items.Add(new SiteTransferItem { Path = relative, Size = file.Length });
+                entries.Add(relative);
+                if (entry is DirectoryInfo)
+                {
+                    folders.Add(relative);
+                    continue;
+                }
+
+                items.Add(new SiteTransferItem { Path = relative, Size = ((FileInfo)entry).Length });
                 if (items.Count > MaxItems) return items;
             }
+
+            items.AddRange(EmptyFolders(name, folders, entries));
+            if (items.Count > MaxItems) return items;
         }
 
         return items;
@@ -950,10 +1011,38 @@ public sealed class SiteTransfers : IAsyncDisposable
         if (download && IsInside(SiteTransferPaths.Local(record.LocalFolder, item.Target ?? item.Path), _stateDirectory))
             throw new ItemFailure("The file would land in Inbound's own data folder; it was not copied.");
 
+        if (item.Folder && download)
+        {
+            // An empty folder: made here, nothing to copy. A file of that name stays and the folder fails.
+            var path = SiteTransferPaths.Local(record.LocalFolder, item.Path);
+            if (File.Exists(path)) throw new ItemFailure("A file of that name is already here, so the folder was not made.");
+            try
+            {
+                Directory.CreateDirectory(path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                throw new ItemFailure($"The folder could not be made: {e.Message}");
+            }
+
+            return SiteTransferItemStates.Done;
+        }
+
         var site = await _getSite(record.SiteId, token).ConfigureAwait(false) ?? throw new ItemFailure("The site no longer exists.");
         using var lease = await _acquire(token).ConfigureAwait(false);
         var client = lease.Client;
         var fs = await SiteRemote.BuildAsync(site, client, token).ConfigureAwait(false);
+        if (item.Folder)
+        {
+            // An empty folder made on the server; one that is there already is fine.
+            await client.CallAsync("operations/mkdir", new JsonObject
+            {
+                ["fs"] = fs.DeepClone(),
+                ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, item.Path)),
+            }, token).ConfigureAwait(false);
+            return SiteTransferItemStates.Done;
+        }
+
         await ApplySpeedLimitAsync(lease, token).ConfigureAwait(false);
         var local = new JsonObject { ["type"] = "local", ["_root"] = record.LocalFolder };
 
@@ -1091,7 +1180,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             Dictionary<string, HashSet<string>> folders = new(StringComparer.Ordinal);
             lock (_sync)
             {
-                foreach (var item in record.Items.Where(NotFinished))
+                foreach (var item in record.Items.Where(i => NotFinished(i) && !i.Folder))
                 {
                     foreach (var relative in new[] { item.Path, item.Target })
                     {
@@ -1392,6 +1481,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             Problem = r.Problem,
             Message = r.Message,
             Files = r.Items.Count,
+            Folders = r.Items.Count(i => i.Folder),
             FilesDone = done,
             FilesSkipped = skipped,
             FilesFailed = failed,

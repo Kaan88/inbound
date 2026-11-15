@@ -135,6 +135,46 @@ public sealed class SiteTransfersEndToEndTests : IAsyncLifetime
     }
 
     [SiteTransfersFact]
+    public async Task EmptyFoldersAreMadeAtTheTargetBothWays()
+    {
+        var port = StartServer(slow: false);
+        var (commands, siteId) = await OpenSiteAsync(port);
+        Directory.CreateDirectory(Path.Combine(Served, "pub", "tree", "empty", "deeper"));
+        Directory.CreateDirectory(Path.Combine(Served, "pub", "tree", "full"));
+        await File.WriteAllTextAsync(Path.Combine(Served, "pub", "tree", "full", "f.txt"), "f");
+        // "full-b.txt" sorts between "full" and "full/f.txt", so "full" must not be taken for empty.
+        await File.WriteAllTextAsync(Path.Combine(Served, "pub", "tree", "full-b.txt"), "b");
+        Directory.CreateDirectory(Path.Combine(Served, "pub", "void"));
+
+        var target = Path.Combine(Local, "folders");
+        var down = await StartAsync(commands, siteId, target, SiteTransferConflicts.Skip, "tree", "void");
+        var downDone = await WaitForAsync(commands, down.Id, t => SiteTransferStates.IsFinished(t.State));
+        Assert.Equal(SiteTransferStates.Done, downDone.State);
+        // f.txt, full-b.txt, tree/empty/deeper (the deepest empty one) and void.
+        Assert.Equal(4, downDone.Files);
+        Assert.Equal(2, downDone.Folders);
+        Assert.True(Directory.Exists(Path.Combine(target, "tree", "empty", "deeper")));
+        Assert.True(Directory.Exists(Path.Combine(target, "void")));
+        AssertSame(Path.Combine(Served, "pub", "tree", "full", "f.txt"), Path.Combine(target, "tree", "full", "f.txt"));
+        var detail = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = down.Id });
+        Assert.Equal(["tree/empty/deeper", "void"], detail.Items!.Where(i => i.IsFolder).Select(i => i.Path).Order(StringComparer.Ordinal));
+
+        var source = Path.Combine(Local, "upfolders");
+        Directory.CreateDirectory(Path.Combine(source, "album", "blank"));
+        await File.WriteAllTextAsync(Path.Combine(source, "album", "a.txt"), "a");
+        var up = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, new SiteTransferStartRequest
+        {
+            SiteId = siteId, Direction = SiteTransferDirections.Upload, RemoteFolder = "/pub/incoming2", LocalFolder = source,
+            Names = [new SiteTransferNameDto { Name = "album", IsFolder = true }],
+        });
+        Assert.True(up.Ok, up.Message);
+        var upDone = await WaitForAsync(commands, up.Transfer!.Id, t => SiteTransferStates.IsFinished(t.State));
+        Assert.Equal(SiteTransferStates.Done, upDone.State);
+        Assert.True(Directory.Exists(Path.Combine(Served, "pub", "incoming2", "album", "blank")));
+        AssertSame(Path.Combine(source, "album", "a.txt"), Path.Combine(Served, "pub", "incoming2", "album", "a.txt"));
+    }
+
+    [SiteTransfersFact]
     public async Task TheSpeedShareSlowsRclone()
     {
         var port = StartServer(slow: false);

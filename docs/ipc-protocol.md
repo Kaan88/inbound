@@ -322,7 +322,7 @@ install cut off that way leaves nothing behind).
 The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
 removed, trusted or starred, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
 
-Transfers (SITES.4, Host side only; no window shows them yet): a batch is one user action that downloads files from a
+Transfers (SITES.4; the WinUI window's Transfers bar, `dm sites`): a batch is one user action that downloads files from a
 site into a folder on this PC, or uploads the other way. The payloads are `SiteTransferDtos.cs`; the Host side is
 `SiteTransfers` (`src/DownloadManager.Runtime/Sites/`).
 
@@ -341,7 +341,8 @@ site into a folder on this PC, or uploads the other way. The payloads are `SiteT
 as for `sites.browse`) and `localFolder` a full path on this PC; left out, it is the site's `localFolder`. A folder
 inside Inbound's data folder is refused. `names` are `{name, isFolder}` entries in the source folder (the server folder
 for a download, the PC folder for an upload), one name each, never a path; a folder brings every file inside it,
-listed when the batch starts. Empty folders are not copied, and links and junctions on this PC are not followed. A
+listed when the batch starts. An empty folder is made at the target as an item of its own (`isFolder: true` in
+`sites.transfer.get`; it counts among `files`), and links and junctions on this PC are not followed. A
 name the server no longer has, or one not in the PC folder, refuses the whole start. At most 20,000 files.
 `conflict` decides what a file does when its target is already there: `skip` (the default), `replace`, or
 `keepBoth`, which writes `name (2).ext` (the first free number). A server file whose name this PC can't hold (on
@@ -389,12 +390,12 @@ running batches at its stop (with `message: "Paused by a schedule."`, whether or
 start resumes the batches a schedule paused; batches paused by hand or by turning Sites off stay paused.
 
 `SiteTransferDto`: `{id, siteId, siteName, direction, remoteFolder, localFolder, conflict, state, problem?, message?,
-files, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytesDone, speed, createdAt, finishedAt?}`. `state` is
+files, folders, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytesDone, speed, createdAt, finishedAt?}`. `state` is
 `running` (moving, or waiting for a free place, a file's retry or the server), `paused`, `done`, `failed` (a file
-failed, or the batch was stopped) or `canceled`. `problem` is `hostKeyChanged` or absent. `files` counts every file,
+failed, or the batch was stopped) or `canceled`. `problem` is `hostKeyChanged` or absent. `files` counts every item, `folders` the empty folders among them,
 `filesRunning` those moving now. `bytes` counts files of unknown size (an item `size` of -1) as 0, and `bytesDone` includes the files in flight and the
 skipped ones. `speed` is bytes a second, as rclone measures it over its last few seconds. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
-tries, error?}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
+tries, error?, isFolder}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
 
 `sites.transfer.changed` (the same sessions as `sites.changed`) carries `{transfers}`, every batch. It is sent after
 each change of state and about once a second while files move, never more than once every 400 ms. Nothing is sent, and

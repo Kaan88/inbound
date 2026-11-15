@@ -56,6 +56,9 @@ public sealed class SiteTransferDto
     public string? Message { get; set; }
 
     public int Files { get; set; }
+
+    /// <summary>How many of <see cref="Files"/> are empty folders made at the target.</summary>
+    public int Folders { get; set; }
     public int FilesDone { get; set; }
     public int FilesSkipped { get; set; }
     public int FilesFailed { get; set; }
@@ -90,6 +93,9 @@ public sealed class SiteTransferItemDto
 
     public int Tries { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>An empty folder that is made at the target rather than a file that is copied.</summary>
+    public bool IsFolder { get; set; }
 }
 
 public sealed class SiteTransferResultDto

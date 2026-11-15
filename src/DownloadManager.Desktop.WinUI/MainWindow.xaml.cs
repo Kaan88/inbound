@@ -4485,6 +4485,7 @@ public sealed partial class MainWindow : Window
                 ShutdownWhenDone = schedule.ShutdownWhenDone,
                 ShutdownMode = schedule.ShutdownMode,
                 ForceShutdown = schedule.ForceShutdown,
+                SiteTransfers = schedule.SiteTransfers,
                 LastStartDate = schedule.LastStartDate,
                 LastStopDate = schedule.LastStopDate,
             }).ToList(),

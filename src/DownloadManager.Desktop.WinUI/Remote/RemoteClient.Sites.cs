@@ -75,6 +75,32 @@ internal sealed partial class RemoteClient
     public async Task<SiteResultDto> StarSiteFolderAsync(SiteStarRequest request, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteStarRequest, SiteResultDto>(SitesMessageTypes.Star, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>
+    /// SITES.4: starts a download or upload batch. On a connection of its own, as browsing is: the Host lists the chosen
+    /// folders first, which can take a while on a far server.
+    /// </summary>
+    public async Task<SiteTransferResultDto> StartSiteTransferAsync(SiteTransferStartRequest request, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesSlowAsync<SiteTransferStartRequest, SiteTransferResultDto>(SitesMessageTypes.TransferStart, request,
+            SitesMessageTypes.TransferResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Pause, resume, cancel, retry or clear (<see cref="SitesMessageTypes"/>) one batch; clear with an empty id
+    /// removes every finished one.</summary>
+    public async Task<SiteTransferResultDto> SiteTransferActionAsync(string type, string id, CancellationToken cancellationToken = default)
+    {
+        if (!SiteTransferRules.IsAction(type)) throw new ArgumentException("Not a transfer action.", nameof(type));
+        // A pause or cancel waits for the files in flight to stop (up to 15 s each on the Host).
+        return TransferResult(await SitesSlowAsync<SiteTransferIdRequest, SiteTransferResultDto>(type, new SiteTransferIdRequest { Id = id },
+            SitesMessageTypes.TransferResult, SitesTestTime, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>One batch with its files.</summary>
+    public async Task<SiteTransferResultDto> GetSiteTransferAsync(string id, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesQuickAsync<SiteTransferIdRequest, SiteTransferResultDto>(SitesMessageTypes.TransferGet,
+            new SiteTransferIdRequest { Id = id }, SitesMessageTypes.TransferResult, cancellationToken).ConfigureAwait(false));
+
+    private static SiteTransferResultDto TransferResult(SitesReply<SiteTransferResultDto> reply)
+        => reply.Value ?? new SiteTransferResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+
     private static SiteResultDto SiteResult(SitesReply<SiteResultDto> reply)
         => reply.Value ?? new SiteResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
 

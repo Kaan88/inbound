@@ -54,7 +54,7 @@
         </Grid>
 
         <Grid Grid.Row="2">
-            <ListView x:Name="ItemsList" SelectionMode="Single" IsDoubleTapEnabled="True"
+            <ListView x:Name="ItemsList" SelectionMode="Extended" IsDoubleTapEnabled="True"
                       AutomationProperties.Name="Folder contents"
                       ItemContainerStyle="{StaticResource InboundListRowStyle}"
                       DoubleTapped="ItemsList_DoubleTapped"

@@ -176,6 +176,47 @@
   chip; empty folders; a CLI. **Not checked:** Linux (the Linux Host builds on Windows only), a real OpenSSH server for
   transfers (the SITES.2 sshd test is Linux-only), batches of thousands of files (each save rewrites the whole batch).
 
+- **L. SITES.4 in the windows, the tray and the CLI; empty folders** (2026-11-15, main). **WinUI (and Uno, which
+  shares the files):** the Sites toolbar has Download (the selected files and folders; several rows can be selected
+  now), Upload (Files… or A folder…) and Pause transfers (every running batch; it turns into Resume transfers when all
+  are paused). Each asks where, and what to do with a file that is already there (Skip, Replace, Keep both), and says a
+  file stopped part way starts again. The Transfers bar takes the speed graph's place in the Sites view: a slim bar that
+  opens upward (by itself when a batch starts), tabs Running and waiting, Failed and Done with counts, one row per batch
+  with progress, speed and Pause, Resume, Retry, Files (each item and why it failed), Cancel and Clear; Retry all on the
+  Failed tab; Clear finished. The status bar has a Site transfers chip; each sidebar site shows ↓n ↑n (and a clock for
+  waiting batches) and a thin progress line while files move there. An upload into the folder on show relists it when it
+  ends. The Scheduler has "Also pause site transfers at the stop time, and resume them at the start time". **Tray:** the
+  tooltip and the status line count running site transfers too (`TrayText`). **CLI:** `dm sites list | transfers | get
+  <site> <path>... --to <folder> | put <site> <folder> <path>... | pause|resume|cancel|retry <id> | clear [<id>]`
+  (`--conflict`, `--json`); the rest of `dm sites` (add, ls, rm, mv, mkdir) is SITES.8. **Empty folders** are made at
+  the target both ways (download: created here; upload: `operations/mkdir`), as items of their own (`isFolder`); the
+  batch counts them (`folders`) and the texts then say "items". **Haiku review** of the diff: seven findings, checked
+  against the code. Fixed: the window's settings copy dropped a schedule's `siteTransfers`, so any Options or Add URL
+  save turned it off (high); the empty-folder check took `a/b` for empty when `a/b-c.txt` sorts between `a/b` and its
+  files; the folder pickers were not guarded against a picker failure; stale protocol text; Clear finished came back
+  enabled with nothing to clear; jargon in the dialog. Not changed: Retry and Cancel hidden where Resume or Clear do the
+  same. Its two guesses were checked: the bar's glyphs are right; Enter with several rows selected opened one of them
+  (now it opens a folder only when one row is selected). **Walk** (published build, own test instance, `rclone serve
+  sftp` on 127.0.0.1 with throwaway keys, driven through UI Automation; no pixels, UI.B9): Add site with the key and
+  Trust (fingerprint equal to `ssh-keygen -lf`); Download of two folders, one holding only an empty folder (hash equal,
+  the empty folder made); upload of a file through the real file dialog and of a folder with an empty subfolder through
+  the folder dialog (made on the server; the view relisted itself); a 57 MB download at 2 MB/s: the chip ("1 transfer
+  running, 3.0 MB/s"), the sidebar ("Site S4, 1 downloading", ↓1 and the line), Pause and Resume in the row and in the
+  toolbar, the chip and marks gone at the end, hash equal; Done tab, Files ("Folder made · empty folder"), Clear
+  finished; the batches still listed after a restart of the Host and the window; the Scheduler box saved
+  (`siteTransfers: true` in the settings) and still set after an Options save; `dm sites list`, `get` (a file and an
+  empty folder) and `put` (a file and a folder) against the same instance. **Found by the walk and fixed:** `dm sites`
+  was refused as an unknown command (the command list missed it; a test now runs the real CLI); an empty folder counted
+  as a "file" and its line said "Copied · 0 B"; an upload's new files did not show until Refresh. Noted, not ours:
+  `rclone serve` caches a folder's listing for five minutes, so a file put on the test server by hand shows only after
+  that (`--dir-cache-time 0s` for walks); Git Bash turns `/pub/x` into a Windows path for `dm` (`MSYS_NO_PATHCONV=1`).
+  **Tests:** `SiteTransferRulesTests` (11), `SiteTransfersCliTests`, the CLI command test, `TrayMenuTests` (tooltip),
+  `EmptyFoldersAreMadeAtTheTargetBothWays` (with the sorting case). Core 2356, Tray 3 and the Integration site,
+  scheduler and CLI tests pass with rclone 1.76.0; the solution builds. **Not checked:** anything visual (UI.B9: the
+  test build draws black), light mode, Retry all with a real failure (rule tested only), the tray tooltip on screen
+  (unit tested), the Uno window on Linux. The Done tab never says "checked" (the plan's hash note): whether rclone
+  compared a hash is not reported to us yet.
+
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

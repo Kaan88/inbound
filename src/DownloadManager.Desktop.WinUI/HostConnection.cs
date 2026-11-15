@@ -955,6 +955,12 @@ public sealed partial class HostConnection : IAsyncDisposable
             return;
         }
 
+        if (message.Type == SitesMessageTypes.TransferChanged)
+        {
+            DispatchSiteTransfersChanged(message);
+            return;
+        }
+
         if (message.Type == ArchiveMessageTypes.Changed)
         {
             try { ArchiveChanged?.Invoke(message.GetPayload<ArchiveChangedDto>()); }

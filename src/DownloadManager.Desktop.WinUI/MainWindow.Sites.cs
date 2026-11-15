@@ -36,8 +36,13 @@ public sealed partial class MainWindow
         });
         connection.ConnectionChanged += (connected, error) =>
         {
-            if (connected && connection == _local) DispatcherQueue.TryEnqueue(() => { _ = ReadSitesAsync(connection); });
+            if (connected && connection == _local) DispatcherQueue.TryEnqueue(() =>
+            {
+                _ = ReadSitesAsync(connection);
+                _ = ReadSiteTransfersAsync(connection);
+            });
         };
+        WireSiteTransfers(connection);
     }
 
     /// <summary>Asks this PC's Host for the switch and the saved sites, once per connection; later changes are pushed.</summary>
@@ -66,6 +71,7 @@ public sealed partial class MainWindow
         _sitesStatus = status;
         _sites = sites;
         SyncSiteEntryPoints();
+        UpdateSitesChip();
         if (!_sitesShown) return;
         var shown = SitesOffered ? _sites.FirstOrDefault(site => site.Id == _shownSiteId) : null;
         if (shown is null) LeaveSites(selectCategory: true);
@@ -77,6 +83,7 @@ public sealed partial class MainWindow
     {
         if (_sitesShown && !SitesOffered) LeaveSites(selectCategory: true);
         SyncSiteEntryPoints();
+        UpdateSitesChip();
     }
 
     // ---- Sidebar ----------------------------------------------------------------------------------------
@@ -156,6 +163,8 @@ public sealed partial class MainWindow
         {
             _refreshingCategories = false;
         }
+
+        SyncSiteMarks();
     }
 
     // ---- The view ---------------------------------------------------------------------------------------
@@ -243,10 +252,11 @@ public sealed partial class MainWindow
         if (selectCategory) SelectSidebarQuietly(_category);
     }
 
-    /// <summary>The speed graph follows its menu item, except in the Sites view, where it is hidden (the Transfers bar comes with SITES.5).</summary>
+    /// <summary>The speed graph follows its menu item, except in the Sites view, where the Transfers bar takes its place (SITES.4).</summary>
     private void UpdateSpeedGraphVisibility()
     {
         SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked && !_sitesShown ? Visibility.Visible : Visibility.Collapsed;
+        TransfersBar.Visibility = _sitesShown ? Visibility.Visible : Visibility.Collapsed;
         UpdateSpeedTimer();
     }
 
@@ -256,6 +266,8 @@ public sealed partial class MainWindow
     {
         if (_sitesPanel is not { } panel || !_sitesShown) return;
         SitesUpButton.IsEnabled = panel.CanGoUp;
+        SitesDownloadButton.IsEnabled = !panel.IsLoading && panel.SelectedNames.Count > 0;
+        SitesUploadButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;
         // The Host refuses a star on the root, so the button is off there.
         SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && panel.CanGoUp;

@@ -76,6 +76,9 @@ public sealed class SiteTransferItem
 
     /// <summary>A failed try waits until then before the next.</summary>
     public DateTimeOffset? NotBefore { get; set; }
+
+    /// <summary>An empty folder to make at the target (nothing is copied); <see cref="Size"/> is 0.</summary>
+    public bool Folder { get; set; }
 }
 
 /// <summary>

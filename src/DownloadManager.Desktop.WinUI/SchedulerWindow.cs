@@ -43,6 +43,11 @@ public sealed class SchedulerWindow : Window
     private readonly CheckBox _shutdownWhenDone = new() { Content = "Turn off the computer when the queue finishes" };
     private readonly ComboBox _shutdownMode = new() { Header = "Computer action", ItemsSource = new[] { "Shut down", "Restart", "Log off" } };
     private readonly CheckBox _forceShutdown = new() { Content = "Force the selected computer action" };
+    // SITES.4: site transfers are in no queue, so a schedule holds them only when this is ticked.
+    private readonly CheckBox _siteTransfers = new()
+    {
+        Content = "Also pause site transfers at the stop time, and resume them at the start time",
+    };
     private readonly CheckBox _allowSystemActions = new() { Content = "Allow computer actions (shut down, restart, log off) when downloads finish" };
     private readonly TextBlock _scheduleHint = InboundUi.Secondary();
     private readonly StackPanel _runOptionsHost = new() { Spacing = 8 };
@@ -94,7 +99,7 @@ public sealed class SchedulerWindow : Window
     private string ScheduleFormKey() => JsonSerializer.Serialize(new object?[] { _scheduleName.Text,
         _scheduleEnabled.IsChecked, _startTime.Text, _stopTime.Text, _days.Text, _oneTimeDate.Text,
         _openWhenDone.IsChecked, _exitWhenDone.IsChecked, _shutdownWhenDone.IsChecked, _shutdownMode.SelectedIndex,
-        _forceShutdown.IsChecked, (_scheduleTarget.SelectedItem as ComboBoxItem)?.Tag, _runOptions?.StateKey });
+        _forceShutdown.IsChecked, _siteTransfers.IsChecked, (_scheduleTarget.SelectedItem as ComboBoxItem)?.Tag, _runOptions?.StateKey });
     private string LimitsFormKey() => JsonSerializer.Serialize(new object?[] { _maxConcurrent.Text,
         _quotaEnabled.IsChecked, _quotaMb.Text, _quotaHours.Text });
     private bool _closeConfirmed;
@@ -387,6 +392,8 @@ public sealed class SchedulerWindow : Window
         timing.Children.Add(_days); Grid.SetRow(_days, 1); Grid.SetColumnSpan(_days, 2);
         timing.Children.Add(_oneTimeDate); Grid.SetRow(_oneTimeDate, 2);
         panel.Children.Add(timing);
+        ToolTipService.SetToolTip(_siteTransfers, "Site transfers paused by a schedule go on at its next start; ones you paused stay paused.");
+        panel.Children.Add(_siteTransfers);
         var completion = new StackPanel { Spacing = 8 };
         completion.Children.Add(_openWhenDone); completion.Children.Add(_exitWhenDone);
         completion.Children.Add(_shutdownWhenDone); completion.Children.Add(_shutdownMode);
@@ -798,6 +805,7 @@ public sealed class SchedulerWindow : Window
         _shutdownWhenDone.IsChecked = schedule.ShutdownWhenDone;
         _shutdownMode.SelectedIndex = schedule.ShutdownMode switch { "restart" => 1, "logoff" => 2, _ => 0 };
         _forceShutdown.IsChecked = schedule.ForceShutdown;
+        _siteTransfers.IsChecked = schedule.SiteTransfers;
         UpdateScheduleTargetChoices(schedule.QueueId);
         var retryLimit = RetryLimitFor(schedule.QueueId);
         _runOptions = new SchedulerRunOptionsEditor(schedule, retryLimit);
@@ -814,7 +822,7 @@ public sealed class SchedulerWindow : Window
     {
         foreach (var control in new Control[] { _scheduleName, _scheduleEnabled, _scheduleTarget,
             _startTime, _stopTime, _days, _oneTimeDate, _openWhenDone, _exitWhenDone, _shutdownWhenDone,
-            _shutdownMode, _forceShutdown }) control.IsEnabled = _scheduleEditorEnabled;
+            _shutdownMode, _forceShutdown, _siteTransfers }) control.IsEnabled = _scheduleEditorEnabled;
         if (_runOptions?.Content is Control options) options.IsEnabled = _scheduleEditorEnabled;
         if (_scheduleEditorEnabled) UpdateShutdownControls();
         var none = !_scheduleEditorEnabled && _schedulePicker.Items.Count == 0;
@@ -836,6 +844,7 @@ public sealed class SchedulerWindow : Window
         _shutdownWhenDone.IsChecked = false;
         _shutdownMode.SelectedIndex = 0;
         _forceShutdown.IsChecked = false;
+        _siteTransfers.IsChecked = false;
         _removeSchedule.IsEnabled = false;
         _scheduleEditorEnabled = false;
         _runOptions = new SchedulerRunOptionsEditor(null, null);
@@ -863,6 +872,7 @@ public sealed class SchedulerWindow : Window
         _shutdownWhenDone.IsChecked = false;
         _shutdownMode.SelectedIndex = 0;
         _forceShutdown.IsChecked = false;
+        _siteTransfers.IsChecked = false;
         UpdateScheduleTargetChoices(SelectedQueue?.Id);
         var queueId = (_scheduleTarget.SelectedItem as ComboBoxItem)?.Tag as int?;
         var retryLimit = RetryLimitFor(queueId);
@@ -941,6 +951,7 @@ public sealed class SchedulerWindow : Window
         draft.ShutdownWhenDone = _shutdownWhenDone.IsChecked == true;
         draft.ShutdownMode = _shutdownMode.SelectedIndex switch { 1 => "restart", 2 => "logoff", _ => "shutdown" };
         draft.ForceShutdown = _forceShutdown.IsChecked == true;
+        draft.SiteTransfers = _siteTransfers.IsChecked == true;
         _scheduleDrafts[draft.Id] = draft;
         _dirtySchedules.Add(draft.Id);
         _displayedScheduleId = draft.Id;

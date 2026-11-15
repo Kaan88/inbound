@@ -289,7 +289,8 @@ internal static class Program
                 // UI.R40: both update entries open the window's one Check for Updates dialog, which checks, shows what's
                 // new, downloads and installs; the automatic check and install stay the monitor's.
                 InstallUpdate: () => controller.OpenUi(UiPages.Updates),
-                CheckForUpdates: () => controller.OpenUi(UiPages.Updates));
+                CheckForUpdates: () => controller.OpenUi(UiPages.Updates),
+                SiteTransferCount: () => sites.Transfers.RunningCount());
 
             var icon = LoadIcon();
             var tray = new TrayApplicationContext(trayActions, icon);
@@ -323,6 +324,8 @@ internal static class Program
             // The tray refreshes on changes instead of every second.
             service.JobChanged += (_, _) => tray.RequestRefresh();
             service.SettingsChanged += (_, _) => tray.RequestRefresh();
+            // SITES.4: a site transfer starting or ending shows in the tooltip too.
+            sites.Transfers.ActivityChanged += () => tray.RequestRefresh();
 
             var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
             using var eventSounds = new CompletionSoundPlayer(log.Warn);

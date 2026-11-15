@@ -275,6 +275,38 @@
                     </StackPanel>
                     </StackPanel>
                     <StackPanel x:Name="SitesToolSet" Orientation="Horizontal" Visibility="Collapsed">
+                        <!-- SITES.4: copy the selected files and folders to this PC, or files and folders of this PC here. -->
+                        <Button x:Name="SitesDownloadButton" AutomationProperties.Name="Download" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesDownloadButton_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Copy the selected files and folders to this PC">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE896;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
+                                <TextBlock Text="Download" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <DropDownButton x:Name="SitesUploadButton" AutomationProperties.Name="Upload" Style="{StaticResource InboundToolButtonStyle}"
+                                        ToolTipService.ToolTip="Copy files or a folder of this PC into the folder shown">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE898;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Upload" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                            <DropDownButton.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                    <MenuFlyoutItem Text="Files…" Click="SitesUploadFiles_Click" />
+                                    <MenuFlyoutItem Text="A folder…" Click="SitesUploadFolder_Click" />
+                                </MenuFlyout>
+                            </DropDownButton.Flyout>
+                        </DropDownButton>
+                        <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
+                        <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesPauseAllButton_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Pause every site transfer; at Resume, files that were moving start again from the beginning">
+                            <StackPanel>
+                                <FontIcon x:Name="SitesPauseAllIcon" Glyph="&#xE769;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock x:Name="SitesPauseAllLabel" Text="Pause transfers" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                         <Button x:Name="SitesUpButton" AutomationProperties.Name="Up" Style="{StaticResource InboundToolButtonStyle}" Click="SitesUpButton_Click"
                                 AutomationProperties.AcceleratorKey="Backspace" ToolTipService.ToolTip="Go to the folder above (Backspace)">
                             <StackPanel>
@@ -867,6 +899,8 @@
         </Grid>
 
         <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="4" />
+        <!-- SITES.4: in the Sites view the Transfers bar takes the speed graph's place. -->
+        <local:SiteTransfersBar x:Name="TransfersBar" Grid.Row="4" Visibility="Collapsed" />
 
         <Border Grid.Row="5" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
@@ -893,7 +927,18 @@
                 <TextBlock x:Name="StatusAnnouncer" Grid.Column="1" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
                            AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
                 <!-- T1: while a torrent downloads (the engine runs then). It opens the Torrents view. -->
-                <Button x:Name="TorrentChip" Grid.Column="2" FontSize="11" Padding="8,0" MinHeight="0" Height="19" CornerRadius="9"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <!-- SITES.4: while a site transfer runs, waits, is paused or failed. It opens the Transfers bar. -->
+                <Button x:Name="SitesChip" FontSize="11" Padding="8,0" MinHeight="0" Height="19" CornerRadius="9"
+                        VerticalAlignment="Center" Visibility="Collapsed" Click="SitesChip_Click"
+                        Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                        ToolTipService.ToolTip="Show the site transfers">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <FontIcon Glyph="&#xE8AB;" FontSize="11" Foreground="{ThemeResource InboundIconInfoBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="SitesChipText" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="TorrentChip" FontSize="11" Padding="8,0" MinHeight="0" Height="19" CornerRadius="9"
                         VerticalAlignment="Center" Visibility="Collapsed" Click="TorrentChip_Click"
                         Foreground="{ThemeResource InboundSecondaryTextBrush}"
                         AutomationProperties.Name="Torrents"
@@ -903,6 +948,7 @@
                         <TextBlock x:Name="TorrentChipText" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
+                </StackPanel>
                 <!-- UI.R37: the version says whether it is the latest; a newer one is a link to Check for updates.
                      UPD.N1: with no update waiting, the version itself is the link, to What's new. -->
 

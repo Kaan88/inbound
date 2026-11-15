@@ -71,6 +71,8 @@ public sealed partial class SitesPanel : UserControl
         LostFocus += OnLostFocus;
         // The list takes Enter for itself (Uno marks it handled before it reaches the panel), so Enter is read on the way in.
         ItemsList.PreviewKeyDown += ItemsList_PreviewKeyDown;
+        // SITES.4: Download follows what is selected.
+        ItemsList.SelectionChanged += (_, _) => StateChanged?.Invoke();
         AutomationProperties.SetName(this, "Site browser");
         SyncChrome();
     }
@@ -94,6 +96,13 @@ public sealed partial class SitesPanel : UserControl
     internal event Action<SiteDto>? SiteUpdated;
 
     internal string? SiteId => _site?.Id;
+
+    /// <summary>The site shown, as last saved.</summary>
+    internal SiteDto? Site => _site;
+
+    /// <summary>SITES.4: the selected files and folders of the folder shown, for Download.</summary>
+    internal List<SiteTransferNameDto> SelectedNames =>
+        [.. ItemsList.SelectedItems.OfType<SiteItemRow>().Select(row => new SiteTransferNameDto { Name = row.Name, IsFolder = row.IsFolder })];
 
     internal string Path => _path;
 
@@ -554,7 +563,7 @@ public sealed partial class SitesPanel : UserControl
     {
         switch (e.Key)
         {
-            case VirtualKey.Enter when ItemsList.SelectedItem is SiteItemRow { IsFolder: true }:
+            case VirtualKey.Enter when ItemsList.SelectedItems.Count == 1 && ItemsList.SelectedItem is SiteItemRow { IsFolder: true }:
                 OpenSelectedFolder();
                 e.Handled = true;
                 break;
