@@ -241,7 +241,8 @@ rclone path is saved first, then rclone stops if it must.
 - `rcloneLastCheck` and `rcloneUpdateError` (the last check's time and what went wrong, or null).
 
 rclone downloads (remote-sites.md, "Getting rclone" and "rclone updates"): `sites.rclone.install` with no `version`
-installs the newest release that is a week old and of the tested major version, or else the tested one (1.76.0);
+installs the newest release that is a week old and of the tested major version; with none, it keeps a newer one already
+installed (never a downgrade) or else installs the tested one (1.76.0);
 with a `version` it installs that one (a `waiting` or `needsAsk` one too, since the user asked). Every install
 checks that rclone's `SHA256SUMS` is identical on `downloads.rclone.org` and GitHub, its signature (rclone's release key,
 built in), the zip's line in it, the binary's own version, and that it starts and answers. The reply comes when that
@@ -249,7 +250,9 @@ is done, with `error` when it was refused. It is refused for "Use my own rclone"
 updates, and where Inbound can't download rclone. A new version is used from rclone's next start. If it fails to start
 twice before it has worked once, the version before comes back and the new one is never offered again.
 `sites.rclone.check` asks rclone's server now and only reports; with Sites on the Host also asks about once a day and,
-with `autoUpdateRclone`, installs a `ready` update while rclone is idle. Neither runs with Sites off.
+with `autoUpdateRclone`, installs a `ready` update while rclone is idle. That replaces an rclone Inbound downloaded or
+one shipped with the build (the Docker image); the first download on a desktop is always the user's. A `waiting`
+update counts as `ready` once its `waitUntil` has passed. Neither runs with Sites off.
 
 `sites.save` takes `SiteSaveRequest`: `id` (left out for a new site), `name`, `kind` (`sftp`), `host`, `port`
 (22 when left out), `user`, `authMethod` (`password` or `key`), `password?`, `privateKey?`, `keyPassphrase?`,

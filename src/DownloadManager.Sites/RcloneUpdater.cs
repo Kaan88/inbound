@@ -155,6 +155,10 @@ public sealed class RcloneDownloads(HttpClient http, Uri? primary = null, Uri? m
             {
                 throw new RcloneReleaseException($"{address.Host} could not be reached: {e.Message}", e);
             }
+            catch (TaskCanceledException e) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new RcloneReleaseException($"{address.Host} did not answer in time.", e);
+            }
 
             var status = (int)response.StatusCode;
             if (status is >= 300 and < 400 && response.Headers.Location is { } location)
@@ -277,9 +281,18 @@ public sealed class RcloneUpdater
     public string? CurrentExecutable => ExecutableFor(State.Current);
 
     /// <summary>The offer from the last check, if any.</summary>
-    public RcloneOffer? Offer => State is { OfferVersion: { } v, OfferState: { } s } && Version.TryParse(v, out var version)
-        ? new RcloneOffer(version, s, State.OfferWaitUntil)
-        : null;
+    public RcloneOffer? Offer
+    {
+        get
+        {
+            var state = State;
+            if (state is not { OfferVersion: { } v, OfferState: { } offerState } || !Version.TryParse(v, out var version)) return null;
+            // A waiting release is ready once its week is over, without waiting for the next daily check.
+            if (offerState == RcloneOfferState.Waiting && state.OfferWaitUntil is { } until && until <= _time.GetUtcNow())
+                return new RcloneOffer(version, RcloneOfferState.Ready);
+            return new RcloneOffer(version, offerState, state.OfferWaitUntil);
+        }
+    }
 
     /// <summary>Asks rclone's server what is newest and keeps what it found. Never installs.</summary>
     public async Task<RcloneOffer?> CheckAsync(CancellationToken cancellationToken)
@@ -337,7 +350,9 @@ public sealed class RcloneUpdater
                     _log($"rclone: the newest release could not be checked ({e.Message}); the tested one is installed.");
                 }
 
-                version = best ?? RclonePinned.Version;
+                // Nothing newer is ready: keep what is installed (never a downgrade), or else the tested version.
+                var installed = State.Current is { } c && Version.TryParse(c, out var parsed) && CurrentExecutable is not null ? parsed : null;
+                version = best ?? (installed is not null && installed >= RclonePinned.Version ? installed : RclonePinned.Version);
             }
 
             if (version < RclonePinned.Version)
@@ -482,6 +497,7 @@ public sealed class RcloneUpdater
             var state = State;
             // The version being replaced is kept for a rollback only if it has run; an unproven one is just dropped.
             var keep = state.Current is { } old && old != name && state.Proven ? old : state.Previous;
+            if (keep == name) keep = null; // reinstalling the kept version: it becomes current, not also the one to go back to
             var drop = new[] { state.Current, state.Previous }.Where(v => v is not null && v != name && v != keep).ToList();
             await SaveAsync(state with
             {
@@ -495,6 +511,10 @@ public sealed class RcloneUpdater
             }, cancellationToken).ConfigureAwait(false);
             foreach (var dropped in drop) DeleteVersion(dropped!);
             _log($"rclone {name} installed{(keep is null ? "" : $"; {keep} is kept until it has run")}.");
+        }
+        catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            throw new RcloneReleaseException($"rclone {name} could not be installed: {e.Message}", e);
         }
         finally
         {

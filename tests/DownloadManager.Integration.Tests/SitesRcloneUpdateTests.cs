@@ -145,12 +145,36 @@ public sealed class SitesRcloneUpdateTests : IAsyncLifetime
         Assert.Contains(_log, line => line.Contains("1.78.0 failed after it was installed", StringComparison.Ordinal));
     }
 
-    private SitesCommands Open(Func<string, string, RcloneSupervisor>? createSupervisor = null)
+    [LinuxOnlyFact]
+    public async Task AShippedRcloneIsReplacedByAReadyUpdateButNoFirstDownloadHappensOnItsOwn()
+    {
+        Publish("1.77.0", signedDaysAgo: 30, latest: true);
+        var none = Open();
+        await Call<SitesStatusDto>(none, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true });
+        await none.UpdateTickAsync(CancellationToken.None);
+        Assert.Null(none.Status().RcloneInstalled); // nothing in use: the user's "Download rclone"
+        await none.DisposeAsync();
+        _commands.Remove(none);
+
+        var shipped = Path.Combine(_root, "image", "rclone");
+        Directory.CreateDirectory(Path.GetDirectoryName(shipped)!);
+        File.WriteAllText(shipped, "#!/bin/sh\necho 'rclone v1.76.0'\n");
+        RcloneUpdater? updater = null;
+        var commands = Open(findRclone: _ => updater!.CurrentExecutable ?? shipped, created: u => updater = u);
+        Assert.Equal(SitesRcloneSources.Shipped, commands.Status().RcloneSource);
+        await commands.UpdateTickAsync(CancellationToken.None);
+        var status = commands.Status();
+        Assert.Equal(("1.77.0", SitesRcloneSources.Downloaded), (status.RcloneInstalled, status.RcloneSource));
+    }
+
+    private SitesCommands Open(Func<string, string, RcloneSupervisor>? createSupervisor = null,
+        Func<string?, string?>? findRclone = null, Action<RcloneUpdater>? created = null)
     {
         var updater = new RcloneUpdater(State,
             new RcloneDownloads(new HttpClient(_server), verify: text => new RcloneSignedText(text, _signedAt[text])),
             Platform, Log, _time, (_, _, _) => Task.FromResult<string?>(null));
-        var commands = new SitesCommands(State, Log, createSupervisor: createSupervisor,
+        created?.Invoke(updater);
+        var commands = new SitesCommands(State, Log, findRclone: findRclone, createSupervisor: createSupervisor,
             probe: (_, _, _) => Task.FromResult<IReadOnlyList<SshHostKey>>([]), updater: updater, time: _time,
             firstCheckDelay: TimeSpan.FromDays(1));
         _commands.Add(commands);

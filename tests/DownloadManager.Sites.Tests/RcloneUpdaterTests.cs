@@ -206,6 +206,63 @@ public sealed class RcloneUpdaterTests : IDisposable
     }
 
     [LinuxFact]
+    public async Task Download_with_nothing_newer_ready_keeps_a_newer_installed_version_instead_of_going_down()
+    {
+        Publish("1.77.0", signedDaysAgo: 30, latest: true);
+        var updater = Open();
+        await updater.InstallAsync(new Version(1, 77, 0), CancellationToken.None);
+        Publish("1.78.0", signedDaysAgo: 1, latest: true); // waiting
+        Publish("1.76.0", signedDaysAgo: 60);              // would fail the built-in hash if it were tried
+
+        Assert.Equal(new Version(1, 77, 0), await updater.InstallAsync(null, CancellationToken.None));
+        Assert.Equal("1.77.0", updater.State.Current);
+    }
+
+    [LinuxFact]
+    public async Task Reinstalling_the_kept_version_does_not_also_keep_it_as_the_one_to_go_back_to()
+    {
+        Publish("1.77.0", signedDaysAgo: 30);
+        Publish("1.78.0", signedDaysAgo: 10, latest: true);
+        var updater = Open();
+        await updater.InstallAsync(new Version(1, 77, 0), CancellationToken.None);
+        await updater.MarkProvenAsync();
+        await updater.InstallAsync(new Version(1, 78, 0), CancellationToken.None);
+        Assert.Equal("1.77.0", updater.State.Previous);
+
+        await updater.InstallAsync(new Version(1, 77, 0), CancellationToken.None);
+        Assert.Equal(("1.77.0", (string?)null), (updater.State.Current, updater.State.Previous));
+        await updater.MarkProvenAsync();
+        Assert.NotNull(updater.CurrentExecutable);
+    }
+
+    [LinuxFact]
+    public async Task A_waiting_offer_is_ready_once_its_week_is_over_without_another_check()
+    {
+        Publish("1.77.0", signedDaysAgo: 2, latest: true);
+        var updater = Open();
+        Assert.Equal(RcloneOfferState.Waiting, (await updater.CheckAsync(CancellationToken.None))!.State);
+        _time.Now = Now.AddDays(5).AddMinutes(1);
+        Assert.Equal(RcloneOfferState.Ready, updater.Offer!.State);
+    }
+
+    [LinuxFact]
+    public async Task A_damaged_zip_is_a_release_error_and_leaves_nothing()
+    {
+        Publish("1.77.0", signedDaysAgo: 10, latest: true);
+        var junk = "not a zip at all"u8.ToArray();
+        var list = $"{Convert.ToHexStringLower(SHA256.HashData(junk))}  rclone-v1.77.0-linux-amd64.zip";
+        var signed = Encoding.UTF8.GetBytes(_key.Sign(list, TestSigningKey.Sha256Digest, signedAt: Now.AddDays(-10)));
+        _server.Files["https://downloads.rclone.org/v1.77.0/SHA256SUMS"] = signed;
+        _server.Files["https://github.com/rclone/rclone/releases/download/v1.77.0/SHA256SUMS"] = signed;
+        _server.Files["https://downloads.rclone.org/v1.77.0/rclone-v1.77.0-linux-amd64.zip"] = junk;
+        var updater = Open();
+
+        await Assert.ThrowsAsync<RcloneReleaseException>(() => updater.InstallAsync(new Version(1, 77, 0), CancellationToken.None));
+        Assert.Null(updater.CurrentExecutable);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Folder, ".*"));
+    }
+
+    [LinuxFact]
     public async Task No_build_for_this_platform_is_no_offer()
     {
         Publish("1.77.0", signedDaysAgo: 30, latest: true);

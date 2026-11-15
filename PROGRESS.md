@@ -23,6 +23,25 @@
   New end-to-end test against a local sshd: probe, trust, key login with a passphrase, list, changed key refused.
   **Not checked:** anything on Windows. **Left:** the Options page and the first-use key prompt in the window; SITES.3 browsing.
 
+- **F. SITES.1 rclone download and updates on branch `sites-2`** (2026-11-15; owner: rclone is downloaded from Options,
+  not shipped in Setup; the desktop apps check for updates and install them automatically by default; Docker ships and
+  updates it). `RcloneReleaseSignature` verifies rclone's clearsigned `SHA256SUMS` with rclone's release key built in
+  (fingerprint `FBF737EC…FF3B54FA`, DSA-1024, SHA-1 digest; the real 1.76.0 list verifies, a changed line, signature,
+  issuer or critical part is refused). `RcloneDownloads` takes the list from `downloads.rclone.org` and GitHub and
+  refuses it unless both are identical; redirects only over HTTPS to rclone's and GitHub's hosts. `RcloneUpdater`
+  installs only the binary into `<state>/tools/rclone/<version>/` after the zip hash, the binary's own version and a
+  start-and-answer test; a release under a week old waits, a new major version is installed only when asked, the
+  previous version stays until the new one has run, a version that fails twice before that is rolled back and refused.
+  `sites.rclone.install` and `sites.rclone.check` in `ipc-protocol.md`; the status says where rclone comes from. Both
+  Hosts pass the proxied handler. The Docker image ships 1.76.0 at `/app/tools/rclone/rclone`. **Found on the way:** the
+  Docker build context lacked `src/DownloadManager.Sites` since the `sites-1` merge, so the server image would not
+  build; fixed on main (`ebc2f2a`, not pushed) and here. **Tests (Linux):** Sites.Tests 128 pass, Integration Sites 27
+  pass, IPC JSON 15 pass. A Haiku review found five real problems (a possible downgrade, a kept version deleted while
+  in use, no automatic update of the Docker image's rclone, a waiting offer not turning ready, zip and timeout errors
+  not caught), fixed with tests; three of its points did not hold; the Windows Host compiles with `EnableWindowsTargeting`. **Not checked:** a real Docker build
+  (the server was published from the context's files instead, and the rclone stage's steps were run with GNU tools, not
+  busybox), the window UI (not built), anything on Windows.
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on

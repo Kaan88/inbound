@@ -304,8 +304,10 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             changed = true;
         }
 
+        // Updates replace an rclone Inbound manages: one it downloaded, or one shipped with this build (the Docker
+        // image). Never a first download on the desktop: that is the user's "Download rclone".
         if (_config.AutoUpdateRclone && _updater.Offer is { State: RcloneOfferState.Ready } offer && RcloneIdle()
-            && _updater.CurrentExecutable is not null)
+            && SourceOf(_findRclone(_config.OwnRclonePath)) is SitesRcloneSources.Downloaded or SitesRcloneSources.Shipped)
         {
             try
             {
