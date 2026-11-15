@@ -413,6 +413,14 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AD. PERF.19 finished** (2026-11-15, main). A CPU profile of the web UI at 5,000 jobs and 8 downloads
+  (`perf-webui.mjs --profile`, `PERF_NO_MINIFY=1 perf-seed.sh build`) found Svelte measuring every row for `animate:flip`
+  and its proxy traps over the 5,000 jobs. Now rows slide only in lists of 200 or fewer (the row's attributes are one
+  `rowAttrs` function and its cells one snippet, used by both branches), and `model.jobs` is a prototype-less table
+  (`jobTable`) replaced on each job event, which Svelte doesn't proxy. Main thread at 5,000 jobs: 66 ms a second with one
+  download (831 at the start), 338 with eight (999); long tasks while loading 2 (40). svelte-check clean, 717 web UI
+  tests (a new one for the table); Playwright on 20 and 300 rows: select, arrows, Shift, End, Shift+F10. The windowed
+  list is not needed. **Not walked:** a phone; a real (not headless) browser with someone looking.
 - **AC. PERF.4 checked again** (2026-11-15, main). A test window with 500 jobs and nothing downloading: two threads switch
   about 70 times a second each, visible and hidden alike (per-thread counters, `Thread(...)\Context Switches/sec`); that
   matches the NVIDIA driver threads traced on 2026-11-08. Our managed code doesn't show in a trace of the window. With the

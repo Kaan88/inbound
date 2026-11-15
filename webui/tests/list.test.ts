@@ -676,3 +676,23 @@ describe('rows kept between updates (PERF.19)', () => {
     expect(third.get('b')).toBe(byId(second).get('b'));
   });
 });
+
+describe('the jobs table (PERF.19)', () => {
+  it('is replaced on each change and has no prototype, so Svelte does not proxy it', () => {
+    const model = emptyModel();
+    apply(model, { v: 1, id: 'x', type: 'jobs.snapshot', payload: { jobs: [job('a', 'queued')], settings: { downloadGroups: [] }, status: {} } });
+    const first = model.jobs;
+    expect(Object.getPrototypeOf(first)).toBeNull();
+    apply(model, { v: 1, id: 'y', type: 'job.event', payload: { eventType: 'added', job: job('b', 'queued') } });
+    expect(model.jobs).not.toBe(first);
+    expect(Object.getPrototypeOf(model.jobs)).toBeNull();
+    expect(Object.keys(model.jobs).sort()).toEqual(['a', 'b']);
+    expect(Object.keys(first)).toEqual(['a']);
+    apply(model, { v: 1, id: 'z', type: 'job.event', payload: { eventType: 'removed', job: job('a', 'queued') } });
+    expect(Object.keys(model.jobs)).toEqual(['b']);
+    // Removing what isn't there changes nothing.
+    const kept = model.jobs;
+    expect(apply(model, { v: 1, id: 'w', type: 'job.event', payload: { eventType: 'removed', job: job('a', 'queued') } })).toBe(false);
+    expect(model.jobs).toBe(kept);
+  });
+});

@@ -204,8 +204,26 @@ Sign-in to a usable list at 5,000 jobs: 1,223 ms before, 712 to 761 ms after. Th
   replaces the object), so an unchanged download is not formatted again and Svelte leaves its row alone. Torrents follow
   the clock and are formatted every time.
 
-What is left at 5,000 jobs and 8 downloads is mostly script (583 ms a second): every update still filters and sorts all
-jobs and Svelte compares 5,000 keyed rows. A windowed list (render only the rows on screen) is the next step.
+A CPU profile of that run (`perf-webui.mjs --profile`, an unminified build with `PERF_NO_MINIFY=1`) showed where the
+583 ms went: `getBoundingClientRect` 70 ms a second (Svelte measuring every row for `animate:flip` on each update),
+Svelte's proxy traps about 130 (going through 5,000 jobs in the deep `$state` model), `buildRows` 37, `counts` 19. Two
+more changes:
+
+- Rows slide to their new places only while the list has 200 rows or fewer; a longer list has no row animation.
+- The jobs are kept in an object with no prototype (`jobTable`), which Svelte doesn't wrap in proxies; a job event
+  replaces the table instead of editing it.
+
+| Jobs | Downloads | Main thread busy ms/s (task / script) | Usable after sign-in | Long tasks while loading |
+| ---: | ---: | --- | ---: | --- |
+| 500 | 1 | 19 / 6 (was 30 / 16) | 215 ms | 1 |
+| 500 | 8 | 81 / 27 (was 145 / 92) | 206 ms | 1 |
+| 5,000 | 1 | 66 / 27 (was 137 / 103) | 651 ms | 2 (was 11) |
+| 5,000 | 8 | 338 / 169 (was 699 / 583) | 629 ms | 2 (was 40) |
+
+From the start of this work, 5,000 jobs and 8 downloads: 999 to 338 ms a second; with one download 831 to 66. Checked
+with Playwright on 20 and 300 rows (both branches): a click selects, the arrows move the cursor, Shift extends,
+End reaches the last row on screen, Shift+F10 opens the menu once the scroll settles. A windowed list is not needed on
+these numbers.
 
 ## PERF.20: the web UI's own files (2026-11-15)
 

@@ -25,10 +25,23 @@ export interface Model {
   siteTransfers: SiteTransfer[];
 }
 
+/**
+ * PERF.19: the downloads by id, in an object with no prototype. Svelte's `$state` leaves such an object (and the jobs in
+ * it) as it is instead of wrapping every job in a reactive proxy, so going through 5,000 jobs costs no proxy traps (about
+ * 130 ms a second at 5,000 jobs before). The table is replaced, never edited, so whatever reads `model.jobs` still
+ * follows each change; a job itself is replaced too (a job event carries the whole job).
+ */
+export function jobTable(source: Iterable<Job> | Record<string, Job> = []): Record<string, Job> {
+  const table = Object.create(null) as Record<string, Job>;
+  if (Symbol.iterator in source) for (const job of source as Iterable<Job>) table[job.id] = job;
+  else Object.assign(table, source);
+  return table;
+}
+
 export function emptyModel(): Model {
   return {
     hello: null,
-    jobs: {},
+    jobs: jobTable(),
     settings: null,
     status: null,
     groups: [],
@@ -58,9 +71,7 @@ export function apply(model: Model, message: Envelope): boolean {
 
     case 'jobs.snapshot': {
       const snapshot = message.payload as Snapshot;
-      const jobs: Record<string, Job> = {};
-      for (const job of snapshot.jobs ?? []) jobs[job.id] = job;
-      model.jobs = jobs;
+      model.jobs = jobTable(snapshot.jobs ?? []);
       if (snapshot.settings) {
         model.settings = snapshot.settings;
         model.groups = snapshot.settings.downloadGroups ?? [];
@@ -73,12 +84,15 @@ export function apply(model: Model, message: Envelope): boolean {
     case 'job.event': {
       const event = message.payload as { job: Job; eventType: string };
       if (!event?.job?.id) return false;
+      // A new table each time (see jobTable): editing the old one would change nothing anyone follows.
+      const jobs = jobTable(model.jobs);
       if (event.eventType === 'removed') {
-        if (!(event.job.id in model.jobs)) return false;
-        delete model.jobs[event.job.id];
+        if (!(event.job.id in jobs)) return false;
+        delete jobs[event.job.id];
       } else {
-        model.jobs[event.job.id] = event.job;
+        jobs[event.job.id] = event.job;
       }
+      model.jobs = jobs;
       return true;
     }
 

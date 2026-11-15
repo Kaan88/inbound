@@ -198,6 +198,32 @@
 
   // UI.R42: a seeding torrent's Seeding time counts on while the column shows, though an idle one gets no updates.
   let seedClock = $state(0);
+  /** PERF.19: how many rows still slide to their new places when the order changes. */
+  const flipLimit = 200;
+
+  /** One row's attributes and handlers, the same with or without the slide (PERF.19). */
+  function rowAttrs(row: Row) {
+    const classes = ['list-row group border-b border-divider/60 text-[12.5px]', selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'];
+    if (showExtraction) classes.push('with-extraction');
+    if (onlyExtraction) classes.push('only-extraction');
+    if (torrentCols) classes.push('torrent-cols');
+    if (infoRoom) classes.push('with-info');
+    if (cursor === row.id) classes.push('is-cursor');
+    return {
+      id: domId(row.id),
+      class: classes.join(' '),
+      style: `--cols-md: ${colsMd}; --cols-lg: ${colsLg}`,
+      role: 'row',
+      'aria-selected': selected.has(row.id),
+      tabindex: -1,
+      onclick: (event: MouseEvent) => click(row, event),
+      ondblclick: () => open(row),
+      oncontextmenu: (event: MouseEvent) => contextmenu(row, event),
+      onpointerdown: (event: PointerEvent) => pointerdown(row, event),
+      onpointermove: (event: PointerEvent) => longPress.move(event.clientX, event.clientY),
+    };
+  }
+
   const rows = $derived((void seedClock, buildRows(store.model, view, search, expanded, shownSort, torrentFiles)));
   const settings = $derived(store.model.settings);
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
@@ -1286,31 +1312,10 @@
   onkeydown={gridKey}
   onfocus={() => { if (!cursor && rows.length > 0) cursor = rows[0].id; }}
 >
-  {#each rows as row (row.id)}
+  <!-- The grid above handles the keys for every row. -->
+  {#snippet rowCells(row: Row)}
     {@const v = connected || store.model.snapshots === 0 ? row.view
       : notCurrentView(row.view, row.kind === 'job' ? [row.job] : row.kind === 'package' ? row.jobs : [])}
-    <!-- The grid above handles the keys for every row. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div
-      id={domId(row.id)}
-      animate:flip={{ duration: 180 }}
-      class="list-row group border-b border-divider/60 text-[12.5px] {selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'}"
-      class:with-extraction={showExtraction}
-      class:only-extraction={onlyExtraction}
-      class:torrent-cols={torrentCols}
-      class:with-info={infoRoom}
-      style:--cols-md={colsMd}
-      style:--cols-lg={colsLg}
-      class:is-cursor={cursor === row.id}
-      role="row"
-      aria-selected={selected.has(row.id)}
-      tabindex="-1"
-      onclick={(event) => click(row, event)}
-      ondblclick={() => open(row)}
-      oncontextmenu={(event) => contextmenu(row, event)}
-      onpointerdown={(event) => pointerdown(row, event)}
-      onpointermove={(event) => longPress.move(event.clientX, event.clientY)}
-    >
       <!-- The whole cell is the box's target, so a finger can tick it (U-WU-8). -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
       {#if row.kind === 'torrentFile'}
@@ -1383,8 +1388,10 @@
       <span class="cell-swarm truncate" class:col-off={off('seedGoal')} title={v.swarm?.goalText || undefined}>{v.swarm?.goalText ?? ''}</span>
       <span class="cell-added hidden text-muted lg:block" class:col-off={off('lastTry')}>{v.lastTryText}</span>
       <span class="cell-desc truncate text-muted" class:col-off={off('description')} title={v.description}>{v.description}{#if row.kind === 'job' && torrentCols && v.swarm && connected}<span class="phone-swarm">{v.description ? ' · ' : ''}{v.swarm.line}</span>{/if}</span>
-    </div>
-  {:else}
+  {/snippet}
+  <!-- PERF.19: rows slide to their new places only in a short list. Svelte measures every animated row on each update,
+       which at 5,000 rows was the page's largest single cost (getBoundingClientRect, about 70 ms a second). -->
+  {#if rows.length === 0}
     <div class="px-6 py-16 text-center text-muted">
       {#if store.model.snapshots === 0}
         Connecting to the server…
@@ -1395,7 +1402,17 @@
         {#if view !== 'remote'}<button class="btn-primary" onclick={onadd}><Icon name="add" size={16} /> Add URL</button>{/if}
       {/if}
     </div>
-  {/each}
+  {:else if rows.length <= flipLimit}
+    {#each rows as row (row.id)}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div animate:flip={{ duration: 180 }} {...rowAttrs(row)}>{@render rowCells(row)}</div>
+    {/each}
+  {:else}
+    {#each rows as row (row.id)}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div {...rowAttrs(row)}>{@render rowCells(row)}</div>
+    {/each}
+  {/if}
 </div>
 </div>
 {#if infoRoom}

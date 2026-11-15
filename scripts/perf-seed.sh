@@ -66,7 +66,10 @@ perf_build() { # [--skip-webui] [--skip-window]
     local wb=$PERF_OUT/webui-build
     rm -rf "$wb"; mkdir -p "$wb"
     ( cd "$PERF_ROOT/webui" && tar cf - --exclude=node_modules --exclude=dist . ) | ( cd "$wb" && tar xf - )
-    ( cd "$wb" && npm ci --no-audit --no-fund --loglevel=error && npm run build >/dev/null ) || { perf_log "web UI build failed"; return 1; }
+    # PERF_NO_MINIFY=1: readable function names for perf-webui.mjs --profile (the page is not the shipped one then).
+    local build="npm run build"
+    [ "${PERF_NO_MINIFY:-0}" = 1 ] && build="npx vite build --minify false && npx vite build -c vite.signin.config.ts"
+    ( cd "$wb" && npm ci --no-audit --no-fund --loglevel=error && eval "$build" >/dev/null ) || { perf_log "web UI build failed"; return 1; }
     pub src/DownloadManager.Server "$lib" "-p:WebUiDist=$(perf_path "$wb")/dist/" || return 1
     [ -f "$lib/wwwroot/assets/$(ls "$wb/dist/assets" | head -1)" ] || { perf_log "the server did not get the built web UI"; return 1; }
   else

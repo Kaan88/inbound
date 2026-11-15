@@ -194,9 +194,25 @@ async function runCombo(jobs, active) {
     await S('Performance.enable', { timeDomain: 'timeTicks' });
     const metrics = async () => Object.fromEntries((await S('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
     const wsBefore = await evalNum(`window.__perf.ws.n`), charsBefore = await evalNum(`window.__perf.ws.chars`);
+    // --profile: a sampled CPU profile of the same window, its busiest functions (self time) written beside the results.
+    // Build with PERF_NO_MINIFY=1 scripts/perf-seed.sh build for readable names.
+    if (flag('profile')) { await S('Profiler.enable'); await S('Profiler.setSamplingInterval', { interval: 500 }); await S('Profiler.start'); }
     const m0 = await metrics(); const w0 = Date.now();
     await sleep(durationS * 1000);
     const m1 = await metrics(); const secs = (Date.now() - w0) / 1000;
+    if (flag('profile')) {
+      const { profile } = await S('Profiler.stop');
+      const self = new Map(); const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+      profile.samples.forEach((id, i) => {
+        const f = byId.get(id).callFrame; const key = `${f.functionName || '(anonymous)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`;
+        self.set(key, (self.get(key) ?? 0) + (profile.timeDeltas[i] ?? 0) / 1000);
+      });
+      const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => `${(ms / secs).toFixed(1).padStart(7)} ms/s  ${k}`);
+      mkdirSync(resultsDir, { recursive: true });
+      const nl = String.fromCharCode(10);
+      writeFileSync(join(resultsDir, `profile-${jobs}-${active}.txt`), top.join(nl) + nl);
+      log(`profile ${jobs}/${active}:${nl}${top.slice(0, 12).join(nl)}`);
+    }
     const wsAfter = await evalNum(`window.__perf.ws.n`), charsAfter = await evalNum(`window.__perf.ws.chars`);
     const per = (k) => +(((m1[k] - m0[k]) / secs) * 1000).toFixed(2); // ms per second
     row.steadySeconds = +secs.toFixed(1);
