@@ -21,7 +21,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 | 2026-11-13 | "uploads and all the needs that come with it are a must. if rclone can do it all, that's fantastic." |
 | 2026-11-13 | Sites in the sidebar show that a download or upload is active there. |
 | 2026-11-13 | The fourth mockup page is agreed. Sites is switchable. rclone is a separate process that runs only while needed. |
-| 2026-11-15 | rclone is checked for updates by the desktop apps, and the Docker server updates it too (replaces "the pinned rclone version changes only with Inbound releases"). |
+| 2026-11-15 | rclone is checked for updates by the desktop apps, and the Docker server updates it too; on the desktop updates install automatically by default (replaces "the pinned rclone version changes only with Inbound releases"). |
 | 2026-11-15 | Open questions answered: site transfers have their own limit (1); a web session may add and edit sites only as admin (2); no Sites line or anything else of Sites in the extension (4); rclone is **not in Setup or the update zip**: Options > Sites downloads it, and the Docker image includes it (5, replaces "rclone is bundled in Setup" of 2026-11-12); FTPS self-signed certificates go in one CA file Inbound manages (6); no resume is accepted for now (7). Question 3: "to this device" and "from this device" are in the first web UI release, not server side only (owner, 2026-11-15). |
 
 ## The agreed design in short
@@ -273,7 +273,7 @@ transfers-at-once limit and the default view.
     kept for a rollback: if the new one fails to start twice, the Host goes back and stops offering that version.
     Older folders are removed.
   - **Desktop:** a notice in Options > Sites and in the app's notifications, "Update rclone" to install, and an
-    "Update rclone automatically" switch (proposed: on). The Inbound version's own pinned rclone stays the floor:
+    "Update rclone automatically" switch, on by default (owner, 2026-11-15). The Inbound version's own pinned rclone stays the floor:
     an update never goes below it.
   - **Docker:** the image keeps its pinned rclone, which is used until a newer, checked one sits in the data volume
     (`/data/tools/rclone/<version>/`). The server checks and installs in the same way, automatically by default,
