@@ -1089,12 +1089,16 @@ public sealed partial class MainWindow
         window.AddPage("Web UI on this PC", "",
             [SettingsWindow.Hint($"This PC's own web UI: a browser on another device can control this PC's downloads through it. It doesn't change {serverName}; {serverName}'s web UI is set on {serverName}."),
              .. webUi.Controls]);
+        // Sites is answered for this PC only, never through a server, so it uses the same client as the web UI above.
+        var sitesPage = new SitesOptionsPage(localClient, window, serverName);
+        window.AddPage("Sites on this PC", "", sitesPage.Controls);
 
         window.Closed += (_, _) =>
         {
             foreach (var (page, _) in accountPages) page.Close();
             extraction?.Close();
             webUi.Close();
+            sitesPage.Close();
             _ = localClient.DisposeAsync().AsTask();
         };
 

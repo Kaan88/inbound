@@ -4085,12 +4085,17 @@ public sealed partial class MainWindow : Window
             // UI.R31: a screen, not Connection's globe.
             window.AddPage("Web UI", "\uE7F4", webUi.Controls);
 
+            // Sites is this PC's own, so its client is this PC's Host's (the window follows the shown server, which here is this PC).
+            var sites = new SitesOptionsPage(_remote, window);
+            window.AddPage("Sites", "\uE753", sites.Controls);
+
             window.Closed += (_, _) =>
             {
                 foreach (var (page, _) in accountPages) page.Close();
                 extraction?.Close();
                 torrentPage?.Close();
                 webUi.Close();
+                sites.Close();
             };
 
             static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
