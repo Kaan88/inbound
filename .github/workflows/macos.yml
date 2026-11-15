@@ -106,11 +106,11 @@ jobs:
           pid=$!
           ok=1
           for i in $(seq 1 60); do
-            if "$app/Contents/Resources/host/DownloadManager.Cli" --no-start list >/dev/null 2>&1; then ok=0; break; fi
+            if "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start >/dev/null 2>&1; then ok=0; break; fi
             kill -0 $pid 2>/dev/null || { echo "The Host exited: $(wait $pid; echo $?)"; break; }
             sleep 1
           done
-          "$app/Contents/Resources/host/DownloadManager.Cli" --no-start list
+          "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start
           echo "--- Host output"; cat "$RUNNER_TEMP/host.log"
           echo "--- Host logs"; find "$DOWNLOADMANAGER_DATA" -maxdepth 2 | head -40; cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -80
           echo "--- sockets"; ls -la "${TMPDIR:-/tmp}"/inbound-* 2>/dev/null

@@ -18,6 +18,9 @@ public static class UnixSockets
     /// </summary>
     public static string Directory()
     {
+        // macOS: a socket path is at most 104 bytes, and $TMPDIR (/var/folders/xx/.../T/) leaves too little of that.
+        // /tmp is short; the folder is still this user's and closed to others (EnsureDirectory checks both).
+        if (OperatingSystem.IsMacOS()) return $"/tmp/inbound-{EffectiveUserId()}";
         var runtime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         return !string.IsNullOrWhiteSpace(runtime) && Path.IsPathRooted(runtime)
             ? Path.Combine(runtime, "inbound")
