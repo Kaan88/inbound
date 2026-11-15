@@ -21,7 +21,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 | 2026-11-13 | "uploads and all the needs that come with it are a must. if rclone can do it all, that's fantastic." |
 | 2026-11-13 | Sites in the sidebar show that a download or upload is active there. |
 | 2026-11-13 | The fourth mockup page is agreed. Sites is switchable. rclone is a separate process that runs only while needed. |
-| 2026-11-15 | Open questions answered: site transfers have their own limit (1); a web session may add and edit sites only as admin (2); no Sites line or anything else of Sites in the extension (4); rclone is **not in Setup or the update zip**: Options > Sites downloads it, and the Docker image includes it (5, replaces "rclone is bundled in Setup" of 2026-11-12); FTPS self-signed certificates go in one CA file Inbound manages (6); no resume is accepted for now (7). Question 3 stays open. |
+| 2026-11-15 | Open questions answered: site transfers have their own limit (1); a web session may add and edit sites only as admin (2); no Sites line or anything else of Sites in the extension (4); rclone is **not in Setup or the update zip**: Options > Sites downloads it, and the Docker image includes it (5, replaces "rclone is bundled in Setup" of 2026-11-12); FTPS self-signed certificates go in one CA file Inbound manages (6); no resume is accepted for now (7). Question 3: "to this device" and "from this device" are in the first web UI release, not server side only (owner, 2026-11-15). |
 
 ## The agreed design in short
 
@@ -38,7 +38,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 - "Delete on server" always asks, with the count and size. Local delete goes to the Recycle Bin.
 - Add a site by picking a tile, then four fields; the rest is under Advanced, with a Test button.
 - Web UI: the same view. "Here" means the machine Inbound runs on. Download and Upload ask "the server or this
-  device" (open question 3). Phone: one pane, bottom sheets. The extension shows nothing of Sites (owner, 2026-11-15).
+  device"; both are in the first web UI release (owner, 2026-11-15). Phone: one pane, bottom sheets. The extension shows nothing of Sites (owner, 2026-11-15).
 
 ## Architecture
 
@@ -223,8 +223,10 @@ sent to clients that have a site open.
   place. Options gets a Sites page through `SettingsWindow.AddPage`. Uno shares the files, so it follows.
 - **Web UI.** A `sites` screen beside `TorBoxScreen.svelte`. "To this device" and "from this device" need two Server
   endpoints that stream between the browser and rclone; they follow the upload precedent in `TorrentUploads.cs` and
-  the same auth and origin checks in `WebFront.cs`. In bridge mode the stream passes through the Host's pipe; if
-  that is too slow, version one offers server-side transfers only in bridge mode. To be measured.
+  the same auth and origin checks in `WebFront.cs`. The device side is in the first web UI release
+  (owner, 2026-11-15). In bridge mode the stream passes through the Host's pipe; that is measured first, and if it
+  is too slow the stream gets a faster path (for example the Server talking to rclone's own loopback address with
+  credentials the Host hands it) rather than being left out.
 - **CLI.** `dm sites list|add|remove|test`, `dm sites ls <site>:<path>`, `dm sites get`, `dm sites put`,
   `dm sites rm`, `dm sites mv`, `dm sites mkdir`, `dm sites transfers`.
 - **Extension.** Nothing (owner, 2026-11-15): no popup line and no new native-host message.
@@ -359,14 +361,9 @@ Summary. Since 2026-11-15 the sections above carry these changes; this list is k
 
 ## Open questions for the owner
 
-3. Is "to this device" and "from this device" in the first web UI release, or server-side only at first? In the web
-   UI on a phone or another PC, "Download" can mean either: from the site to the machine Inbound runs on (the
-   server), or on through the browser to the device in your hand. "Upload" likewise can take a file from the server
-   or from that device. The device side needs streaming through the Server (and the Host's pipe in bridge mode) and
-   is the slower, larger part. Proposed: server side first, the device side after it is measured.
-
-Answered on 2026-11-15 (see Owner decisions): 1 own limit; 2 admin only; 4 nothing in the extension; 5 downloaded
-from Options, in the Docker image; 6 one Host-managed CA file; 7 no resume, for now.
+None. All seven were answered on 2026-11-15 (see Owner decisions): 1 own limit; 2 admin only; 3 "this device" in the
+first web UI release; 4 nothing in the extension; 5 downloaded from Options, in the Docker image; 6 one Host-managed
+CA file; 7 no resume, for now.
 
 ## Rejected
 
