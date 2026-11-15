@@ -413,6 +413,14 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **T. PERF.8 and PERF.15 on Windows** (2026-11-15, main, at `b45b7ca`; the owner said the PC was idle): numbers in
+  `docs/plans/perf-baseline-windows.md`. Engine on NTFS 357 to 606 MB/s (1 to 16 segments) at about 1 CPU s per GB, a
+  third to a half of the Linux figures, cause not established; a save costs its sync (about 3.8 ms); Host ready in
+  235 ms, native host 103 ms, CLI 29 ms. WinUI window: first frame with the list in 619, 763 and 1,043 ms at 0, 500 and
+  5,000 jobs; with downloads running 6 % of a core at one download (4 % on the UI thread) to 14 % at sixteen, almost
+  the same at 500 and 5,000 jobs; hidden and idle it is quiet in CPU (4 s an hour) but wakes about 126 times a second
+  (PERF.4). New `scripts/perf-window-active.sh` and `scripts/perf-thread-sample.ps1` take the active-download rows.
+  **Not measured:** dropped frames, the quiet Linux re-run (Linux deferred), the web UI on Windows.
 - **S. SITES.9: third-party notices and Sites in the docs** (2026-11-15, main). New `THIRD-PARTY-NOTICES.md` at the
   repo root: what ships next to Inbound (7-Zip, libtorrent with Boost and OpenSSL, .NET, Windows App SDK, Uno with
   SkiaSharp, Tmds.DBus.Protocol, Svelte, Tailwind) and what is downloaded on use (rclone), each with version, licence

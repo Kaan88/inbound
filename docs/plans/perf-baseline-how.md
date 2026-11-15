@@ -155,7 +155,9 @@ Nothing new has to be written for the first three numbers; the existing scripts 
    method; the earlier figures are 650 ms empty and 1,065 to 1,129 ms at 5,000 jobs.
 2. **Idle CPU with 0 active downloads, 500 and 5,000 jobs:** `scripts/perf-window.sh idle OUTDIR off 10 500` and `... off 10 5000`
    (window left open: option off, 10 minutes). `scripts/perf-idle-sample.ps1` is the sampler it runs; `scripts/perf-idle-summary.py` summarises its CSV.
-3. **UI-thread CPU per minute with 1, 8 and 20 active downloads, 500 and 5,000 jobs, and memory:** nothing in `perf-window.sh` adds active
+3. **UI-thread CPU per minute with 1, 8 and 20 active downloads, 500 and 5,000 jobs, and memory:** now
+   `scripts/perf-window-active.sh OUTDIR` (with `perf-thread-sample.ps1`), written from the steps below; taken 2026-11-15,
+   `perf-baseline-windows.md`. The steps it follows: nothing in `perf-window.sh` adds active
    downloads, and `scripts/soak.sh` (with `--ui` and `--jobs 5000`) adds a *stream* of mixed downloads, not a fixed count. What is needed:
    a copy of `perf-window.sh`'s `setup` + `add_jobs`, then A calls of the CLI
    `add "http://127.0.0.1:$PORT/slow/active-N.bin?size=268435456&bps=262144" --start now --connections 1` (set `maxconcurrent` to A + 2 first),
