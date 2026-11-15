@@ -146,6 +146,9 @@ Each of these can change the design. None is checked yet.
    folder and is renamed in place must hold. Find out: random-access writes and in-place rename through the picker's
    grant, or a path-based place (the shared Downloads folder) as the default with picked folders as a second step.
    This probably needs a small file-access interface in the engine.
+   **Found on the emulator (2026-11-15, API 35):** by path, the shared Downloads folder works with no permission and
+   no engine change, rename included. The app cannot overwrite a file there that it did not create. Picked folders
+   are not tried yet. Evidence: PROGRESS "Android first trial (ANDROID.2)".
 2. **How long a background service may run.** Recent Android versions limit data-sync foreground services to a few
    hours a day and offer a separate "user-initiated data transfer" job for long downloads. Read the current rules and
    choose; the mockup's note on A7 says "foreground service" and may need changing.
