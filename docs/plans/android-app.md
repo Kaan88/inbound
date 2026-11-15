@@ -120,7 +120,7 @@ Measure, for the .NET engine on Android with `tools/TestServer` and one real ser
 - time from tapping the icon to a usable list, and from boot to resumed downloads;
 - size of the installed app.
 
-Proposed pass marks, for the owner to confirm or change:
+Pass marks (confirmed by the owner, 2026-11-15):
 
 - transfer rate within 10% of the link's capacity on a mid-range phone;
 - no measurable CPU or wake-ups while idle;
@@ -193,6 +193,10 @@ Each item is done only with evidence linked in `PROGRESS.md`.
 ## 9. Open questions for the owner
 
 1. ~~arm64: may device work start?~~ Answered 2026-11-15: yes, for the Android app.
-2. The pass marks in section 5: are they the right ones?
-3. The oldest Android version to support. Dynamic colour needs Android 12; the app can run on older ones without it.
-4. How the app is handed out: an APK from the releases page, or a store.
+2. ~~The pass marks in section 5.~~ Answered 2026-11-15: as proposed.
+3. ~~The oldest Android version.~~ Answered 2026-11-15: Android 12, so dynamic colour is there on every supported
+   phone.
+4. ~~How the app is handed out.~~ Answered 2026-11-15: a signed APK on the releases page, with the app checking there
+   for updates.
+
+Nothing is waiting for the owner now.

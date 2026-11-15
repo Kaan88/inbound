@@ -649,7 +649,9 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - [ ] ANDROID.10 Release (signing, distribution, updates).
 - arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
-- Waiting for the owner: the performance pass marks, the
+- Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
+  signed APK on the releases page with an update check. Nothing waits for the owner.
+- Was waiting for the owner (answered above): the performance pass marks, the
   oldest Android version, how the app is handed out. Left in the mockup: re-export 9 screens at full size, the
   3 missing ones and the board (Figma's call limit ran out).
 
