@@ -427,6 +427,20 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AR. Owner on Sites in 0.8.0: the UI is not finished** (2026-11-16). "current implementation is TERRIBLE ... a tacked
+  on feature that is borderline unusable"; "backend seems sound and it seems to work but ui is not finished"; "I agreed
+  on mockups for the design USE THEM"; "don't start the work yet, create a proper bulletproof plan first". Reported:
+  - Web UI: a download goes to the browser (where the extension catches it) instead of to the server.
+  - Web UI: Google Drive files are not listed.
+  - Desktop: no context menu over files, and a double click on a file does nothing.
+  - Desktop: the transfers list looks unlike the rest of the app, nothing can be done with a downloaded file, and its
+    Files button is of no use.
+  - Desktop: "sites page leaves a lot to be desired".
+  The four mockup pages were never in the repo; they are now in `docs/plans/sites-mockups/` (page 4 is the agreed one).
+  The earlier "walked" notes for SITES.3 to SITES.7 were function checks through UI Automation and never a comparison
+  with the mockup, which those rows say ("Not checked: visuals"). Plan: `docs/plans/sites-rework.md`, ROADMAP SITES.11.
+  Nothing is built yet. The owner accepted the plan and all nine picks the same day ("I accept all picks but don't start
+  yet"); work starts on their word.
 - **AQ. 0.8.0 published** (2026-11-15, owner: "make a full release"). `v0.8.0` at `7fa8a8c` (the audited commit): the
   Windows build made the draft, which was published as the latest release with a summary, the extension line (0.6.4,
   unchanged) and two known issues (a trusted certificate counts for every site; a transfer stops after about half a

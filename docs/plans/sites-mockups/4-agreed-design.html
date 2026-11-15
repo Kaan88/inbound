@@ -1,0 +1,531 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Inbound Sites Proposal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a situation list on the left, one WinUI-styled Inbound window on the right, notes underneath. Palette = App.xaml Inbound tokens. */
+:root{
+--font:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+--page:#E6E6E6;--panel:#F4F4F4;--text:#1A1A1A;--sec:#666666;
+--win:#F3F3F3;--chrome:rgba(255,255,255,.55);--surface:#FFFFFF;--divider:#DADADA;--fill:#1F6FC5;--on-acc:#FFFFFF;--upload:#B35C00;--track:#E2E2E2;--hl:#DCE9F7;--sel:rgba(0,0,0,.08);--card:rgba(255,255,255,.7);--cardstroke:rgba(0,0,0,.075);--ctl:rgba(255,255,255,.8);--ctl-stroke:rgba(0,0,0,.13);--dlg:#FAFAFA;
+--active:#1B65B4;--done:#1B7130;--failed:#B3261E;--wait:#8A5A00;--neutral:#5F5F5F;
+--i-start:#2E8B3E;--i-pause:#B7791F;--i-danger:#C42B1C;--i-info:#1F6FC5;--i-neutral:#6A6A6A;--i-media:#7B4FB8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--page:#101010;--panel:#1A1A1A;--text:#FFFFFF;--sec:#A3A3A3;
+--win:#202020;--chrome:rgba(255,255,255,.031);--surface:#181818;--divider:#343434;--fill:#4AA3F0;--on-acc:#0B1A2A;--upload:#F0A35E;--track:#383838;--hl:#2B3A4F;--sel:rgba(255,255,255,.094);--card:rgba(255,255,255,.05);--cardstroke:rgba(255,255,255,.08);--ctl:rgba(255,255,255,.06);--ctl-stroke:rgba(255,255,255,.1);--dlg:#2B2B2B;
+--active:#6DB3F2;--done:#5DC879;--failed:#F58B8B;--wait:#E0A93E;--neutral:#A3A3A3;
+--i-start:#8CCF8C;--i-pause:#E8B36A;--i-danger:#E08A8A;--i-info:#6FA8DC;--i-neutral:#A8A8A8;--i-media:#B49AD6;color-scheme:dark}}
+:root[data-theme="dark"]{
+--page:#101010;--panel:#1A1A1A;--text:#FFFFFF;--sec:#A3A3A3;
+--win:#202020;--chrome:rgba(255,255,255,.031);--surface:#181818;--divider:#343434;--fill:#4AA3F0;--on-acc:#0B1A2A;--upload:#F0A35E;--track:#383838;--hl:#2B3A4F;--sel:rgba(255,255,255,.094);--card:rgba(255,255,255,.05);--cardstroke:rgba(255,255,255,.08);--ctl:rgba(255,255,255,.06);--ctl-stroke:rgba(255,255,255,.1);--dlg:#2B2B2B;
+--active:#6DB3F2;--done:#5DC879;--failed:#F58B8B;--wait:#E0A93E;--neutral:#A3A3A3;
+--i-start:#8CCF8C;--i-pause:#E8B36A;--i-danger:#E08A8A;--i-info:#6FA8DC;--i-neutral:#A8A8A8;--i-media:#B49AD6;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font:14px/1.5 var(--font);padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button{font:inherit;color:inherit}
+.wrap{max-width:1480px;margin:0 auto}
+.top{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
+.top h1{font-size:24px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.top p{margin:0;color:var(--sec);max-width:64ch}
+.themebtn{height:32px;padding:0 12px;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--panel);cursor:pointer}
+.layout{display:grid;grid-template-columns:238px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1100px){.layout{grid-template-columns:minmax(0,1fr)}}
+#rail{display:flex;flex-direction:column;gap:2px}
+@media (max-width:1100px){#rail{flex-direction:row;flex-wrap:wrap;gap:6px}}
+.rg{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--sec);padding:12px 10px 4px}
+@media (max-width:1100px){.rg{width:100%;padding:6px 2px 0}}
+.ri{display:flex;flex-direction:column;align-items:flex-start;gap:0;text-align:left;background:transparent;border:1px solid transparent;border-radius:6px;padding:6px 10px;cursor:pointer;position:relative}
+.ri span{font-size:12px;color:var(--sec)}
+.ri:hover{background:var(--panel)}
+.ri.on{background:var(--hl)}
+.ri.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--fill)}
+@media (max-width:1100px){.ri{border-color:var(--divider)}.ri span{display:none}}
+.ri:focus-visible,.themebtn:focus-visible{outline:2px solid var(--fill);outline-offset:1px}
+.stage{overflow-x:auto;padding-bottom:4px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+.note{background:var(--panel);border:1px solid var(--divider);border-radius:8px;padding:12px 14px}
+.note h4{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--sec);letter-spacing:.03em}
+.note p{margin:0;font-size:13.5px;line-height:1.5}
+.note.q{border-color:var(--fill)}
+
+/* the mock window */
+.win{min-width:1100px;position:relative;overflow:hidden;background:var(--win);color:var(--text);border:1px solid var(--divider);border-radius:8px;font:12px/1.35 var(--font)}
+.win svg.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.grow{flex:1}
+.title{height:32px;display:flex;align-items:center;gap:8px;padding-left:12px}
+.title .app{color:var(--fill);display:grid}
+.wc{margin-left:auto;display:flex}
+.wc b{width:46px;height:32px;display:grid;place-items:center;font-weight:400}
+.menubar{height:28px;display:flex;align-items:center;gap:2px;padding:0 6px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.menubar b{font-weight:400;padding:3px 10px;border-radius:4px}
+.toolbar{height:62px;display:flex;align-items:stretch;padding:2px 6px;background:var(--chrome);border-bottom:1px solid var(--divider);overflow:hidden}
+.tb{min-width:72px;padding:0 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;white-space:nowrap}
+.tb svg.ic{width:22px;height:22px}
+.tsep{width:1px;background:var(--divider);margin:8px 4px}
+.c-start{color:var(--i-start)}.c-pause{color:var(--i-pause)}.c-danger{color:var(--i-danger)}.c-info{color:var(--i-info)}.c-neutral{color:var(--i-neutral)}.c-media{color:var(--i-media)}
+.body{display:grid;grid-template-columns:190px minmax(0,1fr)}
+.side{background:var(--chrome);border-right:1px solid var(--divider);padding:6px 0 12px;min-height:470px}
+.sh{padding:12px 12px 4px;color:var(--sec);font-weight:600;font-size:11px}
+.si{position:relative;display:flex;align-items:center;gap:8px;height:30px;margin:1px 4px;padding:0 8px;border-radius:4px}
+.si.on{background:var(--sel)}
+.si.on::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--fill)}
+.si .n{margin-left:auto;color:var(--sec)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;border:1.5px solid var(--neutral)}
+.dot.on{background:var(--done);border-color:var(--done)}.dot.busy{background:var(--wait);border-color:var(--wait)}.dot.lost{background:var(--failed);border-color:var(--failed)}
+.main{min-width:0;padding:8px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--surface);border:1px solid var(--cardstroke);border-radius:8px;overflow:hidden;min-width:0}
+.tile{background:var(--card);border:1px solid var(--cardstroke);border-radius:8px;padding:10px 12px}
+.panes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ph{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.ph b{font-weight:600}
+.chipn{border:1px solid var(--divider);border-radius:10px;padding:0 8px;color:var(--sec);font-size:11px;line-height:18px}
+.chipn.warn{color:var(--wait);border-color:var(--wait)}.chipn.ok{color:var(--done);border-color:var(--done)}.chipn.bad{color:var(--failed);border-color:var(--failed)}
+.pp{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--divider)}
+.ib{width:28px;height:26px;display:grid;place-items:center;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--ctl);cursor:pointer;color:var(--i-neutral)}
+.pathbox{flex:1;min-width:0;height:26px;display:flex;align-items:center;padding:0 8px;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.filter{width:120px;height:26px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);color:var(--sec)}
+.filter.has{color:var(--text);width:150px}
+.lh,.lr{display:grid;grid-template-columns:var(--cols);align-items:center;padding:0 10px;gap:8px}
+.lh{height:26px;background:var(--chrome);border-bottom:1px solid var(--divider);font-weight:600}
+.lr{height:27px;position:relative;white-space:nowrap}
+.lr>*{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lr .nm{display:flex;align-items:center;gap:7px}
+.lr .nm span{overflow:hidden;text-overflow:ellipsis}
+.lr.sel{background:var(--hl)}
+.lr.sel::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--fill)}
+.lr:not(.sel):hover{background:var(--sel)}
+.lr .r{text-align:right}.sec{color:var(--sec)}
+.lr.stale{color:var(--sec)}
+.foot{padding:6px 10px;border-top:1px solid var(--divider);color:var(--sec);background:var(--chrome)}
+.st-active{color:var(--active)}.st-done{color:var(--done)}.st-failed{color:var(--failed)}.st-wait{color:var(--wait)}.st-neutral{color:var(--neutral)}
+.stc{display:flex;flex-direction:column;gap:2px;justify-content:center;min-width:0}
+.stc>span{line-height:13px;overflow:hidden;text-overflow:ellipsis}
+.bar{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--fill)}
+.bar.up i{background:var(--upload)}.bar.wait i{background:var(--wait)}
+.qt{display:flex;gap:10px;align-items:center;padding:7px 10px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.qt b{font-weight:600}.qt span{color:var(--sec)}
+.dirI{color:var(--i-pause)}.fileI{color:var(--i-neutral)}.linkI{color:var(--i-info)}
+.down{color:var(--fill)}.upc{color:var(--upload)}
+.state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;color:var(--sec);min-height:190px}
+.state svg.ic{width:32px;height:32px}
+.state .t{color:var(--text);font-size:14px;font-weight:600}
+.ring{width:28px;height:28px;border-radius:50%;border:3px solid var(--track);border-top-color:var(--fill);animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ring{animation:none}}
+.steps{display:flex;flex-direction:column;gap:7px;align-items:flex-start;text-align:left;color:var(--text)}
+.steps div{display:flex;gap:8px;align-items:center}
+.steps .todo{color:var(--sec)}
+.info{display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:4px;border:1px solid var(--cardstroke);background:var(--card)}
+.info.inf{background:var(--hl)}
+.info .ii{display:grid}
+.info.warn .ii{color:var(--wait)}.info.err .ii{color:var(--failed)}.info.ok .ii{color:var(--done)}.info.inf .ii{color:var(--fill)}
+.info .tx{flex:1;min-width:0}.info .tx b{font-weight:600}
+.b{height:28px;padding:0 12px;border-radius:4px;border:1px solid var(--ctl-stroke);background:var(--ctl);display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+.b.acc{background:var(--fill);color:var(--on-acc);border-color:transparent}
+.b.dng{color:var(--i-danger)}
+.b:focus-visible{outline:2px solid var(--fill);outline-offset:1px}
+.gbar{height:23px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--chrome);border-top:1px solid var(--divider);color:var(--sec)}
+.sbar{height:24px;display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--chrome);border-top:1px solid var(--divider)}
+.scrim{position:absolute;inset:32px 0 0 0;background:rgba(0,0,0,.42);display:grid;place-items:center;z-index:5;padding:16px}
+.dlg{width:min(500px,100%);background:var(--dlg);border:1px solid var(--divider);border-radius:8px;overflow:hidden}
+.dh{padding:20px 22px 18px}
+.dh h3{margin:0 0 10px;font-size:18px;font-weight:600;display:flex;gap:10px;align-items:center}
+.dh p{margin:0 0 10px;font-size:13px;line-height:1.45}
+.df{display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;background:var(--chrome);border-top:1px solid var(--divider)}
+.df .b{min-width:96px;justify-content:center}
+.mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px}
+.fp{background:var(--card);border:1px solid var(--cardstroke);border-radius:4px;padding:7px 10px;word-break:break-all;margin:4px 0 10px}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:13px;margin-bottom:8px}
+.kv span:nth-child(odd){color:var(--sec)}
+.rd,.cb{display:flex;gap:10px;align-items:flex-start;margin:7px 0;font-size:13px;cursor:pointer}
+.rd i{width:18px;height:18px;border-radius:50%;border:1px solid var(--sec);flex:none;margin-top:1px;position:relative}
+.rd i.on{border-color:var(--fill)}.rd i.on::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--fill)}
+.cb i{width:18px;height:18px;border-radius:4px;border:1px solid var(--sec);flex:none;margin-top:1px;display:grid;place-items:center;color:var(--on-acc)}
+.cb i.on{background:var(--fill);border-color:var(--fill)}
+.cb svg.ic{width:13px!important;height:13px!important;stroke-width:2.4}
+.sel2{display:inline-flex;gap:2px;padding:2px;border-radius:6px;background:var(--card);border:1px solid var(--cardstroke);margin-bottom:12px}
+.sel2 b{font-weight:400;padding:3px 12px;border-radius:4px;cursor:pointer}
+.sel2 b.on{background:var(--sel);font-weight:600}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>label{color:var(--sec);font-size:12px}
+.in{height:28px;width:100%;border:1px solid var(--ctl-stroke);border-radius:4px;background:var(--ctl);color:var(--text);font:inherit;padding:0 8px}
+select.in{padding-right:4px}
+.in:focus-visible{outline:2px solid var(--fill);outline-offset:0}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.w2{position:absolute;left:50%;top:56px;transform:translateX(-50%);width:700px;max-width:96%;background:var(--win);border:1px solid var(--divider);border-radius:8px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:6}
+.w2 .title{background:var(--win)}
+.mgr{display:grid;grid-template-columns:200px minmax(0,1fr)}
+.mgr .tree{border-right:1px solid var(--divider);padding:8px 0;background:var(--chrome);min-height:420px}
+.mgr .form{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.menu{position:absolute;width:210px;background:var(--dlg);border:1px solid var(--divider);border-radius:8px;padding:4px;z-index:4;box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.menu div{display:flex;gap:10px;align-items:center;padding:6px 10px;border-radius:4px;cursor:pointer}
+.menu div:hover,.menu div.h{background:var(--sel)}
+.menu hr{border:0;border-top:1px solid var(--divider);margin:4px 2px}
+.drop{outline:2px dashed var(--fill);outline-offset:-4px;background:var(--hl)}
+.ghost{position:absolute;z-index:3;background:var(--dlg);border:1px solid var(--fill);border-radius:4px;padding:5px 10px;display:flex;gap:8px;align-items:center}
+.seg{display:flex;height:14px;border-radius:2px;overflow:hidden;gap:2px}
+.seg div{flex:1;background:var(--track);position:relative}.seg div i{position:absolute;inset:0 auto 0 0;background:var(--fill)}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.tiles .tile small{display:block;color:var(--sec);font-size:12px}.tiles .tile b{font-size:18px;font-weight:600}.tiles .tile b u{text-decoration:none;font-size:12px;font-weight:400;color:var(--sec)}
+
+.panes3{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1.25fr);gap:6px}
+.gut{display:flex;flex-direction:column;gap:6px;justify-content:center;align-items:center}
+.gut .lk{color:var(--fill);border-color:var(--fill)}
+.crumb{cursor:pointer}.crumb:hover{text-decoration:underline}
+.pathbox svg.ic{width:12px;height:12px}
+.tbar{display:flex;align-items:center;gap:14px;height:30px;padding:0 12px;border:1px solid var(--cardstroke);border-radius:8px;background:var(--card);cursor:pointer}
+.tbar b{font-weight:600}.tbar span{display:inline-flex;gap:4px;align-items:center}
+.main>.grow{flex:1}
+.sel2 b[data-go]{cursor:pointer}
+.tilesg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.tilesg .tile{cursor:pointer}.tilesg .pick1{border-color:var(--fill);background:var(--hl)}
+.lr[data-go]{cursor:pointer}
+.st-done svg.ic{width:12px;height:12px;vertical-align:-1px}
+.x{background:var(--panel);border:1px solid var(--divider);border-radius:12px;padding:18px 20px;font-size:14px}
+.x h2{margin:0 0 4px;font-size:18px;font-weight:600}
+.x>p{margin:0 0 12px;color:var(--sec);max-width:70ch}
+.cmp{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:10px}
+.cmp th{text-align:left;font-weight:600;color:var(--sec);padding:8px 10px;border-bottom:1px solid var(--divider)}
+.cmp td{padding:8px 10px;border-bottom:1px solid var(--divider);vertical-align:top}
+.phones{display:flex;flex-wrap:wrap;gap:24px;justify-content:center;padding:8px 0}
+.phone{width:390px;max-width:100%;background:var(--win);border:1px solid var(--divider);border-radius:28px;overflow:hidden;display:flex;flex-direction:column;min-height:620px;color:var(--text);font:14px/1.4 var(--font)}
+.phone svg.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.phone .b{height:40px;font-size:13px;padding:0 10px}.phone .b svg.ic{width:16px;height:16px}
+.phone .sec{color:var(--sec)}.phone .dirI{color:var(--i-pause)}.phone .fileI{color:var(--i-neutral)}
+.phone .cb{display:flex;margin:0}.phone .cb i{width:22px;height:22px;margin:0}
+.phone .cb svg.ic{width:14px!important;height:14px!important;stroke-width:2.4}
+.phone .dot{flex:none}.phone .state svg.ic{width:28px;height:28px}
+.si{position:relative}
+.si .act{margin-left:auto;display:inline-flex;gap:5px;align-items:center;font-size:11px}
+.si .act span{display:inline-flex;align-items:center;gap:1px}
+.si .act svg.ic{width:11px;height:11px}
+.sprog{position:absolute;left:10px;right:10px;bottom:1px;height:2px;border-radius:1px;background:var(--divider);overflow:hidden}
+.sprog b{display:block;height:100%;background:var(--fill)}
+.brow{display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--chrome);border-bottom:1px solid var(--divider)}
+.bdots{display:inline-flex;gap:5px}.bdots i{width:10px;height:10px;border-radius:50%;background:var(--divider)}
+.burl{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:var(--win);border:1px solid var(--divider);color:var(--sec);font-size:12px}
+.burl svg.ic{width:12px;height:12px}
+.pop{width:360px;max-width:100%;align-self:flex-start;background:var(--win);border:1px solid var(--divider);border-radius:8px;overflow:hidden;color:var(--text);font:13px/1.4 var(--font)}
+.pop svg.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.pop .sec{color:var(--sec)}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Sites, as I would build it</h1>
+      <p>My own suggestions for the Sites view, with uploads and remote changes in and rclone behind every site. Mockups only; nothing here is built or decided.</p>
+    </div>
+    <button class="themebtn" id="themebtn" type="button">Theme: system</button>
+  </header>
+  <div class="layout">
+    <nav id="rail" aria-label="Situations"></nav>
+    <div>
+      <div class="stage"><div id="win"></div></div>
+      <section class="notes" id="notes" aria-live="polite"></section>
+    </div>
+  </div>
+</div>
+
+<script>
+const P={
+plus:'<path d="M12 5v14M5 12h14"/>',play:'<path d="M7 4v16l13-8z"/>',square:'<rect x="6" y="6" width="12" height="12" rx="2"/>',
+pause:'<path d="M8 5v14M16 5v14"/>',trash:'<path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/>',
+sliders:'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+'folder-plus':'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v5M9.5 12.5h5"/>',
+file:'<path d="M7 3h7l5 5v13H7zM14 3v5h5"/>',
+download:'<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',upload:'<path d="M12 16V5M7 9l5-5 5 5M5 20h14"/>',
+refresh:'<path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5"/>',
+unplug:'<path d="M9 3v4M15 3v4M6 7h12v3a6 6 0 0 1-12 0zM12 16v5M3 3l18 18"/>',
+plug:'<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+server:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+unlock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
+shield:'<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+alert:'<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+chevr:'<path d="M9 6l6 6-6 6"/>',chevd:'<path d="M6 9l6 6 6-6"/>',chevu:'<path d="M6 15l6-6 6 6"/>',
+x:'<path d="M6 6l12 12M18 6L6 18"/>',key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+search:'<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',check:'<path d="M5 12l5 5 9-10"/>',
+info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+aup:'<path d="M12 19V5M6 11l6-6 6 6"/>',adown:'<path d="M12 5v14M6 13l6 6 6-6"/>',
+home:'<path d="M4 11l8-7 8 7v9H4z"/>',cornerr:'<path d="M5 18v-6a3 3 0 0 1 3-3h11M15 5l4 4-4 4"/>',
+edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+minus:'<path d="M6 12h12"/>',sq:'<rect x="6" y="6" width="12" height="12"/>',import:'<path d="M12 4v10M8 10l4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'
+};
+const ic=(n,c)=>`<svg class="ic ${c||''}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const bt=(l,o={})=>`<button class="b ${o.acc?'acc':''} ${o.dng?'dng':''}" type="button" ${o.go?`data-go="${o.go}"`:''}>${o.i?ic(o.i):''}${l}</button>`;
+const rd=(l,on,g)=>`<label class="rd" data-grp="${g}"><i class="${on?'on':''}"></i><span>${l}</span></label>`;
+const cb=(l,on)=>`<label class="cb"><i class="${on?'on':''}">${on?ic('check'):''}</i><span>${l}</span></label>`;
+const info=(k,title,msg,acts)=>`<div class="info ${k}"><span class="ii">${ic(k==='ok'?'check':k==='inf'?'info':'alert')}</span><div class="tx"><b>${title}</b> ${msg}</div>${acts||''}</div>`;
+const dlg=(title,body,btns,ico)=>`<div class="scrim"><div class="dlg" role="dialog" aria-label="${title}"><div class="dh"><h3>${ico||''}${title}</h3>${body}</div><div class="df">${btns}</div></div></div>`;
+
+const T=(i,l,c)=>`<div class="tb">${ic(i,'c-'+c)}<span>${l}</span></div>`;
+/* panes */
+const LOCAL=[['..','dir'],['archive','dir','','Nov 02 09:14'],['debian-13.2-amd64.iso','file','3.4 GB','Oct 28 21:40'],['fedora-43-workstation.iso','file','2.2 GB','Oct 14 18:02'],['notes.txt','file','2 KB','Nov 09 19:19']];
+const REMOTE=[['..','dir'],['backups','dir','','Nov 10 03:00'],['photos-2026','dir','','Nov 08 16:45'],['ubuntu-26.04-desktop-amd64.iso','file','5.8 GB','Nov 05 14:02',1],['ubuntu-26.04-live-server.iso','file','2.1 GB','Nov 05 14:11',1],['latest.iso','link','5.8 GB','Nov 05 14:02'],['notes.txt','file','2 KB','Nov 09 19:19']];
+const FTPROWS=[['..','dir'],['v2.4','dir','','Sep 12 00:00'],['v2.5','dir','','Oct 30 08:00'],['CHECKSUMS.txt','file','1 KB','Oct 30 08:00'],['toolkit-2.5.1-win64.zip','file','184 MB','Oct 30 08:02',1],['toolkit-2.5.1-src.tar.gz','file','12 MB','Oct 30 08:02']];
+function rows(list,stale){
+  return list.map(r=>{
+    const ico=icoFor(r[1]);
+    return `<div class="lr ${r[4]?'sel':''} ${stale?'stale':''}"><div class="nm">${ico}<span>${r[0]}</span></div><div class="r sec">${r[2]||''}</div><div class="sec">${r[3]||''}</div></div>`;
+  }).join('');
+}
+function pane(o){
+  const cols='minmax(120px,1fr) 70px 104px';
+  const head=`<div class="ph">${ic(o.remote?'server':'home')}<b>${o.title}</b>${o.chip||''}</div>
+  <div class="pp"><span class="ib">${ic('chevu')}</span><div class="pathbox">${o.path}</div><span class="ib">${ic('refresh')}</span>${o.filter!==undefined?`<div class="filter ${o.filter?'has':''}">${ic('search')}<span>${o.filter||'Filter'}</span></div>`:''}</div>`;
+  const lh=`<div class="lh" style="--cols:${cols}"><span>${o.remote?'Remote name':'Local name'} ${ic('chevu')}</span><span class="r">Size</span><span>Modified</span></div>`;
+  let content;
+  if(o.state) content=o.state;
+  else content=`<div style="--cols:${cols}">${lh}${rows(o.rows,o.stale)}</div>`;
+  return `<div class="card ${o.drop?'drop':''}" style="position:relative">${head}${content}<div class="foot">${o.foot||''}</div>${o.extra||''}</div>`;
+}
+const LOCALPANE=(x={})=>pane(Object.assign({title:'This PC',path:'D:\\Downloads\\ISOs',rows:LOCAL,foot:'3 files and 1 folder · 5.6 GB'},x));
+const NASPANE=(x={})=>pane(Object.assign({remote:1,title:'nas.home.lan',chip:'<span class="chipn ok">SFTP</span>',path:'/media/isos',rows:REMOTE,foot:'2 of 7 selected · 7.9 GB'},x));
+
+/* queue list */
+function qlist(list,o={}){
+  const cols='minmax(240px,1.7fr) 78px 150px 76px 96px minmax(150px,1.2fr)';
+  const hd=`<div class="lh" style="--cols:${cols}"><span>File Name</span><span class="r">Size</span><span>Status</span><span>Time left</span><span>Transfer rate</span><span>Description</span></div>`;
+  const body=list.map(r=>{
+    const arrow=ic(r.d==='up'?'aup':'adown',r.d==='up'?'upc':'down');
+    const ch=r.pkg?ic(r.pkg==='open'?'chevd':'chevr'):'';
+    const bar=r.pct!==undefined?`<div class="bar ${r.d==='up'?'up':''} ${r.c==='wait'?'wait':''}"><i style="width:${r.pct}%"></i></div>`:'';
+    return `<div class="lr ${r.sel?'sel':''}" style="--cols:${cols}"><div class="nm" style="padding-left:${(r.ind||0)*20}px">${ch}${arrow}<span>${r.n}</span></div><div class="r sec">${r.size||''}</div><div class="stc"><span class="st-${r.c}">${r.st}</span>${bar}</div><div class="sec">${r.left||''}</div><div class="sec">${r.rate||''}</div><div class="sec">${r.desc||''}</div></div>`;
+  }).join('');
+  return `<div class="card">${o.title?`<div class="qt"><b>${o.title}</b><span>${o.sub||''}</span></div>`:''}${hd}${body}</div>`;
+}
+const Q1={n:'ubuntu-26.04-desktop-amd64.iso',d:'down',size:'5.8 GB',st:'Downloading 41.2%',c:'active',pct:41.2,left:'6m 12s',rate:'118.4 MB/s',desc:'nas.home.lan · 4 connections',sel:1};
+const Q2={n:'toolkit-2.5.1-win64.zip',d:'down',size:'184 MB',st:'Downloading 63.0%',c:'active',pct:63,left:'18s',rate:'4.9 MB/s',desc:'files.example.org · FTPS, 1 connection'};
+const Q3={n:'backup-2026-11.tar.zst',d:'down',size:'22.4 GB',st:'Queued',c:'wait',left:'',rate:'',desc:'nas.home.lan · waits for a free slot (3 of 3 in use)'};
+const Q4={n:'debian-13.2-amd64.iso',d:'down',size:'3.4 GB',st:'Completed',c:'done',desc:'nas.home.lan · Nov 09 19:19:28 2026'};
+
+/* scenarios */
+P.link='<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>';
+P.cloud='<path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1 0 9z"/>';
+P.star='<path d="M12 4l2.5 5 5.5.8-4 3.9.9 5.5L12 16.6 7.100 19.2l.9-5.500-4-3.900 5.500-.800z"/>';
+P.aright='<path d="M5 12h14M13 6l6 6-6 6"/>';
+P.aleft='<path d="M19 12H5M11 6l-6 6 6 6"/>';
+P.menu='<path d="M4 7h16M4 12h16M4 17h16"/>';
+P.retry='<path d="M20 11a8 8 0 1 0-2.300 6M20 5v6h-6"/>';
+function icoFor(k){return k==='dir'?ic('folder','dirI'):k==='link'?ic('cornerr','linkI'):ic('file','fileI')}
+const dlg2=(t,b,f,i,w)=>dlg(t,b,f,i).replace('class="dlg"','class="dlg" style="width:min('+w+'px,100%)"');
+
+const SL=[['nas.home.lan','SFTP','on'],['files.example.org','FTP','on'],['cloud.example.net','WebDAV','on'],['gdrive','Drive','on'],['b2-media','B2','on']];
+P.lock='<path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z"/>';
+const ACT={'nas.home.lan':{d:1,u:1,p:24},'gdrive':{w:1}};
+function side(sel,st){
+  st=st||{};
+  const act=n=>{const a=st[n]==='lost'?{w:2}:ACT[n];if(!a)return '';
+    return `<span class="act">${a.d?'<span>'+ic('adown','down')+a.d+'</span>':''}${a.u?'<span>'+ic('aup','upc')+a.u+'</span>':''}${a.w?'<span class="st-wait">'+ic('clock')+a.w+'</span>':''}</span>${a.p?`<i class="sprog"><b style="width:${a.p}%"></b></i>`:''}`};
+  const it=(l,n)=>`<div class="si ${sel===l?'on':''}"><span>${l}</span>${n!==undefined?`<span class="n">${n}</span>`:''}</div>`;
+  return `<div class="side">${it('All Downloads',3)}${it('Unfinished',2)}${it('Active',2)}${it('Queued',0)}${it('Failed',0)}${it('Finished',4)}
+  <div class="sh">Sites</div>${it('All sites')}${SL.map(s=>`<div class="si ${sel===s[0]?'on':''}"><i class="dot ${st[s[0]]||s[2]}"></i><span>${s[0]}</span>${act(s[0])||`<span class="n" style="font-size:11px">${s[1]}</span>`}</div>`).join('')}</div>`;
+}
+const DLTB=()=>`${T('plus','Add URL','info')}<i class="tsep"></i>${T('play','Resume','start')}${T('pause','Stop','pause')}${T('square','Stop All','pause')}<i class="tsep"></i>${T('trash','Delete','danger')}${T('trash','Delete Completed','danger')}<i class="tsep"></i>${T('sliders','Options','neutral')}${T('clock','Scheduler','info')}<i class="tsep"></i>${T('play','Start Queue','start')}${T('square','Stop Queue','pause')}`;
+const SITETB=()=>`${T('download','Download','info')}${T('upload','Upload','info')}<i class="tsep"></i>${T('folder-plus','New folder','info')}${T('edit','Rename','neutral')}${T('trash','Delete on server','danger')}<i class="tsep"></i>${T('refresh','Refresh','info')}<i class="tsep"></i>${T('pause','Pause transfers','pause')}<i class="tsep"></i>${T('server','Edit site','neutral')}${T('sliders','Options','neutral')}`;
+function win(o){
+  return `<div class="win" role="group" aria-label="Mock of the Inbound window">
+  <div class="title"><span class="app">${ic('download')}</span><span>Inbound Download Manager</span><span class="wc"><b>${ic('minus')}</b><b>${ic('sq')}</b><b>${ic('x')}</b></span></div>
+  <div class="menubar"><b>Tasks</b><b>File</b><b>Downloads</b><b>${o.site?'Site':'View'}</b>${o.site?'<b>View</b>':''}<b>Help</b></div>
+  <div class="toolbar">${o.site?SITETB():DLTB()}</div>
+  <div class="body">${side(o.sel,o.st)}<div class="main">${o.main}</div></div>
+  ${o.site?'':`<div class="gbar"><span>${ic('adown','down')} ${o.dl||'0 B/s'}</span><span>${ic('aup','upc')} ${o.ul||'0 B/s'}</span><span class="grow"></span><span>Last 1 minute</span>${ic('chevu')}</div>`}
+  <div class="sbar"><span>${o.status||'Ready'}</span>${o.chip||''}</div>
+  ${o.over||''}</div>`;
+}
+/* panes with breadcrumbs, stars and the On this PC column */
+const here=v=>v==='same'?`<span class="st-done">${ic('check')} Same</span>`:v==='older'?`<span class="st-wait">Older here</span>`:v==='part'?`<span class="st-neutral">Some of it</span>`:v==='no'?`<span class="sec">Not here</span>`:'';
+function pane2(o){
+  const cols=o.here?'minmax(130px,1fr) 66px 96px 96px':(o.wide?'minmax(200px,1fr) 80px 120px 110px 100px':'minmax(130px,1fr) 66px 96px');
+  const crumbs=o.crumbs.map((c,i)=>i===o.crumbs.length-1?`<b style="font-weight:600">${c}</b>`:`<span class="crumb">${c}</span>`).join(`<span class="sec">${ic('chevr')}</span>`);
+  const head=`<div class="ph">${ic(o.remote?'server':'home')}<b>${o.title}</b>${o.chip||''}<span class="grow"></span>${o.note||''}</div>
+  <div class="pp"><span class="ib">${ic('chevu')}</span><div class="pathbox" style="font-family:inherit;font-size:12px;gap:4px">${crumbs}</div><span class="ib ${o.star?'c-pause':''}" title="Starred folders">${ic('star')}</span>${o.filter?`<div class="filter">${ic('search')}<span>Filter</span></div>`:''}</div>`;
+  const lh=`<div class="lh" style="--cols:${cols}"><span>Name ${ic('chevu')}</span><span class="r">Size</span><span>Modified</span>${o.here||o.wide?`<span>${o.hereLabel||'On this PC'}</span>`:''}${o.wide?'<span>Rights</span>':''}</div>`;
+  const body=o.state||o.rows.map(r=>`<div class="lr ${r[4]?'sel':''}" style="--cols:${cols}"><div class="nm">${icoFor(r[1])}<span>${r[0]}</span></div><div class="r sec">${r[2]||''}</div><div class="sec">${r[3]||''}</div>${o.here||o.wide?`<div>${here(r[5])}</div>`:''}${o.wide?`<div class="sec mono">${r[6]||''}</div>`:''}</div>`).join('');
+  return `<div class="card ${o.drop?'drop':''}">${head}${o.state?'':lh}${body}<div class="foot">${o.foot||''}</div></div>`;
+}
+const LR=[['..','dir'],['archive','dir','','Nov 02 09:14'],['debian-13.2-amd64.iso','file','3.4 GB','Oct 28 21:40'],['ubuntu-26.04-live-server.iso','file','2.1 GB','Nov 05 14:11'],['notes.txt','file','2 KB','Nov 01 08:00']];
+const RR=[['..','dir'],['backups','dir','','Nov 10 03:00','', 'no','drwxr-x---'],['photos-2026','dir','','Nov 08 16:45','','part','drwxr-xr-x'],['ubuntu-26.04-desktop-amd64.iso','file','5.8 GB','Nov 05 14:02',1,'no','-rw-r--r--'],['ubuntu-26.04-live-server.iso','file','2.1 GB','Nov 05 14:11','','same','-rw-r--r--'],['debian-13.2-amd64.iso','file','3.4 GB','Oct 28 21:40','','same','-rw-r--r--'],['notes.txt','file','2 KB','Nov 09 19:19','','older','-rw-rw-r--']];
+const LPANE=(x={})=>pane2(Object.assign({title:'This PC',crumbs:['D:','Downloads','ISOs'],rows:LR,foot:'3 files and 1 folder · 5.5 GB'},x));
+const RPANE=(x={})=>pane2(Object.assign({remote:1,title:'nas.home.lan',chip:'<span class="chipn ok">SFTP</span>',crumbs:['nas.home.lan','media','isos'],star:1,rows:RR,here:1,foot:'1 of 6 selected · 5.8 GB · 2 already on this PC'},x));
+const gutter=(l)=>`<div class="gut"><span class="ib" title="Upload selected">${ic('aright','upc')}</span><span class="ib" title="Download selected">${ic('aleft','down')}</span><span class="ib ${l?'lk':''}" title="Linked folders">${ic('link')}</span></div>`;
+const viewSw=(a)=>`<div style="display:flex;align-items:center;gap:10px"><div class="sel2" style="margin:0"><b class="${a===0?'on':''}" data-go="browse">Two panes</b><b class="${a===1?'on':''}" data-go="remote-only">Server only</b></div><span class="grow"></span><span class="sec">${ic('link')} Linked folders: D:\\Downloads\\ISOs follows /media/isos</span></div>`;
+const tbar=(open,txt)=>`<div class="tbar" data-go="${open?'browse':'transfers'}"><b>Transfers</b><span>${ic('adown','down')} 118.4 MB/s</span><span>${ic('aup','upc')} 38.2 MB/s</span><span class="sec">${txt||'2 running · 2 waiting'}</span><span class="grow"></span>${ic(open?'chevd':'chevu')}</div>`;
+const BATCH=[
+ {n:'Download ubuntu-26.04-desktop-amd64.iso',d:'down',size:'5.8 GB',st:'Downloading 41.2%',c:'active',pct:41.2,left:'6m 12s',rate:'118.4 MB/s',desc:'nas.home.lan to D:\\Downloads\\ISOs',sel:1},
+ {n:'Upload backup-2026-11.tar.zst',d:'up',size:'22.4 GB',st:'Uploading 7.0%',c:'active',pct:7,left:'1h 22m',rate:'38.2 MB/s',desc:'D:\\Backups to nas.home.lan /backups'},
+ {n:'Download photos-2026 (1,204 files)',d:'down',pkg:'closed',size:'9.6 GB',st:'Waiting',c:'wait',desc:'nas.home.lan to D:\\Downloads\\photos-2026 · only new files'},
+ {n:'Upload 2 files',d:'up',pkg:'closed',size:'3.4 GB',st:'Waiting',c:'wait',desc:'D:\\Downloads\\ISOs to gdrive /Projects'}];
+const tabs=(a,n)=>`<div class="qt"><div class="sel2" style="margin:0">${['Running and waiting','Failed','Done'].map((t,i)=>`<b class="${i===a?'on':''}" ${i===1?'data-go="failed"':i===0?'data-go="transfers"':''}>${t} (${n[i]})</b>`).join('')}</div><span class="grow"></span>${a===1?bt('Retry all',{i:'retry'}):bt('Clear done')}</div>`;
+const qB=(a,n,list)=>qlist(list,{title:'x'}).replace('<div class="qt"><b>x</b><span></span></div>',tabs(a,n));
+const NORMAL=[
+ {n:'lecture-04.mp4',d:'down',size:'1.2 GB',st:'Downloading 63.0%',c:'active',pct:63,left:'1m 40s',rate:'9.2 MB/s',desc:'Browser · lectures.example.edu'},
+ {n:'archlinux-2026.11.01-x86_64.iso',d:'down',size:'1.4 GB',st:'Downloading 31.0%',c:'active',pct:31,left:'5m 02s',rate:'3.4 MB/s',desc:'Torrent · 14 peers'},
+ {n:'setup-0.7.3.exe',d:'down',size:'74 MB',st:'Completed',c:'done',desc:'Browser · Nov 12 21:08:33 2026'}];
+const CHIP=`<span class="grow"></span><span class="chipn" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center" data-go="browse">${ic('server')}Sites · 2 running · 156 MB/s</span>`;
+const SST='nas.home.lan · SFTP · 6 items';
+
+const S={};
+S.overview={g:'Start here',l:'What I would change',d:'Thirteen suggestions and why',
+ notes:['The list of changes against the earlier mockups. Each has a screen in the list on the left.','Most of these follow from two facts: the site toolbar no longer fits beside the download toolbar, and with rclone behind every site there is no session to manage.','From rclone\'s documentation, not from a run: a password can be passed per call and the config kept in memory, and a host key can be pinned, but rclone never asks about a host key, so Inbound must fetch and show the fingerprint itself. Key files with a passphrase in the current OpenSSH format are not supported by rclone.'],
+ r:()=>{const row=(a,b)=>`<tr><td style="color:var(--text);font-weight:600">${a}</td><td>${b}</td></tr>`;
+ return `<div class="x"><h2>What I would change</h2><p>Uploads and remote changes are in, so the Sites view is a small file manager. These are the changes that make it one you can use without reading a manual.</p><div style="overflow-x:auto"><table class="cmp" style="min-width:620px"><tr><th>Suggestion</th><th>Why</th></tr>
+ ${row('The toolbar changes when you select a site','Download, Upload, Rename and Delete on server get their own labelled buttons. No button means two things depending on focus.')}
+ ${row('No Connect or Disconnect','With rclone behind it, a site is always there: select it and it lists. Trouble shows in the pane with Retry.')}
+ ${row('Transfers in a slim bar that opens upward','The same pattern as the speed graph. The panes keep the height when you are browsing.')}
+ ${row('One row per action, not per file','Dragging a folder of 1,204 files is one row that opens. Uploads and downloads sit together.')}
+ ${row('An "On this PC" column','When pulling, the question is what you already have. Same, Older here, Some of it, Not here.')}
+ ${row('Linked folders','Each site remembers the local folder that goes with it, and the two panes move together.')}
+ ${row('Server only view','Most pulls do not need the local pane. Downloads go where your category rules send them.')}
+ ${row('Arrow buttons between the panes','Dragging is hard to discover and impossible from the keyboard.')}
+ ${row('Breadcrumbs and starred folders','Click any part of the path. Star the three folders you actually use.')}
+ ${row('"Delete on server" and "Delete on this PC"','The words say where. Local deletes go to the Recycle Bin; server deletes ask first.')}
+ ${row('Add a site by picking a tile','Four fields for the common case. Everything else is under Advanced.')}
+ ${row('Sites in the sidebar show their activity','Arrows with counts for downloads and uploads, a clock for waiting ones and a thin progress line, visible from any view. Your note, 2026-11-13.')}
+ ${row('An All sites page','Every site with when you last used it, and a box to open an address once without saving it.')}
+ </table></div></div>`}};
+
+S.downloads={g:'The window',l:'Downloads, unchanged',d:'A chip is the only trace',
+ notes:['The downloads view as it is today, with its own toolbar. Site transfers are not in this list. In the sidebar, nas.home.lan shows one download and one upload with a progress line, and gdrive shows one waiting. The chip in the status bar gives the total.','Site transfers are their own kind of job, so Finished, the extension popup and the totals here stay about downloads.','Nothing to check.'],
+ r:()=>win({sel:'All Downloads',main:qlist(NORMAL),dl:'12.6 MB/s',status:'3 downloads · 2 active',chip:CHIP})};
+
+S.browse={g:'The window',l:'A site, two panes',d:'New toolbar, linked folders',
+ notes:['Select a site and the toolbar becomes the site toolbar. Breadcrumbs, a star for folders you use, arrows between the panes, and a column that says what you already have. Transfers are a slim bar at the bottom; click it.','There is no connection to open. Selecting the site lists it, and each action reaches the server when it runs.','Does the "On this PC" column compare by name, size and time only? That is free. Checksums would be an explicit action.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(0)}<div class="panes3">${LPANE()}${gutter(1)}${RPANE()}</div><span class="grow"></span>${tbar(0)}`,status:SST})};
+
+S.transfers={g:'The window',l:'Transfers bar, opened',d:'One row per action',
+ notes:['The bar opens upward over the lower part of the panes. One row per action: a folder download is one row that opens, and uploads sit beside downloads with an orange arrow.','Each row is a batch the Host tracks as a whole, with its files under it. Limits and the scheduler apply to the batch.','Should a batch be stoppable as a whole only, or each file too? I drew both: Stop on the row, and per file once it is opened.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(0)}<div class="panes3">${LPANE({rows:LR.slice(0,4)})}${gutter(1)}${RPANE({rows:RR.slice(0,4)})}</div>${tbar(1)}${qB(0,[4,1,24],BATCH)}`,status:SST})};
+
+S['remote-only']={g:'The window',l:'Server only view',d:'No local pane',
+ notes:['One wide pane with rights and the "On this PC" column. Download sends files to the site\'s folder or to your category rules, so there is nothing to aim at. Upload opens the Windows file picker.','The linked local folder still decides what "On this PC" means.','Which view opens first for a new site? I would open Server only, since pulling is the common case.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(1)}${pane2({remote:1,wide:1,filter:1,title:'nas.home.lan',chip:'<span class="chipn ok">SFTP</span>',crumbs:['nas.home.lan','media','isos'],star:1,rows:RR,foot:'1 of 6 selected · 5.8 GB · downloads go to D:\\Downloads\\ISOs'})}<span class="grow"></span>${tbar(0)}`,status:SST})};
+
+S.failed={g:'The window',l:'Failed transfers',d:'Reason and Retry all',
+ notes:['The Failed tab keeps what went wrong, with the reason in Description and one button to try them all again.','A failed file does not stop its batch. The rest continue and the batch ends as "done, 1 failed".','Nothing to check.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(0)}<div class="panes3">${LPANE({rows:LR.slice(0,4)})}${gutter(1)}${RPANE({rows:RR.slice(0,4)})}</div>${tbar(1,'2 running · 2 waiting · 1 failed')}${qB(1,[4,1,24],[{n:'Upload render-final.mov',d:'up',size:'3.1 GB',st:'Failed',c:'failed',desc:'nas.home.lan refused the write to /media/isos. Check your rights there',sel:1}])}`,status:SST})};
+
+S.trouble={g:'The window',l:'When a site cannot be reached',d:'In the pane, with Retry',
+ notes:['No connection dialog and no red toolbar. The pane says what happened and offers Retry and Edit site. Waiting transfers say why they are waiting.','The Host retries waiting transfers by itself with a growing pause, and stops after five tries.','Nothing to check.'],
+ r:()=>win({sel:'nas.home.lan',st:{'nas.home.lan':'lost'},site:1,main:`${viewSw(0)}<div class="panes3">${LPANE()}${gutter(1)}${RPANE({state:`<div class="state">${ic('alert','st-wait')}<div class="t">Can't reach nas.home.lan</div><div>It did not answer on port 22. Trying again in 8 s.</div><div style="display:flex;gap:8px">${bt('Retry now',{acc:1,go:'browse'})}${bt('Edit site',{go:'add-fields'})}</div></div>`,foot:'Last listed 2 min ago'})}</div><span class="grow"></span>${tbar(0,'2 waiting for nas.home.lan')}`,status:'<span class="st-wait">nas.home.lan · not reachable</span>'})};
+
+S.delete={g:'Being careful',l:'Delete says where',d:'Server and this PC differ',
+ notes:['The toolbar button reads "Delete on server", and the dialog repeats it with the count and size. In the local pane the same key deletes to the Recycle Bin and says so.','Server deletes run in the Host after the confirm and report each item that failed.','Should a server delete of more than a set size need a typed word, not a tick? I drew a tick.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(0)}<div class="panes3">${LPANE()}${gutter(1)}${RPANE()}</div><span class="grow"></span>${tbar(0)}`,status:SST,over:dlg2('Delete on server?',`<p><b>backups</b> and the 1,842 items inside it (86.4 GB) will be deleted from <b>nas.home.lan</b>.</p><p>Inbound cannot bring them back. Nothing on this PC is touched.</p>${cb('I understand that 1,842 items will be deleted',0)}`,`${bt('Delete on server',{dng:1,i:'trash',go:'browse'})}${bt('Cancel',{acc:1,go:'browse'})}`,ic('alert','st-wait'),520)})};
+
+S.overwrite={g:'Being careful',l:'Upload over a newer file',d:'Says which copy is newer',
+ notes:['Uploading over a file the server already has shows both copies and says which is newer. The safe choice is first.','Uploads are written under a temporary name and renamed at the end, so a stopped upload never leaves half a file under the real name.','Nothing to check.'],
+ r:()=>win({sel:'nas.home.lan',site:1,main:`${viewSw(0)}<div class="panes3">${LPANE()}${gutter(1)}${RPANE()}</div><span class="grow"></span>${tbar(0)}`,status:SST,over:dlg2('notes.txt is newer on the server',`<div class="kv"><span>On this PC</span><span>2 KB · Nov 01 08:00</span><span>On the server</span><span>2 KB · Nov 09 19:19 (newer)</span></div>${rd('Skip, keep the server copy <span class="sec">(recommended)</span>',1,'o')}${rd('Replace the server copy with the older file',0,'o')}${rd('Keep both, upload as notes (2).txt',0,'o')}<div style="margin-top:8px">${cb('Do this for the other 3 files',0)}</div>`,`${bt('Cancel',{go:'browse'})}${bt('Continue',{acc:1,go:'browse'})}`,ic('upload'),500)})};
+
+const TILES=[['SFTP','server','A server you sign in to with SSH'],['FTP','server','Older servers, with or without TLS'],['WebDAV','cloud','Nextcloud, ownCloud, Synology'],['Google Drive','cloud','Signs in through your browser'],['OneDrive','cloud','Signs in through your browser'],['Dropbox','cloud','Signs in through your browser'],['S3 or B2','cloud','Access key and bucket'],['More…','plus','Everything else rclone knows']];
+S['add-tiles']={g:'Sites',l:'Add a site: pick a kind',d:'Tiles, not a protocol list',
+ notes:['Adding a site starts with eight tiles in plain words. "More" lists everything else rclone supports.','Every tile becomes an rclone remote underneath. You never see rclone\'s own setup questions.','Which eight? These are my guess at the common ones.'],
+ r:()=>win({sel:'All sites',site:0,main:qlist(NORMAL),status:'Ready',over:dlg2('Add a site',`<p>What kind of place is it?</p><div class="tilesg">${TILES.map((t,i)=>`<div class="tile ${i===0?'pick1':''}" data-go="add-fields"><span class="c-info">${ic(t[1])}</span><b style="display:block;font-weight:600;font-size:13px;margin-top:4px">${t[0]}</b><span class="sec" style="font-size:12px">${t[2]}</span></div>`).join('')}</div>`,`${bt('Cancel',{go:'home'})}${bt('Next',{acc:1,go:'add-fields'})}`,ic('plus'),620)})};
+
+S['add-fields']={g:'Sites',l:'Add a site: four fields',d:'Advanced stays closed',
+ notes:['Server, user, how you sign in, and the folder on this PC that goes with it. Port, limits, starting folder and the rest are under Advanced. Test runs before you save.','The password or key passphrase is protected by Windows and handed to rclone for the session. It is not written to rclone\'s own file.','rclone\'s documentation allows this (settings passed with each call, config in memory). It also says key files with a passphrase only work in the old PEM format, so a current OpenSSH key with a passphrase would need converting or an agent. Not tried in a run.'],
+ r:()=>win({sel:'All sites',main:qlist(NORMAL),status:'Ready',over:dlg2('Add an SFTP site',`<div class="g2"><div class="fld"><label>Server</label><input class="in" value="nas.home.lan" readonly></div><div class="fld"><label>User</label><input class="in" value="kaan" readonly></div></div><div class="fld" style="margin-top:10px"><label>Sign in with</label><div class="sel2" style="margin:0;display:flex"><b style="flex:1;text-align:center">Password</b><b class="on" style="flex:1;text-align:center">Key file</b><b style="flex:1;text-align:center">Ask each time</b></div></div><div class="fld" style="margin-top:10px"><label>Key file</label><div style="display:flex;gap:8px"><input class="in" value="C:\\Users\\kaank\\.ssh\\id_ed25519" readonly>${bt('Browse…')}</div></div><div class="fld" style="margin-top:10px"><label>Folder on this PC that goes with it</label><div style="display:flex;gap:8px"><input class="in" value="D:\\Downloads\\ISOs" readonly>${bt('Browse…')}</div></div><div style="display:flex;gap:6px;align-items:center;margin-top:12px;color:var(--sec)">${ic('chevr')}<span>Advanced: port, starting folder, transfers at once, connections per file</span></div><div style="margin-top:12px">${info('ok','It works.','Signed in and listed 6 items in 0.4 s.')}</div>`,`${bt('Test',{i:'plug'})}<span class="grow"></span>${bt('Back',{go:'add-tiles'})}${bt('Save',{acc:1,go:'browse'})}`,ic('server'),560)})};
+
+S.home={g:'Sites',l:'All sites',d:'Last used, and open once',
+ notes:['Every site as a row with its kind and when you last used it. The box at the top opens an address once without saving a site.','An address typed here never holds a password. If the server wants one you are asked, and it is kept only if you tick Remember.','Nothing to check.'],
+ r:()=>win({sel:'All sites',site:0,main:`<div style="display:flex;gap:8px"><div class="pathbox" style="font-family:inherit;font-size:12px;color:var(--sec)">Open an address once, for example sftp://nas.home.lan/media</div>${bt('Open')}${bt('Add a site',{acc:1,i:'plus',go:'add-tiles'})}</div><div class="card"><div class="lh" style="--cols:minmax(180px,1.2fr) 90px minmax(160px,1fr) 150px 110px"><span>Site</span><span>Kind</span><span>Folder on this PC</span><span>Last used</span><span></span></div>${[['nas.home.lan','SFTP','D:\\Downloads\\ISOs','Today 09:14','2 transfers running'],['gdrive','Drive','D:\\Renders','Yesterday 22:15',''],['cloud.example.net','WebDAV','D:\\Downloads\\Reports','Nov 10',''],['b2-media','B2','D:\\Backups','Nov 10',''],['files.example.org','FTP','D:\\Downloads\\Tools','Oct 30','']].map((r,i)=>`<div class="lr ${i===0?'sel':''}" style="--cols:minmax(180px,1.2fr) 90px minmax(160px,1fr) 150px 110px;height:34px" data-go="browse"><div class="nm"><i class="dot on"></i><span>${r[0]}</span></div><div><span class="chipn">${r[1]}</span></div><div class="sec">${r[2]}</div><div class="sec">${r[3]}</div><div class="st-active">${r[4]}</div></div>`).join('')}</div>`,status:'5 sites',chip:CHIP})};
+
+S.phone={g:'Sites',l:'On a phone',d:'One pane, a sheet for transfers',
+ notes:['The web UI on a phone is the Server only view: breadcrumbs, tick boxes, an action bar when something is ticked, and transfers as a bar at the bottom that opens as a sheet.','The same commands as the desktop, sent to the server, which runs rclone itself.','Upload from a phone means the phone\'s own files. Worth having, or desktop only at first?'],
+ r:()=>{const f=(n,sz,on,k,h)=>`<div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:4px 14px;border-bottom:1px solid var(--divider);${on?'background:var(--hl)':''}"><span class="cb"><i class="${on?'on':''}">${on?ic('check'):''}</i></span><span class="${k==='d'?'dirI':'fileI'}">${ic(k==='d'?'folder':'file')}</span><div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</div><div class="sec" style="font-size:12px">${sz}${h?' · '+h:''}</div></div></div>`;
+  return `<div class="phones"><div class="phone"><div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--chrome);border-bottom:1px solid var(--divider)">${ic('menu')}<div><b style="font-size:16px;font-weight:600">nas.home.lan</b><div class="sec" style="font-size:12px">media › isos</div></div></div>
+  ${f('backups','Folder',0,'d')}${f('photos-2026','Folder',0,'d','some of it on the server PC')}${f('ubuntu-26.04-desktop-amd64.iso','5.8 GB',1,'f')}${f('ubuntu-26.04-live-server.iso','2.1 GB',0,'f','already downloaded')}${f('notes.txt','2 KB',0,'f')}
+  <div style="margin-top:auto"><div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--divider)">${bt('Download',{acc:1,i:'download'})}${bt('Rename',{i:'edit'})}${bt('Delete on server',{dng:1,i:'trash'})}</div><div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--chrome);border-top:1px solid var(--divider)"><b style="font-weight:600">Transfers</b><span class="sec">2 running · 156 MB/s</span><span style="margin-left:auto">${ic('chevu')}</span></div></div></div></div>`;}};
+
+/* web UI, phone, extension */
+delete S.phone;
+function web(o){return `<div class="win" role="group" aria-label="Mock of the web UI in a browser">
+  <div class="brow"><span class="bdots"><i></i><i></i><i></i></span><div class="burl">${ic('lock')}<span>https://inbound.example.net/#sites/nas.home.lan</span></div></div>
+  <div class="title"><span class="app">${ic('download')}</span><span>Inbound</span><span class="grow"></span><span class="chipn" style="display:inline-flex;gap:6px;align-items:center">${ic('server')}Host: home-server</span></div>
+  <div class="toolbar">${SITETB()}</div>
+  <div class="body">${side('nas.home.lan')}<div class="main">${o.main}</div></div>
+  <div class="sbar"><span>${SST}</span></div>${o.over||''}</div>`}
+const WR=(x={})=>pane2(Object.assign({remote:1,wide:1,filter:1,hereLabel:'On home-server',title:'nas.home.lan',chip:'<span class="chipn ok">SFTP</span>',crumbs:['nas.home.lan','media','isos'],star:1,rows:RR,foot:'1 of 6 selected · 5.8 GB · downloads go to /downloads/ISOs on home-server'},x));
+const wSw=a=>`<div style="display:flex;align-items:center;gap:10px"><div class="sel2" style="margin:0"><b class="${a===0?'on':''}" data-go="web-two">Two panes</b><b class="${a===1?'on':''}" data-go="web-site">Server only</b></div><span class="grow"></span><span class="sec">${ic('link')} /downloads/ISOs on home-server follows /media/isos</span></div>`;
+S['web-site']={g:'Web UI',l:'A site in the browser',d:'Same layout, other "here"',
+ notes:['The same view in a browser tab: site toolbar, sidebar with activity, Server only by default. The column reads "On home-server", because that is where downloads land, not on the device you are holding.','The browser only sends commands. The server runs rclone and the transfers, so they continue when the tab closes.','Nothing to check.'],
+ r:()=>web({main:`${wSw(1)}${WR()}<span class="grow"></span>${tbar(0)}`})};
+S['web-two']={g:'Web UI',l:'Two panes in the browser',d:'Left pane is the server\'s folders',
+ notes:['The left pane is the machine Inbound runs on, limited to the folders Inbound is allowed to use, as browser sessions are today.','Both panes are listed by the server. Nothing in the browser touches files directly.','Nothing to check.'],
+ r:()=>web({main:`${wSw(0)}<div class="panes3">${pane2({title:'home-server',chip:'<span class="chipn">Inbound\'s folders</span>',crumbs:['downloads','ISOs'],rows:LR,foot:'3 files and 1 folder · 5.5 GB'})}${gutter(1)}${RPANE({hereLabel:'On home-server',foot:'1 of 6 selected · 5.8 GB · 2 already on home-server'})}</div><span class="grow"></span>${tbar(0)}`})};
+S['web-download']={g:'Web UI',l:'Download: where to?',d:'To the server, or to this device',
+ notes:['In a browser, Download has two meanings. The first choice keeps the file on the server, which is what Inbound is for. The second hands it to the browser as an ordinary download.','"To this device" streams from the site through Inbound to the browser. It stops if the tab closes, and the dialog says so.','Is "To this device" worth having in version one? It is the one thing a browser user will expect that the desktop window never needs.'],
+ r:()=>web({main:`${wSw(1)}${WR()}<span class="grow"></span>${tbar(0)}`,over:dlg2('Download ubuntu-26.04-desktop-amd64.iso',`<p>5.8 GB from <b>nas.home.lan</b>.</p>${rd('To home-server, in /downloads/ISOs <span class="sec">(keeps going if you close this tab)</span>',1,'w')}${rd('To this device, through the browser <span class="sec">(stops if you close this tab)</span>',0,'w')}`,`${bt('Download',{acc:1,i:'download',go:'web-site'})}${bt('Cancel',{go:'web-site'})}`,ic('download'),520)})};
+S['web-upload']={g:'Web UI',l:'Upload: from where?',d:'Server folders, or this device',
+ notes:['Upload asks the same question the other way round: files already on the server, or files on the device in your hand, dropped or picked.','A file from this device passes through Inbound to the site. It is not kept on the server.','Should it be kept in a temporary file on the server so the upload can resume? Passing it straight through is simpler and cannot resume.'],
+ r:()=>web({main:`${wSw(1)}${WR()}<span class="grow"></span>${tbar(0)}`,over:dlg2('Upload to /media/isos',`${rd('Files on home-server <span class="sec">(Inbound\'s folders)</span>',0,'u')}${rd('Files on this device',1,'u')}<div class="state" style="border:1px dashed var(--divider);border-radius:8px;margin-top:10px;padding:22px">${ic('upload','c-info')}<div class="t">Drop files here</div><div>${bt('Choose files…')}</div><div class="sec">Keep this tab open until they finish.</div></div>`,`${bt('Upload',{acc:1,i:'upload',go:'web-site'})}${bt('Cancel',{go:'web-site'})}`,ic('upload'),520)})};
+
+const phone=(t,sub,body,bottom)=>`<div class="phone"><div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--chrome);border-bottom:1px solid var(--divider)">${ic('menu')}<div><b style="font-size:16px;font-weight:600">${t}</b><div class="sec" style="font-size:12px">${sub}</div></div></div>${body}<div style="margin-top:auto">${bottom||''}</div></div>`;
+const pf=(n,sz,on,k,h)=>`<div style="display:flex;align-items:center;gap:12px;min-height:48px;padding:4px 14px;border-bottom:1px solid var(--divider);${on?'background:var(--hl)':''}"><span class="cb"><i class="${on?'on':''}">${on?ic('check'):''}</i></span><span class="${k==='d'?'dirI':'fileI'}">${ic(k==='d'?'folder':'file')}</span><div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</div><div class="sec" style="font-size:12px">${sz}${h?' · '+h:''}</div></div></div>`;
+const pbar=(pct,up)=>`<div style="height:6px;border-radius:3px;background:var(--divider);margin-top:6px"><div class="${up?'upc':'down'}" style="width:${pct}%;height:100%;border-radius:3px;background:currentColor"></div></div>`;
+const psite=(n,k,a,pct)=>`<div style="padding:8px 14px;border-bottom:1px solid var(--divider);min-height:56px"><div style="display:flex;align-items:center;gap:10px"><i class="dot on"></i><div style="flex:1;min-width:0"><div>${n}</div><div class="sec" style="font-size:12px">${k}</div></div><span style="display:inline-flex;gap:8px;align-items:center;font-size:13px">${a}</span></div>${pct?pbar(pct):''}</div>`;
+const ptr=(n,st,cls,pct,up,sub)=>`<div style="padding:10px 14px;border-bottom:1px solid var(--divider)"><div style="display:flex;gap:10px;align-items:center"><span class="${up?'upc':'down'}">${ic(up?'aup':'adown')}</span><div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</div><div class="${cls}" style="font-size:12px">${st}</div></div><span class="sec">${ic(pct?'pause':'x')}</span></div>${pct?pbar(pct,up):''}<div class="sec" style="font-size:12px;margin-top:4px">${sub}</div></div>`;
+const pbot=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--chrome);border-top:1px solid var(--divider)"><b style="font-weight:600">Transfers</b><span class="sec">2 running · 156 MB/s</span><span style="margin-left:auto">${ic('chevu')}</span></div>`;
+S.phone={g:'Phone',l:'Sites, a folder, transfers',d:'Three screens side by side',
+ notes:['The web UI on a phone. Left: the sites list with the same activity marks as the sidebar. Middle: a folder, with tick boxes and an action bar. Right: the Transfers sheet, pulled up.','The same commands as the desktop, sent to the server. Rows are 48 px or taller so they can be tapped.','Nothing to check.'],
+ r:()=>`<div class="phones">${phone('Sites','5 sites · 2 with transfers',
+   psite('nas.home.lan','SFTP',`<span class="down">${ic('adown')}</span>1<span class="upc">${ic('aup')}</span>1`,24)+psite('gdrive','Drive',`<span class="st-wait">${ic('clock')}</span>1 waiting`)+psite('cloud.example.net','WebDAV','')+psite('b2-media','B2','')+psite('files.example.org','FTP',''),
+   `<div style="padding:10px 14px">${bt('Add a site',{acc:1,i:'plus'})}</div>${pbot}`)}
+  ${phone('nas.home.lan','media › isos',pf('backups','Folder',0,'d')+pf('photos-2026','Folder',0,'d','some of it on home-server')+pf('ubuntu-26.04-desktop-amd64.iso','5.8 GB',1,'f')+pf('ubuntu-26.04-live-server.iso','2.1 GB',0,'f','already on home-server')+pf('notes.txt','2 KB',0,'f'),
+   `<div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--divider)">${bt('Download',{acc:1,i:'download'})}${bt('Rename',{i:'edit'})}${bt('Delete on server',{dng:1,i:'trash'})}</div>${pbot}`)}
+  ${phone('Transfers','2 running · 2 waiting · 1 failed',
+   ptr('ubuntu-26.04-desktop-amd64.iso','Downloading 41.2% · 118.4 MB/s · 6m 12s','st-active',41,0,'nas.home.lan to home-server')+ptr('backup-2026-11.tar.zst','Uploading 7.0% · 38.2 MB/s · 1h 22m','st-active',7,1,'home-server to nas.home.lan')+ptr('photos-2026 (1,204 files)','Waiting','st-wait',0,0,'nas.home.lan to home-server')+ptr('render-final.mov','Failed: the server refused the write','st-failed',0,1,'home-server to nas.home.lan'),
+   `<div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--divider)">${bt('Pause transfers',{i:'pause'})}${bt('Retry failed',{i:'retry'})}</div>`)}</div>`};
+const sheet=(t,body)=>`<div style="margin:auto 0 0;border-top:1px solid var(--divider);background:var(--chrome);border-radius:16px 16px 0 0;padding:14px"><div style="width:36px;height:4px;border-radius:2px;background:var(--divider);margin:0 auto 10px"></div><b style="font-weight:600;font-size:15px">${t}</b>${body}</div>`;
+S['phone-sheets']={g:'Phone',l:'Upload, delete, trouble',d:'Bottom sheets, not dialogs',
+ notes:['Left: Upload offers the phone\'s own files or the server\'s folders. Middle: Delete on server as a sheet with the count, the red button and Cancel. Right: a site that cannot be reached, with Retry.','Sheets come up from the bottom so the buttons are under the thumb.','Is upload from the phone\'s own files wanted at first? It has the same keep-the-tab-open limit as in the desktop browser.'],
+ r:()=>`<div class="phones">${phone('nas.home.lan','media › isos',pf('backups','Folder',0,'d')+pf('photos-2026','Folder',0,'d'),
+   sheet('Upload to /media/isos',`<div style="display:grid;gap:8px;margin-top:10px">${bt('Files on this phone',{acc:1,i:'upload'})}${bt('Files on home-server',{i:'folder'})}</div><div class="sec" style="font-size:12px;margin-top:8px">From this phone: keep the page open until it finishes.</div>`))}
+  ${phone('nas.home.lan','media › isos',pf('backups','Folder',1,'d')+pf('photos-2026','Folder',0,'d'),
+   sheet('Delete on server?',`<p style="margin:8px 0"><b>backups</b> and the 1,842 items inside it (86.4 GB) will be deleted from nas.home.lan. Inbound cannot bring them back.</p><div style="display:grid;gap:8px">${bt('Delete on server',{dng:1,i:'trash'})}${bt('Cancel',{acc:1})}</div>`))}
+  ${phone('nas.home.lan','not reachable',`<div class="state" style="padding:40px 20px">${ic('alert','st-wait')}<div class="t">Can't reach nas.home.lan</div><div>It did not answer on port 22. Trying again in 8 s.</div><div style="display:flex;gap:8px">${bt('Retry now',{acc:1})}${bt('Edit site')}</div></div>`,
+   `<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--chrome);border-top:1px solid var(--divider)"><b style="font-weight:600">Transfers</b><span class="st-wait">2 waiting for nas.home.lan</span></div>`)}</div>`};
+
+const xrow=(n,st,cls,pct)=>`<div style="padding:8px 12px;border-bottom:1px solid var(--divider)"><div style="display:flex;gap:8px;align-items:center"><div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</div><div class="${cls}" style="font-size:12px">${st}</div></div><span class="sec">${ic(pct?'pause':'trash')}</span></div>${pct?pbar(pct):''}</div>`;
+S.ext={g:'Extension',l:'The popup',d:'One line, nothing more',
+ notes:['My suggestion is to keep Sites out of the extension. The popup stays a list of downloads and gains one line that says site transfers are running and opens the Sites view.','The line comes from the same summary the status bar chip uses.','The other option is nothing at all in the extension. A site browser in a 360 px popup is not something I would build.'],
+ r:()=>`<div class="phones"><div class="pop"><div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--divider)"><span class="c-info">${ic('download')}</span><b style="font-weight:600">Inbound</b><span class="grow" style="flex:1"></span><span class="st-done" style="font-size:12px">Connected</span></div>
+  <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--divider);background:var(--hl);cursor:pointer" data-go="browse">${ic('server')}<span style="flex:1">Sites · 2 running · 156 MB/s</span><span class="sec" style="font-size:12px">Open in Inbound</span>${ic('chevr')}</div>
+  ${xrow('lecture-04.mp4','Downloading 63.0% · 9.2 MB/s','st-active',63)}${xrow('archlinux-2026.11.01-x86_64.iso','Downloading 31.0% · 3.4 MB/s','st-active',31)}${xrow('setup-0.7.3.exe','Completed · 74 MB','st-done',0)}
+  <div style="display:flex;gap:8px;padding:10px 12px">${bt('Open Inbound')}${bt('Options',{i:'sliders'})}</div></div>
+  <div class="x" style="max-width:380px;align-self:flex-start"><h2>Left out on purpose</h2><p>Browsing a site, uploads and remote changes need room and care that a popup does not have. The extension's job stays catching browser downloads.</p><p style="margin:0">If the line is too much, the extension is simply out of scope for Sites.</p></div></div>`};
+
+/* engine */
+const winEl=document.getElementById('win'),rail=document.getElementById('rail'),notes=document.getElementById('notes');
+let cur='overview';
+function buildRail(){let last='',h='';Object.keys(S).forEach(k=>{const s=S[k];if(s.g!==last){h+=`<div class="rg">${s.g}</div>`;last=s.g}
+  h+=`<button class="ri ${k===cur?'on':''}" type="button" data-go="${k}"><b style="font-weight:600;font-size:14px">${s.l}</b><span>${s.d}</span></button>`;});rail.innerHTML=h;}
+function show(id){if(!S[id])id='overview';cur=id;winEl.innerHTML=S[id].r();const n=S[id].notes;
+  notes.innerHTML=`<div class="note"><h4>What you see</h4><p>${n[0]}</p></div><div class="note"><h4>How it works</h4><p>${n[1]}</p></div><div class="note q"><h4>To check or decide</h4><p>${n[2]}</p></div>`;
+  buildRail();try{history.replaceState(null,'','#'+id)}catch(e){}}
+document.addEventListener('click',e=>{
+  const r=e.target.closest('.rd');
+  if(r){const grp=r.getAttribute('data-grp');winEl.querySelectorAll('.rd[data-grp="'+grp+'"] i').forEach(i=>i.classList.remove('on'));r.querySelector('i').classList.add('on');return}
+  const c=e.target.closest('.cb');
+  if(c&&!c.closest('.phone')){const i=c.querySelector('i');const on=!i.classList.contains('on');i.classList.toggle('on',on);i.innerHTML=on?ic('check'):'';return}
+  const g=e.target.closest('[data-go]');
+  if(g){show(g.getAttribute('data-go'));return}
+  const row=e.target.closest('.lr');
+  if(row&&row.closest('.panes3')){row.classList.toggle('sel')}
+});
+const tbtn=document.getElementById('themebtn');
+let tm='system';
+try{tm=localStorage.getItem('inb-theme')||'system'}catch(e){}
+function applyTheme(){const r=document.documentElement;if(tm==='system')r.removeAttribute('data-theme');else r.setAttribute('data-theme',tm);tbtn.textContent='Theme: '+tm;try{localStorage.setItem('inb-theme',tm)}catch(e){}}
+tbtn.addEventListener('click',()=>{tm=tm==='system'?'dark':tm==='dark'?'light':'system';applyTheme()});
+applyTheme();
+window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
+show(location.hash.slice(1)||'overview');
+
+</script>
+
+</body></html>
