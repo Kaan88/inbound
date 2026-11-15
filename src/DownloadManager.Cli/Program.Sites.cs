@@ -9,6 +9,8 @@ namespace DownloadManager.Cli;
 /// </summary>
 internal static partial class Program
 {
+    private const string Newline = "\n";
+
     internal const string SitesUsage = """
         usage: sites list
                sites transfers
@@ -16,6 +18,8 @@ internal static partial class Program
                sites put <site> <folder on the site> <file or folder on this PC>... [--conflict skip|replace|keepBoth]
                sites pause|resume|cancel|retry <transfer-id>
                sites clear [<transfer-id>]   (without an id: every finished transfer)
+        """ + Newline + SitesManageUsage + """
+
         <site> is a saved site's name or the start of its id. The paths of one command must share a folder.
         """;
 
@@ -31,9 +35,9 @@ internal static partial class Program
                 {
                     var sites = await client.AskAsync<SitesListDto>(SitesMessageTypes.ListRequest, new EmptyPayload()).ConfigureAwait(false);
                     if (json) { PrintJson(sites.Sites); return 0; }
-                    Console.WriteLine($"{"ID",-9} {"KIND",-6} {"NAME",-24} ADDRESS");
+                    Console.WriteLine($"{"ID",-9} {"KIND",-9} {"NAME",-24} ADDRESS");
                     foreach (var site in sites.Sites)
-                        Console.WriteLine($"{site.Id[..Math.Min(8, site.Id.Length)],-9} {site.Kind,-6} {site.Name,-24} {site.User}@{site.Host}:{site.Port}");
+                        Console.WriteLine($"{site.Id[..Math.Min(8, site.Id.Length)],-9} {site.Kind,-9} {site.Name,-24} {SiteAddress(site)}");
                     return 0;
                 }
                 case "transfers":
@@ -78,6 +82,7 @@ internal static partial class Program
                     return PrintTransferResult(reply, json);
                 }
                 default:
+                    if (await SitesManageAsync(client, sub, args, positional, json).ConfigureAwait(false) is { } done) return done;
                     Console.Error.WriteLine(SitesUsage);
                     return 2;
             }
@@ -158,6 +163,20 @@ internal static partial class Program
         if (reply.Transfer is { } transfer) Console.WriteLine(SiteTransferLine(transfer));
         else Console.WriteLine("ok");
         return 0;
+    }
+
+    /// <summary>Where a site is, without secrets: the server, the address, or the sign-in state.</summary>
+    internal static string SiteAddress(SiteDto site)
+    {
+        var where = site.Kind switch
+        {
+            SiteKindCatalog.WebDav => site.Url ?? "",
+            SiteKindCatalog.S3 => site.Endpoint is { Length: > 0 } endpoint ? endpoint : site.Provider ?? "",
+            SiteKindCatalog.B2 => "",
+            _ when SiteKindCatalog.SignsIn(site.Kind) => site.SignedIn ? "signed in" : "not signed in yet",
+            _ => $"{(site.User.Length > 0 ? site.User + "@" : "")}{site.Host}:{site.Port}",
+        };
+        return site.Encrypted ? where : $"{where} (not encrypted)".TrimStart();
     }
 
     internal static string SiteTransferLine(SiteTransferDto t)

@@ -2222,7 +2222,10 @@ internal static partial class Program
                           [--open] [--exit] [--site-transfers]
                           [--shutdown shutdown|restart|logoff] [--force]
               dm sites list | transfers | get <site> <path>... --to <folder> | put <site> <folder> <path>...
-                          | pause|resume|cancel|retry <transfer-id> | clear [<transfer-id>]   (saved sites, SITES.4)
+                          | pause|resume|cancel|retry <transfer-id> | clear [<transfer-id>]
+                          | on|off|status | add <name> --kind K ... | remove|test|trust|sign-in <site>
+                          | ls <site> [<path>] | mkdir <site> <path> | mv <site> <path> <name> | rm <site> <path>... --yes
+                          (saved sites, SITES.4 and SITES.8; 'dm sites help' lists the options)
               dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
                           (the password is read from standard input unless --password-env names it)
               dm settings [get] | settings set <key> <value> [<key> <value>...]
@@ -2426,7 +2429,9 @@ internal sealed class CliClient : IAsyncDisposable
                type == MessageTypes.UpdateCheck ||
                type == MessageTypes.JobRefreshUrl || type == MessageTypes.JobAdd ||
                // SITES.4: a start lists the chosen folders on the server first; a pause or cancel waits for files to stop.
-               type.StartsWith("sites.transfer.", StringComparison.Ordinal) => TimeSpan.FromMinutes(5),
+               type.StartsWith("sites.transfer.", StringComparison.Ordinal) ||
+               // SITES.8: a site answers over the network, and rclone may first have to start (or be downloaded).
+               type.StartsWith("sites.", StringComparison.Ordinal) => TimeSpan.FromMinutes(5),
         _ => TimeSpan.FromMinutes(1),
     };
 

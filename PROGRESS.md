@@ -392,7 +392,27 @@
   `webui/tests/sites.test.ts`; Integration (site, dispatcher) 391, Server 193 and the web UI's 713 pass, `npm run
   check` clean. **Not checked:** the Windows app's bridge with a real browser (tested only through the dispatcher), the
   sign-in flows in the web UI against a real provider, the Docker image with Sites (not built here; linux/amd64 only),
-  light mode, Linux.
+  light mode, Linux. **Haiku review of the web UI commit** (`940b4c0`): fixed: a slow browse answer for a folder
+  left since could replace the newer one (and Show more could append to another folder); the sign-in dialog could
+  close at once for a site signed in before whose access ran out; a failed `sites.kinds` left Add and Edit greyed out
+  with no word; uploads ran on unseen when the site was left (now stopped, with a note); a 401 during an upload did not
+  go to the sign-in; the delete question now says how many files go (`sites.count`); only an http(s) sign-in address
+  is a link; row actions wider; transfers sorted by date. Not done (deferred, as on purpose for now): the "On this PC"
+  marks (`here`), stars, and forgetting a trusted certificate from the web UI; the rclone update offer. These fixes
+  were checked by `npm run check` and the tests, not walked again.
+- **R. SITES.8: `dm sites`** (2026-11-15, main). New: `on`, `off`, `status`; `add <name> --kind ...` with the kind's
+  fields (`--host`, `--port`, `--user`, `--key-file`, `--url`, `--vendor`, `--provider`, `--endpoint`, `--region`,
+  `--tls`, `--client-id`, `--folder`, `--local-folder`), a password, passphrase or client secret only from standard
+  input or an `-env` variable (an argument is refused before anything is sent); `remove`, `test` (a problem names the
+  command that fixes it); `trust` (shows the server's keys or certificate, asks at a console, trusts nothing at
+  redirected input, or trusts by `--fingerprint`); `sign-in` (prints the address and waits for the Host, or
+  `--token-stdin` for the paste flow); `ls` (every page), `mkdir`, `mv` (rename in the folder), `rm` (counts first and
+  needs `--yes`). `list` shows each kind's address and "not encrypted". Replies to `sites.*` may take five minutes.
+  **Test:** `CliSitesTests` runs the real `dm` against a sandbox Host and rclone's SFTP server: on, add with the
+  password on standard input (and refused as an argument), test refused until trusted, trust refused without a
+  fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
+  `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
+  certificate (the same requests as the web UI, which the Host tests cover), Linux.
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the
