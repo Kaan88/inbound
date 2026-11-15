@@ -7,6 +7,19 @@
 - **C. SITES.0 findings written up:** the rclone run's findings are now in the body sections of `docs/plans/remote-sites.md`, which before had only a "What the run changed" overlay. The "To settle in the rclone run" list is now "The rclone run's questions (phase 0, answered)". A Haiku review of that edit was checked and its fixes applied. New script `scripts/sites-oauth-refresh-check.sh <rclone> drive|dropbox` runs the real OAuth refresh; it prints only yes/no answers and the new expiry, writes nothing to disk, and keeps the token and rc password off every command line. **Not checked:** the real OAuth refresh, which needs the owner's own Google Drive or Dropbox sign-in; the script has not been run. **Left:** the owner runs it.
 - **D. SITES.1 started on branch `sites-1`** (commits `aa4d5a4` and `b99b615`, not merged): new project `src/DownloadManager.Sites` with RcloneSetup (finds rclone, checks version, 1.75.0 minimum for SFTP), RcloneProcess (rcd on a free loopback port, per-start credentials, `--config ""`), RcloneClient (rc calls, errors redacted of known secrets), and RcloneSupervisor (start on first lease, idle stop after 60 s, backoff, failed after 5 crashes in a row until reset). A Haiku review found cleanup gaps on failure paths, short passwords left unredacted and a blocking reset; checked and fixed in `b99b615`. `tools/RcloneProbe` is a test helper. `tests/DownloadManager.Sites.Tests`: 43 pass on Linux, 15 of 15 repeat runs; the 10 tests that need a real rclone skip because no rclone is on this PC (INBOUND_RCLONE). **Not checked:** the real-rclone tests, and anything on Windows. **Left:** wiring into the Host (with SITES.2), bundling in publish, Setup and the AppImage (needs the rclone binary in `third_party`).
 
+- **E. SITES.2 Host side on branch `sites-1`** (commits `d5b83fe`, `8e0d03f`, `1860733`, not merged):
+  `SshHostKeyProbe` reads a server's host keys with the key exchange only, never logging in; against an unprivileged
+  OpenSSH 10.6 sshd with ed25519, ECDSA and RSA keys its fingerprints equal `ssh-keygen -l`. `SshHostKeyProblem` reads
+  rclone's two refusal texts. Saved sites (`sites/<id>.json`, compact, atomic, secrets sealed under their own purpose),
+  the switch (`sites/config.json`, off by default; off answers only `sites.get`/`sites.setEnabled` and starts no
+  rclone), and `sites.get/setEnabled/list/save/remove/kinds/probe/trust/test` with a `sites.changed` push, answered for
+  the user at this PC only (web sessions refused until open question 2 is settled). Both Hosts build it and stop it at
+  exit. `docs/ipc-protocol.md` has a `sites.*` section. Tests: Sites.Tests 87 pass, 10 need rclone and skip;
+  Integration `SitesCommandsTests` and `HostCommandDispatcherSitesTests` 22 pass. The Core (31) and Server (12)
+  failures on Linux are the same on `main`. Haiku wrote the store, remote and IPC tests and the protocol section;
+  reviewed here, and its findings were fixed. **Not checked:** `sites.test` against a real server (no rclone on this
+  PC), anything on Windows. **Left:** the Options page and the first-use key prompt in the window; SITES.3 browsing.
+
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 
 Owner: the Linux window shows no changelog, only the full-changelog link. Cause: UPD.N1 left the Linux window out on
