@@ -1128,7 +1128,7 @@ public sealed partial class RuntimeServiceTests
     {
         var hook = new RecordingPostDownloadHook();
         await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook);
-        var command = @"C:\Program Files\Scanner\scan.exe";
+        var command = OperatingSystem.IsWindows() ? @"C:\Program Files\Scanner\scan.exe" : "/opt/Scanner/scan";
         var settings = ctx.Service.GetSnapshot().Settings;
         settings.PostDownloadCommand = command;
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
@@ -1156,7 +1156,7 @@ public sealed partial class RuntimeServiceTests
         var hook = new RecordingPostDownloadHook { Throw = true };
         await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook);
         var settings = ctx.Service.GetSnapshot().Settings;
-        settings.PostDownloadCommand = "C:\\Scanner\\missing.exe";
+        settings.PostDownloadCommand = OperatingSystem.IsWindows() ? "C:\\Scanner\\missing.exe" : "/opt/Scanner/missing";
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
 
         var response = await ctx.Service.AddJobAsync(new AddJobRequest
@@ -1192,7 +1192,7 @@ public sealed partial class RuntimeServiceTests
         var hook = new BlockingPostDownloadHook();
         await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook, maxConcurrent: 1);
         var settings = ctx.Service.GetSnapshot().Settings;
-        settings.PostDownloadCommand = "C:\\Scanner\\scan.exe";
+        settings.PostDownloadCommand = OperatingSystem.IsWindows() ? "C:\\Scanner\\scan.exe" : "/opt/Scanner/scan";
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
 
         var first = await ctx.Service.AddJobAsync(new AddJobRequest

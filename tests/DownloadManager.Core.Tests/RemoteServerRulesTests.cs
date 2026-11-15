@@ -413,7 +413,7 @@ public sealed class RemoteServerRulesTests
         // The server's own settings are what was edited.
         Assert.Equal(6, sent.MaxConnectionsPerHost);
         // Every field this PC keeps is a setting, named once, and KeepServerValues puts each one back.
-        Assert.Equal(11, RemoteSettingsRules.ThisPcFields.Length);
+        Assert.Equal(12, RemoteSettingsRules.ThisPcFields.Length);
         Assert.Equal(RemoteSettingsRules.ThisPcFields.Length, RemoteSettingsRules.ThisPcFields.Distinct().Count());
         Assert.All(RemoteSettingsRules.ThisPcFields, name => Assert.NotNull(typeof(SettingsDto).GetProperty(name)));
     }

@@ -15,6 +15,7 @@ public sealed class TorrentKillSwitchHostTests
     private const string Magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=kill-switch.bin";
 
     [Theory]
+    [Trait("Platform", "Windows")] // starts the Windows Host, with cmd.exe as the worker
     [InlineData(true)]
     [InlineData(false)]
     public async Task NoWorkerStartsWithTheKillSwitchOrTheSettingOff(bool killSwitch)

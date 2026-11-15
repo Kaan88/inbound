@@ -160,11 +160,28 @@ public sealed partial class RuntimeServiceTests
             var jobs = new JsonJobStore(paths);
             crashed.FinalUrl = "https://downloads.example.test/adopted-marked.bin";
             await jobs.SaveAsync(crashed);
-            File.Delete(crashed.FinalFilePath + ":Zone.Identifier");
-            Assert.False(File.Exists(crashed.FinalFilePath + ":Zone.Identifier"));
+            if (OperatingSystem.IsMacOS())
+            {
+                // Written afresh, the file has no extended attributes, so no quarantine mark.
+                var bytes = await File.ReadAllBytesAsync(crashed.FinalFilePath);
+                File.Delete(crashed.FinalFilePath);
+                await File.WriteAllBytesAsync(crashed.FinalFilePath, bytes);
+                Assert.Null(MacFileMarks.ReadQuarantine(crashed.FinalFilePath));
+            }
+            else
+            {
+                File.Delete(crashed.FinalFilePath + ":Zone.Identifier");
+                Assert.False(File.Exists(crashed.FinalFilePath + ":Zone.Identifier"));
+            }
 
             await using var restarted = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
             Assert.Equal("completed", restarted.Service.GetJob(added.Id)!.State);
+            if (OperatingSystem.IsMacOS())
+            {
+                Assert.Contains(";Inbound;", MacFileMarks.ReadQuarantine(crashed.FinalFilePath));
+                return;
+            }
+
             var mark = await File.ReadAllTextAsync(crashed.FinalFilePath + ":Zone.Identifier");
             Assert.Contains("ZoneId=3", mark);
             Assert.Contains("HostUrl=https://downloads.example.test/", mark);

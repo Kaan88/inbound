@@ -12,6 +12,7 @@ internal static partial class Program
 {
     internal const string SitesManageUsage = """
                sites on|off|status
+               sites rclone [<version>]   (downloads, checks and installs rclone, as Options › Sites › Download rclone)
                sites add <name> --kind sftp|ftp|webdav|s3|drive|onedrive|dropbox|b2 [--host H] [--port N] [--user U]
                          [--key-file F] [--url U] [--vendor V] [--provider P] [--endpoint E] [--region R] [--tls T]
                          [--client-id ID] [--folder /start] [--local-folder D] [--password-env VAR]
@@ -39,6 +40,14 @@ internal static partial class Program
             }
             case "status":
                 return PrintSitesStatus(await client.AskAsync<SitesStatusDto>(SitesMessageTypes.Get, new EmptyPayload()).ConfigureAwait(false), json);
+            case "rclone":
+            {
+                // MAC.1: a headless install (and the macOS workflow) has no Options window to press Download rclone in.
+                var status = await client.AskAsync<SitesStatusDto>(SitesMessageTypes.RcloneInstall,
+                    new SitesRcloneInstallRequest { Version = positional.ElementAtOrDefault(1) }).ConfigureAwait(false);
+                PrintSitesStatus(status, json);
+                return status.Error is { Length: > 0 } ? 1 : 0;
+            }
             case "add":
                 return await AddSiteAsync(client, args, positional, json).ConfigureAwait(false);
             case "remove":

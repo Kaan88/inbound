@@ -1,0 +1,393 @@
+# Builds Inbound.app for macOS (Apple Silicon and Intel) as a .zip and a .dmg (MAC.1), kept as run artifacts for 14 days.
+# The app is signed ad hoc only, not with a Developer ID, and not notarized: see scripts/package-macos.sh.
+#
+# - On a push to main or a macos-* branch, on every pull request, or by hand on any branch: run artifacts only.
+# - When a release of a version tag is published, or by hand with a tag: builds from that tag, signs the update files
+#   (manifest-macos-<arch>.json) with the UPDATE_SIGNING_KEY secret, after checking that it is the key the apps trust
+#   (ReleaseUpdates.PublicKey), and attaches the .zip, the .dmg, the manifest and SHA256SUMS-macos-<arch> to the release.
+# - By hand with test_version (say 0.8.1): builds this branch as that version, signs it the same way and puts the .zip and
+#   the manifest in the pre-release "macos-update-test" (made if missing, never "latest"), so the in-app updater can be
+#   tried without a release: `dm settings set updatemanifest
+#   https://github.com/Kaan88/inbound/releases/download/macos-update-test/manifest.json` on an installed copy.
+# - The torrent worker (native/torrent-worker, libtorrent through vcpkg) is built first; if that step fails the app is
+#   still packed, with torrents turned off, so the rest of the macOS build can be tried.
+# Actions are pinned to the commit of the release named beside each.
+name: macOS packages
+
+on:
+  push:
+    branches: [main, "macos-*"]
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build and attach to (for example v0.8.0). Empty: build this branch."
+        required: false
+        default: ""
+      test_version:
+        description: "Build this branch as this version and publish it to the macos-update-test pre-release (for example 0.8.1)."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-packages-${{ inputs.tag || github.event.release.tag_name || github.ref }}-${{ inputs.test_version }}
+  cancel-in-progress: ${{ github.event_name != 'release' && inputs.tag == '' }}
+
+jobs:
+  app:
+    if: github.repository == 'Kaan88/inbound'
+    runs-on: macos-15
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      VCPKG_DISABLE_METRICS: "1"
+      VCPKG_COMMIT: e54ef0fcc9a82033a61e51002552a910a5d57282
+      # Empty for a build of a branch.
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      TEST_VERSION: ${{ inputs.test_version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (inputs.tag || github.event.release.tag_name) && format('refs/tags/{0}', inputs.tag || github.event.release.tag_name) || github.ref }}
+          persist-credentials: false
+
+      - name: Version
+        run: |
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -n1)"
+          if [ -n "$TAG" ] && [ -n "$TEST_VERSION" ]; then echo "Give a tag or a test version, not both."; exit 1; fi
+          if [ -n "$TAG" ]; then
+            case "$TAG" in v[0-9]*) ;; *) echo "Not a version tag: $TAG"; exit 1 ;; esac
+            test "v$version" = "$TAG" || { echo "Directory.Build.props says $version, the tag is $TAG"; exit 1; }
+          fi
+          if [ -n "$TEST_VERSION" ]; then
+            echo "$TEST_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "test_version must be like 0.8.1"; exit 1; }
+            version="$TEST_VERSION"
+            echo "VERSION_OVERRIDE=$version" >> "$GITHUB_ENV"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "${{ matrix.rid }}" in osx-arm64) echo "ARCH=arm64" >> "$GITHUB_ENV" ;; *) echo "ARCH=x64" >> "$GITHUB_ENV" ;; esac
+          echo "Building ${TAG:-$GITHUB_REF_NAME} as $version for ${{ matrix.rid }}"
+
+      - name: .NET SDK 10
+        run: |
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          "$HOME/.dotnet/dotnet" --version
+
+      - name: vcpkg packages cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ matrix.rid }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('native/torrent-worker/vcpkg.json', 'native/torrent-worker/ports/**', 'native/torrent-worker/triplets/*osx*') }}
+
+      - name: Torrent worker (libtorrent, vcpkg)
+        id: worker
+        continue-on-error: true
+        working-directory: native/torrent-worker
+        run: |
+          case "${{ matrix.rid }}" in osx-arm64) triplet=arm64-osx-static-rel; arch=arm64 ;; *) triplet=x64-osx-static-rel; arch=x86_64 ;; esac
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" checkout --detach "$VCPKG_COMMIT"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          cmake -S . -B "$RUNNER_TEMP/worker" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=$triplet -DVCPKG_OVERLAY_TRIPLETS="$PWD/triplets" \
+            -DCMAKE_OSX_ARCHITECTURES=$arch -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build "$RUNNER_TEMP/worker" --parallel
+          if [ "${{ matrix.rid }}" = osx-arm64 ]; then
+            "$RUNNER_TEMP/worker/inbound-torrent-selftest"
+            "$RUNNER_TEMP/worker/inbound-torrent" --version
+          fi
+          strip "$RUNNER_TEMP/worker/inbound-torrent"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/torrent-worker/${{ matrix.rid }}"
+          cp "$RUNNER_TEMP/worker/inbound-torrent" "$GITHUB_WORKSPACE/artifacts/torrent-worker/${{ matrix.rid }}/"
+          file "$GITHUB_WORKSPACE/artifacts/torrent-worker/${{ matrix.rid }}/inbound-torrent"
+
+      - name: Upload the vcpkg logs when the worker failed
+        if: steps.worker.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vcpkg-logs-${{ matrix.rid }}
+          path: ${{ runner.temp }}/vcpkg/buildtrees/**/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Rosetta, to run the Intel build on this Apple silicon runner
+        if: matrix.rid == 'osx-x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: A release never ships without the torrent worker
+        if: steps.worker.outcome == 'failure' && (env.TAG != '' || env.TEST_VERSION != '')
+        run: |
+          echo "::error::The torrent worker did not build; a release or test update would turn torrents off on every Mac it updates."
+          exit 1
+
+      - name: Build Inbound.app, the .zip and the .dmg
+        run: bash scripts/package-macos.sh ${{ matrix.rid }}
+
+      - name: Darwin-only unit tests (hard-link count for extraction)
+        if: matrix.rid == 'osx-arm64'
+        run: dotnet test tests/DownloadManager.Archives.Tests/DownloadManager.Archives.Tests.csproj -c Release --filter "FullyQualifiedName~TheLinkCountIsReadOnly"
+
+      - name: The Host and the CLI start
+        run: |
+          set +e
+          app="artifacts/macos/$ARCH/Inbound.app"
+          "$app/Contents/MacOS/InboundLauncher" --cli --version
+          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-data"
+          "$app/Contents/Resources/host/inbound-host" --background > "$RUNNER_TEMP/host.log" 2>&1 &
+          pid=$!
+          ok=1
+          for i in $(seq 1 60); do
+            if "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start >/dev/null 2>&1; then ok=0; break; fi
+            kill -0 $pid 2>/dev/null || { echo "The Host exited: $(wait $pid; echo $?)"; break; }
+            sleep 1
+          done
+          "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start
+          # MAC.5: the secret key in the login Keychain (its value is never printed), and sleep held while a download runs.
+          grep -h 'secret key is kept' "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | cut -c1-160
+          if security find-generic-password -s "Inbound Download Manager secret key" -a "$DOWNLOADMANAGER_DATA" >/dev/null 2>&1; then
+            echo "--- the secret key is in the login Keychain"
+          else echo "::warning::no Inbound key in the login Keychain"; fi
+          python3 -c 'import http.server, time
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200); self.send_header("Content-Length", "100000000"); self.end_headers()
+                  for _ in range(400): self.wfile.write(b"x" * 64); self.wfile.flush(); time.sleep(0.1)
+              def log_message(self, *a): pass
+          http.server.ThreadingHTTPServer(("127.0.0.1", 8931), H).serve_forever()' &
+          slow=$!
+          sleep 1
+          "$app/Contents/Resources/host/DownloadManager.Cli" add http://127.0.0.1:8931/slow.bin --dest "$RUNNER_TEMP" --no-start
+          sleep 6
+          if pmset -g assertions | grep -i -E 'caffeinate|PreventUserIdleSystemSleep.*1' | head -5 | grep -q .; then
+            echo "--- sleep is held while downloading:"; pmset -g assertions | grep -i caffeinate | head -3
+          else echo "::warning::no sleep assertion while a download runs"; pmset -g assertions | head -30; fi
+          kill $slow 2>/dev/null
+          # MAC.6: a download from the internet gets the quarantine and "Where from" marks Safari gives one.
+          mkdir -p "$RUNNER_TEMP/marks"
+          "$app/Contents/Resources/host/DownloadManager.Cli" add https://raw.githubusercontent.com/Kaan88/inbound/main/LICENSE --dest "$RUNNER_TEMP/marks"
+          marked=""
+          for i in $(seq 1 60); do
+            marked="$(find "$RUNNER_TEMP/marks" -type f ! -name '*.part' | head -1)"
+            [ -n "$marked" ] && break; sleep 1
+          done
+          sleep 2 # the marks follow the rename
+          if [ -n "$marked" ] && xattr -p com.apple.quarantine "$marked" 2>/dev/null | grep -q ';Inbound;'; then
+            echo "--- quarantine: $(xattr -p com.apple.quarantine "$marked")"
+            xattr -p -x com.apple.metadata:kMDItemWhereFroms "$marked" | xxd -r -p > "$RUNNER_TEMP/wf.plist"
+            echo "--- where from:"; plutil -p "$RUNNER_TEMP/wf.plist"
+            plutil -p "$RUNNER_TEMP/wf.plist" 2>/dev/null | grep -q 'https://raw.githubusercontent.com/' || { echo "::error::Where from is not the site"; ok=1; }
+          else
+            echo "::error::the download from the internet has no Inbound quarantine mark (${marked:-no file})"; xattr -l "$marked" 2>/dev/null; ok=1
+            "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start --json 2>/dev/null | python3 -c 'import json,sys
+          for j in json.load(sys.stdin).get("jobs", []): print(j.get("fileName"), j.get("state"), json.dumps(j.get("failure")))' 
+          fi
+          # MAC.6: the menu-bar helper is its own app with the Services entry, and the Host started it.
+          plutil -p "$app/Contents/Helpers/Inbound Menu.app/Contents/Info.plist" | grep -E 'NSMenuItem|downloadWithInbound|LSUIElement' -A1 | head -12
+          grep -h 'Menu-bar icon\|menu-bar helper' "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | cut -c1-160
+          echo "--- Host output"; cat "$RUNNER_TEMP/host.log"
+          echo "--- Host logs"; find "$DOWNLOADMANAGER_DATA" -maxdepth 2 | head -40; cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -80
+          echo "--- sockets"; ls -la "${TMPDIR:-/tmp}"/inbound-* 2>/dev/null
+          kill $pid 2>/dev/null
+          exit $ok
+
+      - name: Sites downloads a macOS rclone and runs it (both architectures)
+        continue-on-error: true
+        run: |
+          set +e
+          host="artifacts/macos/$ARCH/Inbound.app/Contents/Resources/host"
+          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-sites"
+          "$host/inbound-host" --background > "$RUNNER_TEMP/sites-host.log" 2>&1 &
+          for i in $(seq 1 30); do "$host/DownloadManager.Cli" list --no-start >/dev/null 2>&1 && break; sleep 1; done
+          "$host/DownloadManager.Cli" sites on --no-start
+          echo "--- dm sites rclone (downloads it, as Options › Sites › Download rclone)"
+          "$host/DownloadManager.Cli" sites rclone --no-start
+          echo "--- sites status"; "$host/DownloadManager.Cli" sites status --no-start
+          echo "--- rclone in the Host's log"; grep -i rclone "$DOWNLOADMANAGER_DATA"/logs/host-*.log | cut -c1-220 | tail -15
+          binary="$(find "$DOWNLOADMANAGER_DATA/tools/rclone" -name rclone -type f | head -n1)"
+          echo "--- downloaded: ${binary:-none}"
+          if [ -n "$binary" ]; then
+            file "$binary"
+            codesign -dv "$binary" 2>&1 | grep -E 'Format|Signature|Identifier' 
+            echo "quarantine: $(xattr -p com.apple.quarantine "$binary" 2>/dev/null || echo none)"
+            "$binary" version | head -3
+          fi
+          pkill -f "$host/inbound-host"; pkill -f "$DOWNLOADMANAGER_DATA/tools/rclone"
+          [ -n "$binary" ] && "$binary" version >/dev/null
+
+      - name: A newer copy of the app replaces the running Host (MAC.3)
+        continue-on-error: true
+        run: |
+          set +e
+          app="$PWD/artifacts/macos/$ARCH/Inbound.app"
+          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-mac3"
+          "$app/Contents/Resources/host/inbound-host" --background > /dev/null 2>&1 &
+          for i in $(seq 1 30); do "$app/Contents/Resources/host/DownloadManager.Cli" host status --no-start >/dev/null 2>&1 && break; sleep 1; done
+          echo "--- before: $(pgrep -fl 'inbound-host' | sed "s|$PWD/||")"
+          # The same app as another version, put elsewhere: what dragging a new release over Applications leaves.
+          newer="$RUNNER_TEMP/Newer/Inbound.app"
+          mkdir -p "$(dirname "$newer")" && ditto "$app" "$newer"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 9.9.9' "$newer/Contents/Info.plist"
+          "$newer/Contents/MacOS/InboundLauncher" > "$RUNNER_TEMP/mac3.log" 2>&1 &
+          sleep 15
+          hosts="$(pgrep -fl 'inbound-host')"
+          echo "--- after: $hosts"
+          pkill -f 'Newer/Inbound.app/Contents/'; pkill -f "$app/Contents/"
+          echo "$hosts" | grep -q 'Newer/Inbound.app' && ! echo "$hosts" | grep -q "$app/Contents" \
+            && echo "--- the older Host stopped and the newer copy's Host serves" || { echo "--- MAC.3 failed"; exit 1; }
+
+      - name: The window draws and its dialogs close (screenshots and trace in the log)
+        continue-on-error: true
+        run: |
+          set +e
+          app="artifacts/macos/$ARCH/Inbound.app"
+          host="$app/Contents/Resources/host"
+          data="$RUNNER_TEMP/inbound-ui"
+          trace="$data/logs/ui-trace.log"
+          shot() {
+            screencapture -x "$RUNNER_TEMP/$1.png"
+            sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/$1.png" --out "$RUNNER_TEMP/$1.jpg" >/dev/null
+            echo "SCREENSHOT-$1-BEGIN"; base64 -i "$RUNNER_TEMP/$1.jpg" | fold -w 1000; echo "SCREENSHOT-$1-END"
+          }
+          brew install cliclick >/dev/null 2>&1
+          dotnet tool install -g dotnet-dump >/dev/null 2>&1; export PATH="$PATH:$HOME/.dotnet/tools"
+
+          # The Host with one download (it fails at once: nothing listens on port 9), so Progress Details has one to show.
+          DOWNLOADMANAGER_DATA="$data" "$host/inbound-host" --background > "$RUNNER_TEMP/host.log" 2>&1 &
+          for i in $(seq 1 30); do DOWNLOADMANAGER_DATA="$data" "$host/DownloadManager.Cli" list --no-start >/dev/null 2>&1 && break; sleep 1; done
+          DOWNLOADMANAGER_DATA="$data" "$host/DownloadManager.Cli" add http://127.0.0.1:9/selftest.bin --dest "$RUNNER_TEMP" --no-start
+          echo "--- host log"; cat "$data"/logs/host-*.log | cut -c1-200 | grep -i -E 'menu|tray|ready' 
+
+          # Through LaunchServices, as Finder starts it, so the window runs with the bundle's identity.
+          # DOWNLOADMANAGER_UNO_SELFTEST: About, Progress Details and Options open and close (MainWindow.UnoSelfTest.cs).
+          open -n --env DOWNLOADMANAGER_DATA="$data" --env DOWNLOADMANAGER_UNO_TRACE=1 \
+            --env DOWNLOADMANAGER_UNO_SELFTEST=1 --stdout "$RUNNER_TEMP/ui.log" --stderr "$RUNNER_TEMP/ui.log" "$app"
+          for i in $(seq 1 40); do grep -q 'selftest: opening About' "$trace" 2>/dev/null && break; sleep 1; done
+          shot main
+          clicked=""
+          for i in $(seq 1 60); do
+            # Each "click ... at x,y" line once: as a user would, on the point the window gave.
+            grep -o 'selftest: click .* at [0-9-]*,[0-9-]*' "$trace" 2>/dev/null | while read -r line; do
+              case "$clicked" in *"$line"*) continue ;; esac
+              point="${line##* at }"
+              echo "clicking: $line"
+              case "$line" in *About*) shot about ;; *"Progress Details close"*) shot progress ;; esac
+              cliclick "m:$point" "w:200" "c:$point"
+            done
+            clicked="$(grep -o 'selftest: click .* at [0-9-]*,[0-9-]*' "$trace" 2>/dev/null)"
+            if grep -q 'selftest: short window' "$trace" && [ ! -f "$RUNNER_TEMP/short.jpg" ]; then shot short; fi
+            grep -q 'selftest: click main close' "$trace" && [ -n "$(echo "$clicked" | grep 'main close')" ] && break
+            sleep 0.5
+          done
+          # The main window was closed by its button (the self-test's last click): its process should end.
+          sleep 6; shot closed
+          pid="$(pgrep -f 'Resources/window/DownloadManager.Desktop.Uno' | head -n1)"
+          last="$(grep 'selftest heartbeat' "$trace" | tail -n1)"
+          echo "--- after closing the main window: last heartbeat: $last"
+          if [ -n "$pid" ]; then
+            echo "--- the window process $pid is still running after its window closed: managed stacks of every thread"
+            dotnet-dump collect -p "$pid" -o "$RUNNER_TEMP/ui.dmp" --type Mini >/dev/null 2>&1
+            dotnet-dump analyze "$RUNNER_TEMP/ui.dmp" -c "clrstack -all" -c exit 2>&1 | head -400
+          else
+            echo "--- the window process ended after its window closed"
+          fi
+
+          # Opened again as the menu-bar icon's Open Inbound does now (LinuxHostPlatform.LaunchUi on macOS).
+          open -n -a "$PWD/$app" --env DOWNLOADMANAGER_DATA="$data" --env DOWNLOADMANAGER_UNO_TRACE=1
+          sleep 12; shot reopened
+          echo "--- window processes now: $(pgrep -fl 'DownloadManager.Desktop.Uno' | wc -l)"
+          # The updater's own check (MacAppRestarter.WindowRunning): this user's window, by its path under the bundle.
+          bundle="$(cd "$app" && pwd)"
+          pattern="$(printf '%s' "$bundle/Contents/Resources/window/DownloadManager.Desktop.Uno" | sed 's/[][\\.()*+?{}|^$]/\\&/g')"
+          if pgrep -U "$(id -u)" -f "$pattern" >/dev/null; then echo "--- the updater finds the window by its path"; else echo "::warning::the updater's window check (pgrep -f on the bundle path) found no window"; fi
+          echo "--- menu-bar helper: $(pgrep -fl inbound-menu || echo 'not running')"
+          echo "--- window output"; tail -40 "$RUNNER_TEMP/ui.log"
+          echo "--- ui trace"; grep -v -E 'first chance|selftest heartbeat' "$trace" | tail -40
+          echo "--- heartbeats"; grep 'selftest heartbeat' "$trace" | awk 'NR%4==1' | cut -c12-220
+          echo "--- first-chance exceptions"; grep 'first chance' "$trace" | cut -c1-300 | sort | uniq -c | sort -rn | head -20
+          pkill -f DownloadManager.Desktop.Uno; pkill -f inbound-host
+          exit 0
+
+      - name: Keep them as run artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-${{ matrix.rid }}-${{ env.VERSION }}
+          path: |
+            artifacts/macos/*.zip
+            artifacts/macos/*.dmg
+            artifacts/macos/SHA256SUMS-macos-*
+          retention-days: 14
+
+      - name: Sign the update file
+        if: env.TAG != '' || env.TEST_VERSION != ''
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          test -n "$UPDATE_SIGNING_KEY" || { echo "The UPDATE_SIGNING_KEY secret is missing."; exit 1; }
+          case "${{ matrix.rid }}" in osx-arm64) arch=arm64 ;; *) arch=x64 ;; esac
+          key="$RUNNER_TEMP/update-signing.pem"
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          # The key must be the one installed apps trust: its public half is ReleaseUpdates.PublicKey.
+          trusted="$(sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' src/DownloadManager.Core/ReleaseUpdates.cs | tr -d ' \r\n')"
+          test "$(openssl pkey -in "$key" -pubout | tr -d ' \r\n')" = "$trusted" \
+            || { echo "The signing key does not match ReleaseUpdates.PublicKey."; exit 1; }
+          if [ -n "$TEST_VERSION" ]; then
+            NO_NOTES=1 sh scripts/prepare-macos-release.sh "$VERSION" "artifacts/macos/Inbound-$VERSION-macos-$arch.zip" "$arch" "$key" "$GITHUB_REPOSITORY" macos-update-test
+            out="artifacts/release/macos-update-test-macos-$arch"
+          else
+            sh scripts/prepare-macos-release.sh "$VERSION" "artifacts/macos/Inbound-$VERSION-macos-$arch.zip" "$arch" "$key" "$GITHUB_REPOSITORY" "$TAG"
+            out="artifacts/release/$TAG-macos-$arch"
+          fi
+          cat "$out/SHA256SUMS-macos-$arch"
+          echo "SIGNED=$out" >> "$GITHUB_ENV"
+          echo "ARCH=$arch" >> "$GITHUB_ENV"
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A run by hand can come before the release is made: wait up to an hour for it.
+          for i in $(seq 1 60); do
+            gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            echo "No release $TAG yet; waiting ($i/60)"; sleep 60
+          done
+          gh release upload "$TAG" "$SIGNED/Inbound-$VERSION-macos-$ARCH.zip" "$SIGNED/manifest-macos-$ARCH.json" \
+            "$SIGNED/SHA256SUMS-macos-$ARCH" "artifacts/macos/Inbound-$VERSION-macos-$ARCH.dmg" -R "$GITHUB_REPOSITORY" --clobber
+          echo "Attached the macOS $ARCH files to $TAG."
+
+      - name: Publish the test update (pre-release macos-update-test)
+        if: env.TEST_VERSION != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view macos-update-test -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create macos-update-test -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "macOS update test (not a release)" \
+              --notes "Test files for the macOS in-app updater, built by the macOS workflow with test_version. Not a release: never install these by hand. Point a test copy at it with: dm settings set updatemanifest https://github.com/$GITHUB_REPOSITORY/releases/download/macos-update-test/manifest.json" \
+              || gh release view macos-update-test -R "$GITHUB_REPOSITORY" >/dev/null
+          fi
+          gh release upload macos-update-test "$SIGNED/Inbound-$VERSION-macos-$ARCH.zip" "$SIGNED/manifest-macos-$ARCH.json" \
+            "$SIGNED/SHA256SUMS-macos-$ARCH" -R "$GITHUB_REPOSITORY" --clobber
+          echo "Published the $VERSION test update for $ARCH: https://github.com/$GITHUB_REPOSITORY/releases/tag/macos-update-test"
