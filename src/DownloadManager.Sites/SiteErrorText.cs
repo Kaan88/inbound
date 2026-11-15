@@ -10,6 +10,13 @@ public static class SiteErrorText
     private const string CouldNotConnect = "couldn't connect SSH";
     private const string FtpConnection = "failed to make FTP connection to";
 
+    /// <summary>
+    /// SITES.6b: Go's "unknown authority" (a self-signed or private certificate), the one failure that trusting the
+    /// certificate fixes; a wrong name or an expired certificate is not this.
+    /// </summary>
+    public static bool IsUntrustedCertificate(string message) =>
+        Has(message, "x509: certificate signed by unknown authority") || Has(message, "x509: certificate is not trusted");
+
     public static string Friendly(string message)
     {
         var key = SiteKeyText.Friendly(message);
@@ -33,8 +40,10 @@ public static class SiteErrorText
         }
 
         // SITES.6: FTP, WebDAV and S3. Only rclone's and Go's own fixed phrases are read.
+        if (IsUntrustedCertificate(message))
+            return "The server's certificate is not trusted on this PC, so nothing was sent. Test the site to see the certificate and choose whether to trust it.";
         if (Has(message, "x509:") || Has(message, "failed to verify certificate"))
-            return "The server's certificate is not trusted on this PC, so nothing was sent. Check the address, or ask the server's owner about its certificate.";
+            return "The server's certificate could not be checked (wrong name, or out of date), so nothing was sent. Check the address, or ask the server's owner about its certificate.";
         var ftp = message.IndexOf(FtpConnection, StringComparison.OrdinalIgnoreCase);
         if (ftp >= 0 && message[(ftp + FtpConnection.Length)..] is var ftpCause && ftpCause.Contains(": 530 ", StringComparison.Ordinal))
             return "The server did not accept the sign-in. Check the user name and password in Edit site.";

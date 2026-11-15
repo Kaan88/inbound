@@ -217,6 +217,7 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | `sites.probe` | `{host, port?}` | `sites.probeResult` |
 | `sites.trust` | `{id, entries}` | `sites.result` |
 | `sites.test` | `{id}` | `sites.result` |
+| `sites.certificate` | `{id}` | `sites.certificateResult` |
 | `sites.browse` | `{id, path?, offset?, limit?, refresh?}` | `sites.browseResult` |
 | `sites.star` | `{id, path, starred?}` | `sites.result` |
 | `sites.mkdir` | `{id, path, name}` | `sites.result` |
@@ -252,6 +253,24 @@ folders out.
 them; the Host refuses a field another kind uses, a key for any kind but SFTP, a change of kind, and an address with a
 user name, query or fragment in it. A WebDAV or S3 site's `host` and `port` are filled in from its address. `SiteDto`
 also carries `capabilities` and `encrypted` (false for plain FTP and an http:// address).
+
+Server certificates (SITES.6b). A test or browse that fails because the server's certificate is not signed by an
+authority this PC trusts (Go's "unknown authority") carries `problem: certificateNotTrusted`; a wrong name or an
+out-of-date certificate does not, since trusting it would not help. `sites.certificate {id}` reads the certificate with a
+TLS handshake of the Host's own (explicit FTPS sends `AUTH TLS` first) and nothing else: no user name or password is sent.
+The reply is `{ok, message?, certificate?, trustedBySite}`, with `certificate` as `{subject, issuer, notBefore, notAfter,
+fingerprint (SHA-256, AB:CD:…), names, selfSigned, trustedBySystem, cannotTrust?}`. `cannotTrust` says in words why
+trusting would not help (no subject alternative name, which Go needs; the name does not match; out of date).
+`sites.trust {id, certificateFingerprint}` reads the certificate again and refuses when it is not the one with that
+fingerprint, or when `cannotTrust` is set; `{id, forgetCertificates: true}` forgets the site's. A site keeps at most 4
+(the newest first). `SiteDto.trustedCertificates` lists them as `{fingerprint, subject, notAfter}`; a change of address,
+port or FTP encryption forgets them. The Host writes every trusted certificate, with the system's root certificates
+(Root and, on Windows, third-party roots), to `trusted-certificates.pem` in its rclone folder and starts rclone with
+`--ca-cert` on it; with none trusted there is no file and rclone checks as it always did. rclone reads the file only at
+start, so after a change the running rclone is stopped at once if idle, or when its last transfer ends; a trust reply
+then carries a `message` saying the certificate is used after the running transfers. rclone's own check is never
+switched off. A root Windows would fetch only when first needed is not in the file, so while a certificate is trusted a
+service whose root this PC has never fetched can fail as untrusted.
 
 `sites.status` carries `SitesStatusDto`:
 

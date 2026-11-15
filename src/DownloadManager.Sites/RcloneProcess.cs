@@ -37,6 +37,9 @@ public interface IRcloneInstance : IAsyncDisposable
 public sealed class RcloneProcess : IRcloneInstance
 {
     public const string PidFileName = "rclone.pid";
+
+    /// <summary>SITES.6b: the trusted-certificates file in the state folder, passed as <c>--ca-cert</c> when it exists.</summary>
+    public const string TrustedCertificatesFileName = "trusted-certificates.pem";
     private const int StartAttempts = 3;
 
     private readonly Process _process;
@@ -135,6 +138,15 @@ public sealed class RcloneProcess : IRcloneInstance
             "--log-level", "NOTICE",
             "--use-json-log=false",
         }) info.ArgumentList.Add(argument);
+
+        // SITES.6b: certificates the user trusted for FTPS and https sites, with the system's roots, which this file
+        // replaces for the process. rclone reads it only here, at start.
+        var trusted = Path.Combine(stateDirectory, TrustedCertificatesFileName);
+        if (File.Exists(trusted))
+        {
+            info.ArgumentList.Add("--ca-cert");
+            info.ArgumentList.Add(trusted);
+        }
 
         RcloneEnvironment.Clean(info.Environment);
         info.Environment["RCLONE_RC_USER"] = user;

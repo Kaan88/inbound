@@ -289,6 +289,44 @@
   **Not checked:** FTPS against a real certificate (no trusted test server here), Nextcloud and ownCloud, a real cloud
   S3 service, anything visual, light mode, the Uno window on Linux.
 
+- **O. SITES.6b: trusting a server's own certificate (FTPS, https WebDAV and S3)** (2026-11-15, main). As the plan
+  says (one Host-managed CA file, owner 2026-11-15): rclone has no per-site CA and reads `--ca-cert` only at start.
+  **Host:** a test or browse that fails with Go's "unknown authority" carries `certificateNotTrusted`. `sites.certificate`
+  reads the certificate with a TLS handshake of the Host's own (`TlsCertificateProbe`; explicit FTPS sends `AUTH TLS`
+  first) and sends nothing else, no user name or password. It says why trusting would not help when that is so: no
+  subject alternative name (Go ignores the common name), the wrong name, or out of date. `sites.trust` with
+  `certificateFingerprint` reads the certificate again and refuses another one. `forgetCertificates` forgets them. A site
+  keeps at most 4, and a new address, port or FTP encryption forgets them. Every trusted certificate goes, with the
+  system's roots (Root and, on Windows, third-party roots, since the file replaces them for rclone), into
+  `trusted-certificates.pem` in the Host's rclone folder; rclone starts with `--ca-cert` on it, and with none trusted
+  there is no file. After a change the running rclone stops at once if idle, or when its last lease goes
+  (`RcloneSupervisor.RenewWhenIdleAsync`). A trust made while transfers run says it applies after them. rclone's check is
+  never switched off. **Window:** Test in Options asks "Trust this certificate?" with the names, the issuer ("itself"
+  for self-signed), the dates and the SHA-256 fingerprint, and a hint on how to compare it; Trust is not the default. A
+  certificate trust would not fix gets a Close-only message saying why. The site's row says "Trusts its server's own
+  certificate (valid until …)" and offers "Forget certificate". The Sites pane explains the refusal and points to
+  Options. **My calls:** trusting needs a subject alternative name and a matching name, because rclone checks them
+  anyway; the dialog warns that a trusted certificate is trusted by all Inbound's sites (one CA file per rclone), which
+  matters for a self-signed certificate made as a CA; no per-site isolation is possible with rclone 1.76.0. **Haiku
+  review:** five points. Fixed: two writers of the file could leave an older list last (now one writer at a time, and a
+  failed move is logged rather than failing the save); Forget did not redraw the row; an FTP reply line of only the code
+  waited for the timeout; an unusable address threw past the probe's handler. Hardened: certificates are also dropped
+  when a site becomes unencrypted (the address check already did this). Checked, no change: the gate use (no
+  deadlock). **Walk** (published build, own test instance, `rclone serve webdav --cert` with a self-signed ECDSA
+  certificate for 127.0.0.1, UI Automation only): a new https site was tested at once and asked "Trust this
+  certificate?"; the fingerprint shown equals the certificate file's SHA-256; Trust, and the test said "connected, and
+  its start folder was listed"; the row showed the trust line and Forget certificate; Forget asked, and the row and
+  button went; the Sites pane then explained the refusal. **Found by the walk, not fixed (recorded):** a password under
+  four characters on any site makes the shared rclone client withhold every later error text that contains it, until
+  rclone restarts (the redaction rule of SITES.0; a first walk site used "p"). **Tests:** `SiteCertificatesEndToEndTests`
+  (https: untrusted, read, wrong fingerprint refused, trusted, works, forget, trusted again, another name forgets it and
+  can't be trusted; implicit FTPS: trusted, after which the certificate is no longer the problem, since rclone's own test
+  FTP server refuses `PBSZ` in implicit mode; explicit TLS against an implicit server is not a certificate question;
+  certificates without a name or out of date), `RcloneSupervisorTests` (renew), `SitesOptionsTests`; Core 2372, Sites
+  219 and the Integration site, dispatcher and golden-frame tests pass; the solution builds. **Not checked:** explicit
+  FTPS with a real server, a Windows root that is fetched only on demand while a certificate is trusted (documented in
+  `docs/ipc-protocol.md`), anything visual, light mode, Linux.
+
 - **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
   **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
   (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the

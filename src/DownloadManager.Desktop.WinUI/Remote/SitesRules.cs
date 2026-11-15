@@ -167,6 +167,27 @@ internal static class SitesRules
     /// <summary>Whether a saved site needs its host key asked about: a new one, or one whose host or port changed.</summary>
     public static bool NeedsTrust(SiteDto saved) => saved.Kind == SiteKindCatalog.Sftp && saved.HostKeys.Count == 0;
 
+    /// <summary>SITES.6b: the lines of the "Trust this certificate?" question, label and value.</summary>
+    public static IReadOnlyList<(string Label, string Value)> CertificateLines(SiteCertificateDto certificate)
+    {
+        var lines = new List<(string, string)>
+        {
+            ("Issued to", certificate.Names.Count > 0 ? string.Join(", ", certificate.Names) : certificate.Subject),
+            ("Issued by", certificate.SelfSigned ? "itself (a self-signed certificate)" : certificate.Issuer),
+            ("Valid", $"{certificate.NotBefore.ToLocalTime():d} to {certificate.NotAfter.ToLocalTime():d}"),
+            ("SHA-256 fingerprint", certificate.Fingerprint),
+        };
+        return lines;
+    }
+
+    /// <summary>The line under a site in Options that trusts its server's own certificate, or null.</summary>
+    public static string? TrustedCertificateLine(SiteDto site) => site.TrustedCertificates switch
+    {
+        [] => null,
+        [var one] => $"Trusts its server's own certificate (valid until {one.NotAfter.ToLocalTime():d}).",
+        var many => $"Trusts {many.Count} certificates of its server.",
+    };
+
     /// <summary>
     /// SITES.6: the warning a form shows for a connection that is not encrypted, or null. Plain FTP and an http:// address
     /// send the password and the files readable to anyone on the way.

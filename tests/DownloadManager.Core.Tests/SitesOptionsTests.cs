@@ -320,4 +320,21 @@ public sealed class SitesOptionsTests
         Assert.Null(SitesRules.PlainWarning("s3", null, null, null));
         Assert.Null(SitesRules.PlainWarning("sftp", null, null, null));
     }
+
+    [Fact]
+    public void ACertificateQuestionNamesTheServerTheIssuerAndTheFingerprint()
+    {
+        var lines = SitesRules.CertificateLines(new SiteCertificateDto
+        {
+            Subject = "CN=nas", Issuer = "CN=nas", Names = ["nas.home", "192.168.1.5"], SelfSigned = true, Fingerprint = "AB:CD",
+            NotBefore = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), NotAfter = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        });
+        Assert.Equal(("Issued to", "nas.home, 192.168.1.5"), lines[0]);
+        Assert.Equal("itself (a self-signed certificate)", lines[1].Value);
+        Assert.Equal(("SHA-256 fingerprint", "AB:CD"), lines[3]);
+        Assert.Null(SitesRules.TrustedCertificateLine(new SiteDto()));
+        Assert.StartsWith("Trusts its server's own certificate", SitesRules.TrustedCertificateLine(new SiteDto { TrustedCertificates = [new SiteTrustedCertificateDto()] }));
+        Assert.True(SitesBrowseRules.PointsToOptions(SiteProblems.CertificateNotTrusted));
+        Assert.Contains("Test the site", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
+    }
 }

@@ -74,12 +74,49 @@ public sealed record SiteRecord
 
     public string? Region { get; init; }
 
+    /// <summary>
+    /// SITES.6b: server certificates the user trusted for this FTPS or https site, written with the system's roots to the
+    /// trusted-certificates file rclone reads at start. Cleared when the server changes.
+    /// </summary>
+    public List<SiteCertificateRecord> TrustedCertificates { get; init; } = [];
+
     /// <summary>An SFTP site whose server key the user has not accepted yet: nothing reaches rclone until they do.</summary>
     [JsonIgnore]
     public bool NeedsHostKey => Kind == SiteKinds.Sftp && HostKeys.Count == 0;
 
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
+}
+
+/// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
+public sealed record SiteCertificateRecord
+{
+    public const int MaxPerSite = 4;
+
+    /// <summary>SHA-256, <c>AB:CD:…</c>.</summary>
+    public required string Fingerprint { get; init; }
+
+    public required string Pem { get; init; }
+    public string Subject { get; init; } = "";
+    public DateTimeOffset NotAfter { get; init; }
+
+    /// <summary>The PEM holds one certificate and its fingerprint is <see cref="Fingerprint"/>.</summary>
+    public bool Matches()
+    {
+        try
+        {
+            using var certificate = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(Pem);
+            return TlsCertificateProbe.Fingerprint(certificate) == Fingerprint;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>
@@ -194,11 +231,27 @@ public sealed class SiteStore
                 throw new SiteStoreException("A site secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
+        ValidateCertificates(site);
         if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
             throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
+    }
+
+    /// <summary>SITES.6b: at most a few, each a parseable certificate whose fingerprint is the one stored, and only on TLS sites.</summary>
+    private static void ValidateCertificates(SiteRecord site)
+    {
+        if (site.TrustedCertificates.Count == 0) return;
+        if (site.Kind == SiteKinds.Sftp || !DownloadManager.Contracts.SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint)
+            || (site.Kind == SiteKinds.S3 && string.IsNullOrEmpty(site.Endpoint)))
+            throw new SiteStoreException("Only an encrypted FTP or https site can trust a server certificate.");
+        if (site.TrustedCertificates.Count > SiteCertificateRecord.MaxPerSite)
+            throw new SiteStoreException($"A site can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
+        foreach (var certificate in site.TrustedCertificates)
+        {
+            if (!certificate.Matches()) throw new SiteStoreException("A trusted certificate must be a certificate with its own fingerprint.");
+        }
     }
 
     /// <summary>The fields of each kind: the ones it uses are well formed, and the others are not set.</summary>
@@ -264,7 +317,8 @@ public sealed class SiteStore
             var site = JsonSerializer.Deserialize(bytes, SitesJsonContext.Default.SiteRecord);
             if (site is null) return null;
             // A hand-edited file with "stars": null or "hostKeys": null reads as empty lists, not as a site that breaks sites.list.
-            if (site.Stars is null || site.HostKeys is null) site = site with { Stars = site.Stars ?? [], HostKeys = site.HostKeys ?? [] };
+            if (site.Stars is null || site.HostKeys is null || site.TrustedCertificates is null)
+                site = site with { Stars = site.Stars ?? [], HostKeys = site.HostKeys ?? [], TrustedCertificates = site.TrustedCertificates ?? [] };
             if (site.SchemaVersion > SiteRecord.CurrentSchemaVersion)
             {
                 _log?.Invoke($"Site file {Path.GetFileName(path)} is from a newer version of Inbound; it is left as it is.");

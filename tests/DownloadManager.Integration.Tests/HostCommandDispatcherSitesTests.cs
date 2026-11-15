@@ -88,6 +88,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.Rename, new SiteRenameRequest { Id = SiteId, Path = "/pub", Name = "a.txt", NewName = "b.txt" }),
         (SitesMessageTypes.Count, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
         (SitesMessageTypes.Delete, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.Certificate, new SiteIdRequest { Id = SiteId }),
     ];
 
     /// <summary>The Host's own messages: replies and the push. Every other name in <see cref="SitesMessageTypes"/> is a request.</summary>
@@ -96,7 +97,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         SitesMessageTypes.Status, SitesMessageTypes.List, SitesMessageTypes.Result, SitesMessageTypes.Kinds,
         SitesMessageTypes.ProbeResult, SitesMessageTypes.BrowseResult, SitesMessageTypes.Changed,
         SitesMessageTypes.TransferResult, SitesMessageTypes.TransferListResult, SitesMessageTypes.TransferChanged,
-        SitesMessageTypes.CountResult, SitesMessageTypes.ChangeResult,
+        SitesMessageTypes.CountResult, SitesMessageTypes.ChangeResult, SitesMessageTypes.CertificateResult,
     ];
 
     [Fact]

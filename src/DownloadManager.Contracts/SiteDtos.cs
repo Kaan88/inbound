@@ -41,6 +41,15 @@ public static class SitesMessageTypes
     public const string Test = "sites.test";
 
     /// <summary>
+    /// SITES.6b, <see cref="SiteIdRequest"/>: reads the certificate an FTPS or https site's server shows, with a TLS
+    /// handshake and no login; answered with <see cref="CertificateResult"/>.
+    /// </summary>
+    public const string Certificate = "sites.certificate";
+
+    /// <summary>The reply to <see cref="Certificate"/>: <see cref="SiteCertificateResultDto"/>.</summary>
+    public const string CertificateResult = "sites.certificateResult";
+
+    /// <summary>
     /// <see cref="SitesRcloneInstallRequest"/>: downloads, checks and installs rclone (Options › Sites › Download rclone, or
     /// Update rclone); answered with <see cref="Status"/> when done. Not for "Use my own rclone", which Inbound never touches.
     /// </summary>
@@ -122,7 +131,7 @@ public static class SitesMessageTypes
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
             or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
-            or MakeFolder or Rename or Count or Delete;
+            or MakeFolder or Rename or Count or Delete or Certificate;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -274,6 +283,9 @@ public sealed class SiteDto
 
     /// <summary>SITES.6: false for plain FTP and for an http:// WebDAV or S3 address; the window shows "Not encrypted".</summary>
     public bool Encrypted { get; set; } = true;
+
+    /// <summary>SITES.6b: the server certificates this site trusts beyond the system's (FTPS and https sites).</summary>
+    public List<SiteTrustedCertificateDto> TrustedCertificates { get; set; } = [];
 }
 
 public sealed class SiteHostKeyDto
@@ -354,6 +366,54 @@ public sealed class SiteTrustRequest
 
     /// <summary>The <see cref="SiteHostKeyDto.Entry"/> values the user accepted. Replaces the stored list.</summary>
     public List<string> Entries { get; set; } = [];
+
+    /// <summary>
+    /// SITES.6b, FTPS and https sites: the fingerprint of the certificate the user trusted, from
+    /// <see cref="SiteCertificateResultDto"/>. The Host reads the certificate again and refuses when the server now shows
+    /// another one. Empty with <see cref="ForgetCertificates"/> to stop trusting the site's certificates.
+    /// </summary>
+    public string? CertificateFingerprint { get; set; }
+
+    public bool ForgetCertificates { get; set; }
+}
+
+/// <summary>SITES.6b: a server's certificate, for the "Trust this certificate?" question.</summary>
+public sealed class SiteCertificateDto
+{
+    public string Subject { get; set; } = "";
+    public string Issuer { get; set; } = "";
+    public DateTimeOffset NotBefore { get; set; }
+    public DateTimeOffset NotAfter { get; set; }
+
+    /// <summary>SHA-256, <c>AB:CD:…</c>.</summary>
+    public string Fingerprint { get; set; } = "";
+
+    public List<string> Names { get; set; } = [];
+    public bool SelfSigned { get; set; }
+
+    /// <summary>This PC trusts it as it is; there is nothing to ask.</summary>
+    public bool TrustedBySystem { get; set; }
+
+    /// <summary>Why trusting it would not help (wrong name, out of date), or null.</summary>
+    public string? CannotTrust { get; set; }
+}
+
+public sealed class SiteCertificateResultDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public SiteCertificateDto? Certificate { get; set; }
+
+    /// <summary>The site already trusts this certificate.</summary>
+    public bool TrustedBySite { get; set; }
+}
+
+/// <summary>SITES.6b: a certificate a site trusts.</summary>
+public sealed class SiteTrustedCertificateDto
+{
+    public string Fingerprint { get; set; } = "";
+    public string Subject { get; set; } = "";
+    public DateTimeOffset NotAfter { get; set; }
 }
 
 /// <summary>The values of <see cref="SiteResultDto.Problem"/>.</summary>
@@ -364,6 +424,9 @@ public static class SiteProblems
 
     /// <summary>No host key has been accepted yet: the window probes and asks first.</summary>
     public const string HostKeyNotAccepted = "hostKeyNotAccepted";
+
+    /// <summary>SITES.6b: the server's TLS certificate is not trusted; the window reads it (<c>sites.certificate</c>) and asks.</summary>
+    public const string CertificateNotTrusted = "certificateNotTrusted";
 
     /// <summary>Sites is off.</summary>
     public const string Off = "off";

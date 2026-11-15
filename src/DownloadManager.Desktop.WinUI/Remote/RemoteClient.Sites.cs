@@ -50,6 +50,20 @@ internal sealed partial class RemoteClient
         => SiteResult(await SitesQuickAsync<SiteTrustRequest, SiteResultDto>(SitesMessageTypes.Trust,
             new SiteTrustRequest { Id = id, Entries = entries.ToList() }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>SITES.6b: trusts the certificate with this fingerprint (the Host reads it again first), or with null forgets the site's.</summary>
+    public async Task<SiteResultDto> TrustSiteCertificateAsync(string id, string? fingerprint, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteTrustRequest, SiteResultDto>(SitesMessageTypes.Trust,
+            new SiteTrustRequest { Id = id, CertificateFingerprint = fingerprint, ForgetCertificates = fingerprint is null }, SitesMessageTypes.Result,
+            SitesTestTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.6b: the certificate the site's server shows, read by the Host with no login.</summary>
+    public async Task<SiteCertificateResultDto> SiteCertificateAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteIdRequest, SiteCertificateResultDto>(SitesMessageTypes.Certificate,
+            new SiteIdRequest { Id = id }, SitesMessageTypes.CertificateResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteCertificateResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
     public async Task<SiteResultDto> TestSiteAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesSlowAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Test, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
 

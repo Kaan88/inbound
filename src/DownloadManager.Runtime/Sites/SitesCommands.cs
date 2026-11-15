@@ -25,6 +25,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private readonly Func<string?, string?> _findRclone;
     private readonly Func<string, string, RcloneSupervisor> _createSupervisor;
     private readonly Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>> _probe;
+    private readonly Func<SiteRecord, CancellationToken, Task<TlsCertificateInfo>> _certificateProbe = ProbeCertificateAsync;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly RcloneUpdater? _updater;
     private readonly SiteTransfers _transfers;
@@ -181,6 +182,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     await ProbeAsync(request.GetPayload<SiteProbeRequest>() ?? new SiteProbeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.Trust:
                 return Result(request, await TrustAsync(request.GetPayload<SiteTrustRequest>() ?? new SiteTrustRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Certificate:
+                return IpcMessage.Create(SitesMessageTypes.CertificateResult,
+                    await CertificateAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.Test:
                 return Result(request, await TestAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Browse:
@@ -512,6 +516,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteResultDto> SaveAsync(SiteSaveRequest request, CancellationToken cancellationToken)
     {
         SiteRecord saved;
+        var droppedCertificates = false;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -562,6 +567,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     SealedPrivateKey = Seal(request.PrivateKey, existing?.SealedPrivateKey),
                     SealedKeyPassphrase = Seal(request.KeyPassphrase, existing?.SealedKeyPassphrase),
                     HostKeys = sameServer ? existing!.HostKeys : [],
+                    // SITES.6b: a trusted certificate belongs to one server and one kind of encryption.
+                    TrustedCertificates = sameServer && existing!.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
+                        && SiteKindCatalog.Encrypted(request.Kind, request.Tls, Trimmed(request.Url), Trimmed(request.Endpoint))
+                        ? existing.TrustedCertificates : [],
                     RemoteFolder = request.RemoteFolder.Trim(),
                     LocalFolder = string.IsNullOrWhiteSpace(request.LocalFolder) ? null : request.LocalFolder.Trim(),
                     // Stars are folders on the same server; another server forgets them with its keys.
@@ -569,6 +578,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     CreatedAt = existing?.CreatedAt ?? now,
                     ModifiedAt = now,
                 };
+                droppedCertificates = existing is { TrustedCertificates.Count: > 0 } && saved.TrustedCertificates.Count == 0;
                 if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
                     return Fail("Choose the private key to sign in with.");
                 if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
@@ -591,6 +601,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
 
         ForgetListings(saved.Id);
+        // SITES.6b: another server no longer trusts the old one's certificate.
+        if (droppedCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true, Site = ToDto(saved) };
     }
@@ -598,10 +610,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteResultDto> RemoveAsync(string id, CancellationToken cancellationToken)
     {
         bool removed;
+        var hadCertificates = false;
         if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            hadCertificates = SiteStore.IsId(id) && await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is { TrustedCertificates.Count: > 0 };
             removed = SiteStore.IsId(id) && await _sites.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -611,6 +625,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         ForgetListings(id);
         if (!removed) return Fail("That site no longer exists.");
+        if (hadCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true };
     }
@@ -632,13 +647,17 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     private async Task<SiteResultDto> TrustAsync(SiteTrustRequest request, CancellationToken cancellationToken)
     {
+        // SITES.6b: other kinds trust a certificate, read outside the gate (a handshake can take seconds).
+        if (SiteStore.IsId(request.Id) && await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is { Kind: not SiteKinds.Sftp } tlsSite)
+            return await TrustCertificateAsync(tlsSite, request, cancellationToken).ConfigureAwait(false);
+
         SiteRecord saved;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
                 return Fail("That site no longer exists.");
-            if (site.Kind != SiteKinds.Sftp) return Fail("Only SFTP sites have a server key to trust.");
+            if (site.Kind != SiteKinds.Sftp) return Fail("The site changed while it was trusted. Try again.");
             if (request.Entries.Count is 0 or > 16) return Fail("Accept between 1 and 16 of the server's keys.");
             saved = site with { HostKeys = [.. request.Entries.Distinct(StringComparer.Ordinal)], ModifiedAt = DateTimeOffset.UtcNow };
             try
@@ -847,6 +866,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     AcceptedFingerprints = [.. problem.PinnedFingerprints],
                 });
             }
+            catch (RcloneCallException e) when (SiteErrorText.IsUntrustedCertificate(e.Message))
+            {
+                return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.CertificateNotTrusted, Message = SiteErrorText.Friendly(e.Message) });
+            }
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
                 // RcloneClient has already redacted the text.
@@ -930,6 +953,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
                 _rcloneVersion = version!.ToString(3);
                 _rcloneProblem = null;
+                // SITES.6b: the trusted-certificates file as the sites have it now, with today's system roots.
+                await WriteTrustedCertificatesAsync(cancellationToken).ConfigureAwait(false);
                 _supervisor = _createSupervisor(rclone, Path.Combine(_stateDirectory, "sites", "rclone"));
                 _supervisorFor = rclone;
                 _supervisor.Changed += OnSupervisorChanged;
@@ -1084,6 +1109,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         HasPrivateKey = site.SealedPrivateKey is not null,
         HasKeyPassphrase = site.SealedKeyPassphrase is not null,
         HostKeys = [.. site.HostKeys.Select(EntryToDto).OfType<SiteHostKeyDto>()],
+        TrustedCertificates = [.. site.TrustedCertificates.Select(c => new SiteTrustedCertificateDto { Fingerprint = c.Fingerprint, Subject = c.Subject, NotAfter = c.NotAfter })],
         RemoteFolder = site.RemoteFolder,
         LocalFolder = site.LocalFolder,
         Stars = [.. site.Stars],
