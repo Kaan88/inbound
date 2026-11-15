@@ -413,6 +413,12 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **X. Step 7 of the performance order: measured, then decided** (2026-11-15, main). `dotnet-trace` (installed as a
+  .NET global tool) on the window with one download and on the Host with eight: our managed code is under 0.1 % of the
+  window's UI-thread samples, and no event building or sending shows in the Host. PERF.13 and PERF.17 are decided
+  against. With the speed graph hidden the window's UI thread goes from 4.1 % to 2.3 % of a core with one download:
+  the graph is the one cheap target left in the window (cause inside it not established). `perf-window-active.sh` takes
+  `UI_STATE`. Numbers: `docs/plans/perf-baseline-windows.md`, step 7.
 - **W. PERF.12: fewer synced saves** (2026-11-15, main). `DownloadManagerService` saves an HTTP download's job file
   for progress every 30 s instead of 5 s (the engine's checkpoint, synced every 5 s, decides the bytes after a restart);
   torrents keep 5 s, the queue quota keeps its own 5 s, state changes are saved at once. Jobs and checkpoints are

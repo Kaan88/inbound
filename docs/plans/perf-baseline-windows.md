@@ -154,6 +154,28 @@ state change is saved at once as before). That is 14 synced writes a minute per 
 from the code, not measured. Job and checkpoint files are serialised straight to UTF-8 bytes; they stay indented, since
 compact JSON would save only bytes (serialising takes about 2 µs of a 2.5 ms save), and tests and people read these files.
 
+## Step 7: where the window's and the Host's CPU goes (2026-11-15)
+
+`dotnet-trace` (sampled thread time, 30 s) on a test instance with 500 held jobs:
+
+- **Window, 1 download:** our managed code on the UI thread (event batches, row updates, the speed graph's drawing,
+  buttons) is about 0.03 % of the samples; the rest of the UI thread's 4 % is WinUI's own layout and drawing, inside the
+  native message loop. With the speed graph hidden (`UI_STATE='{"showSpeedGraph":false}' scripts/perf-window-active.sh`)
+  the UI thread drops from 4.1 % to 2.3 % of a core with 1 download, and from 8.2 % to 7.7 % with 8: the graph costs
+  about 1.8 points whenever anything downloads, the rows the rest.
+- **Host, 8 downloads:** the managed work that shows is flushing the part files and saving checkpoints; building and
+  sending progress events does not appear among the samples.
+
+So:
+
+- **PERF.13** (a smaller progress message, serialise once per broadcast): **not worth doing** on these numbers; the
+  serialisation it would save does not show.
+- **PERF.17** (compiled bindings in the list row): **not worth doing**; bindings are part of managed time that is
+  already under 0.1 %.
+- **The speed graph** is the one cheap target in the window: about 1.8 % of a core with one download. Its line slides
+  between samples with a storyboard on a `TranslateTransform` and is rebuilt every second; which of the two costs is
+  not established (a trace with native stacks, WPR, would show it).
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

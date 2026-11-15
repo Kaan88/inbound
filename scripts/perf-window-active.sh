@@ -9,6 +9,7 @@
 # Per combination: a fresh instance (own name, own data folder under OUTDIR, own copy of the binaries), N held jobs,
 # A downloads of 256 MiB at 256 KiB/s each (about 17 minutes, so they stay active), the window opened, WARMUP seconds,
 # then SECONDS of sampling. "20 active" runs 16: the product's cap (maxconcurrent is clamped to 16).
+# UI_STATE='<json>' writes the window's ui-state.json first (e.g. '{"showSpeedGraph":false}').
 # Writes OUTDIR/window-active.csv and keeps each instance's sample under OUTDIR/<name>/.
 set -u
 OUTDIR=$1; shift
@@ -91,6 +92,8 @@ for jobs in "${JOBS_LIST[@]}"; do
     configure "$active" || { teardown; continue; }
     add_jobs "$jobs"
     add_active "$active"
+    # UI_STATE='{"showSpeedGraph":false}' starts the window with that view state (ui-state.json in the data folder).
+    [ -n "${UI_STATE:-}" ] && printf '%s' "$UI_STATE" > "$INST/data/ui-state.json"
     t0=$(date +%s%3N)
     timeout 20 "$C" host open >/dev/null
     for _ in $(seq 1 600); do trace_seen "First frame with the list" && break; sleep 0.1; done
