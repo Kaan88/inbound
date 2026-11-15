@@ -193,9 +193,26 @@ app runs with torrents off.
 | `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server, `inbound-menu` (the menu-bar icon, `native/macos-menu`) and the torrent worker |
 
 The app is signed ad hoc only, not with a Developer ID, and not notarized: Gatekeeper asks on the first open
-(right-click > Open, or `xattr -dr com.apple.quarantine /Applications/Inbound.app`). There is no updater on macOS.
-To replace a running copy, stop it first: `pkill -f 'Inbound.app/Contents/'` (the Host keeps running after the window
-closes, and an older Host would otherwise serve the new window).
+(right-click > Open, or `xattr -dr com.apple.quarantine /Applications/Inbound.app`).
+
+It updates itself as the AppImage does: it reads `manifest-macos-arm64.json` or `manifest-macos-x64.json` beside the
+Windows `manifest.json`, downloads the signed zip, unpacks it with `ditto` beside the running bundle, swaps the bundles
+with two renames and restarts (`MacAppRestarter`). Sign a release's zip with the same key:
+
+```sh
+scripts/prepare-macos-release.sh X.Y.Z artifacts/macos/Inbound-X.Y.Z-macos-arm64.zip arm64 <path to update-signing.pem>
+```
+
+The macOS workflow does this for both architectures when a release is published. To try the updater without a
+release, run the workflow by hand with `test_version` (higher than the installed one, e.g. `0.8.1`): it publishes that
+build to the pre-release `macos-update-test`, which never becomes "latest". On a test Mac:
+`/Applications/Inbound.app/Contents/MacOS/InboundLauncher --cli settings set updatemanifest
+https://github.com/Kaan88/inbound/releases/download/macos-update-test/manifest.json`, then Help > Check for Updates.
+Put it back afterwards with `--cli settings set updatemanifest https://github.com/Kaan88/inbound/releases/latest/download/manifest.json`.
+
+A copy of the app put in place of an older one by hand stops the older Host when it starts (MAC.3); to stop
+everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign in writes the LaunchAgent
+`~/Library/LaunchAgents/local.inbound.host.plist`.
 
 ## GitHub workflows (CI.1)
 

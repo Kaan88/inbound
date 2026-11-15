@@ -16,6 +16,12 @@
   takes points); Options coming back tiny from a saved size; a freeze closing Progress Details (a socket disposed
   under a blocked Accept doesn't wake it on macOS); no way to reopen the window (menu-bar icon, `native/macos-menu`);
   the reopened window being another app (the Host opens Inbound.app). Uno.Sdk 6.7.49. The Extractions glyph on Uno.
+- **Then, before the pull request (owner: "let's [do] everything we can before the pr", "self update is not done.
+  macos specific changelog entries", "tag a fake version so we can test auto update without a release"):** the
+  macOS updater and release files (MAC.4 above), a `macos` changelog tag with the 0.8.1 entry's Mac lines, `dm sites
+  rclone`, sign-in start as a LaunchAgent, MAC.3, windows kept clear of the Dock, a scrolling sidebar on Uno (owner:
+  "sidebar becomes too long and items on the bottom remain inaccessible"; Windows' ListBox scrolls by itself, so the
+  Windows window is unchanged), and every CI check for the Intel build too (under Rosetta).
 - **Checked:** on GitHub's Mac (CI): the Host and CLI answer; Sites downloads the macOS rclone and runs it; the window
   is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
   Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
