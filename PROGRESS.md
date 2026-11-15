@@ -1,5 +1,27 @@
 # Progress — session handoff
 
+### macOS app, MAC.1 (2026-11-15, branch `macos-0.8.0`)
+
+- **Owner request:** "what does it take to get a macos version quickly? use github builds and work on a branch. build
+  should be based on last release." Built on 0.7.7 first (`macos-build`), then the same commits on 0.8.0. Owner,
+  after running it: "macos version matured in a very short time, let's go all in for a pull request."
+- **How:** the Linux Host and the Uno window run on macOS. Unix-socket IPC on macOS too (getpeereid and lstat in place
+  of SO_PEERCRED and statx; sockets in `/tmp/inbound-<uid>`, as a socket path is at most 104 bytes); `DetachedProcess`
+  where Linux used setsid(1); `open`, `open -R` and AppleScript's folder dialog; browsers' manifests under
+  `~/Library/Application Support`; the Host counts a Mac as a desktop (EXT.B9). `scripts/package-macos.sh` and
+  `.github/workflows/macos.yml` build Inbound.app (ad hoc signed) with the torrent worker (osx triplets).
+- **Fixed on the way, from the owner's runs:** trails under transparent windows (macOS windows are solid; Mica is MAC.2);
+  icons missing when started from Finder (Uno reads its files from `Resources/` beside the program); windows opening at
+  half size and resizing past the screen (no screen lookup on macOS, and Uno hands NSWindow.minSize pixels where it
+  takes points); Options coming back tiny from a saved size; a freeze closing Progress Details (a socket disposed
+  under a blocked Accept doesn't wake it on macOS); no way to reopen the window (menu-bar icon, `native/macos-menu`);
+  the reopened window being another app (the Host opens Inbound.app). Uno.Sdk 6.7.49. The Extractions glyph on Uno.
+- **Checked:** on GitHub's Mac (CI): the Host and CLI answer; Sites downloads the macOS rclone and runs it; the window
+  is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
+  Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
+  Mac: the window, downloads, the extension and the menu-bar icon. **Not checked:** a Retina screen in CI (the runner's
+  scale is 1); the last sizing and reopening fixes on the owner's Mac; the Intel build beyond building.
+
 ### Android app design in Figma (2026-11-15)
 
 - **Owner request:** design an Android app for Inbound: Material You, default colours from the web UI, a full downloader on the phone (not only a remote for another host), animated, and clear about how it works. Done in Figma.

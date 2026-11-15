@@ -175,12 +175,32 @@ and `SHA256SUMS-linux-packages`. The three packages need [nfpm](https://nfpm.gor
 `/usr/lib/inbound`, the launcher `/usr/bin/inbound`, a menu entry and an icon. None of them updates itself: the
 in-app updater is for the AppImage, so they are not in `manifest-linux-x64.json` and are not signed.
 
+## macOS app (MAC.1)
+
+`scripts/package-macos.sh osx-arm64` (or `osx-x64`) builds `Inbound.app` on a Mac with the .NET 10 SDK and Xcode's
+command-line tools, and packs `artifacts/macos/Inbound-<version>-macos-<arch>.zip` and `.dmg` with
+`SHA256SUMS-macos-<arch>`. It uses the macOS torrent worker from `artifacts/torrent-worker/<rid>/inbound-torrent` when
+there is one (built with vcpkg and the `*-osx-static-rel` triplets in `native/torrent-worker/triplets`); without it the
+app runs with torrents off.
+
+| Inside Inbound.app | What |
+| --- | --- |
+| `Contents/MacOS/InboundLauncher` | The bundle's program: starts the Host, then becomes the window (`--cli`, `--host`, `--background` as AppRun) |
+| `Contents/Resources/window/` | The Uno window. `Resources -> .` beside it, as Uno's macOS host reads its files from there when started from Finder |
+| `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server, `inbound-menu` (the menu-bar icon, `native/macos-menu`) and the torrent worker |
+
+The app is signed ad hoc only, not with a Developer ID, and not notarized: Gatekeeper asks on the first open
+(right-click > Open, or `xattr -dr com.apple.quarantine /Applications/Inbound.app`). There is no updater on macOS.
+To replace a running copy, stop it first: `pkill -f 'Inbound.app/Contents/'` (the Host keeps running after the window
+closes, and an older Host would otherwise serve the new window).
+
 ## GitHub workflows (CI.1)
 
 | Workflow | Starts | Does |
 | --- | --- | --- |
 | `ci.yml` (CI) | Every push to main and every pull request, except Markdown and docs only | Windows: `scripts\build.ps1` and `scripts\test.ps1`. Linux: the web UI, the extension, the programs the Linux build ships, and the tests that pass on Linux |
 | `appimage.yml` (Linux packages) | A published release, or by hand | With a tag: builds the AppImage and the four packages from the tag, signs `manifest-linux-x64.json` and attaches everything to the release. By hand without a tag: builds the chosen branch and keeps the files as run artifacts |
+| `macos.yml` (macOS packages) | Every push to main or a `macos-*` branch and every pull request, except Markdown and docs only; or by hand | Builds the torrent worker and `Inbound.app` for arm64 and x64 as run artifacts (14 days), starts the Host and the CLI, has Sites download rclone and runs it, and drives the window through `DOWNLOADMANAGER_UNO_SELFTEST` (About, Progress Details, Options, closing and reopening the main window) with screenshots and the trace in the log. Nothing is attached to a release |
 | `docker.yml` (Docker image) | A published release, or by hand from a tag | Builds and pushes the server image |
 | `windows.yml` (Windows build) | A pushed version tag, or by hand | With a tag: builds Setup (with the signed Firefox add-on) and the zip, signs `manifest.json`, and puts the six files in a **draft** release with notes drafted from `changelog.json` (CI.2). By hand without a tag: a test Setup (no Firefox add-on) and zip of the chosen branch as run artifacts, nothing signed |
 
