@@ -98,19 +98,27 @@ jobs:
       - name: The Host and the CLI start (arm64)
         if: matrix.rid == 'osx-arm64'
         run: |
+          set +e
           app="artifacts/macos/arm64/Inbound.app"
           "$app/Contents/MacOS/InboundLauncher" --cli --version
           export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-data"
           "$app/Contents/Resources/host/inbound-host" --background > "$RUNNER_TEMP/host.log" 2>&1 &
-          for i in $(seq 1 30); do
-            "$app/Contents/Resources/host/DownloadManager.Cli" list >/dev/null 2>&1 && break
+          pid=$!
+          ok=1
+          for i in $(seq 1 60); do
+            if "$app/Contents/Resources/host/DownloadManager.Cli" --no-start list >/dev/null 2>&1; then ok=0; break; fi
+            kill -0 $pid 2>/dev/null || { echo "The Host exited: $(wait $pid; echo $?)"; break; }
             sleep 1
           done
-          "$app/Contents/Resources/host/DownloadManager.Cli" list
-          ls "$DOWNLOADMANAGER_DATA"/logs || true
-          cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -40 || true
+          "$app/Contents/Resources/host/DownloadManager.Cli" --no-start list
+          echo "--- Host output"; cat "$RUNNER_TEMP/host.log"
+          echo "--- Host logs"; find "$DOWNLOADMANAGER_DATA" -maxdepth 2 | head -40; cat "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | tail -80
+          echo "--- sockets"; ls -la "${TMPDIR:-/tmp}"/inbound-* 2>/dev/null
+          kill $pid 2>/dev/null
+          exit $ok
 
       - name: Keep them as run artifacts
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-${{ matrix.rid }}-${{ env.VERSION }}
