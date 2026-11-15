@@ -49,11 +49,21 @@ public static class SitesMessageTypes
     /// <summary><c>{}</c>: asks rclone's server for a newer release now; answered with <see cref="Status"/>.</summary>
     public const string RcloneCheck = "sites.rclone.check";
 
+    /// <summary>
+    /// <see cref="SiteBrowseRequest"/>: one folder of a site, sorted folders first then by name, paged; answered with
+    /// <see cref="BrowseResult"/> (SITES.3). Read-only. A host-key problem comes back as in <see cref="Test"/>.
+    /// </summary>
+    public const string Browse = "sites.browse";
+
+    /// <summary><see cref="SiteStarRequest"/>: stars or unstars a folder of a site; answered with <see cref="Result"/> (its <c>Site</c> set).</summary>
+    public const string Star = "sites.star";
+
     public const string Status = "sites.status";
     public const string List = "sites.listResult";
     public const string Result = "sites.result";
     public const string Kinds = "sites.kindsResult";
     public const string ProbeResult = "sites.probeResult";
+    public const string BrowseResult = "sites.browseResult";
 
     /// <summary>Host push to the desktop role's sessions: a <see cref="SitesChangedDto"/> after the switch or a site changed.</summary>
     public const string Changed = "sites.changed";
@@ -179,6 +189,9 @@ public sealed class SiteDto
 
     public string RemoteFolder { get; set; } = "";
     public string? LocalFolder { get; set; }
+
+    /// <summary>Starred folders, absolute paths on the server (<c>/srv/pub</c>), in the order they were starred.</summary>
+    public List<string> Stars { get; set; } = [];
 }
 
 public sealed class SiteHostKeyDto
@@ -291,4 +304,63 @@ public sealed class SitesChangedDto
 {
     public SitesStatusDto Status { get; set; } = new();
     public List<SiteDto> Sites { get; set; } = [];
+}
+
+/// <summary>
+/// One folder of a site. <see cref="Path"/> is absolute on the server, with <c>/</c> separators (<c>/srv/pub</c>); null or
+/// empty is the site's start folder (its remote folder, else <c>/</c>). <c>..</c> and <c>.</c> segments are refused.
+/// </summary>
+public sealed class SiteBrowseRequest
+{
+    public string Id { get; set; } = "";
+    public string? Path { get; set; }
+
+    /// <summary>The first item to return, in the sorted order.</summary>
+    public int Offset { get; set; }
+
+    /// <summary>How many items at most: 1 to 2000, default 500.</summary>
+    public int Limit { get; set; } = 500;
+
+    /// <summary>Lists the folder again instead of paging a listing the Host read in the last minute.</summary>
+    public bool Refresh { get; set; }
+}
+
+public sealed class SiteItemDto
+{
+    public string Name { get; set; } = "";
+    public bool IsFolder { get; set; }
+
+    /// <summary>Bytes; -1 when the server does not say (and for folders).</summary>
+    public long Size { get; set; } = -1;
+
+    public DateTimeOffset? Modified { get; set; }
+}
+
+public sealed class SiteBrowseResultDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+
+    /// <summary>As in <see cref="SiteResultDto.Problem"/>.</summary>
+    public string? Problem { get; set; }
+
+    public string? OfferedFingerprint { get; set; }
+    public List<string> AcceptedFingerprints { get; set; } = [];
+
+    /// <summary>The folder listed, normalised: absolute, no trailing slash except for <c>/</c>.</summary>
+    public string Path { get; set; } = "/";
+
+    public List<SiteItemDto> Items { get; set; } = [];
+
+    /// <summary>All items in the folder; more pages follow while <c>Offset + Items.Count &lt; Total</c>.</summary>
+    public int Total { get; set; }
+
+    public int Offset { get; set; }
+}
+
+public sealed class SiteStarRequest
+{
+    public string Id { get; set; } = "";
+    public string Path { get; set; } = "";
+    public bool Starred { get; set; } = true;
 }
