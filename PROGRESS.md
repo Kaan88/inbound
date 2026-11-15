@@ -413,6 +413,15 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AB. PERF.10: the native host as Native AOT** (2026-11-15, main). `publish.ps1 -SelfContained` publishes the native
+  host with `PublishAot` (and no native symbol file); vswhere's folder goes on PATH when it isn't, which the AOT linker
+  needs. `NativeBridgePolicy` writes its `JsonObject` payloads through `IpcJsonContext` (now naming `JsonObject`) instead
+  of reflection with default options, which Native AOT refuses. `SandboxHost` takes `INBOUND_TEST_NATIVE_HOST`.
+  **Checked:** first reply to `host.ping` 30 ms instead of 100 (`Bench start`); the bridge, hello and pipe integration
+  groups (70, of which 9 start the native host) pass against the AOT program, and fail with a wrong path, so the override
+  is used; Core 2,373 pass (the context coverage test now treats JSON nodes as written by their converter); a full
+  self-contained publish works and is 253 MB. **Not checked:** a real browser handing a download to the AOT native host;
+  the Windows workflow on GitHub (not pushed); Linux.
 - **AA. PERF.20: compressed, cached web UI files** (2026-11-15, main). New `Server/StaticAssetCompression`: for
   `/assets/` the server sends the publish step's `.br` or `.gz` copy when the browser accepts it (Brotli first), with
   the original content type, `Vary: Accept-Encoding` and `Cache-Control: private, max-age=31536000, immutable`; a copy

@@ -108,7 +108,17 @@ function Publish-Project([string]$project, [string[]]$extraArgs = @()) {
 }
 
 Publish-Project (Join-Path $root "src\DownloadManager.Host\DownloadManager.Host.csproj")
-Publish-Project (Join-Path $root "src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj")
+# PERF.10: a release build compiles the native host with Native AOT: one program that answers the browser in about 30 ms
+# instead of 100 (docs/plans/perf-baseline-windows.md). It needs Visual Studio's C++ tools (the GitHub runners have them);
+# the AOT linker finds them through vswhere, which is not always on PATH.
+$nativeHostArgs = @()
+if ($SelfContained) {
+    $vswhereDir = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer"
+    if ((Test-Path -LiteralPath (Join-Path $vswhereDir "vswhere.exe")) -and ($env:PATH -notlike "*$vswhereDir*")) { $env:PATH = "$vswhereDir;$env:PATH" }
+    # No native symbol file: it is 41 MB, and the managed .pdb files beside it stay as before.
+    $nativeHostArgs = @("-p:PublishAot=true", "-p:NativeDebugSymbols=false")
+}
+Publish-Project (Join-Path $root "src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj") $nativeHostArgs
 Publish-Project (Join-Path $root "src\DownloadManager.Cli\DownloadManager.Cli.csproj")
 
 # The web UI bridge (DownloadManager.Server.exe, started by the Host when "Web UI" is on in Options). Its pages come

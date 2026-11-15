@@ -217,6 +217,18 @@ the plain file, a copy asked for by its own name is a 404, and without a session
 sign-in. The snapshot and the WebSocket stay uncompressed (the compression side channel in
 `ui-performance-areas.md`), and serialising once per broadcast was dropped with PERF.13.
 
+## PERF.10: the native host as Native AOT (2026-11-15)
+
+`scripts/publish.ps1 -SelfContained` (what Setup, the update zip and the Windows workflow use) now compiles the native
+host with Native AOT. `Bench start`, the Host running, median of 10: first reply to `host.ping` 100 ms before, 30 ms
+after; the program is one 9.5 MB file and the install folder grows from 244 to 253 MB (its 41 MB native symbol file is
+left out). One place still went through reflection with default options (`NativeBridgePolicy` writing a `JsonObject`),
+which Native AOT would have refused at run time; it now uses the generated context. The integration tests that start
+the native host (9 of the 70 in the bridge, hello and pipe groups) pass against the AOT build
+(`INBOUND_TEST_NATIVE_HOST` points the sandbox at it). The CLI stays as it is: its JSON still goes through reflection in
+many places, and it is started by hand, not on every browser download. The Linux native host is unchanged (Linux tests
+are deferred).
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

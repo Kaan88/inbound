@@ -239,6 +239,8 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(WebUiSetRequest))]
 [JsonSerializable(typeof(WebUiStatusDto))]
 [JsonSerializable(typeof(WebUiTicketDto))]
+// PERF.10: NativeBridgePolicy rewrites a payload as a JsonObject; named here so that works without reflection (Native AOT).
+[JsonSerializable(typeof(System.Text.Json.Nodes.JsonObject))]
 public sealed partial class IpcJsonContext : JsonSerializerContext
 {
 }
