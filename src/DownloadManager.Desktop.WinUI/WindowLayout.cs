@@ -109,7 +109,10 @@ internal static class WindowLayout
     /// never sits under a white caption) and the app icon. Re-applies when the root's theme changes.
     /// </summary>
     /// <summary>Whether windows get Mica: Windows 11. Elsewhere the window brush is the solid color beneath Mica.</summary>
-    public static bool MicaSupported { get; } = Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported();
+    /// macOS (Uno): Uno answers yes, but its macOS window doesn't clear what a transparent root leaves, so every frame
+    /// is drawn over the last (trails, translucent dialogs brightening). macOS windows are solid.
+    public static bool MicaSupported { get; } =
+        !OperatingSystem.IsMacOS() && Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported();
 
     /// <summary>
     /// Without Mica a transparent window would show nothing behind it, so the window brush becomes the solid color
