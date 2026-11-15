@@ -14,9 +14,8 @@ internal static class Program
         var data = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
         if (!string.IsNullOrWhiteSpace(data))
             Uno.WinRTFeatureConfiguration.ApplicationData.ApplicationDataPathOverride = Path.Combine(data, "uno-appdata");
-        // Software rendering on X11, to compare with OpenGL (D7 on KDE Wayland with NVIDIA, through XWayland).
-        if (Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UNO_SOFTWARE") == "1")
-            Uno.UI.FeatureConfiguration.Rendering.UseOpenGLOnX11 = false;
+        // [Uno 7 trial] DOWNLOADMANAGER_UNO_SOFTWARE (software rendering on X11) is gone for now: Uno 7 removed
+        // FeatureConfiguration.Rendering.UseOpenGLOnX11; its X11 host builder takes the backend instead.
         try
         {
             var host = UnoPlatformHostBuilder.Create()

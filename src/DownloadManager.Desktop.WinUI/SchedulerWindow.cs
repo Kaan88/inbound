@@ -286,11 +286,7 @@ public sealed class SchedulerWindow : Window
         // A queue stopped or a schedule added in another window shows when the user comes back to this one.
         Activated += (_, args) =>
         {
-#if HAS_UNO
-            if (args.WindowActivationState != Windows.UI.Core.CoreWindowActivationState.Deactivated) _ = RefreshAsync();
-#else
             if (args.WindowActivationState != WindowActivationState.Deactivated) _ = RefreshAsync();
-#endif
         };
         _connection.Start();
         _ = RefreshAsync();
