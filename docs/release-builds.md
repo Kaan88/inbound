@@ -83,7 +83,8 @@ feeds What's new in the Windows app (opened once after an update, and from Help 
   Add `torrents` for a line about torrents the app downloads (shown only while torrents are on) and `torbox` (the provider's id) for one
   about the TorBox account (shown only with an account set). The Windows app shows `desktop`, `windows` and `all` lines; the Linux
   window `desktop`, `linux` and `all`; the web UI `webui`, `server`, `docker` and `all`. In the manifest a `desktop` tag
-  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line. The rest is folded under "N changes in the web UI and the browser extension".
+  is written as `windows` and `linux`, because apps from before the tag (0.7.7 or older) would hide the line. This can go once no
+  such install updates directly (ROADMAP UPD.N3); `changelog.json` itself uses `desktop`. The rest is folded under "N changes in the web UI and the browser extension".
 - `dotnet test tests\DownloadManager.Core.Tests -c Release --filter ChangelogTests` checks the file: it parses, versions
   go newest first, every tag is known and each version fits a manifest.
 

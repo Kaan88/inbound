@@ -52,7 +52,7 @@ public static class UpdateNotes
     /// One version's changelog lines, in order, as a manifest carries them. A <c>desktop</c> tag is written as
     /// <c>windows</c> and <c>linux</c>: the apps that read the manifest are the installed, older ones, and one from before
     /// the desktop tag (0.7.7 or older) would take it for a provider's id and hide the line. Both windows show a line
-    /// tagged that way, so nothing is lost.
+    /// tagged that way, so nothing is lost. ROADMAP UPD.N3: drop this once no 0.7.7-or-older install updates directly.
     /// </summary>
     public static List<ChangelogItem> From(ChangelogVersion version)
         => version.Sections.SelectMany(section => section.Items)
