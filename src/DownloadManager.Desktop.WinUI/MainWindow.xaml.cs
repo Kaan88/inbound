@@ -544,6 +544,9 @@ public sealed partial class MainWindow : Window
         {
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
             UiTrace.Write("First frame with the list");
+#if HAS_UNO
+            StartUnoSelfTest();
+#endif
         }
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
     }

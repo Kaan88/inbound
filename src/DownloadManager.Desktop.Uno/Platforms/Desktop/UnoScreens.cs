@@ -23,8 +23,10 @@ internal static class UnoScreens
         {
             ScreenRect? pixels = null;
             if (OperatingSystem.IsLinux()) pixels = X11WorkArea(x, y);
+            else if (OperatingSystem.IsMacOS()) pixels = MacWorkArea(x, y);
             else if (OperatingSystem.IsWindows()) pixels = Win32WorkArea(x, y);
             if (pixels is null) UiTrace.Write("screen size unknown");
+            else if (OperatingSystem.IsMacOS()) UiTrace.Write($"work area {pixels}, scale {Scale()}");
             return pixels;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException
@@ -46,6 +48,90 @@ internal static class UnoScreens
         catch (Exception ex) when (ex is InvalidOperationException or NotImplementedException or NullReferenceException or COMException)
         {
             return 1;
+        }
+    }
+
+    // ---- macOS ----
+    //
+    // Uno's macOS AppWindow takes and reports pixels: MacOSWindowWrapper.Move/Resize divide by the window's
+    // RawPixelsPerViewPixel and hand Cocoa points, with y measured down from the top of the first screen
+    // (uno_desktop_top: NSMaxY(NSScreen.screens[0].frame)). Without this the window opened at the unknown-screen size in
+    // pixels, which a Retina screen halves (550 by 350 points), and grew to its minimum at the first resize.
+
+    private static ScreenRect? MacWorkArea(int? x, int? y)
+    {
+        var screens = ObjC.Send(ObjC.Class("NSScreen"), ObjC.Selector("screens"));
+        var count = (int)ObjC.SendUInt(screens, ObjC.Selector("count"));
+        if (count == 0) return null;
+        var first = ObjC.SendRect(ObjC.SendIndex(screens, ObjC.Selector("objectAtIndex:"), 0), ObjC.Selector("frame"));
+        var desktopTop = first.Y + first.Height;
+
+        // The scale Uno divides by (RawPixelsPerViewPixel), not each screen's backingScaleFactor: sizes here must come out
+        // the same once Uno turns them back into points.
+        var scale = Scale();
+        var monitors = new List<ScreenRect>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var screen = ObjC.SendIndex(screens, ObjC.Selector("objectAtIndex:"), (nuint)i);
+            var visible = ObjC.SendRect(screen, ObjC.Selector("visibleFrame")); // less the menu bar and the Dock
+            monitors.Add(new ScreenRect(
+                (int)Math.Round(visible.X * scale),
+                (int)Math.Round((desktopTop - (visible.Y + visible.Height)) * scale),
+                (int)Math.Round(visible.Width * scale),
+                (int)Math.Round(visible.Height * scale)));
+        }
+
+        if (x is null || y is null)
+        {
+            // A new window opens on the screen with the mouse. NSEvent.mouseLocation is in points, from the bottom.
+            var mouse = ObjC.SendPoint(ObjC.Class("NSEvent"), ObjC.Selector("mouseLocation"));
+            x = (int)Math.Round(mouse.X * scale);
+            y = (int)Math.Round((desktopTop - mouse.Y) * scale);
+        }
+
+        return WindowSizeRules.WorkAreaFor(monitors, 0, null, x, y);
+    }
+
+    private static class ObjC
+    {
+        private const string Lib = "/usr/lib/libobjc.A.dylib";
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CGPoint { public double X, Y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CGRect { public double X, Y, Width, Height; }
+
+        [DllImport(Lib, EntryPoint = "objc_getClass")]
+        public static extern IntPtr Class(string name);
+
+        [DllImport(Lib, EntryPoint = "sel_registerName")]
+        public static extern IntPtr Selector(string name);
+
+        [DllImport(Lib, EntryPoint = "objc_msgSend")]
+        public static extern IntPtr Send(IntPtr receiver, IntPtr selector);
+
+        [DllImport(Lib, EntryPoint = "objc_msgSend")]
+        public static extern nuint SendUInt(IntPtr receiver, IntPtr selector);
+
+        [DllImport(Lib, EntryPoint = "objc_msgSend")]
+        public static extern IntPtr SendIndex(IntPtr receiver, IntPtr selector, nuint index);
+
+        [DllImport(Lib, EntryPoint = "objc_msgSend")]
+        public static extern CGPoint SendPoint(IntPtr receiver, IntPtr selector);
+
+        // A 32-byte struct comes back in registers on arm64 and through a hidden pointer on x86_64 (objc_msgSend_stret).
+        [DllImport(Lib, EntryPoint = "objc_msgSend")]
+        private static extern CGRect SendRectArm64(IntPtr receiver, IntPtr selector);
+
+        [DllImport(Lib, EntryPoint = "objc_msgSend_stret")]
+        private static extern void SendRectX64(out CGRect result, IntPtr receiver, IntPtr selector);
+
+        public static CGRect SendRect(IntPtr receiver, IntPtr selector)
+        {
+            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64) return SendRectArm64(receiver, selector);
+            SendRectX64(out var rect, receiver, selector);
+            return rect;
         }
     }
 

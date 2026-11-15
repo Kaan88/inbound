@@ -117,25 +117,42 @@ jobs:
           kill $pid 2>/dev/null
           exit $ok
 
-      - name: The window draws (arm64; screenshot in the log)
+      - name: The window draws and its dialogs close (arm64; screenshots and trace in the log)
         if: matrix.rid == 'osx-arm64'
         continue-on-error: true
         run: |
           set +e
           app="artifacts/macos/arm64/Inbound.app"
-          echo "--- fonts in the bundle"; find "$app" -iname '*.ttf' -o -iname '*.otf' | sed "s|$app/||"
-          export DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-ui"
-          export DOWNLOADMANAGER_UNO_TRACE=1
+          trace="$RUNNER_TEMP/inbound-ui/logs/ui-trace.log"
+          shot() {
+            screencapture -x "$RUNNER_TEMP/$1.png"
+            sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/$1.png" --out "$RUNNER_TEMP/$1.jpg" >/dev/null
+            echo "SCREENSHOT-$1-BEGIN"; base64 -i "$RUNNER_TEMP/$1.jpg" | fold -w 1000; echo "SCREENSHOT-$1-END"
+          }
+          dotnet tool install -g dotnet-dump >/dev/null 2>&1; export PATH="$PATH:$HOME/.dotnet/tools"
           # Through LaunchServices, as Finder starts it, so the window runs with the bundle's identity.
-          open -n --env DOWNLOADMANAGER_DATA="$DOWNLOADMANAGER_DATA" --env DOWNLOADMANAGER_UNO_TRACE=1 \
-            --stdout "$RUNNER_TEMP/ui.log" --stderr "$RUNNER_TEMP/ui.log" "$app"
-          sleep 25
-          screencapture -x "$RUNNER_TEMP/shot.png"
-          sips -Z 1200 -s format jpeg -s formatOptions 70 "$RUNNER_TEMP/shot.png" --out "$RUNNER_TEMP/shot.jpg" >/dev/null
+          # DOWNLOADMANAGER_UNO_SELFTEST: after the first frame, About opens and closes, then Options (MainWindow.UnoSelfTest.cs).
+          open -n --env DOWNLOADMANAGER_DATA="$RUNNER_TEMP/inbound-ui" --env DOWNLOADMANAGER_UNO_TRACE=1 \
+            --env DOWNLOADMANAGER_UNO_SELFTEST=1 --stdout "$RUNNER_TEMP/ui.log" --stderr "$RUNNER_TEMP/ui.log" "$app"
+          for i in $(seq 1 40); do grep -q 'selftest: opening About' "$trace" 2>/dev/null && break; sleep 1; done
+          sleep 1; shot main
+          sleep 1.5; shot about
+          sleep 4; shot options
+          sleep 12
+          shot last
+          pid="$(pgrep -f 'Resources/window/DownloadManager.Desktop.Uno' | head -n1)"
+          last="$(grep 'selftest heartbeat' "$trace" | tail -n1)"
+          echo "--- last heartbeat: $last (now $(date -u +%H:%M:%S))"
+          beat_age=$(( $(date -u +%s) - $(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$(echo "$last" | cut -c1-19)" +%s 2>/dev/null || echo 0) ))
+          if [ -n "$pid" ] && [ "$beat_age" -gt 3 ]; then
+            echo "--- the UI thread has not beaten for ${beat_age}s: managed stacks of every thread"
+            dotnet-dump collect -p "$pid" -o "$RUNNER_TEMP/ui.dmp" --type Mini >/dev/null 2>&1
+            dotnet-dump analyze "$RUNNER_TEMP/ui.dmp" -c "clrstack -all" -c exit 2>&1 | head -400
+          fi
           echo "--- window output"; tail -40 "$RUNNER_TEMP/ui.log"
-          echo "--- ui trace"; grep -v 'first chance' "$DOWNLOADMANAGER_DATA/logs/ui-trace.log" | tail -40
-          echo "--- first-chance exceptions"; grep 'first chance' "$DOWNLOADMANAGER_DATA/logs/ui-trace.log" | cut -c1-300 | sort | uniq -c | sort -rn | head -20
-          echo "SCREENSHOT-BEGIN"; base64 -i "$RUNNER_TEMP/shot.jpg" | fold -w 1000; echo "SCREENSHOT-END"
+          echo "--- ui trace"; grep -v -E 'first chance|selftest heartbeat' "$trace" | tail -40
+          echo "--- heartbeats"; grep 'selftest heartbeat' "$trace" | awk 'NR%4==1' | cut -c12-200
+          echo "--- first-chance exceptions"; grep 'first chance' "$trace" | cut -c1-300 | sort | uniq -c | sort -rn | head -20
           pkill -f DownloadManager.Desktop.Uno; pkill -f inbound-host
           exit 0
 
