@@ -102,6 +102,17 @@ public static class SecretProtector
 
     public static string? UnprotectProxy(string? protectedValue) => Unprotect(protectedValue, ProxyEntropy);
 
+    private static readonly byte[] SiteSecretEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.SiteSecret.v1");
+
+    /// <summary>
+    /// A secret of a saved site under Sites (SITES.2): a password, a private key, its passphrase, an OAuth token or an access
+    /// key. Its own purpose, so no other stored blob (a site login of the download engine included) opens as one.
+    /// </summary>
+    public static string ProtectSiteSecret(string plaintext) => Protect(plaintext, SiteSecretEntropy);
+
+    public static string? UnprotectSiteSecret(string? protectedValue) => Unprotect(protectedValue, SiteSecretEntropy);
+
     private static readonly byte[] ArchivePasswordEntropy =
         Encoding.UTF8.GetBytes("DownloadManager.ArchivePassword.v1");
 

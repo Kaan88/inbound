@@ -8,6 +8,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DownloadManager.Integration.Tests" />
     <InternalsVisibleTo Include="DownloadManager.Engine.Tests" />
+    <!-- SITES.2: the site store writes with AtomicFile. -->
+    <InternalsVisibleTo Include="DownloadManager.Sites" />
   </ItemGroup>
 
   <PropertyGroup>

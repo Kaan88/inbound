@@ -229,13 +229,17 @@ internal static class Program
                 new WebUiPlatform(bridgeLauncher, new WindowsFirewallRules(log.Warn), new TcpListenerOwner(),
                     new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
                 paths.Root, PipeNames.HostHelloPipe(), log);
+            // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs.
+            var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info);
             var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
             {
                 Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
                 WebSessions = webSessions.Rights,
                 WebUi = webUi,
+                Sites = sites,
             };
             webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
+            sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
             webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
@@ -430,6 +434,16 @@ internal static class Program
             catch (Exception ex)
             {
                 log.Warn($"Web UI shutdown: {ex.GetType().Name}");
+            }
+
+            try
+            {
+                // rclone quits (core/quit, then a kill); the job object would end it anyway when this process goes.
+                sites.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"Sites shutdown: {ex.GetType().Name}");
             }
 
             try

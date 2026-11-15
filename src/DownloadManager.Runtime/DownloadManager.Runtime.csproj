@@ -9,6 +9,7 @@
     <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\DownloadManager.Containers\DownloadManager.Containers.csproj" />
+    <ProjectReference Include="..\DownloadManager.Sites\DownloadManager.Sites.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="DownloadManager.Integration.Tests" />

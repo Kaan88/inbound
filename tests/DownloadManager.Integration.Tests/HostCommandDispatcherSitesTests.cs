@@ -1,0 +1,305 @@
+using System.Text.Json;
+using DownloadManager.Contracts;
+using DownloadManager.Core;
+using DownloadManager.Persistence;
+using DownloadManager.Runtime;
+using DownloadManager.Runtime.Ipc;
+using DownloadManager.Sites;
+using DownloadManager.Tests.Shared;
+
+namespace DownloadManager.Integration.Tests;
+
+/// <summary>
+/// SITES.2: <c>sites.*</c> belong to the user at this PC. A web session (a browser through the bridge) is refused every
+/// request before it reaches the Sites commands, and the Host's Sites changes reach the desktop sessions only.
+/// Mirrors the web UI tests of HostCommandDispatcherTests; nothing here makes a network call.
+/// </summary>
+public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
+{
+    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "test-work", "dispatcher-sites-" + Guid.NewGuid().ToString("N"));
+    private readonly List<string> _timeline = [];
+    private StoragePaths _paths = null!;
+    private HttpDownloadEngine? _engine;
+    private DownloadManagerService? _service;
+    private readonly List<IAsyncDisposable> _cleanup = [];
+
+    public Task InitializeAsync()
+    {
+        _paths = new StoragePaths(Path.Combine(_root, "state"));
+        _paths.EnsureCreated();
+        return Task.CompletedTask;
+    }
+
+    public async Task DisposeAsync()
+    {
+        foreach (var item in _cleanup) await item.DisposeAsync();
+        if (_service is not null) await _service.ShutdownAsync();
+        _engine?.Dispose();
+        try { Directory.Delete(_root, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+    }
+
+    private sealed class Disposer(Action dispose) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingSites : ISitesCommands
+    {
+        public List<string> Seen { get; } = [];
+
+        public Task<IpcMessage> HandleAsync(IpcMessage request, CancellationToken cancellationToken)
+        {
+            lock (Seen) Seen.Add(request.Type);
+            return Task.FromResult(IpcMessage.Create(SitesMessageTypes.Status, new SitesStatusDto { Enabled = true }, request.Id));
+        }
+    }
+
+    private const string SiteId = "0123456789abcdef0123456789abcdef";
+
+    private static readonly (string Type, object Payload)[] SitesRequests =
+    [
+        (SitesMessageTypes.Get, new { }),
+        (SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = "" }),
+        (SitesMessageTypes.ListRequest, new { }),
+        (SitesMessageTypes.Save, new SiteSaveRequest { Name = "Office box", Host = "srv.example", Password = "not sent by a browser" }),
+        (SitesMessageTypes.Remove, new SiteIdRequest { Id = SiteId }),
+        (SitesMessageTypes.KindsRequest, new { }),
+        (SitesMessageTypes.Probe, new SiteProbeRequest { Host = "srv.example", Port = 22 }),
+        (SitesMessageTypes.Trust, new SiteTrustRequest { Id = SiteId, Entries = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA"] }),
+        (SitesMessageTypes.Test, new SiteIdRequest { Id = SiteId }),
+    ];
+
+    [Fact]
+    public async Task TheSitesRequestsAreRefusedForAWebSessionAndAnsweredForThePipe()
+    {
+        var service = await ServiceAsync();
+        var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
+        _cleanup.Add(new Disposer(profile.Dispose));
+        var sites = new RecordingSites();
+        var dispatcher = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            WebSessions = profile.Rights,
+            Sites = sites,
+        };
+        var web = Session();
+        var pipe = Session();
+        await dispatcher.OpenSessionAsync(web, new ClientHelloDto { Role = ClientRoles.Web }, CancellationToken.None);
+        await dispatcher.OpenSessionAsync(pipe, new ClientHelloDto(), CancellationToken.None);
+
+        foreach (var (type, payload) in SitesRequests)
+        {
+            var refused = await AskAsync(dispatcher, web, type, payload);
+            Assert.Equal(MessageTypes.HostActionResult, refused.Type);
+            var result = refused.GetPayload<HostActionResult>();
+            Assert.False(result.Ok);
+            Assert.Contains("this PC", result.Message);
+        }
+
+        Assert.Empty(sites.Seen);
+
+        foreach (var (type, payload) in SitesRequests)
+        {
+            var answered = await AskAsync(dispatcher, pipe, type, payload);
+            Assert.Equal(SitesMessageTypes.Status, answered.Type);
+        }
+
+        Assert.Equal(SitesRequests.Select(request => request.Type), sites.Seen);
+    }
+
+    [Fact]
+    public async Task SitesChangesReachThePipeSessionsOnly()
+    {
+        var service = await ServiceAsync();
+        var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
+        _cleanup.Add(new Disposer(profile.Dispose));
+        var dispatcher = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            WebSessions = profile.Rights,
+            Sites = new RecordingSites(),
+        };
+        var web = Session();
+        var pipe = Session();
+        var quiet = Session();
+        await dispatcher.OpenSessionAsync(web, new ClientHelloDto { Role = ClientRoles.Web }, CancellationToken.None);
+        await dispatcher.OpenSessionAsync(pipe, new ClientHelloDto(), CancellationToken.None);
+        await dispatcher.OpenSessionAsync(quiet, new ClientHelloDto { Events = false }, CancellationToken.None);
+
+        dispatcher.BroadcastSitesChanged(new SitesChangedDto
+        {
+            Status = new SitesStatusDto { Enabled = true, Rclone = SitesRcloneStates.Running },
+            Sites = [new SiteDto { Id = SiteId, Name = "Office box", Kind = SiteKinds.Sftp, Host = "srv.example", Port = 22 }],
+        });
+        await pipe.UntilAsync(frames => frames.Any(frame => frame.Type == SitesMessageTypes.Changed));
+        await Task.Delay(100);
+        Assert.DoesNotContain(web.Frames, frame => frame.Type == SitesMessageTypes.Changed);
+        Assert.DoesNotContain(quiet.Frames, frame => frame.Type == SitesMessageTypes.Changed);
+        var change = pipe.Frames.Single(frame => frame.Type == SitesMessageTypes.Changed).GetPayload<SitesChangedDto>();
+        Assert.True(change.Status.Enabled);
+        Assert.Equal("Office box", Assert.Single(change.Sites).Name);
+    }
+
+    [Fact]
+    public async Task AHostWithoutSitesSaysSo()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+        await dispatcher.OpenSessionAsync(session, CancellationToken.None);
+        var reply = await AskAsync(dispatcher, session, SitesMessageTypes.Get, new { });
+        var result = reply.GetPayload<HostActionResult>();
+        Assert.Equal(MessageTypes.HostActionResult, reply.Type);
+        Assert.False(result.Ok);
+        Assert.Contains("not available", result.Message);
+    }
+
+    [Theory]
+    [InlineData(SitesMessageTypes.Probe, true)]
+    [InlineData(SitesMessageTypes.Test, true)]
+    [InlineData(SitesMessageTypes.ListRequest, false)]
+    public void TheSlowSitesCommandsGetTheClientsLifetime(string type, bool expected)
+        => Assert.Equal(expected, HostCommandDispatcher.NeedsLifetime(type));
+
+    private async Task<DownloadManagerService> ServiceAsync()
+    {
+        var store = new JsonJobStore(_paths);
+        var checkpoints = new JsonCheckpointStore(_paths);
+        _engine = new HttpDownloadEngine(new EngineOptions { MaxAttempts = 1, AllowLocalNetwork = true }, checkpoints: checkpoints);
+        _service = new DownloadManagerService(_paths, store, checkpoints, new JsonSettingsStore(_paths), _engine, enableSchedulerTimer: false);
+        await _service.InitializeAsync();
+        return _service;
+    }
+
+    private HostCommandDispatcher Dispatcher(DownloadManagerService service, FakePlatform? platform = null)
+        => new(service, platform ?? new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog());
+
+    private MemorySession Session()
+    {
+        var session = new MemorySession(_timeline);
+        session.Writer = session.RunWriterAsync(CancellationToken.None);
+        _cleanup.Add(session);
+        return session;
+    }
+
+    private static async Task<IpcMessage> AskAsync(HostCommandDispatcher dispatcher, MemorySession session, string type, object payload)
+    {
+        var request = IpcMessage.Create(type, payload);
+        await dispatcher.DispatchAsync(session, request, CancellationToken.None);
+        return await session.ReplyToAsync(request.Id);
+    }
+
+    /// <summary>The real queue and writer, with frames kept in memory and the same size limit as a pipe frame.</summary>
+    private sealed class MemorySession(List<string> timeline) : QueuedClientSession(new ListLog())
+    {
+        private readonly List<IpcMessage> _frames = [];
+
+        public Task? Writer { get; set; }
+
+        public IReadOnlyList<IpcMessage> Frames
+        {
+            get
+            {
+                lock (_frames) return _frames.ToList();
+            }
+        }
+
+        protected override Task WriteFrameAsync(IpcMessage message, CancellationToken cancellationToken)
+        {
+            if (JsonSerializer.SerializeToUtf8Bytes(message, IpcJson.Options).Length > Protocol.MaxFrameBytes)
+                throw new InvalidDataException("Too large for a frame.");
+
+            lock (_frames) _frames.Add(message);
+            lock (timeline) timeline.Add($"{Id}:{message.Type}");
+            return Task.CompletedTask;
+        }
+
+        public async Task UntilAsync(Func<IReadOnlyList<IpcMessage>, bool> done)
+        {
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
+            while (!done(Frames))
+            {
+                if (DateTimeOffset.UtcNow > deadline) throw new TimeoutException($"Frames so far: {string.Join(", ", Frames.Select(f => f.Type))}");
+                await Task.Delay(10);
+            }
+        }
+
+        public async Task<IpcMessage> ReplyToAsync(string id)
+        {
+            await UntilAsync(frames => frames.Any(f => f.ReplyTo == id));
+            return Frames.First(f => f.ReplyTo == id);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            Complete();
+            if (Writer is not null) await Writer;
+            await base.DisposeAsync();
+        }
+    }
+
+    private sealed class FakePlatform(PlatformCapabilities capabilities, List<string> timeline) : IHostPlatform
+    {
+        public PlatformCapabilities Capabilities { get; } = capabilities;
+        public List<string?> Opened { get; } = [];
+
+        public void OpenUi(string? page = null)
+        {
+            Opened.Add(page);
+            lock (timeline) timeline.Add($"platform:open:{page}");
+        }
+
+        public void RequestShutdown()
+        {
+            lock (timeline) timeline.Add("platform:shutdown");
+        }
+
+        public Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken)
+        {
+            lock (timeline) timeline.Add("platform:pick");
+            return Task.FromResult(Picks is { } path
+                ? new FolderPickResult { Ok = true, Path = path }
+                : new FolderPickResult { Ok = true, Cancelled = true });
+        }
+
+        /// <summary>The folder the dialog returns; null: the user cancels it.</summary>
+        public string? Picks { get; set; }
+
+        public List<string> Revealed { get; } = [];
+
+        /// <summary>EXT.R12: downloads the main window was asked to open at.</summary>
+        public List<Guid> Shown { get; } = [];
+
+        public void ShowJob(Guid jobId)
+        {
+            Shown.Add(jobId);
+            lock (timeline) timeline.Add("platform:show");
+        }
+
+        public void RevealFile(string path)
+        {
+            Revealed.Add(path);
+            lock (timeline) timeline.Add("platform:reveal");
+        }
+
+        /// <summary>EXT.R13: files the popup's double-click opened.</summary>
+        public List<string> OpenedFiles { get; } = [];
+
+        public void OpenFile(string path)
+        {
+            lock (OpenedFiles) OpenedFiles.Add(path);
+            lock (timeline) timeline.Add("platform:open");
+        }
+    }
+
+    private sealed class ListLog : IHostLog
+    {
+        public List<string> Lines { get; } = [];
+        public void Info(string message) { lock (Lines) Lines.Add("INFO " + message); }
+        public void Warn(string message) { lock (Lines) Lines.Add("WARN " + message); }
+        public void Error(string message) { lock (Lines) Lines.Add("ERROR " + message); }
+    }
+}

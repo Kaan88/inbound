@@ -159,13 +159,17 @@ internal static class Program
             new WebUiPlatform(bridgeLauncher, new LinuxFirewall(), new ProcListenerCheck(),
                 new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
             paths.Root, PipeNames.HostHelloPipe(), log);
+        // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs.
+        var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info);
         var dispatcher = new HostCommandDispatcher(service, platform, log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
             WebSessions = webSessions.Rights,
             WebUi = webUi,
+            Sites = sites,
         };
         webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
+        sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
         webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         completionExecutor.ExitHost = () => _ = Task.Run(async () =>
@@ -301,6 +305,7 @@ internal static class Program
 
         // First, so no browser starts anything while the rest stops.
         await Step(() => webUi.StopAsync(), "Web UI shutdown", log).ConfigureAwait(false);
+        await Step(() => sites.DisposeAsync().AsTask(), "Sites shutdown", log).ConfigureAwait(false);
         // Shutting down stops what is running, which isn't news about any package.
         downloadNotices.Dispose();
         remoteNotices?.Dispose();
