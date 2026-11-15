@@ -253,7 +253,7 @@ internal static class Program
                 var current = currentSettings;
                 var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
                     (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
-                if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out _);
+                if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
                 if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
                     service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
                         .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&
