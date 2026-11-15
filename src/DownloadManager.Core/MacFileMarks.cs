@@ -24,7 +24,7 @@ public static class MacFileMarks
             Set(path, QuarantineName, Encoding.ASCII.GetBytes(Quarantine(DateTimeOffset.UtcNow, Guid.NewGuid())));
             if (site is not null) Set(path, WhereFromsName, WhereFroms([site]));
         }
-        catch (Exception ex) when (ex is IOException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or ArgumentException or DllNotFoundException or EntryPointNotFoundException)
         {
             log?.Invoke($"The download could not be marked as from the internet: {ex.Message}");
         }

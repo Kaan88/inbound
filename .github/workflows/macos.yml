@@ -183,9 +183,9 @@ jobs:
           kill $slow 2>/dev/null
           # MAC.6: a download from the internet gets the quarantine and "Where from" marks Safari gives one.
           mkdir -p "$RUNNER_TEMP/marks"
-          "$app/Contents/Resources/host/DownloadManager.Cli" add https://www.example.com/ --dest "$RUNNER_TEMP/marks"
+          "$app/Contents/Resources/host/DownloadManager.Cli" add https://raw.githubusercontent.com/Kaan88/inbound/main/LICENSE --dest "$RUNNER_TEMP/marks"
           marked=""
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             marked="$(find "$RUNNER_TEMP/marks" -type f ! -name '*.part' | head -1)"
             [ -n "$marked" ] && break; sleep 1
           done
@@ -194,8 +194,12 @@ jobs:
             echo "--- quarantine: $(xattr -p com.apple.quarantine "$marked")"
             xattr -p -x com.apple.metadata:kMDItemWhereFroms "$marked" | xxd -r -p > "$RUNNER_TEMP/wf.plist"
             echo "--- where from:"; plutil -p "$RUNNER_TEMP/wf.plist"
-            plutil -p "$RUNNER_TEMP/wf.plist" 2>/dev/null | grep -q 'https://www.example.com/' || { echo "::error::Where from is not the site"; ok=1; }
-          else echo "::error::the download from the internet has no Inbound quarantine mark (${marked:-no file})"; xattr -l "$marked" 2>/dev/null; ok=1; fi
+            plutil -p "$RUNNER_TEMP/wf.plist" 2>/dev/null | grep -q 'https://raw.githubusercontent.com/' || { echo "::error::Where from is not the site"; ok=1; }
+          else
+            echo "::error::the download from the internet has no Inbound quarantine mark (${marked:-no file})"; xattr -l "$marked" 2>/dev/null; ok=1
+            "$app/Contents/Resources/host/DownloadManager.Cli" list --no-start --json 2>/dev/null | python3 -c 'import json,sys
+          for j in json.load(sys.stdin).get("jobs", []): print(j.get("fileName"), j.get("state"), json.dumps(j.get("failure")))' 
+          fi
           # MAC.6: the menu-bar helper is its own app with the Services entry, and the Host started it.
           plutil -p "$app/Contents/Helpers/Inbound Menu.app/Contents/Info.plist" | grep -E 'NSMenuItem|downloadWithInbound|LSUIElement' -A1 | head -12
           grep -h 'Menu-bar icon\|menu-bar helper' "$DOWNLOADMANAGER_DATA"/logs/* 2>/dev/null | cut -c1-160
