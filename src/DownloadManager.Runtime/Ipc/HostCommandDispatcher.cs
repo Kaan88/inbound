@@ -159,7 +159,8 @@ public sealed partial class HostCommandDispatcher
     /// These wait on something that can take long (a server's headers, the provider), so a transport runs them under a
     /// lifetime that ends when their client goes away (<see cref="IpcOperationLifetime"/>). The rest are quick.
     /// </summary>
-    public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type);
+    public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
+        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that
@@ -339,6 +340,12 @@ public sealed partial class HostCommandDispatcher
             if (WebUiMessageTypes.IsRequest(message.Type))
             {
                 await AnswerWebUiAsync(client, rights, message, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (SitesMessageTypes.IsRequest(message.Type))
+            {
+                await AnswerSitesAsync(client, rights, message, cancellationToken).ConfigureAwait(false);
                 return;
             }
 

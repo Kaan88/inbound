@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SITES.1 test helper: stands in for the Host in the "rclone dies with its parent" test. Starts rclone through
+       RcloneProcess exactly as the Host does, prints rclone's pid, and waits to be killed. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DownloadManager.Sites\DownloadManager.Sites.csproj" />
+  </ItemGroup>
+
+</Project>

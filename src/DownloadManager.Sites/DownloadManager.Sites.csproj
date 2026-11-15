@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SITES.1 (docs/plans/remote-sites.md): rclone as a supervised child process and its rc client. No site model,
+       store or IPC here yet (SITES.2). The Host references this; nothing in it knows about a UI. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DownloadManager.Sites.Tests" />
+  </ItemGroup>
+
+</Project>
