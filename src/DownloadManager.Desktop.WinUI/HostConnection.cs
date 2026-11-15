@@ -1085,8 +1085,8 @@ public static class HostLauncher
             Path.Combine(AppContext.BaseDirectory, "inbound-host"),
             // The AppImage keeps the window in desktop/ beside the Host.
             Path.Combine(AppContext.BaseDirectory, "..", "inbound-host"),
-            // macOS: Inbound.app keeps the window in Contents/MacOS and the Host in Contents/Resources/host.
-            Path.Combine(AppContext.BaseDirectory, "..", "Resources", "host", "inbound-host"),
+            // macOS: Inbound.app keeps the window in Contents/Resources/window and the Host in Contents/Resources/host.
+            Path.Combine(AppContext.BaseDirectory, "..", "host", "inbound-host"),
         };
         for (var i = 0; i < 7 && directory is not null; i++, directory = directory.Parent)
         {
