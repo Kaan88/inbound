@@ -111,6 +111,8 @@ describe('Sites in the web UI (SITES.7)', () => {
     expect(rcloneLine(status)).toContain('not on this computer');
     expect(rcloneLine({ ...status, rcloneInstalling: true })).toBe('Downloading rclone…');
     expect(rcloneLine({ ...status, rclone: 'running', rcloneVersion: 'v1.76.0' })).toBe('rclone v1.76.0 is running.');
+    expect(rcloneLine({ ...status, rclone: 'stopping' })).toBe('rclone is stopping.');
+    expect(rcloneLine({ ...status, rclone: 'off' })).toBe('rclone starts when a site is used.');
   });
 
   it('keeps the sites, their status and every batch from the server', () => {
@@ -149,9 +151,16 @@ describe('Sites in the web UI (SITES.7)', () => {
     made[1].finish(409, '{"ok":false,"error":"ü report.pdf is already in that folder.","problem":"exists"}');
     expect(await taken.done).toEqual({ ok: false, status: 409, error: 'ü report.pdf is already in that folder.', problem: 'exists' });
 
+    // Signed out: said, and the page goes to the sign-in.
+    let signedOut = 0;
+    const expired = uploadToSite('id1', '/pub', file, false, () => {}, make, () => signedOut++);
+    made[2].finish(401, '');
+    expect((await expired.done).ok).toBe(false);
+    expect(signedOut).toBe(1);
+
     const lost = uploadToSite('id1', '/pub', file, true, () => {}, make);
-    expect(made[2].url).toContain('replace=1');
-    made[2].onerror?.();
+    expect(made[3].url).toContain('replace=1');
+    made[3].onerror?.();
     expect((await lost.done).ok).toBe(false);
   });
 });

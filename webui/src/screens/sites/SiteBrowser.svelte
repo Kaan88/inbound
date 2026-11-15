@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import AskDialog from '../../components/AskDialog.svelte';
   import Dialog from '../../components/Dialog.svelte';
   import FolderField from '../../components/FolderField.svelte';
@@ -29,6 +29,23 @@
   // One dialog at a time; files whose names are taken wait in turn to be asked about.
   let nameBox = $state<{ title: string; value: string; action: 'mkdir' | 'rename'; from?: string } | null>(null);
   let deleting = $state<SiteItem[] | null>(null);
+  /** What a delete would remove, as the server counts it; null while it counts. */
+  let deleteCount = $state<{ files: number; folders: number; sizeUnknown: boolean; bytes: number } | null>(null);
+
+  async function askDelete(list: SiteItem[]) {
+    dialogError = '';
+    deleteCount = null;
+    deleting = list;
+    try {
+      const counted = await store.ask<{ ok: boolean; message?: string; files: number; folders: number; bytes: number; sizeUnknown: boolean }>(
+        'sites.count', { id: site.id, path, items: names(list) });
+      if (deleting !== list) return;
+      if (counted.ok) deleteCount = counted;
+      else dialogError = counted.message ?? '';
+    } catch (failure) {
+      if (deleting === list) dialogError = failure instanceof Error ? failure.message : String(failure);
+    }
+  }
   let toHostBox = $state<{ names: SiteItem[]; folder: string; conflict: string } | null>(null);
   let replacing = $state<{ file: File; folder: string }[]>([]);
   let busy = $state(false);
@@ -44,7 +61,12 @@
     value === problems.hostKeyNotAccepted || value === problems.hostKeyChanged || value === problems.certificateNotTrusted || value === problems.signInNeeded;
   const chosen = $derived(items.filter((item) => selected.has(item.name)));
 
+  // Only the newest browse is shown: a slow answer for a folder left since must not replace the one asked for after it.
+  let round = 0;
+
   async function open(next: string, refresh = false, more = false) {
+    if (more && next !== path) return;
+    const mine = ++round;
     loading = true;
     error = '';
     problem = null;
@@ -52,6 +74,7 @@
       const result = await store.ask<SiteBrowseResult>('sites.browse', {
         id: site.id, path: next, offset: more ? items.length : 0, limit: 500, refresh, listing: more ? listing : undefined,
       });
+      if (mine !== round) return;
       if (!result.ok) {
         error = result.message ?? 'The folder could not be read.';
         problem = result.problem ?? null;
@@ -64,13 +87,22 @@
       listing = result.listing ?? null;
       if (!more) selected = new Set();
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : String(failure);
+      if (mine === round) error = failure instanceof Error ? failure.message : String(failure);
     } finally {
-      loading = false;
+      if (mine === round) loading = false;
     }
   }
 
   onMount(() => void open(path));
+
+  // An upload belongs to this page: leaving the site stops it, and says so, rather than leaving it running out of sight.
+  onDestroy(() => {
+    for (const upload of uploads) {
+      if (upload.state !== 'sending') continue;
+      upload.abort?.();
+      store.toast(`Uploading ${upload.name} stopped because you left ${site.name}.`, 'error');
+    }
+  });
 
   function toggle(name: string) {
     const next = new Set(selected);
@@ -205,7 +237,7 @@
     {#if canMakeFolder}<button class="btn" onclick={() => { dialogError = ''; nameBox = { title: 'New folder', value: '', action: 'mkdir' }; }}><Icon name="folder-plus" size={15} /> New folder</button>{/if}
     {#if chosen.length}
       <button class="btn" onclick={() => { dialogError = ''; toHostBox = { names: chosen, folder: defaultFolder(), conflict: 'skip' }; }}><Icon name="download" size={15} /> Download to {store.texts.hostName}</button>
-      <button class="btn-danger" onclick={() => { dialogError = ''; deleting = chosen; }}><Icon name="trash" size={15} /> Delete ({chosen.length})</button>
+      <button class="btn-danger" onclick={() => askDelete(chosen)}><Icon name="trash" size={15} /> Delete ({chosen.length})</button>
     {/if}
   </div>
 
@@ -244,7 +276,7 @@
       <span class="flex-1">Name</span>
       <span class="hidden w-24 text-right sm:block">Size</span>
       <span class="hidden w-40 md:block">Modified</span>
-      <span class="w-24"></span>
+      <span class="w-28"></span>
     </div>
     {#if loading && !items.length}
       <p class="px-3 py-4 text-[13px] text-muted">Reading the folder…</p>
@@ -265,12 +297,12 @@
           </span>
           <span class="tabular hidden w-24 text-right text-muted sm:block">{item.isFolder ? '' : bytes(item.size)}</span>
           <span class="hidden w-40 text-muted md:block">{item.modified ? dateTime(item.modified) : ''}</span>
-          <span class="flex w-24 justify-end gap-0.5">
+          <span class="flex w-28 shrink-0 justify-end gap-0.5">
             {#if !item.isFolder}
               <a class="btn-icon" href={deviceDownloadUrl(site.id, joinPath(path, item.name))} download={item.name} title="Download to this device" aria-label="Download {item.name} to this device"><Icon name="download" size={15} /></a>
             {/if}
             <button class="btn-icon" title="Rename" aria-label="Rename {item.name}" onclick={() => { dialogError = ''; nameBox = { title: `Rename ${item.name}`, value: item.name, action: 'rename', from: item.name }; }}><Icon name="document" size={15} /></button>
-            <button class="btn-icon" title="Delete" aria-label="Delete {item.name}" onclick={() => { dialogError = ''; deleting = [item]; }}><Icon name="trash" size={15} /></button>
+            <button class="btn-icon" title="Delete" aria-label="Delete {item.name}" onclick={() => askDelete([item])}><Icon name="trash" size={15} /></button>
           </span>
         </li>
       {/each}
@@ -299,7 +331,9 @@
 {:else if deleting}
   {@const list = deleting}
   <AskDialog title="Delete on {site.name}?" danger busy={busy} confirm="Delete"
-    text={(list.length === 1 ? `${list[0].name}${list[0].isFolder ? ' and everything in it' : ''}` : `${list.length} items, and everything in their folders,`) + ` will be deleted on the server. This can't be undone.` + (dialogError ? ` ${dialogError}` : '')}
+    text={(list.length === 1 ? `${list[0].name}${list[0].isFolder ? ' and everything in it' : ''}` : `${list.length} items, and everything in their folders,`) + ` will be deleted on the server. This can't be undone.`
+      + (deleteCount ? ` That is ${deleteCount.files.toLocaleString()} file${deleteCount.files === 1 ? '' : 's'}${deleteCount.sizeUnknown || !deleteCount.bytes ? '' : ` (${bytes(deleteCount.bytes)})`}.` : dialogError ? '' : ' Counting what is in it…')
+      + (dialogError ? ` ${dialogError}` : '')}
     onconfirm={() => remove(list)} onclose={closeDialogs} />
 {:else if toHostBox}
   <Dialog title="Download to {store.texts.hostName}" onclose={closeDialogs}>

@@ -26,16 +26,28 @@
   const status = $derived(store.model.sitesStatus);
   const sites = $derived(store.model.sites);
   const site = $derived(siteId ? sites.find((item) => item.id === siteId) : undefined);
-  const transfers = $derived([...store.model.siteTransfers].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  const transfers = $derived([...store.model.siteTransfers].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
   const finished = $derived(transfers.some((transfer) => ['done', 'failed', 'canceled'].includes(transfer.state)));
 
-  onMount(async () => {
+  let kindsProblem = $state('');
+
+  /** The kinds the form offers; asked again when Add or Edit is used after a failed first try. */
+  async function loadKinds(): Promise<boolean> {
+    if (kinds.length) return true;
     try {
       kinds = (await store.ask<{ kinds: SiteKind[] }>('sites.kinds', {})).kinds ?? [];
-    } catch {
-      // The form falls back to what each site says about itself.
+      kindsProblem = '';
+    } catch (error) {
+      kindsProblem = `The kinds of site could not be read: ${error instanceof Error ? error.message : String(error)}`;
     }
-  });
+    return kinds.length > 0;
+  }
+
+  async function edit(item: Site | null) {
+    if (await loadKinds()) editing = item;
+  }
+
+  onMount(() => void loadKinds());
 
   async function setEnabled(enabled: boolean) {
     switching = true;
@@ -108,8 +120,9 @@
         <section class="mt-5">
           <div class="mb-2 flex items-center gap-2">
             <h2 class="flex-1 text-[14px] font-semibold">Your sites</h2>
-            <button class="btn-primary" disabled={!kinds.length} onclick={() => (editing = null)}><Icon name="add" size={15} /> Add a site</button>
+            <button class="btn-primary" onclick={() => edit(null)}><Icon name="add" size={15} /> Add a site</button>
           </div>
+          {#if kindsProblem}<p class="mb-2 text-[12.5px] text-error" role="alert">{kindsProblem}</p>{/if}
           {#if !sites.length}
             <p class="text-[13px] text-muted">No sites yet.</p>
           {:else}
@@ -127,7 +140,7 @@
                     <button class="btn" onclick={() => (fixing = { site: item, problem: problems.signInNeeded })}>Sign in…</button>
                   {/if}
                   <button class="btn" disabled={testing === item.id} onclick={() => test(item)}>{testing === item.id ? 'Testing…' : 'Test'}</button>
-                  <button class="btn-icon" title="Edit" aria-label="Edit {item.name}" disabled={!kinds.length} onclick={() => (editing = item)}><Icon name="settings" size={16} /></button>
+                  <button class="btn-icon" title="Edit" aria-label="Edit {item.name}" onclick={() => edit(item)}><Icon name="settings" size={16} /></button>
                   <button class="btn-icon" title="Remove" aria-label="Remove {item.name}" onclick={() => (removing = item)}><Icon name="trash" size={16} /></button>
                 </li>
               {/each}

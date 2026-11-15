@@ -319,6 +319,7 @@ export function uploadToSite(
   replace: boolean,
   onProgress: (sent: number) => void,
   make: () => UploadLike = () => new XMLHttpRequest() as unknown as UploadLike,
+  onSignedOut: (() => void) | null = () => location.assign('/signin/'),
 ): { done: Promise<UploadOutcome>; abort: () => void } {
   const request = make();
   const done = new Promise<UploadOutcome>((resolve) => {
@@ -337,7 +338,10 @@ export function uploadToSite(
       } catch {
         // Not JSON: the status says enough.
       }
-      if (request.status === 401) error = 'You are signed out. Sign in again and send it once more.';
+      if (request.status === 401) {
+        error = 'You are signed out. Sign in again and send it once more.';
+        onSignedOut?.();
+      }
       resolve({ ok: false, status: request.status, error, problem });
     };
     request.onerror = () => resolve({ ok: false, status: 0, error: 'The connection to Inbound was lost.' });
@@ -379,6 +383,8 @@ export function rcloneLine(status: SitesStatus): string {
       return 'rclone is not on this computer yet.';
     case 'starting':
       return 'Starting rclone…';
+    case 'stopping':
+      return 'rclone is stopping.';
     case 'running':
       return `rclone ${status.rcloneVersion ?? ''} is running.`.replace('  ', ' ');
     case 'failed':

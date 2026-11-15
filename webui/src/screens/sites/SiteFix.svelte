@@ -24,11 +24,18 @@
   const title = $derived(hostKey ? (problem === problems.hostKeyChanged ? 'The server key changed' : 'Trust this server?')
     : problem === problems.certificateNotTrusted ? 'Trust this certificate?' : `Sign in to ${site.name}`);
 
-  // The site's own record follows sites.changed: a sign-in finished in a browser shows up here.
+  // The site's own record follows sites.changed: a sign-in finished in a browser shows up here. It counts only once the
+  // Host has said it is signing in and then that it has stopped (a site signed in before, whose access ran out, is
+  // already "signed in" when this starts).
   const current = $derived(store.model.sites.find((item) => item.id === site.id) ?? site);
+  let sawSigningIn = $state(false);
   $effect(() => {
-    if (signIn && current.signedIn && !current.signingIn) onfixed();
+    if (!signIn) return;
+    if (current.signingIn) sawSigningIn = true;
+    else if (sawSigningIn && current.signedIn) onfixed();
   });
+  /** Only a web address is offered as a link. */
+  const safeUrl = (value: string | null | undefined) => (value && /^https?:\/\//i.test(value) ? value : null);
 
   async function load() {
     busy = true;
@@ -129,8 +136,8 @@
       {#if !signIn}
         <button class="btn-primary" disabled={busy} onclick={startSignIn}>{busy ? 'Starting…' : 'Sign in…'}</button>
       {:else}
-        {#if signIn.url}
-          <p>If this browser runs on the same computer as Inbound, open <a class="link break-all" href={signIn.url} target="_blank" rel="noopener noreferrer">the sign-in page</a> and allow access; this closes by itself when it is done.</p>
+        {#if safeUrl(signIn.url)}
+          <p>If this browser runs on the same computer as Inbound, open <a class="link break-all" href={safeUrl(signIn.url)} target="_blank" rel="noopener noreferrer">the sign-in page</a> and allow access; this closes by itself when it is done.</p>
         {/if}
         {#if signIn.command}
           <p>From another device, run this on a computer that has rclone and a browser, then paste everything between <code>---&gt;</code> and <code>&lt;---End paste</code> here:</p>
