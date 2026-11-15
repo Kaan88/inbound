@@ -427,6 +427,8 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AO. Owner on the remaining live checks** (2026-11-15): S3 against a real service is left for later and does not
+  block the release; B2 file transfers stay noted as unchecked (AN); WebDAV tested against local servers is enough.
 - **AN. B2 live, and the app's own rclone download** (2026-11-15). The owner added a B2 site in a fresh test instance's
   window with a key limited to one bucket. **rclone download:** Options › Sites, Download rclone, fetched, checked and
   installed rclone 1.76.0 in 3 seconds (the first live run of SITES.1's download). **B2:** test, listing the buckets,
