@@ -25,8 +25,42 @@ for the next person picking it up.
 5. A quick second click on Load more was lost twice. It may be the XTEST harness, or the button being disabled while a
    page loads; it hasn't been looked into.
 
-Not reviewed: this round's changes were pushed when the owner asked to stop, without a second review. Haiku should
-review the window focus changes, and Fable should review `SiteKeyText` and the save refusal (they handle secrets).
+## Review still owed (Fable)
+
+This round (`9885b46..43a4bbf`) was pushed without a review because the owner asked to stop. The owner's rule is that
+security, durability, IPC and concurrency work goes to Fable (Agent model `fable`), and small or routine diffs go to
+Haiku. Hand Fable the code and this context, not the conclusions below, then check its findings yourself before
+fixing anything.
+
+**What to send:** `git diff 9885b46 43a4bbf -- src tests` (8 source files, about 190 lines), and these files in full:
+
+- `src/DownloadManager.Sites/SiteKeyText.cs`
+- `SitesCommands.SaveAsync` and `ListFolderAsync` in `src/DownloadManager.Runtime/Sites/SitesCommands.cs`
+- `src/DownloadManager.Desktop.WinUI/SitesPanel.xaml.cs`
+
+**Questions for Fable:**
+
+1. **Secrets.** Can a refused key, or its passphrase, reach a reply, the log or a file? `SiteKeyText.Problem` must
+   never quote the key, and the refusal must come before `Seal` and before anything is stored. Does `Friendly` keep
+   rclone's text redacted? It runs after `RcloneClient` has already redacted it.
+2. **Key check.**
+   - Does `Problem` refuse a valid key that rclone's `key_pem` accepts? Think of OpenSSH, PKCS#1, PKCS#8, encrypted
+     PEM with `Proc-Type`, CRLF line endings, and leading blank lines.
+   - Does it pass text that isn't a key at all?
+   - Is an empty `PrivateKey` (keep the stored key) still kept on edit?
+3. **Error mapping.** Can `Friendly` wrongly match a message that isn't about the key, and so hide the real cause
+   (for example a server-side error that contains "passphrase")?
+4. **Window focus** (concurrency on the UI thread).
+   - `HoldKeyboard`, `OnLostFocus`, `PassHeldKeyboard` and `FocusListWhenReady`: can a stale queued focus call steal
+     the keyboard after the user moved on? The `_generation` check is meant to prevent that; check it covers leaving
+     the view, switching sites and dialogs.
+   - Can `IsTabStop` be left `true`?
+   - Does anything here act differently on WinUI (Windows) than on Uno?
+5. **View restart.** `SitesPanel.UpdateSite` calls `Open` when the server, user or folder changed. Can that race with
+   a load already in flight, or with `ShowSite`'s `ShowsSameStart` check?
+
+**After the review:** record the findings and what was fixed in PROGRESS item H, with the tests that cover them.
+Haiku can then do a quick pass over the PROGRESS and ROADMAP wording.
 
 ## Left (minor, seen in the walk, not fixed)
 
