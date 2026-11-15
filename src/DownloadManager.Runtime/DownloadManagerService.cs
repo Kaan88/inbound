@@ -3268,10 +3268,11 @@ public sealed partial class DownloadManagerService
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }
 
-                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move.
+                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move. A Mac volume is
+                // usually case-insensitive too, so there the "existing" target can be this very file.
                 if (!PathNames.Same(target, runtime.Job.FinalFilePath))
                 {
-                    if (File.Exists(target))
+                    if (File.Exists(target) && !PathNames.SameFileOtherCase(target, runtime.Job.FinalFilePath))
                     {
                         return new JobActionResponse { Ok = false, Error = "The target file already exists." };
                     }

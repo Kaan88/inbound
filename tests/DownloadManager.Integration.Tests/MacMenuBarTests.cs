@@ -7,6 +7,9 @@ namespace DownloadManager.Integration.Tests;
 /// <summary>MAC.6: the Host's half of the menu-bar helper's protocol, and the pause on a costly network or in Low Power Mode.</summary>
 public sealed class MacMenuBarTests
 {
+    // Speeds follow the Mac's number format ("1,5 GB/s" in many languages); the tests pin one.
+    public MacMenuBarTests() => System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+
     [Fact]
     public void TheStatusListsRunningDownloadsFastestFirst()
     {

@@ -41,10 +41,18 @@
   download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
   real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
   (2026-11-15).
-- **The engine's test suites on a Mac (owner, 2026-11-15: "do it immediately"):** the macOS workflow runs Engine, TorBox,
-  Containers and Torrents on both builds (the Intel one with an x64 SDK under Rosetta) and fails on them, as Linux does;
-  Core, Archives, Sites and the full Integration suite (until now run only on Windows; Linux runs its Linux tests only)
-  run and are reported, not yet gating. ⌘Q stays File > Exit (owner: "leave as is").
+- **The test suites on a Mac (owner, 2026-11-15, run on the owner's Apple silicon Mac):** Engine passed 214 of 214.
+  The full Integration suite had 182 failures. 170 are tests already tagged `Platform=Windows` (they start the Windows
+  Host, PowerShell or cmd.exe, or read the registry or pipe ACLs). Of the other 12:
+  - One real bug, fixed: a rename that only changes the case (`report.pdf` to `Report.pdf`) was refused on APFS, which
+    is case-insensitive by default, as "The target file already exists." The fix is `PathNames.SameFileOtherCase`.
+  - Two menu-bar speed tests expected "1.5", but the Mac's number format gives "1,5". The tests now pin the culture.
+  - Six tests used Windows paths as test data; they now use Unix paths elsewhere.
+  - The adopted-file mark test now checks the quarantine mark on macOS.
+  - Junction, native-host and torrent kill-switch tests are now tagged Windows.
+  The suites were taken off the macOS workflow again because it took too long (owner: "end ci, it takes forever. it's
+  redundant too"). The fixes still need a second local run (`--filter "Platform!=Windows"`). ⌘Q stays File > Exit
+  (owner: "leave as is").
 - **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
   and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
   integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second
