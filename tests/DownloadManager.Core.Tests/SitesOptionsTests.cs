@@ -85,6 +85,30 @@ public sealed class SitesOptionsTests
     }
 
     [Fact]
+    public void WithSitesOffAMissingRcloneIsNoProblemAndNoErrorIsRepeated()
+    {
+        var view = SitesRules.Rclone(Status(s => { NoRclone(s); s.Enabled = false; s.Error = "Sites is off."; }), Now);
+        Assert.False(view.LineIsProblem);
+        Assert.Equal("rclone is looked for when Sites is on.", view.Line);
+        Assert.False(view.EnableAutoUpdate);
+    }
+
+    [Fact]
+    public void BeforeItsVersionIsReadTheLineSaysSo()
+    {
+        var view = SitesRules.Rclone(Status(s => { s.RcloneSource = SitesRcloneSources.Own; s.OwnRclonePath = "C:\\rclone.exe"; s.RcloneVersion = null; s.RcloneInstalled = null; s.Rclone = SitesRcloneStates.Off; }), Now);
+        Assert.Equal("rclone (your own rclone). Its version shows once it has started.", view.Line);
+        Assert.False(view.LineIsProblem);
+    }
+
+    [Fact]
+    public void AutomaticUpdatesCannotBeChangedForAnOwnRclone()
+    {
+        Assert.True(SitesRules.Rclone(Status(), Now).EnableAutoUpdate);
+        Assert.False(SitesRules.Rclone(Status(s => { s.RcloneSource = SitesRcloneSources.Own; s.OwnRclonePath = "/usr/bin/rclone"; }), Now).EnableAutoUpdate);
+    }
+
+    [Fact]
     public void OwnRcloneIsNeverOfferedAnUpdate()
     {
         var view = SitesRules.Rclone(Status(s =>
@@ -203,6 +227,11 @@ public sealed class SitesOptionsTests
     {
         Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "hello" }), null, out var problem));
         Assert.Contains("private key", problem);
+        // The window says what the Host would: a .pub or .ppk text gets its own words (one rule, SiteKeyRules).
+        Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "ssh-ed25519 AAAAC3Nza me@pc" }), null, out problem));
+        Assert.Contains("public key", problem);
+        Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "PuTTY-User-Key-File-3: ssh-ed25519" }), null, out problem));
+        Assert.Contains("PuTTY", problem);
     }
 
     [Fact]

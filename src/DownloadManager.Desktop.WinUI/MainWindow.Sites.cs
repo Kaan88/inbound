@@ -12,6 +12,7 @@ namespace DownloadManager.Desktop.WinUI;
 public sealed partial class MainWindow
 {
     private const string SiteTagPrefix = "site:";
+    private const string SitesHeadingTag = "sites-heading";
 
     private SitesStatusDto? _sitesStatus;
     private List<SiteDto> _sites = [];
@@ -99,6 +100,34 @@ public sealed partial class MainWindow
             var items = CategoryList.Items.OfType<ListBoxItem>().ToList();
             var anchor = items.FindLastIndex(item => item.Tag is "queues" || (item.Tag is string tag && tag.StartsWith("remote:", StringComparison.Ordinal)));
             var at = anchor + 1;
+
+            // A "Sites" heading above the sites, as the walk asked; not selectable, so the arrow keys pass it.
+            var heading = items.FirstOrDefault(item => item.Tag as string == SitesHeadingTag);
+            if (wanted.Count == 0)
+            {
+                if (heading is not null) CategoryList.Items.Remove(heading);
+            }
+            else
+            {
+                if (heading is null)
+                {
+                    heading = new ListBoxItem
+                    {
+                        Tag = SitesHeadingTag,
+                        IsEnabled = false,
+                        IsTabStop = false,
+                        Padding = new Thickness(14, 8, 8, 2),
+                        MinHeight = 0,
+                        Content = new TextBlock { Text = "Sites", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                    };
+                    AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+                    AutomationProperties.SetName(heading, "Sites");
+                    CategoryList.Items.Insert(Math.Min(at, CategoryList.Items.Count), heading);
+                }
+
+                at = CategoryList.Items.IndexOf(heading) + 1;
+            }
+
             foreach (var site in wanted)
             {
                 var tag = SiteTag(site.Id);
@@ -191,7 +220,7 @@ public sealed partial class MainWindow
         SitesToolSet.Visibility = Visibility.Visible;
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
-        panel.Open(site, keepPlace ? panel.Path : null);
+        panel.Open(site, keepPlace ? panel.ReopenPath : null);
         UpdateSitesToolbar();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, panel.FocusList);
     }

@@ -14,7 +14,8 @@ internal sealed record SitesRcloneView(
     bool ShowUpdate,
     bool EnableUpdate,
     string? UpdateVersion,
-    string? LastCheckLine);
+    string? LastCheckLine,
+    bool EnableAutoUpdate);
 
 /// <summary>The values of the Add a site / Edit a site form, as typed.</summary>
 internal sealed record SiteFormValues(
@@ -35,7 +36,6 @@ internal sealed record SiteFormValues(
 internal static class SitesRules
 {
     public const int MostKeyBytes = 64 * 1024;
-    public const string Off = "Sites is off. Turn it on to add and use sites.";
 
     public static string SourceWords(string? source) => source switch
     {
@@ -64,6 +64,8 @@ internal static class SitesRules
         string line;
         var problem = false;
         if (installing) line = "Downloading rclone…";
+        // Off, the Host does not look for rclone, so not finding it is no problem yet.
+        else if (missing && !enabled) line = "rclone is looked for when Sites is on.";
         else if (missing)
         {
             problem = true;
@@ -74,15 +76,18 @@ internal static class SitesRules
         else
         {
             var version = status.RcloneVersion ?? status.RcloneInstalled;
-            line = version is null ? $"rclone ({SourceWords(status.RcloneSource)})" : $"rclone {version} ({SourceWords(status.RcloneSource)})";
-            if (status.Rclone == SitesRcloneStates.Failed)
+            // The Host reads the version when it first starts rclone; until then only where it comes from is known.
+            line = version is null
+                ? $"rclone ({SourceWords(status.RcloneSource)}). Its version shows once it has started."
+                : $"rclone {version} ({SourceWords(status.RcloneSource)})";
+            if (enabled && status.Rclone == SitesRcloneStates.Failed)
             {
                 problem = true;
                 line += ". It didn't start.";
             }
         }
 
-        if (!installing && (status.Rclone == SitesRcloneStates.Failed || status.Rclone == SitesRcloneStates.Missing)
+        if (enabled && !installing && (status.Rclone == SitesRcloneStates.Failed || status.Rclone == SitesRcloneStates.Missing)
             && !string.IsNullOrWhiteSpace(status.Error))
             line += " " + status.Error.Trim();
 
@@ -107,7 +112,9 @@ internal static class SitesRules
             ShowUpdate: offerable,
             EnableUpdate: enabled && !installing,
             UpdateVersion: offerable ? update!.Version : null,
-            LastCheckLine: last);
+            LastCheckLine: last,
+            // Inbound never updates an rclone the user chose.
+            EnableAutoUpdate: enabled && !installing && !own && !ownPath);
     }
 
     /// <summary>"rclone X is ready", "waits until", "is a new major version", as the update offer says.</summary>
@@ -186,7 +193,7 @@ internal static class SitesRules
             }
             else
             {
-                if (!LooksLikePrivateKey(values.PrivateKey)) { problem = "That doesn't look like a private key. It starts with \"-----BEGIN\"."; return null; }
+                if (SiteKeyRules.Problem(values.PrivateKey) is { } keyProblem) { problem = keyProblem; return null; }
                 key = Normalize(values.PrivateKey);
             }
 
@@ -218,9 +225,6 @@ internal static class SitesRules
             LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
         };
     }
-
-    public static bool LooksLikePrivateKey(string text)
-        => text.Contains("-----BEGIN", StringComparison.Ordinal) && text.Contains("PRIVATE KEY", StringComparison.Ordinal);
 
     /// <summary>A pasted key with the line ends the SSH tools expect and a closing line end.</summary>
     private static string Normalize(string text) => text.Trim().Replace("\r\n", "\n").Replace('\r', '\n') + "\n";

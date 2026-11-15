@@ -220,12 +220,10 @@ internal sealed class SitesOptionsPage
             _update.Visibility = view.ShowUpdate ? Visibility.Visible : Visibility.Collapsed;
             _update.IsEnabled = view.EnableUpdate && !_busy;
             _update.Content = view.UpdateVersion is null ? "Update" : $"Update to {view.UpdateVersion}";
-            _auto.IsEnabled = status.Enabled && !_busy;
+            _auto.IsEnabled = view.EnableAutoUpdate && !_busy;
             _ownPath.IsEnabled = _browseOwn.IsEnabled = _useOwn.IsEnabled = status.Enabled && !_busy && !status.RcloneInstalling;
 
             _add.IsEnabled = status.Enabled && !_busy;
-            if (!status.Enabled) _siteResult.Show(SitesRules.Off);
-            else if (_siteResult.Text.Text == SitesRules.Off) _siteResult.Show(string.Empty);
             RenderSites(status.Enabled);
         }
         finally
@@ -469,21 +467,34 @@ internal sealed class SitesOptionsPage
             if (result.Problem == SiteProblems.HostKeyNotAccepted)
             {
                 if (attempt == 0 && await TrustAsync(site)) continue;
-                _siteResult.Say($"{site.Name} wasn't tested, because its server's key isn't trusted.", isProblem: true);
+                SayTestResult($"{site.Name} wasn't tested, because its server's key isn't trusted.", isProblem: true);
                 return;
             }
 
             if (result.Problem == SiteProblems.HostKeyChanged)
             {
                 if (attempt == 0 && await ReplaceKeyAsync(site, result)) continue;
-                _siteResult.Say($"{site.Name} wasn't used: its server's key is not the one you trusted.", isProblem: true);
+                SayTestResult($"{site.Name} wasn't used: its server's key is not the one you trusted.", isProblem: true);
                 return;
             }
 
-            if (result.Ok) _siteResult.Say($"{site.Name}: connected, and its start folder was listed.");
-            else _siteResult.Say($"{site.Name}: {(string.IsNullOrWhiteSpace(result.Message) ? "the test failed." : result.Message)}", isProblem: true);
+            if (result.Ok) SayTestResult($"{site.Name}: connected, and its start folder was listed.");
+            else SayTestResult($"{site.Name}: {(string.IsNullOrWhiteSpace(result.Message) ? "the test failed." : result.Message)}", isProblem: true);
             return;
         }
+    }
+
+    /// <summary>
+    /// A test's outcome, scrolled into view: the line sits under the sites list, which can be below the fold of the page
+    /// when the Test button was pressed.
+    /// </summary>
+    private void SayTestResult(string text, bool isProblem = false)
+    {
+        _siteResult.Say(text, isProblem);
+        _siteResult.Text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_siteResult.Text.XamlRoot is not null) _siteResult.Text.StartBringIntoView();
+        });
     }
 
     /// <summary>First use: reads the server's keys without signing in, shows them, and records them if the user trusts them.</summary>

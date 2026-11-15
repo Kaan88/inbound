@@ -97,6 +97,13 @@ public sealed partial class SitesPanel : UserControl
 
     internal string Path => _path;
 
+    // True from opening at the site's start folder until a folder has loaded: the start folder is the Host's to say
+    // (null asks for it), so Try again and opening the site again ask for it again rather than for "/".
+    private bool _atStart;
+
+    /// <summary>Where opening this site again should go: the folder shown, or null while the start folder never loaded.</summary>
+    internal string? ReopenPath => _atStart ? null : _path;
+
     // What the shown place depends on; when it changes the place is not kept.
     private string? _openedAs;
 
@@ -118,6 +125,7 @@ public sealed partial class SitesPanel : UserControl
         _openedAs = StartOf(site);
         SiteNameText.Text = site.Name;
         _path = path is null ? SitesBrowseRules.Root : SitesBrowseRules.Normalize(path);
+        _atStart = path is null;
         _ = LoadAsync(path, refresh: false, append: false);
     }
 
@@ -144,7 +152,7 @@ public sealed partial class SitesPanel : UserControl
         if (SitesBrowseRules.Parent(_path) is { } parent) OpenFolder(parent, selectName: SitesBrowseRules.LeafName(_path));
     }
 
-    internal void Reload() => _ = LoadAsync(_path, refresh: true, append: false);
+    internal void Reload() => _ = LoadAsync(ReopenPath, refresh: true, append: false);
 
     internal async Task ToggleStarAsync()
     {
@@ -199,10 +207,13 @@ public sealed partial class SitesPanel : UserControl
         _cts?.Cancel();
         _generation++;
         _loading = false;
+        // The view is left: the panel no longer holds the keyboard (a collapsed element's LostFocus is not relied on).
+        IsTabStop = false;
     }
 
     private void OpenFolder(string path, string? selectName = null)
     {
+        _atStart = false;
         _path = SitesBrowseRules.Normalize(path);
         _selectAfter = selectName;
         _ = LoadAsync(_path, refresh: false, append: false);
@@ -279,6 +290,7 @@ public sealed partial class SitesPanel : UserControl
         }
 
         _failed = false;
+        _atStart = false;
         _listing = result.Listing;
         _path = SitesBrowseRules.Normalize(string.IsNullOrEmpty(result.Path) ? path : result.Path);
         foreach (var item in result.Items) _rows.Add(new SiteItemRow(item));
@@ -331,7 +343,10 @@ public sealed partial class SitesPanel : UserControl
 
     private void OnLostFocus(object sender, RoutedEventArgs e)
     {
-        if (ReferenceEquals(e.OriginalSource, this)) IsTabStop = false;
+        // WinUI raises LostFocus later than the move: one from an earlier load may arrive after the panel took the
+        // keyboard again, and must not make it stop being a tab stop while it holds it.
+        if (ReferenceEquals(e.OriginalSource, this) && !(XamlRoot is not null && ReferenceEquals(FocusManager.GetFocusedElement(XamlRoot), this)))
+            IsTabStop = false;
     }
 
     /// <summary>A load that failed while the panel held the keyboard gives it to Try again.</summary>
@@ -351,9 +366,13 @@ public sealed partial class SitesPanel : UserControl
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (generation != _generation || ItemsList.Visibility != Visibility.Visible || XamlRoot is null) return;
+            var focused = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+            // The user moved on without a load (a dialog, an open menu, a click in the sidebar): the keyboard is theirs.
+            // Only the menu bar, where hiding the list sends it, is taken back.
+            if (focused is not null && !IsInside(focused, this) && !IsInMenuBar(focused)) return;
             // The selected row itself: a row scrolled away is reused for another item and loses the keyboard with it.
             var row = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as Control : null;
-            if (row is not null && FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused && IsInside(focused, row)) return;
+            if (row is not null && focused is not null && IsInside(focused, row)) return;
             if (row?.Focus(FocusState.Programmatic) != true) ItemsList.Focus(FocusState.Programmatic);
             if (tries > 1) FocusListWhenReady(generation, tries - 1);
         });
@@ -364,6 +383,17 @@ public sealed partial class SitesPanel : UserControl
         for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
         {
             if (ReferenceEquals(node, container)) return true;
+        }
+
+        return false;
+    }
+
+    // A menu bar item, not an open menu: an open menu's items live in a popup, outside the bar.
+    private static bool IsInMenuBar(DependencyObject element)
+    {
+        for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is MenuBar) return true;
         }
 
         return false;
@@ -509,7 +539,10 @@ public sealed partial class SitesPanel : UserControl
         try
         {
             var start = _rows.Count;
+            var generation = _generation + 1;
             await LoadAsync(_path, refresh: false, append: true);
+            // Another folder or site was opened meanwhile: its rows are not the ones this page added.
+            if (generation != _generation) return;
             // The last page took the button (and the keyboard with it) away: the keyboard goes to the first new row.
             if (MoreButton.Visibility == Visibility.Collapsed && ItemsList.Visibility == Visibility.Visible && _rows.Count > start)
             {

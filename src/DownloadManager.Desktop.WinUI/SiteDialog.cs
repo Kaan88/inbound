@@ -20,7 +20,7 @@ internal sealed class SiteDialog
     private readonly Func<SiteSaveRequest, CancellationToken, Task<SiteResultDto>> _save;
     private readonly TextBox _name = new() { Header = "Name", PlaceholderText = "My server" };
     private readonly TextBox _host = new() { Header = "Server", PlaceholderText = "files.example.com" };
-    private readonly TextBox _port = new() { Header = "Port", Width = 110 };
+    private readonly TextBox _port = new() { Header = "Port", Width = 96 };
     private readonly TextBox _user = new() { Header = "User name" };
     private readonly RadioButtons _auth = new() { Header = "Sign in with" };
     private readonly PasswordBox _password = new() { Header = "Password", PasswordRevealMode = PasswordRevealMode.Hidden };
@@ -66,6 +66,7 @@ internal sealed class SiteDialog
         }
         else _privateKey.PlaceholderText = "-----BEGIN OPENSSH PRIVATE KEY-----";
 
+        ScrollViewer.SetHorizontalScrollBarVisibility(_privateKey, ScrollBarVisibility.Auto);
         AutomationProperties.SetName(_name, "Site name");
         AutomationProperties.SetName(_host, "Server");
         AutomationProperties.SetName(_port, "Port");
@@ -124,10 +125,17 @@ internal sealed class SiteDialog
     private async Task<SiteDto?> RunAsync(FrameworkElement root)
     {
         var xamlRoot = root.XamlRoot!;
-        var panel = new StackPanel { Spacing = 10, MinWidth = 380 };
+        // A fixed width: a long unwrapped key line would otherwise widen the whole dialog (it scrolls in its box instead).
+        var panel = new StackPanel { Spacing = 10, MinWidth = 380, MaxWidth = 440 };
         panel.Children.Add(_name);
-        panel.Children.Add(_host);
-        panel.Children.Add(_port);
+        // Server and port on one line, as an address is read.
+        var address = new Grid { ColumnSpacing = 8 };
+        address.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        address.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(_port, 1);
+        address.Children.Add(_host);
+        address.Children.Add(_port);
+        panel.Children.Add(address);
         if (_existing is not null)
             panel.Children.Add(SettingsWindow.Hint("Changing the server or the port asks about the server's key again."));
         panel.Children.Add(_user);
@@ -254,9 +262,9 @@ internal sealed class SiteDialog
             }
 
             var text = await File.ReadAllTextAsync(file);
-            if (!SitesRules.LooksLikePrivateKey(text))
+            if (SiteKeyRules.Problem(text) is { } keyProblem)
             {
-                ShowError("That file doesn't look like a private key. It starts with \"-----BEGIN\".");
+                ShowError(keyProblem);
                 return;
             }
 
