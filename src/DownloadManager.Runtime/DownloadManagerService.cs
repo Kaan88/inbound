@@ -4454,6 +4454,9 @@ public sealed partial class DownloadManagerService
     /// <summary>Tests only: called in the gap between a job being picked and its runner starting (audit 2 L14).</summary>
     internal Action<Guid>? BeforeRunForTesting { get; set; }
 
+    /// <summary>Tests only: stands in for Windows' check of a finished download (L3), which a test can't make remove a file.</summary>
+    internal Func<string, string?, Task<ScanOutcome>>? ScanForTesting { get; set; }
+
     /// <summary>
     /// Audit 2 L10: decided and applied under one gate, so two callers can't apply their answers out of order and leave
     /// sleep prevented with nothing downloading. The gate is taken before <c>_sync</c>, never inside it.
@@ -4702,6 +4705,17 @@ public sealed partial class DownloadManagerService
                 job.ReceivedBytes, job.TotalBytes);
         }
 
+        // L3: before the download counts as finished, Windows checks the file as it checks a browser's download (the
+        // antivirus, and the internet mark of REV.4), so nothing sees it completed (a window, extraction, hooks) first.
+        // A file the antivirus took away fails the download, not to be retried by itself.
+        var scan = ScanOutcome.NotRun;
+        if (result.Success && job.Torrent is null && !runtime.CancelRequested)
+        {
+            var landed = result.FinalFilePath ?? job.FinalFilePath;
+            scan = await (ScanForTesting?.Invoke(landed, job.EffectiveUrl) ?? DownloadScan.RunAsync(landed, job.EffectiveUrl, _log)).ConfigureAwait(false);
+            if (scan == ScanOutcome.Removed) _log?.Invoke($"Job {job.Id}: the antivirus removed its file.");
+        }
+
         var deletePayload = false;
         var deleteFinal = false;
         string changeType;
@@ -4744,6 +4758,16 @@ public sealed partial class DownloadManagerService
                 deletePayload = runtime.DeleteOnCancel;
                 deleteFinal = result.Success && runtime.DeleteOnCancel && !runtime.CancelledForRemoval;
                 changeType = "cancelled";
+            }
+            else if (result.Success && scan == ScanOutcome.Removed)
+            {
+                job.State = DownloadState.Failed;
+                job.Failure = new JobFailure(FailureKind.VerificationFailed,
+                    "Your antivirus removed the file after it was downloaded.", false, false, DateTimeOffset.UtcNow);
+                runtime.CancelRequested = false;
+                runtime.PauseRequested = false;
+                runtime.ResumeWhenStopped = false;
+                changeType = "failed";
             }
             else if (result.Success)
             {
@@ -4844,8 +4868,9 @@ public sealed partial class DownloadManagerService
 
         if (changeType == "completed")
         {
-            // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it.
-            if (job.Torrent is null) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
+            // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it
+            // (already done by the check above when Windows ran it).
+            if (job.Torrent is null) { if (scan != ScanOutcome.Passed) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log); }
             else await MarkTorrentFilesAsync(job).ConfigureAwait(false);
             // T10: a download that looks like a torrent, and whose file reads as one, is offered as a torrent. Only such a
             // download's file is read (TorrentFileRule); every other file is left unopened.

@@ -227,6 +227,11 @@ recorded. Failure leaves Chrome's download intact.
   (`SecretProtector`: DPAPI on Windows, the AES-GCM key file in the server's data folder, the Linux Host's own choice) and never logged; a server's SSH key or self-signed certificate is trusted
   only after the user saw its fingerprint. A web session or a server caller is held to its folders on the computer
   Inbound runs on, and can't choose a program for Sites to run (`docs/ipc-protocol.md`, "Sites").
+- A finished download from the network is handed to Windows as a browser hands over its own (L3,
+  `Runtime/DownloadScan`, `IAttachmentExecute::Save`): the registered antivirus checks it and the internet mark
+  (`Zone.Identifier`, zone 3, the site only) is written, before anything extracts or opens it. A file the antivirus takes
+  away fails the download, which is not retried by itself. Off Windows, or when the check can't run, only the mark is
+  written (REV.4).
 - Download URLs are restricted to http/https (FTP was cut in 0.7.2: an
   ftp:// address is refused with "FTP addresses aren't supported.", and an FTP
   download an older version left fails with it) and cannot address

@@ -257,8 +257,8 @@ as `docker images` shows it, of which the ASP.NET base is 342 MB; the server and
 
 ## Not done in the container
 
-- Sites in the image has not been built and run yet; it is tested with the same server program on Windows
-  (`SiteDeviceStreamTests` and a walk in a browser).
+- Sites in the image was built and run once on the owner's test VM (2026-11-15, linux/amd64, ROADMAP SITES.7); the
+  sign-in sites (Drive, OneDrive, Dropbox) were not tried there.
 
 - After an extraction's renames the folder itself is not flushed to disk (Windows does it; Linux skips it), so a
   power cut just then could lose the renames, though not the data.

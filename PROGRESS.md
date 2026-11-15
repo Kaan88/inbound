@@ -413,18 +413,40 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AG. SITES.7: the Docker image with Sites, run** (2026-11-15, main at `8666b73`, the owner's test VM, linux/amd64).
+  Built on the VM from `git archive` of that commit, with the 0.7.1 image's torrent worker passed in through
+  `--build-context torrent-worker=` (the rest built from source); the image is 490 MB. Run with sign-in from the
+  environment, `/downloads` as its folder, and a second container of the same image serving a WebDAV folder with its
+  rclone on a private network. From this PC over the network, as a browser would: signed in; Sites off at first, then
+  on; rclone 1.76.0 from the image (`source=shipped`, no download); a WebDAV site saved, tested ("Connected"),
+  `/pub` browsed; a 3,000,000-byte file downloaded to this device with the same SHA-256 as on the server; a file uploaded
+  from this device (non-ASCII name) and read back byte for byte; a transfer into `/downloads` finished, the file the same
+  SHA-256 and owned by uid 1000 (`PUID`); a transfer into `/etc` refused ("outside the folders this server may use").
+  Everything removed afterwards (containers, network, image, folder; `docker builder prune` also cleared the VM's
+  unused build cache); the owner's `inbound` container untouched. **Not tried there:** sign-in sites (Drive, OneDrive,
+  Dropbox), the web UI's own pages in a browser against the image (the same server program was walked on Windows).
+- **AF. L3: Windows checks each finished download** (2026-11-15, main). New `Runtime/DownloadScan`: on Windows a
+  completed download from the network is passed to `IAttachmentExecute::Save` on its own STA thread (two minutes at
+  most), with only the site as its source, which runs the registered antivirus and writes the internet mark. If the
+  file is gone afterwards the job fails with "Your antivirus removed the file after it was downloaded."
+  (`VerificationFailed`, so queues don't retry it) before extraction, hooks or the completion notice; if the check
+  can't run, the plain mark of REV.4 is written as before. Loopback and local downloads and torrents are not checked
+  (torrent files keep their marks). **Tests:** a removed file fails the job and is not retried, a passed one completes
+  (through a test hook), and the real check on a harmless file returned Passed here and wrote zone 3 with the site
+  only. **Not seen:** a real detection (an EICAR file would raise a Defender alert on the owner's desktop); another
+  antivirus; a slow scan of a large file. A first placement checked the file after the job already read as completed, so a watcher could see it completed before its mark (the REV.4 mark test caught it); the check now runs before the job's state is decided. **Full integration run** with the final code: 2,018 tests, 1 failure, `KilledDuringExtractionAndDuringArchiveCleanup...` counting 15 provider links instead of 14 (when the kill lands); it passed alone and the kill-matrix group 9 of 9 three times in a row.
 - **AE. What waits for the owner** (2026-11-15). Everything else on the roadmap that could be done here is done or
   decided with numbers. Left, each needing the owner:
-  - **Docker image with Sites (SITES.7):** not built here: WSL is not installed (installing it needs admin and a restart)
-    and the test VM's password is not in this session. Either give the VM's password again, or push a branch for the
-    Docker workflow to build.
+  - **Docker image with Sites (SITES.7):** done on the test VM (AG).
   - **Walks in the running app:** the T rows, UI.B24, UI.B26, UI.R37, T13 (scaling), AUDIT.1, SITES.1 to 3 visuals, the
     About link to the third-party notices, the AOT native host from a real browser download (PERF.10).
   - **Accounts and stores:** a real Google, Microsoft, Dropbox or B2 sign-in for Sites (SITES.6, question P); whether every
     signed-in browser counts as the admin (question Q); the Edge store review (EXT.S1); extension 0.6.3 not uploaded
     (EXT.R12).
   - **Linux** (deferred): the quiet PERF.8/PERF.15 re-run, PERF.18, D7.W.
-  - **Ideas L1 to L5:** not started; none has been asked for, so none is begun without the owner choosing.
+  - **Ideas:** L3 is built (AF). L1 (video from websites) goes against CUT.1, where the owner cut stream downloading
+    ("use a video downloader"), so it is left. L2 (Usenet) is as large as the torrent client and L5 (hoster accounts)
+    is low value next to TorBox; both wait for the owner to want them.
   - **UPD.N3:** waits until no install at 0.7.7 or older updates directly.
   - **Nothing is pushed** (this session's commits are on local main).
 - **AD. PERF.19 finished** (2026-11-15, main). A CPU profile of the web UI at 5,000 jobs and 8 downloads
