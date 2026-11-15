@@ -456,7 +456,7 @@
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,1,0">
-                <Grid>
+                <Grid x:Name="SidebarGrid">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />

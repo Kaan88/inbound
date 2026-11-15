@@ -88,6 +88,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSecrets.cs" Link="WinUI\ServerSecrets.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSwitch.cs" Link="WinUI\ServerSwitch.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CommandKey.cs" Link="WinUI\CommandKey.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressWindowSet.cs" Link="WinUI\ProgressWindowSet.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\VersionStatus.cs" Link="WinUI\VersionStatus.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />

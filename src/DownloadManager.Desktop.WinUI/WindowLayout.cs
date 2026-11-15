@@ -33,6 +33,18 @@ internal static class WindowLayout
     {
         if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
         var size = ScaledToFit(window, width, height);
+#if HAS_UNO
+        if (OperatingSystem.IsMacOS())
+        {
+            // Uno 6.7's macOS presenter hands these to NSWindow.minSize as they are, and minSize is in points: a minimum
+            // in pixels was twice as big on a Retina screen, and the first resize threw the window past the screen's
+            // edges. In points, macOS keeps to it while the window is dragged, so the grow-back below isn't needed.
+            var scale = UnoScreens.Scale();
+            presenter.PreferredMinimumWidth = (int)Math.Round(size.Width / scale);
+            presenter.PreferredMinimumHeight = (int)Math.Round(size.Height / scale);
+            return;
+        }
+#endif
         presenter.PreferredMinimumWidth = size.Width;
         presenter.PreferredMinimumHeight = size.Height;
 #if HAS_UNO
@@ -109,7 +121,10 @@ internal static class WindowLayout
     /// never sits under a white caption) and the app icon. Re-applies when the root's theme changes.
     /// </summary>
     /// <summary>Whether windows get Mica: Windows 11. Elsewhere the window brush is the solid color beneath Mica.</summary>
-    public static bool MicaSupported { get; } = Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported();
+    /// macOS (Uno): Uno answers yes, but its macOS window doesn't clear what a transparent root leaves, so every frame
+    /// is drawn over the last (trails, translucent dialogs brightening). macOS windows are solid.
+    public static bool MicaSupported { get; } =
+        !OperatingSystem.IsMacOS() && Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported();
 
     /// <summary>
     /// Without Mica a transparent window would show nothing behind it, so the window brush becomes the solid color

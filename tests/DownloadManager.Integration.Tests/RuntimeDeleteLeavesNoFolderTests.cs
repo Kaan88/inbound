@@ -171,6 +171,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // a junction is a Windows link
     public async Task DeletingAProviderFileNeverRemovesOrFollowsAJunction()
     {
         var broker = new ScriptedBroker(job => RemoteLinkResolution.Link(SlowLink(job.FileName)));

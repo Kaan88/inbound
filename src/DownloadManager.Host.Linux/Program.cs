@@ -24,11 +24,16 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            Console.Error.WriteLine("This is the Linux Host; on Windows, run DownloadManager.Host.");
+            Console.Error.WriteLine("This is the Linux and macOS Host; on Windows, run DownloadManager.Host.");
             return 1;
         }
+
+        // macOS has no setsid(1): DetachedProcess starts the Host in the background, and the Host leaves its starter's
+        // session here, so a browser that ends the native host's process group doesn't end the Host.
+        // Only a Host meant for the background: one run by hand from a terminal keeps it, so Ctrl-C still ends it.
+        if (OperatingSystem.IsMacOS() && args.Contains("--background")) DetachedProcess.LeaveSession();
 
         // What the Host opens inherits this; the program's own folder (an AppImage mount) isn't one to hold.
         Environment.CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -54,7 +59,7 @@ internal static class Program
         }
 
         var log = new FileLogger(paths.LogsDirectory);
-        log.Info($"Linux Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
+        log.Info($"{(OperatingSystem.IsMacOS() ? "macOS" : "Linux")} Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => log.Error($"Unhandled exception: {e.ExceptionObject}");
 
         try
@@ -92,7 +97,7 @@ internal static class Program
         using var notifications = new DesktopNotifications(log.Warn);
         var completionExecutor = new LinuxCompletionActionExecutor(log.Info) { Notice = notifications.Notify };
         // One power request for downloads and site transfers (SITES.4): held while either is running.
-        using var sharedSleep = new SharedSleepPrevention(new LogindSleepPrevention(log.Info));
+        using var sharedSleep = new SharedSleepPrevention(OperatingSystem.IsMacOS() ? new MacSleepPrevention(log.Info) : new LogindSleepPrevention(log.Info));
         var sleepPrevention = sharedSleep.Share();
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
@@ -221,6 +226,9 @@ internal static class Program
             log.Warn($"Browser registration failed: {ex.GetType().Name}");
         }
 
+        using var sounds = OperatingSystem.IsMacOS() ? new MacSounds(log.Warn) : null;
+        // MAC.6: set once the menu-bar helper runs; its notifications are Inbound's own, with Open, Show in Finder and Retry.
+        MacMenuBar? macMenu = null;
         // As the Windows Host's tray balloons: the same notices on the same settings.
         using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
         {
@@ -233,8 +241,42 @@ internal static class Program
                 DownloadNoticeKind.Failed or DownloadNoticeKind.Extraction => true,
                 _ => false,
             };
-            if (show) notifications.Notify(notice.Title, notice.Message);
+            if (show && macMenu is { Notifications: "on" } helper)
+            {
+                var kind = notice.Kind switch
+                {
+                    DownloadNoticeKind.Completed => "completed",
+                    DownloadNoticeKind.Failed => "failed",
+                    _ => null,
+                };
+                helper.Notify(notice.Title, notice.Message, kind is null ? null : notice.JobId, kind);
+            }
+            else if (show)
+            {
+                notifications.Notify(notice.Title, notice.Message);
+            }
+            // MAC.5: the event sounds, as the Windows Host plays them.
+            if (sounds is null) return;
+            if (notice.Kind == DownloadNoticeKind.Completed && current.PlayCompletionSound) sounds.Play("completed", current.EventSoundFiles);
+            if (notice.Kind == DownloadNoticeKind.Failed && current.EventSoundFiles.ContainsKey("failed")) sounds.Play("failed", current.EventSoundFiles);
         }, log.Warn);
+        if (sounds is not null)
+        {
+            // A queue's last download ended: once per run of the queue, as on Windows.
+            var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
+            service.JobChanged += (_, e) =>
+            {
+                var current = currentSettings;
+                var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
+                    (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
+                if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
+                if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
+                    service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
+                        .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&
+                    finishedQueueSounds.TryAdd(e.Job.QueueId, 0))
+                    sounds.Play("queueFinished", current.EventSoundFiles);
+            };
+        }
         // [TODO D7] Whether the window is in front, so a notice it already shows isn't repeated.
         using var remoteNotices = remoteStarted
             ? RemoteNotices.Listen(remoteJobs, TimeProvider.System, () => currentSettings.NotifyOnCompletion, () => false, notice =>
@@ -271,15 +313,50 @@ internal static class Program
         }
 
         // Optional: without a tray the Host runs as before, and the window and the CLI reach it as always.
-        await using var tray = await StatusNotifierTray.TryStartAsync(new LinuxTrayActions(
+        var trayActions = new LinuxTrayActions(
             Open: () => platform.OpenUi(),
             OpenSettings: () => platform.OpenUi("settings"),
             PauseAll: () => Observe(service.PauseAllAsync(), log, "Pause all"),
             ResumeAll: () => Observe(service.ResumeAllAsync(), log, "Resume all"),
             Exit: () => completionExecutor.ExitHost?.Invoke(),
-            ActiveCount: () => service.ActiveDownloadCount()), log.Info).ConfigureAwait(false);
-        service.TrayAvailable = platform.TrayAvailable = tray is not null;
+            ActiveCount: () => service.ActiveDownloadCount());
+        // macOS: the menu-bar icon (inbound-menu) in place of the StatusNotifierItem, which needs a D-Bus session.
+        await using var tray = OperatingSystem.IsMacOS() ? null : await StatusNotifierTray.TryStartAsync(trayActions, log.Info).ConfigureAwait(false);
+        await using var menuBar = OperatingSystem.IsMacOS() ? MacMenuBar.TryStart(trayActions, log.Info) : null;
+        service.TrayAvailable = platform.TrayAvailable = tray is not null || menuBar is not null;
         if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
+        if (menuBar is not null) service.JobChanged += (_, _) => menuBar.RequestRefresh();
+        if (menuBar is not null)
+        {
+            // MAC.5: "Add links I copy": the helper reads the clipboard, by the Windows Host's rules from there on.
+            var copiedLinks = new CopiedLinks(service, remoteJobs);
+            var copiedFilter = new CopiedUrlFilter();
+            var copiedGate = new Lock();
+            menuBar.Requests.Copied = text =>
+            {
+                string? url;
+                lock (copiedGate) url = copiedFilter.Accept(text, DateTimeOffset.UtcNow);
+                if (url is null) return;
+                log.Info($"Clipboard URL detected: {copiedLinks.DescribeForLog(url)}");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var outcome = await copiedLinks.AddAsync(url).ConfigureAwait(false);
+                        if (outcome.Title is { } title) notifications.Notify(title, outcome.Words ?? string.Empty);
+                        if (outcome.Problem is { } problem) log.Warn(problem);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error($"Clipboard download failed ({copiedLinks.DescribeForLog(url)}): {DownloadManager.Core.Providers.UrlRedactor.RedactText(ex.ToString())}");
+                    }
+                });
+            };
+            menuBar.WatchClipboard(currentSettings.ClipboardMonitoring);
+            service.SettingsChanged += (_, _) => menuBar.WatchClipboard(service.GetSettings().ClipboardMonitoring);
+            WireMacMenu(menuBar, service, platform, copiedLinks, notifications, log);
+            macMenu = menuBar;
+        }
 
         webUi.Notice = notifications.Notify;
         updateMonitor.Attach(notifications.Notify);
@@ -378,7 +455,15 @@ internal static class Program
         var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
         if (!File.Exists(keyFile))
         {
-            using var keyring = SecretServiceKeyStore.TryOpen(paths.Root, log.Info);
+            if (OperatingSystem.IsMacOS() && MacKeychainKeyStore.TryOpen(paths.Root, log.Info) is { } keychain)
+            {
+                var protector = AesGcmSecretProtector.OpenForDataFolder(keychain, paths.Root,
+                    keyFile + AesGcmSecretProtector.DiscardedFileSuffix, discardUnreadable: false, log.Warn);
+                log.Info("The secret key is kept in the login Keychain.");
+                return protector;
+            }
+
+            using var keyring = OperatingSystem.IsMacOS() ? null : SecretServiceKeyStore.TryOpen(paths.Root, log.Info);
             if (keyring is not null)
             {
                 var protector = AesGcmSecretProtector.OpenForDataFolder(keyring, paths.Root,
@@ -466,6 +551,9 @@ internal static class Program
         {
             // A sandbox data folder (tests, a second profile) must not change the real handler.
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+            // macOS opens files and links through the bundle's Info.plist and Apple events, not desktop files; the
+            // window doesn't offer the setting there (not built yet), so nothing is written for it.
+            if (OperatingSystem.IsMacOS()) return;
             lock (_sync)
             {
                 if (_applied == wanted) return;
@@ -535,6 +623,85 @@ internal static class Program
         {
             log.Error($"{name}: {ex.GetType().Name}");
         }
+    }
+
+    /// <summary>
+    /// MAC.6: what the menu-bar helper asks besides the tray's actions: a download's own menu and notification buttons,
+    /// links and files dropped on the icon or sent by Services, the downloads folder, the Mac waking or its clock
+    /// changing, and the network and power state for "Pause downloads on a phone hotspot…".
+    /// </summary>
+    private static void WireMacMenu(MacMenuBar menuBar, DownloadManagerService service, LinuxHostPlatform platform,
+        CopiedLinks copiedLinks, DesktopNotifications notifications, FileLogger log)
+    {
+        var requests = menuBar.Requests;
+        requests.Job = (action, id) =>
+        {
+            switch (action)
+            {
+                case "pause": Observe(service.PauseAsync(id), log, "Pause"); break;
+                case "resume" or "retry": Observe(service.ResumeAsync(id), log, "Resume"); break;
+                case "show": platform.ShowJob(id); break;
+                case "open" or "reveal":
+                    // A notification can outlive its download, or the file can have been moved.
+                    if (service.GetJob(id) is not { } job || string.IsNullOrEmpty(job.FinalFilePath)) break;
+                    if (action == "open" && File.Exists(job.FinalFilePath)) platform.OpenFile(job.FinalFilePath);
+                    else if (File.Exists(job.FinalFilePath) || Directory.Exists(Path.GetDirectoryName(job.FinalFilePath))) platform.RevealFile(job.FinalFilePath);
+                    break;
+            }
+        };
+        requests.AddText = text =>
+        {
+            // A drop, Services or Add from Clipboard: asked for, so not the copied-link filter; the same routing after it.
+            foreach (var url in MacMenuBar.WebLinks(text))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var outcome = await copiedLinks.AddAsync(url).ConfigureAwait(false);
+                        if (outcome.Title is { } title) notifications.Notify(MacMenuBar.AddedTitle(title), outcome.Words ?? string.Empty);
+                        if (outcome.Problem is { } problem) log.Warn(problem);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error($"Menu-bar add failed ({copiedLinks.DescribeForLog(url)}): {ex.GetType().Name}");
+                    }
+                });
+            }
+        };
+        requests.AddFile = path =>
+        {
+            if (path.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && File.Exists(path)) platform.OpenTorrentFiles([path]);
+            else log.Info("A file dropped on the menu-bar icon was not a .torrent file; nothing was added.");
+        };
+        requests.OpenFolder = () =>
+        {
+            var folder = service.GetSettings().DefaultDownloadDirectory;
+            if (Directory.Exists(folder)) platform.OpenFile(folder);
+        };
+        // As the Windows Host's resume and time-change events (audit 2 M18): timers count only time awake.
+        requests.Wake = () =>
+        {
+            TimeZoneInfo.ClearCachedData();
+            service.NotifyClockChanged();
+        };
+        var saving = new SavingPauses(hold => service.SetSavingHoldAsync(hold));
+        requests.Network = kind => Observe(saving.NetworkAsync(kind), log, "Network change");
+        requests.Power = state => Observe(saving.PowerAsync(state), log, "Power change");
+        requests.Ended = () => Observe(saving.HelperEndedAsync(), log, "Menu-bar helper ended");
+        Observe(saving.EnabledAsync(service.GetSettings().PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
+        service.SettingsChanged += (_, next) => Observe(saving.EnabledAsync(next.PauseOnCostlyNetworkOrLowPower), log, "Saving setting");
+        menuBar.Status = () => MacMenuBar.StatusJson(service.GetSnapshot().Jobs, saving.Reason);
+        // The helper's first network and power lines may have come before these handlers: it says them again.
+        menuBar.AskForState();
+        menuBar.RequestRefresh();
+        // Every other notice (updates, copied links, the web UI) as Inbound's too; none once the user turned them off.
+        notifications.MacRoute = (title, message) => menuBar.Notifications switch
+        {
+            "on" => menuBar.Notify(title, message, null, null),
+            "off" => true,
+            _ => false,
+        };
     }
 
     private static void Observe(Task task, FileLogger log, string what) => _ = task.ContinueWith(

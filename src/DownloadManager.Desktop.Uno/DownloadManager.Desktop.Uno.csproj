@@ -1,4 +1,4 @@
-<Project Sdk="Uno.Sdk/6.7.45">
+<Project Sdk="Uno.Sdk/6.7.49">
   <!-- D7 prototype: the WinUI window's own sources compiled by Uno Platform's Skia desktop head (Windows, Linux X11).
        Every .cs/.xaml of src\DownloadManager.Desktop.WinUI is linked, not copied; Uno-only differences are #if HAS_UNO
        in those files or shims in this folder. -->
@@ -55,6 +55,7 @@
     <!-- Linux: a saved server's token is sealed with the Host's own key (its key file, or the desktop keyring). -->
     <Compile Include="..\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="Servers\AesGcmSecretProtector.cs" />
     <Compile Include="..\DownloadManager.Host.Linux\SecretServiceKeyStore.cs" Link="Servers\SecretServiceKeyStore.cs" />
+    <Compile Include="..\DownloadManager.Host.Linux\MacKeychainKeyStore.cs" Link="Servers\MacKeychainKeyStore.cs" />
   </ItemGroup>
 
   <!-- Native AOT trial: the WinUI sources use reflection-based System.Text.Json everywhere (no source-generated

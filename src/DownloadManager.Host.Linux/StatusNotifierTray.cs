@@ -3,15 +3,6 @@ using Tmds.DBus.Protocol;
 
 namespace DownloadManager.Host;
 
-/// <summary>What the tray offers; the same as the Windows tray's actions, less the updater.</summary>
-internal sealed record LinuxTrayActions(
-    Action Open,
-    Action OpenSettings,
-    Action PauseAll,
-    Action ResumeAll,
-    Action Exit,
-    Func<int> ActiveCount);
-
 /// <summary>
 /// The tray icon on a Linux desktop: a StatusNotifierItem (<c>org.kde.StatusNotifierItem</c>) with its menu over
 /// <c>com.canonical.dbusmenu</c>, registered with the session's <c>org.kde.StatusNotifierWatcher</c>. KDE Plasma shows it

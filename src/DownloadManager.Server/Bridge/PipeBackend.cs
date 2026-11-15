@@ -201,7 +201,7 @@ internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBa
     private async Task<Stream?> OpenAsync(ClientHelloDto wanted, CancellationToken cancellationToken)
     {
         Stream pipe;
-        if (OperatingSystem.IsLinux())
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             // The Linux Host's hello socket; UnixSockets checks the folder and that the Host is this user.
             try
