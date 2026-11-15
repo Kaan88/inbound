@@ -11,7 +11,8 @@
 #                                        files and scripts may sit in Contents/MacOS, or codesign refuses the bundle.
 #   Contents/Resources/window/           the Uno window (DownloadManager.Desktop.Uno)
 #   Contents/Resources/host/             inbound-host, DownloadManager.Cli, DownloadManager.NativeHost,
-#                                        DownloadManager.Server, inbound-torrent (when built)
+#                                        DownloadManager.Server, inbound-menu (the menu-bar icon),
+#                                        inbound-torrent (when built)
 set -euo pipefail
 rid="${1:-osx-arm64}"
 case "$rid" in osx-arm64) arch=arm64 ;; osx-x64) arch=x64 ;; *) echo "Unknown runtime $rid" >&2; exit 1 ;; esac
@@ -46,6 +47,10 @@ if [ -f "$worker" ]; then
 else
   echo "No torrent worker at $worker: packing without torrents."
 fi
+
+# The menu-bar icon (native/macos-menu): the tray's counterpart, started by the Host from beside it.
+case "$arch" in arm64) swift_target=arm64-apple-macos12 ;; *) swift_target=x86_64-apple-macos12 ;; esac
+swiftc -O -target "$swift_target" -o "$host/inbound-menu" "$root/native/macos-menu/main.swift"
 
 cat > "$macos/InboundLauncher" <<'EOF'
 #!/bin/sh
