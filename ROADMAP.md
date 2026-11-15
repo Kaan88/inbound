@@ -638,6 +638,8 @@ whether rclone is a Setup component that can be unticked.
 - [x] ANDROID.1 Owner review of the design (2026-11-15): accepted. The engine stays .NET unless performance on a phone
   is a problem; then it is ported to Rust. The built-in browser tab is agreed. Plan: `docs/plans/android-app.md`,
   with the screens as images in `docs/plans/android-mockups/`.
+- **Starts only when the perf work is done** (owner, 2026-11-15). Method (owner, same day): implementation is
+  delegated to lesser agents, preferably Sonnet, then reviewed critically and redone where it falls short.
 - [ ] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
   picker grant, how long a service may run, the toolkit. Decides .NET or Rust. Not started.
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
