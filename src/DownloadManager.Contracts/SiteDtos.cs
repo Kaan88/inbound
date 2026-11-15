@@ -64,7 +64,7 @@ public static class SitesRcloneStates
     public const string Waiting = "waiting";
     public const string Failed = "failed";
 
-    /// <summary>No rclone was found (unticked in Setup, or a wrong own path): Sites shows one screen with Repair.</summary>
+    /// <summary>No rclone was found (not downloaded yet, or a wrong own path): Sites shows one screen saying so.</summary>
     public const string Missing = "missing";
 }
 

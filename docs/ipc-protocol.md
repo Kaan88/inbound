@@ -221,9 +221,9 @@ rclone path is saved first, then rclone stops if it must.
 
 `sites.status` carries `SitesStatusDto`:
 
-- `enabled`; `ownRclonePath` (null for the bundled rclone);
+- `enabled`; `ownRclonePath` (null for the one Inbound finds itself);
 - `rclone`: `off`, `starting`, `running`, `stopping`, `waiting`, `failed` or `missing`. `missing` means no rclone was
-  found (Setup left it out, or the chosen path is wrong). An rclone that was found but can't be used (too old for SFTP,
+  found (not downloaded yet, or the chosen path is wrong). An rclone that was found but can't be used (too old for SFTP,
   not rclone, no answer to `rclone version`) is `failed`. Both carry `error` with the reason, and so does a `failed`
   after repeated crashes;
 - `rcloneVersion` (once read; null before the first start or when missing) and `error` (plain words, or null).

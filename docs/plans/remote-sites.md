@@ -8,7 +8,7 @@ Order together with the performance work (PERF.8 to PERF.20), and the rules that
 ## What this is
 
 A Sites view in Inbound: saved remote places, a file browser for each, and uploads, downloads, delete, rename and new
-folder. Every protocol runs through one bundled `rclone` process that the Host controls. The agreed design is the
+folder. Every protocol runs through one `rclone` process that the Host controls (downloaded from Options > Sites on Windows and Linux desktops, included in the Docker image). The agreed design is the
 fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and suggestions").
 
 ## Owner decisions
@@ -21,6 +21,7 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 | 2026-11-13 | "uploads and all the needs that come with it are a must. if rclone can do it all, that's fantastic." |
 | 2026-11-13 | Sites in the sidebar show that a download or upload is active there. |
 | 2026-11-13 | The fourth mockup page is agreed. Sites is switchable. rclone is a separate process that runs only while needed. |
+| 2026-11-15 | Open questions answered: site transfers have their own limit (1); a web session may add and edit sites only as admin (2); no Sites line or anything else of Sites in the extension (4); rclone is **not in Setup or the update zip**: Options > Sites downloads it, and the Docker image includes it (5, replaces "rclone is bundled in Setup" of 2026-11-12); FTPS self-signed certificates go in one CA file Inbound manages (6); no resume is accepted for now (7). Question 3 stays open. |
 
 ## The agreed design in short
 
@@ -32,12 +33,12 @@ fourth mockup page (owner, 2026-11-13: "I completely agree with your mockups and
 - An "On this PC" column: Same, Older here, Some of it, Not here. It compares name, size and time only.
 - Transfers live in a slim bar that opens upward, with tabs Running and waiting, Failed, Done. One row per action; a
   folder is one row that opens.
-- Site transfers never appear in the main downloads list, the Finished view or the extension popup's list. The status
+- Site transfers never appear in the main downloads list, the Finished view or the extension popup. The status
   bar has one chip, and each sidebar site shows arrows with counts, a clock for waiting ones and a progress line.
 - "Delete on server" always asks, with the count and size. Local delete goes to the Recycle Bin.
 - Add a site by picking a tile, then four fields; the rest is under Advanced, with a Test button.
 - Web UI: the same view. "Here" means the machine Inbound runs on. Download and Upload ask "the server or this
-  device". Phone: one pane, bottom sheets. Extension: at most one "Sites" line in the popup.
+  device" (open question 3). Phone: one pane, bottom sheets. The extension shows nothing of Sites (owner, 2026-11-15).
 
 ## Architecture
 
@@ -101,8 +102,9 @@ The price is that these places must be taught about it on purpose:
   exits, so rclone is started from a long-lived thread).
   At shutdown: `core/quit`, wait a few seconds, then kill. At start the Host stops an rclone left by a crashed Host
   (pid file). `TorrentWorkerSupervisor` is the pattern to copy.
-- **Which binary:** `tools\rclone\rclone.exe` next to the Host, or the path set in Options ("Use my own rclone"), or
-  `INBOUND_RCLONE` for tests, as `TorrentSetup.cs` does for the worker. A version check at start; too old shows a
+- **Which binary:** the path set in Options ("Use my own rclone"), or `INBOUND_RCLONE` for tests, or the copy Options
+  downloaded (`<state>\tools\rclone\<version>\rclone(.exe)`, see "Getting rclone"), or in the Docker image the one
+  the image ships, as `TorrentSetup.cs` does for the worker. A version check at start; too old shows a
   clear message, not a broken view. The oldest accepted for SFTP is 1.75.0, the first with `host_keys` by the
   changelog (run point 3; 1.75.0 itself was not run). An older rclone is refused for SFTP, never used unchecked.
 - **Idle cost:** none when not running. No polling of sites in the background. Sidebar activity comes from the
@@ -131,10 +133,10 @@ The price is that these places must be taught about it on purpose:
      forms, one for a changed key and one when the key's algorithm no longer matches; both must be recognised.
 - **FTPS certificates.** rclone offers a CA file or "do not verify", not pinning, and there is **no per-site CA**:
   the CA file is read once when rclone starts (`RCLONE_CA_CERT`; run point 6). A certificate that fails verification
-  is shown with its fingerprint; if the user trusts it, it is stored with the site. How it then reaches rclone is
-  open question 6: either one Host-managed CA file of accepted certificates, read by rclone at start and rclone
-  restarted when it changes (proposed), or rclone's check turned off for that site (`no_check_certificate`) with
-  the Host checking the fingerprint itself before each connection. A CA file trusts the certificate for every
+  is shown with its fingerprint; if the user trusts it, it is stored with the site. It then reaches rclone
+  through one Host-managed CA file of accepted certificates, read by rclone at start, and rclone is restarted when
+  it changes (owner, 2026-11-15, question 6). Turning rclone's check off for the site and checking the fingerprint
+  in the Host was rejected: it leaves a gap between our check and rclone's connection. A CA file trusts the certificate for every
   remote of that rclone process, though name checking still applies (run point 6). "Do not verify" is never offered
   to the user.
 - **Plain FTP** is a per-site choice with a warning in the dialog and a permanent "Not encrypted" chip in the pane.
@@ -151,12 +153,12 @@ The price is that these places must be taught about it on purpose:
   App registration (owner, 2026-11-14): rclone's shared app IDs are used by default, and the site's settings have an
   optional field for the user's own client ID and secret. Other providers are added one at a time.
 - **Key files:** passphrase-protected keys in the current OpenSSH format work in 1.76.0, as do old PEM and
-  unencrypted keys (run point 5, Linux), so the bundled rclone needs no conversion step. Which version made the
+  unencrypted keys (run point 5, Linux), so the Host's rclone needs no conversion step. Which version made the
   new format work is not known; "Use my own rclone" with a version between 1.75.0 and 1.76.0 needs a test first. A key passed inline (`key_pem`) needs its line
   breaks as literal `\n`.
 - **Web sessions** keep their folder limit: local paths in any `sites.*` command go through `CallerScope` and
   `PathRoots` (`WebSessionProfile.cs:85`). Remote paths are not limited. Whether a web session may add or edit sites
-  follows `SessionRights`; the default proposed is admin only.
+  follows `SessionRights`: admin only (owner, 2026-11-15).
 
 ## Capabilities
 
@@ -179,7 +181,7 @@ from the earlier mockups: folders exist only while they hold something, and rena
   next try overwrites it (run point 7); the Host marks that file as not done and never reports it as complete.
   After a crash the Host removes stray `.partial` files of its batches.
 - **Resume.** A stopped batch continues with the files not yet done. A half-done file starts again from zero
-  (run point 7: SFTP, FTP, WebDAV and local, mostly against `rclone serve`; cloud kinds not tried); "Pause" is stop and start again, and the UI says so. Open question 7. rc job results
+  (run point 7: SFTP, FTP, WebDAV and local, mostly against `rclone serve`; cloud kinds not tried); "Pause" is stop and start again, and the UI says so. Accepted for now (owner, 2026-11-15, question 7); to look at again later. rc job results
   expire after a minute by default, so the Host reads them promptly and keeps its own record.
 - **Conflicts** are decided before the batch starts where possible (the listing is already known), with the dialog
   from the mockups: Skip first, then Replace, then Keep both, and "do this for the others".
@@ -225,8 +227,7 @@ sent to clients that have a site open.
   that is too slow, version one offers server-side transfers only in bridge mode. To be measured.
 - **CLI.** `dm sites list|add|remove|test`, `dm sites ls <site>:<path>`, `dm sites get`, `dm sites put`,
   `dm sites rm`, `dm sites mv`, `dm sites mkdir`, `dm sites transfers`.
-- **Extension.** One optional line in the popup from the activity summary, which means one new message on the
-  native-host allow-list (`NativeBridgePolicy.cs:27`). Last, and only if still wanted.
+- **Extension.** Nothing (owner, 2026-11-15): no popup line and no new native-host message.
 
 ## The switch
 
@@ -236,22 +237,30 @@ transfers-at-once limit and the default view.
 - Off: no Sites section, no site toolbar, no chip, no rclone process, `sites.*` commands answer "Sites is off".
   Saved sites and their sealed secrets stay on disk and return when it is turned on.
 - Turning it off while transfers run asks first, then stops them and rclone.
-- A web session may not flip it unless `WebSettingsRules.cs` lists it; proposed: admin only.
-- If rclone is missing (unticked in Setup, or a bad path), Sites shows one screen saying so with a Repair button.
+- A web session may add and edit sites only as admin (owner, 2026-11-15); flipping the switch follows the same rule
+  (proposed). Until SITES.7 the Host refuses web sessions entirely.
+- Site transfers have their own "transfers at once" limit here, apart from "downloads at once" (owner, 2026-11-15).
+- If rclone is missing (not downloaded yet, or a bad own path), Sites shows one screen saying so with a Download
+  rclone button (or Choose for an own path).
 
 ## Setup, updates, Docker, licences
 
-- `third_party\rclone\` holds the official Windows build, its licence and a `SOURCE.md` with the version, address
-  and SHA-256, like `third_party\7-Zip\`. It is linked into `tools\rclone\` and added to the required-file list in
-  `scripts\publish.ps1:220`. The installer copies the whole publish folder, so no `.iss` change is needed for the
-  file itself; a Setup component tick ("Sites support, rclone") is optional.
-- The update zip (`scripts\package.ps1`) carries it like any other app file. Measured in the run: rclone.exe 1.76.0
-  is about 86 MB unpacked and 32 MB zipped, about 43% on top of the current 200 MB install (open question 5).
+- **Getting rclone (owner, 2026-11-15):** not in Setup and not in the update zip. Options > Sites has "Download
+  rclone": the Host downloads the official zip for this OS and CPU from `downloads.rclone.org`, checks its SHA-256
+  against the value built into this Inbound release (never one read from the server), unpacks only the binary into
+  `<state>\tools\rclone\<version>\` (a temp name, then a rename, so a cut download leaves nothing usable), and
+  checks `rclone version` before using it. Per user, so no admin rights. Size: about 32 MB to download, 86 MB on
+  disk (run point 10). Turning Sites on with no rclone offers the download first.
+- A later Inbound release that pins a newer rclone offers "Update rclone" in Options; the old folder is removed once
+  the new one works. "Use my own rclone" stays for any other version.
+- `third_party\rclone\` holds the licence and a `SOURCE.md` with the pinned version, addresses and SHA-256 values per
+  OS and CPU, like `third_party\7-Zip\`. The licence ships with Inbound (it is shown before the download).
+- Uninstall treats the downloaded copy like the rest of the state, which it keeps (as uninstall does today).
 - Docker: a pinned, checksummed download stage like the 7-Zip one (`Dockerfile:28-50`), linux/amd64 only (arm64 is
   on hold).
 - There is no central third-party notices file today. Add `THIRD-PARTY-NOTICES.md` (7-Zip, rclone, the torrent
   worker's libraries) and link it from Help.
-- rclone updates only with Inbound releases. "Use my own rclone" is the way to run a newer one.
+- The pinned rclone version changes only with Inbound releases. "Use my own rclone" is the way to run another one.
 
 ## FTP: undoing part of CUT.1
 
@@ -272,7 +281,7 @@ Each phase ends with evidence linked in PROGRESS; nothing is marked implemented 
 | Phase | ROADMAP | Content | Done when |
 | --- | --- | --- | --- |
 | 0 | SITES.0 | rclone run: the list below. Measure sizes. Decide the open items. | Results in `remote-sites-rclone-run.md`, the changes here, a note in PROGRESS. |
-| 1 | SITES.1 | `DownloadManager.Sites`: locate, start, supervise, stop rclone; rc client; idle stop; never outlives the Host. Bundled in publish. | Supervisor tests like `WebUiSupervisorTests`; a kill test; idle shows no process. |
+| 1 | SITES.1 | `DownloadManager.Sites`: locate, start, supervise, stop rclone; rc client; idle stop; never outlives the Host. Download from Options (pinned version and SHA-256); in the Docker image. | Supervisor tests like `WebUiSupervisorTests`; a kill test; idle shows no process. |
 | 2 | SITES.2 | Site model, stores, sealed secrets, `sites.list/save/remove/test/kinds`, the Options switch, SFTP host-key trust. | Dispatcher tests; a site saved, Host restarted, tested again; changed key refused. |
 | 3 | SITES.3 | `sites.browse` and the desktop Server only view: toolbar swap, breadcrumbs, stars, sidebar section. Read-only. | Walked in the app against a local test SFTP server, dark mode. |
 | 4 | SITES.4 | Transfers: download and upload batches, stores, Transfers bar, conflicts, failures, retry, speed share, scheduler, sidebar activity, status chip. | Hash-matched files both ways; Host killed mid-batch and restarted; limits respected. |
@@ -280,7 +289,7 @@ Each phase ends with evidence linked in PROGRESS; nothing is marked implemented 
 | 6 | SITES.6 | Kinds beyond SFTP: FTP, FTPS (certificate trust, plain-FTP warning), WebDAV presets, OAuth kinds, S3 and B2, capability differences. | One real or emulated server per kind; no provider claims without a source. |
 | 7 | SITES.7 | Web UI and phone, including "this device" streams; Docker image with rclone. | Web tests; a container run on the Docker test VM when Linux work resumes. |
 | 8 | SITES.8 | CLI `dm sites`. | CLI integration tests. |
-| 9 | SITES.9 | Extension popup line, notices file, docs (`ipc-protocol.md`, `architecture.md`, `new-frontend-guide.md`, `docker.md`), release notes. | Docs match the code. |
+| 9 | SITES.9 | Notices file, docs (`ipc-protocol.md`, `architecture.md`, `new-frontend-guide.md`, `docker.md`), release notes. | Docs match the code. |
 
 Phases 1 to 5 with SFTP alone are a usable first release behind the switch. Complex parts (the supervisor, trust,
 batch durability, the IPC surface) stay with the main model; dialogs, CLI text and docs can be delegated.
@@ -312,8 +321,8 @@ Each question with its answer (run point in brackets) and where the plan now say
    (4; "SFTP host keys").
 5. Key files: unencrypted, old PEM and current OpenSSH with a passphrase all work in 1.76.0 (5; "Key files").
 6. FTPS with a self-signed certificate: there is no per-site CA, only one CA file per rclone process or no check
-   (6; "FTPS certificates", open question 6).
-7. Partial files: `.partial` and rename except WebDAV uploads; nothing resumes (7; "Transfers", open question 7).
+   (6; "FTPS certificates"; one Host-managed CA file, owner 2026-11-15).
+7. Partial files: `.partial` and rename except WebDAV uploads; nothing resumes (7; "Transfers"; accepted for now, owner 2026-11-15).
 8. Progress per group, stopping one batch, `core/bwlimit` live: all work; there is no pause; per-batch speed limits
    not settled (8; "Transfers", IPC).
 9. OAuth refresh with an in-memory config: a named remote and `config/get`; a real refresh seen for Drive and Dropbox, a
@@ -335,32 +344,29 @@ Summary. Since 2026-11-15 the sections above carry these changes; this list is k
   first. Inbound reads the key with a small SSH handshake of its own (key exchange only, no login), shows the
   fingerprint, and passes the accepted key in `host_keys`. A 50-line probe did this in the run.
 - **Key files:** passphrase keys in the current OpenSSH format work. The conversion step is dropped.
-- **FTPS:** there is no per-site CA. Open question 6.
+- **FTPS:** there is no per-site CA. One Host-managed CA file (owner, 2026-11-15).
 - **Resume:** no kind resumes a cut transfer; the file starts again from zero. Downloads, and SFTP and FTP uploads,
   go to `name.<hex>.partial` and are renamed at the end; WebDAV uploads have no temporary name. "Pause" is stop and
-  start again, and the UI says so. Stray `.partial` files are removed after a crash. Open question 7.
+  start again, and the UI says so. Stray `.partial` files are removed after a crash. Accepted for now (owner, 2026-11-15).
 - **Lifetime:** rclone keeps running, and keeps transferring, when its parent dies. The Host ties it to itself: a
   job object on Windows, `PR_SET_PDEATHSIG` on Linux.
 - **Sign-in kinds:** one named in-memory remote per site; the token is read back with `config/get` after each batch
-  and stored if it changed. A real refresh has not been seen.
-- **Size:** rclone.exe is about 86 MB unpacked and 32 MB zipped, about 43% on top of the current install. This bears
-  on open question 5.
-- **Not known:** everything on Windows; timings on a quiet machine; a real token refresh; per-batch speed limits
+  and stored if it changed. A real refresh was seen for Drive and Dropbox on 2026-11-15 (see "Credentials and trust").
+- **Size:** rclone.exe is about 86 MB unpacked and 32 MB zipped, about 43% on top of the current install. So it is
+  downloaded from Options instead of shipped in Setup (owner, 2026-11-15).
+- **Not known:** everything on Windows; timings on a quiet machine; per-batch speed limits
   (only the global limit was seen to work); a cut upload to a real WebDAV, FTP or cloud server.
 
 ## Open questions for the owner
 
-1. Do site transfers count against "downloads at once", or have their own limit (proposed: their own)?
-2. May a web session add and edit sites, or admin only (proposed: admin only)?
-3. Is "to this device" and "from this device" in the first web UI release, or server-side only at first?
-4. Is the extension popup line wanted at all?
-5. Setup: is rclone always installed, or a component the user can untick?
-6. FTPS with a self-signed certificate (from the run): either Inbound keeps one CA file of the certificates the user
-   accepted and restarts rclone when it changes, or rclone's check is turned off for that site and Inbound checks
-   the certificate's fingerprint itself before each connection (proposed: the first; the second leaves a gap between
-   our check and rclone's connection).
-7. No resume (from the run): a stopped or failed site transfer starts its current file again from zero. Accept this
-   for the first release (proposed: yes, and say so in the UI), or hold Sites until a way to resume is found?
+3. Is "to this device" and "from this device" in the first web UI release, or server-side only at first? In the web
+   UI on a phone or another PC, "Download" can mean either: from the site to the machine Inbound runs on (the
+   server), or on through the browser to the device in your hand. "Upload" likewise can take a file from the server
+   or from that device. The device side needs streaming through the Server (and the Host's pipe in bridge mode) and
+   is the slower, larger part. Proposed: server side first, the device side after it is measured.
+
+Answered on 2026-11-15 (see Owner decisions): 1 own limit; 2 admin only; 4 nothing in the extension; 5 downloaded
+from Options, in the Docker image; 6 one Host-managed CA file; 7 no resume, for now.
 
 ## Rejected
 

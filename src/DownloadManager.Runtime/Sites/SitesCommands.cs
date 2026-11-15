@@ -353,7 +353,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 if (rclone is null)
                 {
                     _rcloneProblem = _config.OwnRclonePath is null
-                        ? "rclone is not installed with Inbound. Run Repair in Setup, or choose your own rclone in Options › Sites."
+                        ? "rclone is not on this PC yet. Choose your own rclone in Options › Sites."
                         : "The rclone chosen in Options › Sites was not found.";
                     _rcloneMissing = true;
                     throw new RcloneUnavailableException(_rcloneProblem);
