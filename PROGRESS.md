@@ -427,6 +427,17 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AL. Release 0.8.0 tagged** (2026-11-15). `main` and `v0.8.0` at `aac4b82`, pushed with the owner's go-ahead; the
+  Windows workflow makes the draft release for the owner to finish and publish (Firefox add-on from the earlier
+  release, as before). Setup built locally first: 68.2 MB, the install folder 253 MB with the notices, the Native AOT
+  native host (9.5 MB, no native symbol file) and the compressed web UI files. **A slip, fixed:** the Android session
+  (deleted by the owner) had made a branch `android-trial` in this same checkout and switched to it, so the live-check
+  and release commits landed there on top of its Android note (`dc082eb`), `main` was pushed only to `cb07f7b`, and the
+  first `v0.8.0` tag pointed at a commit with the Android note in it. The tag was deleted within a minute and its
+  Windows build cancelled before it made a draft release; the two commits were cherry-picked onto `main`
+  (`0b4ece0`, `aac4b82`), `android-trial` was put back to `dc082eb`, and the tag made again on `main`. The untracked
+  `tools/AndroidTrial/` and `tools/AndroidTrialServer/` from that session are left for the owner. **Left:** Backblaze B2
+  live (owner: later); the window's default view measured again on a quiet machine.
 - **AK. SITES.6c live: Drive, OneDrive and Dropbox with the owner's accounts** (2026-11-15, main at `cb07f7b`). An
   isolated test instance (own name and data folder) and the real `dm`, rclone 1.76.0. Each service: added, signed in in
   the owner's browser through the printed `127.0.0.1:53682` address (`dm sites sign-in`, rclone's own app), tested, a
