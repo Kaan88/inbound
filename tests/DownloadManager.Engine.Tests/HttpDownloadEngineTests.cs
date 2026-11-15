@@ -683,6 +683,19 @@ public sealed class HttpDownloadEngineTests
             Assert.False(result.Success);
             Assert.Equal(FailureKind.Timeout, result.Failure!.Kind);
         }
+
+        // PERF.9: the range workers read through the same deadline; a stalled range is still a timeout, not a cancel.
+        using (var engine = CreateEngine(
+                   maxAttempts: 1, readTimeout: TimeSpan.FromMilliseconds(250)))
+        {
+            var job = ctx.CreateJob(
+                $"{_server.BaseAddress}/slow/timeout-segments.bin?size=4194304&seed=13&bps=1024",
+                "timeout-segments.bin");
+            job.RequestedConnections = 4;
+            var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.Timeout, result.Failure!.Kind);
+        }
     }
 
     [Fact]

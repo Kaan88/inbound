@@ -11,6 +11,9 @@ internal sealed class TransferRateLimiter(Func<long?> readLimit)
     private double _creditBytes;
     private int _maximumBurstBytes;
 
+    /// <summary>Whether a cap is set now (PERF.9: the loops then read in small steps, so the cap stays smooth).</summary>
+    public bool Limited => readLimit().GetValueOrDefault() > 0;
+
     public async Task WaitAsync(int bytes, CancellationToken cancellationToken)
     {
         // No cap is the common case: skip the gate, so uncapped transfers never queue behind each other.

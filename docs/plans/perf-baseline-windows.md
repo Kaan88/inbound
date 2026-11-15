@@ -104,6 +104,46 @@ status bar redraw every tick, whatever changed. That is where PERF.16 and PERF.1
 The Host is quiet. The hidden window wakes about 126 times a second while doing nothing: PERF.4's remaining
 wake-ups, now measured. With the option on (the default since PERF.5) there is no window process after closing.
 
+## PERF.9: the transfer loop (2026-11-15)
+
+`TransferReader` gives each response one pooled buffer and one cancellation source re-armed per read, instead of a
+task, a timer and a 128 KB array; uncapped, it fills half the buffer before each write. The same `Bench throughput` run
+after the change (`artifacts/perf-bench/perf9-windows`):
+
+| Segments | Host limit | Allocated MB/GB before | after | GCs (0/1/2) before | after | CPU s/GB before | after |
+| ---: | ---: | ---: | ---: | --- | --- | ---: | ---: |
+| 1 | 8 | 1.4 | 0.8 | 1/0/0 | 0/0/0 | 0.96 | 0.97 |
+| 8 | 8 | 2.6 | 1.7 | 3/1/1 | 1/0/0 | 1.10 | 1.19 |
+| 16 | 8 | 2.5 | 1.6 | 3/1/1 | 1/0/0 | 1.10 | 1.07 |
+| 16 | 16 | 2.9 | 1.9 | 4/2/2 | 1/0/0 | 1.30 | 1.29 |
+
+Allocation fell by a third to a half and the gen-2 collections went. CPU per GB is within noise. MB/s can't be compared on
+this disk: the same configuration gave 237 to 1,000 MB/s from one run to the next, before and after alike, so the disk (or
+what scans it) sets the speed, not the engine.
+
+## PERF.11: ReadyToRun (2026-11-15)
+
+Self-contained publishes of the whole app, plain and ReadyToRun (`scripts/publish.ps1 -SelfContained [-ReadyToRun]`);
+start times by `Bench start`, the window by `scripts/perf-window.sh coldopen` with `PERF_APP_DIR` (5 opens, median).
+
+| Build | Install folder | Host ready | Native host reply | `dm status` | Window first frame, 0 / 500 / 5,000 jobs |
+| --- | ---: | ---: | ---: | ---: | --- |
+| plain | 244 MB | 238 ms | 100 ms | 80 ms | 635 / 774 / 1,085 ms |
+| ReadyToRun | 296 MB | 182 ms | 88 ms | 67 ms | 536 / 671 / 1,270 ms |
+| ReadyToRun except Microsoft's window libraries | 255 MB | | | | 589 / 716 / 1,223 ms |
+| ReadyToRun except every window library | 251 MB | | | | 637 / 774 / 1,215 ms |
+
+The .NET runtime's own libraries are already ReadyToRun in both; 44 MB of the 52 MB added is the WinUI and Windows SDK
+projections. With 5,000 jobs the window applies the snapshot sooner but takes twice as long (about 400 ms instead of
+200 ms) to draw the list, steadily over every open; that comes with the ReadyToRun copies of the libraries the window
+shares with the Host (the last row), which sit in the same folder. ReadyToRun code is not replaced by optimised code
+inside a long-running loop, and it cannot inline across libraries, which is the likely reason; not confirmed.
+
+**Decision: not turned on.** 52 MB more (against the REV.3 trim), about 55 ms off the Host's start at sign-in and 12 ms
+off a browser handoff, and a window that is faster with a short list but slower with a long one. `-ReadyToRun` stays as
+an opt-in switch for measuring. Worth trying again with the window in its own folder, or with Native AOT for the native
+host and the CLI (PERF.10).
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

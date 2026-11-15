@@ -413,6 +413,21 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **V. PERF.9 and PERF.11** (2026-11-15, main; numbers in `docs/plans/perf-baseline-windows.md`). PERF.9: new
+  `Engine/TransferReader` reads both transfer loops' response bodies with one pooled buffer and one linked
+  cancellation source re-armed per read (a stalled read is still a retryable `Timeout`, and is now cancelled rather than
+  left running); uncapped it fills half the buffer before writing, capped every read goes on at once. Allocation per GB
+  down a third to a half, gen-2 collections gone, CPU per GB unchanged; MB/s varies two- to four-fold between runs on
+  this disk, so no speed claim. Engine tests 210 pass plus a new segmented stall case. PERF.11: ReadyToRun measured in
+  four builds and not adopted (window slower with 5,000 jobs, +52 MB); `publish.ps1 -ReadyToRun` is opt-in, and
+  `perf-window.sh` takes `PERF_APP_DIR` to time a published folder. **Integration tests:** the first full run with
+  PERF.9 hung (about 40 minutes, no output; a test Host left running locked the build); it was stopped, and the rerun with
+  a 4-minute hang detector ran all 2,014 tests with no hang and two queue-retry timing failures
+  (`StartingTheQueueRetries...`, `StartingTheQueueRunsAWaitingRetry...`, 20 s waits) that pass alone, three times in a
+  row, with and without PERF.9. Which test hung is not known. Because a stream that ignores cancellation would hang the
+  new reader where the old code gave up, `TransferReader` now also waits with the deadline (and then never returns that
+  buffer to the pool); engine tests 210 pass with it. **Not checked:** a real fast link; Linux; a full integration run
+  with the final reader.
 - **U. SITES.7: what the web UI left for later** (2026-11-15, main). The site browser stars and unstars the folder it
   shows (`sites.star`) and lists the starred folders as buttons (with the parent's name when two share one, as the
   desktop does); a site with a linked folder gets an "On the server" / "On the PC" column from each item's `here`

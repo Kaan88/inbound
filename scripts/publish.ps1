@@ -6,7 +6,10 @@ param(
     # Bundle the .NET runtime and the Windows App SDK so the app runs on a PC without them.
     [switch]$SelfContained,
     # The native torrent worker (native\torrent-worker\build-windows.cmd), shipped next to the Host. Required.
-    [string]$TorrentWorker
+    [string]$TorrentWorker,
+    # PERF.11: compile a self-contained build ahead of time (ReadyToRun). Off for releases: measured 2026-11-15, it adds
+    # 52 MB, starts the Host 55 ms sooner, and makes the window slower with a long list (docs/plans/perf-baseline-windows.md).
+    [switch]$ReadyToRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,6 +96,12 @@ New-Item -ItemType Directory -Path $Output -Force | Out-Null
 function Publish-Project([string]$project, [string[]]$extraArgs = @()) {
     Write-Host "Publishing $project..."
     $runtimeArgs = if ($SelfContained) { @("-r", "win-x64", "--self-contained", "-p:WindowsAppSDKSelfContained=true") } else { @("--no-self-contained") }
+    # ReadyToRun needs a runtime identifier, so only a self-contained build can have it. Every program gets it: they share
+    # one folder, and a later publish would otherwise put back the plain copy of a library they share.
+    if ($ReadyToRun) {
+        if (-not $SelfContained) { throw "-ReadyToRun needs -SelfContained." }
+        $runtimeArgs += "-p:PublishReadyToRun=true"
+    }
     $argumentList = @("publish", $project, "-c", $Configuration, "-o", $Output) + $runtimeArgs + $extraArgs
     & dotnet @argumentList
     if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
