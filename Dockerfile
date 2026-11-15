@@ -97,7 +97,7 @@ RUN set -eu; \
 # commit, libtorrent from the overlay port. It runs on the build machine and cross-compiles for arm64, so no emulation.
 # It takes a while (Boost, OpenSSL and libtorrent from source). A worker built before can stand in for this stage:
 #   docker build --build-context torrent-worker=artifacts/torrent-worker/linux-x64 -t inbound .
-FROM --platform=$BUILDPLATFORM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS torrent-worker-build
+FROM --platform=$BUILDPLATFORM ubuntu:22.10@sha256:e322f4808315c387868a9135beeb11435b5b83130a8599fd7d0014452c34f489 AS torrent-worker-build
 ARG TARGETARCH
 ARG VCPKG_COMMIT=e54ef0fcc9a82033a61e51002552a910a5d57282
 ARG TORRENT_JOBS=4
