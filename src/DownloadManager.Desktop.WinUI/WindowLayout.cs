@@ -33,6 +33,18 @@ internal static class WindowLayout
     {
         if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
         var size = ScaledToFit(window, width, height);
+#if HAS_UNO
+        if (OperatingSystem.IsMacOS())
+        {
+            // Uno 6.7's macOS presenter hands these to NSWindow.minSize as they are, and minSize is in points: a minimum
+            // in pixels was twice as big on a Retina screen, and the first resize threw the window past the screen's
+            // edges. In points, macOS keeps to it while the window is dragged, so the grow-back below isn't needed.
+            var scale = UnoScreens.Scale();
+            presenter.PreferredMinimumWidth = (int)Math.Round(size.Width / scale);
+            presenter.PreferredMinimumHeight = (int)Math.Round(size.Height / scale);
+            return;
+        }
+#endif
         presenter.PreferredMinimumWidth = size.Width;
         presenter.PreferredMinimumHeight = size.Height;
 #if HAS_UNO
