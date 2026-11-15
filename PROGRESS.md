@@ -121,8 +121,18 @@
   dialog opened during a load (code path only), the SFTP end-to-end test on Windows (no sshd), the Uno window on Linux
   after these focus changes (built on Windows only). **Left:** rows in the browse view still look tall on Linux (not
   measured; the row style already sets 27 px, so the cause is not known); F5 selects the first row rather than the one
-  that was selected; a server that refuses the connection shows rclone's own text ("rclone operations/list failed (500):
-  NewFs: couldn't connect …") rather than plain words.
+  that was selected.
+  **Then (same day):** connection and sign-in failures are said in plain words (`SiteErrorText`, used for browse and
+  Test): refused, name not found, no answer, sign-in not accepted, folder not on the server. The texts were taken from
+  rclone 1.76.0 runs on Windows against the loopback server, plus the Linux phrasings of the same Go errors; only text after
+  rclone's "couldn't connect SSH" is read, and anything else keeps rclone's (redacted) text. `SiteErrorTextTests` (11);
+  Sites.Tests 152 pass, 20 skip. **Pixels:** the WinUI test build draws black on screen, not only in captures (UI.B9; a
+  one-pixel resize no longer helps), so nothing visual was seen; relabelling the test exe Medium to test the Low-integrity
+  cause was refused by the harness. The Uno window, run on Windows against the test Host, does draw: the "Sites" heading
+  and the site show in its sidebar, and Options › Sites (remove, add, key prompt with Cancel focused, Test connected)
+  works there; its sidebar could not be selected through automation or window messages, so the browse view was not seen
+  in Uno. Uno on Windows draws some text twice (column headers, the empty-list line); Uno on Windows is not shipped.
+  The Linux VM did not answer, so the Uno window on Linux is still not re-walked after the focus changes.
   **Haiku review of the focus fixes:** three points held and are fixed. A later retry no longer takes the keyboard from
   somewhere the user moved it (a status-bar click; sidebar clicks already end the chain by leaving or reopening the view).
   The wait for a first layout has a 100 ms fallback. Try again pressed from the keyboard no longer leaves the keyboard in

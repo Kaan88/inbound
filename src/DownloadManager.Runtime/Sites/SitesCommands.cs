@@ -743,7 +743,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
                 // RcloneClient has already redacted the text.
-                return (null, Fail(SiteKeyText.Friendly(e.Message)));
+                return (null, Fail(SiteErrorText.Friendly(e.Message)));
             }
         }
     }
