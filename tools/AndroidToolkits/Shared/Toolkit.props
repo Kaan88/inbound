@@ -1,0 +1,28 @@
+<Project>
+  <!-- Imported by every tools/AndroidToolkits/<Name>/<Name>.csproj. The host (AndroidHost, the timed stores, StartupTrace) is linked
+       from tools/AndroidTrial, not copied, so tools/AndroidTrial and its scripts keep working unchanged. Not in DownloadManager.slnx. -->
+  <PropertyGroup>
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.0.1</ApplicationDisplayVersion>
+    <RuntimeIdentifiers>android-x64</RuntimeIdentifiers>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>$(NoWarn);CA1416;CS1591;NU1701</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)*.cs" Link="Shared\%(Filename)%(Extension)" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\AndroidTrial\AndroidHost.cs" Link="Shared\AndroidHost.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\AndroidTrial\StartupTrace.cs" Link="Shared\StartupTrace.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\AndroidTrial\TimedStores.cs" Link="Shared\TimedStores.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\..\src\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\..\src\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\..\src\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\..\src\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+  </ItemGroup>
+</Project>

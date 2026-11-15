@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui" xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:AndroidTrial.MauiTk" xmlns:m="clr-namespace:AndroidTrial"
+             x:Class="AndroidTrial.MauiTk.DownloadsPage" Title="Downloads" BackgroundColor="{DynamicResource Bg}">
+  <ContentPage.Resources>
+    <local:KindColor x:Key="KindColor" />
+  </ContentPage.Resources>
+  <Grid>
+    <CollectionView x:Name="List" ItemsUpdatingScrollMode="KeepItemsInView" Margin="16,4,16,0">
+      <CollectionView.ItemTemplate>
+        <DataTemplate x:DataType="m:JobRow">
+          <Border Margin="0,6" Padding="16,14" StrokeThickness="0" BackgroundColor="{DynamicResource Card}">
+            <Border.StrokeShape><RoundRectangle CornerRadius="20" /></Border.StrokeShape>
+            <VerticalStackLayout Spacing="2">
+              <Label Text="{Binding Name}" FontSize="16" TextColor="{DynamicResource Text}" LineBreakMode="TailTruncation" MaxLines="1" />
+              <Label Text="{Binding Subtitle}" FontSize="14" TextColor="{Binding Kind, Converter={StaticResource KindColor}}" LineBreakMode="TailTruncation" MaxLines="1" />
+              <local:AnimatedBar Target="{Binding Progress}" IsVisible="{Binding ShowBar}" Margin="0,8,0,0" ProgressColor="{DynamicResource Accent}" />
+            </VerticalStackLayout>
+          </Border>
+        </DataTemplate>
+      </CollectionView.ItemTemplate>
+    </CollectionView>
+    <Border x:Name="Fab" HorizontalOptions="End" VerticalOptions="End" Margin="16,16,16,16" Padding="20,16" StrokeThickness="0" BackgroundColor="{DynamicResource Container}">
+      <Border.StrokeShape><RoundRectangle CornerRadius="16" /></Border.StrokeShape>
+      <HorizontalStackLayout Spacing="12">
+        <Label Text="+" FontSize="22" TextColor="{DynamicResource Accent}" VerticalOptions="Center" />
+        <Label Text="Add" FontSize="16" FontAttributes="Bold" TextColor="{DynamicResource Accent}" VerticalOptions="Center" />
+      </HorizontalStackLayout>
+    </Border>
+  </Grid>
+</ContentPage>

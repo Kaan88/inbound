@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="1" android:versionName="0.0.1" package="app.inbound.tk.uno">
+  <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="35" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application android:label="Inbound (Uno)" android:usesCleartextTraffic="true" android:allowBackup="false" android:enableOnBackInvokedCallback="true" />
+</manifest>

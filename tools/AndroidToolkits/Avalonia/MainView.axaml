@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:m="clr-namespace:AndroidTrial;assembly=AvaloniaTk" xmlns:sys="using:System" xmlns:local="clr-namespace:AndroidTrial.AvaloniaTk;assembly=AvaloniaTk" x:Class="AndroidTrial.AvaloniaTk.MainView">
+    <UserControl.Styles>
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Style.Animations>
+        <Animation Duration="0:0:0.2" FillMode="Both">
+          <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0" /></KeyFrame>
+          <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+    <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="Transparent" /></Style>
+    <Style Selector="ListBoxItem:selected /template/ ContentPresenter"><Setter Property="Background" Value="Transparent" /></Style>
+    <Style Selector="ProgressBar.row">
+      <Setter Property="Transitions"><Transitions><DoubleTransition Property="Value" Duration="0:0:0.25" /></Transitions></Setter>
+    </Style>
+  </UserControl.Styles>
+  <Grid x:Name="Root" RowDefinitions="Auto,*,Auto" Background="{DynamicResource Bg}">
+    <TextBlock Grid.Row="0" Text="Downloads" FontSize="22" Foreground="{DynamicResource Text}" Margin="16,12,16,12" />
+    <ListBox x:Name="List" Grid.Row="1" Background="Transparent" Margin="12,0,12,0" Padding="0">
+    </ListBox>
+    <Border Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Padding="20,16" CornerRadius="16" Background="{DynamicResource Container}">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="+" FontSize="22" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+        <TextBlock Text="Add" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+      </StackPanel>
+    </Border>
+    <Grid x:Name="Nav" Grid.Row="2" ColumnDefinitions="*,*,*,*" Background="{DynamicResource Card}" Height="80">
+      <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="4">
+        <Border Width="64" Height="32" CornerRadius="16" Background="{DynamicResource Container}" HorizontalAlignment="Center">
+          <PathIcon Data="M5,20h14v-2H5V20zM19,9h-4V3H9v6H5l7,7L19,9z" Width="24" Height="24" Foreground="{DynamicResource Accent}" />
+        </Border>
+        <TextBlock Text="Downloads" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" Foreground="{DynamicResource Text}" />
+      </StackPanel>
+      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+        <PathIcon Data="M3,13h2v-2H3V13zM3,17h2v-2H3V17zM3,9h2V7H3V9zM7,13h14v-2H7V13zM7,17h14v-2H7V17zM7,7v2h14V7H7z" Width="24" Height="24" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" />
+        <TextBlock Text="Queues" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="4">
+        <PathIcon Data="M19.35,10.04C18.67,6.59 15.64,4 12,4 9.11,4 6.6,5.64 5.35,8.04 2.34,8.36 0,10.91 0,14c0,3.31 2.69,6 6,6h13c2.76,0 5,-2.24 5,-5 0,-2.64 -2.05,-4.78 -4.65,-4.96z" Width="24" Height="24" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" />
+        <TextBlock Text="Sites" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}" />
+      </StackPanel>
+      <StackPanel Grid.Column="3" VerticalAlignment="Center" Spacing="4">
+        <PathIcon Data="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z" Width="24" Height="24" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" />
+        <TextBlock Text="Settings" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</UserControl>

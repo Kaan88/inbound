@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell xmlns="http://schemas.microsoft.com/dotnet/2021/maui" xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+       xmlns:local="clr-namespace:AndroidTrial.MauiTk" x:Class="AndroidTrial.MauiTk.AppShell"
+       Shell.BackgroundColor="{DynamicResource Bg}" Shell.TitleColor="{DynamicResource Text}" Shell.ForegroundColor="{DynamicResource Text}"
+       Shell.TabBarBackgroundColor="{DynamicResource Card}" Shell.TabBarTitleColor="{DynamicResource Accent}"
+       Shell.TabBarUnselectedColor="{DynamicResource Muted}" Shell.TabBarForegroundColor="{DynamicResource Accent}">
+  <TabBar>
+    <ShellContent Title="Downloads" Icon="ic_download.png" ContentTemplate="{DataTemplate local:DownloadsPage}" Route="downloads" />
+    <ShellContent Title="Queues" Icon="ic_queues.png" ContentTemplate="{DataTemplate local:PlaceholderPage}" Route="queues" />
+    <ShellContent Title="Sites" Icon="ic_sites.png" ContentTemplate="{DataTemplate local:PlaceholderPage}" Route="sites" />
+    <ShellContent Title="Settings" Icon="ic_settings.png" ContentTemplate="{DataTemplate local:PlaceholderPage}" Route="settings" />
+  </TabBar>
+</Shell>

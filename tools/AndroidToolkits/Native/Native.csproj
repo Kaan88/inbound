@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Toolkit trial 1: .NET for Android with Android Views + Google's Material Components (Xamarin.Google.Android.Material). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>app.inbound.tk.nativeui</ApplicationId>
+    <RootNamespace>AndroidTrial.Native</RootNamespace>
+  </PropertyGroup>
+  <Import Project="..\Shared\Toolkit.props" />
+  <ItemGroup>
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.13.0.2" />
+    <PackageReference Include="Xamarin.AndroidX.RecyclerView" Version="1.4.0.5" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Toolkit trial 3: Avalonia for Android (12.1.6) with Material.Avalonia 3.21.0 (the credible Material theme for Avalonia; Material Design 2-style, no M3 / dynamic colour). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>app.inbound.tk.avalonia</ApplicationId>
+    <RootNamespace>AndroidTrial.AvaloniaTk</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <Import Project="..\Shared\Toolkit.props" />
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Android" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageReference Include="Material.Avalonia" Version="3.21.0" />
+  </ItemGroup>
+</Project>

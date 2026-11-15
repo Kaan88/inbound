@@ -1,0 +1,20 @@
+<Project Sdk="Uno.Sdk/6.7.45">
+  <!-- Toolkit trial 4: Uno Platform for Android (the SDK version src/DownloadManager.Desktop.Uno uses), with its Material toolkit. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UnoSingleProject>true</UnoSingleProject>
+    <ApplicationTitle>Inbound (Uno)</ApplicationTitle>
+    <ApplicationId>app.inbound.tk.uno</ApplicationId>
+    <RootNamespace>AndroidTrial.UnoTk</RootNamespace>
+    <UnoFeatures>Material;Toolkit</UnoFeatures>
+    <UnoDisableHotDesign>true</UnoDisableHotDesign>
+    <UnoDisableMCPSupport>true</UnoDisableMCPSupport>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <Import Project="..\Shared\Toolkit.props" />
+  <ItemGroup>
+    <PackageReference Include="Uno.Sdk.Extras" Version="6.3.1" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Uno.Settings.DevServer" Version="1.13.32" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

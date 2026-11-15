@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Toolkit trial 2: .NET MAUI, Android target only. MAUI version = the maui-android workload's (10.0.110). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ApplicationId>app.inbound.tk.maui</ApplicationId>
+    <RootNamespace>AndroidTrial.MauiTk</RootNamespace>
+    <MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
+  </PropertyGroup>
+  <Import Project="..\Shared\Toolkit.props" />
+  <ItemGroup><MauiImage Include="Resources\Images\*.svg" /></ItemGroup>
+</Project>
