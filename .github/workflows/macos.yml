@@ -133,6 +133,12 @@ jobs:
         if: matrix.rid == 'osx-x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
+      - name: A release never ships without the torrent worker
+        if: steps.worker.outcome == 'failure' && (env.TAG != '' || env.TEST_VERSION != '')
+        run: |
+          echo "::error::The torrent worker did not build; a release or test update would turn torrents off on every Mac it updates."
+          exit 1
+
       - name: Build Inbound.app, the .zip and the .dmg
         run: bash scripts/package-macos.sh ${{ matrix.rid }}
 

@@ -32,7 +32,8 @@ internal static class Program
 
         // macOS has no setsid(1): DetachedProcess starts the Host in the background, and the Host leaves its starter's
         // session here, so a browser that ends the native host's process group doesn't end the Host.
-        if (OperatingSystem.IsMacOS()) DetachedProcess.LeaveSession();
+        // Only a Host meant for the background: one run by hand from a terminal keeps it, so Ctrl-C still ends it.
+        if (OperatingSystem.IsMacOS() && args.Contains("--background")) DetachedProcess.LeaveSession();
 
         // What the Host opens inherits this; the program's own folder (an AppImage mount) isn't one to hold.
         Environment.CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -58,7 +59,7 @@ internal static class Program
         }
 
         var log = new FileLogger(paths.LogsDirectory);
-        log.Info($"Linux Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
+        log.Info($"{(OperatingSystem.IsMacOS() ? "macOS" : "Linux")} Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => log.Error($"Unhandled exception: {e.ExceptionObject}");
 
         try

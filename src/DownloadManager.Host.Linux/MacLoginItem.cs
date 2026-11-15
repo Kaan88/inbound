@@ -6,7 +6,8 @@ namespace DownloadManager.Host;
 /// <summary>
 /// MAC.1: Options › Start Inbound when I sign in, on macOS. A LaunchAgent (<c>~/Library/LaunchAgents</c>) that starts
 /// Inbound.app's launcher with <c>--background</c>, so only the Host starts, as the autostart entry does on Linux. macOS
-/// reads it at the next sign-in; removing it is turning the option off.
+/// reads it at the next sign-in; removing it is turning the option off. AbandonProcessGroup: launchd would otherwise kill
+/// what the Host leaves running when it exits, among them the restarter that starts the updated app.
 /// </summary>
 internal static class MacLoginItem
 {
@@ -24,9 +25,12 @@ internal static class MacLoginItem
             return;
         }
 
+        var text = Plist(LaunchProgram());
+        // Written only when it changed: a rewrite at every start can bring back macOS's "Background Items Added" notice.
+        if (File.Exists(path) && File.ReadAllText(path) == text) return;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, Plist(LaunchProgram()));
+        File.WriteAllText(temporary, text);
         File.Move(temporary, path, overwrite: true);
     }
 
@@ -55,6 +59,7 @@ internal static class MacLoginItem
           </array>
           <key>RunAtLoad</key><true/>
           <key>LimitLoadToSessionType</key><string>Aqua</string>
+          <key>AbandonProcessGroup</key><true/>
         </dict>
         </plist>
 

@@ -193,7 +193,8 @@ app runs with torrents off.
 | `Contents/Resources/host/` | `inbound-host` (the Linux Host's project, built for macOS), the CLI, the native host, the server, `inbound-menu` (the menu-bar icon, `native/macos-menu`) and the torrent worker |
 
 The app is signed ad hoc only, not with a Developer ID, and not notarized: Gatekeeper asks on the first open
-(right-click > Open, or `xattr -dr com.apple.quarantine /Applications/Inbound.app`).
+(open it once, then System Settings > Privacy & Security > Open Anyway; macOS 15 dropped the right-click > Open way.
+Or `xattr -dr com.apple.quarantine /Applications/Inbound.app`).
 
 It updates itself as the AppImage does: it reads `manifest-macos-arm64.json` or `manifest-macos-x64.json` beside the
 Windows `manifest.json`, downloads the signed zip, unpacks it with `ditto` beside the running bundle, swaps the bundles

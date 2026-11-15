@@ -22,6 +22,8 @@ public sealed class MacLoginItemTests
         Assert.Equal(["/Applications/My <Apps> & Co/Inbound.app/Contents/MacOS/InboundLauncher", "--background"], arguments);
         Assert.Equal("true", values[values.FindIndex(element => element.Value == "RunAtLoad") + 1].Name.LocalName);
         Assert.Equal("Aqua", After("LimitLoadToSessionType"));
+        // The updater's restarter outlives the Host's exit only if launchd leaves its process group alone.
+        Assert.Equal("true", values[values.FindIndex(element => element.Value == "AbandonProcessGroup") + 1].Name.LocalName);
     }
 
     [Fact]

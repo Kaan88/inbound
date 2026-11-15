@@ -15,10 +15,10 @@ public sealed class MacDesktopTests
     }
 
     [Theory]
-    [InlineData("shutdown", "aevtrsdn", "shut down")]
-    [InlineData("restart", "aevtrrst", "restart")]
+    [InlineData("shutdown", "aevtshut", "shut down")]
+    [InlineData("restart", "aevtrest", "restart")]
     [InlineData("logoff", "aevtrlgo", "sign out")]
-    [InlineData(null, "aevtrsdn", "shut down")]
+    [InlineData(null, "aevtshut", "shut down")]
     public void CompletionPowerActionsAreLoginwindowsAppleEvents(string? mode, string code, string what)
     {
         var (program, arguments, said) = MacDesktop.Shutdown(mode);

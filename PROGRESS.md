@@ -33,6 +33,19 @@
   completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
   the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
   notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
+- **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
+  window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
+  started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);
+  a release or test update could ship without the torrent worker (now fails); macOS 15 has no right-click > Open for
+  unnotarized apps (texts say Open Anyway); shut down and restart used loginwindow's dialog events (now `shut`/`rest`,
+  unverified on a Mac); the LaunchAgent is rewritten only when it changes; a Host run from a terminal keeps its session;
+  the Mac Host's log says macOS. Open from the audit, after merge: swap the bundle atomically (`renamex_np`
+  `RENAME_SWAP`) and in the restarter after the Host exits; App Translocation (run from Downloads or the DMG) turns the
+  updater and sign-in start off with a "move to Applications" note; a locked Keychain fails the Host's start; the
+  signing key in a protected environment and a sign-only job (the repository is public), with a separate test key for
+  test updates; `LSMinimumSystemVersion` 12.0 while .NET 10's supported list starts at macOS 15; `/tmp/inbound-<uid>`
+  can be taken first by another local user; `open -n -a` drops `DOWNLOADMANAGER_DATA`; a CI step that runs a real
+  update end to end.
 - **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
   hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
   loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS

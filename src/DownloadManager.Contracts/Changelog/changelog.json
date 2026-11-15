@@ -24,7 +24,7 @@
         {
           "title": "Upgrade notes",
           "items": [
-            { "text": "Inbound for macOS isn't notarized by Apple: the first time, open it with right-click, Open.", "tags": ["macos"] }
+            { "text": "Inbound for macOS isn't notarized by Apple. The first time, open it, then choose Open Anyway in System Settings > Privacy & Security.", "tags": ["macos"] }
           ]
         }
       ]
