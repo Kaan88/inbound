@@ -413,6 +413,11 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AC. PERF.4 checked again** (2026-11-15, main). A test window with 500 jobs and nothing downloading: two threads switch
+  about 70 times a second each, visible and hidden alike (per-thread counters, `Thread(...)\Context Switches/sec`); that
+  matches the NVIDIA driver threads traced on 2026-11-08. Our managed code doesn't show in a trace of the window. With the
+  default since PERF.5 the window process ends on close, so a closed window costs nothing; the Host idled at 0.0 to 0.1 s
+  CPU an hour. ROADMAP PERF.4 is done as far as Inbound reaches.
 - **AB. PERF.10: the native host as Native AOT** (2026-11-15, main). `publish.ps1 -SelfContained` publishes the native
   host with `PublishAot` (and no native symbol file); vswhere's folder goes on PATH when it isn't, which the AOT linker
   needs. `NativeBridgePolicy` writes its `JsonObject` payloads through `IpcJsonContext` (now naming `JsonObject`) instead
