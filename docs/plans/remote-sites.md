@@ -142,8 +142,12 @@ The price is that these places must be taught about it on purpose:
   browser, the `rclone authorize` paste flow from the earlier mockups. The Host stores the token sealed and must
   write back a refreshed token after each use. Each such site is one **named** in-memory remote (`config/create`
   with `--config ""`; an on-the-fly `fs` object has no name to write a new token back to). After each batch and
-  before rclone stops, the Host reads the token with `config/get` and re-seals it if it changed. That a real refresh
-  appears there is not yet seen (run point 9).
+  before rclone stops, the Host reads the token with `config/get` and re-seals it if it changed. Seen with rclone
+  1.76.0 (2026-11-15, `scripts/sites-oauth-refresh-check.sh --from-conf`, the owner's own Drive and Dropbox remotes):
+  with the expiry moved into the past, the first list refreshed the token and `config/get` returned the new access
+  token and expiry; neither provider rotated the refresh token. A grant that no longer works (a OneDrive token unused
+  since 2025) fails the call with `invalid_grant` and leaves the stored token as it was: the site then needs a
+  "Sign in again" state, not a generic error.
   App registration (owner, 2026-11-14): rclone's shared app IDs are used by default, and the site's settings have an
   optional field for the user's own client ID and secret. Other providers are added one at a time.
 - **Key files:** passphrase-protected keys in the current OpenSSH format work in 1.76.0, as do old PEM and
@@ -312,7 +316,8 @@ Each question with its answer (run point in brackets) and where the plan now say
 7. Partial files: `.partial` and rename except WebDAV uploads; nothing resumes (7; "Transfers", open question 7).
 8. Progress per group, stopping one batch, `core/bwlimit` live: all work; there is no pause; per-batch speed limits
    not settled (8; "Transfers", IPC).
-9. OAuth refresh with an in-memory config: a named remote and `config/get`; a real refresh not yet seen (9; "OAuth").
+9. OAuth refresh with an in-memory config: a named remote and `config/get`; a real refresh seen for Drive and Dropbox, a
+   dead grant fails with `invalid_grant` (9; "OAuth").
 10. Start about 25 ms, idle about 69 MB, no idle CPU; 86 MB unpacked, 32 MB zipped; Linux, loaded machine
     (10; "Lifetime", "Setup").
 
