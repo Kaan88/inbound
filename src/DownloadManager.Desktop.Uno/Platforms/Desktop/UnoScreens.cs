@@ -92,6 +92,33 @@ internal static class UnoScreens
         return WindowSizeRules.WorkAreaFor(monitors, 0, null, x, y);
     }
 
+    /// <summary>
+    /// macOS: the window titled <paramref name="title"/> as Cocoa has it, in global points with a top-left origin: the
+    /// frame's top-left corner and the title bar's height. Uno's AppWindow.Position can differ (it keeps what it was asked
+    /// for when macOS moved the window below the menu bar). Null when no such window, or off macOS.
+    /// </summary>
+    public static (double Left, double Top, double TitleBar)? MacWindowFrame(string title)
+    {
+        if (!OperatingSystem.IsMacOS()) return null;
+        var screens = ObjC.Send(ObjC.Class("NSScreen"), ObjC.Selector("screens"));
+        var first = ObjC.SendRect(ObjC.SendIndex(screens, ObjC.Selector("objectAtIndex:"), 0), ObjC.Selector("frame"));
+        var desktopTop = first.Y + first.Height;
+        var app = ObjC.Send(ObjC.Class("NSApplication"), ObjC.Selector("sharedApplication"));
+        var windows = ObjC.Send(app, ObjC.Selector("windows"));
+        var count = (int)ObjC.SendUInt(windows, ObjC.Selector("count"));
+        for (var i = 0; i < count; i++)
+        {
+            var window = ObjC.SendIndex(windows, ObjC.Selector("objectAtIndex:"), (nuint)i);
+            var name = Marshal.PtrToStringUTF8(ObjC.Send(ObjC.Send(window, ObjC.Selector("title")), ObjC.Selector("UTF8String")));
+            if (name != title) continue;
+            var frame = ObjC.SendRect(window, ObjC.Selector("frame"));
+            var content = ObjC.SendRect(ObjC.Send(window, ObjC.Selector("contentView")), ObjC.Selector("frame"));
+            return (frame.X, desktopTop - (frame.Y + frame.Height), frame.Height - content.Height);
+        }
+
+        return null;
+    }
+
     private static class ObjC
     {
         private const string Lib = "/usr/lib/libobjc.A.dylib";

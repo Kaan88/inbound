@@ -59,7 +59,7 @@ public sealed partial class MainWindow
             UiTrace.Write("selftest: About closed");
 
             // Progress Details of the first download, closed by a click on its close button, else from here.
-            if (_remote.State.Jobs.FirstOrDefault() is { } job)
+            if (_visibleJobs.FirstOrDefault(row => !row.IsRemoteRow) is { } job)
             {
                 await Task.Delay(2000);
                 UiTrace.Write("selftest: opening Progress Details");
@@ -67,7 +67,8 @@ public sealed partial class MainWindow
                 await Task.Delay(2500);
                 if (_progressWindows.Find(ProgressWindowKey.For(ProgressWindowKind.Download, job.Id, _connection.Target)) is { } progress)
                 {
-                    UiTrace.Write($"selftest: progress {Describe(progress)}; click close at {CloseButtonPoint(progress)}");
+                    UiTrace.Write($"selftest: Progress Details {Describe(progress)}");
+                    UiTrace.Write($"selftest: click Progress Details close at {CloseButtonPoint(progress)}");
                     var closed = false;
                     progress.Closed += (_, _) => closed = true;
                     if (!await WaitAsync(() => closed, 10000))
@@ -110,22 +111,18 @@ public sealed partial class MainWindow
         return done();
     }
 
-    /// <summary>The centre of <paramref name="element"/> in global screen points, top-left origin (what cliclick takes).</summary>
+    /// <summary>The centre of <paramref name="element"/> in global screen points, top-left origin (what cliclick takes),
+    /// from where Cocoa has the window.</summary>
     private static string ScreenPoint(Window window, FrameworkElement element)
     {
-        var scale = UnoScreens.Scale();
-        var app = window.AppWindow;
-        var titleBar = (app.Size.Height - app.ClientSize.Height) / scale;
+        if (UnoScreens.MacWindowFrame(window.Title) is not { } frame) return "unknown";
         var centre = element.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(element.ActualWidth / 2, element.ActualHeight / 2));
-        return $"{Math.Round(app.Position.X / scale + centre.X)},{Math.Round(app.Position.Y / scale + titleBar + centre.Y)}";
+        return $"{Math.Round(frame.Left + centre.X)},{Math.Round(frame.Top + frame.TitleBar + centre.Y)}";
     }
 
     /// <summary>The red close button of a standard macOS title bar: about 20 by 14 points in from the top-left corner.</summary>
     private static string CloseButtonPoint(Window window)
-    {
-        var scale = UnoScreens.Scale();
-        return $"{Math.Round(window.AppWindow.Position.X / scale + 20)},{Math.Round(window.AppWindow.Position.Y / scale + 14)}";
-    }
+        => UnoScreens.MacWindowFrame(window.Title) is { } frame ? $"{Math.Round(frame.Left + 20)},{Math.Round(frame.Top + 14)}" : "unknown";
 
     private static Button? FindButton(DependencyObject element, string text)
     {
