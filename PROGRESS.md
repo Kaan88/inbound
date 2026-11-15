@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Android first trial (ANDROID.2), branch `android-trial` (2026-11-15)
+
+- **Go-ahead:** the owner answered "Yes, start ANDROID.2" to "perf is recorded done on Windows, with only deferred Linux items left: does that count as done?".
+- **Machine:** Android SDK at `%LOCALAPPDATA%\Android\Sdk` (platforms 34, 36, 36.1; NDK 28.2; one emulator `kweb35`, API 35, x86-64). No phone is attached, so the pass marks of the plan's section 5 (they need a real phone) can't be measured yet.
+
 ### Android app design in Figma (2026-11-15)
 
 - **Owner request:** design an Android app for Inbound: Material You, default colours from the web UI, a full downloader on the phone (not only a remote for another host), animated, and clear about how it works. Done in Figma.

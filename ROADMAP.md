@@ -641,8 +641,10 @@ whether rclone is a Setup component that can be unticked.
   with the screens as images in `docs/plans/android-mockups/`.
 - **Starts only when the perf work is done** (owner, 2026-11-15). Method (owner, same day): implementation is
   delegated to lesser agents, preferably Sonnet, then reviewed critically and redone where it falls short.
+  **Go-ahead given** (owner, 2026-11-15): perf done on Windows with only the deferred Linux items left counts as done.
 - [ ] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
-  picker grant, how long a service may run, the toolkit. Decides .NET or Rust. Not started.
+  picker grant, how long a service may run, the toolkit. Decides .NET or Rust. In progress on branch
+  `android-trial`; state in PROGRESS "Android first trial (ANDROID.2)".
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
