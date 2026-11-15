@@ -1580,6 +1580,10 @@
   /* UI.R42: the tracks are those of the columns that show (listTemplate): --cols-md below 1024 px and beside Torrent
      Info, --cols-lg from 1024 px. */
   .list-grid { grid-template-columns: var(--cols-md); height: 30px; }
+  /* PERF.19: rows off screen are not laid out or painted (a long list holds thousands). A row not drawn yet counts as
+     32px (a desktop row is about 31px), and remembers its real height once drawn, so the scroll bar moves little as
+     rows first come into view. Its focus outline is drawn inside it, which this allows. */
+  .list-row { content-visibility: auto; contain-intrinsic-size: auto 32px; }
   .header-cell { padding: 0; background: transparent; white-space: nowrap; font: inherit; color: inherit; text-align: inherit; }
   .header-cell:hover { text-decoration: underline; }
   .sort-mark { margin-left: 3px; font-size: 9px; color: var(--muted); }

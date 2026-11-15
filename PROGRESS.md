@@ -413,6 +413,16 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **Z. PERF.19: the web UI's list** (2026-11-15, main). `ProgressBar.svelte` clips a full-width fill instead of
+  animating its width (the page was laid out on nearly every frame while progress came in); list rows have
+  `content-visibility: auto`; `buildRows` keeps a download's cells and row object per job object (not for torrents, which
+  follow the clock), so Svelte leaves unchanged rows alone. Measured in headless Chrome on Windows
+  (`docs/plans/perf-baseline-windows.md`): at 5,000 jobs the main thread busy 831 to 137 ms a second with one download and
+  999 to 699 with eight; at 500 jobs with one, 193 to 30; the list usable after sign-in in about 740 ms instead of
+  1,223. `perf-seed.sh` and `perf-webui.mjs` now run on Windows (Git Bash): win-x64 build, the Windows Host, Windows
+  paths, CR-free ports, Chrome ended by its process tree. svelte-check clean; 716 web UI tests with a new one for the kept
+  rows; the bars seen in a headless Chrome screenshot (light mode). **Not walked:** keyboard moves and "show this job" in
+  a long list with `content-visibility` (the rows stay in the page, only their drawing is skipped); phones.
 - **Y. Speed graph: the grid is kept between samples** (2026-11-15, main; PERF.16 follow-up). `DownloadSpeedGraph.Draw`
   rebuilt its grid, labels and clip with every sample; now only when the size, scale, period or theme changes. One
   download: the window's UI thread 4.1 % to 2.8 % of a core; eight: 8.2 % to 7.4 % (single 60 s runs). Checked through UI

@@ -33,7 +33,7 @@ const durationS = Number(opt('duration', '60'));
 const warmupS = Number(opt('warmup', '10'));
 const perfOut = resolve(opt('out', process.env.PERF_OUT ?? join(root, 'artifacts/perf')));
 const resultsDir = resolve(opt('results', join(perfOut, 'results')));
-const chromeBin = opt('chrome', 'google-chrome-stable');
+const chromeBin = opt('chrome', process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : 'google-chrome-stable');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 mkdirSync(resultsDir, { recursive: true });
 const csvPath = join(resultsDir, `webui-${stamp}.csv`);
@@ -117,7 +117,13 @@ async function runCombo(jobs, active) {
     for (let i = 0; i < 100 && !existsSync(portFile); i++) await sleep(100);
     if (!existsSync(portFile)) throw new Error('Chrome did not start');
     await sleep(200);
-    const [port, path] = readFileSync(portFile, 'utf8').trim().split('\n');
+    // Chrome may still hold the file open for writing (Windows), so a failed read is tried again.
+    let portText = '';
+    for (let i = 0; i < 20 && !portText.includes('\n'); i++) {
+      try { portText = readFileSync(portFile, 'utf8').trim(); } catch { /* still being written */ }
+      if (!portText.includes('\n')) await sleep(100);
+    }
+    const [port, path] = portText.split('\n');
     cdp = await Cdp.connect(`ws://127.0.0.1:${port}${path}`);
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
@@ -217,8 +223,18 @@ async function runCombo(jobs, active) {
     row.reloadBytesTransferred = reload.encoded; row.reloadRequests = reload.requests;
   } finally {
     cdp?.close();
-    if (chrome?.pid) { try { process.kill(-chrome.pid, 'SIGTERM'); } catch { /* gone */ } await sleep(500); try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* gone */ } }
-    rmSync(profile, { recursive: true, force: true });
+    if (chrome?.pid) {
+      if (process.platform === 'win32') {
+        // No process groups on Windows: end Chrome and the processes it started by their tree.
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(chrome.pid)], { stdio: 'ignore' });
+      } else {
+        try { process.kill(-chrome.pid, 'SIGTERM'); } catch { /* gone */ } await sleep(500); try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* gone */ }
+      }
+      chrome.unref();
+    }
+    // Chrome can hold its profile for a moment after it ends (Windows); a folder left in the temp directory is no reason
+    // to lose the row.
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (error) { log(`could not remove ${profile}: ${error.message}`); }
     spawnSync('bash', [join(root, 'scripts/perf-seed.sh'), 'stop', '--name', name, '--out', perfOut, ...(flag('keep') ? [] : ['--purge'])], { stdio: 'ignore' });
   }
   return row;

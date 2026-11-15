@@ -36,12 +36,21 @@ ACTIVE_BPS=${ACTIVE_BPS:-262144}
 ACTIVE_SIZE=${ACTIVE_SIZE:-268435456}
 export PATH="$HOME/.dotnet:$PATH"
 # The TestServer is framework-dependent (the others are self-contained): it must find a runtime.
-[ -d "$HOME/.dotnet" ] && export DOTNET_ROOT=${DOTNET_ROOT:-$HOME/.dotnet}
+{ [ -x "$HOME/.dotnet/dotnet" ] || [ -x "$HOME/.dotnet/dotnet.exe" ]; } && export DOTNET_ROOT=${DOTNET_ROOT:-$HOME/.dotnet}
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 
 perf_log() { echo "[perf-seed] $*" >&2; }
 
-perf_free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
+# Windows (Git Bash) as well as Linux: the Windows Host, .exe names, and Windows paths for what the programs read.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) PERF_WIN=1; PERF_RID=win-x64; PERF_EXE=.exe; PERF_HOST_PROJECT=src/DownloadManager.Host; PERF_HOST_BIN=DownloadManager.Host ;;
+  *) PERF_WIN=0; PERF_RID=linux-x64; PERF_EXE=; PERF_HOST_PROJECT=src/DownloadManager.Host.Linux; PERF_HOST_BIN=inbound-host ;;
+esac
+PERF_PY=python3; command -v python3 >/dev/null 2>&1 && python3 -c '' 2>/dev/null || PERF_PY=python
+perf_path() { if [ "$PERF_WIN" = 1 ]; then cygpath -w "$1"; else echo "$1"; fi; }
+
+# tr: Python on Windows ends its lines with CR LF, and a port with a CR on it is refused by Node's fetch.
+perf_free_port() { "$PERF_PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])' | tr -d '\r'; }
 
 # ---------------------------------------------------------------- build
 perf_build() { # [--skip-webui] [--skip-window]
@@ -50,7 +59,7 @@ perf_build() { # [--skip-webui] [--skip-window]
   local out=$PERF_OUT/bin lib=$PERF_OUT/bin/lib
   mkdir -p "$lib" "$out/testserver"
   local config=Release
-  pub() { dotnet publish "$PERF_ROOT/$1" -c "$config" -r linux-x64 --self-contained true -p:PublishSingleFile=false \
+  pub() { dotnet publish "$PERF_ROOT/$1" -c "$config" -r "$PERF_RID" --self-contained true -p:PublishSingleFile=false \
             -p:DebugType=none -o "$2" -nologo -v q "${@:3}" || { perf_log "publish of $1 failed"; return 1; }; }
   if [ "$webui" = 1 ]; then
     # Built in a copy under OUT, so the checkout gets no node_modules and no dist.
@@ -58,14 +67,15 @@ perf_build() { # [--skip-webui] [--skip-window]
     rm -rf "$wb"; mkdir -p "$wb"
     ( cd "$PERF_ROOT/webui" && tar cf - --exclude=node_modules --exclude=dist . ) | ( cd "$wb" && tar xf - )
     ( cd "$wb" && npm ci --no-audit --no-fund --loglevel=error && npm run build >/dev/null ) || { perf_log "web UI build failed"; return 1; }
-    pub src/DownloadManager.Server "$lib" "-p:WebUiDist=$wb/dist/" || return 1
+    pub src/DownloadManager.Server "$lib" "-p:WebUiDist=$(perf_path "$wb")/dist/" || return 1
     [ -f "$lib/wwwroot/assets/$(ls "$wb/dist/assets" | head -1)" ] || { perf_log "the server did not get the built web UI"; return 1; }
   else
     pub src/DownloadManager.Server "$lib" || return 1
   fi
-  pub src/DownloadManager.Host.Linux "$lib" || return 1
+  pub "$PERF_HOST_PROJECT" "$lib" || return 1
   pub src/DownloadManager.Cli "$lib" || return 1
-  if [ "$window" = 1 ]; then pub src/DownloadManager.Desktop.Uno "$PERF_OUT/bin/desktop" || return 1; fi
+  # The Uno window is the Linux one; on Windows the WinUI window is measured by perf-window*.sh instead.
+  if [ "$window" = 1 ] && [ "$PERF_WIN" = 0 ]; then pub src/DownloadManager.Desktop.Uno "$PERF_OUT/bin/desktop" || return 1; fi
   dotnet publish "$PERF_ROOT/tools/TestServer" -c "$config" -o "$out/testserver" -nologo -v q || return 1
   perf_log "built into $PERF_OUT/bin"
 }
@@ -74,11 +84,11 @@ perf_build() { # [--skip-webui] [--skip-window]
 perf_inst() { echo "$PERF_OUT/inst/$1"; }
 
 perf_cli() { # runs the CLI against the instance whose env is loaded
-  timeout 300 "$PERF_OUT/bin/lib/DownloadManager.Cli" "$@"
+  timeout 300 "$PERF_OUT/bin/lib/DownloadManager.Cli$PERF_EXE" "$@"
 }
 
 perf_start_host() { # env of the instance must be exported
-  "$PERF_OUT/bin/lib/inbound-host" --background >"$PERF_INST/host.out" 2>&1 &
+  "$PERF_OUT/bin/lib/$PERF_HOST_BIN$PERF_EXE" --background >"$PERF_INST/host.out" 2>&1 &
   PERF_HOST_PID=$!
   local i
   for i in $(seq 1 60); do
@@ -104,7 +114,7 @@ perf_add_held() { # $1 count: batches of up to 1000, held for later
   while [ "$done" -lt "$1" ]; do
     n=$(( $1 - done )); [ "$n" -gt 1000 ] && n=1000
     printf -v a '%05d' $((done + 1)); printf -v b '%05d' $((done + n))
-    perf_cli add-batch "http://127.0.0.1:$PERF_TS_PORT/file/job-[$a-$b].bin?size=1048576" --dest "$PERF_INST/downloads" --start later --yes >/dev/null \
+    perf_cli add-batch "http://127.0.0.1:$PERF_TS_PORT/file/job-[$a-$b].bin?size=1048576" --dest "$(perf_path "$PERF_INST/downloads")" --start later --yes >/dev/null \
       || { perf_log "add-batch $a-$b failed"; return 1; }
     done=$((done + n))
   done
@@ -114,7 +124,7 @@ perf_add_active() { # $1 count
   local i
   for i in $(seq 1 "$1"); do
     perf_cli add "http://127.0.0.1:$PERF_TS_PORT/slow/active-$i.bin?size=$ACTIVE_SIZE&bps=$ACTIVE_BPS&seed=$i" \
-      --dest "$PERF_INST/downloads" --start now --connections 1 >/dev/null || { perf_log "add of active $i failed"; return 1; }
+      --dest "$(perf_path "$PERF_INST/downloads")" --start now --connections 1 >/dev/null || { perf_log "add of active $i failed"; return 1; }
   done
 }
 
@@ -123,15 +133,15 @@ perf_start() {
   local name=$1 jobs=$2 active=$3 target=${4:-host} password=${5:-}
   PERF_INST=$(perf_inst "$name")
   [ -e "$PERF_INST/instance.env" ] && { perf_log "$name already exists; stop it or pick another name"; return 2; }
-  [ -x "$PERF_OUT/bin/lib/inbound-host" ] || { perf_log "not built: run scripts/perf-seed.sh build"; return 2; }
+  [ -x "$PERF_OUT/bin/lib/$PERF_HOST_BIN$PERF_EXE" ] || { perf_log "not built: run scripts/perf-seed.sh build"; return 2; }
   mkdir -p "$PERF_INST/data" "$PERF_INST/downloads"
   PERF_INST=$(cd "$PERF_INST" && pwd)
   export DOWNLOADMANAGER_INSTANCE="perf-$name-$$-$RANDOM"
-  export DOWNLOADMANAGER_DATA="$PERF_INST/data"
+  export DOWNLOADMANAGER_DATA="$(perf_path "$PERF_INST/data")"
   # Not inherited from the caller's shell: a variable of the user's own session must not point us at their app.
   unset DOWNLOADMANAGER_HOST DOWNLOADMANAGER_UI DOWNLOADMANAGER_URLS DOWNLOADMANAGER_ROOTS DOWNLOADMANAGER_AUTH DOWNLOADMANAGER_PASSWORD DOWNLOADMANAGER_PASSWORD_FILE
   PERF_TS_PORT=$(perf_free_port)
-  "$PERF_OUT/bin/testserver/TestServer" --port "$PERF_TS_PORT" >"$PERF_INST/testserver.out" 2>&1 &
+  "$PERF_OUT/bin/testserver/TestServer$PERF_EXE" --port "$PERF_TS_PORT" >"$PERF_INST/testserver.out" 2>&1 &
   PERF_TS_PID=$!
   local i ok=0
   for i in $(seq 1 40); do curl -fs "http://127.0.0.1:$PERF_TS_PORT/health" >/dev/null && { ok=1; break; }; sleep 0.25; done
@@ -139,9 +149,9 @@ perf_start() {
   perf_start_host || { perf_kill_started; return 1; }
   # No completion windows or notifications: nobody is there, and a window is a process of its own. The CLI has no key for
   # this setting, so it goes through a settings export and import (as soak.sh does).
-  perf_cli settings set defaultdir "$PERF_INST/downloads" >/dev/null
+  perf_cli settings set defaultdir "$(perf_path "$PERF_INST/downloads")" >/dev/null
   perf_cli settings set maxconcurrent $((active > 4 ? active + 2 : 4)) >/dev/null
-  perf_cli settings export "$PERF_INST/settings-in.json" >/dev/null
+  perf_cli settings export "$(perf_path "$PERF_INST/settings-in.json")" >/dev/null
   sed -i 's/"showCompletionDialog": *true/"showCompletionDialog": false/' "$PERF_INST/settings-in.json"
   # All active downloads come from one host (127.0.0.1) and the per-host limit is 8 by default, so more than 8 would
   # leave the rest waiting. Raised only then, so runs with 8 or fewer keep the default.
@@ -149,7 +159,7 @@ perf_start() {
     sed -i "s/\"maxConnectionsPerHost\": *[0-9]*/\"maxConnectionsPerHost\": $((active + 2))/" "$PERF_INST/settings-in.json"
     grep -q "\"maxConnectionsPerHost\": $((active + 2))" "$PERF_INST/settings-in.json" || { perf_log "could not raise maxConnectionsPerHost"; perf_kill_started; return 1; }
   fi
-  perf_cli settings import "$PERF_INST/settings-in.json" >/dev/null
+  perf_cli settings import "$(perf_path "$PERF_INST/settings-in.json")" >/dev/null
   perf_add_held "$jobs" || { perf_kill_started; return 1; }
 
   local server_pid="" server_port="" url=""
@@ -158,10 +168,10 @@ perf_start() {
     # CLI, so the active downloads are added once it is up, over HTTP (perf-seed-active.mjs).
     perf_stop_host
     server_port=$(perf_free_port)
-    [ -n "$password" ] || password=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')
-    DOWNLOADMANAGER_URLS="http://127.0.0.1:$server_port" DOWNLOADMANAGER_ROOTS="$PERF_INST/downloads" \
+    [ -n "$password" ] || password=$("$PERF_PY" -c 'import secrets; print(secrets.token_urlsafe(18))' | tr -d '\r')
+    DOWNLOADMANAGER_URLS="http://127.0.0.1:$server_port" DOWNLOADMANAGER_ROOTS="$(perf_path "$PERF_INST/downloads")" \
       DOWNLOADMANAGER_PASSWORD="$password" DOWNLOADMANAGER_TORRENTS=off \
-      "$PERF_OUT/bin/lib/DownloadManager.Server" >"$PERF_INST/server.out" 2>&1 &
+      "$PERF_OUT/bin/lib/DownloadManager.Server$PERF_EXE" >"$PERF_INST/server.out" 2>&1 &
     server_pid=$!
     url="http://127.0.0.1:$server_port"
     for i in $(seq 1 80); do curl -fs "$url/health" >/dev/null && break; kill -0 "$server_pid" 2>/dev/null || { perf_log "the server exited: $(tail -3 "$PERF_INST/server.out")"; perf_kill_started; return 1; }; sleep 0.25; done
@@ -186,7 +196,7 @@ perf_start() {
 perf_server_add_active() { # url password count
   [ "$3" -gt 0 ] || return 0
   node "$PERF_ROOT/scripts/perf-seed-active.mjs" --url "$1" --password "$2" --count "$3" \
-    --base "http://127.0.0.1:$PERF_TS_PORT" --size "$ACTIVE_SIZE" --bps "$ACTIVE_BPS" --dest "$PERF_INST/downloads" \
+    --base "http://127.0.0.1:$PERF_TS_PORT" --size "$ACTIVE_SIZE" --bps "$ACTIVE_BPS" --dest "$(perf_path "$PERF_INST/downloads")" \
     || { perf_log "adding the active downloads through the server failed"; return 1; }
 }
 
@@ -195,7 +205,12 @@ perf_server_add_active() { # url password count
 perf_kill() {
   local pid=$1
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
-  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF "$PERF_OUT/bin/" || return 0
+  if [ "$PERF_WIN" = 1 ]; then
+    # Git Bash: a pid from $! names the program it started; check that one is still ours by its path.
+    ps -p "$pid" -W 2>/dev/null | tr '\\' '/' | grep -qiF "$(cygpath -m "$PERF_OUT/bin/")" || ps -p "$pid" 2>/dev/null | grep -qF "$PERF_OUT/bin/" || return 0
+  else
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF "$PERF_OUT/bin/" || return 0
+  fi
   kill "$pid" 2>/dev/null
   local i; for i in $(seq 1 12); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.25; done
   kill -9 "$pid" 2>/dev/null

@@ -182,6 +182,31 @@ So:
   8.2 % to 7.4 %. With the graph hidden it was 2.3 %, so about a quarter of the graph's cost is left (the lines and the
   slide). The labels were read through UI Automation while downloads ran: each once, the summary updating.
 
+## PERF.19: the web UI's list (2026-11-15)
+
+`scripts/perf-webui.mjs` now runs on Windows too (`perf-seed.sh` builds win-x64 and uses the Windows Host; headless Chrome
+157). Headless Chrome against the headless server, 30 s after 10 s, per second of the page's main thread:
+
+| Jobs | Downloads | Before: task / script / layout ms, layouts | Clip-path bar and `content-visibility` | And rows kept between updates |
+| ---: | ---: | --- | --- | --- |
+| 500 | 1 | 193 / 20 / 33, 118 | (run failed) | 30 / 16 / 0.4, 2.6 |
+| 500 | 8 | 354 / 118 / 33, 141 | 165 / 120 / 2.1, 12 | 145 / 92 / 2.4, 14 |
+| 5,000 | 1 | 831 / 188 / 102, 94 | (run failed) | 137 / 103 / 2.5, 2.7 |
+| 5,000 | 8 | 999 / 811 / 30, 25 | 892 / 820 / 9.0, 8.5 | 699 / 583 / 13, 12 |
+
+Sign-in to a usable list at 5,000 jobs: 1,223 ms before, 712 to 761 ms after. Three changes:
+
+- **The progress bar** animated its `width`, and progress arrives about every 300 ms, so the page was laid out again on
+  nearly every frame (about 120 layouts a second with one download, at 500 jobs). The fill is now full width and clipped
+  from the right (`clip-path: inset(... round 9999px)`), which repaints the bar only.
+- **`content-visibility: auto`** on list rows: rows off screen are not laid out or painted.
+- **Rows kept between updates** (`views.ts`): a download's cells and its row object are kept per job object (a job event
+  replaces the object), so an unchanged download is not formatted again and Svelte leaves its row alone. Torrents follow
+  the clock and are formatted every time.
+
+What is left at 5,000 jobs and 8 downloads is mostly script (583 ms a second): every update still filters and sorts all
+jobs and Svelte compares 5,000 keyed rows. A windowed list (render only the rows on screen) is the next step.
+
 ## Not measured
 
 Dropped frames while scrolling (no script exists), the web UI on Windows (the Linux run covers the page; the browser

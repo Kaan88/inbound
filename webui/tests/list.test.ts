@@ -655,3 +655,24 @@ describe('review fixes', () => {
     expect(providerEntries([account(true, true)], [])[0]).toMatchObject({ showWaiting: true, showBrowse: true });
   });
 });
+
+describe('rows kept between updates (PERF.19)', () => {
+  it('keeps the row of a download that did not change, and makes a new one for one that did', () => {
+    const model = emptyModel();
+    const torrent = job('t', 'downloading', { torrent: { name: 't', hasMetadata: true, seeding: false } as unknown as Job['torrent'] });
+    apply(model, { v: 1, id: 'x', type: 'jobs.snapshot', payload: { jobs: [job('a', 'downloading'), job('b', 'queued'), torrent], settings: { downloadGroups: [] }, status: {} } });
+    const first = buildRows(model, 'all', '', new Set());
+    const second = buildRows(model, 'all', '', new Set());
+    const byId = (rows: ReturnType<typeof buildRows>) => new Map(rows.map((row) => [row.id, row]));
+    expect(byId(second).get('a')).toBe(byId(first).get('a'));
+    expect(byId(second).get('b')).toBe(byId(first).get('b'));
+    // A torrent's cells follow the clock, so they are formatted again each time.
+    expect(byId(second).get('t')).not.toBe(byId(first).get('t'));
+
+    apply(model, { v: 1, id: 'y', type: 'job.event', payload: { eventType: 'progress', job: job('a', 'downloading', { receivedBytes: 10, totalBytes: 100 }) } });
+    const third = byId(buildRows(model, 'all', '', new Set()));
+    expect(third.get('a')).not.toBe(byId(second).get('a'));
+    expect(third.get('a')?.view.sizeText).toBe('100 B');
+    expect(third.get('b')).toBe(byId(second).get('b'));
+  });
+});
