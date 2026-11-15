@@ -30,6 +30,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
     private string? _supervisorFor;
     private string? _rcloneVersion;
     private string? _rcloneProblem;
+    private bool _rcloneMissing;
 
     /// <param name="stateDirectory">The Host's data folder; sites live in <c>sites/</c>, rclone's own state in <c>sites/rclone/</c>.</param>
     /// <param name="findRclone">The rclone to run for an own path (tests); <see cref="RcloneSetup.Find(string?, string?)"/> by default.</param>
@@ -107,7 +108,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             Enabled = _config.Enabled,
             OwnRclonePath = _config.OwnRclonePath,
-            Rclone = _rcloneProblem is not null && supervisor is null ? SitesRcloneStates.Missing : state?.State switch
+            Rclone = _rcloneProblem is not null && supervisor is null
+                ? (_rcloneMissing ? SitesRcloneStates.Missing : SitesRcloneStates.Failed)
+                : state?.State switch
             {
                 RcloneState.Starting => SitesRcloneStates.Starting,
                 RcloneState.Running => SitesRcloneStates.Running,
@@ -352,6 +355,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                     _rcloneProblem = _config.OwnRclonePath is null
                         ? "rclone is not installed with Inbound. Run Repair in Setup, or choose your own rclone in Options › Sites."
                         : "The rclone chosen in Options › Sites was not found.";
+                    _rcloneMissing = true;
                     throw new RcloneUnavailableException(_rcloneProblem);
                 }
 
@@ -359,7 +363,9 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
                 problem ??= version is null ? "rclone's version could not be read." : RcloneSetup.TooOldForSftp(version);
                 if (problem is not null)
                 {
+                    // Found but unusable (too old, not rclone, no answer): failed with the reason, not missing.
                     _rcloneProblem = problem;
+                    _rcloneMissing = false;
                     throw new RcloneUnavailableException(problem);
                 }
 
@@ -389,6 +395,7 @@ public sealed class SitesCommands : ISitesCommands, IAsyncDisposable
         _supervisorFor = null;
         _rcloneVersion = null;
         _rcloneProblem = null;
+        _rcloneMissing = false;
         if (supervisor is null) return;
         supervisor.Changed -= OnSupervisorChanged;
         await supervisor.DisposeAsync().ConfigureAwait(false);

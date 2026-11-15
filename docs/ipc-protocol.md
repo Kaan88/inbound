@@ -179,6 +179,95 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
+### Sites: `sites.*` (SITES.2, on branch sites-1, not released)
+
+Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
+`SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
+`SitesCommands` (`src/DownloadManager.Runtime/Sites/`) and `HostCommandDispatcher.Sites.cs`.
+
+Who may send: only the user at this PC. That is a `desktop` session (role left out or `desktop`) with no web scope.
+A `web` session, or a session with a scope, gets `host.actionResult` `{ok: false, message: "Sites can only be used
+from the app on this PC for now."}` and nothing changes. A Host built without Sites says "Sites are not available
+here." in the same shape.
+
+Off: when the switch is off, rclone never starts and nothing runs on a timer. Only `sites.get` and
+`sites.setEnabled` are answered in full. The other requests get:
+
+- `sites.list`: `sites.listResult` with an empty `sites` list;
+- `sites.kinds`: `sites.kindsResult`, as when on;
+- `sites.probe`: `sites.probeResult` `{ok: false, message: "Sites is off. Turn it on in Options › Sites."}`;
+- `sites.save`, `sites.remove`, `sites.trust` and `sites.test`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`.
+
+Turning Sites off stops rclone. The saved sites and their sealed secrets stay on disk.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.get` | `{}` | `sites.status` |
+| `sites.setEnabled` | `{enabled, ownRclonePath?}` | `sites.status` |
+| `sites.list` | `{}` | `sites.listResult` `{sites}` |
+| `sites.kinds` | `{}` | `sites.kindsResult` `{kinds}` |
+| `sites.save` | `SiteSaveRequest` (below) | `sites.result` |
+| `sites.remove` | `{id}` | `sites.result` |
+| `sites.probe` | `{host, port?}` | `sites.probeResult` |
+| `sites.trust` | `{id, entries}` | `sites.result` |
+| `sites.test` | `{id}` | `sites.result` |
+
+`sites.setEnabled`: `ownRclonePath` left out keeps the current path. An empty string goes back to the bundled rclone.
+Any other value must be a full path, or the reply carries `error` and nothing changes. A change to the switch or to the
+rclone path is saved first, then rclone stops if it must.
+
+`sites.kindsResult` lists each kind as `{kind, title, defaultPort, authMethods}`. Only `sftp` is listed for now
+(port 22, `password` and `key`).
+
+`sites.status` carries `SitesStatusDto`:
+
+- `enabled`; `ownRclonePath` (null for the bundled rclone);
+- `rclone`: `off`, `starting`, `running`, `stopping`, `waiting`, `failed` or `missing`. `missing` means no rclone was
+  found (Setup left it out, or the chosen path is wrong). An rclone that was found but can't be used (too old for SFTP,
+  not rclone, no answer to `rclone version`) is `failed`. Both carry `error` with the reason, and so does a `failed`
+  after repeated crashes;
+- `rcloneVersion` (once read; null before the first start or when missing) and `error` (plain words, or null).
+
+`sites.save` takes `SiteSaveRequest`: `id` (left out for a new site), `name`, `kind` (`sftp`), `host`, `port`
+(22 when left out), `user`, `authMethod` (`password` or `key`), `password?`, `privateKey?`, `keyPassphrase?`,
+`remoteFolder` and `localFolder?`. The host is trimmed. A key login needs a private key stored. The reply is
+`sites.result`; on success its `site` is set. A refusal (an unknown site, a bad id, no secret protection on this
+system, a site rule broken) comes back as `sites.result` with `ok: false` and `message`, and nothing is saved.
+
+Secrets: they go in on save and never come back out. A `SiteDto` (in `sites.listResult`, `sites.result` and
+`sites.changed`) has only `hasPassword`, `hasPrivateKey` and `hasKeyPassphrase`. In `SiteSaveRequest`, a secret field
+that is null keeps the stored value, and an empty string removes it. A changed host or port forgets the accepted host
+keys, so the new server is asked about again.
+
+`SiteDto` also has `id`, `name`, `kind`, `host`, `port`, `user`, `authMethod`, `hostKeys` (each
+`{type, fingerprint, entry}`), `remoteFolder` and `localFolder?`.
+
+Host keys: `sites.probe` reads the server's host keys with the SSH key exchange only. It does not log in. The reply is
+`sites.probeResult` `{ok, message?, keys}`, with every key the server offers and ed25519 first. Each key is
+`{type, fingerprint, entry}`. The window shows them and asks the user to accept.
+
+`sites.trust` takes `{id, entries}`, with `entries` the `entry` values the user accepted. It replaces the stored list.
+It takes 1 to 16 entries (duplicates are dropped). Each entry is `type base64`, and the type must match the key blob's
+own type, or the reply is `sites.result` `ok: false`. The fingerprints are `SHA256:...`.
+
+`sites.test` connects through rclone and lists the start folder. The reply is `sites.result`. It fails in three ways
+the window handles on their own screens, with `problem` set:
+
+- `hostKeyNotAccepted`: no key is accepted yet. The window probes and asks first.
+- `hostKeyChanged`: the server's key is not the accepted one, or the server no longer offers that kind of key. The
+  reply carries `offeredFingerprint` (what the server offers now) and `acceptedFingerprints` (what was accepted). The
+  window stops with a warning and does not continue unless the server's owner confirms the new key.
+- `off`: Sites is off (see above).
+
+On success, `message` says how many items the folder holds. A missing rclone or a failed connection carries `ok: false`
+with `message` and no `problem`.
+
+`sites.probe` and `sites.test` end when their client disconnects.
+
+`sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
+The Host sends it after the switch changes, the rclone path changes, rclone's state changes, or a saved site is saved,
+removed or trusted. `sites` is empty while Sites is off.
+
 ### The server's transports (D1b)
 
 `DownloadManager.Server`, the headless Host for Linux and Docker, serves the same envelopes over HTTP:
