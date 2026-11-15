@@ -38,7 +38,7 @@ public sealed partial class MainWindow
     private bool InfoMinimized => AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
 
     /// <summary>The torrent the pane shows now, or null (<see cref="TorrentInfoRules.Shown"/>).</summary>
-    private JobDto? InfoJob => TorrentInfoRules.Shown(TorrentInfoMenuItem.IsChecked, !_providerFull, SelectedJobDtos);
+    private JobDto? InfoJob => TorrentInfoRules.Shown(TorrentInfoMenuItem.IsChecked, !_providerFull && !_sitesShown, SelectedJobDtos);
 
     /// <summary>The pane is seen: it shows a torrent in this shown, unminimized window.</summary>
     private bool TorrentInfoWatches => TorrentInfoRules.Watches(_infoSeen, InfoJob);
