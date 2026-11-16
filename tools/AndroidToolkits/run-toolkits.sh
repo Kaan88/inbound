@@ -88,7 +88,7 @@ ticks() { local p; p=$(pid_of); [ -n "$p" ] && adb shell cat /proc/$p/stat | tr 
 if has build; then
   if [ -z "${SKIP_BUILD:-}" ]; then
     rm -rf "$DIR/bin/Release" "$DIR/obj/Release"
-    dotnet build "$ROOT/tools/AndroidToolkits/$PRJ" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=android-x64 > "$OUT/build.log" 2>&1
+    dotnet build "$ROOT/tools/AndroidToolkits/$PRJ" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=${RID:-android-x64} -p:AndroidTrialRid=${RID:-android-x64} > "$OUT/build.log" 2>&1
     echo "build exit $?; $(grep -E 'Warn.*\(s\)|Error\(s\)' "$OUT/build.log" | tr -s ' ' | tr '\n' ' ')" | tee -a "$OUT/summary.txt"
   fi
 fi

@@ -5,7 +5,8 @@
     <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>0.0.1</ApplicationDisplayVersion>
-    <RuntimeIdentifiers>android-x64</RuntimeIdentifiers>
+    <AndroidTrialRid Condition="'$(AndroidTrialRid)' == ''">android-x64</AndroidTrialRid>
+    <RuntimeIdentifiers>$(AndroidTrialRid)</RuntimeIdentifiers>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

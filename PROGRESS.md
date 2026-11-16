@@ -77,6 +77,26 @@
   - **A batch that measured nothing:** four windows ran with the test server on the wrong port (my mistake); they are in `failed-noserver` and are not in the table. Three of them, with the trial app showing a failed start, drew 632 to 644 mW, which agrees with the idle windows.
   - **Phone afterwards:** screen timeout back at 60000 ms (the only setting changed), test files deleted, the trial app left installed, server stopped. Battery went from 68% to 26%.
   - **Scripts (branch `android-phone`):** `tools/AndroidTrial/run-battery.sh`, `summarize-battery.py`, `uitap.py`.
+- **Battery on the S24 FE (Android 17, 2026-11-16, short run the owner asked for; raw files `artifacts\android-trial\phone-07-battery-s24` in the `idm-android-phone` worktree):** **not decidable at this resolution**; the engine is not shown to be worse than Edge. Same script and method as on the Mi 8 Lite but 4 GiB files (the phone had 11 GB free), windows of 180 to 210 s, brightness manual at the level automatic had left it (67), battery 24% falling to 18%. The counter moves in 2.375 mAh steps about every 30 to 60 s, which is about 2.2 mWh per GiB per window. Idle: 525 and 598 mW.
+
+  | Run (in order) | Download s | MiB/s | Window s | mAh | mWh | Net mWh per GiB | Temp start/max C |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | engine, 1 connection | 36.7 | 111.7 | 181.5 | 16.63 | 61.3 | 8.2 | 28.3 / 30.0 |
+  | engine, 8 connections | 36.9 | 111.1 | 210.5 | 19.00 | 70.1 | 9.3 | 29.3 / 30.9 |
+  | Edge | 49.3 | 83 | 210.6 | 26.13 | 95.9 | 15.8 | 30.9 / 32.5 |
+  | engine, 1 connection | 37.0 | 110.8 | 211.8 | 21.38 | 78.5 | 11.4 | 31.3 / 32.7 |
+  | Edge | 45.4 | 90 | 180.6 | 19.00 | 69.5 | 10.3 | 31.4 / 33.0 |
+
+  Engine 8.2 to 11.4 (mean 9.6), Edge 10.3 and 15.8 (mean 13.0); the ranges overlap and each figure carries about +/-2.2 from the counter and +/-0.5 from the two idle windows differing. Edge's time is from the intent to the link going quiet: it starts fetching while its "Choose where to download" dialog is up, and needed one tap on Download (sent with `input tap`). Both Edge files were complete at 4,294,967,296 bytes. The engine's CPU on this phone: 3.7 s per GB at 1 connection, 5.8 at 8.
+  - **Chrome on the S24 FE could not download from the test server:** every try ended in "This site can't be reached, ERR_TOO_MANY_RETRIES", while `/sha256` from the same server loaded. Cause not found. So there is no Chrome figure.
+  - **Not measured on the S24 FE:** more than two runs per case, larger files, screen off, Chrome, Samsung Internet (not installed).
+  - **S24 FE afterwards:** brightness back to automatic, timeout back to 30000, trial app removed, test files deleted. My failed Chrome tries left about four tabs open in the owner's Chrome, and Chrome and Edge were force-stopped during the runs.
+- **Native toolkit app on the S24 FE (2026-11-16, my run; raw files `artifacts\android-trial\toolkits\native-s24`):** the ARM build now installs. Cause of `INSTALL_FAILED_NO_MATCHING_ABIS`: `Shared/Toolkit.props` and `run-toolkits.sh` hard-coded `android-x64`; both now take `RID` (default unchanged), fixed by a Sonnet agent, APK checked to hold only `lib/arm64-v8a` (14.3 MB). Default Release build (Mono), commands as in `run-toolkits.sh`, run by hand:
+  - **List fully drawn, 200 jobs, cold:** 2.5 to 3.0 s in eight starts (2.51, 2.62, 2.65, 2.65, 2.66, 2.69, 2.91, 2.97) and one of 6.5 s. Emulator figure was 2.5 s. **These starts ran with the lock screen showing over the app**, so they are not clean; `am start -W` gave no TotalTime on this phone (WaitTime 3.0 to 3.3 s), so there is no first-frame figure.
+  - **Idle CPU:** 3 ticks in 60 s with 200 idle jobs (2 ticks in an earlier pass); lock screen showing, so the app was not drawing.
+  - **With three downloads (screen on, unlocked, screenshot `downloads2.png` seen by me):** 103 MB PSS (emulator 104); 885 frames, 11 janky (1.24%), 50th/90th/95th/99th percentile 5/5/6/14 ms (emulator 0.3% janky).
+  - **Not measured:** first frame, a clean unlocked cold start, the other three toolkits on a phone. A first pass had the screen off for the download part and is not used (`meminfo.txt`, `gfxinfo.txt` in the same folder).
+  - Phone afterwards: app removed, timeout back to 30000.
 
 ### Android app design in Figma (2026-11-15)
 
