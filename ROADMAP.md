@@ -645,6 +645,8 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
   picker grant, how long a service may run, the toolkit. Decides .NET or Rust. In progress on branch
   `android-trial`; state in PROGRESS "Android first trial (ANDROID.2)".
+  Decided (owner, 2026-11-16): .NET engine, NativeAOT, native Material 3 screens; battery mark met (Jelly, Edge);
+  the remaining measurements are taken on the real app. Build plan: `docs/plans/android-build-plan.md`.
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).

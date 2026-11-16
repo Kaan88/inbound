@@ -114,6 +114,7 @@
   - Phone afterwards: brightness automatic, timeout 600000 (the value found at the start of this run; someone had changed it from 30000), trial app removed, files deleted.
 - **Native toolkit app, clean cold start on the S24 FE (2026-11-16, unlocked, screen on, checked per start; `starts3-unlocked.txt`):** six starts with 200 jobs: first frame (`am start -W` TotalTime) 184 to 202 ms, list fully drawn 761 to 794 ms. So the 2.5 to 3.0 s above came from the lock screen, and the default (Mono) build is inside the 2 s cold mark on this phone. Not measured: warm start, the Mi 8 Lite.
 - **Owner (2026-11-16): "ignore chrome, edge is enough."** The battery mark is closed as met: better than Jelly on the Mi 8 Lite, equal to Edge on the S24 FE. No Chrome run is owed.
+- **Owner (2026-11-16): "let's leave some of the measurements to after app is made, nativeaot it is unless you have a strong argument. we are ready for the actual app, right? make a plan for opus to follow."** Build type is NativeAOT; I found no strong argument against it, only that the Material 3 screens and NativeAOT have not run together yet, which is the first gate of the plan. The remaining measurements (idle and wake-ups on a phone, warm start, the hour with the screen off) move to the real app. Plan: `docs/plans/android-build-plan.md`. **Not done yet:** ANDROID.2 is not ticked and `android-phone` is not merged; both are step 0 of the plan.
 
 ### Android app design in Figma (2026-11-15)
 
