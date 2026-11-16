@@ -113,6 +113,7 @@
   - **Not measured:** Chrome (still fails on the test server), screen off, mobile data, a second idle window.
   - Phone afterwards: brightness automatic, timeout 600000 (the value found at the start of this run; someone had changed it from 30000), trial app removed, files deleted.
 - **Native toolkit app, clean cold start on the S24 FE (2026-11-16, unlocked, screen on, checked per start; `starts3-unlocked.txt`):** six starts with 200 jobs: first frame (`am start -W` TotalTime) 184 to 202 ms, list fully drawn 761 to 794 ms. So the 2.5 to 3.0 s above came from the lock screen, and the default (Mono) build is inside the 2 s cold mark on this phone. Not measured: warm start, the Mi 8 Lite.
+- **Owner (2026-11-16): "ignore chrome, edge is enough."** The battery mark is closed as met: better than Jelly on the Mi 8 Lite, equal to Edge on the S24 FE. No Chrome run is owed.
 
 ### Android app design in Figma (2026-11-15)
 
