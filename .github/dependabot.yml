@@ -70,6 +70,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Ubuntu's second number is not a minor version: 22.10 was a nine-month release (support ended in 2023), while
+      # 22.04 is long-term. Only new digests of the pinned tag are proposed; a move to another Ubuntu is done by hand.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
