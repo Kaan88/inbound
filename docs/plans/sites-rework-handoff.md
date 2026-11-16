@@ -1,6 +1,6 @@
-# Handoff: Sites UI rework (SITES.11) and what is open from 2026-11-16
+# Handoff: Sites UI rework (SITES.11) and where everything else stands
 
-Written 2026-11-16 for the session that picks this up. Read `CLAUDE.md` first, then this, then
+Written 2026-11-16, last updated the same day after the pull request work, for the session that picks this up. Read `CLAUDE.md` first, then this, then
 `docs/plans/sites-rework.md` (the plan) and open `docs/plans/sites-mockups/4-agreed-design.html` in a browser.
 
 ## Where things stand
@@ -8,12 +8,20 @@ Written 2026-11-16 for the session that picks this up. Read `CLAUDE.md` first, t
 - **Sites UI rework: accepted, not started.** The owner accepted the plan and all nine decisions on 2026-11-16
   ("I accept all picks but don't start yet"), then asked for this handoff. Nothing of the rework is built. Start at
   R0 when the owner says so.
-- **main** is at the merge of #15 and is pushed; the local checkout equals origin.
-- **The macOS build is on the v0.8.0 release** (done 2026-11-17, PROGRESS AV): both architectures, signed update
-  files, release notes.
-- **Then ask the owner** whether the merged branches `macos-0.8.0`, `deps-upkeep` and `extension-open-files` may be
-  deleted on GitHub. Not asked yet.
-- **Left open on purpose:** #14 and #16 (TypeScript 7; ROADMAP CI.6). #13 and #18 are merged, #19 is closed.
+- **Nothing else is waiting on this session.** The pull request and release work of 2026-11-16 is finished (PROGRESS
+  AT, AV); the next thing to do is R0, on the owner's word.
+- **main** is pushed and the local checkout equals origin. The last code merges are #18 (`ca1dc79`) and #13
+  (`72954f6`); later commits are records only.
+- **The macOS build is on the v0.8.0 release:** `.dmg`, `.zip`, signed `manifest-macos-<arch>.json` and
+  `SHA256SUMS-macos-<arch>` for arm64 and x64, and the Mac lines in the release notes.
+- **Merged branches deleted on GitHub** (owner: "Yes, delete them"): `macos-0.8.0`, `deps-upkeep`,
+  `extension-open-files`.
+- **Pull requests left open on purpose:** #14 and #16 (TypeScript 7), blocked as ROADMAP CI.6 says. Nothing else is
+  open.
+- **CI on main at `72954f6`:** macOS packages passed; the CI workflow was still running when this was written, so
+  look at it once. GitHub's Windows job is unreliable (ROADMAP CI.5; owner: "windows is windows. deal with ci
+  later"), so a local `scripts	est.ps1` pass decides. The full local Windows suite has not been run on main since
+  #13 and #18 went in; R0 is a good moment to run it.
 
 ## What the owner said about Sites (2026-11-16)
 
@@ -85,4 +93,5 @@ phone); R7 owner's walk, light mode, docs, release.
 
 - Firefox: the listed add-on, version 0.6.5, was approved at addons.mozilla.org (ROADMAP EXT.S5, PROGRESS AS).
 - Pull requests merged: #9 `4633baf`, #11 `1ceaebe`, #10 `3c6a760`, #5 `ef82afb`, #7 `cf75467`, #8 `2ba7b6c`, #17
-  `b6d52ce`, #15 `1de6d90`. Closed, not merged: #6 and #12 (Ubuntu 22.10). PROGRESS AT.
+  `b6d52ce`, #15 `1de6d90`, #18 `ca1dc79`, #13 `72954f6`. Closed, not merged: #6 and #12 (Ubuntu 22.10), #19 (a copy
+  of #18). PROGRESS AT and AV.
