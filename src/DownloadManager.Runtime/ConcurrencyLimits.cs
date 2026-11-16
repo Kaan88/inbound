@@ -92,7 +92,7 @@ public sealed partial class DownloadManagerService
             ? (_settings.Queues.FirstOrDefault(q => q.Id == r.Job.QueueId) ?? queueDefaults).MaxConcurrentDownloads
             : _settings.MaxConcurrentDownloads;
 
-        var overall = running.Count - _settings.MaxConcurrentDownloads;
+        var overall = running.Count - (_savingHold ? 0 : _settings.MaxConcurrentDownloads);
         var perQueue = running.GroupBy(QueueKey).ToDictionary(group => group.Key, group => group.Count());
         var fileOrder = FileOrderLocked();
         foreach (var runtime in running

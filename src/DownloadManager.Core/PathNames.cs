@@ -20,6 +20,30 @@ public static class PathNames
     public static bool Same(string? left, string? right) => string.Equals(left, right, Comparison);
 
     /// <summary>
+    /// Whether <paramref name="target"/>, found to exist, is <paramref name="source"/> itself under another case: a
+    /// case-insensitive volume outside Windows (APFS is one by default on macOS) answers yes for <c>Report.pdf</c> when only
+    /// <c>report.pdf</c> is there. True only when the names differ in case alone and the folder lists no entry spelt as
+    /// <paramref name="target"/> is, so a real second file (a case-sensitive volume holding both) is never taken for it.
+    /// </summary>
+    public static bool SameFileOtherCase(string target, string source)
+    {
+        if (OperatingSystem.IsWindows() || string.Equals(target, source, StringComparison.Ordinal) ||
+            !string.Equals(target, source, StringComparison.OrdinalIgnoreCase))
+            return false;
+        try
+        {
+            var folder = Path.GetDirectoryName(target);
+            var name = Path.GetFileName(target);
+            return folder is not null && File.Exists(source) &&
+                   !Directory.EnumerateFileSystemEntries(folder).Any(entry => string.Equals(Path.GetFileName(entry), name, StringComparison.Ordinal));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// An archive or listing path with this machine's separator. Windows reads both <c>/</c> and <c>\</c> as a separator
     /// and 7-Zip lists either, so <c>/</c> becomes <c>\</c> there. On Linux only <c>/</c> separates, and a <c>\</c> is part
     /// of a name; it is left as it is, and <c>ExtractionSafety</c> refuses such a name rather than guess.

@@ -43,6 +43,8 @@ public sealed partial class DownloadManagerService
     private readonly SemaphoreSlim _updateDownloadGate = new(1, 1);
     private bool _updateInstallScheduled;
     private bool _updateQuiescing;
+    // MAC.6: while the Mac saves data or power, nothing starts and what runs waits in the queue (SavingHold.cs).
+    private bool _savingHold;
     public event EventHandler? UpdateShutdownRequested;
     public event EventHandler<UpdateProgressDto>? UpdateProgressChanged;
     private UpdateProgressDto? _updateProgress;
@@ -1617,6 +1619,7 @@ public sealed partial class DownloadManagerService
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
+            PauseOnCostlyNetworkOrLowPower = settings.PauseOnCostlyNetworkOrLowPower,
             TorrentsEnabled = settings.TorrentsEnabled,
             TorrentRoute = TorrentRoutes.IsKnown(settings.TorrentRoute) ? settings.TorrentRoute : TorrentRoutes.Ask,
             TorrentChooseFiles = settings.TorrentChooseFiles,
@@ -2240,12 +2243,19 @@ public sealed partial class DownloadManagerService
     /// </summary>
     public static string ManifestUrlFor(InstallMetadata install, string manifestUrl)
     {
-        if (install.AppImagePath is null) return manifestUrl;
+        var name = install.AppImagePath is not null ? AppImageManifestName
+            : install.MacAppPath is not null ? MacManifestName(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture)
+            : null;
+        if (name is null) return manifestUrl;
         const string windows = "/manifest.json";
         return manifestUrl.EndsWith(windows, StringComparison.OrdinalIgnoreCase)
-            ? manifestUrl[..^windows.Length] + "/" + AppImageManifestName
+            ? manifestUrl[..^windows.Length] + "/" + name
             : manifestUrl;
     }
+
+    /// <summary>MAC.1: Inbound.app's signed manifest beside the Windows one, one per architecture (its zip is built for one).</summary>
+    public static string MacManifestName(System.Runtime.InteropServices.Architecture architecture) =>
+        architecture == System.Runtime.InteropServices.Architecture.X64 ? "manifest-macos-x64.json" : "manifest-macos-arm64.json";
 
     public async Task<UpdateDownloadResult> DownloadUpdateAsync(
         CancellationToken cancellationToken = default)
@@ -2643,6 +2653,8 @@ public sealed partial class DownloadManagerService
         }
         if (install.AppImagePath is { } appImage)
             return ReplaceAppImage(appImage, download.Path, check.AvailableVersion, download.Size);
+        if (install.MacAppPath is { } macApp)
+            return ReplaceMacApp(macApp, download.Path, install.Version, check.AvailableVersion, download.Size);
         RemoveUpdatePackages(keepVersion: check.AvailableVersion);
         var staging = Path.Combine(_paths.Root, "updates", $"stage-{check.AvailableVersion}");
         ReportUpdateProgress("staging", check.AvailableVersion, download.Size ?? 0, download.Size);
@@ -2795,6 +2807,95 @@ public sealed partial class DownloadManagerService
 
         _log?.Invoke($"AppImage updated to {version}; the Host exits and the new one starts.");
         return new UpdateInstallResult { Ok = true, Status = "scheduled", Version = version, ResultPath = journal.ResultPath };
+    }
+
+    /// <summary>
+    /// MAC.1: the macOS update. The verified zip (Inbound.app, as scripts/package-macos.sh packs it) is unpacked with
+    /// ditto beside the running bundle, which keeps its links, modes and signatures; then the running bundle is renamed
+    /// aside and the new one renamed into its place, two renames on one volume. Should the second fail, the first is
+    /// undone. The running programs keep the files of the bundle they started from. A restarter then waits for this Host
+    /// to exit and starts the new one, with the window when one was open.
+    /// </summary>
+    private UpdateInstallResult ReplaceMacApp(string bundle, string package, string installedVersion, string version, long? size)
+    {
+        var folder = Path.GetDirectoryName(bundle)!;
+        var name = Path.GetFileName(bundle);
+        var staging = Path.Combine(folder, $".{name}.{version}.new");
+        var aside = Path.Combine(folder, $".{name}.{installedVersion}.old");
+        ReportUpdateProgress("installing", version, size ?? 0, size);
+        try
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+            if (Directory.Exists(aside)) Directory.Delete(aside, recursive: true);
+            Directory.CreateDirectory(staging);
+            var unpack = new System.Diagnostics.ProcessStartInfo("/usr/bin/ditto") { UseShellExecute = false };
+            foreach (var argument in new[] { "-x", "-k", package, staging }) unpack.ArgumentList.Add(argument);
+            using (var ditto = System.Diagnostics.Process.Start(unpack) ?? throw new IOException("ditto did not start."))
+            {
+                if (!ditto.WaitForExit(TimeSpan.FromMinutes(5)) || ditto.ExitCode != 0)
+                    throw new InvalidDataException("The update package could not be unpacked.");
+            }
+
+            var fresh = Path.Combine(staging, "Inbound.app");
+            if (!File.Exists(Path.Combine(fresh, "Contents", "Info.plist")) ||
+                !File.Exists(Path.Combine(fresh, "Contents", "Resources", "host", "inbound-host")))
+                throw new InvalidDataException("The update package holds no Inbound.app.");
+
+            Directory.Move(bundle, aside);
+            try
+            {
+                Directory.Move(fresh, bundle);
+            }
+            catch
+            {
+                Directory.Move(aside, bundle);
+                throw;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.ComponentModel.Win32Exception)
+        {
+            TryDeleteDirectory(staging);
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = "failed",
+                Error = ex is InvalidDataException
+                    ? ex.Message
+                    : $"Inbound.app could not be replaced ({ex.GetType().Name}). Check that its folder is writable: {folder}",
+                Version = version,
+            };
+        }
+
+        // The running Host and window still load assemblies and resources from the old bundle as they need them, so it
+        // stays until the Host is gone: the restarter removes it then (and a next update removes one left over).
+        TryDeleteDirectory(staging);
+        var journal = UpdateJournal;
+        journal.ClearForNewInstall();
+        journal.RecordSucceeded(version);
+        RemoveUpdatePackages();
+        try
+        {
+            MacAppRestarter.Start(bundle, Environment.ProcessId, aside);
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _log?.Invoke($"Inbound.app {version} is in place, but the restarter did not start ({ex.GetType().Name}); start Inbound again.");
+        }
+
+        _log?.Invoke($"Inbound.app updated to {version}; the Host exits and the new one starts.");
+        return new UpdateInstallResult { Ok = true, Status = "scheduled", Version = version, ResultPath = journal.ResultPath };
+    }
+
+    private void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not remove {Path.GetFileName(path)} ({ex.GetType().Name}).");
+        }
     }
 
     private UpdateInstallJournal UpdateJournal => new(Path.Combine(_paths.Root, "updates"));
@@ -3167,10 +3268,11 @@ public sealed partial class DownloadManagerService
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }
 
-                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move.
+                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move. A Mac volume is
+                // usually case-insensitive too, so there the "existing" target can be this very file.
                 if (!PathNames.Same(target, runtime.Job.FinalFilePath))
                 {
-                    if (File.Exists(target))
+                    if (File.Exists(target) && !PathNames.SameFileOtherCase(target, runtime.Job.FinalFilePath))
                     {
                         return new JobActionResponse { Ok = false, Error = "The target file already exists." };
                     }
@@ -4365,7 +4467,7 @@ public sealed partial class DownloadManagerService
                 .Where(r => r.Starting || r.Runner is { IsCompleted: false })
                 .ToList();
             var activeTotal = running.Count;
-            var slots = _settings.MaxConcurrentDownloads - activeTotal;
+            var slots = (_savingHold ? 0 : _settings.MaxConcurrentDownloads) - activeTotal;
             if (slots <= 0)
             {
                 return;
@@ -4453,6 +4555,9 @@ public sealed partial class DownloadManagerService
 
     /// <summary>Tests only: called in the gap between a job being picked and its runner starting (audit 2 L14).</summary>
     internal Action<Guid>? BeforeRunForTesting { get; set; }
+
+    /// <summary>Tests only: stands in for Windows' check of a finished download (L3), which a test can't make remove a file.</summary>
+    internal Func<string, string?, Task<ScanOutcome>>? ScanForTesting { get; set; }
 
     /// <summary>
     /// Audit 2 L10: decided and applied under one gate, so two callers can't apply their answers out of order and leave
@@ -4578,6 +4683,11 @@ public sealed partial class DownloadManagerService
 
         var lastProgressEvent = DateTimeOffset.MinValue;
         var lastProgressSave = DateTimeOffset.MinValue;
+        var lastQuotaSave = DateTimeOffset.MinValue;
+        // PERF.12: an HTTP download's byte count after a restart comes from the engine's checkpoint (written and synced
+        // every 5 s; ReconcileAsync takes it over the job's), so its job file needs the progress only now and then. Every
+        // state change is still saved at once. A torrent has no such checkpoint and keeps the 5 s.
+        var progressSaveEvery = job.Torrent is null ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(5);
         var progress = new InlineProgress<TransferProgress>(p =>
         {
             JobDto? dto = null;
@@ -4652,11 +4762,16 @@ public sealed partial class DownloadManagerService
                 AnnounceJobChange(dto, "progress");
             }
 
-            if (now - lastProgressSave >= TimeSpan.FromSeconds(5))
+            if (now - lastQuotaSave >= TimeSpan.FromSeconds(5))
+            {
+                lastQuotaSave = now;
+                _ = SaveQuotaUseQuietlyAsync();
+            }
+
+            if (now - lastProgressSave >= progressSaveEvery)
             {
                 lastProgressSave = now;
                 _ = PersistQuietlyAsync(runtime);
-                _ = SaveQuotaUseQuietlyAsync();
             }
         });
 
@@ -4690,6 +4805,17 @@ public sealed partial class DownloadManagerService
             result = DownloadResult.Fail(DownloadState.Failed,
                 new JobFailure(FailureKind.Unknown, UrlRedactor.RedactText(ex.Message), false, true, DateTimeOffset.UtcNow),
                 job.ReceivedBytes, job.TotalBytes);
+        }
+
+        // L3: before the download counts as finished, Windows checks the file as it checks a browser's download (the
+        // antivirus, and the internet mark of REV.4), so nothing sees it completed (a window, extraction, hooks) first.
+        // A file the antivirus took away fails the download, not to be retried by itself.
+        var scan = ScanOutcome.NotRun;
+        if (result.Success && job.Torrent is null && !runtime.CancelRequested)
+        {
+            var landed = result.FinalFilePath ?? job.FinalFilePath;
+            scan = await (ScanForTesting?.Invoke(landed, job.EffectiveUrl) ?? DownloadScan.RunAsync(landed, job.EffectiveUrl, _log)).ConfigureAwait(false);
+            if (scan == ScanOutcome.Removed) _log?.Invoke($"Job {job.Id}: the antivirus removed its file.");
         }
 
         var deletePayload = false;
@@ -4734,6 +4860,16 @@ public sealed partial class DownloadManagerService
                 deletePayload = runtime.DeleteOnCancel;
                 deleteFinal = result.Success && runtime.DeleteOnCancel && !runtime.CancelledForRemoval;
                 changeType = "cancelled";
+            }
+            else if (result.Success && scan == ScanOutcome.Removed)
+            {
+                job.State = DownloadState.Failed;
+                job.Failure = new JobFailure(FailureKind.VerificationFailed,
+                    "Your antivirus removed the file after it was downloaded.", false, false, DateTimeOffset.UtcNow);
+                runtime.CancelRequested = false;
+                runtime.PauseRequested = false;
+                runtime.ResumeWhenStopped = false;
+                changeType = "failed";
             }
             else if (result.Success)
             {
@@ -4834,8 +4970,9 @@ public sealed partial class DownloadManagerService
 
         if (changeType == "completed")
         {
-            // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it.
-            if (job.Torrent is null) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
+            // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it
+            // (already done by the check above when Windows ran it).
+            if (job.Torrent is null) { if (scan != ScanOutcome.Passed) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log); }
             else await MarkTorrentFilesAsync(job).ConfigureAwait(false);
             // T10: a download that looks like a torrent, and whose file reads as one, is offered as a torrent. Only such a
             // download's file is read (TorrentFileRule); every other file is left unopened.
@@ -5777,6 +5914,7 @@ public sealed partial class DownloadManagerService
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
+            PauseOnCostlyNetworkOrLowPower = settings.PauseOnCostlyNetworkOrLowPower,
             TorrentsEnabled = settings.TorrentsEnabled,
             TorrentRoute = settings.TorrentRoute,
             TorrentChooseFiles = settings.TorrentChooseFiles,
@@ -5858,6 +5996,7 @@ public sealed partial class DownloadManagerService
                 ShutdownWhenDone = s.ShutdownWhenDone,
                 ShutdownMode = s.ShutdownMode,
                 ForceShutdown = s.ForceShutdown,
+                SiteTransfers = s.SiteTransfers,
                 StartOnHostStartup = s.StartOnHostStartup, TimedStartEnabled = s.TimedStartEnabled,
                 RepeatEveryMinutes = s.RepeatEveryMinutes,
                 LastRunAt = s.LastRunAt, LastRunError = s.LastRunError,

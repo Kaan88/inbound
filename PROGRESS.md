@@ -1,5 +1,137 @@
 # Progress — session handoff
 
+### Popup row menu cut off in a short popup, EXT.B10 (2026-11-15)
+
+- **Owner report (screenshot, macOS):** the popup's right-click menu doesn't fit when the popup is small (one download
+  in the list): "not sure if it happens only on mac". It doesn't: any popup shorter than the menu cut it off.
+- **Cause:** `ui/menu.ts` keeps the menu inside the window, but a `position: fixed` menu adds nothing to the page's
+  height, so the browser never grew the popup for it; a menu taller than the popup was clipped.
+- **Fix:** while a menu is open the page's minimum height is the menu's, so the browser grows the popup (to its own
+  limit); the menu is placed again on resize, is never taller than the window (it scrolls instead), and the height
+  is given back on close.
+- **Checked:** `npx tsc --noEmit`, the 339 extension tests, and headless Chromium on a 120 px page with the six-entry
+  menu: 194 px asked for, the menu fully visible once the viewport had grown, height restored on close. **Not
+  checked:** the real popup in Chrome or Edge.
+
+### Keeping dependencies current, CI.4 (2026-11-15, branch `deps-upkeep`)
+
+- **Owner request:** "what can be done to keep the project up to date in the future?", then "yep, bi weekly though".
+  Found while building for macOS: Uno.Sdk was pinned at 6.7.45 since the D7 prototype (2026-11-09), one day before
+  Uno 7.0.5; nothing watched NuGet or npm, only Docker and Actions.
+- **Done:** `.github/dependabot.yml` covers NuGet (every project; Uno.Sdk now in `global.json` `msbuild-sdks`, so the
+  csproj says `Sdk="Uno.Sdk"`), npm (web UI, extension), Docker (root Dockerfile and the torrent worker's build) and
+  Actions, on the 1st and 15th of the month (cron; Dependabot has no two-week interval). Minor and patch updates come
+  grouped; majors come as their own pull requests. The four placeholder packages that keep Uno's dev tools out are
+  ignored. `scripts/check-pins.py` and `.github/workflows/upkeep.yml` check the pins Dependabot can't see (libtorrent,
+  vcpkg baseline, rclone, 7-Zip, appimagetool, nfpm) on the same days and keep one issue, "Pinned tools behind upstream".
+- **Checked:** the checker's pin reading, locally with GitHub's answers stubbed. **Not checked:** the GitHub API calls
+  (blocked in this session), Dependabot itself (it runs only from main, on its schedule), and whether Dependabot
+  finds Uno.Sdk in `global.json`. A Uno.Sdk update also needs THIRD-PARTY-NOTICES.md changed by hand.
+
+### macOS app, MAC.1 (2026-11-15, branch `macos-0.8.0`)
+
+- **Owner request:** "what does it take to get a macos version quickly? use github builds and work on a branch. build
+  should be based on last release." Built on 0.7.7 first (`macos-build`), then the same commits on 0.8.0. Owner,
+  after running it: "macos version matured in a very short time, let's go all in for a pull request."
+- **How:** the Linux Host and the Uno window run on macOS. Unix-socket IPC on macOS too (getpeereid and lstat in place
+  of SO_PEERCRED and statx; sockets in `/tmp/inbound-<uid>`, as a socket path is at most 104 bytes); `DetachedProcess`
+  where Linux used setsid(1); `open`, `open -R` and AppleScript's folder dialog; browsers' manifests under
+  `~/Library/Application Support`; the Host counts a Mac as a desktop (EXT.B9). `scripts/package-macos.sh` and
+  `.github/workflows/macos.yml` build Inbound.app (ad hoc signed) with the torrent worker (osx triplets).
+- **Fixed on the way, from the owner's runs:** trails under transparent windows (macOS windows are solid; Mica is MAC.2);
+  icons missing when started from Finder (Uno reads its files from `Resources/` beside the program); windows opening at
+  half size and resizing past the screen (no screen lookup on macOS, and Uno hands NSWindow.minSize pixels where it
+  takes points); Options coming back tiny from a saved size; a freeze closing Progress Details (a socket disposed
+  under a blocked Accept doesn't wake it on macOS); no way to reopen the window (menu-bar icon, `native/macos-menu`);
+  the reopened window being another app (the Host opens Inbound.app). Uno.Sdk 6.7.49. The Extractions glyph on Uno.
+- **Then, before the pull request (owner: "let's [do] everything we can before the pr", "self update is not done.
+  macos specific changelog entries", "tag a fake version so we can test auto update without a release"):** the
+  macOS updater and release files (MAC.4 above), a `macos` changelog tag with the 0.8.1 entry's Mac lines, `dm sites
+  rclone`, sign-in start as a LaunchAgent, MAC.3, windows kept clear of the Dock, a scrolling sidebar on Uno (owner:
+  "sidebar becomes too long and items on the bottom remain inaccessible"; Windows' ListBox scrolls by itself, so the
+  Windows window is unchanged), and every CI check for the Intel build too (under Rosetta).
+- **Checked:** on GitHub's Mac (CI): the Host and CLI answer; Sites downloads the macOS rclone and runs it; the window
+  is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
+  Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
+  Mac: the window, downloads, the extension and the menu-bar icon. **Not checked:** a Retina screen in CI (the runner's
+  scale is 1); the last sizing and reopening fixes on the owner's Mac. The Intel build runs every check under
+  Rosetta, and MAC.3 (a newer copy replaces the running Host) passes on both builds; Rosetta's rclone is the arm64 one,
+  as .NET reports the machine's arm64 there.
+- **MAC.5, parity with the Windows Host (owner: "is that all for parity with windows?"):** sleep prevention, the
+  completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
+  the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
+  notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
+- **MAC.6, better on a Mac (owner: "implement fable suggestions except number 10"):** quarantine and "Where from" on
+  finished files, the scheduler woken after sleep and clock changes, ⌘ shortcuts, a menu-bar icon that shows activity
+  and the running downloads, drops on it and a Services entry, Inbound's own notifications with Open / Show in Finder /
+  Retry, the Mac app and Window menus, the Dock badge and progress bar, and an Options choice to pause on a phone
+  hotspot, Low Data Mode or Low Power Mode. **Checked:** unit tests; in the macOS workflow, the marks on a real HTTPS
+  download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
+  real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
+  (2026-11-15).
+- **The test suites on a Mac (owner, 2026-11-15, run on the owner's Apple silicon Mac):** Engine passed 214 of 214.
+  The full Integration suite had 182 failures. 170 are tests already tagged `Platform=Windows` (they start the Windows
+  Host, PowerShell or cmd.exe, or read the registry or pipe ACLs). Of the other 12:
+  - One real bug, fixed: a rename that only changes the case (`report.pdf` to `Report.pdf`) was refused on APFS, which
+    is case-insensitive by default, as "The target file already exists." The fix is `PathNames.SameFileOtherCase`.
+  - Two menu-bar speed tests expected "1.5", but the Mac's number format gives "1,5". The tests now pin the culture.
+  - Six tests used Windows paths as test data; they now use Unix paths elsewhere.
+  - The adopted-file mark test now checks the quarantine mark on macOS.
+  - Junction, native-host and torrent kill-switch tests are now tagged Windows.
+  The suites were taken off the macOS workflow again because it took too long (owner: "end ci, it takes forever. it's
+  redundant too"). A second run with the fixes on the owner's Mac (`--filter "Platform!=Windows"`, 2026-11-15) passed: 1704 passed,
+  0 failed, 70 skipped. The skipped tests need tools a source checkout doesn't bundle: 7-Zip for 60 archive tests, rclone
+  for 6 Sites tests and the torrent worker for 4.
+  The final build of the PR branch (2026-11-15) failed one Windows test: the golden IPC frames lacked the new MAC.6
+  setting. With that fixed (`d1b5cb1`), it passed: macOS packages on both architectures (run 43769913069) and CI on
+  Windows and Linux (run 43771417513). ⌘Q stays File > Exit
+  (owner: "leave as is").
+- **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
+  and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
+  integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second
+  (now after it closes); notifications the user turned off came back through osascript, and other notices weren't
+  Inbound's (one route now); Services registers its port explicitly and hands off to the CLI off the main thread; the
+  helper's first network/power lines could be lost (the Host asks again); a helper that ends releases the hold; an Edit
+  menu for the file panels; the Dock view is made once; the helper is only used from its bundle. Open: ⌘Q ends the Host
+  and its downloads (owner's call); an update zip's architecture isn't checked against the Mac; a notification clicked
+  with no Host running is lost; a Services link is on the CLI's argv while it runs; plus the earlier audit's items
+  below.
+- **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
+  window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
+  started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);
+  a release or test update could ship without the torrent worker (now fails); macOS 15 has no right-click > Open for
+  unnotarized apps (texts say Open Anyway); shut down and restart used loginwindow's dialog events (now `shut`/`rest`,
+  unverified on a Mac); the LaunchAgent is rewritten only when it changes; a Host run from a terminal keeps its session;
+  the Mac Host's log says macOS. Open from the audit, after merge: swap the bundle atomically (`renamex_np`
+  `RENAME_SWAP`) and in the restarter after the Host exits; App Translocation (run from Downloads or the DMG) turns the
+  updater and sign-in start off with a "move to Applications" note; a locked Keychain fails the Host's start; the
+  signing key in a protected environment and a sign-only job (the repository is public), with a separate test key for
+  test updates; `LSMinimumSystemVersion` 12.0 while .NET 10's supported list starts at macOS 15; `/tmp/inbound-<uid>`
+  can be taken first by another local user; `open -n -a` drops `DOWNLOADMANAGER_DATA`; a CI step that runs a real
+  update end to end.
+- **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
+  hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
+  loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS
+  cuts to 16 characters (now `pgrep -f` on the bundle path, with plain launcher paths); the web bridge said "windows" on
+  a Mac; the activation wake-up connection now runs on macOS only. Not a fault: "the launcher stops when no Host runs"
+  (it is `/bin/sh` without `set -e`). Left, named: the update signing key is usable by any branch's manual run (one
+  owner; a protected environment would close it); a Host started from the native host is in the browser's process
+  group until its own `setsid` at start.
+
+### Android app design in Figma (2026-11-15)
+
+- **Owner request:** design an Android app for Inbound: Material You, default colours from the web UI, a full downloader on the phone (not only a remote for another host), animated, and clear about how it works. Done in Figma.
+- **Done (design only, no code):** file "Inbound for Android — Material You", https://www.figma.com/design/OOujeLSw6cddv52YlnzVm1 (in the Figma account's drafts). 22 screens in three rows (A downloading on the phone, B catching links, C queues, sites, hosts, settings), colour variables mapped from `webui/src/tokens.css` to Material 3 roles, the glyphs from `webui/src/lib/icons.ts`, three prototype flows with 71 interactions, and a "How it works" board (pipeline, background behaviour, phone as host and as remote, motion, colour).
+- **Limits of the Figma plan:** one variable mode per collection, so dark and light are two collections; the screens are dark, with one light screen (C8).
+- **Not checked:** the prototype was not played through in Figma's Present view; the interactions were set by script and reported no errors. Nothing was tried on a device.
+- **Owner's answer (2026-11-15):** design accepted. Keep the .NET engine unless performance on a phone is a problem; port to Rust if it is. Agreed with the rest, the built-in browser tab included.
+- **Plan written:** `docs/plans/android-app.md` (decisions, feature map, architecture, the performance measurements that decide .NET or Rust, eight Android unknowns to check first, order of work ANDROID.2 to ANDROID.10). Its claims about Android's rules (service time limits, "Open with", running a downloaded rclone) are from memory and marked as to check.
+- **Mockup in the repo:** 19 screen images and a small overview of the board in `docs/plans/android-mockups/`, shown in the plan. 10 are full size; 9 are smaller captures from the build. **Not done:** B6, C6 and C8 have no image and the board image is too small to read, because Figma's call limit on the free plan ran out. **Left:** export again when it resets.
+- **Not started, on the owner's word (2026-11-15):** ANDROID.2 waits until the perf work is done. The owner's method for it: delegate implementation to lesser agents, preferably Sonnet, review critically, and reimplement what is not good enough. **Question for the owner:** ROADMAP records every PERF item as done or decided on Windows except PERF.18 (Linux window, not started) and the quiet Linux re-runs, both Linux and deferred. Does that count as done, or does Android wait for those, or for a release?
+- **Missing images added (2026-11-15):** B6, C6 and C8 were captured from the Figma page in the browser pane and cropped (about 236 px wide), so all 22 screens have an image in the plan. The Figma connector was still over its limit, and the page gave no script access. The link opened without a sign-in, so anyone who has it can view the file. **Left:** full-size exports of 12 screens and the board.
+- **All four questions answered (2026-11-15):** pass marks as proposed; oldest version Android 12; signed APK on the releases page with an update check; arm64 as below. **Next:** ANDROID.2, not started.
+- **The questions as asked:** (1) answered 2026-11-15: arm64 is allowed for the Android app's device work; read here as Android only, the rest of arm64 stays on hold. (2) Are the performance pass marks in the plan's section 5 right? (3) Oldest Android version to support? (4) APK from the releases page, or a store?
+
 ### Sites and performance on Linux, continued (2026-11-15)
 
 - **A. Quiet re-runs still pending:** the PERF.8 and PERF.15 baselines and the SITES.0 timings were not re-run, because the machine was busy (two VirtualBox VMs and another project's test run; load average 7 to 17 on 28 cores). **Left:** the re-runs on a quiet machine.
@@ -86,6 +218,595 @@
   rclone line is red while Sites is off; "your own rclone" shows before the version is known; "Update rclone
   automatically" stays enabled with an own rclone; the key box widens the dialog; the Test result line can be below the
   fold; no "Sites" heading in the sidebar; rows are tall.
+
+- **I. SITES.3 on Windows: Fable review, walk leftovers, WinUI walk** (2026-11-15, main). **Fable review** of the Linux walk
+  round (`9885b46..43a4bbf`, owed in the hand-off) found six points, all checked against the code and fixed (`f583ee9`):
+  Try again, or reopening a site whose start folder never loaded, asked for `/` instead of the site's folder
+  (`SitesPanel.ReopenPath`); the window refused `.pub` and `.ppk` text with a generic line, because its own looser check
+  ran first (the rule moved to Contracts, `SiteKeyRules`, used by the window and the Host); `SiteKeyText.Friendly` read
+  key words anywhere in a message (now only after rclone's "failed to parse private key"); a superseded Load more moved
+  the selection; `IsTabStop` could stay true (cleared on Stop, not by a late LostFocus); queued focus retries could take
+  the keyboard from a dialog. No secret path found: refused keys are never quoted, the check runs before sealing.
+  **Walk leftovers fixed:** the rclone line is not red while Sites is off ("rclone is looked for when Sites is on.") and
+  the off message is said once; before its version is read the line says so; "Update rclone automatically" is disabled
+  for an own rclone; Server and Port share a row and the dialog keeps 440 px with a 400-character key line; a Test result
+  scrolls into view; a "Sites" heading (not selectable) above the sites in the sidebar. **Windows:** the solution and the
+  WinUI XAML compiler build; Sites.Tests 141 pass, 20 skip (they need sshd, which this PC lacks) with the real rclone
+  1.76.0 (zip hash equal to the signed list); Integration Sites 50 pass, 6 skip; Core Sites rules 71 pass. The signed
+  rclone fixture failed on a CRLF checkout; it now keeps its bytes (`.gitattributes -text`). **WinUI walk** (published
+  build, own test instance, `rclone serve sftp` on 127.0.0.1 with throwaway keys as the server, driven through UI
+  Automation and window messages to the test window only; no screenshots, because the window draws black when
+  captured): Use Sites off and on; the download offer; **rclone downloaded, verified and installed by the app on
+  Windows**; Add site with a `.pub` paste (the new specific message), the real key with a passphrase, the key prompt
+  (fingerprint equal to `ssh-keygen -lf`, Cancel focused); Test connected; open from the sidebar; Enter, Backspace (parent
+  selected), Down, Home, End, F5; Up; 1,200 files paged 500 / 1,000 / 1,200, two quick Load more presses both count
+  (hand-off point 5 was the Linux harness); Star, Starred menu (label `big`), open from it, Unstar; the folder changed
+  while shown restarts the view (hand-off point 2); a wrong passphrase with a new start folder, then fixed, and Try again
+  lists the start folder (the Fable fix); a changed server key refused with both fingerprints, "Open Options > Sites",
+  Replace the key (Cancel and "Keep the old key" focused); Remove site (Cancel focused; sidebar entry, heading and view
+  go; the site file deleted, hand-off point 1). No passphrase or key text in the test data or logs. **Found by the walk and
+  fixed** (WinUI only): the first open left the keyboard on "Starred folders" (the panel was focused while not a tab stop,
+  and the retries ran out before a new list's first layout; now the panel holds it and the retry waits for the next layout
+  pass); Load more's keyboard went to the status bar on a middle page (WinUI moves focus off a disabled button; the panel
+  holds it during the load and gives it back) and on the last page (the new guard; it now stands down only for a dialog
+  or menu). **Not checked:** anything visual (row height, colours, light mode, the Starred tooltip), the guard with a
+  dialog opened during a load (code path only), the SFTP end-to-end test on Windows (no sshd), the Uno window on Linux
+  after these focus changes (built on Windows only). **Left:** rows in the browse view still look tall on Linux (not
+  measured; the row style already sets 27 px, so the cause is not known); F5 selects the first row rather than the one
+  that was selected.
+  **Then (same day):** connection and sign-in failures are said in plain words (`SiteErrorText`, used for browse and
+  Test): refused, name not found, no answer, sign-in not accepted, folder not on the server. The texts were taken from
+  rclone 1.76.0 runs on Windows against the loopback server, plus the Linux phrasings of the same Go errors; only text after
+  rclone's "couldn't connect SSH" is read, and anything else keeps rclone's (redacted) text. `SiteErrorTextTests` (11);
+  Sites.Tests 152 pass, 20 skip. **Pixels:** the WinUI test build draws black on screen, not only in captures (UI.B9; a
+  one-pixel resize no longer helps), so nothing visual was seen; relabelling the test exe Medium to test the Low-integrity
+  cause was refused by the harness. The Uno window, run on Windows against the test Host, does draw: the "Sites" heading
+  and the site show in its sidebar, and Options › Sites (remove, add, key prompt with Cancel focused, Test connected)
+  works there; its sidebar could not be selected through automation or window messages, so the browse view was not seen
+  in Uno. Uno on Windows draws some text twice (column headers, the empty-list line); Uno on Windows is not shipped.
+  The Linux VM did not answer, so the Uno window on Linux is still not re-walked after the focus changes.
+  **Haiku review of the focus fixes:** three points held and are fixed. A later retry no longer takes the keyboard from
+  somewhere the user moved it (a status-bar click; sidebar clicks already end the chain by leaving or reopening the view).
+  The wait for a first layout has a 100 ms fallback. Try again pressed from the keyboard no longer leaves the keyboard in
+  the status bar while it loads; seen in the app: the panel holds it through an 11 s failing load, then Try again gets it.
+  Not taken: "the window may hide the view without Stop" (it hides it in one place, after Stop). Not checked: a focus ring
+  shown after a mouse click on Load more, and whether an open dialog's popup child is the dialog's ancestor on Uno.
+
+- **J. SITES.4 started: transfers on the Host side** (2026-11-15, main; no window shows them yet). A batch downloads
+  files and folders from a site into a folder on this PC, or uploads the other way: `sites.transfer.start/pause/resume/
+  cancel/retry/clear/list/get` and the `sites.transfer.changed` push (`docs/ipc-protocol.md`, Transfers). Each file is
+  one rclone `operations/copyfile` async job in a stats group per batch, polled with `job/status`, stopped with
+  `job/stop` (and `job/stopgroup` when a batch stops). Batches are `sites/transfers/{id}.json`, written before anything
+  moves; progress is saved every 2 s, changes of state at once. "Transfers at once" (1 to 10, default 3, `maxTransfers`
+  in `sites.setEnabled`; owner decision of 2026-11-15) across all sites, oldest batch first, apart from downloads at
+  once. Conflicts Skip, Replace, Keep both (`name (2).ext`). A failed file retries after 2, 4, 8, 16 s, then fails with
+  a plain reason; a file gone from its source fails at once; a changed host key or a refused sign-in stops the batch; a
+  server that can't be reached makes the batch wait (files keep their tries) and stop after five waits. Pause stops the
+  files in flight (rclone removes its partial file) and Resume starts them from zero. Turning Sites off pauses running
+  batches; removing a site cancels its batches. After a kill, a running batch removes rclone's partial files for its
+  unfinished files (exactly `name.<8 hex>.partial`, seen over six rclone copies) before going on. Server names this PC
+  can't hold (`..\x`, `a:b`, `CON`, trailing dot, names equal but for case on Windows) fail on their own and are never
+  renamed; nothing lands in Inbound's data folder. A running batch keeps the PC awake through one power request shared
+  with downloads (`SharedSleepPrevention`), under the same option. **Fable review** (concurrency, durability, safety,
+  secrets): nine findings checked against the code and fixed. "Running" was never saved, so the crash sweep rarely ran
+  (now a batch-level sweep). Retry revived canceled and paused batches. A stop during the copy call could orphan an rclone
+  job. Connection failures were spent per file (up to 5 sign-ins per file). The data-folder check covered only the
+  batch root. Pause-all came before validation. A start refused while stopping left its file. Case-only duplicates
+  collided on Windows. The partial-name pattern was too wide. Also fixed: cancels now run outside the lock, and missing
+  reserved names were added. Not changed: "done" is saved up to 2 s late, so with Keep both a kill in that window copies a
+  just-finished file again as `name (2)` (documented); junctions or `subst` drives leading into the data folder are not
+  resolved. **Tests:** `SiteTransfersEndToEndTests` (7, against `rclone serve sftp` on loopback, which runs on Windows;
+  every file compared by SHA-256): folder and file download with the three conflict choices and Clear; folder upload;
+  pause and resume mid-file (sleep held, then let go); a Host stopped mid-file with a stray partial file left removed at
+  the next start while the user's own `slow.bin.old.partial` stays; Sites off pauses, a vanished file fails alone, Retry;
+  a password changed mid-batch stops it with the plain reason and spends no tries, no password in logs or the batch file,
+  canceled can't be retried; the server killed mid-batch makes it wait, then stop, with no file failed. Unit tests:
+  `SiteTransferPathsTests`, `SiteTransferStoreTests`, `SharedSleepPreventionTests`; the dispatcher test lists every new
+  request. Run on Windows with rclone 1.76.0: those 7 pass, Sites.Tests 194 pass and 20 skip (sshd), Sites integration
+  44 pass, the solution builds. **Not done in SITES.4:** the Transfers bar and the Download/Upload commands in the
+  windows; the speed share (`core/bwlimit`); scheduler stop and start; the tray tooltip; sidebar activity and the status
+  chip; empty folders; a CLI. **Not checked:** Linux (the Linux Host builds on Windows only), a real OpenSSH server for
+  transfers (the SITES.2 sshd test is Linux-only), batches of thousands of files (each save rewrites the whole batch).
+
+- **L. SITES.4 in the windows, the tray and the CLI; empty folders** (2026-11-15, main). **WinUI (and Uno, which
+  shares the files):** the Sites toolbar has Download (the selected files and folders; several rows can be selected
+  now), Upload (Files… or A folder…) and Pause transfers (every running batch; it turns into Resume transfers when all
+  are paused). Each asks where, and what to do with a file that is already there (Skip, Replace, Keep both), and says a
+  file stopped part way starts again. The Transfers bar takes the speed graph's place in the Sites view: a slim bar that
+  opens upward (by itself when a batch starts), tabs Running and waiting, Failed and Done with counts, one row per batch
+  with progress, speed and Pause, Resume, Retry, Files (each item and why it failed), Cancel and Clear; Retry all on the
+  Failed tab; Clear finished. The status bar has a Site transfers chip; each sidebar site shows ↓n ↑n (and a clock for
+  waiting batches) and a thin progress line while files move there. An upload into the folder on show relists it when it
+  ends. The Scheduler has "Also pause site transfers at the stop time, and resume them at the start time". **Tray:** the
+  tooltip and the status line count running site transfers too (`TrayText`). **CLI:** `dm sites list | transfers | get
+  <site> <path>... --to <folder> | put <site> <folder> <path>... | pause|resume|cancel|retry <id> | clear [<id>]`
+  (`--conflict`, `--json`); the rest of `dm sites` (add, ls, rm, mv, mkdir) is SITES.8. **Empty folders** are made at
+  the target both ways (download: created here; upload: `operations/mkdir`), as items of their own (`isFolder`); the
+  batch counts them (`folders`) and the texts then say "items". **Haiku review** of the diff: seven findings, checked
+  against the code. Fixed: the window's settings copy dropped a schedule's `siteTransfers`, so any Options or Add URL
+  save turned it off (high); the empty-folder check took `a/b` for empty when `a/b-c.txt` sorts between `a/b` and its
+  files; the folder pickers were not guarded against a picker failure; stale protocol text; Clear finished came back
+  enabled with nothing to clear; jargon in the dialog. Not changed: Retry and Cancel hidden where Resume or Clear do the
+  same. Its two guesses were checked: the bar's glyphs are right; Enter with several rows selected opened one of them
+  (now it opens a folder only when one row is selected). **Walk** (published build, own test instance, `rclone serve
+  sftp` on 127.0.0.1 with throwaway keys, driven through UI Automation; no pixels, UI.B9): Add site with the key and
+  Trust (fingerprint equal to `ssh-keygen -lf`); Download of two folders, one holding only an empty folder (hash equal,
+  the empty folder made); upload of a file through the real file dialog and of a folder with an empty subfolder through
+  the folder dialog (made on the server; the view relisted itself); a 57 MB download at 2 MB/s: the chip ("1 transfer
+  running, 3.0 MB/s"), the sidebar ("Site S4, 1 downloading", ↓1 and the line), Pause and Resume in the row and in the
+  toolbar, the chip and marks gone at the end, hash equal; Done tab, Files ("Folder made · empty folder"), Clear
+  finished; the batches still listed after a restart of the Host and the window; the Scheduler box saved
+  (`siteTransfers: true` in the settings) and still set after an Options save; `dm sites list`, `get` (a file and an
+  empty folder) and `put` (a file and a folder) against the same instance. **Found by the walk and fixed:** `dm sites`
+  was refused as an unknown command (the command list missed it; a test now runs the real CLI); an empty folder counted
+  as a "file" and its line said "Copied · 0 B"; an upload's new files did not show until Refresh. Noted, not ours:
+  `rclone serve` caches a folder's listing for five minutes, so a file put on the test server by hand shows only after
+  that (`--dir-cache-time 0s` for walks); Git Bash turns `/pub/x` into a Windows path for `dm` (`MSYS_NO_PATHCONV=1`).
+  **Tests:** `SiteTransferRulesTests` (11), `SiteTransfersCliTests`, the CLI command test, `TrayMenuTests` (tooltip),
+  `EmptyFoldersAreMadeAtTheTargetBothWays` (with the sorting case). Core 2356, Tray 3 and the Integration site,
+  scheduler and CLI tests pass with rclone 1.76.0; the solution builds. **Not checked:** anything visual (UI.B9: the
+  test build draws black), light mode, Retry all with a real failure (rule tested only), the tray tooltip on screen
+  (unit tested), the Uno window on Linux. The Done tab never says "checked" (the plan's hash note): whether rclone
+  compared a hash is not reported to us yet.
+
+- **M. SITES.5: remote changes, "On this PC", Two panes, linked folders** (2026-11-15, main). **Host:** `sites.mkdir`,
+  `sites.rename`, `sites.count` and `sites.delete` (`SitesCommands.Changes.cs`; protocol in `docs/ipc-protocol.md`).
+  Names follow `SiteNameRules` (Contracts, shared with `SitePaths`). Rename refuses a name already there; a change of case
+  only goes through a name of its own (`.inbound-rename-…`, put back on failure) because a server that ignores case
+  takes "a" to "A" as no change. Delete gives a result per item; a name already gone counts as deleted. Rename and
+  delete refuse anything a running, paused or still-resumable batch uses (`SiteTransfers.Uses`). Each change forgets the
+  site's kept listing. Browse items carry `here` (`SiteHere`): same, older here, partly here, different, not here, folder
+  here, against the site's linked folder (the start folder matches it; outside it nothing is compared; name, size, time
+  with 2 s slack, never contents). **Window (WinUI, Uno shares it):** New folder, Rename (F2) and Delete on server
+  (Delete key) on the Sites toolbar; names are checked as typed; Delete counts first, then asks with Cancel focused and
+  says it can't be undone. The "On this PC" column shows for a site with a linked folder. **Two panes** (toolbar,
+  remembered in `ui-state.json` as `sitesTwoPanes`): this PC on the left (Up, a path box, Refresh, Enter/Backspace/F5),
+  arrows in the middle that start the same Host transfers, the server on the right. It follows the server folder into
+  the matching folder under the linked folder when that exists; otherwise it stays where it is (a new site opens at its
+  linked folder, else the default download folder). Delete in the left pane sends to the Recycle Bin on Windows only,
+  after asking, and refuses a folder a batch writes into or reads from. Both panes re-read when a transfer lands. Two
+  panes is off while the window shows another server (its sites move files on that server's disks). **My calls**
+  (recorded here, as the goal said to decide): folders say only "Folder here", contents are not compared; I added
+  "Different here" (bigger here, or a file on one side and a folder on the other); only paths inside the site's start
+  folder are compared; Two panes is not offered for another server; the left pane has no rename or new folder (Explorer
+  does that). **Haiku review:** ten points, checked. Fixed: a case-only rename could replace another file on a server
+  that keeps case (now an exact-name check, and the in-between name above, which the walk showed was needed); Two panes
+  stayed on, and its Delete live, after switching to another server; a server folder with a file of that name here said
+  "Not here"; "Some of it" is now "Partly here"; misplaced doc comments; an unverified comment about folder renames. Not
+  changed: deleting a file inside a download's folder on this PC is allowed (only the batch's folder and the folders
+  holding it are refused; a file rclone is writing is held open, so Windows refuses it anyway); the busy check runs
+  just before the rclone lease (one Host; a batch starts through the same commands); the left pane accepts names the
+  column would compare though Windows can't open them (rare; the pane says why). **Walk** (published build, own test
+  instance, `rclone serve sftp`, UI Automation only; screen capture draws black, UI.B9, and screen control was not
+  granted): Two panes remembered across a restart; the left pane followed the server into `docs` and back; ← downloaded
+  `readme.txt` into the left folder and both panes re-read (the column went from "Not here" to "Same"; first walk found
+  the server pane did not re-read, fixed); → uploaded a file into `/pub`; Delete in the left pane asked (Cancel focused)
+  and sent the file to the Recycle Bin; a folder a running download wrote into was refused with "A site transfer still
+  uses deep"; New folder (suggested "New folder", made, selected), Rename refused a slash as typed, a case-only folder
+  rename `walk5` → `Walk5` took effect, Delete on server asked with Cancel focused and removed it. Found and fixed: the
+  delete question said "removes 0 files (0 B) … inside the folders" for an empty folder. **Tests:**
+  `SiteChangesEndToEndTests` (2, against real rclone: new folder, renames including case only, count, delete, busy
+  refusals), `SiteHereTests`, `SitePathNameTests`, `SiteChangeRulesTests`, `LocalListingTests`; Core 2367, Sites and
+  the whole Integration suite (1991, 10 skip, with rclone 1.76.0) pass; the solution builds. The full Integration run
+  found the recorded Host frames out of date since SITES.3 added the `sites` hello capability (only that word differs;
+  regenerated) and the dispatcher's request list missing the four new requests (added). **Not checked:** anything visual, light mode, the Uno window on Linux, a case-keeping
+  server (the test server serves a Windows folder), Two panes after a real server switch (rule only).
+
+- **N. SITES.6a: FTP, FTPS, WebDAV and S3 sites** (2026-11-15, main). **Host:** `SiteKindCatalog` (Contracts) lists
+  each kind's fields, choices and capabilities (`newFolder`, `emptyFolders`, `hostKey`), and `sites.kinds` serves it.
+  Each kind gets its own rclone remote (`SiteRemote`): FTP with explicit or implicit TLS or plain (`tls`,
+  `explicit_tls`); WebDAV by its address and vendor; S3 by provider, endpoint and region, with `env_auth` off so only the
+  site's keys are used, and the secret key registered as a secret. A save is checked against the catalog: fields of
+  another kind, a key for anything but SFTP, a change of kind, an address with a user name, query or fragment, and an S3
+  site without both keys are refused. A WebDAV or S3 site's host and port come from its address. Only SFTP asks about a
+  host key (`NeedsHostKey`); `sites.trust` refuses other kinds. An upload to S3 leaves empty folders out. `SiteDto`
+  carries `capabilities` and `encrypted`. New plain words: certificate not trusted, FTP 530, HTTP 401, S3 bad signature,
+  unknown key and access denied, and unknown host, refused and timed-out connections. **Window (WinUI, Uno shares
+  it):** the new-site dialog starts with a Kind box and shows only that kind's fields, with S3's own labels (Access key
+  ID, Secret access key) and its object-store note. The port follows the kind (21, 22, 990 for implicit TLS). Plain FTP
+  and a finished http:// address warn while the form is filled in. Options says "Not encrypted" under such a site and
+  tests any new site straight after it is saved. The Sites pane shows a "Not encrypted" chip next to the site's name and
+  hides New folder on S3. An FTP address typed in Add URL, or pasted into Add links, now points to Options > Sites.
+  **My calls:** one Kind box in the dialog rather than a menu on Add a site; FTPS certificates are checked against
+  Windows' roots only for now (a self-signed server fails with the plain words; trusting one is SITES.6b); no `sites.probe`
+  for other kinds. **Haiku review:** two points, both fixed: the port did not follow the kind after passing through
+  WebDAV or S3 (they have none), and filling the Encryption box on a kind switch moved 990 back to 21. **Walk**
+  (published build, own test instance, `rclone serve ftp`, `webdav` and `s3` on 127.0.0.1, UI Automation only): FTP,
+  then implicit TLS (port 990), then plain (21, warning shown); plain FTP, http WebDAV and S3 ("Other", local endpoint)
+  saved and tested themselves ("connected, and its start folder was listed"); each listed "Not encrypted" in Options and
+  showed the chip in the pane; New folder hidden only on S3; a folder downloaded over FTP. Found and fixed: Options
+  still said "SFTP today". **Tests:** `SiteKindsEndToEndTests` (4, against real rclone servers: plain FTP, WebDAV, S3
+  without empty folders, the save checks), `SiteErrorTextTests` (7 new), `SitesOptionsTests` (4 new); Core 2371, Sites
+  208 and the Integration site, dispatcher and golden-frame tests (385) pass; the solution and the Uno window build.
+  **Not checked:** FTPS against a real certificate (no trusted test server here), Nextcloud and ownCloud, a real cloud
+  S3 service, anything visual, light mode, the Uno window on Linux.
+
+- **O. SITES.6b: trusting a server's own certificate (FTPS, https WebDAV and S3)** (2026-11-15, main). As the plan
+  says (one Host-managed CA file, owner 2026-11-15): rclone has no per-site CA and reads `--ca-cert` only at start.
+  **Host:** a test or browse that fails with Go's "unknown authority" carries `certificateNotTrusted`. `sites.certificate`
+  reads the certificate with a TLS handshake of the Host's own (`TlsCertificateProbe`; explicit FTPS sends `AUTH TLS`
+  first) and sends nothing else, no user name or password. It says why trusting would not help when that is so: no
+  subject alternative name (Go ignores the common name), the wrong name, or out of date. `sites.trust` with
+  `certificateFingerprint` reads the certificate again and refuses another one. `forgetCertificates` forgets them. A site
+  keeps at most 4, and a new address, port or FTP encryption forgets them. Every trusted certificate goes, with the
+  system's roots (Root and, on Windows, third-party roots, since the file replaces them for rclone), into
+  `trusted-certificates.pem` in the Host's rclone folder; rclone starts with `--ca-cert` on it, and with none trusted
+  there is no file. After a change the running rclone stops at once if idle, or when its last lease goes
+  (`RcloneSupervisor.RenewWhenIdleAsync`). A trust made while transfers run says it applies after them. rclone's check is
+  never switched off. **Window:** Test in Options asks "Trust this certificate?" with the names, the issuer ("itself"
+  for self-signed), the dates and the SHA-256 fingerprint, and a hint on how to compare it; Trust is not the default. A
+  certificate trust would not fix gets a Close-only message saying why. The site's row says "Trusts its server's own
+  certificate (valid until …)" and offers "Forget certificate". The Sites pane explains the refusal and points to
+  Options. **My calls:** trusting needs a subject alternative name and a matching name, because rclone checks them
+  anyway; the dialog warns that a trusted certificate is trusted by all Inbound's sites (one CA file per rclone), which
+  matters for a self-signed certificate made as a CA; no per-site isolation is possible with rclone 1.76.0. **Haiku
+  review:** five points. Fixed: two writers of the file could leave an older list last (now one writer at a time, and a
+  failed move is logged rather than failing the save); Forget did not redraw the row; an FTP reply line of only the code
+  waited for the timeout; an unusable address threw past the probe's handler. Hardened: certificates are also dropped
+  when a site becomes unencrypted (the address check already did this). Checked, no change: the gate use (no
+  deadlock). **Walk** (published build, own test instance, `rclone serve webdav --cert` with a self-signed ECDSA
+  certificate for 127.0.0.1, UI Automation only): a new https site was tested at once and asked "Trust this
+  certificate?"; the fingerprint shown equals the certificate file's SHA-256; Trust, and the test said "connected, and
+  its start folder was listed"; the row showed the trust line and Forget certificate; Forget asked, and the row and
+  button went; the Sites pane then explained the refusal. **Found by the walk, not fixed (recorded):** a password under
+  four characters on any site makes the shared rclone client withhold every later error text that contains it, until
+  rclone restarts (the redaction rule of SITES.0; a first walk site used "p"). **Tests:** `SiteCertificatesEndToEndTests`
+  (https: untrusted, read, wrong fingerprint refused, trusted, works, forget, trusted again, another name forgets it and
+  can't be trusted; implicit FTPS: trusted, after which the certificate is no longer the problem, since rclone's own test
+  FTP server refuses `PBSZ` in implicit mode; explicit TLS against an implicit server is not a certificate question;
+  certificates without a name or out of date), `RcloneSupervisorTests` (renew), `SitesOptionsTests`; Core 2372, Sites
+  219 and the Integration site, dispatcher and golden-frame tests pass; the solution builds. **Not checked:** explicit
+  FTPS with a real server, a Windows root that is fetched only on demand while a certificate is trusted (documented in
+  `docs/ipc-protocol.md`), anything visual, light mode, Linux.
+
+- **P. SITES.6c: Drive, OneDrive and Dropbox sign in through the browser; Backblaze B2** (2026-11-15, main). **Host:**
+  new kinds `drive`, `onedrive`, `dropbox` (auth method `signIn`, no password or key; optional own client ID and
+  secret, sealed) and `b2` (application key ID and key). `sites.signIn` runs `rclone authorize <kind>
+  --auth-no-open-browser` (cleaned environment, no config), reads the 127.0.0.1:53682 address from its output and
+  answers with it; the token rclone prints when it ends is sealed into the site (`SealedSignIn`, the rclone settings as
+  JSON: token, `scope: drive` for Drive, and for OneDrive the `drive_id` and `drive_type` read from Graph `/me/drive`).
+  One sign-in at a time (rclone's port is fixed), 10 minutes at most, `sites.signInCancel`, and a removed site or a
+  Host shutdown stops it. The paste flow takes `rclone authorize`'s output from another computer. The site becomes a
+  named in-memory rclone remote (`config/create`); a token rclone renews is noticed at the next use (`config/get`) and
+  sealed back, unless the site was signed in again meanwhile. No token: `signInNeeded`; `invalid_grant` too. A new
+  client ID drops the old secret and the sign-in. **Window:** the dialog shows only the optional client fields for
+  these kinds; saving starts the sign-in, opens the address in the browser and shows "Signing in to …" with the
+  address, Cancel and "Paste a token…", which closes by itself when the Host's sign-in ends; then the site is tested.
+  The row says "Not signed in yet." and offers "Sign in…" or "Sign in again…"; a test that needs a sign-in offers it;
+  the Sites pane explains `signInNeeded`. **Haiku review:** twelve points. Fixed: two sign-ins starting at once could
+  both start rclone (the start is now one step); a new client ID kept the old secret; Cancel while Options closed did
+  not reach the Host; a failed poll closed the waiting dialog as if done; "couldn't fetch token" (also a network error)
+  read as a refused sign-in; a renewal of an older grant could overwrite a new sign-in; shutdown left rclone authorize
+  running; a token printed just before a cancel was still stored; the output was read before it was complete; a
+  failed store was not logged. Not changed: a renewed token whose store fails is used until the next restart (logged);
+  an own client secret is on `rclone authorize`'s command line for its run (rclone takes it no other way).
+  **Walk** (published build, own test instance, UI Automation): the kind list has the four new kinds; a Dropbox site
+  shows only name, client ID and secret, and folders; Save opened the browser and the "Signing in to Walk box" dialog
+  with a 127.0.0.1:53682 address; Cancel said the sign-in was cancelled; the row showed "Not signed in yet." and
+  "Sign in…"; the Sites pane explained the missing sign-in. **Tests:** `SiteSignInRemoteTests` (real rclone: named
+  remote, renewal handed back, a new sign-in replaces it, own client ID, secrets withheld, B2 fs),
+  `SiteSignInEndToEndTests` (real `rclone authorize`: address, one at a time, cancel, port free again, remove cancels;
+  paste flow, sealed on disk, client-ID rules, B2 save), `SitesOptionsTests`, dispatcher lists; Core 2373, Sites 223
+  and the Integration site, dispatcher and golden-frame tests pass. **Not checked:** a sign-in with a real Google,
+  Microsoft or Dropbox account, a renewal by the real provider, OneDrive's drive lookup, a real B2 bucket, anything
+  visual, light mode, Linux. **Question for the owner:** may a live check use your own Google, Microsoft, Dropbox or
+  Backblaze account (a test folder, removed afterwards)? Until then 6c is unverified against the services. **Answered 2026-11-15 (yes); Drive, OneDrive and Dropbox checked live (AK), B2 later.**
+- **Q. SITES.7: Sites in the web UI and on the server, "this device" streams** (2026-11-15, main; commits `dad04f5`,
+  `ec80948` and the web UI commit after them). **Who may:** a web session signed in with the password is the admin, so
+  it is answered for `sites.*` (my reading of the owner's "admin only", 2026-11-15: there is no role system, and the
+  password is the only way in). It is held to its folders on the computer Inbound runs on (a site's or a transfer's
+  folder outside them is refused; resuming or retrying a batch made there with an outside folder is refused too) and
+  can't choose Use my own rclone (a program to run). On the server every caller is held to the server's roots the same
+  way. **Question for the owner:** is "every signed-in browser is the admin" right, or should a second, lesser
+  password (or the setup code) be asked before Sites can be changed from a browser? **Host:** `sites.device.*` streams
+  a file between a site and the browser's device in 1 MiB pieces through rclone's served files (`--rc-serve`, named
+  in-memory remotes) and `operations/uploadfile`, nothing on a disk on the way; 8 at once, closed after two idle minutes
+  (the timer runs only while one is open). **Server:** Sites runs in the headless server (and in the image, whose
+  rclone it finds), and `GET`/`POST /api/sites/device` carry the bytes (the name in `X-File-Name`, 409 when it is
+  taken). **Web UI:** Sites in the sidebar (Manage) when the host offers it: the switch and rclone's state, Download
+  rclone, the site list (add, edit, test, remove, sign in), a site's files (breadcrumbs, more than 500 items in pages,
+  download to this device as a plain link, upload from this device with progress and a Replace question, download to
+  the server or PC with a folder and the conflict choice, new folder, rename, delete), host-key, certificate and
+  sign-in questions (the sign-in link works only when the browser is on the same computer; otherwise the paste flow),
+  and the transfers with pause, resume, cancel, retry and Clear finished. **Haiku review of the Host and server
+  commit:** eleven points. Fixed: a web session could set a batch from outside its folders moving again; a failed open
+  or piece could keep an rclone lease; an upload that ended early could leave a piece waiting forever; a close during
+  a piece disposed what it used; the idle timer never stopped; opens over the cap or after shutdown; an empty answer
+  was a 200. Documented instead: a stopped upload that was replacing a file may already have removed the old one; a
+  browser that pauses a download for over two minutes ends it; a web session sees every site and batch (it is the
+  admin). **Walk** (the server built here on Windows, a WebDAV site served by rclone 1.76.0, the browser pane):
+  turned Sites on, added the site (shown Not encrypted), tested it, browsed `/pub`, a 3,000,000-byte file came to the
+  page whole, an upload from the page landed byte for byte, a taken name asked first and Replace replaced it (the walk
+  found that Replace did nothing: fixed and walked again), a file and a folder downloaded to the server equal the
+  originals, a folder outside the roots was refused in the server's words, new folder, rename and delete worked, and
+  the screen fits a phone. **Tests:** `SiteDeviceEndToEndTests` (SFTP and S3, real rclone), `SiteDeviceStreamTests`
+  (the HTTP endpoints against WebDAV), dispatcher tests (web answered, held to its folders, batches outside refused),
+  `webui/tests/sites.test.ts`; Integration (site, dispatcher) 391, Server 193 and the web UI's 713 pass, `npm run
+  check` clean. **Not checked:** the Windows app's bridge with a real browser (tested only through the dispatcher), the
+  sign-in flows in the web UI against a real provider, the Docker image with Sites (not built here; linux/amd64 only),
+  light mode, Linux. **Haiku review of the web UI commit** (`940b4c0`): fixed: a slow browse answer for a folder
+  left since could replace the newer one (and Show more could append to another folder); the sign-in dialog could
+  close at once for a site signed in before whose access ran out; a failed `sites.kinds` left Add and Edit greyed out
+  with no word; uploads ran on unseen when the site was left (now stopped, with a note); a 401 during an upload did not
+  go to the sign-in; the delete question now says how many files go (`sites.count`); only an http(s) sign-in address
+  is a link; row actions wider; transfers sorted by date. Not done (deferred, as on purpose for now): the "On this PC"
+  marks (`here`), stars, and forgetting a trusted certificate from the web UI; the rclone update offer. These fixes
+  were checked by `npm run check` and the tests, not walked again.
+- **R. SITES.8: `dm sites`** (2026-11-15, main). New: `on`, `off`, `status`; `add <name> --kind ...` with the kind's
+  fields (`--host`, `--port`, `--user`, `--key-file`, `--url`, `--vendor`, `--provider`, `--endpoint`, `--region`,
+  `--tls`, `--client-id`, `--folder`, `--local-folder`), a password, passphrase or client secret only from standard
+  input or an `-env` variable (an argument is refused before anything is sent); `remove`, `test` (a problem names the
+  command that fixes it); `trust` (shows the server's keys or certificate, asks at a console, trusts nothing at
+  redirected input, or trusts by `--fingerprint`); `sign-in` (prints the address and waits for the Host, or
+  `--token-stdin` for the paste flow); `ls` (every page), `mkdir`, `mv` (rename in the folder), `rm` (counts first and
+  needs `--yes`). `list` shows each kind's address and "not encrypted". Replies to `sites.*` may take five minutes.
+  **Test:** `CliSitesTests` runs the real `dm` against a sandbox Host and rclone's SFTP server: on, add with the
+  password on standard input (and refused as an argument), test refused until trusted, trust refused without a
+  fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
+  `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
+  certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AQ. 0.8.0 published** (2026-11-15, owner: "make a full release"). `v0.8.0` at `7fa8a8c` (the audited commit): the
+  Windows build made the draft, which was published as the latest release with a summary, the extension line (0.6.4,
+  unchanged) and two known issues (a trusted certificate counts for every site; a transfer stops after about half a
+  minute of an unreachable server). Publishing built the Linux packages (AppImage, .deb, .rpm, pacman, tar.gz) and the
+  Docker image; both succeeded. CI on `main` after the tag: a ranged stall case added in PERF.9 was wrong about the test
+  server (it sends 64 KB before throttling, so a range keeps its tries by UI.B15) and was dropped (`dd0a797`, test only);
+  then Linux passed and Windows failed once on `IpcOperationLifetimeTests.DisconnectCancelsTheRunningOperation`, a
+  2-second wait on a busy runner in a test this release doesn't touch, which passes locally in milliseconds.
+  **Next, open:** ROADMAP SITES.10 (audit follow-ups), S3 on a real service and B2 file transfers (owner: later), the
+  window's default view measured on a quiet machine, ANDROID.2.
+- **AP. Fable audit of v0.7.7..HEAD before 0.8.0** (2026-11-15, owner's request; one Fable agent, read-only). No
+  high-severity finding. Fixed after checking each against the code:
+  - **Outage counted per file** (`SiteTransfers.RunItemAsync`): every file in flight added one to the batch's failed
+    connections, so one drop with 3 at once stopped a batch after about 10 s. Now only the first failure of an outage
+    counts and sets the wait; files failing while the batch already waits are the same outage.
+  - **Stop and wait rules only knew SFTP**: a wrong FTP/WebDAV/S3 password, a revoked sign-in or an untrusted
+    certificate tried every file 5 times (a lockout risk), and an unreachable FTP/WebDAV/S3/cloud server failed files
+    instead of waiting. New `SiteErrorText.RefusesTheSite` and `CantReach` read the same fixed phrases as the friendly
+    texts, for every kind; 12 new cases in `SiteErrorTextTests`.
+  - **A saved password could be sent to another server**: saving a site with a new host, port, URL or endpoint kept its
+    sealed password, which a test would then send there. Such a save is now refused until the password is typed again
+    ("a saved password is only sent to the server it was saved for"); a key is kept (key sign-in gives the server
+    nothing of it). `SitesCommandsTests` checks the refusal leaves the site as it was.
+  - **The antivirus check's thread could end the Host** on an exception it didn't list: it now catches everything.
+  - **The year-long cache header went on misses too** (`StaticAssetCompression`): now only on a 200.
+  **Fable checked the fixes** (same agent): 1, 5 and 9 right and complete. Fix 4 had a two-step bypass (save the moved
+  site with key sign-in, which carried the password over, then switch back to password sign-in); a saved password is
+  now never carried to another server whatever the sign-in method, and `SitesCommandsTests` covers the two steps. Fix 2
+  missed Windows' "unreachable network/host" and a TLS handshake timeout; added, with cases. Its other notes (a stopped
+  batch carries no problem code for Sign in again or Trust; five waits come to about 30 s; a matched phrase anywhere in
+  the text) go to SITES.10.
+  **Left as follow-ups** (ROADMAP SITES.10): a trusted self-signed certificate that can sign others (`openssl req -x509`
+  makes them so by default, as many NAS do) also vouches for other sites' names, since rclone takes one CA file for
+  all sites; a user's own OAuth client secret is on `rclone authorize`'s command line for up to 10 minutes; "Keep both"
+  can make a duplicate when the Host is killed within 2 s of a file finishing; a hung `operations/copyfile` answer
+  fails the file for good; a web edit of a site whose linked folder is outside the server's folders is refused.
+- **AO. Owner on the remaining live checks** (2026-11-15): S3 against a real service is left for later and does not
+  block the release; B2 file transfers stay noted as unchecked (AN); WebDAV tested against local servers is enough.
+- **AN. B2 live, and the app's own rclone download** (2026-11-15). The owner added a B2 site in a fresh test instance's
+  window with a key limited to one bucket. **rclone download:** Options › Sites, Download rclone, fetched, checked and
+  installed rclone 1.76.0 in 3 seconds (the first live run of SITES.1's download). **B2:** test, listing the buckets,
+  making a folder and deleting it all worked; the upload failed with "failed to HEAD for download ... server gave HTTP
+  response to HTTPS client" on `f003.backblazeb2.com`. On this network that name resolves to 45.11.36.16, not a
+  Backblaze address (`api.backblazeb2.com` resolves to Backblaze's 104.153.233.180), and HTTPS to it fails
+  (`curl`: SEC_E_INVALID_TOKEN): a DNS-level block of B2's file host on this connection, outside Inbound. A file
+  transfer to or from B2 is therefore unchecked here; it needs another network or DNS. The bucket was left empty, the
+  site and the test instance removed. (A test-setup quirk on the way: `INBOUND_RCLONE` pointing at a file that is gone
+  wins over a downloaded rclone and reports it missing; it is a developer override, so left as it is.)
+- **AM. PERF.9 fix: bytes before a reset were lost** (2026-11-15, main). CI on Linux failed
+  `EngineRecoveryTests.ASegmentThatGetsBytesOnItsLastAllowedAttemptStillRetries` after the 0.8.0 tag: the reader now
+  gathers up to 64 KB before a write, and when a read failed (a server resetting the connection) the bytes already
+  gathered were dropped, so a segment that only ever got a little before each reset made no progress and ran out of
+  attempts. `TransferReader.FillAsync` now hands over what it has and gives the failure with the next call. New
+  `TransferReaderTests` (4) force the case; engine tests 214 pass on Windows. The unpublished 0.8.0 draft is to be made
+  again from this commit once CI passes on Linux.
+- **AL. Release 0.8.0 tagged** (2026-11-15). `main` and `v0.8.0` at `aac4b82`, pushed with the owner's go-ahead; the
+  Windows workflow makes the draft release for the owner to finish and publish (Firefox add-on from the earlier
+  release, as before). Setup built locally first: 68.2 MB, the install folder 253 MB with the notices, the Native AOT
+  native host (9.5 MB, no native symbol file) and the compressed web UI files. **A slip, fixed:** the Android session
+  (deleted by the owner) had made a branch `android-trial` in this same checkout and switched to it, so the live-check
+  and release commits landed there on top of its Android note (`dc082eb`), `main` was pushed only to `cb07f7b`, and the
+  first `v0.8.0` tag pointed at a commit with the Android note in it. The tag was deleted within a minute and its
+  Windows build cancelled before it made a draft release; the two commits were cherry-picked onto `main`
+  (`0b4ece0`, `aac4b82`), `android-trial` was put back to `dc082eb`, and the tag made again on `main`. The untracked
+  `tools/AndroidTrial/` and `tools/AndroidTrialServer/` from that session are left for the owner. **Left:** Backblaze B2
+  live (owner: later); the window's default view measured again on a quiet machine.
+- **AK. SITES.6c live: Drive, OneDrive and Dropbox with the owner's accounts** (2026-11-15, main at `cb07f7b`). An
+  isolated test instance (own name and data folder) and the real `dm`, rclone 1.76.0. Each service: added, signed in in
+  the owner's browser through the printed `127.0.0.1:53682` address (`dm sites sign-in`, rclone's own app), tested, a
+  folder `/inbound-live-check` made, a 2,000,000-byte file uploaded (`dm sites put`), listed, downloaded
+  (`dm sites get`) with the same SHA-256 as the original, the folder deleted (`dm sites rm --yes`) and gone from the
+  listing; then the site removed. All three pass. One slip in the test script, not in Inbound: Git Bash rewrote
+  `/inbound-live-check` into `C:/Program Files/Git/inbound-live-check` for the first Drive run, so a folder `/C:` was made
+  on the owner's Drive with only the test file in it; it was listed, found to hold nothing else, and deleted; the script
+  then ran with `MSYS_NO_PATHCONV=1`. The test instance and its data (the sealed tokens) were deleted afterwards; the
+  grants stay with the providers until the owner revokes them. **Not checked:** Backblaze B2 (owner, 2026-11-15:
+  "continue without b2 for now, later"); a renewal after the token runs out.
+- **AJ. Release 0.8.0 in preparation** (2026-11-15, main). Version 0.8.0 in `Directory.Build.props`, Setup, the
+  scripts and the Firefox update link; `changelog.json` has the 0.8.0 lines (date empty until release; no test status).
+  **Owner's answers (2026-11-15):** question Q, "every signed-in browser is the admin", is right as built; question P,
+  a live check may use the owner's own accounts with the owner signing in; release: push main and tag v0.8.0 once tests
+  pass and Setup builds (Firefox signing stays the owner's step). **Tests before release:** Core 2,373, Engine 210,
+  Server 202, Sites 223 (20 skipped: need an SSH server), Torrents 94 (29 skipped), TorBox 323, Archives 401,
+  Containers 188, Tray 3, Integration 2,008 (10 skipped), web UI 717, extension 339; all pass.
+- **AI. The window's list bars** (2026-11-15, main; PERF.16 follow-up). WinUI's `ProgressBar` animates every value
+  change (a `RepositionThemeAnimation` in its template), which was nearly all of the window's UI-thread work with
+  downloads running. The list rows use the new `InboundListProgressBarStyle` (same parts and look, no visual states).
+  Graph hidden, quiet machine: one download 2.31 to 0.42 % of a core on the UI thread, eight 7.72 to 0.60 %; the
+  window process 9.5 to 1.6 % with eight. **Not checked:** the bars on screen (they draw from the same parts; not
+  looked at), the default view on a quiet machine (the runs with the graph shown were taken during a Rust build), Uno.
+- **AH. UI.B40 (owner report, 2026-11-15): numbers in the main list jump around.** The download window's rows set
+  `Typography.NumeralAlignment="Tabular"` on each text; the main list's row template set nothing and relied on the
+  implicit TextBlock style in App.xaml, which doesn't reach into it. All 16 texts of the row template now set tabular
+  digits. **Not yet seen on screen.**
+- **AG. SITES.7: the Docker image with Sites, run** (2026-11-15, main at `8666b73`, the owner's test VM, linux/amd64).
+  Built on the VM from `git archive` of that commit, with the 0.7.1 image's torrent worker passed in through
+  `--build-context torrent-worker=` (the rest built from source); the image is 490 MB. Run with sign-in from the
+  environment, `/downloads` as its folder, and a second container of the same image serving a WebDAV folder with its
+  rclone on a private network. From this PC over the network, as a browser would: signed in; Sites off at first, then
+  on; rclone 1.76.0 from the image (`source=shipped`, no download); a WebDAV site saved, tested ("Connected"),
+  `/pub` browsed; a 3,000,000-byte file downloaded to this device with the same SHA-256 as on the server; a file uploaded
+  from this device (non-ASCII name) and read back byte for byte; a transfer into `/downloads` finished, the file the same
+  SHA-256 and owned by uid 1000 (`PUID`); a transfer into `/etc` refused ("outside the folders this server may use").
+  Everything removed afterwards (containers, network, image, folder; `docker builder prune` also cleared the VM's
+  unused build cache); the owner's `inbound` container untouched. **Not tried there:** sign-in sites (Drive, OneDrive,
+  Dropbox), the web UI's own pages in a browser against the image (the same server program was walked on Windows).
+- **AF. L3: Windows checks each finished download** (2026-11-15, main). New `Runtime/DownloadScan`: on Windows a
+  completed download from the network is passed to `IAttachmentExecute::Save` on its own STA thread (two minutes at
+  most), with only the site as its source, which runs the registered antivirus and writes the internet mark. If the
+  file is gone afterwards the job fails with "Your antivirus removed the file after it was downloaded."
+  (`VerificationFailed`, so queues don't retry it) before extraction, hooks or the completion notice; if the check
+  can't run, the plain mark of REV.4 is written as before. Loopback and local downloads and torrents are not checked
+  (torrent files keep their marks). **Tests:** a removed file fails the job and is not retried, a passed one completes
+  (through a test hook), and the real check on a harmless file returned Passed here and wrote zone 3 with the site
+  only. **Not seen:** a real detection (an EICAR file would raise a Defender alert on the owner's desktop); another
+  antivirus; a slow scan of a large file. A first placement checked the file after the job already read as completed, so a watcher could see it completed before its mark (the REV.4 mark test caught it); the check now runs before the job's state is decided. **Full integration run** with the final code: 2,018 tests, 1 failure, `KilledDuringExtractionAndDuringArchiveCleanup...` counting 15 provider links instead of 14 (when the kill lands); it passed alone and the kill-matrix group 9 of 9 three times in a row.
+- **AE. What waits for the owner** (2026-11-15). Everything else on the roadmap that could be done here is done or
+  decided with numbers. Left, each needing the owner:
+  - **Docker image with Sites (SITES.7):** done on the test VM (AG).
+  - **Walks in the running app:** the T rows, UI.B24, UI.B26, UI.R37, T13 (scaling), AUDIT.1, SITES.1 to 3 visuals, the
+    About link to the third-party notices, the AOT native host from a real browser download (PERF.10).
+  - **Accounts and stores:** a real Google, Microsoft, Dropbox or B2 sign-in for Sites (SITES.6, question P); whether every
+    signed-in browser counts as the admin (question Q); the Edge store review (EXT.S1); extension 0.6.3 not uploaded
+    (EXT.R12).
+  - **Linux** (deferred): the quiet PERF.8/PERF.15 re-run, PERF.18, D7.W.
+  - **Ideas:** L3 is built (AF). L1 (video from websites) goes against CUT.1, where the owner cut stream downloading
+    ("use a video downloader"), so it is left. L2 (Usenet) is as large as the torrent client and L5 (hoster accounts)
+    is low value next to TorBox; both wait for the owner to want them.
+  - **UPD.N3:** waits until no install at 0.7.7 or older updates directly.
+  - **Nothing is pushed** (this session's commits are on local main).
+- **AD. PERF.19 finished** (2026-11-15, main). A CPU profile of the web UI at 5,000 jobs and 8 downloads
+  (`perf-webui.mjs --profile`, `PERF_NO_MINIFY=1 perf-seed.sh build`) found Svelte measuring every row for `animate:flip`
+  and its proxy traps over the 5,000 jobs. Now rows slide only in lists of 200 or fewer (the row's attributes are one
+  `rowAttrs` function and its cells one snippet, used by both branches), and `model.jobs` is a prototype-less table
+  (`jobTable`) replaced on each job event, which Svelte doesn't proxy. Main thread at 5,000 jobs: 66 ms a second with one
+  download (831 at the start), 338 with eight (999); long tasks while loading 2 (40). svelte-check clean, 717 web UI
+  tests (a new one for the table); Playwright on 20 and 300 rows: select, arrows, Shift, End, Shift+F10. The windowed
+  list is not needed. **Not walked:** a phone; a real (not headless) browser with someone looking.
+- **AC. PERF.4 checked again** (2026-11-15, main). A test window with 500 jobs and nothing downloading: two threads switch
+  about 70 times a second each, visible and hidden alike (per-thread counters, `Thread(...)\Context Switches/sec`); that
+  matches the NVIDIA driver threads traced on 2026-11-08. Our managed code doesn't show in a trace of the window. With the
+  default since PERF.5 the window process ends on close, so a closed window costs nothing; the Host idled at 0.0 to 0.1 s
+  CPU an hour. ROADMAP PERF.4 is done as far as Inbound reaches.
+- **AB. PERF.10: the native host as Native AOT** (2026-11-15, main). `publish.ps1 -SelfContained` publishes the native
+  host with `PublishAot` (and no native symbol file); vswhere's folder goes on PATH when it isn't, which the AOT linker
+  needs. `NativeBridgePolicy` writes its `JsonObject` payloads through `IpcJsonContext` (now naming `JsonObject`) instead
+  of reflection with default options, which Native AOT refuses. `SandboxHost` takes `INBOUND_TEST_NATIVE_HOST`.
+  **Checked:** first reply to `host.ping` 30 ms instead of 100 (`Bench start`); the bridge, hello and pipe integration
+  groups (70, of which 9 start the native host) pass against the AOT program, and fail with a wrong path, so the override
+  is used; Core 2,373 pass (the context coverage test now treats JSON nodes as written by their converter); a full
+  self-contained publish works and is 253 MB. **Not checked:** a real browser handing a download to the AOT native host;
+  the Windows workflow on GitHub (not pushed); Linux.
+- **AA. PERF.20: compressed, cached web UI files** (2026-11-15, main). New `Server/StaticAssetCompression`: for
+  `/assets/` the server sends the publish step's `.br` or `.gz` copy when the browser accepts it (Brotli first), with
+  the original content type, `Vary: Accept-Encoding` and `Cache-Control: private, max-age=31536000, immutable`; a copy
+  asked for by its own name is a 404. **Checked:** 9 new tests (Accept-Encoding with q values, the choice, the types, a
+  path out of the folder) and all 202 server tests pass; against a published server with curl the main script is
+  162 KB with Brotli instead of 645 KB, the decoded bytes are the same, and without a session it still redirects.
+  **Not checked:** the Docker image (its publish makes the same copies); a real slow link.
+- **Z. PERF.19: the web UI's list** (2026-11-15, main). `ProgressBar.svelte` clips a full-width fill instead of
+  animating its width (the page was laid out on nearly every frame while progress came in); list rows have
+  `content-visibility: auto`; `buildRows` keeps a download's cells and row object per job object (not for torrents, which
+  follow the clock), so Svelte leaves unchanged rows alone. Measured in headless Chrome on Windows
+  (`docs/plans/perf-baseline-windows.md`): at 5,000 jobs the main thread busy 831 to 137 ms a second with one download and
+  999 to 699 with eight; at 500 jobs with one, 193 to 30; the list usable after sign-in in about 740 ms instead of
+  1,223. `perf-seed.sh` and `perf-webui.mjs` now run on Windows (Git Bash): win-x64 build, the Windows Host, Windows
+  paths, CR-free ports, Chrome ended by its process tree. svelte-check clean; 716 web UI tests with a new one for the kept
+  rows; the bars seen in a headless Chrome screenshot (light mode). **Not walked:** keyboard moves and "show this job" in
+  a long list with `content-visibility` (the rows stay in the page, only their drawing is skipped); phones.
+- **Y. Speed graph: the grid is kept between samples** (2026-11-15, main; PERF.16 follow-up). `DownloadSpeedGraph.Draw`
+  rebuilt its grid, labels and clip with every sample; now only when the size, scale, period or theme changes. One
+  download: the window's UI thread 4.1 % to 2.8 % of a core; eight: 8.2 % to 7.4 % (single 60 s runs). Checked through UI
+  Automation (each label once, the summary updating); WinUI and Uno build; Core tests (the graph rules) passed before the
+  change and it touches no rule. **Not seen on screen** (a screen copy picked up other windows, so it was deleted and not
+  used); a scale change redrawing the labels is not walked.
+- **X. Step 7 of the performance order: measured, then decided** (2026-11-15, main). `dotnet-trace` (installed as a
+  .NET global tool) on the window with one download and on the Host with eight: our managed code is under 0.1 % of the
+  window's UI-thread samples, and no event building or sending shows in the Host. PERF.13 and PERF.17 are decided
+  against. With the speed graph hidden the window's UI thread goes from 4.1 % to 2.3 % of a core with one download:
+  the graph is the one cheap target left in the window (cause inside it not established). `perf-window-active.sh` takes
+  `UI_STATE`. Numbers: `docs/plans/perf-baseline-windows.md`, step 7.
+- **W. PERF.12: fewer synced saves** (2026-11-15, main). `DownloadManagerService` saves an HTTP download's job file
+  for progress every 30 s instead of 5 s (the engine's checkpoint, synced every 5 s, decides the bytes after a restart);
+  torrents keep 5 s, the queue quota keeps its own 5 s, state changes are saved at once. Jobs and checkpoints are
+  serialised straight to UTF-8 bytes. Compact JSON was tried and dropped: 11 integration tests read job files as text,
+  and the bench shows serialising is about 2 µs of a 2.5 ms save. **Tests:** Core 2,373 pass; the full integration run
+  (2,014) had only those 11, which pass with the indented files, and no hang; the kill-matrix and recovery tests pass.
+  **Not checked:** a power cut (the checkpoint's sync is unchanged); Linux.
+- **V. PERF.9 and PERF.11** (2026-11-15, main; numbers in `docs/plans/perf-baseline-windows.md`). PERF.9: new
+  `Engine/TransferReader` reads both transfer loops' response bodies with one pooled buffer and one linked
+  cancellation source re-armed per read (a stalled read is still a retryable `Timeout`, and is now cancelled rather than
+  left running); uncapped it fills half the buffer before writing, capped every read goes on at once. Allocation per GB
+  down a third to a half, gen-2 collections gone, CPU per GB unchanged; MB/s varies two- to four-fold between runs on
+  this disk, so no speed claim. Engine tests 210 pass plus a new segmented stall case. PERF.11: ReadyToRun measured in
+  four builds and not adopted (window slower with 5,000 jobs, +52 MB); `publish.ps1 -ReadyToRun` is opt-in, and
+  `perf-window.sh` takes `PERF_APP_DIR` to time a published folder. **Integration tests:** the first full run with
+  PERF.9 hung (about 40 minutes, no output; a test Host left running locked the build); it was stopped, and the rerun with
+  a 4-minute hang detector ran all 2,014 tests with no hang and two queue-retry timing failures
+  (`StartingTheQueueRetries...`, `StartingTheQueueRunsAWaitingRetry...`, 20 s waits) that pass alone, three times in a
+  row, with and without PERF.9. Which test hung is not known. Because a stream that ignores cancellation would hang the
+  new reader where the old code gave up, `TransferReader` now also waits with the deadline (and then never returns that
+  buffer to the pool); engine tests 210 pass with it. **Not checked:** a real fast link; Linux; a full integration run
+  with the final reader.
+- **U. SITES.7: what the web UI left for later** (2026-11-15, main). The site browser stars and unstars the folder it
+  shows (`sites.star`) and lists the starred folders as buttons (with the parent's name when two share one, as the
+  desktop does); a site with a linked folder gets an "On the server" / "On the PC" column from each item's `here`
+  (Same, Older here, Partly here, Not here, Different here, Folder here; inline on a phone); a site that trusts a
+  certificate has Forget certificate (asks first; `sites.trust` with `forgetCertificates`); Sites shows the rclone
+  update the Host found in the desktop's words, Install for a ready or new-major one, Update rclone automatically,
+  Check now and when it last checked (none of it for "Use my own rclone"). **Checked:** svelte-check, 715 web UI tests;
+  walked in the browser pane against the headless server and a local WebDAV site: the marks (Same, Partly here, Not
+  here, Folder here), star and unstar, and phone width. **Not walked:** Forget certificate and the update offer (no
+  certificate site or newer rclone at hand; the helpers are tested). **Haiku review**, fixed after the walk: a
+  `sites.status` reply carries rclone's own `error`, which the page took as a failed request, so a working install,
+  check or switch could show as an error (the Use Sites switch and Download rclone had this before too); they now read
+  the reply as the desktop does. The two switches go back when a change did not go through; a star shows at once from
+  the reply; the waiting line always gives its date; Forget names how many certificates and passes on the Host's note;
+  Update rclone automatically and the last check show while rclone is missing, and not with a chosen rclone path.
+  These fixes were checked by svelte-check and the tests, not walked again.
+- **T. PERF.8 and PERF.15 on Windows** (2026-11-15, main, at `b45b7ca`; the owner said the PC was idle): numbers in
+  `docs/plans/perf-baseline-windows.md`. Engine on NTFS 357 to 606 MB/s (1 to 16 segments) at about 1 CPU s per GB, a
+  third to a half of the Linux figures, cause not established; a save costs its sync (about 3.8 ms); Host ready in
+  235 ms, native host 103 ms, CLI 29 ms. WinUI window: first frame with the list in 619, 763 and 1,043 ms at 0, 500 and
+  5,000 jobs; with downloads running 6 % of a core at one download (4 % on the UI thread) to 14 % at sixteen, almost
+  the same at 500 and 5,000 jobs; hidden and idle it is quiet in CPU (4 s an hour) but wakes about 126 times a second
+  (PERF.4). New `scripts/perf-window-active.sh` and `scripts/perf-thread-sample.ps1` take the active-download rows.
+  **Not measured:** dropped frames, the quiet Linux re-run (Linux deferred), the web UI on Windows.
+- **S. SITES.9: third-party notices and Sites in the docs** (2026-11-15, main). New `THIRD-PARTY-NOTICES.md` at the
+  repo root: what ships next to Inbound (7-Zip, libtorrent with Boost and OpenSSL, .NET, Windows App SDK, Uno with
+  SkiaSharp, Tmds.DBus.Protocol, Svelte, Tailwind) and what is downloaded on use (rclone), each with version, licence
+  and where its text is; build-only tools listed apart. `scripts\publish.ps1` copies it into the app folder (and fails
+  without it), so Setup and the update zip carry it; the Docker image has it in `/app`, the AppImage next to the
+  programs; Help › About links it when the file is there. Docs: `architecture.md` (the rclone child process, the
+  Sites project, its files, its security), `new-frontend-guide.md` (Sites in the checklist), `docker.md` (a Sites
+  section), and a release-notes draft in `docs/plans/remote-sites.md`. **Checked:** the solution builds. **Not
+  checked:** the About link in the running window, the notices in a built Setup, AppImage or image.
+- **K. SITES.4: speed share, schedules, and stopped batches that couldn't go on** (2026-11-15, main; Host side only).
+  **Speed:** the overall speed limit is now split four ways: HTTP, torrent download, torrent upload and site transfers
+  (`SpeedBudgetSplit` takes any of them; `SpeedShares.Sites`). Site transfers take part only while a batch runs, and the
+  split is redone when one starts or all end and with each second of their progress, as for torrents; their share goes
+  to rclone with `core/bwlimit` (`<bytes>B`, read as bytes; checked against rclone 1.76.0), sent before each file and
+  each second while files move, and again when rclone was restarted. With no batch running rclone keeps a twentieth, so a
+  starting batch can't overshoot before its split. **Schedules:** a schedule gets `siteTransfers` (off by default; CLI
+  `dm schedule add ... --site-transfers`): its stop pauses the running batches ("Paused by a schedule.") whether or not
+  its queue ran, once, as a queue's stop acts; its start resumes only the batches a schedule paused. Site transfers are
+  in no queue, so a schedule touches them only when asked (my call; the plan said "too" without saying which schedule).
+  A web session can't change the flag (`WebSettingsRules.KeepHostOwned` puts this PC's value back). The WinUI scheduler
+  keeps the field when it saves; it has no box for it yet. **Fixed (Haiku doc review of J):** a batch stopped by five
+  failed connections or by a refused sign-in left `problem` empty, so Resume refused it and Retry did nothing: it could
+  only be cleared. Both now go on with any batch that is `failed` with files still waiting. The stop message now says
+  "after 5 failed connections in a row". The protocol notes were corrected where the review found them off (what is
+  saved at once, the other host-key case, `files`/`filesRunning`, size -1, how often the push comes). **Tests:**
+  `TheSpeedShareSlowsRclone` (a 1 MiB file at 256 KiB/s takes over 2.5 s through `rclone serve sftp`); the sign-in test
+  now puts the password back and resumes to done; the server-gone test retries the stopped batch, then cancels it and
+  checks Retry is refused; `SiteTransfersTakeAShareOnlyWhileOneRuns` and `SiteTransfersShareTheLimitWithHttpWhileOneRuns`
+  (the split and the service's hand-off); `AScheduleThatAsksForItPausesSiteTransfersAtItsStopAndResumesThemAtItsStart`
+  (also when the queue was stopped by hand first); `AWebSessionCannotChangeWhetherAScheduleHoldsSiteTransfers`. The
+  test helper `DeleteWhenReleasedAsync` now also retries on `UnauthorizedAccessException` (a settings temp file mid
+  replace; `AScheduleSavedInsideItsWindowStartsTheQueueAtOnce` failed on it about one run in four). Run on Windows with
+  rclone 1.76.0: the 8 transfer end-to-end tests, 301 dispatcher tests, 41 scheduler, web-rights and settings tests (three runs), 77
+  Site integration tests (6 skip) and Sites.Tests 194 (20 skip) pass; the solution builds. **Left in SITES.4:** the Transfers bar and Download/Upload commands in the windows (and the
+  schedule's box), the tray tooltip, sidebar activity and status chip, empty folders, a `dm sites` CLI.
 
 ### Linux window: release notes (UI.B39, owner report 2026-11-15)
 

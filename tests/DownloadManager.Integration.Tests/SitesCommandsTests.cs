@@ -337,7 +337,24 @@ public sealed class SitesCommandsTests : IAsyncLifetime
 
         var renamed = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, name: "Renamed", password: null));
         Assert.Equal(["/home/tester"], renamed.Site!.Stars);
-        var moved = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: null));
+        // Audit 2026-11-15: a saved password is never sent to another server, so a move without one is refused and
+        // changes nothing; with the password typed again it goes through, and the stars of the old server go.
+        var refusedMove = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: null));
+        Assert.False(refusedMove.Ok);
+        Assert.Contains("password again", refusedMove.Message);
+        Assert.Equal(["/home/tester"], Assert.Single((await Call<SitesListDto>(reopened, SitesMessageTypes.ListRequest)).Sites).Stars);
+        var moved = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example", password: "typed again"));
+        // The two-step way round (audit 2026-11-15): moved with key sign-in, then back to a password without one. The
+        // old server's password did not come along, so the second save (same server now) is kept without a password.
+        var keyedRequest = Site(id: saved.Id, host: "third.example", password: null);
+        keyedRequest.AuthMethod = SiteAuthMethods.Key;
+        keyedRequest.PrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\ninvented\n-----END OPENSSH PRIVATE KEY-----";
+        var keyed = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, keyedRequest);
+        Assert.True(keyed.Ok, keyed.Message);
+        Assert.False(keyed.Site!.HasPassword);
+        var backToPassword = await Call<SiteResultDto>(reopened, SitesMessageTypes.Save, Site(id: saved.Id, host: "third.example", password: null));
+        Assert.True(backToPassword.Ok, backToPassword.Message);
+        Assert.False(backToPassword.Site!.HasPassword);
         Assert.Empty(moved.Site!.Stars);
     }
 

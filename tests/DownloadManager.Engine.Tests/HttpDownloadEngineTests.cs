@@ -683,6 +683,10 @@ public sealed class HttpDownloadEngineTests
             Assert.False(result.Success);
             Assert.Equal(FailureKind.Timeout, result.Failure!.Kind);
         }
+
+        // PERF.9: the range workers read through the same TransferReader deadline; a stalled read is a timeout
+        // (TransferReaderTests.AStalledReadIsATimeout). Not checked here with ranges: /slow sends 64 KB at once before it
+        // throttles, so each range gets bytes before every stall and, by UI.B15, keeps its tries and may finish.
     }
 
     [Fact]

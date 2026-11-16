@@ -51,6 +51,18 @@ public sealed class RcloneClient : IDisposable
     public Uri BaseAddress => _http.BaseAddress!;
 
     /// <summary>
+    /// SITES.6c: the named in-memory remotes of sign-in sites this rclone holds (<c>config/create</c>), each with the token
+    /// it was last given or seen with, so a token rclone renewed can be told apart and written back.
+    /// </summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, string> SignedInRemotes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// SITES.6c: told the site id and rclone's settings for it when rclone renewed a site's token, so the Host seals and
+    /// stores them. Set by the Host for each rclone.
+    /// </summary>
+    public Func<string, string, JsonObject, CancellationToken, Task>? SignInRenewed { get; set; }
+
+    /// <summary>
     /// A value that must never appear in an error message or a log line. One under four characters is not replaced
     /// inside the text: a text that contains it is withheld whole (<see cref="Redact"/>).
     /// </summary>
@@ -154,6 +166,63 @@ public sealed class RcloneClient : IDisposable
             if (response.StatusCode == HttpStatusCode.Unauthorized)
                 throw new RcloneCallException(command, 401, "rclone refused the Host's credentials.");
             throw new RcloneCallException(command, (int)response.StatusCode, Redact(ErrorText(body)));
+        }
+    }
+
+    /// <summary>
+    /// SITES.7: a file of the named remote <paramref name="remoteName"/>, as rclone serves it (<c>--rc-serve</c>). The caller
+    /// disposes the response; its body is the file. A missing file or a refusal throws <see cref="RcloneCallException"/>.
+    /// </summary>
+    public async Task<HttpResponseMessage> OpenFileAsync(string remoteName, string remotePath, CancellationToken cancellationToken = default)
+    {
+        var path = "[" + remoteName + ":]/" + string.Join('/', remotePath.TrimStart('/').Split('/').Select(Uri.EscapeDataString));
+        using var request = new HttpRequestMessage(HttpMethod.Get, path.Replace("[", "%5B", StringComparison.Ordinal).Replace("]", "%5D", StringComparison.Ordinal));
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException e)
+        {
+            throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone could not be reached: {e.Message}", e);
+        }
+
+        if (response.IsSuccessStatusCode) return response;
+        using (response)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new RcloneCallException("serve", (int)response.StatusCode,
+                response.StatusCode == HttpStatusCode.NotFound ? "The file is not on the server." : Redact(ErrorText(body)));
+        }
+    }
+
+    /// <summary>
+    /// SITES.7: <c>operations/uploadfile</c> into <paramref name="folder"/> of the named remote, the file's bytes read from
+    /// <paramref name="content"/> as rclone takes them (nothing is buffered here).
+    /// </summary>
+    /// The remote's root is "/", as in the fs objects: absolute paths on SFTP and FTP servers.
+    public async Task UploadFileAsync(string remoteName, string folder, string name, Stream content, CancellationToken cancellationToken = default)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new StreamContent(content, 256 * 1024);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(file, "file0", name);
+        var query = "operations/uploadfile?fs=" + Uri.EscapeDataString(remoteName + ":/") + "&remote=" + Uri.EscapeDataString(folder.Trim('/'));
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.PostAsync(query, form, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException e)
+        {
+            throw new RcloneUnavailableException(_exited() ? "rclone has exited." : $"rclone could not be reached: {e.Message}", e);
+        }
+
+        using (response)
+        {
+            if (response.IsSuccessStatusCode) return;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new RcloneCallException("operations/uploadfile", (int)response.StatusCode, Redact(ErrorText(body)));
         }
     }
 

@@ -78,6 +78,7 @@ public static class WebSettingsRules
         nameof(SettingsDto.ShowCompletionDialog),
         nameof(SettingsDto.AllowLocalNetwork),
         nameof(SettingsDto.PreventSleepWhileDownloading),
+        nameof(SettingsDto.PauseOnCostlyNetworkOrLowPower),
         // Turning torrents on makes the PC take connections from peers, and the handler is Windows' own setting; the
         // port and the router request open the PC to the network (and a firewall rule is made for that port).
         nameof(SettingsDto.TorrentsEnabled),
@@ -176,6 +177,14 @@ public static class WebSettingsRules
         // T14: a browser page from before the torrent folders sends neither; it keeps the Host's (null in a save keeps).
         requested.UseTorrentCategoryFolders ??= current.UseTorrentCategoryFolders;
         requested.TorrentCategoryFoldersRoot ??= current.TorrentCategoryFoldersRoot;
+
+        // SITES.4: a web session has no say over site transfers, so a schedule's hold on them stays as this PC set it
+        // (and a schedule the browser adds has none).
+        foreach (var schedule in requested.Schedules ?? [])
+        {
+            if (schedule is null) continue;
+            schedule.SiteTransfers = current.Schedules?.FirstOrDefault(saved => saved?.Id == schedule.Id)?.SiteTransfers ?? false;
+        }
 
         foreach (var name in KeptByHost)
         {

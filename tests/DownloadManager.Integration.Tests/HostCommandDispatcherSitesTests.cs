@@ -10,8 +10,9 @@ using DownloadManager.Tests.Shared;
 namespace DownloadManager.Integration.Tests;
 
 /// <summary>
-/// SITES.2: <c>sites.*</c> belong to the user at this PC. A web session (a browser through the bridge) is refused every
-/// request before it reaches the Sites commands, and the Host's Sites changes reach the desktop sessions only.
+/// SITES.2, SITES.7: <c>sites.*</c> for the user at this PC and for a web session (a browser through the bridge, the
+/// admin), whose folders on this computer are held to its own and which can't choose a program (Use my own rclone).
+/// The Host's Sites changes reach both.
 /// Mirrors the web UI tests of HostCommandDispatcherTests; nothing here makes a network call.
 /// </summary>
 public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
@@ -51,10 +52,19 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     private sealed class RecordingSites : ISitesCommands
     {
         public List<string> Seen { get; } = [];
+        public List<IpcMessage> Messages { get; } = [];
+        public Dictionary<string, string> Folders { get; } = [];
+
+        public string? TransferLocalFolder(string transferId) => Folders.GetValueOrDefault(transferId);
 
         public Task<IpcMessage> HandleAsync(IpcMessage request, CancellationToken cancellationToken)
         {
-            lock (Seen) Seen.Add(request.Type);
+            lock (Seen)
+            {
+                Seen.Add(request.Type);
+                Messages.Add(request);
+            }
+
             return Task.FromResult(IpcMessage.Create(SitesMessageTypes.Status, new SitesStatusDto { Enabled = true }, request.Id));
         }
     }
@@ -76,6 +86,26 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.RcloneCheck, new { }),
         (SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteId, Path = "/pub" }),
         (SitesMessageTypes.Star, new SiteStarRequest { Id = SiteId, Path = "/pub" }),
+        (SitesMessageTypes.TransferStart, new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = "/srv/in", Names = [new SiteTransferNameDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.TransferPause, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferResume, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferCancel, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferRetry, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.TransferClear, new SiteTransferIdRequest()),
+        (SitesMessageTypes.TransferList, new { }),
+        (SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = SiteId }),
+        (SitesMessageTypes.MakeFolder, new SiteMakeFolderRequest { Id = SiteId, Path = "/pub", Name = "new" }),
+        (SitesMessageTypes.Rename, new SiteRenameRequest { Id = SiteId, Path = "/pub", Name = "a.txt", NewName = "b.txt" }),
+        (SitesMessageTypes.Count, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.Delete, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.Certificate, new SiteIdRequest { Id = SiteId }),
+        (SitesMessageTypes.SignIn, new SiteSignInRequest { Id = SiteId }),
+        (SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = SiteId }),
+        (SitesMessageTypes.DeviceReadOpen, new SiteDeviceOpenRequest { Id = SiteId, Path = "/pub/a.txt" }),
+        (SitesMessageTypes.DeviceWriteOpen, new SiteDeviceOpenRequest { Id = SiteId, Folder = "/pub", Name = "a.txt" }),
+        (SitesMessageTypes.DeviceRead, new SiteDeviceChunkRequest { StreamId = "x" }),
+        (SitesMessageTypes.DeviceWrite, new SiteDeviceChunkRequest { StreamId = "x" }),
+        (SitesMessageTypes.DeviceClose, new SiteDeviceChunkRequest { StreamId = "x" }),
     ];
 
     /// <summary>The Host's own messages: replies and the push. Every other name in <see cref="SitesMessageTypes"/> is a request.</summary>
@@ -83,6 +113,9 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     [
         SitesMessageTypes.Status, SitesMessageTypes.List, SitesMessageTypes.Result, SitesMessageTypes.Kinds,
         SitesMessageTypes.ProbeResult, SitesMessageTypes.BrowseResult, SitesMessageTypes.Changed,
+        SitesMessageTypes.TransferResult, SitesMessageTypes.TransferListResult, SitesMessageTypes.TransferChanged,
+        SitesMessageTypes.CountResult, SitesMessageTypes.ChangeResult, SitesMessageTypes.CertificateResult,
+        SitesMessageTypes.SignInResult, SitesMessageTypes.DeviceStream, SitesMessageTypes.DeviceChunk,
     ];
 
     [Fact]
@@ -121,13 +154,13 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         List<string> Offered(MemorySession session) => session.Frames.First(f => f.Type == MessageTypes.ServerHello).GetPayload<HostHelloDto>().Capabilities;
         Assert.Contains("sites", Offered(pipe));
         Assert.Equal("sites", Offered(pipe)[^1]);
-        Assert.DoesNotContain("sites", Offered(web));
+        Assert.Contains("sites", Offered(web));
         Assert.DoesNotContain("sites", Offered(plain));
         Assert.Contains("sites", with.Capabilities);
     }
 
     [Fact]
-    public async Task TheSitesRequestsAreRefusedForAWebSessionAndAnsweredForThePipe()
+    public async Task AWebSessionIsAnsweredHeldToItsFoldersAndThePipeIsAnswered()
     {
         var service = await ServiceAsync();
         var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
@@ -145,14 +178,46 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
 
         foreach (var (type, payload) in SitesRequests)
         {
-            var refused = await AskAsync(dispatcher, web, type, payload);
-            Assert.Equal(MessageTypes.HostActionResult, refused.Type);
-            var result = refused.GetPayload<HostActionResult>();
-            Assert.False(result.Ok);
-            Assert.Contains("this PC", result.Message);
+            var reply = await AskAsync(dispatcher, web, type, payload);
+            if (type is SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)
+            {
+                // Use my own rclone names a program to run; /srv/in is outside the app's folders.
+                Assert.Equal(MessageTypes.HostActionResult, reply.Type);
+                Assert.False(reply.GetPayload<HostActionResult>().Ok);
+            }
+            else Assert.Equal(SitesMessageTypes.Status, reply.Type);
         }
 
-        Assert.Empty(sites.Seen);
+        Assert.Equal(SitesRequests.Select(request => request.Type).Where(t => t is not (SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)), sites.Seen);
+
+        // The switch itself, and a folder inside the app's folders, go on; the folder as the Host resolved it.
+        var inside = Path.Combine(profile.Roots.Roots[0], "from-site");
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferStart,
+            new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = inside, Names = [new SiteTransferNameDto { Name = "a.txt" }] })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.Save,
+            new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = inside })).Type);
+        var outside = await AskAsync(dispatcher, web, SitesMessageTypes.Save, new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = "/srv/in" });
+        Assert.Equal(MessageTypes.HostActionResult, outside.Type);
+        lock (sites.Seen)
+        {
+            Assert.Equal(inside, sites.Messages[^1].GetPayload<SiteSaveRequest>().LocalFolder);
+            Assert.Equal(inside, sites.Messages[^2].GetPayload<SiteTransferStartRequest>().LocalFolder);
+        }
+
+        // A batch the user at this PC made outside the session's folders is not set moving again from the browser; one
+        // inside them is, and pausing or cancelling either moves nothing.
+        sites.Folders["outsidebatch"] = "/srv/in";
+        sites.Folders["insidebatch"] = inside;
+        foreach (var type in new[] { SitesMessageTypes.TransferResume, SitesMessageTypes.TransferRetry })
+        {
+            Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
+            Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, type, new SiteTransferIdRequest { Id = "insidebatch" })).Type);
+            Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, pipe, type, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
+        }
+
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferPause, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
+        sites.Seen.Clear();
 
         foreach (var (type, payload) in SitesRequests)
         {
@@ -164,7 +229,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SitesChangesReachThePipeSessionsOnly()
+    public async Task SitesChangesReachThePipeAndWebSessions()
     {
         var service = await ServiceAsync();
         var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop);
@@ -187,8 +252,8 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             Sites = [new SiteDto { Id = SiteId, Name = "Office box", Kind = SiteKinds.Sftp, Host = "srv.example", Port = 22 }],
         });
         await pipe.UntilAsync(frames => frames.Any(frame => frame.Type == SitesMessageTypes.Changed));
+        await web.UntilAsync(frames => frames.Any(frame => frame.Type == SitesMessageTypes.Changed));
         await Task.Delay(100);
-        Assert.DoesNotContain(web.Frames, frame => frame.Type == SitesMessageTypes.Changed);
         Assert.DoesNotContain(quiet.Frames, frame => frame.Type == SitesMessageTypes.Changed);
         var change = pipe.Frames.Single(frame => frame.Type == SitesMessageTypes.Changed).GetPayload<SitesChangedDto>();
         Assert.True(change.Status.Enabled);

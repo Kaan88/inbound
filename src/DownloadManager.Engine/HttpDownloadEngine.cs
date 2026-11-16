@@ -7,6 +7,14 @@ namespace DownloadManager.Core;
 
 public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataReader, IDisposable
 {
+    /// <summary>
+    /// PERF.9: how full the buffer gets before it is written. Uncapped, half of it (64 KB by default), so a TLS stream's
+    /// 16 KB reads become a quarter as many writes, progress rounds and lock rounds; capped, every read goes on at once
+    /// so the cap stays smooth. A stop refetches at most this much, as before at most one buffer.
+    /// </summary>
+    private int FillTarget(TransferRateLimiter perTransfer)
+        => perTransfer.Limited || SharedRateLimiter.Limited ? 1 : Math.Max(1, _options.BufferSize / 2);
+
     private static readonly HashSet<string> RestrictedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host", "Range", "If-Range", "Content-Length", "Transfer-Encoding",
@@ -710,8 +718,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
 
             file.Seek(state.Bytes, SeekOrigin.Begin);
-            var buffer = new byte[_options.BufferSize];
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var reader = new TransferReader(stream, _options.BufferSize, _options.ReadTimeout, cancellationToken);
+            var buffer = reader.Buffer;
             var lastCheckpointAt = DateTimeOffset.UtcNow;
             var checkpointBytes = state.Bytes;
 
@@ -720,10 +729,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 int read;
                 try
                 {
-                    read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken)
-                        .AsTask()
-                        .WaitAsync(_options.ReadTimeout, cancellationToken)
-                        .ConfigureAwait(false);
+                    read = await reader.FillAsync(FillTarget(state.RateLimiter)).ConfigureAwait(false);
                 }
                 catch (TimeoutException ex)
                 {
@@ -747,7 +753,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                 await state.RateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
                 await SharedRateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
-                await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                await file.WriteAsync(buffer[..read], cancellationToken).ConfigureAwait(false);
                 state.Bytes += read;
                 bytesThisResponse += read;
 
@@ -1842,15 +1848,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                     var stream = await response.Content.ReadAsStreamAsync(token)
                         .ConfigureAwait(false);
-                    var buffer = new byte[_options.BufferSize];
+                    using var reader = new TransferReader(stream, _options.BufferSize, _options.ReadTimeout, token);
+                    var buffer = reader.Buffer;
                     var writeOffset = offset;
                     var truncated = false;
                     while (true)
                     {
-                        var read = await stream.ReadAsync(buffer.AsMemory(), token)
-                            .AsTask()
-                            .WaitAsync(_options.ReadTimeout, token)
-                            .ConfigureAwait(false);
+                        var read = await reader.FillAsync(FillTarget(run.RateLimiter)).ConfigureAwait(false);
                         if (read == 0)
                         {
                             break;
@@ -1880,7 +1884,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         localWork = true;
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
-                                buffer.AsMemory(0, allowed),
+                                buffer[..allowed],
                                 writeOffset,
                                 cancellationToken)
                             .ConfigureAwait(false);

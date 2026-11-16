@@ -14,7 +14,30 @@ public sealed record TrayActions(
     Func<int> ActiveCount,
     Func<string?> UpdateText,
     Action InstallUpdate,
-    Action CheckForUpdates);
+    Action CheckForUpdates,
+    Func<int>? SiteTransferCount = null);
+
+/// <summary>The tray's words for what runs: downloads, and site transfers (SITES.4).</summary>
+public static class TrayText
+{
+    /// <summary>The menu's status line.</summary>
+    public static string Status(int downloads, int siteTransfers)
+    {
+        var parts = new List<string>();
+        if (downloads > 0) parts.Add($"{downloads} active download{(downloads == 1 ? "" : "s")}");
+        if (siteTransfers > 0) parts.Add($"{siteTransfers} site transfer{(siteTransfers == 1 ? "" : "s")}");
+        return parts.Count == 0 ? "Idle" : string.Join(", ", parts);
+    }
+
+    /// <summary>The icon's tooltip (Windows keeps at most 127 characters).</summary>
+    public static string Tooltip(int downloads, int siteTransfers)
+    {
+        var parts = new List<string>();
+        if (downloads > 0) parts.Add($"{downloads} active");
+        if (siteTransfers > 0) parts.Add($"{siteTransfers} site transfer{(siteTransfers == 1 ? "" : "s")}");
+        return parts.Count == 0 ? "Inbound Download Manager" : "Inbound — " + string.Join(", ", parts);
+    }
+}
 
 public sealed class TrayApplicationContext : ApplicationContext
 {
@@ -154,8 +177,9 @@ public sealed class TrayIconController : IDisposable
         try
         {
             var active = _actions.ActiveCount();
-            _statusItem.Text = active == 0 ? "Idle" : $"{active} active download{(active == 1 ? "" : "s")}";
-            _icon.Text = active == 0 ? "Inbound Download Manager" : $"Inbound — {active} active";
+            var sites = _actions.SiteTransferCount?.Invoke() ?? 0;
+            _statusItem.Text = TrayText.Status(active, sites);
+            _icon.Text = TrayText.Tooltip(active, sites);
             var updateText = _actions.UpdateText();
             _updateItem.Visible = !string.IsNullOrWhiteSpace(updateText);
             _updateItem.Text = updateText ?? "Update Available";

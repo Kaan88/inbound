@@ -13,6 +13,10 @@ internal static class CliArgs
         "--dest", "--to", "--name", "--category", "--start", "--priority", "--package", "--package-name", "--conflict",
         "--description", "--referrer", "--user-agent", "--sha256", "--connections", "--queue", "--header",
         "--password", "--password-env", "--days", "--stop", "--once", "--shutdown",
+        // dm sites (SITES.8)
+        "--kind", "--host", "--port", "--user", "--key-file", "--url", "--vendor", "--provider", "--endpoint", "--region",
+        "--tls", "--client-id", "--folder", "--local-folder", "--key-passphrase-env", "--client-secret-env", "--fingerprint",
+        "--key-passphrase", "--client-secret",
     ];
 
     /// <summary>The commands whose arguments are read here.</summary>

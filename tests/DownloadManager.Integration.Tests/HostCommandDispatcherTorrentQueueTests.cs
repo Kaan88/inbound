@@ -328,4 +328,60 @@ public sealed partial class HostCommandDispatcherTests
         Assert.False(SpeedBudgetSplit.Differs(first, first with { Http = first.Http + 10 }));
         Assert.True(SpeedBudgetSplit.Differs(first, first with { Http = first.Http * 2 }));
     }
+
+    [Fact]
+    public void SiteTransfersTakeAShareOnlyWhileOneRuns()
+    {
+        const long limit = 100_000;
+        // Worker off: HTTP and sites split the limit; the torrent shares stay the even split for when the worker starts.
+        var two = SpeedBudgetSplit.Initial(limit, 0, torrents: false, sites: true);
+        Assert.Equal(two.Http, two.Sites, tolerance: 1);
+        Assert.InRange(two.Http + two.Sites, limit - 2, limit);
+        Assert.Equal(SpeedBudgetSplit.Initial(limit, 0).TorrentDownload, two.TorrentDownload);
+
+        // All four: each starts with a quarter.
+        var four = SpeedBudgetSplit.Initial(limit, 0, torrents: true, sites: true);
+        Assert.InRange(four.Total, limit - 4, limit);
+        Assert.InRange(four.Sites, 24_000, 25_000);
+
+        // Sites use all of theirs, HTTP is idle: sites get most of the limit, HTTP keeps its floor.
+        var busy = SpeedBudgetSplit.Split(limit, 0, two, new SpeedDemand(false, 0), default, default,
+            new SpeedDemand(true, two.Sites), torrents: false);
+        Assert.Equal(limit / SpeedBudgetSplit.FloorDivisor, busy.Http);
+        Assert.InRange(busy.Sites, limit - limit / SpeedBudgetSplit.FloorDivisor - 2, limit);
+
+        // Without sites, nothing changes from the three-way split.
+        Assert.Equal(0, SpeedBudgetSplit.Initial(limit, 0).Sites);
+        Assert.True(SpeedBudgetSplit.Differs(four, four with { Sites = four.Sites * 2 }));
+    }
+
+    [Fact]
+    public async Task SiteTransfersShareTheLimitWithHttpWhileOneRuns()
+    {
+        var service = await LimitedTorrentServiceAsync(100_000);
+        var demand = new SpeedDemand(false, 0);
+        long? sites = -1;
+        service.AttachSiteTransfers(() => demand, limit => sites = limit);
+        // None runs: sites keep only the floor, HTTP has the whole limit.
+        Assert.Equal(100_000 / SpeedBudgetSplit.FloorDivisor, sites);
+        Assert.Equal(100_000, HttpBudget);
+
+        // One starts: HTTP and sites split the limit.
+        demand = new SpeedDemand(true, 0);
+        service.OnSiteTransfersActivityChanged();
+        Assert.InRange(sites!.Value, 49_000, 50_000);
+        Assert.InRange(HttpBudget + sites.Value, 99_998, 100_000);
+
+        // It ends: HTTP has the whole limit again.
+        demand = new SpeedDemand(false, 0);
+        service.OnSiteTransfersActivityChanged();
+        Assert.Equal(100_000, HttpBudget);
+        Assert.Equal(100_000 / SpeedBudgetSplit.FloorDivisor, sites);
+
+        // No limit: nothing is capped.
+        var settings = service.GetSettings();
+        settings.GlobalSpeedLimitBytesPerSecond = null;
+        Assert.True((await service.UpdateSettingsAsync(settings)).Ok);
+        Assert.Null(sites);
+    }
 }

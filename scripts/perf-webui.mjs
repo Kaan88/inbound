@@ -33,7 +33,7 @@ const durationS = Number(opt('duration', '60'));
 const warmupS = Number(opt('warmup', '10'));
 const perfOut = resolve(opt('out', process.env.PERF_OUT ?? join(root, 'artifacts/perf')));
 const resultsDir = resolve(opt('results', join(perfOut, 'results')));
-const chromeBin = opt('chrome', 'google-chrome-stable');
+const chromeBin = opt('chrome', process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : 'google-chrome-stable');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 mkdirSync(resultsDir, { recursive: true });
 const csvPath = join(resultsDir, `webui-${stamp}.csv`);
@@ -117,7 +117,13 @@ async function runCombo(jobs, active) {
     for (let i = 0; i < 100 && !existsSync(portFile); i++) await sleep(100);
     if (!existsSync(portFile)) throw new Error('Chrome did not start');
     await sleep(200);
-    const [port, path] = readFileSync(portFile, 'utf8').trim().split('\n');
+    // Chrome may still hold the file open for writing (Windows), so a failed read is tried again.
+    let portText = '';
+    for (let i = 0; i < 20 && !portText.includes('\n'); i++) {
+      try { portText = readFileSync(portFile, 'utf8').trim(); } catch { /* still being written */ }
+      if (!portText.includes('\n')) await sleep(100);
+    }
+    const [port, path] = portText.split('\n');
     cdp = await Cdp.connect(`ws://127.0.0.1:${port}${path}`);
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
@@ -188,9 +194,25 @@ async function runCombo(jobs, active) {
     await S('Performance.enable', { timeDomain: 'timeTicks' });
     const metrics = async () => Object.fromEntries((await S('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
     const wsBefore = await evalNum(`window.__perf.ws.n`), charsBefore = await evalNum(`window.__perf.ws.chars`);
+    // --profile: a sampled CPU profile of the same window, its busiest functions (self time) written beside the results.
+    // Build with PERF_NO_MINIFY=1 scripts/perf-seed.sh build for readable names.
+    if (flag('profile')) { await S('Profiler.enable'); await S('Profiler.setSamplingInterval', { interval: 500 }); await S('Profiler.start'); }
     const m0 = await metrics(); const w0 = Date.now();
     await sleep(durationS * 1000);
     const m1 = await metrics(); const secs = (Date.now() - w0) / 1000;
+    if (flag('profile')) {
+      const { profile } = await S('Profiler.stop');
+      const self = new Map(); const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+      profile.samples.forEach((id, i) => {
+        const f = byId.get(id).callFrame; const key = `${f.functionName || '(anonymous)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`;
+        self.set(key, (self.get(key) ?? 0) + (profile.timeDeltas[i] ?? 0) / 1000);
+      });
+      const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => `${(ms / secs).toFixed(1).padStart(7)} ms/s  ${k}`);
+      mkdirSync(resultsDir, { recursive: true });
+      const nl = String.fromCharCode(10);
+      writeFileSync(join(resultsDir, `profile-${jobs}-${active}.txt`), top.join(nl) + nl);
+      log(`profile ${jobs}/${active}:${nl}${top.slice(0, 12).join(nl)}`);
+    }
     const wsAfter = await evalNum(`window.__perf.ws.n`), charsAfter = await evalNum(`window.__perf.ws.chars`);
     const per = (k) => +(((m1[k] - m0[k]) / secs) * 1000).toFixed(2); // ms per second
     row.steadySeconds = +secs.toFixed(1);
@@ -217,8 +239,18 @@ async function runCombo(jobs, active) {
     row.reloadBytesTransferred = reload.encoded; row.reloadRequests = reload.requests;
   } finally {
     cdp?.close();
-    if (chrome?.pid) { try { process.kill(-chrome.pid, 'SIGTERM'); } catch { /* gone */ } await sleep(500); try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* gone */ } }
-    rmSync(profile, { recursive: true, force: true });
+    if (chrome?.pid) {
+      if (process.platform === 'win32') {
+        // No process groups on Windows: end Chrome and the processes it started by their tree.
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(chrome.pid)], { stdio: 'ignore' });
+      } else {
+        try { process.kill(-chrome.pid, 'SIGTERM'); } catch { /* gone */ } await sleep(500); try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* gone */ }
+      }
+      chrome.unref();
+    }
+    // Chrome can hold its profile for a moment after it ends (Windows); a folder left in the temp directory is no reason
+    // to lose the row.
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (error) { log(`could not remove ${profile}: ${error.message}`); }
     spawnSync('bash', [join(root, 'scripts/perf-seed.sh'), 'stop', '--name', name, '--out', perfOut, ...(flag('keep') ? [] : ['--purge'])], { stdio: 'ignore' });
   }
   return row;

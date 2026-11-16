@@ -201,6 +201,11 @@ public sealed class ScheduleDto
     public bool ShutdownWhenDone { get; set; }
     public string ShutdownMode { get; set; } = "shutdown";
     public bool ForceShutdown { get; set; }
+    /// <summary>
+    /// SITES.4: the schedule's stop also pauses the running site transfers, and its start resumes the ones a schedule
+    /// paused. Site transfers are in no queue, so a schedule touches them only when asked to.
+    /// </summary>
+    public bool SiteTransfers { get; set; }
 }
 
 public sealed class ProxyDto
@@ -260,6 +265,8 @@ public sealed class SettingsDto
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+    /// <summary>MAC.6: pause downloads on a costly network (a phone hotspot, Low Data Mode) and in Low Power Mode, and resume them after. The Mac Host only.</summary>
+    public bool PauseOnCostlyNetworkOrLowPower { get; set; }
     public bool TorrentsEnabled { get; set; }
     public string TorrentRoute { get; set; } = "ask";
     public bool TorrentChooseFiles { get; set; } = true;

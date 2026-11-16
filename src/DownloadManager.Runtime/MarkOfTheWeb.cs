@@ -1,3 +1,5 @@
+using DownloadManager.Core;
+
 namespace DownloadManager.Runtime;
 
 /// <summary>
@@ -15,6 +17,19 @@ public static class MarkOfTheWeb
     /// </summary>
     public static void TryWrite(string path, string? address, Action<string>? log = null)
     {
+        // MAC.6: on a Mac, the quarantine and "Where from" attributes Safari writes.
+        // A torrent's magnet has no site to name: the file is quarantined without a "Where from".
+        if (OperatingSystem.IsMacOS())
+        {
+            var magnet = address?.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) == true;
+            if (!(Applies(address) || magnet) || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            var from = Uri.TryCreate(address, UriKind.Absolute, out var site) && site.Scheme is "http" or "https"
+                ? $"{site.Scheme}://{site.IdnHost}/"
+                : null;
+            MacFileMarks.TryWrite(path, from, log);
+            return;
+        }
+
         if (!OperatingSystem.IsWindows() || !Applies(address) || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
         var host = Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
             ? $"HostUrl={uri.Scheme}://{uri.IdnHost}/" + Environment.NewLine

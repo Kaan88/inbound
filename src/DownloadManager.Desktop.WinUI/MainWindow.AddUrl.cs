@@ -608,7 +608,7 @@ public sealed partial class MainWindow
                     ShowNoLink(AddUrlRules.NotALinkWords(torrentInputs));
                     return null;
                 case AddUrlKind.Ftp:
-                    ShowNoLink(FtpAddresses.NotSupported);
+                    ShowNoLink(FtpAddresses.UseSites);
                     return null;
                 case AddUrlKind.SeveralLinks:
                 {

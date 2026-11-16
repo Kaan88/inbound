@@ -2,6 +2,7 @@
 // the tests feed it envelopes; the Svelte store holds one of these in reactive state.
 
 import type { Envelope } from './protocol';
+import type { Site, SitesStatus, SiteTransfer } from './sites';
 import type { ArchiveSet, DownloadGroup, Hello, HostStatus, Job, RemoteAccount, RemoteJob, Settings, Snapshot } from './types';
 
 export interface Model {
@@ -18,12 +19,29 @@ export interface Model {
   /** Grows with each snapshot, so views can tell a fresh start from an update. */
   snapshots: number;
   exiting: boolean;
+  /** Sites (SITES.7): null until the server has said; the list and every transfer batch, as it last sent them. */
+  sitesStatus: SitesStatus | null;
+  sites: Site[];
+  siteTransfers: SiteTransfer[];
+}
+
+/**
+ * PERF.19: the downloads by id, in an object with no prototype. Svelte's `$state` leaves such an object (and the jobs in
+ * it) as it is instead of wrapping every job in a reactive proxy, so going through 5,000 jobs costs no proxy traps (about
+ * 130 ms a second at 5,000 jobs before). The table is replaced, never edited, so whatever reads `model.jobs` still
+ * follows each change; a job itself is replaced too (a job event carries the whole job).
+ */
+export function jobTable(source: Iterable<Job> | Record<string, Job> = []): Record<string, Job> {
+  const table = Object.create(null) as Record<string, Job>;
+  if (Symbol.iterator in source) for (const job of source as Iterable<Job>) table[job.id] = job;
+  else Object.assign(table, source);
+  return table;
 }
 
 export function emptyModel(): Model {
   return {
     hello: null,
-    jobs: {},
+    jobs: jobTable(),
     settings: null,
     status: null,
     groups: [],
@@ -33,6 +51,9 @@ export function emptyModel(): Model {
     archivesAnswered: false,
     snapshots: 0,
     exiting: false,
+    sitesStatus: null,
+    sites: [],
+    siteTransfers: [],
   };
 }
 
@@ -50,9 +71,7 @@ export function apply(model: Model, message: Envelope): boolean {
 
     case 'jobs.snapshot': {
       const snapshot = message.payload as Snapshot;
-      const jobs: Record<string, Job> = {};
-      for (const job of snapshot.jobs ?? []) jobs[job.id] = job;
-      model.jobs = jobs;
+      model.jobs = jobTable(snapshot.jobs ?? []);
       if (snapshot.settings) {
         model.settings = snapshot.settings;
         model.groups = snapshot.settings.downloadGroups ?? [];
@@ -65,12 +84,15 @@ export function apply(model: Model, message: Envelope): boolean {
     case 'job.event': {
       const event = message.payload as { job: Job; eventType: string };
       if (!event?.job?.id) return false;
+      // A new table each time (see jobTable): editing the old one would change nothing anyone follows.
+      const jobs = jobTable(model.jobs);
       if (event.eventType === 'removed') {
-        if (!(event.job.id in model.jobs)) return false;
-        delete model.jobs[event.job.id];
+        if (!(event.job.id in jobs)) return false;
+        delete jobs[event.job.id];
       } else {
-        model.jobs[event.job.id] = event.job;
+        jobs[event.job.id] = event.job;
       }
+      model.jobs = jobs;
       return true;
     }
 
@@ -162,6 +184,28 @@ export function apply(model: Model, message: Envelope): boolean {
       }
       return false;
     }
+
+    case 'sites.changed': {
+      const change = message.payload as { status?: SitesStatus; sites?: Site[] };
+      if (!change?.status) return false;
+      model.sitesStatus = change.status;
+      model.sites = change.sites ?? [];
+      return true;
+    }
+
+    case 'sites.status':
+      if (!message.payload) return false;
+      model.sitesStatus = message.payload as SitesStatus;
+      return true;
+
+    case 'sites.listResult':
+      model.sites = (message.payload as { sites?: Site[] })?.sites ?? [];
+      return true;
+
+    case 'sites.transfer.changed':
+    case 'sites.transfer.listResult':
+      model.siteTransfers = (message.payload as { transfers?: SiteTransfer[] })?.transfers ?? [];
+      return true;
 
     case 'host.exiting':
       model.exiting = true;

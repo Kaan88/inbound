@@ -57,6 +57,33 @@ public sealed class RcloneSupervisorTests
     }
 
     [Fact]
+    public async Task Renew_stops_an_idle_rclone_at_once_and_a_busy_one_when_its_last_lease_goes()
+    {
+        var factory = new FakeFactory();
+        await using var supervisor = new RcloneSupervisor(factory.StartAsync, Options, time: factory.Time);
+        Assert.True(await supervisor.RenewWhenIdleAsync()); // none running
+
+        (await supervisor.AcquireAsync()).Dispose();
+        await WaitFor(() => supervisor.Status.Users == 0 && factory.Time.ActiveTimers == 1);
+        Assert.True(await supervisor.RenewWhenIdleAsync());
+        Assert.True(factory.Instances[0].StopRequested);
+        Assert.Equal(0, factory.Time.ActiveTimers);
+
+        var first = await supervisor.AcquireAsync();
+        var second = await supervisor.AcquireAsync();
+        Assert.Equal(2, factory.Started);
+        Assert.False(await supervisor.RenewWhenIdleAsync());
+        first.Dispose();
+        await WaitFor(() => supervisor.Status.Users == 1);
+        Assert.False(factory.Instances[1].StopRequested);
+        second.Dispose();
+        // No idle wait: the next lease starts an rclone that reads the new settings.
+        await WaitFor(() => factory.Instances[1].StopRequested && supervisor.Status.State == RcloneState.Off);
+        using var third = await supervisor.AcquireAsync();
+        Assert.Equal(3, factory.Started);
+    }
+
+    [Fact]
     public async Task A_lease_taken_during_the_idle_delay_keeps_rclone_and_cancels_the_stop()
     {
         var factory = new FakeFactory();

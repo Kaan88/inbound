@@ -23,6 +23,25 @@ public sealed partial class HostConnection
         return reply.Type == SitesMessageTypes.List ? reply.GetPayload<SitesListDto>()?.Sites : null;
     }
 
+    /// <summary>SITES.4: every site transfer batch, pushed after each change and about once a second while files move.</summary>
+    public event Action<SiteTransfersDto>? SiteTransfersChanged;
+
+    /// <summary>The batches now (once per connection; later changes are pushed). Null when the Host could not say.</summary>
+    public async Task<List<SiteTransferDto>?> ListSiteTransfersAsync(CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(SitesMessageTypes.TransferList, new EmptyPayload(), TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+        return reply.Type == SitesMessageTypes.TransferListResult ? reply.GetPayload<SiteTransfersDto>()?.Transfers : null;
+    }
+
+    private void DispatchSiteTransfersChanged(IpcMessage message)
+    {
+        try
+        {
+            if (message.GetPayload<SiteTransfersDto>() is { } change) SiteTransfersChanged?.Invoke(change);
+        }
+        catch (System.Text.Json.JsonException) { /* a malformed event is dropped */ }
+    }
+
     private void DispatchSitesChanged(IpcMessage message)
     {
         try

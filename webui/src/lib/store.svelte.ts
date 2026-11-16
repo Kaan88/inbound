@@ -34,6 +34,10 @@ const slowTypes = new Set([
   'remote.account.get', 'remote.account.validate', 'remote.classify', 'remote.hosters', 'remote.add', 'remote.item.get',
   'remote.files', 'remote.select', 'remote.deleteRemote', 'remote.startQueued', 'remote.container.preview',
   'remote.container.add', 'job.refreshUrl', 'file.metadata',
+  // Sites (SITES.7): each waits on a server somewhere else, or on rclone starting.
+  'sites.setEnabled', 'sites.save', 'sites.probe', 'sites.trust', 'sites.test', 'sites.certificate', 'sites.signIn',
+  'sites.browse', 'sites.mkdir', 'sites.rename', 'sites.count', 'sites.delete', 'sites.rclone.install', 'sites.rclone.check',
+  'sites.transfer.start',
 ]);
 
 export class Store {
@@ -162,6 +166,11 @@ export class Store {
       await this.quiet('remote.account.get', {});
     }
     await this.quiet('archive.list', {});
+    if (hasCapability(this.model, 'sites')) {
+      await this.quiet('sites.get', {});
+      await this.quiet('sites.list', {});
+      await this.quiet('sites.transfer.list', {});
+    }
   }
 
   private async quiet(type: string, payload: unknown): Promise<void> {

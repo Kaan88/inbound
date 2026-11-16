@@ -281,7 +281,8 @@ public sealed class ServerAuth
     internal static bool IsDesktopAppPath(PathString path) =>
         path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) ||
         path.Equals(TorrentUploadPath, StringComparison.OrdinalIgnoreCase) ||
-        path.Equals(ContainerUploadPath, StringComparison.OrdinalIgnoreCase);
+        path.Equals(ContainerUploadPath, StringComparison.OrdinalIgnoreCase) ||
+        path.Equals(SiteDeviceStreams.Path, StringComparison.OrdinalIgnoreCase);
 
     public const string WebSocketPath = "/api/ws";
     public const string TorrentUploadPath = "/api/upload/torrent";

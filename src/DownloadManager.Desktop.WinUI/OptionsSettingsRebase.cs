@@ -32,6 +32,7 @@ public static class OptionsSettingsRebase
         if (Changed(atOpen.UseTorrentCategoryFolders, edited.UseTorrentCategoryFolders)) latest.UseTorrentCategoryFolders = edited.UseTorrentCategoryFolders;
         if (Changed(atOpen.TorrentCategoryFoldersRoot, edited.TorrentCategoryFoldersRoot)) latest.TorrentCategoryFoldersRoot = edited.TorrentCategoryFoldersRoot;
         if (Changed(atOpen.ClipboardMonitoring, edited.ClipboardMonitoring)) latest.ClipboardMonitoring = edited.ClipboardMonitoring;
+        if (Changed(atOpen.PauseOnCostlyNetworkOrLowPower, edited.PauseOnCostlyNetworkOrLowPower)) latest.PauseOnCostlyNetworkOrLowPower = edited.PauseOnCostlyNetworkOrLowPower;
         if (Changed(atOpen.BrowserIntegrationEnabled, edited.BrowserIntegrationEnabled)) latest.BrowserIntegrationEnabled = edited.BrowserIntegrationEnabled;
         if (Changed(atOpen.NotifyOnCompletion, edited.NotifyOnCompletion)) latest.NotifyOnCompletion = edited.NotifyOnCompletion;
         if (Changed(atOpen.PlayCompletionSound, edited.PlayCompletionSound)) latest.PlayCompletionSound = edited.PlayCompletionSound;

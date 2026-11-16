@@ -94,6 +94,13 @@ public sealed class IpcJsonContextTests
             return;
         }
 
+        if (typeof(System.Text.Json.Nodes.JsonNode).IsAssignableFrom(type))
+        {
+            // A JSON node is written by its own converter; its properties (Options, Parent) are never serialised.
+            if (options.GetTypeInfo(type) is null) failures.Add(type.FullName ?? type.Name);
+            return;
+        }
+
         if (type.IsPrimitive || type == typeof(string) || type == typeof(decimal) || type == typeof(DateTimeOffset) ||
             type == typeof(TimeSpan) || type == typeof(DateOnly) || type == typeof(TimeOnly) || type == typeof(Guid) || type == typeof(JsonElement) || type == typeof(DateTime) || type == typeof(object))
         {

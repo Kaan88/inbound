@@ -23,7 +23,8 @@ public sealed class ServerProtocolTests
         Assert.DoesNotContain("tray", helloDto.Capabilities);
         // D8 added names after these for the desktop Host; the server has none of them, so its list is as it was, and then
         // "archives" where a 7-Zip is there to extract with, and "uploads" (it stores the web UI's uploads) beside "remote".
-        Assert.Equal(["jobs", "settings", "handoff", "status", "folders"],
+        // SITES.7: "sites" last, since the server answers Sites (whether the switch is on or off).
+        Assert.Equal(["jobs", "settings", "handoff", "status", "folders", "sites"],
             helloDto.Capabilities.Where(name => name is not ("remote" or "archives" or "uploads")));
         Assert.Equal(DownloadManager.Archives.SevenZipTool.Find() is not null, helloDto.Capabilities.Contains("archives"));
         Assert.Equal(helloDto.Capabilities.Contains("remote"), helloDto.Capabilities.Contains("uploads"));

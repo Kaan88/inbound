@@ -50,8 +50,8 @@ started: 7-Zip found; one installed later shows on the next connection, and at o
 `tool`), and `uploads` (the server takes `POST /api/upload/torrent` and `/api/upload/container`, and the `remote.*`
 commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
 installed, since the bridge serves both uploads into the Host's data folder), and `sites` (the `sites.*` messages are
-answered for this session: the Host has Sites and the session is the desktop user at this PC; sent with the switch on
-or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+answered for this session: the Host has Sites and the session is the desktop user at this PC or, since SITES.7, a web
+session or the server's own; sent with the switch on or off). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -107,7 +107,8 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
   `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are, and
   a schedule that has any of those actions can't be changed at all (its queue, times, days, on/off); it can be removed.
-  A schedule's "open the file when done" never opens a file a web session added.
+  A schedule's "open the file when done" never opens a file a web session added. A schedule's `siteTransfers` stays as
+  this PC set it (false for a schedule the web session adds): web sessions have no say over site transfers.
   `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
   those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
 - What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
@@ -181,16 +182,38 @@ answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in
 `webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
 changes, the bridge included (started, ready, stopped, failed).
 
-### Sites: `sites.*` (SITES.2 and SITES.3, on main since 2026-11-15, not released)
+### Sites: `sites.*` (SITES.2 to SITES.7, on main since 2026-11-15, not released)
 
 Sites (remote-sites.md) has its own messages: the switch, saved sites, and SFTP host-key trust. The type names are
 `SitesMessageTypes` and the payloads are `SiteDtos.cs` in `src/DownloadManager.Contracts/`. The Host side is
 `SitesCommands` (`src/DownloadManager.Runtime/Sites/`) and `HostCommandDispatcher.Sites.cs`.
 
-Who may send: only the user at this PC. That is a `desktop` session (role left out or `desktop`) with no web scope.
-A `web` session, or a session with a scope, gets `host.actionResult` `{ok: false, message: "Sites can only be used
-from the app on this PC for now."}` and nothing changes. A Host built without Sites says "Sites are not available
-here." in the same shape.
+Who may send: the user at this PC (a `desktop` session) and, since SITES.7, a web session (a browser signed in with the
+password: the admin, owner 2026-11-15) and the server's clients. A web session's folders on the computer Inbound runs
+on are held to its own: a site's `localFolder` and a transfer's `localFolder` outside them get `host.actionResult`
+`{ok: false, message}` with the folder words, and one inside is passed on resolved. On the server every caller is held
+to the server's roots the same way (`HostCommandDispatcher.SitesRoots`). Neither may change Use my own rclone
+(`ownRclonePath` set): that names a program to run, chosen only in the app on that computer. A Host built without Sites
+says "Sites are not available here." in the same shape.
+
+"This device" (SITES.7): `sites.device.readOpen {id, path}` and `sites.device.writeOpen {id, folder, name, size,
+replace}` open a stream between a site and the device the web UI runs on, answered with `sites.device.stream {ok,
+message?, problem?, streamId, name, size}` (`problem: exists` when the name is taken and `replace` is not set). Then
+`sites.device.read {streamId}` answers `sites.device.chunk {ok, data (base64), done}` until `done`, and
+`sites.device.write {streamId, data, last}` sends pieces of at most 1 MiB (`SiteDeviceLimits`); the answer to the
+`last` one comes when the server has the whole file. More bytes than `size`, or fewer at `last`, end the stream and
+stop the upload; rclone removes what it had written where the kind of site lets it, but a stopped upload that was
+replacing a file may already have removed the old one. Any failed or aborted piece ends its stream.
+`sites.device.close {streamId}` stops one (a piece in flight is cancelled first); one unused for two minutes, or a
+piece rclone does not move for two minutes, is closed, and 8 at once is the most. Pausing a download in the browser for
+longer than that ends it. The idle timer runs only while a stream is open. A scoped session (a web session, or any
+caller on the server) can't resume or retry a transfer batch whose folder on this computer is outside its folders; it
+can still see every site and batch, folders included (it is the admin). rclone reads the file over its own served address (`--rc-serve`, named in-memory remotes) and takes an upload
+with `operations/uploadfile`, so nothing is written to a disk on the way. The browser uses the server's
+`GET /api/sites/device?id=&path=` (the file as a download) and `POST /api/sites/device?id=&folder=&replace=1` (the body,
+its name percent-encoded in `X-File-Name`, its `Content-Length` required; `409` when the name is taken), signed in or
+with a paired desktop app's token; both go through the same backend as `/api/ipc`, so through the pipe in the Windows
+app's bridge.
 
 Off: when the switch is off, rclone never starts and nothing runs on a timer. Only `sites.get` and
 `sites.setEnabled` are answered in full. The other requests get:
@@ -199,7 +222,8 @@ Off: when the switch is off, rclone never starts and nothing runs on a timer. On
 - `sites.kinds`: `sites.kindsResult`, as when on;
 - `sites.probe`: `sites.probeResult` `{ok: false, message: "Sites is off. Turn it on in Options › Sites."}`;
 - `sites.browse`: `sites.browseResult` `{ok: false, problem: "off", message: ...}`, the same message;
-- `sites.save`, `sites.remove`, `sites.trust`, `sites.test` and `sites.star`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
+- `sites.count`: `sites.countResult` and `sites.delete`: `sites.changeResult`, each `{ok: false, problem: "off", message: ...}`;
+- `sites.save`, `sites.remove`, `sites.trust`, `sites.test`, `sites.star`, `sites.mkdir` and `sites.rename`: `sites.result` `{ok: false, problem: "off", message: "Sites is off. Turn it on in Options › Sites."}`;
 - `sites.rclone.install` and `sites.rclone.check`: `sites.status` with that `error`, and nothing is downloaded.
 
 Turning Sites off stops rclone. The saved sites and their sealed secrets stay on disk.
@@ -207,7 +231,7 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | Request | Payload | Reply |
 | --- | --- | --- |
 | `sites.get` | `{}` | `sites.status` |
-| `sites.setEnabled` | `{enabled, ownRclonePath?, autoUpdateRclone?}` | `sites.status` |
+| `sites.setEnabled` | `{enabled, ownRclonePath?, autoUpdateRclone?, maxTransfers?}` | `sites.status` |
 | `sites.list` | `{}` | `sites.listResult` `{sites}` |
 | `sites.kinds` | `{}` | `sites.kindsResult` `{kinds}` |
 | `sites.save` | `SiteSaveRequest` (below) | `sites.result` |
@@ -215,8 +239,13 @@ Turning Sites off stops rclone. The saved sites and their sealed secrets stay on
 | `sites.probe` | `{host, port?}` | `sites.probeResult` |
 | `sites.trust` | `{id, entries}` | `sites.result` |
 | `sites.test` | `{id}` | `sites.result` |
+| `sites.certificate` | `{id}` | `sites.certificateResult` |
 | `sites.browse` | `{id, path?, offset?, limit?, refresh?}` | `sites.browseResult` |
 | `sites.star` | `{id, path, starred?}` | `sites.result` |
+| `sites.mkdir` | `{id, path, name}` | `sites.result` |
+| `sites.rename` | `{id, path, name, newName}` | `sites.result` |
+| `sites.count` | `{id, path, items}` | `sites.countResult` |
+| `sites.delete` | `{id, path, items}` | `sites.changeResult` |
 | `sites.rclone.install` | `{version?}` | `sites.status` |
 | `sites.rclone.check` | `{}` | `sites.status` |
 
@@ -225,8 +254,64 @@ finds itself. `autoUpdateRclone` (true or false) sets "Update rclone automatical
 Any other value must be a full path, or the reply carries `error` and nothing changes. A change to the switch or to the
 rclone path is saved first, then rclone stops if it must.
 
-`sites.kindsResult` lists each kind as `{kind, title, defaultPort, authMethods}`. Only `sftp` is listed for now
-(port 22, `password` and `key`).
+`sites.kindsResult` lists each kind as `{kind, title, defaultPort, authMethods, fields, choices, capabilities,
+userLabel?, passwordLabel?, note?}` (SITES.6; the list is `SiteKindCatalog` in Contracts, and a save is checked against
+it):
+
+| Kind | Fields | Capabilities |
+| --- | --- | --- |
+| `sftp` (port 22) | `host`, `port`, `user`, `password`, `key` | `newFolder`, `emptyFolders`, `hostKey` |
+| `ftp` (port 21) | `host`, `port`, `tls` (`explicit`, `implicit`, `none`), `user`, `password` | `newFolder`, `emptyFolders` |
+| `webdav` | `url`, `vendor` (`other`, `nextcloud`, `owncloud`), `user`, `password` | `newFolder`, `emptyFolders` |
+| `s3` | `provider` (`AWS`, `Cloudflare`, `Wasabi`, `Minio`, `Other`), `endpoint`, `region`, `user` (access key ID), `password` (secret access key) | none |
+| `drive`, `onedrive`, `dropbox` | `signIn` (optional `clientId`, `clientSecret`) | `newFolder`, `emptyFolders`, `signIn` |
+| `b2` | `user` (application key ID), `password` (application key) | none |
+
+`choices` maps a field to its `[{value, title}]`; the values are rclone's own. A client shows only the listed fields and
+hides a command whose capability is missing (New folder on S3). `hostKey` is the only kind that asks about the server's
+key before first use (`sites.probe` reads an SSH key, and `sites.trust` refuses other kinds). TLS certificates are checked
+against Windows' trusted roots and are never switched off. An upload to a kind without `emptyFolders` leaves empty
+folders out.
+
+`SiteDto` and `SiteSaveRequest` carry `tls`, `url`, `vendor`, `provider`, `endpoint` and `region` for the kinds that use
+them; the Host refuses a field another kind uses, a key for any kind but SFTP, a change of kind, and an address with a
+user name, query or fragment in it. A WebDAV or S3 site's `host` and `port` are filled in from its address. `SiteDto`
+also carries `capabilities` and `encrypted` (false for plain FTP and an http:// address).
+
+Server certificates (SITES.6b). A test or browse that fails because the server's certificate is not signed by an
+authority this PC trusts (Go's "unknown authority") carries `problem: certificateNotTrusted`; a wrong name or an
+out-of-date certificate does not, since trusting it would not help. `sites.certificate {id}` reads the certificate with a
+TLS handshake of the Host's own (explicit FTPS sends `AUTH TLS` first) and nothing else: no user name or password is sent.
+The reply is `{ok, message?, certificate?, trustedBySite}`, with `certificate` as `{subject, issuer, notBefore, notAfter,
+fingerprint (SHA-256, AB:CD:…), names, selfSigned, trustedBySystem, cannotTrust?}`. `cannotTrust` says in words why
+trusting would not help (no subject alternative name, which Go needs; the name does not match; out of date).
+`sites.trust {id, certificateFingerprint}` reads the certificate again and refuses when it is not the one with that
+fingerprint, or when `cannotTrust` is set; `{id, forgetCertificates: true}` forgets the site's. A site keeps at most 4
+(the newest first). `SiteDto.trustedCertificates` lists them as `{fingerprint, subject, notAfter}`; a change of address,
+port or FTP encryption forgets them. The Host writes every trusted certificate, with the system's root certificates
+(Root and, on Windows, third-party roots), to `trusted-certificates.pem` in its rclone folder and starts rclone with
+`--ca-cert` on it; with none trusted there is no file and rclone checks as it always did. rclone reads the file only at
+start, so after a change the running rclone is stopped at once if idle, or when its last transfer ends; a trust reply
+then carries a `message` saying the certificate is used after the running transfers. rclone's own check is never
+switched off. A root Windows would fetch only when first needed is not in the file, so while a certificate is trusted a
+service whose root this PC has never fetched can fail as untrusted.
+
+Browser sign-in (SITES.6c). Drive, OneDrive and Dropbox sites have `authMethod: "signIn"` and no password or key; a save
+with one is refused, and so is a `clientId` on any other kind. `clientId` and `clientSecret` are the user's own app
+registration (optional; rclone's shared one otherwise); a new `clientId` drops the stored secret and the sign-in.
+`SiteDto` carries `signedIn`, `clientId`, `hasClientSecret` and `signingIn`. `sites.signIn {id}` starts
+`rclone authorize <kind> [clientId clientSecret] --auth-no-open-browser` on the Host and answers `sites.signInResult
+{ok, message?, url?, authorizeCommand?, site?}` once rclone prints its address (`http://127.0.0.1:53682/auth?state=…`):
+the client opens `url` in a browser on the Host's PC. rclone listens on that one port, so one sign-in runs at a time
+(another site's is refused) and gives up after 10 minutes. The site shows `signingIn` until rclone ends; a token it
+printed is sealed into the site, and `sites.changed` follows. `sites.signInCancel {id}` stops it. `sites.signIn {id,
+token}` is the paste flow, for a browser on another computer: `token` is what `rclone authorize` printed (the part
+between `--->` and `<---End paste`, or the whole output), a JSON object with an `access_token`. The stored settings are
+the token, plus `scope: drive` for Drive and the `drive_id` and `drive_type` OneDrive's Graph `/me/drive` names, read
+with the new token at sign-in. rclone gets the site as a named in-memory remote (`site-<id>`, `config/create`); when
+it renews the token the Host notices at the next use and seals the new one, unless the site was signed in again
+meanwhile. A site with no token, or one the provider refuses (`invalid_grant`), carries `problem: signInNeeded`. No
+token, client secret or B2 key is logged or returned.
 
 `sites.status` carries `SitesStatusDto`:
 
@@ -314,12 +399,115 @@ runs one command per connection at a time and closing the connection is how a li
 empty or `/`, or hold format or line-separator characters (such as a right-to-left override). Starring a starred folder keeps its place; unstarring removes it. A site has at most 100 stars. Editing a site
 keeps its stars unless the host or port changes, which forgets them with the host keys.
 
+Remote changes (SITES.5): `path` is the folder on the server, normalised as for `sites.browse`; `name`, `newName` and
+each item's `name` are one name, never a path (`SiteNameRules`: not empty, no `/`, not `.` or `..`, no control
+characters, not spaces only, at most 255 characters). `sites.mkdir` makes `name` in `path` and is refused when something of that
+name is already there. `sites.rename` renames `name` to `newName` in the same folder (a file with rclone's
+`operations/movefile`, a folder with one `sync/move` of the tree); it is refused when `name` is gone or `newName` is
+already there (for a change of case only, another item of exactly the new name; such a rename goes through a name of its own, `.inbound-rename-…`, so a server that ignores case takes it too). `sites.count` takes `items` `[{name, isFolder}]` (1 to 1,000,
+no name twice) and replies `SiteCountResultDto` `{ok, message?, problem?, files, folders, bytes, sizeUnknown,
+missing}`: the files inside the chosen folders count too, `sizeUnknown` is true when some size was not given, and
+`missing` counts names no longer there. `sites.delete` takes the same and deletes each item (a folder with all inside
+it); the reply `SiteChangeResultDto` `{ok, message?, problem?, items}` has one `{name, ok, message?}` per item, so one
+item that can't go does not stop the others, and a name already gone counts as deleted with a message. `sites.rename`
+and `sites.delete` are refused as a whole, with nothing done, when a transfer that runs, is paused or can still go on
+uses the item: the batch's server folder, a file it has still to move, or a folder holding either. Failures are as for
+`sites.test`, including `hostKeyNotAccepted` and `hostKeyChanged`. Every change forgets the site's kept listing, so
+the next `sites.browse` reads the server again.
+
+"On this PC" (SITES.5): for a site with a `localFolder`, each `sites.browse` item carries `here`, how the item compares
+with the same place under that folder. The site's `remoteFolder` matches `localFolder`; items outside it, and names
+this PC can't hold, have no `here`. Values: `same` (same size, and not older here than on the server, with 2 seconds
+of slack), `olderHere` (the copy here is older), `someOfIt` (smaller here, as a stopped download leaves it),
+`different` (bigger here, or a folder on one side and a file on the other), `notHere`, and, for a folder, `folderHere`
+(its contents are not compared). A server that gives no size is compared by time only. Name, size and time only,
+never contents.
+
 `sites.probe`, `sites.test`, `sites.browse`, `sites.rclone.install` and `sites.rclone.check` end when their client disconnects (an
 install cut off that way leaves nothing behind).
 
-`sites.changed` (desktop sessions with no scope only, never a web session) carries `SitesChangedDto` `{status, sites}`.
+`sites.changed` (the sessions `sites.*` is answered for) carries `SitesChangedDto` `{status, sites}`.
 The Host sends it after the switch changes, the rclone path changes, rclone's state changes, a saved site is saved,
 removed, trusted or starred, or an rclone download, check or rollback changes the status. `sites` is empty while Sites is off.
+
+Transfers (SITES.4; the WinUI window's Transfers bar, `dm sites`): a batch is one user action that downloads files from a
+site into a folder on this PC, or uploads the other way. The payloads are `SiteTransferDtos.cs`; the Host side is
+`SiteTransfers` (`src/DownloadManager.Runtime/Sites/`).
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.transfer.start` | `{siteId, direction, remoteFolder, localFolder?, names, conflict?}` | `sites.transfer.result` |
+| `sites.transfer.pause` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.resume` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.cancel` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.retry` | `{id}` | `sites.transfer.result` |
+| `sites.transfer.clear` | `{id?}` | `sites.transfer.result` |
+| `sites.transfer.list` | `{}` | `sites.transfer.listResult` `{transfers}` |
+| `sites.transfer.get` | `{id}` | `sites.transfer.result` with `items` |
+
+`sites.transfer.start`: `direction` is `download` or `upload`. `remoteFolder` is the folder on the server (normalised
+as for `sites.browse`) and `localFolder` a full path on this PC; left out, it is the site's `localFolder`. A folder
+inside Inbound's data folder is refused. `names` are `{name, isFolder}` entries in the source folder (the server folder
+for a download, the PC folder for an upload), one name each, never a path; a folder brings every file inside it,
+listed when the batch starts. An empty folder is made at the target as an item of its own (`isFolder: true` in
+`sites.transfer.get`; it counts among `files`), and links and junctions on this PC are not followed. A
+name the server no longer has, or one not in the PC folder, refuses the whole start. At most 20,000 files.
+`conflict` decides what a file does when its target is already there: `skip` (the default), `replace`, or
+`keepBoth`, which writes `name (2).ext` (the first free number). A server file whose name this PC can't hold (on
+Windows `\ : * ? " < > |`, a trailing dot or space, a device name such as `CON`), or one that differs from another
+in the batch only by upper and lower case on Windows, fails on its own with a message saying so; it is never renamed.
+A file that would land inside Inbound's data folder fails the same way. The reply carries the new batch in `transfer`. It is written to
+`sites/transfers/{id}.json` in the Host's data folder before anything moves. Failures are as for `sites.test`,
+including `hostKeyNotAccepted` and `hostKeyChanged`. Like `sites.browse`, a start lists folders on the server and
+ends when its client disconnects.
+
+Running: files move one rclone job each, at most "transfers at once" (`maxTransfers` in `sites.status`, 1 to 10,
+default 3, set with `sites.setEnabled`; it does not count against "downloads at once") across every batch, oldest
+batch first. A download is written as rclone's `name.<token>.partial` next to its target and renamed in place, so no
+bytes go through a temporary folder. A failed file does not stop its batch: it is tried again after 2, 4, 8 and 16
+seconds (five tries in all), then fails with a plain `error`. A file that is gone from its source fails at once. A
+changed host key, or a server that no longer offers the kind of key that was accepted, stops the whole batch with `state: "failed"`, `problem: "hostKeyChanged"` and the warning in `message`; a refused
+sign-in stops it at once with the plain reason in `message` (each further file would be refused too, and a server may
+lock the account). When the server can't be reached, or rclone stopped, the batch waits before its next file (2 s,
+doubling up to a minute) and its files keep their tries; the fifth such failure in a row stops it with the reason in
+`message`. A stopped batch is `failed` with its unmoved files still `waiting`; nothing more goes to that server until
+`resume` or `retry`.
+
+`pause` stops the files in flight; rclone removes their partial files. `resume` starts them again from zero: no
+transfer resumes inside a file. `cancel` stops a batch for good; files already moved stay. `retry` tries every failed
+file again from scratch, and goes on with a stopped batch; a paused batch stays paused (its failed files run
+at `resume`), and a canceled one is refused. `clear` removes one finished batch (`done`, `failed` or `canceled`) from the list, or every
+finished batch when `id` is empty; the files moved are never touched. Turning Sites off pauses every running batch
+with `message: "Paused when Sites was turned off."`; removing a site cancels its batches. With Sites off,
+`sites.transfer.list` and `.get` are still answered, and the other transfer requests get `sites.transfer.result`
+`{ok: false, problem: "off"}`.
+
+After a Host restart a running batch goes on by itself. Which file was moving is not saved, so before any of its files
+runs again, each folder that holds one of its unfinished files is looked at once, and rclone's partial files for those
+files (`name.` plus eight hex digits plus `.partial`, on this PC for a download, on the server for an upload) are
+removed; nothing else moves meanwhile. The same is done after rclone itself stopped mid-batch. The files that were
+moving start again from zero. A batch's own changes of state (paused, canceled, stopped, done) are saved at once; a
+file's progress and its own state at most every two seconds, so a killed Host may move a file that had just finished
+once more. With Keep both, a name chosen because the first was taken is
+saved before the copy starts, so a restart writes to that name; but a file that had just arrived under its own name
+and was not yet saved as done is copied again as `name (2)`.
+
+A running batch keeps the PC awake, as a download does, when Options › "Prevent sleep while downloading" is on. Site
+transfers share the overall speed limit with downloads (see T2, speed). A schedule with `siteTransfers: true` pauses the
+running batches at its stop (with `message: "Paused by a schedule."`, whether or not its queue was running) and at its
+start resumes the batches a schedule paused; batches paused by hand or by turning Sites off stay paused.
+
+`SiteTransferDto`: `{id, siteId, siteName, direction, remoteFolder, localFolder, conflict, state, problem?, message?,
+files, folders, filesDone, filesSkipped, filesFailed, filesRunning, bytes, bytesDone, speed, createdAt, finishedAt?}`. `state` is
+`running` (moving, or waiting for a free place, a file's retry or the server), `paused`, `done`, `failed` (a file
+failed, or the batch was stopped) or `canceled`. `problem` is `hostKeyChanged` or absent. `files` counts every item, `folders` the empty folders among them,
+`filesRunning` those moving now. `bytes` counts files of unknown size (an item `size` of -1) as 0, and `bytesDone` includes the files in flight and the
+skipped ones. `speed` is bytes a second, as rclone measures it over its last few seconds. `sites.transfer.get` adds `items`, each `{path, target?, size, state,
+tries, error?, isFolder}` with `state` `waiting`, `running`, `done`, `skipped` or `failed`.
+
+`sites.transfer.changed` (the same sessions as `sites.changed`) carries `{transfers}`, every batch. It is sent after
+each change of state and about once a second while files move, never more than once every 400 ms. Nothing is sent, and
+nothing runs, while no batch is running.
 
 ### The server's transports (D1b)
 
@@ -897,11 +1085,13 @@ by `jobId` except `torrent.inspect` and `torrent.add`.
   A seeding job stays `completed` and takes no download slot; `job.torrent` carries `seeding`, `seedingSince`,
   `uploaded` (bytes, the torrent's life), `ratio` (uploaded over the downloaded size) and `uploadRate`. When extraction
   deletes a seeding torrent's archive, its seeding stops first.
-- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP downloads, torrent downloads and torrent
-  uploads together. While the torrent engine runs, the Host splits it again on each torrent progress report (at most
+- T2, speed: `globalSpeedLimitBytesPerSecond` is one budget for HTTP downloads, torrent downloads, torrent uploads
+  and site transfers (SITES.4, through rclone's `core/bwlimit`) together. While the torrent engine or a site transfer
+  runs, the Host splits it again on each torrent progress report and each second of a site transfer's progress (at most
   once a second; no timer of its own): a kind that used most of its share gets more, one that used less keeps what it
-  used plus a quarter, and each keeps at least a twentieth even while idle. With the engine stopped, HTTP downloads have
-  the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
+  used plus a quarter, and each keeps at least a twentieth even while idle. Site transfers take part only while a batch
+  runs; otherwise rclone is held to a twentieth, so a batch that starts can't overshoot before the split it causes. With
+  neither running, HTTP downloads have the whole limit. `torrentUploadLimit` (bytes/s, 0 = none) caps torrent uploads within that and only ever lowers them;
   without an overall limit it is the only cap.
 - T2, details: `torrent.peers`, `torrent.trackers` and `torrent.pieces`, each `{jobId}`, answer `torrent.peersResult`,
   `torrent.trackersResult` and `torrent.piecesResult` with `ok`, `error` and `running`. `running` is false when the

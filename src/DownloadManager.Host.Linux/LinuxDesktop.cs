@@ -18,7 +18,21 @@ internal sealed class DesktopNotifications(Action<string> warn) : IDisposable
     private bool _warned;
 
     /// <summary>Shows a notice; never throws, and never waits for the desktop.</summary>
-    public void Notify(string title, string message) => _ = NotifyAsync(title, message);
+    /// <summary>MAC.6: the menu-bar helper's notifications; true when it took the notice (or the user turned them off).</summary>
+    public Func<string, string, bool>? MacRoute { get; set; }
+
+    public void Notify(string title, string message)
+    {
+        if (MacRoute?.Invoke(title, message) == true) return;
+        if (OperatingSystem.IsMacOS()) MacDesktop.Notify(title, message, Warn);
+        else _ = NotifyAsync(title, message);
+    }
+
+    private void Warn(string message)
+    {
+        if (!_warned) warn(message);
+        _warned = true;
+    }
 
     private async Task NotifyAsync(string title, string message)
     {
@@ -182,6 +196,13 @@ internal static class AutostartEntry
 
     public static void Apply(bool enabled)
     {
+        // MAC.1: macOS doesn't read XDG autostart entries; a LaunchAgent starts the Host there.
+        if (OperatingSystem.IsMacOS())
+        {
+            MacLoginItem.Apply(enabled);
+            return;
+        }
+
         var path = PathOf();
         if (!enabled)
         {
@@ -241,7 +262,7 @@ internal sealed class LinuxCompletionActionExecutor(Action<string> log) : ICompl
 
     public async Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken)
     {
-        var (program, arguments, what) = mode?.Trim().ToLowerInvariant() switch
+        var (program, arguments, what) = OperatingSystem.IsMacOS() ? MacDesktop.Shutdown(mode) : mode?.Trim().ToLowerInvariant() switch
         {
             "restart" => ("systemctl", new List<string> { "reboot" }, "restart"),
             "logoff" => ("loginctl", ["terminate-session", Environment.GetEnvironmentVariable("XDG_SESSION_ID") ?? string.Empty], "sign out"),
@@ -280,7 +301,7 @@ internal static class LinuxApp
     /// <summary>A file or folder with the desktop's default program (<c>xdg-open</c>).</summary>
     public static void Open(string path)
     {
-        var start = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+        var start = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
         start.ArgumentList.Add(path);
         using var _ = Process.Start(start);
     }

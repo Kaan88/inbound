@@ -37,6 +37,9 @@ public interface IRcloneInstance : IAsyncDisposable
 public sealed class RcloneProcess : IRcloneInstance
 {
     public const string PidFileName = "rclone.pid";
+
+    /// <summary>SITES.6b: the trusted-certificates file in the state folder, passed as <c>--ca-cert</c> when it exists.</summary>
+    public const string TrustedCertificatesFileName = "trusted-certificates.pem";
     private const int StartAttempts = 3;
 
     private readonly Process _process;
@@ -132,9 +135,21 @@ public sealed class RcloneProcess : IRcloneInstance
             "--cache-dir", cache,
             "--temp-dir", temp,
             "--rc-job-expire-duration", "10m",
+            // SITES.7: a file of a named remote is read over HTTP (GET /[name:]path), for "to this device". Only the
+            // Host has the credentials, and only named remotes the Host made exist (--config "").
+            "--rc-serve",
             "--log-level", "NOTICE",
             "--use-json-log=false",
         }) info.ArgumentList.Add(argument);
+
+        // SITES.6b: certificates the user trusted for FTPS and https sites, with the system's roots, which this file
+        // replaces for the process. rclone reads it only here, at start.
+        var trusted = Path.Combine(stateDirectory, TrustedCertificatesFileName);
+        if (File.Exists(trusted))
+        {
+            info.ArgumentList.Add("--ca-cert");
+            info.ArgumentList.Add(trusted);
+        }
 
         RcloneEnvironment.Clean(info.Environment);
         info.Environment["RCLONE_RC_USER"] = user;
@@ -181,7 +196,10 @@ public sealed class RcloneProcess : IRcloneInstance
             if (!rclone.TiedByKernel)
                 log?.Invoke(OperatingSystem.IsLinux()
                     ? "Warning: setpriv (util-linux) was not found, so rclone is not ended by the system if the Host crashes; the next start ends it."
-                    : "Warning: rclone could not be put in a job object, so it is not ended by the system if the Host crashes; the next start ends it.");
+                    : OperatingSystem.IsMacOS()
+                        // macOS has no parent-death signal or job object: rclone outlives a crashed Host until the next start.
+                        ? "rclone is not ended by macOS if the Host crashes; the next start ends it."
+                        : "Warning: rclone could not be put in a job object, so it is not ended by the system if the Host crashes; the next start ends it.");
             return rclone;
         }
         catch

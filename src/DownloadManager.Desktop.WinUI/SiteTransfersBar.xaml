@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DownloadManager.Desktop.WinUI.SiteTransfersBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- SITES.4: the Transfers bar of the Sites view, in the speed graph's place. A slim bar that opens upward, with the
+         tabs Running and waiting, Failed and Done; one row per batch. -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="23" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="BodyPanel" Height="220" Visibility="Collapsed" Background="{ThemeResource InboundCardBrush}"
+              BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Padding="8,4" ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ToggleButton x:Name="ActiveTabButton" Padding="10,2" FontSize="12" Click="TabButton_Click" Tag="active" IsChecked="True" />
+                <ToggleButton x:Name="FailedTabButton" Grid.Column="1" Padding="10,2" FontSize="12" Click="TabButton_Click" Tag="failed" />
+                <ToggleButton x:Name="DoneTabButton" Grid.Column="2" Padding="10,2" FontSize="12" Click="TabButton_Click" Tag="done" />
+                <TextBlock x:Name="ErrorText" Grid.Column="3" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" MaxLines="2"
+                           TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Assertive"
+                           Foreground="{ThemeResource InboundIconDangerBrush}" />
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="RetryAllButton" Padding="10,2" FontSize="12" Content="Retry all" Visibility="Collapsed"
+                            Click="RetryAllButton_Click" ToolTipService.ToolTip="Try the failed files of every transfer again" />
+                    <Button x:Name="ClearFinishedButton" Padding="10,2" FontSize="12" Content="Clear finished"
+                            Click="ClearFinishedButton_Click" ToolTipService.ToolTip="Remove every finished transfer from this list; the files stay where they are" />
+                </StackPanel>
+            </Grid>
+            <ListView x:Name="RowsList" Grid.Row="1" SelectionMode="None" AutomationProperties.Name="Site transfers"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection />
+                </ListView.ItemContainerTransitions>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Padding="8,4" ColumnSpacing="8" AutomationProperties.Name="{Binding AccessibleName}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="22" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="{Binding Glyph}" FontSize="15" VerticalAlignment="Center" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Route}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" ToolTipService.ToolTip="{Binding Route}" />
+                                <ProgressBar Value="{Binding Percent}" Maximum="100" Visibility="{Binding ProgressVisibility}" Margin="0,2" />
+                                <TextBlock Text="{Binding StateText}" FontSize="11" TextWrapping="Wrap" MaxLines="3"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <Button Content="Pause" Padding="8,2" FontSize="12" Tag="{Binding Id}" Visibility="{Binding PauseVisibility}"
+                                        Click="PauseButton_Click" ToolTipService.ToolTip="Stop the files moving now; Resume starts them again from the beginning" />
+                                <Button Content="Resume" Padding="8,2" FontSize="12" Tag="{Binding Id}" Visibility="{Binding ResumeVisibility}" Click="ResumeButton_Click" />
+                                <Button Content="Retry" Padding="8,2" FontSize="12" Tag="{Binding Id}" Visibility="{Binding RetryVisibility}"
+                                        Click="RetryButton_Click" ToolTipService.ToolTip="Try the failed files again" />
+                                <Button Content="Files" Padding="8,2" FontSize="12" Tag="{Binding Id}" Click="FilesButton_Click"
+                                        ToolTipService.ToolTip="Each file of this transfer, and why any failed" />
+                                <Button Content="Cancel" Padding="8,2" FontSize="12" Tag="{Binding Id}" Visibility="{Binding CancelVisibility}"
+                                        Click="CancelButton_Click" ToolTipService.ToolTip="Stop this transfer for good; files already copied stay" />
+                                <Button Content="Clear" Padding="8,2" FontSize="12" Tag="{Binding Id}" Visibility="{Binding ClearVisibility}"
+                                        Click="ClearButton_Click" ToolTipService.ToolTip="Remove it from this list; the files stay where they are" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock x:Name="EmptyText" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"
+                       Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+        </Grid>
+
+        <Grid Grid.Row="1" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+            <Grid.Resources>
+                <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+            </Grid.Resources>
+            <Button x:Name="ToggleButton" Click="ToggleButton_Click" AutomationProperties.Name="Transfers"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                    MinHeight="0" Padding="8,0" BorderThickness="0" CornerRadius="0">
+                <Grid ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon x:Name="Chevron" Glyph="&#xE70E;" FontSize="9" VerticalAlignment="Center"
+                              Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    <TextBlock Grid.Column="1" Text="Transfers" FontSize="11" VerticalAlignment="Center" />
+                    <TextBlock x:Name="SummaryText" Grid.Column="2" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                </Grid>
+            </Button>
+        </Grid>
+    </Grid>
+</UserControl>

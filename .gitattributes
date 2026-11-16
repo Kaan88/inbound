@@ -7,3 +7,5 @@ docker/** text eol=lf
 native/torrent-worker/Dockerfile.build text eol=lf
 native/torrent-worker/** text eol=lf
 native/torrent-worker/*.cmd text eol=crlf
+# Signed or hashed test fixtures must keep their exact bytes on every checkout (a CRLF checkout breaks the signature).
+tests/DownloadManager.Sites.Tests/Fixtures/** -text

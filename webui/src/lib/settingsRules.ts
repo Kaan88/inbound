@@ -533,6 +533,7 @@ const settingLabels: Record<string, string> = {
   playCompletionSound: 'Completion sound',
   showCompletionDialog: 'Completion window',
   preventSleepWhileDownloading: 'Prevent sleep while downloading',
+  pauseOnCostlyNetworkOrLowPower: 'Pause on a hotspot or in Low Power Mode',
   excludedFileExtensions: 'File types not sent',
   excludedHosts: 'Sites not sent from',
   interceptedFileExtensions: 'File types sent',
