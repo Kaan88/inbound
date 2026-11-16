@@ -135,7 +135,7 @@ COPY --from=torrent-worker-build /out/ /
 # ---- Runtime ------------------------------------------------------------------------------------------------------
 # The regular ASP.NET image (Ubuntu), not the chiseled one: the entrypoint needs a shell, chown and setpriv to give
 # /data to PUID:PGID and then drop root, which a chiseled image (no shell, fixed user) can't do.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Inbound Download Manager" \
