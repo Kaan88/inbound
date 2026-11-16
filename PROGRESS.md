@@ -1,5 +1,20 @@
 # Progress — session handoff
 
+### Keeping dependencies current, CI.4 (2026-11-15, branch `deps-upkeep`)
+
+- **Owner request:** "what can be done to keep the project up to date in the future?", then "yep, bi weekly though".
+  Found while building for macOS: Uno.Sdk was pinned at 6.7.45 since the D7 prototype (2026-11-09), one day before
+  Uno 7.0.5; nothing watched NuGet or npm, only Docker and Actions.
+- **Done:** `.github/dependabot.yml` covers NuGet (every project; Uno.Sdk now in `global.json` `msbuild-sdks`, so the
+  csproj says `Sdk="Uno.Sdk"`), npm (web UI, extension), Docker (root Dockerfile and the torrent worker's build) and
+  Actions, on the 1st and 15th of the month (cron; Dependabot has no two-week interval). Minor and patch updates come
+  grouped; majors come as their own pull requests. The four placeholder packages that keep Uno's dev tools out are
+  ignored. `scripts/check-pins.py` and `.github/workflows/upkeep.yml` check the pins Dependabot can't see (libtorrent,
+  vcpkg baseline, rclone, 7-Zip, appimagetool, nfpm) on the same days and keep one issue, "Pinned tools behind upstream".
+- **Checked:** the checker's pin reading, locally with GitHub's answers stubbed. **Not checked:** the GitHub API calls
+  (blocked in this session), Dependabot itself (it runs only from main, on its schedule), and whether Dependabot
+  finds Uno.Sdk in `global.json`. A Uno.Sdk update also needs THIRD-PARTY-NOTICES.md changed by hand.
+
 ### macOS app, MAC.1 (2026-11-15, branch `macos-0.8.0`)
 
 - **Owner request:** "what does it take to get a macos version quickly? use github builds and work on a branch. build
