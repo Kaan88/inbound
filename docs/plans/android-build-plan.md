@@ -26,14 +26,18 @@ text-log screen. They have not run together. NativeAOT for Android is marked exp
 build is the fallback: on the S24 FE it draws a 200-job list 0.8 s after a cold start, and it is the build to use on
 the emulator and for day-to-day work anyway, because NativeAOT builds are slow.
 
-**Not decided, ask the owner before it matters (one question each, with a recommendation):**
+**Answered by the owner in step 0 (2026-11-16):**
 
-1. Application ID and the name under the icon. The ID cannot change after the first release. The trials used
-   `app.inbound.trial` and `app.inbound.tk.nativeui`.
-2. Shared Downloads by path as the default destination. It works with no permission (emulator and both phones); the
-   owner has not yet confirmed it as the default. Needed in step 2.
-3. Anything a mockup leaves open (long-press, what a finished row does when tapped, empty states, errors). Ask, do
-   not skip and do not invent. The known faults of the mockup are listed in `android-app.md` section 2.
+| Question | Answer |
+| --- | --- |
+| Application ID and name under the icon | `app.inbound.android`, "Inbound" |
+| Default destination | The shared `Download/` folder by path, directly (no subfolder) |
+| The Mi 8 Lite is Android 11, below the minimum | Test (Debug) builds go down to API 30 so it stays the slow phone; release builds stay at 31 |
+| Which phone the 2 s cold mark is held to | S24 FE and Mi 8 Lite, "but only within reason" on the Mi 8 Lite |
+
+**Still to ask when it comes up:** anything a mockup leaves open (long-press, what a finished row does when tapped,
+empty states, errors). Ask, do not skip and do not invent. The known faults of the mockup are listed in
+`android-app.md` section 2.
 
 ## 2. Rules for this work
 
@@ -62,9 +66,8 @@ the emulator and for day-to-day work anyway, because NativeAOT builds are slow.
 
 - adb is `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`, not on PATH. Start exes from Bash, never PowerShell.
   Always pin `ANDROID_SERIAL`; an emulator (`kweb35`, API 35 x86-64) and two phones may be attached at once.
-- Mi 8 Lite (LineageOS, Android 11, serial `63316e92`): the slow phone. **It is below the supported version (12)**,
-  so the real app (min API 31) will not install on it. Ask the owner whether to lower the minimum for test builds
-  only, and which phone stands for the slow end. Do not lower it in a release build without asking.
+- Mi 8 Lite (LineageOS, Android 11, serial `63316e92`): the slow phone. It is below the supported version (12);
+  the owner allowed test builds with min API 30 for it (2026-11-16). Never lower it in a release build.
 - S24 FE (Android 17, wireless adb, the owner's daily phone): the owner's own phone. The A54 (Android 16) was lent
   for one test only; ask before using it again. Install and remove
   only our apps and delete only our files. Change no setting without asking; put back anything changed and say so.

@@ -642,11 +642,19 @@ whether rclone is a Setup component that can be unticked.
 - **Starts only when the perf work is done** (owner, 2026-11-15). Method (owner, same day): implementation is
   delegated to lesser agents, preferably Sonnet, then reviewed critically and redone where it falls short.
   **Go-ahead given** (owner, 2026-11-15): perf done on Windows with only the deferred Linux items left counts as done.
-- [ ] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
-  picker grant, how long a service may run, the toolkit. Decides .NET or Rust. In progress on branch
-  `android-trial`; state in PROGRESS "Android first trial (ANDROID.2)".
+- [x] ANDROID.2 First trial and measurements: the engine on Android, the performance marks, storage by path or by
+  picker grant, how long a service may run, the toolkit. Decides .NET or Rust. Branch `android-trial` (with
+  `android-phone` merged, 2026-11-16); evidence in PROGRESS "Android first trial (ANDROID.2)".
   Decided (owner, 2026-11-16): .NET engine, NativeAOT, native Material 3 screens; battery mark met (Jelly, Edge);
   the remaining measurements are taken on the real app. Build plan: `docs/plans/android-build-plan.md`.
+  **Deferred to the real app** (build plan section 6): idle CPU and wake-ups with the screen off, one hour of
+  downloading with the screen off, warm start, cold start on the real app, rate at 1 and 8 connections as a check,
+  boot to resumed, janky frames. Not done in the trial: picked folders (an engine change, its own item), Chrome
+  (owner: "ignore chrome, edge is enough").
+  Owner's answers (2026-11-16): application ID `app.inbound.android`, name "Inbound"; default destination the
+  shared `Download/` folder by path; test builds may go down to Android 11 (API 30) so the Mi 8 Lite stays the slow
+  phone, release stays at 12; the 2 s cold mark is held on the S24 FE and the Mi 8 Lite, "but only within reason"
+  on the Mi 8 Lite.
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).

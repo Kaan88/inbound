@@ -1,6 +1,7 @@
 # Inbound for Android: plan
 
-Status: design accepted by the owner (2026-11-15). Nothing is built. This plan says what the app is, what has to be
+Status: design accepted by the owner (2026-11-15); first trial done (ANDROID.2, 2026-11-16). The order of building
+is in `docs/plans/android-build-plan.md`, which is newer where the two differ. This plan says what the app is, what has to be
 found out first, and the order of work. ROADMAP section "Android app" tracks the items.
 
 ## 1. Decisions (owner, 2026-11-15)
@@ -13,6 +14,16 @@ found out first, and the order of work. ROADMAP section "Android app" tracks the
 - **Material You.** The default colours are the web UI's (`webui/src/tokens.css`) mapped onto Material 3 roles.
   Dynamic (wallpaper) colour is a switch, off by default.
 - **A built-in browser tab** catches downloads that need a sign-in, because a shared link carries no cookies.
+
+Decided after the trial (owner, 2026-11-16; evidence in PROGRESS "Android first trial (ANDROID.2)"):
+
+- **No Rust port.** The .NET engine met the marks it was measured against (rate, battery against the phone's
+  browser, cold start of a native screen).
+- **NativeAOT**, arm64, with `DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1`. The default (Mono) build is the
+  fallback and the build for day-to-day work on the emulator.
+- **Native Android views with Material 3** (`Xamarin.Google.Android.Material`), not MAUI, Uno or Avalonia.
+- **Application ID `app.inbound.android`, name "Inbound".** Default destination: the shared `Download/` folder by
+  path. Test builds may target Android 11 (API 30) for the slow phone; release builds stay at 12.
 
 ## 2. The mockup
 
@@ -108,10 +119,16 @@ prevention. `docs/new-frontend-guide.md` section 3 is the checklist the app is h
 - **New: the app's screens.** They are a frontend in the sense of `docs/new-frontend-guide.md`: they show the host's
   state and send commands, and write nothing durable except their own view state. The same screens talk to a remote
   host over the server's existing API, as the web UI does.
-- **The toolkit that draws the screens is not chosen.** It has to host .NET code in process, look like Material 3
-  with dynamic colour, and do the motion in section 7. It is chosen after the first trial (ANDROID.2), on evidence.
+- **The toolkit is native Android views with Material 3 components** (chosen after the trial, owner 2026-11-16). The
+  screens' logic lives in a plain `net10.0` project (`DownloadManager.Mobile`) so it is unit-tested and reused for a
+  remote host; the Android project holds the host, the service and the views. See the build plan, section 3.
 
 ## 5. The performance question (.NET or Rust)
+
+**Answered (ANDROID.2, 2026-11-16): .NET stays, on NativeAOT.** The battery mark is met (better than Jelly on the
+Mi 8 Lite, equal to Edge on the S24 FE); a native screen draws a 200-job list 0.8 s after a cold start on the S24 FE.
+The measurements still owed are taken on the real app (build plan, section 6). The text below is the plan as written
+before the trial.
 
 The owner's rule: keep the .NET engine unless performance on a phone is a problem. So the first work item measures
 it, on a real phone, before any screen is built.
