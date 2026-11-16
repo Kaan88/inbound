@@ -72,9 +72,15 @@ public sealed partial class HostCommandDispatcher
             case SitesMessageTypes.Save:
             {
                 var save = message.GetPayload<SiteSaveRequest>();
-                if (save is null || string.IsNullOrWhiteSpace(save.LocalFolder)) return null;
-                if (roots.Allowed(save.LocalFolder) is not { } real) return roots.OutsideTextFor(save.LocalFolder);
-                save.LocalFolder = real;
+                if (save is null) return null;
+                // SITES.11: a web session's SFTP site never signs in with this PC's ssh-agent keys.
+                save.OwnSignInOnly = true;
+                if (!string.IsNullOrWhiteSpace(save.LocalFolder))
+                {
+                    if (roots.Allowed(save.LocalFolder) is not { } real) return roots.OutsideTextFor(save.LocalFolder);
+                    save.LocalFolder = real;
+                }
+
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(save, IpcJson.Options) };
                 return null;
             }

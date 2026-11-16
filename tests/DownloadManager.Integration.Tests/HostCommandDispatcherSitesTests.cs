@@ -99,6 +99,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.OpenOnce, new SiteOpenOnceRequest { Address = "sftp://me@srv.example/pub", Password = "not logged" }),
         (SitesMessageTypes.Close, new SiteIdRequest { Id = SiteId }),
         (SitesMessageTypes.Keep, new SiteKeepRequest { Id = SiteId, Name = "Office box" }),
+        (SitesMessageTypes.Here, new SiteHereRequest { Id = SiteId, Path = "/pub", Names = ["docs"] }),
         (SitesMessageTypes.MakeFolder, new SiteMakeFolderRequest { Id = SiteId, Path = "/pub", Name = "new" }),
         (SitesMessageTypes.Rename, new SiteRenameRequest { Id = SiteId, Path = "/pub", Name = "a.txt", NewName = "b.txt" }),
         (SitesMessageTypes.Count, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
@@ -120,7 +121,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         SitesMessageTypes.ProbeResult, SitesMessageTypes.BrowseResult, SitesMessageTypes.Changed,
         SitesMessageTypes.TransferResult, SitesMessageTypes.TransferListResult, SitesMessageTypes.TransferChanged,
         SitesMessageTypes.CountResult, SitesMessageTypes.ChangeResult, SitesMessageTypes.CertificateResult,
-        SitesMessageTypes.SignInResult, SitesMessageTypes.DeviceStream, SitesMessageTypes.DeviceChunk,
+        SitesMessageTypes.SignInResult, SitesMessageTypes.DeviceStream, SitesMessageTypes.DeviceChunk, SitesMessageTypes.HereResult,
     ];
 
     [Fact]
@@ -207,6 +208,8 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         lock (sites.Seen)
         {
             Assert.Equal(inside, sites.Messages[^1].GetPayload<SiteSaveRequest>().LocalFolder);
+            // SITES.11: a web session's SFTP site must hold its own password or key, whatever the browser sent.
+            Assert.True(sites.Messages[^1].GetPayload<SiteSaveRequest>().OwnSignInOnly);
             Assert.Equal(inside, sites.Messages[^2].GetPayload<SiteTransferStartRequest>().LocalFolder);
         }
 
@@ -231,6 +234,8 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         }
 
         Assert.Equal(SitesRequests.Select(request => request.Type), sites.Seen);
+        lock (sites.Seen)
+            Assert.False(sites.Messages.Last(m => m.Type == SitesMessageTypes.Save).GetPayload<SiteSaveRequest>().OwnSignInOnly);
     }
 
     [Fact]

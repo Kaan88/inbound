@@ -143,6 +143,15 @@ public static class SitesMessageTypes
     /// <summary>SITES.11, <see cref="SiteKeepRequest"/>: saves an unsaved site ("Remember"). Refused for a saved site.</summary>
     public const string Keep = "sites.keep";
 
+    /// <summary>
+    /// SITES.11, <see cref="SiteHereRequest"/>: compares folders of one server folder, file by file and all the way down,
+    /// with the same folders under the site's linked folder ("Some of it" on a folder). Read-only and on demand: a client
+    /// asks once for the folders it shows after a page came. Answered with <see cref="HereResult"/>.
+    /// </summary>
+    public const string Here = "sites.here";
+
+    public const string HereResult = "sites.hereResult";
+
     /// <summary><see cref="SiteTransferIdRequest"/>: removes a finished batch from the list, or every finished batch when the id is empty.</summary>
     public const string TransferClear = "sites.transfer.clear";
 
@@ -188,7 +197,7 @@ public static class SitesMessageTypes
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
-            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep
+            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep or Here
             or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
             or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
 }
@@ -400,6 +409,13 @@ public sealed class SiteSaveRequest
     public string RemoteFolder { get; set; } = "";
     public string? LocalFolder { get; set; }
 
+    /// <summary>
+    /// SITES.11 (owner's pick left to me, 2026-11-16): an SFTP site saved with this set must hold its own password or a
+    /// key, so rclone never offers this PC's ssh-agent keys for it. The Host sets it for every web session's save,
+    /// whatever the client sent; a client at this PC may set it to hold itself to the same rule.
+    /// </summary>
+    public bool OwnSignInOnly { get; set; }
+
     /// <summary>SITES.6: FTP only: <see cref="SiteTlsModes"/> (<c>explicit</c>, <c>implicit</c> or <c>none</c>).</summary>
     public string? Tls { get; set; }
 
@@ -514,6 +530,40 @@ public sealed class SiteSignInResultDto
 public sealed class SiteIdRequest
 {
     public string Id { get; set; } = "";
+}
+
+/// <summary>SITES.11: <c>sites.here</c>.</summary>
+public sealed class SiteHereRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>The server folder the names are in, absolute.</summary>
+    public string Path { get; set; } = "/";
+
+    /// <summary>Folder names in it, at most <see cref="MaxNames"/>.</summary>
+    public List<string> Names { get; set; } = [];
+
+    public const int MaxNames = 100;
+}
+
+public sealed class SiteHereResultDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+    public string Path { get; set; } = "";
+
+    /// <summary>
+    /// Each folder asked for, with a <see cref="SiteHereStates"/> value; <c>Here</c> null when it was not compared (no
+    /// such folder here, more than 20,000 files, or the server could not list it): the browse's own value stands.
+    /// </summary>
+    public List<SiteFolderHereDto> Folders { get; set; } = [];
+}
+
+public sealed class SiteFolderHereDto
+{
+    public string Name { get; set; } = "";
+    public string? Here { get; set; }
 }
 
 /// <summary>SITES.11: <c>sites.openOnce</c>.</summary>

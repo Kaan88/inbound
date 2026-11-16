@@ -276,10 +276,17 @@ R1 design (2026-11-16, revised after the Fable review the same day):
    folder.
 9. **Open and reveal** of a finished transfer: no Host change; clients use the existing shell open/reveal.
 10. **Not in R1:** "Some of it" on a folder in the This PC pane (`SiteHere` marks only files). It needs the whole remote
-    folder listed recursively; asked of the owner.
+    folder listed. Owner, 2026-11-16: "build". Built 2026-11-17 as `sites.here` (a client asks once for the folders a
+    page shows): each folder that is here is listed level by level on the server (at most 2,000 folders, 20,000 files,
+    60 s for the request), stopping as soon as the answer can only be Some of it. Rules: Same when every server file is
+    here and the same (an empty folder too); Older here when all are here and some older; Not here when none is; Some of
+    it otherwise. Files only on this PC are ignored, a file that can't be read here counts as not here. On S3, whether
+    reading times costs a request per object is not checked.
 11. **Found by the review, not changed in R1:** a saved SFTP site with password sign-in and no password also lets rclone
-    offer this PC's ssh-agent keys, and a web session can save such a site (an existing behaviour since SITES.2). Asked
-    of the owner whether to turn the agent off for sites a web session saves. `RetryAt` is an absolute time, so a remote
+    offer this PC's ssh-agent keys, and a web session can save such a site (an existing behaviour since SITES.2). Owner,
+    2026-11-16: "no idea", so my pick, built 2026-11-17: a site a web session saves (SFTP, password sign-in) must hold its
+    own password or a key, and a key stays with its server when the web edits the site; sites saved at this PC keep the
+    agent as now. An address opened once can't be remembered without a password. `RetryAt` is an absolute time, so a remote
     client with a wrong clock shows a wrong countdown. A file stopped at the moment rclone itself dies may leave its
     partial file (the sweep looks at unfinished files only). Opening an address that is already open reuses the site
     and ignores the new address's folder. Look-alike characters in a typed server name become the site's name as typed.

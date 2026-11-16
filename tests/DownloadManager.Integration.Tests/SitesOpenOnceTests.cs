@@ -188,6 +188,75 @@ public sealed class SitesOpenOnceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ASiteSavedFromTheWebMustHoldItsOwnPasswordOrKey()
+    {
+        // SITES.11: OwnSignInOnly (set by the Host for every web session) refuses an SFTP site rclone would sign in to
+        // with this PC's ssh-agent keys; at this PC the same site saves as before.
+        var commands = await OnAsync();
+        SiteSaveRequest Box(bool web, string? password) => new()
+        {
+            Name = "Box", Kind = SiteKinds.Sftp, Host = "srv.example", Port = 22, User = "me",
+            AuthMethod = SiteAuthMethods.Password, Password = password, RemoteFolder = "/", OwnSignInOnly = web,
+        };
+
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Box(web: true, password: null));
+        Assert.False(refused.Ok);
+        Assert.Contains("password", refused.Message);
+        Assert.Empty(SiteFiles());
+
+        var withPassword = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Box(web: true, password: Secret));
+        Assert.True(withPassword.Ok, withPassword.Message);
+
+        // An edit from the web that empties the password is refused too; the site keeps it.
+        var emptied = Box(web: true, password: "");
+        emptied.Id = withPassword.Site!.Id;
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, emptied)).Ok);
+        Assert.True((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites.Single().HasPassword);
+
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Box(web: false, password: null))).Ok);
+    }
+
+    [Fact]
+    public async Task AStoredKeyStaysWithItsServerWhenTheWebEditsTheSite()
+    {
+        // Review: a web session must not point a key site saved at this PC at a server it chose and sign in there with the key.
+        var commands = await OnAsync();
+        SiteSaveRequest Keyed(string host, bool web, string? key) => new()
+        {
+            Name = "Keyed", Kind = SiteKinds.Sftp, Host = host, Port = 22, User = "me", AuthMethod = SiteAuthMethods.Key,
+            PrivateKey = key, RemoteFolder = "/", OwnSignInOnly = web,
+        };
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save,
+            Keyed("srv.example", web: false, "-----BEGIN OPENSSH PRIVATE KEY-----\ninvented\n-----END OPENSSH PRIVATE KEY-----"))).Site!;
+
+        var moved = Keyed("elsewhere.example", web: true, key: null);
+        moved.Id = saved.Id;
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, moved);
+        Assert.False(refused.Ok);
+        Assert.Equal("srv.example", (await new SiteStore(State).GetAsync(saved.Id))!.Host);
+
+        // The same server from the web keeps it; another server from this PC keeps it, as before.
+        var same = Keyed("srv.example", web: true, key: null);
+        same.Id = saved.Id;
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, same)).Ok);
+        var here = Keyed("elsewhere.example", web: false, key: null);
+        here.Id = saved.Id;
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, here)).Ok);
+    }
+
+    [Fact]
+    public async Task AnAddressWithoutAPasswordCantBeRemembered()
+    {
+        // Review: kept, it would no longer be guarded as unsaved and rclone would offer this PC's ssh-agent keys.
+        var commands = await OnAsync();
+        var site = (await Call<SiteResultDto>(commands, SitesMessageTypes.OpenOnce, new SiteOpenOnceRequest { Address = "sftp://me@nas.home.lan/" })).Site!;
+        var kept = await Call<SiteResultDto>(commands, SitesMessageTypes.Keep, new SiteKeepRequest { Id = site.Id });
+        Assert.False(kept.Ok);
+        Assert.Contains("password", kept.Message);
+        Assert.Empty(SiteFiles());
+    }
+
+    [Fact]
     public async Task AtMostEightAddressesAreOpenAtOnce()
     {
         var commands = await OnAsync();

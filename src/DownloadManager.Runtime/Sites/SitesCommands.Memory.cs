@@ -255,6 +255,9 @@ public sealed partial class SitesCommands
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // SITES.11 review: saved, it would no longer be guarded as unsaved, and rclone would offer this PC's ssh-agent keys.
+            if (await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is { Kind: SiteKinds.Sftp, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
+                return Fail("Type the password for this server before remembering it.");
             kept = await _sites.KeepAsync(request.Id, request.Name, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is SiteStoreException or IOException or UnauthorizedAccessException)

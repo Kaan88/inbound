@@ -36,7 +36,7 @@ scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
 Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1).
-Edge has its own Edge Add-ons listing with its own extension ID (`ifoagddcenmjpbklkhghbdmgplldcdci`, trusted from 0.6.7; Setup links it; the Chrome
+Edge has its own Edge Add-ons listing, published (owner, 2026-11-17) and updated through the store like Chrome and Firefox, with its own extension ID (`ifoagddcenmjpbklkhghbdmgplldcdci`, trusted from 0.6.7; Setup links it; the Chrome
 Web Store listing also works in Edge). Setup and the update zip no longer ship an unpacked extension (owner, 2026-11-11: the extensions are in the stores; Firefox's signed add-on is still offered), and Setup and the updater remove one an older install left. Setup, repair and the Host register the native host under Edge's key too. In Edge the owner checked automatic catching (2026-11-08). Firefox gets its own build and gecko ID, which the app accepts
 from 0.6.0; checked in Firefox 159 with a test profile (EXT.B3). In Firefox, downloads are caught from
 their response headers with blocking `webRequest`, before Firefox's own Save dialog (EXT.B5).

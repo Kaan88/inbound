@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Edge extension published (owner, 2026-11-17)
+
+- Owner: "edge extension is also finally published, it can be updated like chrome and firefox now". Recorded in
+  ROADMAP EXT.S1 and CLAUDE.md. A new extension version now goes to the Chrome, Edge and Firefox stores alike.
+
 ### Sites rework R1: what the Host adds, SITES.11 (2026-11-16)
 
 - **Owner:** "built is crap, I want mockup" (go-ahead for R1 against the mockup). Each step reviewed by the same Fable
@@ -28,9 +33,24 @@
   Full local suite after both reviews (`scripts	est.ps1`, rclone 1.76 for the Sites tests): Core 2388, Engine 214,
   Integration 2073 + 10 skipped, TorBox 323, Archives 401, Containers 188, Torrents 94 + 29 skipped, Server 202, Tray 3;
   extension typecheck and tests; web UI 718 tests and svelte-check clean.
-- **Questions for the owner:** (1) "Some of it" on a folder in the This PC pane needs the whole remote folder listed
-  recursively; build it, or mark files only? (2) A saved SFTP site with password sign-in and no password lets rclone
-  use this PC's ssh-agent, and a web session can save one (since SITES.2): turn the agent off for such sites?
+- **Owner's answers (2026-11-16), built 2026-11-17 after "resume":** (1) folder "Some of it": "build". (2) the
+  ssh-agent for SFTP sites with no password: "no idea"; my pick, built: a site a web session saves must hold its own
+  password or a key, while sites saved at this PC keep the agent.
+  - Web rule: `SiteSaveRequest.OwnSignInOnly`, forced on by `ScopedSites` for every web session. A web save of an SFTP
+    password site with no password is refused. From the web, a stored key and its passphrase stay with their server, as
+    the password already did. Remembering an address opened once with no password is refused for everyone.
+  - Folder "Some of it": `sites.here` {Id, Path, Names <= 100} answered by `sites.hereResult`, on demand only. Each named
+    folder that is here is read on the server one level at a time (at most 2,000 folders and 20,000 files). The count
+    stops as soon as the answer can only be Some of it. The whole request has 60 s. A connection failure answers
+    Ok = false and marks the site in trouble. One folder that can't be listed keeps the browse's own value.
+  - Fable review 3 applied: keep-after-openOnce hole, the key moving to another server, the recursive listing's
+    unbounded cost (now level by level), no overall limit, rclone dying mid-request, connection failure reported as
+    success. Not changed: `sites.here`, like browse's "On this PC" column, is not scoped to a web session's roots; both
+    say only whether files exist under the site's own linked folder (decide both together if it matters).
+  - Tests: Sites.Tests 239 pass; Integration Sites tests 140 pass, 6 skipped (rclone update and key e2e, which need
+    other setup). New: `AFolderTallySettlesAsSoonAsItIsSomeOfIt`, `AFolderComparesEveryFileUnderIt`,
+    `AFolderIsComparedFileByFileAllTheWayDown` (real rclone), `AStoredKeyStaysWithItsServerWhenTheWebEditsTheSite`,
+    `AnAddressWithoutAPasswordCantBeRemembered`, `ASiteSavedFromTheWebMustHoldItsOwnPasswordOrKey`.
 - **Not done:** no window or web UI uses the new fields yet (R2 onward). Not changed: rclone's connection cache is not
   cleared when an unsaved site is closed; a batch on a site that vanished at restart fails file by file.
 

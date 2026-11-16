@@ -67,6 +67,42 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task AFolderIsComparedFileByFileAllTheWayDown()
+    {
+        var port = StartServer(slow: false);
+        var (commands, siteId) = await OpenSiteAsync(port);
+        var linked = Path.Combine(Local, "here-linked");
+        Directory.CreateDirectory(Path.Combine(linked, "docs"));
+        // File.Copy keeps the file's time, so a copied file is the same as the server's.
+        File.Copy(Path.Combine(Served, "pub", "docs", "a.txt"), Path.Combine(linked, "docs", "a.txt"));
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Id = siteId, Name = "Loopback", Kind = SiteKinds.Sftp, Host = "127.0.0.1", Port = port, User = User,
+            AuthMethod = SiteAuthMethods.Password, Password = Password, RemoteFolder = "/pub", LocalFolder = linked,
+        });
+        Assert.True(saved.Ok, saved.Message);
+
+        // docs/deep/b.txt is not here yet; "deep" itself is not here, so it is not read from the server at all.
+        var here = await Call<SiteHereResultDto>(commands, SitesMessageTypes.Here,
+            new SiteHereRequest { Id = siteId, Path = "/pub", Names = ["docs", "../etc", "docs", "missing"] });
+        Assert.True(here.Ok, here.Message);
+        Assert.Equal(["docs", "missing"], here.Folders.Select(f => f.Name));
+        Assert.Equal(SiteHereStates.SomeOfIt, here.Folders[0].Here);
+        Assert.Null(here.Folders[1].Here);
+
+        Directory.CreateDirectory(Path.Combine(linked, "docs", "deep"));
+        File.Copy(Path.Combine(Served, "pub", "docs", "deep", "b.txt"), Path.Combine(linked, "docs", "deep", "b.txt"));
+        here = await Call<SiteHereResultDto>(commands, SitesMessageTypes.Here, new SiteHereRequest { Id = siteId, Path = "/pub", Names = ["docs"] });
+        Assert.Equal(SiteHereStates.Same, here.Folders.Single().Here);
+        here = await Call<SiteHereResultDto>(commands, SitesMessageTypes.Here, new SiteHereRequest { Id = siteId, Path = "/pub/docs", Names = ["deep"] });
+        Assert.Equal(SiteHereStates.Same, here.Folders.Single().Here);
+
+        var tooMany = await Call<SiteHereResultDto>(commands, SitesMessageTypes.Here,
+            new SiteHereRequest { Id = siteId, Path = "/pub", Names = [.. Enumerable.Range(0, SiteHereRequest.MaxNames + 1).Select(i => "f" + i)] });
+        Assert.False(tooMany.Ok);
+    }
+
+    [SiteTransfersFact]
     public async Task ABrowseMarksTheSiteReachableAndUsedAndAServerGoneMarksItInTrouble()
     {
         var port = StartServer(slow: false);

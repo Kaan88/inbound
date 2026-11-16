@@ -160,6 +160,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.Browse => IpcMessage.Create(SitesMessageTypes.BrowseResult,
                     new SiteBrowseResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
+                SitesMessageTypes.Here => IpcMessage.Create(SitesMessageTypes.HereResult,
+                    new SiteHereResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.Count => IpcMessage.Create(SitesMessageTypes.CountResult,
                     new SiteCountResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
@@ -240,6 +242,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 return Result(request, await CloseAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Keep:
                 return Result(request, await KeepAsync(request.GetPayload<SiteKeepRequest>() ?? new SiteKeepRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Here:
+                return IpcMessage.Create(SitesMessageTypes.HereResult,
+                    await HereAsync(request.GetPayload<SiteHereRequest>() ?? new SiteHereRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.TransferPause:
                 return Transfer(request, await _transfers.PauseAsync(TransferId(request)).ConfigureAwait(false));
             case SitesMessageTypes.TransferResume:
@@ -624,8 +629,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     // Audit 2026-11-15: never carried to another server, whatever the sign-in method, so a site moved
                     // with key sign-in and switched back to a password can't take the old server's password along.
                     SealedPassword = Seal(request.Password, sameServer ? existing?.SealedPassword : null),
-                    SealedPrivateKey = Seal(request.PrivateKey, existing?.SealedPrivateKey),
-                    SealedKeyPassphrase = Seal(request.KeyPassphrase, existing?.SealedKeyPassphrase),
+                    // SITES.11 review: from a web session the key stays with its server too, or an edit could sign in
+                    // anywhere with this PC's stored key.
+                    SealedPrivateKey = Seal(request.PrivateKey, sameServer || !request.OwnSignInOnly ? existing?.SealedPrivateKey : null),
+                    SealedKeyPassphrase = Seal(request.KeyPassphrase, sameServer || !request.OwnSignInOnly ? existing?.SealedKeyPassphrase : null),
                     HostKeys = sameServer ? existing!.HostKeys : [],
                     // SITES.6b: a trusted certificate belongs to one server and one kind of encryption.
                     TrustedCertificates = sameServer && existing!.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
@@ -662,6 +669,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     return Fail("An S3 site needs its access key ID and secret access key.");
                 if (saved.Kind == SiteKinds.B2 && (saved.User.Length == 0 || saved.SealedPassword is null))
                     return Fail("A B2 site needs its application key ID and application key.");
+                if (request.OwnSignInOnly && saved is { Kind: SiteKinds.Sftp, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
+                    return Fail("Type the password, or choose a key: a site saved here can't sign in with the server PC's own SSH keys.");
                 await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
