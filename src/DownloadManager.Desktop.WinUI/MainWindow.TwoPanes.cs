@@ -31,6 +31,10 @@ public sealed partial class MainWindow
     private string? _followedSiteId;
     private string? _followedServerPath;
 
+    // SITES.11 R2c: drag and drop (MainWindow.Drag.cs); built on Windows only.
+    partial void WireServerDrag(SitesPanel panel);
+    partial void WireLocalDrag(LocalPane local);
+
     private bool TwoPanesOffered => !_connection.IsRemote;
 
     private bool TwoPanesShown => _uiState.SitesTwoPanes && TwoPanesOffered;
@@ -193,6 +197,7 @@ public sealed partial class MainWindow
         local.DeleteRequested += () => _ = DeleteLocalAsync();
         local.CommandRequested += FireLocalCommand;
         local.CanUpload = () => _sitesPanel is { IsLoading: false, SiteId: not null };
+        WireLocalDrag(local);
         Grid.SetColumn(local, 0);
         grid.Children.Add(local);
         _localPane = local;

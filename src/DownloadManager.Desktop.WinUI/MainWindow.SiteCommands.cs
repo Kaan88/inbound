@@ -206,14 +206,18 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>Starts a transfer flow once: while one is starting, another Enter, menu click or double click does nothing.</summary>
-    private async Task OnceAsync(Func<Task> work)
+    /// <summary>
+    /// Starts a transfer flow once: while one is starting, another Enter, menu click or double click does nothing. False when
+    /// it was ignored for that (a drop says so).
+    /// </summary>
+    private async Task<bool> OnceAsync(Func<Task> work)
     {
-        if (_transferStarting) return;
+        if (_transferStarting) return false;
         _transferStarting = true;
         try
         {
             await work();
+            return true;
         }
         finally
         {

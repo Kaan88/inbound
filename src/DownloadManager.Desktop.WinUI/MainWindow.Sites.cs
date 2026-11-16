@@ -190,6 +190,7 @@ public sealed partial class MainWindow
         };
         panel.StateChanged += UpdateSitesToolbar;
         panel.CommandRequested += FireSiteCommand;
+        WireServerDrag(panel);
         InitSiteMenu();
         WireSiteChanges(panel);
         panel.StateChanged += FollowServerFolder;

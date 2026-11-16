@@ -137,6 +137,9 @@ public sealed partial class SitesPanel : UserControl
     // The first row the last page added that the list shows: Load more's last page gives it the keyboard.
     private SiteItemRow? _firstAdded;
 
+    // SITES.11 R2c: drag and drop, built on Windows only (PaneDrag.cs).
+    partial void WireDrag();
+
     public SitesPanel()
     {
         InitializeComponent();
@@ -146,6 +149,7 @@ public sealed partial class SitesPanel : UserControl
         // The list takes Enter for itself (Uno marks it handled before it reaches the panel), so Enter is read on the way in.
         ItemsList.PreviewKeyDown += ItemsList_PreviewKeyDown;
         ItemsList.ContextRequested += ItemsList_ContextRequested;
+        WireDrag();
         // SITES.4: Download follows what is selected.
         ItemsList.SelectionChanged += (_, e) =>
         {

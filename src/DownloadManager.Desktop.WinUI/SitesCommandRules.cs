@@ -394,4 +394,118 @@ internal static class SitesCommandRules
     /// </summary>
     public static string AskedPath(bool atStart, string? startFolder, string path) =>
         atStart && !string.IsNullOrWhiteSpace(startFolder) ? SitesBrowseRules.Normalize(startFolder) : path;
+
+    // ---- Drag and drop (R2c) ------------------------------------------------------------------------------
+    // Out of scope: dragging server files out to Explorer (it would need virtual files) and moving items within one pane.
+
+    /// <summary>Where a drag comes from: a row of the This PC pane, a row of the server pane, or Windows Explorer.</summary>
+    public enum DragFrom { None, ThisPc, Server, Explorer }
+
+    /// <summary>The pane a drag is over.</summary>
+    public enum DropPane { Server, ThisPc }
+
+    /// <summary>NoDrop: the no-drop cursor and nothing happens. Do: the drop starts the transfer. Refuse: the drop is taken and the reason goes in the status line.</summary>
+    public enum DropKind { NoDrop, Do, Refuse }
+
+    /// <summary>What a drag over a pane means. <see cref="TargetFolder"/> is where it lands (null when NoDrop).</summary>
+    public readonly record struct DropPlan(DropKind Kind, string Caption, string? TargetFolder, string? Why)
+    {
+        public static DropPlan No { get; } = new(DropKind.NoDrop, "", null, null);
+    }
+
+    /// <summary>A drop that is taken but not carried out; <paramref name="why"/> goes in the status line.</summary>
+    public static DropPlan Refused(string why) => new(DropKind.Refuse, "", null, why);
+
+    /// <summary>The no-drop caption over the server pane while the window manages another Inbound server.</summary>
+    public const string DropOtherServerCaption = "Not while managing another server";
+
+    /// <summary>Why this PC's files can't be dropped while the window manages another Inbound server.</summary>
+    public const string DropOtherServerReason =
+        "Dropping files from this PC doesn't work while this window shows another server: this PC's files can't be sent through that server's Host.";
+
+    /// <summary>
+    /// What a drag of <paramref name="source"/> over <paramref name="pane"/> does. The target is the folder the pane shows, or a
+    /// folder row under the pointer (<paramref name="row"/>); a file row, "..", the pane the drag came from, a pane that is not
+    /// ready (no remote shown, still loading, no folder) and Explorer onto This PC are no-drop. The same commands as the
+    /// gutter arrows and Upload/Download run on a drop, so their conflict question and in-flight guard apply.
+    /// </summary>
+    public static DropPlan PlanDrop(DragFrom source, DropPane pane, SitesBrowseRules.PaneLine? row, string paneFolder, bool paneReady, bool otherServer)
+    {
+        if (source == DragFrom.None) return DropPlan.No;
+        if (pane == DropPane.Server)
+        {
+            if (source == DragFrom.Server) return DropPlan.No;
+        }
+        else if (source != DragFrom.Server || otherServer) return DropPlan.No;
+
+        // No remote shown (or still loading): plain no-drop, whichever server the window shows.
+        if (!paneReady) return DropPlan.No;
+        // Another server: this PC's files can't go through its Host. No-drop (no Drop event follows) with a short caption.
+        if (pane == DropPane.Server && otherServer) return new DropPlan(DropKind.NoDrop, DropOtherServerCaption, null, DropOtherServerReason);
+        string target;
+        if (row is not { } line) target = paneFolder;
+        else if (!line.IsFolder || !SitesBrowseRules.IsActionable(line)) return DropPlan.No;
+        else target = pane == DropPane.Server ? SitesBrowseRules.Join(paneFolder, line.Name) : System.IO.Path.Combine(paneFolder, line.Name);
+        if (pane == DropPane.ThisPc && target.Length == 0) return DropPlan.No;
+        return new DropPlan(DropKind.Do, (pane == DropPane.Server ? "Upload to " + SitesBrowseRules.Normalize(target) : "Download to " + target), target, null);
+    }
+
+    public const string NotFilesOnThisPc = "Some of the dragged items aren't files on this PC (for example, inside a zip); drag them from a folder.";
+
+    public const string WholeDriveText = "A whole drive or share can't be uploaded; drag a folder on it.";
+
+    public const string TransferStartingText = "A transfer is starting; try again.";
+
+    /// <summary>
+    /// The names of what Explorer dropped (full paths): all from one folder, each a file or a folder by its attributes
+    /// (<paramref name="attributesOf"/>, null when the path is gone). A drive or share root is refused first; so is a folder
+    /// that is a junction or symbolic link (it would upload another folder's contents under this name).
+    /// </summary>
+    public static (string? Folder, List<SiteTransferNameDto> Names, string? Problem) ExplorerNames(IReadOnlyList<string> paths, Func<string, System.IO.FileAttributes?> attributesOf)
+    {
+        if (paths.Count == 0) return (null, [], "Nothing was dropped.");
+        if (paths.Any(IsRootPath)) return (null, [], WholeDriveText);
+        var (folder, _, problem) = SiteTransferRules.UploadNames(paths);
+        if (problem is not null || folder is null) return (null, [], problem?.Replace("Choose files", "Drag items") ?? "Nothing was dropped.");
+        var names = new List<SiteTransferNameDto>();
+        foreach (var path in paths)
+        {
+            var name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
+            if (attributesOf(path) is not { } attributes) return (null, [], $"{name} is no longer there.");
+            var isFolder = attributes.HasFlag(System.IO.FileAttributes.Directory);
+            if (isFolder && attributes.HasFlag(System.IO.FileAttributes.ReparsePoint)) return (null, [], $"{name} is a link to another folder; drag the folder itself.");
+            names.Add(new SiteTransferNameDto { Name = name, IsFolder = isFolder });
+        }
+
+        return (folder, names, null);
+    }
+
+    /// <summary>A drive root (C:\) or a share root (\\srv\share).</summary>
+    public static bool IsRootPath(string path)
+    {
+        var trimmed = (path ?? "").TrimEnd('\\', '/');
+        if (trimmed.Length == 0) return true;
+        var root = System.IO.Path.GetPathRoot(path)?.TrimEnd('\\', '/');
+        return root is { Length: > 0 } && string.Equals(trimmed, root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>A pane's drag as it started: the site (null for This PC), the folder and the names.</summary>
+    internal readonly record struct DragStart(string? SiteId, string Folder, IReadOnlyList<SiteTransferNameDto> Names);
+
+    public const string DragMovedText = "The folder the items were dragged from is no longer shown; drag them again.";
+
+    /// <summary>
+    /// Why a drop of a drag that started in <paramref name="start"/> can't run now: the source pane shows another folder (or
+    /// remote) than when the drag started. Null when it is the same. This PC folders compare without case.
+    /// </summary>
+    public static string? DragMoved(DragStart start, string? siteNow, string folderNow, bool local)
+    {
+        var same = local
+            ? string.Equals(start.Folder.TrimEnd('\\', '/'), (folderNow ?? "").TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+            : start.SiteId == siteNow && SitesBrowseRules.Normalize(start.Folder) == SitesBrowseRules.Normalize(folderNow);
+        return same ? null : DragMovedText;
+    }
+
+    /// <summary>An upload's target folder that is not the one shown, and could not be read: nothing is asked, existing files are skipped.</summary>
+    public static string UnreadTargetText(string folder) => $"{folder} could not be read; files already there are skipped.";
 }

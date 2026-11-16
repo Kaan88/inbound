@@ -322,4 +322,137 @@ public sealed class SitesCommandRulesTests
         Assert.Equal("Ctrl+Enter", SitesCommandRules.KeyText(SiteCommand.Open));
         Assert.Equal("", SitesCommandRules.KeyText(SiteCommand.StarFolder));
     }
+
+    // ---- R2c: drag and drop ----
+
+    private static SitesCommandRules.DropPlan ToServer(SitesCommandRules.DragFrom from, SitesBrowseRules.PaneLine? row, bool ready = true, bool other = false) =>
+        SitesCommandRules.PlanDrop(from, SitesCommandRules.DropPane.Server, row, "/media/isos", ready, other);
+
+    private static SitesCommandRules.DropPlan ToLocal(SitesCommandRules.DragFrom from, SitesBrowseRules.PaneLine? row, bool ready = true, bool other = false) =>
+        SitesCommandRules.PlanDrop(from, SitesCommandRules.DropPane.ThisPc, row, @"D:\Downloads\ISOs", ready, other);
+
+    [Fact]
+    public void ADropOnTheServerPaneUploadsIntoTheFolderShownOrAFolderRow()
+    {
+        var plan = ToServer(SitesCommandRules.DragFrom.ThisPc, null);
+        Assert.Equal(SitesCommandRules.DropKind.Do, plan.Kind);
+        Assert.Equal("/media/isos", plan.TargetFolder);
+        Assert.Equal("Upload to /media/isos", plan.Caption);
+
+        var inFolder = ToServer(SitesCommandRules.DragFrom.Explorer, Folder("old"));
+        Assert.Equal("/media/isos/old", inFolder.TargetFolder);
+        Assert.Equal("Upload to /media/isos/old", inFolder.Caption);
+    }
+
+    [Fact]
+    public void ADropOnThisPcDownloadsIntoItsFolderOrALocalFolderRow()
+    {
+        var plan = ToLocal(SitesCommandRules.DragFrom.Server, null);
+        Assert.Equal(@"Download to D:\Downloads\ISOs", plan.Caption);
+        Assert.Equal(@"D:\Downloads\ISOs", plan.TargetFolder);
+        Assert.Equal(Path.Combine(@"D:\Downloads\ISOs", "x"), ToLocal(SitesCommandRules.DragFrom.Server, Folder("x")).TargetFolder);
+    }
+
+    [Fact]
+    public void FileRowsParentRowsTheSourcePaneAndNothingAreNoDrop()
+    {
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToServer(SitesCommandRules.DragFrom.ThisPc, File("a.iso")).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToServer(SitesCommandRules.DragFrom.ThisPc, Up).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToLocal(SitesCommandRules.DragFrom.Server, Up).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToServer(SitesCommandRules.DragFrom.Server, null).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToLocal(SitesCommandRules.DragFrom.ThisPc, null).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToLocal(SitesCommandRules.DragFrom.Explorer, null).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToServer(SitesCommandRules.DragFrom.None, null).Kind);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToServer(SitesCommandRules.DragFrom.ThisPc, null, ready: false).Kind);
+    }
+
+    [Fact]
+    public void AnotherServerIsNoDropWithAShortCaptionAndHasNoLocalDownloadTarget()
+    {
+        var refused = ToServer(SitesCommandRules.DragFrom.Explorer, null, other: true);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, refused.Kind);
+        Assert.Equal("Not while managing another server", refused.Caption);
+        Assert.Equal(SitesCommandRules.DropOtherServerReason, refused.Why);
+        Assert.Equal(SitesCommandRules.DropKind.NoDrop, ToLocal(SitesCommandRules.DragFrom.Server, null, other: true).Kind);
+        // No remote shown: plain no-drop, without the other-server caption.
+        var notReady = ToServer(SitesCommandRules.DragFrom.Explorer, null, ready: false, other: true);
+        Assert.Equal(SitesCommandRules.DropPlan.No, notReady);
+    }
+
+    [Fact]
+    public void AParentRowIsNoDropForEverySource()
+    {
+        foreach (var from in new[] { SitesCommandRules.DragFrom.ThisPc, SitesCommandRules.DragFrom.Explorer })
+        {
+            Assert.Equal(SitesCommandRules.DropPlan.No, ToServer(from, Up));
+            Assert.Equal(SitesCommandRules.DropPlan.No, ToServer(from, new SitesBrowseRules.PaneLine("..", true, -1)));
+        }
+
+        Assert.Equal(SitesCommandRules.DropPlan.No, ToLocal(SitesCommandRules.DragFrom.Server, Up));
+    }
+
+    [Fact]
+    public void ExplorerItemsBecomeOneBatchFromOneFolder()
+    {
+        var a = Path.Combine(Path.GetTempPath(), "a");
+        var (folder, names, problem) = SitesCommandRules.ExplorerNames([Path.Combine(a, "x.iso"), Path.Combine(a, "dir")], AttributesFor);
+        Assert.Null(problem);
+        Assert.Equal(a, folder);
+        Assert.Equal(["x.iso", "dir"], names.Select(n => n.Name));
+        Assert.Equal([false, true], names.Select(n => n.IsFolder));
+
+        Assert.NotNull(SitesCommandRules.ExplorerNames([Path.Combine(a, "x"), Path.Combine(a, "b", "y")], AttributesFor).Problem);
+        Assert.NotNull(SitesCommandRules.ExplorerNames([], AttributesFor).Problem);
+    }
+
+    private static FileAttributes? AttributesFor(string path) =>
+        path.EndsWith("gone", StringComparison.Ordinal) ? null
+        : path.EndsWith("link", StringComparison.Ordinal) ? FileAttributes.Directory | FileAttributes.ReparsePoint
+        : path.EndsWith("dir", StringComparison.Ordinal) ? FileAttributes.Directory
+        : FileAttributes.Archive;
+
+    [Theory]
+    [InlineData(@"C:\")]
+    [InlineData(@"C:")]
+    [InlineData(@"\\srv\share")]
+    [InlineData(@"\\srv\share\")]
+    public void DriveAndShareRootsAreRefusedFirst(string root)
+    {
+        Assert.True(SitesCommandRules.IsRootPath(root));
+        Assert.Equal(SitesCommandRules.WholeDriveText, SitesCommandRules.ExplorerNames([root], AttributesFor).Problem);
+        Assert.False(SitesCommandRules.IsRootPath(@"\\srv\share\docs"));
+        Assert.False(SitesCommandRules.IsRootPath(@"C:\Users"));
+    }
+
+    [Fact]
+    public void AFolderThatIsALinkIsRefused()
+    {
+        var a = Path.Combine(Path.GetTempPath(), "a");
+        var (_, names, problem) = SitesCommandRules.ExplorerNames([Path.Combine(a, "x.iso"), Path.Combine(a, "link")], AttributesFor);
+        Assert.Empty(names);
+        Assert.Equal("link is a link to another folder; drag the folder itself.", problem);
+        Assert.Equal("gone is no longer there.", SitesCommandRules.ExplorerNames([Path.Combine(a, "gone")], AttributesFor).Problem);
+    }
+
+    [Fact]
+    public void ADropFromAPaneThatMovedIsRefused()
+    {
+        var server = new SitesCommandRules.DragStart("s1", "/media/isos", [new SiteTransferNameDto { Name = "a.iso" }]);
+        Assert.Null(SitesCommandRules.DragMoved(server, "s1", "/media/isos/", local: false));
+        Assert.Equal(SitesCommandRules.DragMovedText, SitesCommandRules.DragMoved(server, "s1", "/media", local: false));
+        Assert.Equal(SitesCommandRules.DragMovedText, SitesCommandRules.DragMoved(server, "s2", "/media/isos", local: false));
+        var local = new SitesCommandRules.DragStart(null, @"D:\ISOs", [new SiteTransferNameDto { Name = "a.iso" }]);
+        Assert.Null(SitesCommandRules.DragMoved(local, null, @"d:\isos\", local: true));
+        Assert.Equal(SitesCommandRules.DragMovedText, SitesCommandRules.DragMoved(local, null, @"D:\Other", local: true));
+    }
+
+    [Fact]
+    public void DropWordsAreTheAgreedOnes()
+    {
+        Assert.Equal("/x/old could not be read; files already there are skipped.", SitesCommandRules.UnreadTargetText("/x/old"));
+        Assert.Equal("A transfer is starting; try again.", SitesCommandRules.TransferStartingText);
+        Assert.Equal("Some of the dragged items aren't files on this PC (for example, inside a zip); drag them from a folder.", SitesCommandRules.NotFilesOnThisPc);
+        Assert.Equal(SitesCommandRules.DropKind.Refuse, SitesCommandRules.Refused("why").Kind);
+        Assert.Equal("why", SitesCommandRules.Refused("why").Why);
+    }
 }

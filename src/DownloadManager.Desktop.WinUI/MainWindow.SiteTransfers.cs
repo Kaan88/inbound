@@ -224,21 +224,63 @@ public sealed partial class MainWindow
     {
         // Compared without case (a server may not tell "A.iso" from "a.iso"); a folder whose pages are not all loaded is
         // asked about anyway, since what isn't listed may be there.
-        var shown = _sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == SitesBrowseRules.Normalize(remoteFolder);
-        var there = SitesCommandRules.AlreadyThere(names, shown ? _sitesPanel!.ShownNames : [], ignoreCase: true);
-        var complete = shown && _sitesPanel!.ListingComplete;
+        var target = SitesBrowseRules.Normalize(remoteFolder);
+        var shown = _sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == target;
+        IEnumerable<string>? existing;
+        bool complete;
+        if (shown)
+        {
+            existing = _sitesPanel!.ShownNames;
+            complete = _sitesPanel.ListingComplete;
+        }
+        else
+        {
+            // Another folder (a drop on a folder row): its first page, as the pane asks for it, is read to look.
+            (existing, complete) = await ReadServerNamesAsync(site, target);
+        }
+
         var conflict = SitesCommandRules.Skip;
-        if (SitesCommandRules.ConflictQuestion(there, $"{SitesBrowseRules.Normalize(remoteFolder)} on {site.Name}", names.Any(name => name.IsFolder), complete) is { } ask)
+        string? unread = null;
+        if (existing is null)
+        {
+            // Not readable: nothing to ask about; Skip keeps what is there.
+            unread = SitesCommandRules.UnreadTargetText(target);
+        }
+        else if (SitesCommandRules.ConflictQuestion(SitesCommandRules.AlreadyThere(names, existing, ignoreCase: true), $"{target} on {site.Name}",
+                     names.Any(name => name.IsFolder), complete) is { } ask)
         {
             if (await AskConflictAsync(ask) is not { } chosen) return;
             conflict = chosen;
         }
 
-        await StartSiteTransferAsync(new SiteTransferStartRequest
+        var started = await StartSiteTransferAsync(new SiteTransferStartRequest
         {
             SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = names,
             Conflict = conflict,
         });
+        if (started is not null && unread is not null) SetSitesStatus(unread);
+    }
+
+    /// <summary>
+    /// The names in a server folder that is not the one shown: one sites.browse of its first page (the request the pane
+    /// makes). Complete when that page holds the whole folder; null names when it could not be read.
+    /// </summary>
+    private async Task<(IEnumerable<string>? Names, bool Complete)> ReadServerNamesAsync(SiteDto site, string folder)
+    {
+        try
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var result = await _remote.BrowseSiteAsync(new SiteBrowseRequest
+            {
+                Id = site.Id, Path = folder, Offset = 0, Limit = SitesBrowseRules.PageSize,
+            }, limit.Token);
+            if (!result.Ok) return (null, false);
+            return ([.. result.Items.Select(item => item.Name)], result.Items.Count >= result.Total);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException or TimeoutException)
+        {
+            return (null, false);
+        }
     }
 
     /// <summary>Starts a batch; the batch as the Host reports it, or null when it did not start (the reason is shown).</summary>

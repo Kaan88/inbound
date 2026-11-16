@@ -1,5 +1,24 @@
 # Progress — session handoff
 
+### Sites rework R2c: drag and drop, SITES.11 (2026-11-17); R2 complete
+
+- **Owner:** "Start R2c". Built (Sonnet), reviewed (Opus, 9 findings), fixed (Opus), accepted by me.
+- **Built:** drag rows from This PC onto the server pane (upload into the folder shown or the folder row dropped on),
+  from the server pane onto This PC (download likewise), and files or folders from Windows Explorer onto the server
+  pane (one batch from one folder). Drops use the same commands as the gutter arrows and Upload/Download: the same
+  conflict question (a drop on a folder row reads that folder first), the same in-flight guard ("A transfer is
+  starting; try again."), the same other-server gating (no-drop, caption "Not while managing another server"). The
+  row under the pointer lights like a selected row; the caption says "Upload to /media/isos" or "Download to …".
+  The source folder and remote are fixed when the drag starts; a drop after the pane moved is refused.
+- **Refused with a reason:** items with no path on this PC (inside a zip, a phone), a drive or share root, a folder
+  that is a link (junction or symlink), items from several folders, an unreadable item.
+- **Not built, by design:** dragging server files out to Explorer (needs virtual files), moving within one pane.
+- **Linux (Uno) window:** no drag and drop at all (`#if !HAS_UNO`); Uno's drag support was not verifiable here.
+- **Tests:** Core 2505 pass (new drop rules: plans, captions, roots, links, stale source, "..", other server);
+  solution and Uno builds 0 errors, no warning in a changed file. **Not checked:** any drag by hand in a running
+  window (cursor, caption, highlight, Explorer drops); no picture (UI Automation can't drag on the hidden desktop).
+- **R2 as a whole:** R2a, R2b and R2c built and reviewed; ready for the owner to try. Next stage: R3 (transfers).
+
 ### Sites rework R2b: toolbar, Remote menu, context menus, no-dialog downloads, SITES.11 (2026-11-17)
 
 - **Owner:** "Go on to R2b". Built (Sonnet), reviewed (Opus, 12 findings), fixed (Opus), accepted by me.

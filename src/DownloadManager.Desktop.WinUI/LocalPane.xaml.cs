@@ -64,6 +64,9 @@ public sealed partial class LocalPane : UserControl
     private string? _footerNote;
     private string? _pendingNote;
 
+    // SITES.11 R2c: drag and drop, built on Windows only (PaneDrag.cs).
+    partial void WireDrag();
+
     public LocalPane()
     {
         InitializeComponent();
@@ -90,6 +93,7 @@ public sealed partial class LocalPane : UserControl
         Bar.EditEnded += FocusList;
         KeyDown += OnKeyDown;
         ItemsList.ContextRequested += ItemsList_ContextRequested;
+        WireDrag();
         AutomationProperties.SetName(this, "This PC folder");
     }
 
