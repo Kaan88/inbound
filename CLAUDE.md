@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-14, release 0.7.7, extension 0.6.4)
+## Current status (2026-11-14, release 0.8.0, extension 0.6.4)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
@@ -47,7 +47,10 @@ Stream downloading (HLS/DASH, FFmpeg muxing, DRM/live checks) and FTP were cut i
 `docs\plans\feature-cuts.md`): a playlist address or HLS/DASH response fails at start with "Streaming playlists
 aren't downloaded; use a video downloader.", and ftp:// or ftps:// is refused with "FTP addresses aren't supported."
 A Sites view (remote file browsing, uploads and downloads for FTP, SFTP, WebDAV and cloud storage through a bundled
-rclone child process) is planned and not started: `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
+rclone child process) is in progress: SFTP sites can be browsed, changed (new folder, rename, delete) and files moved
+both ways, with an "On this PC" column and a Two panes view (SITES.0 to SITES.5, done on Windows). FTP, FTPS, WebDAV
+and S3 sites work too, a server's own certificate can be trusted, and Drive, OneDrive and Dropbox sign in through the
+browser (`rclone authorize`), with B2 by key (SITES.6a to 6c; no real cloud account tried yet). The web UI has Sites too, files go to and from the browser's device, and the headless server runs Sites (SITES.7; a signed-in browser counts as the admin). `dm sites` adds, trusts, browses and changes sites (SITES.8). `THIRD-PARTY-NOTICES.md` ships with every build (SITES.9). `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
 Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
 a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect

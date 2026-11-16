@@ -14,7 +14,8 @@ internal sealed record SitesRcloneView(
     bool ShowUpdate,
     bool EnableUpdate,
     string? UpdateVersion,
-    string? LastCheckLine);
+    string? LastCheckLine,
+    bool EnableAutoUpdate);
 
 /// <summary>The values of the Add a site / Edit a site form, as typed.</summary>
 internal sealed record SiteFormValues(
@@ -29,13 +30,20 @@ internal sealed record SiteFormValues(
     string KeyPassphrase,
     bool RemovePassphrase,
     string RemoteFolder,
-    string LocalFolder);
+    string LocalFolder,
+    string? Tls = null,
+    string Url = "",
+    string? Vendor = null,
+    string? Provider = null,
+    string Endpoint = "",
+    string Region = "",
+    string ClientId = "",
+    string ClientSecret = "");
 
 /// <summary>The checks and the words of Options > Sites that need no window.</summary>
 internal static class SitesRules
 {
     public const int MostKeyBytes = 64 * 1024;
-    public const string Off = "Sites is off. Turn it on to add and use sites.";
 
     public static string SourceWords(string? source) => source switch
     {
@@ -64,6 +72,8 @@ internal static class SitesRules
         string line;
         var problem = false;
         if (installing) line = "Downloading rclone…";
+        // Off, the Host does not look for rclone, so not finding it is no problem yet.
+        else if (missing && !enabled) line = "rclone is looked for when Sites is on.";
         else if (missing)
         {
             problem = true;
@@ -74,15 +84,18 @@ internal static class SitesRules
         else
         {
             var version = status.RcloneVersion ?? status.RcloneInstalled;
-            line = version is null ? $"rclone ({SourceWords(status.RcloneSource)})" : $"rclone {version} ({SourceWords(status.RcloneSource)})";
-            if (status.Rclone == SitesRcloneStates.Failed)
+            // The Host reads the version when it first starts rclone; until then only where it comes from is known.
+            line = version is null
+                ? $"rclone ({SourceWords(status.RcloneSource)}). Its version shows once it has started."
+                : $"rclone {version} ({SourceWords(status.RcloneSource)})";
+            if (enabled && status.Rclone == SitesRcloneStates.Failed)
             {
                 problem = true;
                 line += ". It didn't start.";
             }
         }
 
-        if (!installing && (status.Rclone == SitesRcloneStates.Failed || status.Rclone == SitesRcloneStates.Missing)
+        if (enabled && !installing && (status.Rclone == SitesRcloneStates.Failed || status.Rclone == SitesRcloneStates.Missing)
             && !string.IsNullOrWhiteSpace(status.Error))
             line += " " + status.Error.Trim();
 
@@ -107,7 +120,9 @@ internal static class SitesRules
             ShowUpdate: offerable,
             EnableUpdate: enabled && !installing,
             UpdateVersion: offerable ? update!.Version : null,
-            LastCheckLine: last);
+            LastCheckLine: last,
+            // Inbound never updates an rclone the user chose.
+            EnableAutoUpdate: enabled && !installing && !own && !ownPath);
     }
 
     /// <summary>"rclone X is ready", "waits until", "is a new major version", as the update offer says.</summary>
@@ -134,14 +149,65 @@ internal static class SitesRules
 
     public static string Summary(SiteDto site)
     {
-        var where = site.Port is > 0 and not 22 ? $"{site.Host}:{site.Port}" : site.Host;
+        // SITES.6: an address kind is shown by its address; S3 by its service and endpoint.
+        if (site.Kind == SiteKindCatalog.WebDav && site.Url is { Length: > 0 } url)
+            return string.IsNullOrEmpty(site.RemoteFolder) ? url : $"{url}  {site.RemoteFolder}";
+        if (site.Kind == SiteKindCatalog.S3)
+        {
+            var service = SiteKindCatalog.Find(site.Kind)?.Choices.GetValueOrDefault(SiteFields.Provider)?.FirstOrDefault(c => c.Value == site.Provider)?.Title ?? "S3";
+            var s3 = site.Endpoint is { Length: > 0 } endpoint ? $"{service}, {endpoint}" : site.Region is { Length: > 0 } region ? $"{service}, {region}" : service;
+            return string.IsNullOrEmpty(site.RemoteFolder) ? s3 : $"{s3}  {site.RemoteFolder}";
+        }
+
+        if (SiteKindCatalog.SignsIn(site.Kind) || site.Kind == SiteKindCatalog.B2)
+        {
+            // SITES.6c: the service by name; its fixed API address says nothing.
+            var service = SiteKindCatalog.Find(site.Kind)?.Title ?? site.Kind;
+            if (site.ClientId is not null) service += ", your own app registration";
+            else if (site.Kind == SiteKindCatalog.B2 && site.User.Length > 0) service += $", key {site.User}";
+            return string.IsNullOrEmpty(site.RemoteFolder) ? service : $"{service}  {site.RemoteFolder}";
+        }
+
+        var defaultPort = SiteKindCatalog.Find(site.Kind)?.DefaultPort ?? 22;
+        var where = site.Port > 0 && site.Port != defaultPort ? $"{site.Host}:{site.Port}" : site.Host;
         var line = $"{(string.IsNullOrEmpty(site.User) ? "" : site.User + "@")}{where}";
         if (!string.IsNullOrEmpty(site.RemoteFolder)) line += $"  {site.RemoteFolder}";
         return line;
     }
 
     /// <summary>Whether a saved site needs its host key asked about: a new one, or one whose host or port changed.</summary>
-    public static bool NeedsTrust(SiteDto saved) => saved.HostKeys.Count == 0;
+    public static bool NeedsTrust(SiteDto saved) => saved.Kind == SiteKindCatalog.Sftp && saved.HostKeys.Count == 0;
+
+    /// <summary>SITES.6b: the lines of the "Trust this certificate?" question, label and value.</summary>
+    public static IReadOnlyList<(string Label, string Value)> CertificateLines(SiteCertificateDto certificate)
+    {
+        var lines = new List<(string, string)>
+        {
+            ("Issued to", certificate.Names.Count > 0 ? string.Join(", ", certificate.Names) : certificate.Subject),
+            ("Issued by", certificate.SelfSigned ? "itself (a self-signed certificate)" : certificate.Issuer),
+            ("Valid", $"{certificate.NotBefore.ToLocalTime():d} to {certificate.NotAfter.ToLocalTime():d}"),
+            ("SHA-256 fingerprint", certificate.Fingerprint),
+        };
+        return lines;
+    }
+
+    /// <summary>The line under a site in Options that trusts its server's own certificate, or null.</summary>
+    public static string? TrustedCertificateLine(SiteDto site) => site.TrustedCertificates switch
+    {
+        [] => null,
+        [var one] => $"Trusts its server's own certificate (valid until {one.NotAfter.ToLocalTime():d}).",
+        var many => $"Trusts {many.Count} certificates of its server.",
+    };
+
+    /// <summary>
+    /// SITES.6: the warning a form shows for a connection that is not encrypted, or null. Plain FTP and an http:// address
+    /// send the password and the files readable to anyone on the way.
+    /// </summary>
+    public static string? PlainWarning(string kind, string? tls, string? url, string? endpoint) =>
+        SiteKindCatalog.Encrypted(kind, tls, url, endpoint) ? null
+        : kind == SiteKindCatalog.Ftp
+            ? "Plain FTP is not encrypted: the password and the files can be read by anyone on the network between here and the server. Use it only on a network you trust."
+            : "This address starts with http://, so the connection is not encrypted: the password and the files can be read on the way. Use https:// if the server offers it.";
 
     /// <summary>Whether the probe saw the key rclone was offered, so a replacement trusts what was actually seen.</summary>
     public static bool OffersFingerprint(IEnumerable<SiteHostKeyDto> keys, string? offered)
@@ -166,10 +232,13 @@ internal static class SitesRules
         var host = values.Host.Trim();
         var user = values.User.Trim();
         if (name.Length == 0) { problem = "Give the site a name."; return null; }
+        if (values.Kind is SiteKindCatalog.WebDav or SiteKindCatalog.S3) return AddressRequest(values, existing, name, user, out problem);
+        if (SiteKindCatalog.SignsIn(values.Kind)) return SignInRequest(values, existing, name, out problem);
+        if (values.Kind == SiteKindCatalog.B2) return KeyRequest(values, existing, name, user, out problem);
         if (host.Length == 0) { problem = "Type the server's name or address."; return null; }
         if (host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '\\'))
         {
-            problem = "The server is a name or an address such as files.example.com, without sftp:// or a user name.";
+            problem = $"The server is a name or an address such as files.example.com, without {values.Kind}:// or a user name.";
             return null;
         }
 
@@ -186,7 +255,7 @@ internal static class SitesRules
             }
             else
             {
-                if (!LooksLikePrivateKey(values.PrivateKey)) { problem = "That doesn't look like a private key. It starts with \"-----BEGIN\"."; return null; }
+                if (SiteKeyRules.Problem(values.PrivateKey) is { } keyProblem) { problem = keyProblem; return null; }
                 key = Normalize(values.PrivateKey);
             }
 
@@ -216,11 +285,106 @@ internal static class SitesRules
             KeyPassphrase = passphrase,
             RemoteFolder = values.RemoteFolder.Trim(),
             LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
+            Tls = values.Kind == SiteKindCatalog.Ftp ? values.Tls ?? SiteTlsModes.Explicit : null,
         };
     }
 
-    public static bool LooksLikePrivateKey(string text)
-        => text.Contains("-----BEGIN", StringComparison.Ordinal) && text.Contains("PRIVATE KEY", StringComparison.Ordinal);
+    /// <summary>SITES.6: WebDAV and S3, which are reached by an address rather than a server name and port.</summary>
+    private static SiteSaveRequest? AddressRequest(SiteFormValues values, SiteDto? existing, string name, string user, out string? problem)
+    {
+        problem = null;
+        var s3 = values.Kind == SiteKindCatalog.S3;
+        var url = values.Url.Trim();
+        var endpoint = values.Endpoint.Trim();
+        var region = values.Region.Trim();
+        if (s3)
+        {
+            if (values.Provider is null) { problem = "Choose the S3 service."; return null; }
+            if (endpoint.Length > 0 || values.Provider != SiteKindCatalog.AwsProvider)
+            {
+                if (SiteKindCatalog.AddressProblem(endpoint, "service address (endpoint)") is { } endpointProblem) { problem = endpointProblem; return null; }
+            }
+
+            if (region.Length > 0 && !region.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+            {
+                problem = "A region is letters, digits and dashes, such as eu-central-1.";
+                return null;
+            }
+
+            if (user.Length == 0) { problem = "Type the access key ID."; return null; }
+        }
+        else if (SiteKindCatalog.AddressProblem(url, "server address") is { } urlProblem)
+        {
+            problem = urlProblem;
+            return null;
+        }
+
+        string? password = null;
+        if (values.Password.Length > 0) password = values.Password;
+        else if (s3 && (existing is null || !existing.HasPassword)) { problem = "Type the secret access key."; return null; }
+
+        return new SiteSaveRequest
+        {
+            Id = existing?.Id,
+            Name = name,
+            Kind = values.Kind,
+            User = user,
+            AuthMethod = "password",
+            Password = password,
+            RemoteFolder = values.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
+            Url = s3 ? null : url,
+            Vendor = s3 ? null : values.Vendor ?? "other",
+            Provider = s3 ? values.Provider : null,
+            Endpoint = s3 && endpoint.Length > 0 ? endpoint : null,
+            Region = s3 && region.Length > 0 ? region : null,
+        };
+    }
+
+    /// <summary>SITES.6c: Drive, OneDrive, Dropbox. No password; an own app registration is optional.</summary>
+    private static SiteSaveRequest? SignInRequest(SiteFormValues values, SiteDto? existing, string name, out string? problem)
+    {
+        problem = null;
+        var clientId = values.ClientId.Trim();
+        if (clientId.Length > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_'))
+        {
+            problem = "A client ID is letters, digits, dots, dashes and underscores.";
+            return null;
+        }
+
+        if (clientId.Length == 0 && values.ClientSecret.Length > 0) { problem = "A client secret needs its client ID."; return null; }
+        return new SiteSaveRequest
+        {
+            Id = existing?.Id,
+            Name = name,
+            Kind = values.Kind,
+            AuthMethod = "signIn",
+            RemoteFolder = values.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
+            ClientId = clientId.Length == 0 ? null : clientId,
+            // Empty keeps the stored secret (null on the wire) while the ID stays; the Host drops it with a new ID.
+            ClientSecret = values.ClientSecret.Length > 0 ? values.ClientSecret : clientId.Length == 0 ? "" : null,
+        };
+    }
+
+    /// <summary>SITES.6c, Backblaze B2: an application key ID and key, no address.</summary>
+    private static SiteSaveRequest? KeyRequest(SiteFormValues values, SiteDto? existing, string name, string user, out string? problem)
+    {
+        problem = null;
+        if (user.Length == 0) { problem = "Type the application key ID."; return null; }
+        if (values.Password.Length == 0 && (existing is null || !existing.HasPassword)) { problem = "Type the application key."; return null; }
+        return new SiteSaveRequest
+        {
+            Id = existing?.Id,
+            Name = name,
+            Kind = values.Kind,
+            User = user,
+            AuthMethod = "password",
+            Password = values.Password.Length > 0 ? values.Password : null,
+            RemoteFolder = values.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(values.LocalFolder) ? null : values.LocalFolder.Trim(),
+        };
+    }
 
     /// <summary>A pasted key with the line ends the SSH tools expect and a closing line end.</summary>
     private static string Normalize(string text) => text.Trim().Replace("\r\n", "\n").Replace('\r', '\n') + "\n";

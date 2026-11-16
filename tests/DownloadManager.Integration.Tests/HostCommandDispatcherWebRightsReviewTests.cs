@@ -132,7 +132,7 @@ public sealed partial class HostCommandDispatcherTests
     {
         var web = await WebAsync();
 
-        foreach (var options in new[] { new JobCompletionOptionsDto { OpenFile = true }, new JobCompletionOptionsDto { ProgramPath = @"C:\Tools\scan.exe" } })
+        foreach (var options in new[] { new JobCompletionOptionsDto { OpenFile = true }, new JobCompletionOptionsDto { ProgramPath = OperatingSystem.IsWindows() ? @"C:\Tools\scan.exe" : "/opt/tools/scan" } })
         {
             var job = (await web.Service.AddJobAsync(Later("http://203.0.113.10/a.bin", Inside))).Job!;
             var set = await web.Service.UpdateJobAsync(new JobUpdateRequest { JobId = job.Id, CompletionOptions = options });
@@ -160,13 +160,14 @@ public sealed partial class HostCommandDispatcherTests
     [Fact]
     public async Task AWebSessionIsNotShownTheProgramsProxyLoginsSoundsOrRecentAddressesAndCanStillSaveWhatItWasShown()
     {
+        var Sound = OperatingSystem.IsWindows() ? @"C:\Sounds\done.wav" : "/opt/sounds/done.wav";
         var web = await WebAsync();
         var settings = web.Service.GetSettings();
-        settings.PostDownloadCommand = @"C:\Tools\scan.exe";
+        settings.PostDownloadCommand = OperatingSystem.IsWindows() ? @"C:\Tools\scan.exe" : "/opt/tools/scan";
         settings.UpdateManifestUrl = "https://updates.example.invalid/manifest.json";
         settings.Proxy = new ProxyDto { Mode = "manual", Address = "203.0.113.5:3128", Username = "proxy-user", Password = "invented-proxy-password" };
         settings.SiteLogins = [new SiteLoginDto { Id = Guid.NewGuid(), Site = "files.example.invalid", Username = "site-user", Password = "invented-site-password" }];
-        settings.EventSoundFiles = new(StringComparer.OrdinalIgnoreCase) { ["completed"] = @"C:\Sounds\done.wav" };
+        settings.EventSoundFiles = new(StringComparer.OrdinalIgnoreCase) { ["completed"] = Sound };
         Assert.True((await web.Service.UpdateSettingsAsync(settings)).Ok);
         await web.Service.AddJobAsync(Later("http://203.0.113.10/signed.bin?token=invented-token", Inside, "signed.bin"));
         Assert.NotEmpty(web.Service.GetSettings().RecentUrls);
@@ -204,7 +205,7 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Equal("203.0.113.5:3128", kept.Proxy.Address);
         Assert.True(kept.Proxy.HasPassword);
         Assert.Equal("site-user", Assert.Single(kept.SiteLogins).Username);
-        Assert.Equal(@"C:\Sounds\done.wav", kept.EventSoundFiles["completed"]);
+        Assert.Equal(Sound, kept.EventSoundFiles["completed"]);
 
         // A hidden one changed is still refused.
         shown.PostDownloadCommand = "cmd.exe /c echo";

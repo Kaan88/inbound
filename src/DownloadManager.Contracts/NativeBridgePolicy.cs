@@ -228,7 +228,7 @@ public static class NativeBridgePolicy
                 kept[property.Name] = value;
             }
 
-            return message with { Payload = JsonSerializer.SerializeToElement(kept) };
+            return message with { Payload = JsonSerializer.SerializeToElement(kept, IpcJsonContext.Default.JsonObject) };
         }
 
         // One download in an event, an action's answer or a handoff's acknowledgement. Rewritten only when it needs it,
@@ -262,7 +262,7 @@ public static class NativeBridgePolicy
             }
         }
 
-        return message with { Payload = JsonSerializer.SerializeToElement(whole) };
+        return message with { Payload = JsonSerializer.SerializeToElement(whole, IpcJsonContext.Default.JsonObject) };
     }
 
     private static bool NeedsRewrite(JsonElement job)

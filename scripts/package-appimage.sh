@@ -34,6 +34,9 @@ publish src/DownloadManager.NativeHost "$lib"
 publish src/DownloadManager.Server "$lib"
 publish src/DownloadManager.Desktop.Uno "$lib/desktop"
 install -m 755 "$worker" "$lib/inbound-torrent"
+# SITES.9: what others made that ships here; the window's About opens the copy next to it.
+install -m 644 "$root/THIRD-PARTY-NOTICES.md" "$lib/THIRD-PARTY-NOTICES.md"
+install -m 644 "$root/THIRD-PARTY-NOTICES.md" "$lib/desktop/THIRD-PARTY-NOTICES.md"
 
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh

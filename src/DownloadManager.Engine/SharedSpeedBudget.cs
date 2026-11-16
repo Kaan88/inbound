@@ -15,6 +15,9 @@ public sealed class SharedSpeedBudget
 
     public long BytesPerSecond => Volatile.Read(ref _bytesPerSecond);
 
+    /// <summary>Whether a shared cap is set now.</summary>
+    public bool Limited => BytesPerSecond > 0;
+
     /// <summary>Null or zero takes the cap away. A change reaches transfers already running.</summary>
     public void Update(long? bytesPerSecond) => Volatile.Write(ref _bytesPerSecond, bytesPerSecond is > 0 ? bytesPerSecond.Value : 0);
 

@@ -48,6 +48,9 @@ internal sealed class UiState
     public bool SpeedGraphExpanded { get; set; } = true;
     /// <summary>T7: View > Torrent Info, the pane beside the list for the one selected torrent.</summary>
     public bool ShowTorrentInfo { get; set; } = true;
+
+    /// <summary>SITES.5: the Sites view shows this PC's folders beside the server's.</summary>
+    public bool SitesTwoPanes { get; set; }
     /// <summary>View > Dark Mode from before the Theme setting was the source (UI.R23). Moved into the setting once,
     /// then cleared; null when it was never set or has moved.</summary>
     public bool? DarkMode { get; set; }

@@ -4,16 +4,26 @@ using DownloadManager.Persistence;
 
 namespace DownloadManager.Sites;
 
+/// <summary>The kinds of site (SITES.6); <see cref="DownloadManager.Contracts.SiteKindCatalog"/> holds their fields and capabilities.</summary>
 public static class SiteKinds
 {
-    /// <summary>The first kind (SITES.2 to SITES.5); the others arrive in SITES.6.</summary>
-    public const string Sftp = "sftp";
+    public const string Sftp = DownloadManager.Contracts.SiteKindCatalog.Sftp;
+    public const string Ftp = DownloadManager.Contracts.SiteKindCatalog.Ftp;
+    public const string WebDav = DownloadManager.Contracts.SiteKindCatalog.WebDav;
+    public const string S3 = DownloadManager.Contracts.SiteKindCatalog.S3;
+    public const string Drive = DownloadManager.Contracts.SiteKindCatalog.Drive;
+    public const string OneDrive = DownloadManager.Contracts.SiteKindCatalog.OneDrive;
+    public const string Dropbox = DownloadManager.Contracts.SiteKindCatalog.Dropbox;
+    public const string B2 = DownloadManager.Contracts.SiteKindCatalog.B2;
 }
 
 public static class SiteAuthMethods
 {
     public const string Password = "password";
     public const string Key = "key";
+
+    /// <summary>SITES.6c: a browser sign-in (OAuth) instead of a password.</summary>
+    public const string SignIn = "signIn";
 }
 
 /// <summary>
@@ -55,8 +65,81 @@ public sealed record SiteRecord
     /// <summary>Starred folders: absolute paths on the server, normalised by <see cref="SitePaths.Normalize"/>.</summary>
     public List<string> Stars { get; init; } = [];
 
+    /// <summary>SITES.6, FTP: <c>explicit</c>, <c>implicit</c> or <c>none</c> (plain).</summary>
+    public string? Tls { get; init; }
+
+    /// <summary>SITES.6, WebDAV: the server's address.</summary>
+    public string? Url { get; init; }
+
+    /// <summary>SITES.6, WebDAV: rclone's vendor.</summary>
+    public string? Vendor { get; init; }
+
+    /// <summary>SITES.6, S3: rclone's provider, the endpoint (none for Amazon S3) and the region. The access key ID is <see cref="User"/>, the secret <see cref="SealedPassword"/>.</summary>
+    public string? Provider { get; init; }
+
+    public string? Endpoint { get; init; }
+
+    public string? Region { get; init; }
+
+    /// <summary>
+    /// SITES.6b: server certificates the user trusted for this FTPS or https site, written with the system's roots to the
+    /// trusted-certificates file rclone reads at start. Cleared when the server changes.
+    /// </summary>
+    public List<SiteCertificateRecord> TrustedCertificates { get; init; } = [];
+
+    /// <summary>SITES.6c, sign-in kinds: the user's own app registration (public), or null for rclone's shared one.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>SITES.6c: the secret of <see cref="ClientId"/>, sealed.</summary>
+    public string? SealedClientSecret { get; init; }
+
+    /// <summary>
+    /// SITES.6c: rclone's settings for the signed-in remote (the token, and for OneDrive the drive's id and type), as a
+    /// JSON object, sealed. Null until the first sign-in. Written back when rclone renews the token.
+    /// </summary>
+    public string? SealedSignIn { get; init; }
+
+    /// <summary>SITES.6c: a sign-in kind with a token.</summary>
+    [JsonIgnore]
+    public bool SignedIn => SealedSignIn is not null;
+
+    /// <summary>An SFTP site whose server key the user has not accepted yet: nothing reaches rclone until they do.</summary>
+    [JsonIgnore]
+    public bool NeedsHostKey => Kind == SiteKinds.Sftp && HostKeys.Count == 0;
+
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
+}
+
+/// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
+public sealed record SiteCertificateRecord
+{
+    public const int MaxPerSite = 4;
+
+    /// <summary>SHA-256, <c>AB:CD:…</c>.</summary>
+    public required string Fingerprint { get; init; }
+
+    public required string Pem { get; init; }
+    public string Subject { get; init; } = "";
+    public DateTimeOffset NotAfter { get; init; }
+
+    /// <summary>The PEM holds one certificate and its fingerprint is <see cref="Fingerprint"/>.</summary>
+    public bool Matches()
+    {
+        try
+        {
+            using var certificate = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(Pem);
+            return TlsCertificateProbe.Fingerprint(certificate) == Fingerprint;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>
@@ -71,7 +154,10 @@ public sealed record SiteRecord
 [JsonSerializable(typeof(SiteRecord))]
 internal sealed partial class SitesJsonContext : JsonSerializerContext;
 
-public sealed class SiteStoreException(string message, Exception? inner = null) : Exception(message, inner);
+/// <summary>SITES.6c: a sign-in site has no token, or the provider no longer accepts it: the user signs in again.</summary>
+public sealed class SiteSignInNeededException(string message) : SiteStoreException(message);
+
+public class SiteStoreException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
 /// The saved sites, one file each under <c>&lt;state&gt;/sites/</c>, written atomically (temp file, flush to disk,
@@ -160,21 +246,96 @@ public sealed class SiteStore
     private static void Validate(SiteRecord site)
     {
         if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A site of another version can't be saved.");
-        if (site.Kind != SiteKinds.Sftp) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported yet.");
+        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported.");
         if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A site needs a name.");
         if (string.IsNullOrWhiteSpace(site.Host) || site.Host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '?' or '#'))
             throw new SiteStoreException("A site needs a server name or address, without a path, user or password in it.");
         if (site.Port is < 1 or > 65535) throw new SiteStoreException("The port must be between 1 and 65535.");
-        foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase })
+        ValidateKind(site);
+        foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase, site.SealedClientSecret, site.SealedSignIn })
             if (sealedValue is not null && !SecretProtector.IsProtected(sealedValue))
                 throw new SiteStoreException("A site secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
+        ValidateCertificates(site);
         if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
             throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
+    }
+
+    /// <summary>SITES.6b: at most a few, each a parseable certificate whose fingerprint is the one stored, and only on TLS sites.</summary>
+    private static void ValidateCertificates(SiteRecord site)
+    {
+        if (site.TrustedCertificates.Count == 0) return;
+        if (site.Kind == SiteKinds.Sftp || !DownloadManager.Contracts.SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint)
+            || (site.Kind == SiteKinds.S3 && string.IsNullOrEmpty(site.Endpoint)))
+            throw new SiteStoreException("Only an encrypted FTP or https site can trust a server certificate.");
+        if (site.TrustedCertificates.Count > SiteCertificateRecord.MaxPerSite)
+            throw new SiteStoreException($"A site can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
+        foreach (var certificate in site.TrustedCertificates)
+        {
+            if (!certificate.Matches()) throw new SiteStoreException("A trusted certificate must be a certificate with its own fingerprint.");
+        }
+    }
+
+    /// <summary>The fields of each kind: the ones it uses are well formed, and the others are not set.</summary>
+    private static void ValidateKind(SiteRecord site)
+    {
+        static void Unused(params string?[] values)
+        {
+            if (values.Any(value => value is not null)) throw new SiteStoreException("A site has a setting its kind does not use.");
+        }
+
+        switch (site.Kind)
+        {
+            case SiteKinds.Sftp:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                break;
+            case SiteKinds.Ftp:
+                Unused(site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Tls, site.Tls))
+                    throw new SiteStoreException("Choose whether the FTP connection is encrypted.");
+                break;
+            case SiteKinds.WebDav:
+                Unused(site.Tls, site.Provider, site.Endpoint, site.Region);
+                if (DownloadManager.Contracts.SiteKindCatalog.AddressProblem(site.Url, "server address") is { } urlProblem) throw new SiteStoreException(urlProblem);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Vendor, site.Vendor))
+                    throw new SiteStoreException("Choose what kind of WebDAV server it is.");
+                break;
+            case SiteKinds.S3:
+                Unused(site.Tls, site.Url, site.Vendor);
+                if (!DownloadManager.Contracts.SiteKindCatalog.IsChoice(site.Kind, DownloadManager.Contracts.SiteFields.Provider, site.Provider))
+                    throw new SiteStoreException("Choose the S3 service.");
+                if (site.Endpoint is not null || site.Provider != DownloadManager.Contracts.SiteKindCatalog.AwsProvider)
+                {
+                    if (DownloadManager.Contracts.SiteKindCatalog.AddressProblem(site.Endpoint, "service address (endpoint)") is { } endpointProblem)
+                        throw new SiteStoreException(endpointProblem);
+                }
+
+                if (site.Region is { } region && (region.Length is 0 or > 64 || !region.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+                    throw new SiteStoreException("A region is letters, digits and dashes, such as eu-central-1.");
+                break;
+            case SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region, site.SealedPassword);
+                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of site signs in through the browser.");
+                if (site.ClientId is { } clientId && (clientId.Length is 0 or > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')))
+                    throw new SiteStoreException("A client ID is letters, digits, dots, dashes and underscores.");
+                if (site.ClientId is null && site.SealedClientSecret is not null) throw new SiteStoreException("A client secret needs its client ID.");
+                break;
+            case SiteKinds.B2:
+                Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region);
+                break;
+        }
+
+        if (!DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.ClientId is not null || site.SealedClientSecret is not null || site.SealedSignIn is not null))
+            throw new SiteStoreException("Only a site that signs in through the browser has an app registration or a token.");
+        if (site.Kind != SiteKinds.Sftp && !DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind)
+            && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
+            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+        if (DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
+            throw new SiteStoreException("Only SFTP sites sign in with a key.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>
@@ -197,7 +358,8 @@ public sealed class SiteStore
             var site = JsonSerializer.Deserialize(bytes, SitesJsonContext.Default.SiteRecord);
             if (site is null) return null;
             // A hand-edited file with "stars": null or "hostKeys": null reads as empty lists, not as a site that breaks sites.list.
-            if (site.Stars is null || site.HostKeys is null) site = site with { Stars = site.Stars ?? [], HostKeys = site.HostKeys ?? [] };
+            if (site.Stars is null || site.HostKeys is null || site.TrustedCertificates is null)
+                site = site with { Stars = site.Stars ?? [], HostKeys = site.HostKeys ?? [], TrustedCertificates = site.TrustedCertificates ?? [] };
             if (site.SchemaVersion > SiteRecord.CurrentSchemaVersion)
             {
                 _log?.Invoke($"Site file {Path.GetFileName(path)} is from a newer version of Inbound; it is left as it is.");

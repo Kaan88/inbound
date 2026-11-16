@@ -15,6 +15,9 @@
   {#if value === null}
     <div class="h-full w-1/3 animate-pulse rounded-full bg-progress/60"></div>
   {:else}
-    <div class="h-full rounded-full bg-progress transition-[width] duration-500 ease-out" style="width: {Math.max(0, Math.min(100, value))}%"></div>
+    <!-- PERF.19: the fill is full width and clipped from the right, rounded end kept. A width transition re-laid out the
+         whole page on every frame while progress came in (about 120 layouts a second with one download); a clip-path
+         transition only repaints the bar. -->
+    <div class="h-full rounded-full bg-progress transition-[clip-path] duration-500 ease-out" style="clip-path: inset(0 {100 - Math.max(0, Math.min(100, value))}% 0 0 round 9999px)"></div>
   {/if}
 </div>

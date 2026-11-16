@@ -148,7 +148,9 @@ internal static class Program
                 },
                 checkpoints: checkpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
-            var sleepPrevention = new WindowsSleepPrevention(log.Info);
+            // One power request for downloads and site transfers (SITES.4): held while either is running.
+            var sharedSleep = new SharedSleepPrevention(new WindowsSleepPrevention(log.Info));
+            var sleepPrevention = sharedSleep.Share();
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;
@@ -231,7 +233,8 @@ internal static class Program
                 paths.Root, PipeNames.HostHelloPipe(), log);
             // SITES.2: Sites. Off until turned on in Options; with it off no rclone runs and nothing is checked for updates.
             var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
-                updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info));
+                updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info),
+                sleepPrevention: sharedSleep.Share(), preventSleep: () => service.GetSettings().PreventSleepWhileDownloading);
             var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
             {
                 Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
@@ -241,6 +244,12 @@ internal static class Program
             };
             webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
             sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
+            sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
+            // Site transfers take a share of the overall speed limit, as torrents do (SITES.4).
+            sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
+            sites.Transfers.Measured += service.OnSiteTransfersMeasured;
+            service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
+            service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
             webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
@@ -280,7 +289,8 @@ internal static class Program
                 // UI.R40: both update entries open the window's one Check for Updates dialog, which checks, shows what's
                 // new, downloads and installs; the automatic check and install stay the monitor's.
                 InstallUpdate: () => controller.OpenUi(UiPages.Updates),
-                CheckForUpdates: () => controller.OpenUi(UiPages.Updates));
+                CheckForUpdates: () => controller.OpenUi(UiPages.Updates),
+                SiteTransferCount: () => sites.Transfers.RunningCount());
 
             var icon = LoadIcon();
             var tray = new TrayApplicationContext(trayActions, icon);
@@ -314,6 +324,8 @@ internal static class Program
             // The tray refreshes on changes instead of every second.
             service.JobChanged += (_, _) => tray.RequestRefresh();
             service.SettingsChanged += (_, _) => tray.RequestRefresh();
+            // SITES.4: a site transfer starting or ending shows in the tooltip too.
+            sites.Transfers.ActivityChanged += () => tray.RequestRefresh();
 
             var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
             using var eventSounds = new CompletionSoundPlayer(log.Warn);
@@ -487,7 +499,7 @@ internal static class Program
 
             webSessions.Dispose();
             remoteCommands.Dispose();
-            sleepPrevention.Dispose();
+            sharedSleep.Dispose();
             remote.Dispose();
             engine.Dispose();
             tray.ExitNow();

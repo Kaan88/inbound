@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace DownloadManager.Core;
 
 /// <param name="AppImagePath">Set when this build runs from an AppImage: the file an update replaces.</param>
-public sealed record InstallMetadata(string Version, string Channel, string InstallRoot, string? AppImagePath = null);
+/// <param name="MacAppPath">Set when this build runs from Inbound.app on macOS: the bundle an update replaces.</param>
+public sealed record InstallMetadata(string Version, string Channel, string InstallRoot, string? AppImagePath = null, string? MacAppPath = null);
 
 public static class InstalledBuild
 {
@@ -17,6 +18,7 @@ public static class InstalledBuild
         }
 
         if (startDirectory is null && AppImage() is { } appImage) return appImage;
+        if (startDirectory is null && MacApp() is { } macApp) return macApp;
 
         var directory = new DirectoryInfo(startDirectory ?? AppContext.BaseDirectory);
         for (var depth = 0; depth < 5 && directory is not null; depth++)
@@ -50,6 +52,28 @@ public static class InstalledBuild
         version ??= typeof(InstalledBuild).Assembly.GetName().Version?.ToString(3);
         if (string.IsNullOrWhiteSpace(version)) return null;
         return new InstallMetadata(version, "stable", Path.GetDirectoryName(appImage) ?? "/", appImage);
+    }
+
+    /// <summary>
+    /// MAC.1: a build running from an app bundle on macOS: this program is in <c>X.app/Contents/Resources/host</c> or
+    /// <c>.../window</c> (scripts/package-macos.sh), and the bundle has its Info.plist. Its version is this build's own,
+    /// and an update replaces the whole bundle. A copy run from a build folder is not one.
+    /// </summary>
+    public static InstallMetadata? MacApp(string? baseDirectory = null, string? version = null, Func<string, bool>? fileExists = null)
+    {
+        if (!OperatingSystem.IsMacOS() && baseDirectory is null) return null;
+        fileExists ??= File.Exists;
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDirectory ?? AppContext.BaseDirectory));
+        // .../Inbound.app/Contents/Resources/<host|window>
+        var resources = Path.GetDirectoryName(directory);
+        var contents = resources is null ? null : Path.GetDirectoryName(resources);
+        var bundle = contents is null ? null : Path.GetDirectoryName(contents);
+        if (bundle is null || Path.GetFileName(resources) != "Resources" || Path.GetFileName(contents) != "Contents" ||
+            !bundle.EndsWith(".app", StringComparison.OrdinalIgnoreCase) || !fileExists(Path.Combine(contents, "Info.plist")))
+            return null;
+        version ??= typeof(InstalledBuild).Assembly.GetName().Version?.ToString(3);
+        if (string.IsNullOrWhiteSpace(version)) return null;
+        return new InstallMetadata(version, "stable", Path.GetDirectoryName(bundle) ?? "/", MacAppPath: bundle);
     }
 
     private static InstallMetadata? Read(string path, string root)

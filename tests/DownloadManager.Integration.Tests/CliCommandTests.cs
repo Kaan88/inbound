@@ -86,6 +86,12 @@ public sealed class CliCommandTests
         Assert.Contains("--help", unknown.Error, StringComparison.Ordinal);
         Assert.Empty(unknown.Output);
 
+        // SITES.4: dm sites is a command (it was once refused here as unknown); a wrong subcommand gets its usage.
+        var sites = await host.RunCliAsync(null, "sites", "bogus");
+        Assert.Equal(2, sites.ExitCode);
+        Assert.DoesNotContain("unknown command", sites.Error, StringComparison.Ordinal);
+        Assert.Contains("usage: sites list", sites.Error, StringComparison.Ordinal);
+
         // CUT.1: the archive and TorBox (remote) commands are gone and get the same short error, before their flags are
         // read (a "--provider=x" is not reported as an unknown flag). dm torrent stays (CUT.2).
         foreach (var removed in new[]

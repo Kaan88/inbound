@@ -31,6 +31,9 @@ public sealed class SiteKeyTextTests
     [InlineData("failed to parse private key file: x509: decryption password incorrect", "passphrase is wrong")]
     [InlineData("failed to parse private key file: ssh: no key found", "could not be read")]
     [InlineData("couldn't connect SSH: connection refused", "couldn't connect SSH: connection refused")]
+    // A folder named like a key error is not a key error (Fable review, SITES.3 walk round).
+    [InlineData("directory not found: /srv/decryption password incorrect", "directory not found: /srv/decryption password incorrect")]
+    [InlineData("error listing \"this private key is passphrase protected\": permission denied", "permission denied")]
     public void RcloneKeyErrorsBecomePlainWords(string message, string expected) =>
         Assert.Contains(expected, SiteKeyText.Friendly(message));
 }

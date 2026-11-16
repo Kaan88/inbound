@@ -7,7 +7,7 @@ namespace DownloadManager.Sites.Tests;
 
 public sealed class RcloneReleaseSignatureTests
 {
-    private static readonly string Real = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "rclone-v1.76.0-SHA256SUMS"));
+    private static readonly string Real = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "rclone-v1.76.0-SHA256SUMS")).ReplaceLineEndings("\n");
 
     [Fact]
     public void Rclones_own_list_for_1_76_0_verifies_and_holds_the_zip_hashes()

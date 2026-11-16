@@ -69,6 +69,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
     private ITimer? _idleTimer;
     private long _idleGeneration;
     private bool _stopped;
+    private bool _renewWhenIdle;
     private readonly CancellationTokenSource _stopping = new();
     private volatile RcloneStatus _snapshot = new(RcloneState.Off, 0, null, null, null);
 
@@ -196,6 +197,41 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         Raise(changed);
     }
 
+    /// <summary>
+    /// SITES.6b: rclone reads some settings (the trusted-certificates file) only when it starts. The running rclone is
+    /// stopped now if no lease holds it, or as soon as the last lease is let go; the next lease starts a new one. True when
+    /// none runs any more (stopped now, or none was running); false when it waits for its leases.
+    /// </summary>
+    public async Task<bool> RenewWhenIdleAsync()
+    {
+        RcloneStatus? changed = null;
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_instance is null || _stopped)
+            {
+                _renewWhenIdle = false;
+                return true;
+            }
+
+            if (_users > 0)
+            {
+                _renewWhenIdle = true;
+                return false;
+            }
+
+            CancelIdleLocked();
+            await StopInstanceLocked("settings changed").ConfigureAwait(false);
+            changed = Snap();
+            return true;
+        }
+        finally
+        {
+            _gate.Release();
+            if (changed is not null) Raise(changed);
+        }
+    }
+
     /// <summary>On the Host's exit: rclone stops and nothing starts it again.</summary>
     public async Task StopAsync()
     {
@@ -231,7 +267,17 @@ public sealed class RcloneSupervisor : IAsyncDisposable
             // A lease on an rclone that has since been replaced was already dropped from the count.
             if (!ReferenceEquals(instance, _instance) || _users == 0) return;
             _users--;
-            if (_users == 0 && !_stopped) ScheduleIdleLocked();
+            if (_users == 0 && !_stopped)
+            {
+                if (_renewWhenIdle)
+                {
+                    // SITES.6b: a setting rclone reads only at start changed while it was busy; the next lease starts a new one.
+                    CancelIdleLocked();
+                    await StopInstanceLocked("settings changed").ConfigureAwait(false);
+                }
+                else ScheduleIdleLocked();
+            }
+
             changed = Snap();
         }
         finally { _gate.Release(); }
@@ -286,6 +332,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         Snap();
         _instance = null;
         _users = 0;
+        _renewWhenIdle = false;
         try
         {
             var quit = await instance.StopAsync(_options.StopGrace).ConfigureAwait(false);
@@ -325,6 +372,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         if (!ReferenceEquals(instance, _instance)) return;
         _instance = null;
         _users = 0;
+        _renewWhenIdle = false;
         CancelIdleLocked();
         if (_time.GetUtcNow() - _startedAt >= _options.StableRun) _crashes = 0;
         CountCrashLocked("rclone stopped unexpectedly.");

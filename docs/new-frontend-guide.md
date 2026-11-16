@@ -68,6 +68,13 @@ The WinUI window is the reference (`CLAUDE.md`, "UI structure"). The web UI revi
   the status from `extensionsSeen` where the Host gives it, and the one-time hint until an extension connects
   (`extensions.seen` ends it live; see "Browser extensions seen" in `docs/ipc-protocol.md`).
 - **Providers:** TorBox and the containers/archives flows, if the Host reports `remote` and `archives`.
+- **Sites,** if the Host offers `sites` in its hello (`docs/ipc-protocol.md`, "Sites"): the switch and rclone's
+  state (with Download rclone), the site list with add, edit, test and remove, the questions a site asks before first
+  use (a server's SSH key, a certificate, a browser sign-in), a site's files (browse in pages, new folder, rename,
+  delete after counting), transfers between a site and the computer Inbound runs on (`sites.transfer.*`, with pause,
+  resume, cancel, retry, clear), and, for a frontend that runs somewhere else, files to and from its own device
+  (`sites.device.*`, or the server's `/api/sites/device`). The kinds and their fields come from `sites.kinds`; don't
+  hard-code them. The WinUI window and the web UI are the two references.
 - **Servers:** managing another Inbound server (see `docs/docker.md` and the sign-in flow in the protocol doc).
 - **Accessibility:** names and live regions for status changes, keyboard reachable everything.
 

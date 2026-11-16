@@ -31,6 +31,9 @@ public static class SitePaths
         && !path.Any(c => char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.Format
             or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator);
 
+    /// <summary>Why <paramref name="name"/> can't be one item's name on the server; see <see cref="Contracts.SiteNameRules"/>.</summary>
+    public static string? NameProblem(string? name) => Contracts.SiteNameRules.Problem(name);
+
     /// <summary>The <c>remote</c> argument for rclone: the path without its leading slash (<c>""</c> for the root).</summary>
     public static string ToRemote(string normalized) => normalized.TrimStart('/');
 }

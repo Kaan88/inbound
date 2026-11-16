@@ -38,6 +38,7 @@ export const iconPaths: Record<string, string> = {
     alert: 'M12 4l9 15.5H3zM12 10v4M12 16.8v.2',
     info: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.2',
     lock: 'M6.5 10.5h11v9h-11zM8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5',
+    star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8L3.5 9.7l5.9-.9z',
     retry: 'M5 12a7 7 0 1 0 2.1-5M5 4.5V8h3.5',
     hosters: 'M4 6h16v5H4zM4 13h16v5H4zM7 8.5h.2M7 15.5h.2',
     file: 'M6 3.5h8l4 4V20.5H6zM14 3.5V7.5h4',

@@ -723,7 +723,7 @@ public sealed partial class RuntimeServiceTests
         for (var attempt = 0; ; attempt++)
         {
             try { Directory.Delete(root, recursive: true); return; }
-            catch (IOException) when (attempt < 50) { await Task.Delay(100); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && attempt < 50) { await Task.Delay(100); }
         }
     }
 

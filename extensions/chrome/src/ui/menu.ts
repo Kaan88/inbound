@@ -61,13 +61,28 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     if (options.upward) menu.style.bottom = `${Math.max(4, window.innerHeight - rect.top + 2)}px`;
     else menu.style.top = `${rect.bottom + 2}px`;
   }
+  // Never taller than the window: a menu that still doesn't fit scrolls rather than being cut off.
+  menu.style.maxHeight = "calc(100vh - 8px)";
+  menu.style.overflowY = "auto";
   document.body.append(menu);
-  if (options.at) {
-    // Inside the popup: moved left or up by what would stick out.
+
+  // A fixed menu doesn't count towards the page's height, so a short popup (one download in the list) cut it off.
+  // While it is open the page is made at least as tall as the menu, and the browser grows the popup to fit
+  // (up to its own limit); the height the page had is given back on close.
+  const root = document.documentElement;
+  const heightBefore = root.style.minHeight;
+  const needed = menu.scrollHeight + 8;
+  if (needed > window.innerHeight) root.style.minHeight = `${needed}px`;
+
+  // Inside the popup: moved left or up by what would stick out. Again when the popup has grown.
+  const place = () => {
+    if (!options.at) return;
     const box = menu.getBoundingClientRect();
     if (box.right > window.innerWidth - 4) menu.style.left = `${Math.max(4, window.innerWidth - 4 - box.width)}px`;
     if (box.bottom > window.innerHeight - 4) menu.style.top = `${Math.max(4, window.innerHeight - 4 - box.height)}px`;
-  }
+  };
+  place();
+  window.addEventListener("resize", place);
   anchor.setAttribute("aria-expanded", "true");
 
   const move = (step: number) => {
@@ -90,6 +105,8 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     if (closeOpen !== close) return;
     closeOpen = null;
     menu.remove();
+    root.style.minHeight = heightBefore;
+    window.removeEventListener("resize", place);
     anchor.setAttribute("aria-expanded", "false");
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onPointer, true);

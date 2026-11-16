@@ -13,7 +13,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// given a client of this PC's Host, also while the window shows another server. Secrets are written in the site dialog
 /// and are never shown here.
 /// </summary>
-internal sealed class SitesOptionsPage
+internal sealed partial class SitesOptionsPage
 {
     private readonly RemoteClient _client;
     private readonly SettingsWindow _window;
@@ -114,7 +114,7 @@ internal sealed class SitesOptionsPage
             _tryAgain,
             SettingsWindow.Section("Sites"),
             _enable,
-            SettingsWindow.Hint("Browse and move files on your own servers (SFTP today) through rclone. Off, nothing runs and rclone never starts."),
+            SettingsWindow.Hint("Browse and move files on your own servers (SFTP, FTP, WebDAV and S3) through rclone. Off, nothing runs and rclone never starts."),
             _switchResult.Text,
             SettingsWindow.Section("rclone"),
             _rcloneLine,
@@ -220,12 +220,10 @@ internal sealed class SitesOptionsPage
             _update.Visibility = view.ShowUpdate ? Visibility.Visible : Visibility.Collapsed;
             _update.IsEnabled = view.EnableUpdate && !_busy;
             _update.Content = view.UpdateVersion is null ? "Update" : $"Update to {view.UpdateVersion}";
-            _auto.IsEnabled = status.Enabled && !_busy;
+            _auto.IsEnabled = view.EnableAutoUpdate && !_busy;
             _ownPath.IsEnabled = _browseOwn.IsEnabled = _useOwn.IsEnabled = status.Enabled && !_busy && !status.RcloneInstalling;
 
             _add.IsEnabled = status.Enabled && !_busy;
-            if (!status.Enabled) _siteResult.Show(SitesRules.Off);
-            else if (_siteResult.Text.Text == SitesRules.Off) _siteResult.Show(string.Empty);
             RenderSites(status.Enabled);
         }
         finally
@@ -246,6 +244,10 @@ internal sealed class SitesOptionsPage
             text.Children.Add(new TextBlock { Text = site.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             text.Children.Add(SettingsWindow.Hint(SitesRules.Summary(site)));
             if (SitesRules.NeedsTrust(site)) text.Children.Add(SettingsWindow.Hint("The server's key isn't trusted yet. Test the site to check it."));
+            if (!site.Encrypted) text.Children.Add(SettingsWindow.Hint("Not encrypted: the password and the files can be read on the way."));
+            if (SitesRules.TrustedCertificateLine(site) is { } trustLine) text.Children.Add(SettingsWindow.Hint(trustLine));
+            var signsIn = SiteKindCatalog.SignsIn(site.Kind);
+            if (signsIn && !site.SignedIn) text.Children.Add(SettingsWindow.Hint("Not signed in yet."));
 
             var test = new Button { Content = "Test", MinWidth = 64, IsEnabled = enabled && !_busy };
             var edit = new Button { Content = "Edit…", MinWidth = 64, IsEnabled = enabled && !_busy };
@@ -258,6 +260,24 @@ internal sealed class SitesOptionsPage
             edit.Click += (_, _) => _ = EditAsync(captured);
             remove.Click += (_, _) => _ = RemoveAsync(captured);
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            if (site.TrustedCertificates.Count > 0)
+            {
+                // SITES.6b: a way back from trusting a certificate.
+                var forget = new Button { Content = "Forget certificate", IsEnabled = enabled && !_busy };
+                AutomationProperties.SetName(forget, $"Forget the certificate trusted for {site.Name}");
+                forget.Click += (_, _) => _ = ForgetCertificateAsync(captured);
+                buttons.Children.Add(forget);
+            }
+
+            if (signsIn)
+            {
+                // SITES.6c: the first sign-in, or a new one when the service no longer accepts the old.
+                var signIn = new Button { Content = site.SignedIn ? "Sign in again…" : "Sign in…", IsEnabled = enabled && !_busy };
+                AutomationProperties.SetName(signIn, $"{(site.SignedIn ? "Sign in again to" : "Sign in to")} {site.Name}");
+                signIn.Click += (_, _) => _ = SignInAsync(captured);
+                buttons.Children.Add(signIn);
+            }
+
             buttons.Children.Add(test);
             buttons.Children.Add(edit);
             buttons.Children.Add(remove);
@@ -427,8 +447,11 @@ internal sealed class SitesOptionsPage
         Render();
         _siteResult.Say($"{saved.Name} is saved.");
 
-        // A new server, or a changed host or port, has no trusted key yet: ask now, then try the site.
-        if (SitesRules.NeedsTrust(saved)) await TestSiteAsync(saved);
+        // A new server, or a changed host or port, has no trusted key yet: ask now, then try the site. A new site of any
+        // kind is tried at once, so a wrong address or key is found while it is fresh.
+        // A site that signs in through the browser does that first (and again after a new client ID); the test follows.
+        if (SiteKindCatalog.SignsIn(saved.Kind) && !saved.SignedIn) await SignInAsync(saved);
+        else if (SitesRules.NeedsTrust(saved) || existing is null) await TestSiteAsync(saved);
     }
 
     private async Task RemoveAsync(SiteDto site)
@@ -453,7 +476,7 @@ internal sealed class SitesOptionsPage
         });
     }
 
-    private async Task TestSiteAsync(SiteDto site)
+    private async Task TestSiteAsync(SiteDto site, bool afterSignIn = false)
     {
         // Twice at most: once, and again after the key was trusted or replaced.
         for (var attempt = 0; attempt < 2; attempt++)
@@ -469,21 +492,49 @@ internal sealed class SitesOptionsPage
             if (result.Problem == SiteProblems.HostKeyNotAccepted)
             {
                 if (attempt == 0 && await TrustAsync(site)) continue;
-                _siteResult.Say($"{site.Name} wasn't tested, because its server's key isn't trusted.", isProblem: true);
+                SayTestResult($"{site.Name} wasn't tested, because its server's key isn't trusted.", isProblem: true);
+                return;
+            }
+
+            if (result.Problem == SiteProblems.CertificateNotTrusted)
+            {
+                if (attempt == 0 && await TrustCertificateAsync(site)) continue;
+                SayTestResult($"{site.Name} wasn't used: its server's certificate isn't trusted.", isProblem: true);
+                return;
+            }
+
+            if (result.Problem == SiteProblems.SignInNeeded)
+            {
+                // Once: a sign-in that was just made is not offered again at once.
+                if (!afterSignIn && attempt == 0 && await AskSignInAsync(site, result.Message)) return;
+                SayTestResult($"{site.Name}: {result.Message ?? "sign in to use it."}", isProblem: true);
                 return;
             }
 
             if (result.Problem == SiteProblems.HostKeyChanged)
             {
                 if (attempt == 0 && await ReplaceKeyAsync(site, result)) continue;
-                _siteResult.Say($"{site.Name} wasn't used: its server's key is not the one you trusted.", isProblem: true);
+                SayTestResult($"{site.Name} wasn't used: its server's key is not the one you trusted.", isProblem: true);
                 return;
             }
 
-            if (result.Ok) _siteResult.Say($"{site.Name}: connected, and its start folder was listed.");
-            else _siteResult.Say($"{site.Name}: {(string.IsNullOrWhiteSpace(result.Message) ? "the test failed." : result.Message)}", isProblem: true);
+            if (result.Ok) SayTestResult($"{site.Name}: connected, and its start folder was listed.");
+            else SayTestResult($"{site.Name}: {(string.IsNullOrWhiteSpace(result.Message) ? "the test failed." : result.Message)}", isProblem: true);
             return;
         }
+    }
+
+    /// <summary>
+    /// A test's outcome, scrolled into view: the line sits under the sites list, which can be below the fold of the page
+    /// when the Test button was pressed.
+    /// </summary>
+    private void SayTestResult(string text, bool isProblem = false)
+    {
+        _siteResult.Say(text, isProblem);
+        _siteResult.Text.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_siteResult.Text.XamlRoot is not null) _siteResult.Text.StartBringIntoView();
+        });
     }
 
     /// <summary>First use: reads the server's keys without signing in, shows them, and records them if the user trusts them.</summary>
@@ -572,6 +623,99 @@ internal sealed class SitesOptionsPage
         return true;
     }
 
+    /// <summary>
+    /// SITES.6b: the server's own certificate, shown with what it says and its fingerprint; trusted only on a yes, and only
+    /// if the server still shows the same one. A certificate that trusting would not fix says why and offers nothing.
+    /// </summary>
+    private async Task<bool> TrustCertificateAsync(SiteDto site)
+    {
+        SiteCertificateResultDto? read = null;
+        await RunAsync(async () =>
+        {
+            _siteResult.Say($"Reading the certificate of {site.Host}…");
+            read = await _client.SiteCertificateAsync(site.Id, _closing.Token);
+        });
+        if (read is null) return false;
+        if (!read.Ok || read.Certificate is not { } certificate)
+        {
+            _siteResult.Say($"Couldn't read the certificate of {site.Host}. {read.Message}", isProblem: true);
+            return false;
+        }
+
+        var body = new StackPanel { Spacing = 8 };
+        if (certificate.CannotTrust is { } cannot)
+        {
+            body.Children.Add(new TextBlock { Text = $"{site.Host} shows a certificate that this PC can't use. {cannot}", TextWrapping = TextWrapping.Wrap });
+            foreach (var (label, value) in SitesRules.CertificateLines(certificate)) body.Children.Add(Mono(label, value));
+            await AskAsync("Certificate not usable", body, null, "Close");
+            return false;
+        }
+
+        body.Children.Add(new TextBlock
+        {
+            Text = $"{site.Host} showed the certificate below, which isn't signed by an authority this PC trusts. That is usual for a server you run yourself. Trust it only if it is your server's: once trusted, Inbound connects only while the server shows a certificate it trusts.",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        foreach (var (label, value) in SitesRules.CertificateLines(certificate)) body.Children.Add(Mono(label, value));
+        body.Children.Add(SettingsWindow.Hint("Compare the fingerprint with the one on the server (for example openssl x509 -noout -fingerprint -sha256 -in the certificate file)."));
+        // rclone takes a trusted certificate as an authority for all of Inbound's sites (no per-site trust exists).
+        body.Children.Add(SettingsWindow.Hint("Whoever holds this certificate's key is trusted by all your Inbound sites, not only this one. Trust only a certificate of your own server."));
+        if (await AskAsync("Trust this certificate?", body, "Trust", "Cancel", defaultClose: true) != ContentDialogResult.Primary) return false;
+
+        SiteResultDto? trusted = null;
+        await RunAsync(async () => trusted = await _client.TrustSiteCertificateAsync(site.Id, certificate.Fingerprint, _closing.Token));
+        if (trusted is null) return false;
+        if (!trusted.Ok)
+        {
+            _siteResult.Say(string.IsNullOrWhiteSpace(trusted.Message) ? "The certificate couldn't be trusted." : trusted.Message, isProblem: true);
+            return false;
+        }
+
+        if (trusted.Site is { } updated)
+        {
+            var index = _sites.FindIndex(s => s.Id == updated.Id);
+            if (index >= 0) _sites[index] = updated;
+            Render();
+        }
+
+        if (!string.IsNullOrWhiteSpace(trusted.Message))
+        {
+            // Trusted, but rclone is busy with transfers and reads the certificate when they finish: a test now would fail.
+            _siteResult.Say(trusted.Message);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task ForgetCertificateAsync(SiteDto site)
+    {
+        var body = new TextBlock
+        {
+            Text = $"Stop trusting the certificate of {site.Host}? The site then can't be used until you trust its certificate again (Test asks).",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        if (await AskAsync("Forget the certificate?", body, "Forget", "Cancel", defaultClose: true) != ContentDialogResult.Primary) return;
+        await RunAsync(async () =>
+        {
+            var result = await _client.TrustSiteCertificateAsync(site.Id, null, _closing.Token);
+            if (!result.Ok)
+            {
+                _siteResult.Say(string.IsNullOrWhiteSpace(result.Message) ? "The certificate couldn't be forgotten." : result.Message, isProblem: true);
+                return;
+            }
+
+            if (result.Site is { } updated)
+            {
+                var index = _sites.FindIndex(s => s.Id == updated.Id);
+                if (index >= 0) _sites[index] = updated;
+                Render();
+            }
+
+            _siteResult.Say($"{site.Name} no longer trusts its server's certificate.");
+        });
+    }
+
     private static void AddKeys(Panel panel, IEnumerable<SiteHostKeyDto> keys)
     {
         foreach (var key in keys) panel.Children.Add(Mono(key.Type, key.Fingerprint));
@@ -606,7 +750,7 @@ internal sealed class SitesOptionsPage
         }
     }
 
-    private async Task<ContentDialogResult?> AskAsync(string title, UIElement body, string primary, string close, bool danger = false, bool defaultClose = false)
+    private async Task<ContentDialogResult?> AskAsync(string title, UIElement body, string? primary, string close, bool danger = false, bool defaultClose = false)
     {
         if (_window.Content is not FrameworkElement root || root.XamlRoot is null) return null;
         var dialog = new ContentDialog
@@ -615,9 +759,10 @@ internal sealed class SitesOptionsPage
             RequestedTheme = root.ActualTheme,
             Title = title,
             Content = DialogLayout.ScrollingContent(body, root.XamlRoot),
-            PrimaryButtonText = primary,
+            // No primary text: a message with Close only.
+            PrimaryButtonText = primary ?? string.Empty,
             CloseButtonText = close,
-            DefaultButton = defaultClose ? ContentDialogButton.Close : ContentDialogButton.Primary,
+            DefaultButton = defaultClose || primary is null ? ContentDialogButton.Close : ContentDialogButton.Primary,
         };
         if (danger) dialog.PrimaryButtonStyle = InboundUi.DangerDialogButton;
         return await DialogGuard.ShowAsync(dialog);

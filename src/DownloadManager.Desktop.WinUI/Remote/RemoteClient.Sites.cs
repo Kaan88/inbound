@@ -50,6 +50,31 @@ internal sealed partial class RemoteClient
         => SiteResult(await SitesQuickAsync<SiteTrustRequest, SiteResultDto>(SitesMessageTypes.Trust,
             new SiteTrustRequest { Id = id, Entries = entries.ToList() }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>SITES.6b: trusts the certificate with this fingerprint (the Host reads it again first), or with null forgets the site's.</summary>
+    public async Task<SiteResultDto> TrustSiteCertificateAsync(string id, string? fingerprint, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteTrustRequest, SiteResultDto>(SitesMessageTypes.Trust,
+            new SiteTrustRequest { Id = id, CertificateFingerprint = fingerprint, ForgetCertificates = fingerprint is null }, SitesMessageTypes.Result,
+            SitesTestTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.6b: the certificate the site's server shows, read by the Host with no login.</summary>
+    public async Task<SiteCertificateResultDto> SiteCertificateAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteIdRequest, SiteCertificateResultDto>(SitesMessageTypes.Certificate,
+            new SiteIdRequest { Id = id }, SitesMessageTypes.CertificateResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteCertificateResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>SITES.6c: starts a browser sign-in (the answer has the address to open), or, with a token, stores a pasted one.</summary>
+    public async Task<SiteSignInResultDto> SignInSiteAsync(string id, string? token = null, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteSignInRequest, SiteSignInResultDto>(SitesMessageTypes.SignIn,
+            new SiteSignInRequest { Id = id, Token = token }, SitesMessageTypes.SignInResult, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteSignInResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    public async Task<SiteResultDto> CancelSiteSignInAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
     public async Task<SiteResultDto> TestSiteAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesSlowAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Test, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
 
@@ -74,6 +99,58 @@ internal sealed partial class RemoteClient
     /// <summary>Stars or unstars a folder; the answer's <c>Site</c> has the new list of stars.</summary>
     public async Task<SiteResultDto> StarSiteFolderAsync(SiteStarRequest request, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteStarRequest, SiteResultDto>(SitesMessageTypes.Star, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.5: a new folder on the server. Slow: the Host looks first, then makes it.</summary>
+    public async Task<SiteResultDto> MakeSiteFolderAsync(SiteMakeFolderRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteMakeFolderRequest, SiteResultDto>(SitesMessageTypes.MakeFolder, request,
+            SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.5: renames one item in its folder.</summary>
+    public async Task<SiteResultDto> RenameSiteItemAsync(SiteRenameRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteRenameRequest, SiteResultDto>(SitesMessageTypes.Rename, request,
+            SitesMessageTypes.Result, SitesBrowseTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.5: what a delete would remove, counted on the server (folders are walked, so it can take a while).</summary>
+    public async Task<SiteCountResultDto> CountSiteItemsAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteChangeRequest, SiteCountResultDto>(SitesMessageTypes.Count, request,
+            SitesMessageTypes.CountResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteCountResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>SITES.5: deletes on the server, with a result per item.</summary>
+    public async Task<SiteChangeResultDto> DeleteSiteItemsAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteChangeRequest, SiteChangeResultDto>(SitesMessageTypes.Delete, request,
+            SitesMessageTypes.ChangeResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteChangeResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>
+    /// SITES.4: starts a download or upload batch. On a connection of its own, as browsing is: the Host lists the chosen
+    /// folders first, which can take a while on a far server.
+    /// </summary>
+    public async Task<SiteTransferResultDto> StartSiteTransferAsync(SiteTransferStartRequest request, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesSlowAsync<SiteTransferStartRequest, SiteTransferResultDto>(SitesMessageTypes.TransferStart, request,
+            SitesMessageTypes.TransferResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Pause, resume, cancel, retry or clear (<see cref="SitesMessageTypes"/>) one batch; clear with an empty id
+    /// removes every finished one.</summary>
+    public async Task<SiteTransferResultDto> SiteTransferActionAsync(string type, string id, CancellationToken cancellationToken = default)
+    {
+        if (!SiteTransferRules.IsAction(type)) throw new ArgumentException("Not a transfer action.", nameof(type));
+        // A pause or cancel waits for the files in flight to stop (up to 15 s each on the Host).
+        return TransferResult(await SitesSlowAsync<SiteTransferIdRequest, SiteTransferResultDto>(type, new SiteTransferIdRequest { Id = id },
+            SitesMessageTypes.TransferResult, SitesTestTime, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>One batch with its files.</summary>
+    public async Task<SiteTransferResultDto> GetSiteTransferAsync(string id, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesQuickAsync<SiteTransferIdRequest, SiteTransferResultDto>(SitesMessageTypes.TransferGet,
+            new SiteTransferIdRequest { Id = id }, SitesMessageTypes.TransferResult, cancellationToken).ConfigureAwait(false));
+
+    private static SiteTransferResultDto TransferResult(SitesReply<SiteTransferResultDto> reply)
+        => reply.Value ?? new SiteTransferResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
 
     private static SiteResultDto SiteResult(SitesReply<SiteResultDto> reply)
         => reply.Value ?? new SiteResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };

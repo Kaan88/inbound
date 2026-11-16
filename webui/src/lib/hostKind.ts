@@ -28,6 +28,8 @@ export interface HostTexts {
   versionPrefix: string;
   /** Options, General: the start-up resume box. */
   resumeOnStart: string;
+  /** Where Inbound runs, as a place: "the server", "the PC" (Sites, SITES.7). */
+  hostName: string;
 }
 
 const server: HostTexts = {
@@ -47,6 +49,7 @@ const server: HostTexts = {
   setupCodeHint: "This browser isn't on the server's own computer, so the server asks for the code it wrote in its log (docker logs).",
   versionPrefix: 'Server',
   resumeOnStart: 'Resume unfinished downloads when the server starts',
+  hostName: 'the server',
 };
 
 const windows: HostTexts = {
@@ -66,6 +69,7 @@ const windows: HostTexts = {
   setupCodeHint: null,
   versionPrefix: 'Inbound on the PC',
   resumeOnStart: 'Resume unfinished downloads when the app starts on the PC',
+  hostName: 'the PC',
 };
 
 export function hostTexts(kind: string | null | undefined): HostTexts {

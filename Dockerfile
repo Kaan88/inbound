@@ -146,7 +146,7 @@ LABEL org.opencontainers.image.title="Inbound Download Manager" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT"
 # The bundled 7-Zip keeps its own terms in /app/tools/7-Zip/License.txt (GNU LGPL with the unRAR restriction), and
-# rclone (for Sites) its MIT licence in /app/tools/rclone/COPYING.
+# rclone (for Sites) its MIT licence in /app/tools/rclone/COPYING. /app/THIRD-PARTY-NOTICES.md lists everything.
 
 ENV DOWNLOADMANAGER_DATA=/data \
     DOWNLOADMANAGER_ROOTS=/downloads \
@@ -161,6 +161,7 @@ ENV DOWNLOADMANAGER_DATA=/data \
 COPY --from=server /out/ /app/
 COPY --from=sevenzip /out/tools/ /app/tools/
 COPY --from=rclone /out/tools/ /app/tools/
+COPY THIRD-PARTY-NOTICES.md /app/THIRD-PARTY-NOTICES.md
 # The Server looks for the torrent worker next to itself (TorrentSetup.FindWorker). DOWNLOADMANAGER_TORRENTS=off turns
 # torrents off without it ever starting.
 COPY --from=torrent-worker --chmod=755 /inbound-torrent /app/inbound-torrent

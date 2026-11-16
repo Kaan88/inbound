@@ -456,6 +456,7 @@ internal static class RemoteSettingsRules
         nameof(SettingsDto.LaunchAtStartup),
         nameof(SettingsDto.CloseWindowCompletely),
         nameof(SettingsDto.ClipboardMonitoring),
+        nameof(SettingsDto.PauseOnCostlyNetworkOrLowPower),
         nameof(SettingsDto.BrowserIntegrationEnabled),
         nameof(SettingsDto.AutoCheckUpdates),
         nameof(SettingsDto.UpdateCheckIntervalHours),

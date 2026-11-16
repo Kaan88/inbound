@@ -19,6 +19,32 @@ public sealed class AppImageUpdateTests
     }
 
     [Fact]
+    public void InboundAppReadsTheManifestOfItsArchitectureBesideTheWindowsOne()
+    {
+        var mac = new InstallMetadata("0.8.0", "stable", "/Applications", MacAppPath: "/Applications/Inbound.app");
+        var expected = DownloadManagerService.MacManifestName(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+        Assert.Equal("https://github.com/Kaan88/inbound/releases/latest/download/" + expected,
+            DownloadManagerService.ManifestUrlFor(mac, ReleaseUpdates.ManifestUrl));
+        Assert.Equal("manifest-macos-arm64.json", DownloadManagerService.MacManifestName(System.Runtime.InteropServices.Architecture.Arm64));
+        Assert.Equal("manifest-macos-x64.json", DownloadManagerService.MacManifestName(System.Runtime.InteropServices.Architecture.X64));
+        Assert.Equal("https://example.com/feed.json", DownloadManagerService.ManifestUrlFor(mac, "https://example.com/feed.json"));
+    }
+
+    [Fact]
+    public void TheMacRestarterWaitsForTheHostAndOpensTheAppOnlyWhenAWindowWasOpen()
+    {
+        var withWindow = MacAppRestarter.Arguments("/Applications/My Apps/Inbound.app", 4242, reopenWindow: true);
+        Assert.Equal(["-c", MacAppRestarter.Script, "inbound-restart", "4242", "/Applications/My Apps/Inbound.app", "open", ""], withWindow);
+        Assert.Equal("", MacAppRestarter.Arguments("/a", 1, reopenWindow: false)[^2]);
+        // The old bundle is removed by the shell, after the Host is gone, not while it still loads from it.
+        Assert.Equal("/Applications/.Inbound.app.0.8.0.old", MacAppRestarter.Arguments("/a", 1, false, "/Applications/.Inbound.app.0.8.0.old")[^1]);
+        Assert.True(MacAppRestarter.Script.IndexOf("rm -rf", StringComparison.Ordinal) > MacAppRestarter.Script.IndexOf("kill -0", StringComparison.Ordinal));
+        // pgrep's pattern: the bundle's dots and brackets are literal.
+        Assert.Equal(@"/Apps \(x\)/Inbound\.app/Contents/Resources/window/DownloadManager\.Desktop\.Uno", MacAppRestarter.Pattern("/Apps (x)/Inbound.app"));
+        Assert.DoesNotContain("My Apps", MacAppRestarter.Script);
+    }
+
+    [Fact]
     public void TheRestarterWaitsForTheHostAndOpensTheWindowOnlyWhenAsked()
     {
         var withWindow = AppImageRestarter.Arguments("/home/u/My Apps/Inbound.AppImage", 4242, reopenWindow: true);

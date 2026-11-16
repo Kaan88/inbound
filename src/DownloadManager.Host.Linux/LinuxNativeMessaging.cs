@@ -32,6 +32,8 @@ internal static class LinuxNativeMessaging
         var launcher = WriteLauncher(dataRoot, target);
         var written = new List<string>();
         var kept = new List<string>();
+        if (OperatingSystem.IsMacOS()) return ApplyMac(home, launcher, written, kept);
+
         var config = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         if (string.IsNullOrWhiteSpace(config) || !Path.IsPathRooted(config)) config = Path.Combine(home, ".config");
 
@@ -44,6 +46,27 @@ internal static class LinuxNativeMessaging
 
         if (Directory.Exists(Path.Combine(home, ".mozilla")))
             Place(Path.Combine(home, ".mozilla", "native-messaging-hosts"), "firefox", FirefoxManifest(launcher), launcher, written, kept);
+
+        var text = written.Count == 0 ? "Browser registration: no browser folder found." : $"Browser registration written for {string.Join(", ", written)}.";
+        return kept.Count == 0 ? text : text + $" Left another program's registration in place for {string.Join(", ", kept)}.";
+    }
+
+    /// <summary>macOS: Chromium-family browsers and Firefox keep their manifests under ~/Library/Application Support.</summary>
+    private static readonly string[] MacChromiumFamily =
+        ["Google/Chrome", "Google/Chrome Beta", "Google/Chrome Canary", "Chromium", "Microsoft Edge", "Microsoft Edge Beta", "BraveSoftware/Brave-Browser", "Vivaldi"];
+
+    private static string ApplyMac(string home, string launcher, List<string> written, List<string> kept)
+    {
+        var support = Path.Combine(home, "Library", "Application Support");
+        foreach (var browser in MacChromiumFamily)
+        {
+            var folder = Path.Combine(support, browser);
+            if (!Directory.Exists(folder)) continue;
+            Place(Path.Combine(folder, "NativeMessagingHosts"), browser, ChromiumManifest(launcher), launcher, written, kept);
+        }
+
+        if (Directory.Exists(Path.Combine(support, "Firefox")))
+            Place(Path.Combine(support, "Mozilla", "NativeMessagingHosts"), "firefox", FirefoxManifest(launcher), launcher, written, kept);
 
         var text = written.Count == 0 ? "Browser registration: no browser folder found." : $"Browser registration written for {string.Join(", ", written)}.";
         return kept.Count == 0 ? text : text + $" Left another program's registration in place for {string.Join(", ", kept)}.";
