@@ -84,6 +84,56 @@ These are what make the plan hold. A stage that breaks one is not done.
 | `trouble`, `delete`, `overwrite` | An error notice with a button; delete text is right; "Replace X?" for uploads only | Trouble in the pane; overwrite as drawn |
 | `phone`, `phone-sheets`: sites list with activity, folder with tick boxes and an action bar, Transfers as a bottom sheet, sheets for Upload / Delete / trouble | The same page made narrow; no sheets, no action bar | All of it |
 
+### R0 check by screenshot (2026-11-16)
+
+The pairs are in `sites-mockups/compare/` (see its README). The tables above hold; these are the corrections and what
+reading the code missed.
+
+Desktop:
+
+- **Download dialog** (`download-dialog-built`): "Download <file> from <site>", "From /media/isos", a folder box, "If a
+  file is already there: Skip it", "A file that was stopped part way starts again from the beginning", Download /
+  Cancel. The gutter arrow opens it too.
+- **Overwrite** (correction): the desktop has no overwrite question. The upload dialog's conflict box defaults to
+  "Skip it", so uploading the older `notes.txt` over the newer one asked nothing; the transfer ends under Done as
+  "Done: 0 of 1 copied, 1 skipped (already there)" (`SiteTransferRules.cs:149,165`; that row was not photographed).
+  The whole `overwrite` screen is a gap, not a restyle.
+- **Failed** (correction): a failed row says only "1 of 1 file failed", with no reason. The mockup's reason line is a gap.
+- **Trouble** (correction): a refused connection shows the reason and "Try again" only; no "Open Options", no Edit site.
+- **Transfers:** running rows offer Pause, Files, Cancel; failed rows Retry, Files, Clear; done rows Files, Clear. The
+  slim bar reads "Transfers · 2 transfers running, 2.0 MB/s, 1 failed": one speed, not one per direction.
+- **New:** a running download's `<name>.<id>.partial` file shows in the This PC pane with 0 B.
+- **Downloads chip:** reads "Site transfers: 2 transfers running, 1.2 MB/s, 1 failed" against the mockup's
+  "Sites · 2 running · 156 MB/s".
+- **Sidebar:** the "Sites" heading can't be selected (there is no All sites page). A site's activity mark and the
+  "small progress bar" were not caught in a picture; at 800 px with the bar open the sidebar scrolls under
+  "Categories" and the sites fall off the bottom.
+- **Home:** nothing to compare but Options › Sites (`home-built` is that page).
+- **Gutter:** two arrow buttons only; no Linked button.
+- **Delete:** wording is right ("does not go to a Recycle Bin and can't be undone"), Cancel is the default; it names
+  the site but not the folder, and has no "on this PC" counterpart.
+- **Panes:** the server pane's Name column cuts names short ("debian-13.2-amd6…") beside empty space; the This PC pane
+  has no footer; dates carry seconds and the year.
+- **Transfer rows:** a running upload read "0 of 1 file, 11.4 MB of 11.4 MB" with a full bar; no row shows time left.
+  Not photographed: a waiting row, and a folder transfer as one row.
+
+Web UI:
+
+- **Download** confirmed: each file row's icon is "Download <file> to this device" (a browser link). "Download to the
+  server" shows in the toolbar only after a tick; its dialog has a folder box, free space and "When a file is already
+  there: Skip it".
+- **Upload** confirmed: "Upload from this device" opens the browser's file chooser at once; there is no dialog, so
+  `web-upload-built` looks the same as `web-site-built`.
+- Not photographed in the web UI: transfers, trouble, delete.
+- **Phone** (new): the toolbar wraps to three rows, and on a long name the status ("· Same") overlaps the download icon.
+- **New page error** during the walk: "Cannot read properties of null (reading 'folder')". Seen once in
+  `webui/scripts/sites-r0.mjs`, after Escape closed the download dialog or while the phone page opened; not yet
+  reproduced alone.
+- **New, server:** with a relative `DOWNLOADMANAGER_ROOTS` (`artifacts\r0\web\downloads`), saving any site, even one
+  with no folder, failed with "That folder is outside the folders this server may use". An absolute root worked.
+  Cause not checked.
+- **Drive not listing** was not reproduced: the test has no Drive account (`gdrive` here is a read-only WebDAV).
+
 ### The two web bugs
 
 **1. A download goes to the browser, where the extension catches it.** Cause found in the code, not yet reproduced:
@@ -136,7 +186,7 @@ the automated walk, the walk by sight, the screenshot pairs, then the owner look
 
 - A test instance with three local sites from `rclone serve` (SFTP, WebDAV, FTP) and seeded folders that match the
   mockup's rows (a folder of many files, a file that exists locally, an older local copy).
-- A script that opens each mockup screen in Chromium at 1360 x 800 and saves `<screen>-mockup.png` (21 screens).
+- A script that opens each mockup screen in Chromium at 1360 x 800 and saves `<screen>-mockup.png` (19 screens; `S.phone` is defined twice).
 - Screenshots of every screen as built today, beside them. This is the "before" set and corrects the gap tables
   above where reading the code was wrong.
 - Done when: the pairs are in `compare/` and the gap tables are confirmed or corrected.
@@ -206,7 +256,7 @@ the automated walk, the walk by sight, the screenshot pairs, then the owner look
 ### R7. Closing
 
 - The owner walks a test build. Light mode pass. Linux Uno builds.
-- `remote-sites.md`, `new-frontend-guide.md`, `PROGRESS.md`, `ROADMAP.md`, `CLAUDE.md` updated; the 21 final pairs
+- `remote-sites.md`, `new-frontend-guide.md`, `PROGRESS.md`, `ROADMAP.md`, `CLAUDE.md` updated; the 19 final pairs
   stay in the repo as the acceptance evidence.
 - Release.
 

@@ -5,11 +5,12 @@ Written 2026-11-16, last updated the same day after the pull request work, for t
 
 ## Where things stand
 
-- **Sites UI rework: accepted, not started.** The owner accepted the plan and all nine decisions on 2026-11-16
-  ("I accept all picks but don't start yet"), then asked for this handoff. Nothing of the rework is built. Start at
-  R0 when the owner says so.
-- **Nothing else is waiting on this session.** The pull request and release work of 2026-11-16 is finished (PROGRESS
-  AT, AV); the next thing to do is R0, on the owner's word.
+- **Sites UI rework: R0 done (2026-11-16), R1 next.** The owner accepted the plan and all nine decisions, then said
+  "start". R0's pairs are in `docs/plans/sites-mockups/compare/` (README there), and the gap tables are corrected in
+  the plan's "R0 check by screenshot". No product code has changed. The owner looks at the pairs before R1 starts.
+- **How to look at the app without disturbing the owner:** run the test window on a hidden desktop
+  (`scripts/run-on-hidden-desktop.ps1`, `scripts/ui-drive-hidden.sh`); never send real mouse or key input. Have the
+  same Fable reviewer check every major change or decision.
 - **main** is pushed and the local checkout equals origin. The last code merges are #18 (`ca1dc79`) and #13
   (`72954f6`); later commits are records only.
 - **The macOS build is on the v0.8.0 release:** `.dmg`, `.zip`, signed `manifest-macos-<arch>.json` and
@@ -70,7 +71,7 @@ Reported faults:
 
 ## Stages (details in the plan)
 
-R0 baseline screenshots of all 21 mockup screens and the built ones (no product code); R1 Host additions (per-file
+R0 baseline screenshots of all 19 mockup screens and the built ones (no product code); R1 Host additions (per-file
 progress, time left, last used, an unsaved site); R2 desktop browse view; R3 desktop transfers; R4 All sites, Add a
 site tiles, sidebar; R5 dialogs and a full desktop pass; R6 web UI (the two bugs first, then the screens, then
 phone); R7 owner's walk, light mode, docs, release.

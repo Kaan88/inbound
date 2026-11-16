@@ -1,5 +1,30 @@
 # Progress — session handoff
 
+### Sites rework R0: baseline screenshots, SITES.11 (2026-11-16)
+
+- **Owner:** "start" (R0), then "keep the app hidden without taking over my mouse and keyboard", and "after every
+  major change or decision, give the same fable agent a review" (done for each step below).
+- **Done:** all 19 mockup screens (`scripts/shoot-sites-mockups.ps1`; the plan's "21" was wrong, `S.phone` is defined
+  twice) and the app as built in 0.8.0, in `docs/plans/sites-mockups/compare/` with a README of what each pair shows.
+  The test window ran on a separate hidden Windows desktop (`scripts/run-on-hidden-desktop.ps1`), driven only through
+  UI Automation (`scripts/ui-drive-hidden.sh`, `ui-drive.ps1 -NoInput`, new `size:` step); the web UI with Playwright
+  (`webui/scripts/sites-r0.mjs`). Test sites: `rclone serve` SFTP (throttled), WebDAV, FTP, a read-only WebDAV and a
+  closed port, under `artifacts\r0`.
+- **Gap tables:** confirmed, with corrections in `docs/plans/sites-rework.md`, "R0 check by screenshot": the desktop has
+  no overwrite question at all (an older file over a newer one is skipped without asking, shown as "1 skipped (already there)"), a failed
+  transfer shows no reason, trouble has no Edit site. New faults: a running download's `.partial` file shows in the
+  This PC pane; at phone width the web status text overlaps the download icon; a page error "Cannot read properties
+  of null (reading 'folder')" (not yet reproduced alone); a server with a relative `DOWNLOADMANAGER_ROOTS` refuses to
+  save any site.
+- **Full local suite on main (after #13 and #18):** all .NET suites pass (Core 2388, Engine 214, Integration 2009 + 32
+  skipped, TorBox 323, Archives 401, Containers 188, Torrents 94 + 29 skipped, Server 202, Tray 3); extension typecheck
+  and 339 tests; web UI 718 tests and svelte-check clean. `scripts\test.ps1` first stopped at the extension typecheck:
+  this checkout's `node_modules` still held `@types/chrome` 0.0.300 against the lockfile's 0.3.7; `npm ci` fixed it.
+  `test.ps1` installs only when `node_modules` is missing, so a stale install fails the same way elsewhere.
+- **Not done:** Drive listing not reproduced (no Drive account in the test); the `ext` screen; light mode (R7); a
+  picture of a waiting row, a folder transfer, the sidebar's activity mark, the overwrite "skipped" row, and web
+  transfers, trouble and delete. The test machine's folder is repainted as `D:\Downloads\ISOs` in the built PNGs.
+
 ### Popup row menu cut off in a short popup, EXT.B10 (2026-11-15)
 
 - **Owner report (screenshot, macOS):** the popup's right-click menu doesn't fit when the popup is small (one download

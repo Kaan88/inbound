@@ -7,6 +7,7 @@
 #   right:<Name>                    right-click the middle of an element (context menus); only with the test UI in front
 #   key:<ESC|ENTER|TAB|DELETE|SHIFTDELETE|DOWN|UP>  real key input to the foreground test window
 #   front                           bring the main window to the front (and nudge its size so it paints)
+#   size:<w>x<h>                    set the main window's outer size (no input sent)
 #   nudge                           resize every normal window of the UI by one pixel and back, so each paints
 #   set:<AutomationId or Name>=<text>  set the value of an edit box (or the edit inside a combo box)
 #   closewin:<title start>          close a secondary window (never the main one) with WM_CLOSE; the title start is required
@@ -18,7 +19,10 @@
 param(
     [Parameter(Mandatory)][string]$PathPart,
     [string]$OutDir = '.',
-    [Parameter(Mandatory)][string[]]$Do
+    [Parameter(Mandatory)][string[]]$Do,
+    # Refuse every step that sends real mouse or keyboard input (click, right, key, front), e.g. on a hidden desktop,
+    # where that input would reach the owner's active desktop instead.
+    [switch]$NoInput
 )
 
 $ErrorActionPreference = 'Continue'
@@ -139,6 +143,7 @@ function Pattern($el, $pattern) {
 $Do = @($Do | ForEach-Object { $_ -split '\|' } | Where-Object { $_ })
 foreach ($step in $Do) {
     $verb, $arg = $step -split ':', 2
+    if ($NoInput -and $verb -in 'click', 'right', 'key', 'front') { Write-Output "REFUSED $step (sends real input)"; continue }
     switch ($verb) {
         'set' {
             $target, $value = $arg -split '=', 2
@@ -187,6 +192,17 @@ foreach ($step in $Do) {
                 [UiDriveNative]::MoveWindow($h, $r.Left, $r.Top, $w, $hh, $true) | Out-Null
             }
             Start-Sleep -Milliseconds 600
+        }
+        'size' {
+            # size:<width>x<height>: the main window's outer size in pixels, for screenshots that match a mockup.
+            $w, $hh = $arg -split 'x', 2
+            if ("$w" -notmatch '^\d+$' -or "$hh" -notmatch '^\d+$' -or [int]$w -lt 200 -or [int]$hh -lt 200) { Write-Output "SIZE $arg refused: give <width>x<height>, each 200 or more"; continue }
+            $h = MainHwnd
+            $r = New-Object UiDriveNative+RECT
+            [UiDriveNative]::GetWindowRect($h, [ref]$r) | Out-Null
+            [UiDriveNative]::MoveWindow($h, $r.Left, $r.Top, [int]$w, [int]$hh, $true) | Out-Null
+            Start-Sleep -Milliseconds 600
+            Write-Output "SIZE $arg"
         }
         'invoke' {
             $el = Find-Element $arg
