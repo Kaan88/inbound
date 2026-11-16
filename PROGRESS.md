@@ -1,5 +1,18 @@
 # Progress — session handoff
 
+### Popup row menu cut off in a short popup, EXT.B10 (2026-11-15)
+
+- **Owner report (screenshot, macOS):** the popup's right-click menu doesn't fit when the popup is small (one download
+  in the list): "not sure if it happens only on mac". It doesn't: any popup shorter than the menu cut it off.
+- **Cause:** `ui/menu.ts` keeps the menu inside the window, but a `position: fixed` menu adds nothing to the page's
+  height, so the browser never grew the popup for it; a menu taller than the popup was clipped.
+- **Fix:** while a menu is open the page's minimum height is the menu's, so the browser grows the popup (to its own
+  limit); the menu is placed again on resize, is never taller than the window (it scrolls instead), and the height
+  is given back on close.
+- **Checked:** `npx tsc --noEmit`, the 339 extension tests, and headless Chromium on a 120 px page with the six-entry
+  menu: 194 px asked for, the menu fully visible once the viewport had grown, height restored on close. **Not
+  checked:** the real popup in Chrome or Edge.
+
 ### Keeping dependencies current, CI.4 (2026-11-15, branch `deps-upkeep`)
 
 - **Owner request:** "what can be done to keep the project up to date in the future?", then "yep, bi weekly though".
