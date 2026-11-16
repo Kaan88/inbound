@@ -7,13 +7,6 @@
         {
           "title": "New",
           "items": [
-            { "text": "Inbound for macOS, for Apple silicon and Intel Macs: the same window, downloads, torrents, Sites and browser extension as on Windows and Linux.", "tags": ["macos"] },
-            { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
-            { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
-            { "text": "On the Mac too: the Mac stays awake while downloads run, a finished queue can shut down, restart or sign out, notifications and event sounds play, links you copy can be added, and saved passwords are sealed with a key in your login Keychain.", "tags": ["macos"] },
-            { "text": "Mac touches: the menu-bar icon shows what is downloading and lets you pause or show each download, takes links and .torrent files dropped on it, and Services > Download with Inbound sends a selected link. Notifications let you open a finished file, show it in Finder or retry a failed one.", "tags": ["macos"] },
-            { "text": "On the Mac, ⌘ shortcuts, the usual Inbound and Window menus, and the number of running downloads and their progress on the Dock icon.", "tags": ["macos"] },
-            { "text": "Finished downloads on a Mac are marked as from the internet, as Safari does, and Finder shows the site they came from. Options can pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode.", "tags": ["macos"] },
             { "text": "dm sites rclone downloads rclone for Sites from the command line.", "tags": ["all"] }
           ]
         },
@@ -22,12 +15,6 @@
           "items": [
             { "text": "A window that was last left very small opens at its least size, and Options can't be made smaller than its pages.", "tags": ["desktop"] },
             { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] }
-          ]
-        },
-        {
-          "title": "Upgrade notes",
-          "items": [
-            { "text": "Inbound for macOS isn't notarized by Apple. The first time, open it, then choose Open Anyway in System Settings > Privacy & Security.", "tags": ["macos"] }
           ]
         }
       ]
@@ -44,7 +31,14 @@
             { "text": "The Docker image includes rclone, so Sites works without a download. Turn it on in the web UI.", "tags": ["docker"] },
             { "text": "dm sites adds, tests, browses and changes sites, and starts and controls transfers.", "tags": ["all"] },
             { "text": "Each finished download is checked by your antivirus before anything opens or extracts it, as a browser's own downloads are. A file the antivirus removes ends the download with a note, and it is not downloaded again by itself.", "tags": ["windows"] },
-            { "text": "Help, About links the notices of the software Inbound is built with.", "tags": ["desktop"] }
+            { "text": "Help, About links the notices of the software Inbound is built with.", "tags": ["desktop"] },
+            { "text": "Inbound for macOS, for Apple silicon and Intel Macs: the same window, downloads, torrents, Sites and browser extension as on Windows and Linux.", "tags": ["macos"] },
+            { "text": "While the window is closed, Inbound stays in the menu bar: open it again from there, open Options, stop or resume all downloads, or quit.", "tags": ["macos"] },
+            { "text": "The Mac app checks for updates and installs them itself, as the Windows app does.", "tags": ["macos"] },
+            { "text": "On the Mac too: the Mac stays awake while downloads run, a finished queue can shut down, restart or sign out, notifications and event sounds play, links you copy can be added, and saved passwords are sealed with a key in your login Keychain.", "tags": ["macos"] },
+            { "text": "Mac touches: the menu-bar icon shows what is downloading and lets you pause or show each download, takes links and .torrent files dropped on it, and Services > Download with Inbound sends a selected link. Notifications let you open a finished file, show it in Finder or retry a failed one.", "tags": ["macos"] },
+            { "text": "On the Mac, ⌘ shortcuts, the usual Inbound and Window menus, and the number of running downloads and their progress on the Dock icon.", "tags": ["macos"] },
+            { "text": "Finished downloads on a Mac are marked as from the internet, as Safari does, and Finder shows the site they came from. Options can pause downloads on a phone hotspot, in Low Data Mode or in Low Power Mode.", "tags": ["macos"] }
           ]
         },
         {
@@ -55,6 +49,12 @@
             { "text": "The web UI's download list stays quick with thousands of downloads: it uses a fraction of the processor time it did, and its files load compressed.", "tags": ["webui", "server"] },
             { "text": "The browser extension hands a download to Inbound faster.", "tags": ["windows"] },
             { "text": "Downloads write their progress to disk less often, with the same protection against a crash or power cut.", "tags": ["all"] }
+          ]
+        },
+        {
+          "title": "Upgrade notes",
+          "items": [
+            { "text": "Inbound for macOS isn't notarized by Apple. The first time, open it, then choose Open Anyway in System Settings > Privacy & Security.", "tags": ["macos"] }
           ]
         }
       ]

@@ -545,6 +545,19 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AT. Open pull requests merged into main** (2026-11-16, owner's list; merge commits, no squash). #9 macOS `4633baf`,
+  #11 dependency upkeep `1ceaebe`, #10 extension popup menu `3c6a760`, #5 `ef82afb`, #7 `cf75467`, #8 `2ba7b6c` (Docker
+  image digests), #17 `b6d52ce` (Dependabot: no Ubuntu version updates). Closed, not merged: #6 and #12 (Ubuntu 22.04 to
+  22.10; 22.10's support ended in 2023).
+  - Conflicts: #11 in the Uno project file (kept `Sdk="Uno.Sdk"`; a first resolution took the branch's whole file and
+    dropped a line #9 added, which failed the Uno build and was corrected before the merge) and PROGRESS.md (both
+    kept); #10 in PROGRESS.md (both kept).
+  - Dependabot could not rebase #5, #7, #8 ("The dependabot.yml entry that created this PR has been deleted"), so main
+    was merged into each branch; each merged after its Linux and macOS jobs passed.
+  - GitHub's Windows job failed on a different test each run (ROADMAP CI.5). Owner: "do the tests locally instead",
+    "windows is windows. deal with ci later." #10 merged on a local pass of `build.ps1` and `test.ps1`.
+  - **macOS goes into 0.8.0, not a 0.8.1** (owner's choice, 2026-11-16): the macOS lines of the changelog moved from
+    0.8.1 to 0.8.0; the Mac files are built from main (still 0.8.0) and attached to the v0.8.0 release.
 - **AS. Firefox add-on approved** (2026-11-16, owner: "finally firefox got approved"). The listed add-on, version 0.6.5 (owner),
   passed review at addons.mozilla.org (ROADMAP EXT.S5). Not checked here: the public page.
 - **AR. Owner on Sites in 0.8.0: the UI is not finished** (2026-11-16). "current implementation is TERRIBLE ... a tacked
