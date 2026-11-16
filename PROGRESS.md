@@ -545,6 +545,11 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AU. Open for the next session** (2026-11-16, owner: "keep these open for tomorrow"). The Mac files are not on the
+  v0.8.0 release yet: download the two artifacts of run 43789035309, sign, upload, add the Mac lines to the release
+  notes; then check main's latest CI and macOS runs; then ask whether the three merged branches may be deleted. Also
+  merged after AT: #15 jsdom 31 `1de6d90` (local npm checks passed). Left open with a comment: #13, #14, #16 (each
+  fails a local check). The Sites rework is accepted and not started. Handoff: `docs/plans/sites-rework-handoff.md`.
 - **AT. Open pull requests merged into main** (2026-11-16, owner's list; merge commits, no squash). #9 macOS `4633baf`,
   #11 dependency upkeep `1ceaebe`, #10 extension popup menu `3c6a760`, #5 `ef82afb`, #7 `cf75467`, #8 `2ba7b6c` (Docker
   image digests), #17 `b6d52ce` (Dependabot: no Ubuntu version updates). Closed, not merged: #6 and #12 (Ubuntu 22.04 to
