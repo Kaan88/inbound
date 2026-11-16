@@ -9,21 +9,11 @@ Written 2026-11-16 for the session that picks this up. Read `CLAUDE.md` first, t
   ("I accept all picks but don't start yet"), then asked for this handoff. Nothing of the rework is built. Start at
   R0 when the owner says so.
 - **main** is at the merge of #15 and is pushed; the local checkout equals origin.
-- **Open for tomorrow (owner: "keep these open for tomorrow"), the macOS build into the v0.8.0 release:**
-  1. Download the two Mac builds: artifacts `macos-osx-arm64-0.8.0` and `macos-osx-x64-0.8.0` of the "macOS packages"
-     run 43789035309 (main at `028ab64`, kept 14 days). A first download was stopped part way; nothing is uploaded.
-  2. Sign the update files here with the release key (`scripts/prepare-macos-release.sh 0.8.0 <zip> <arm64|x64> <key>
-     Kaan88/inbound v0.8.0`, once per architecture; the key's path is in the session memory, never print it), upload
-     the `.dmg`, `.zip`, `manifest-macos-<arch>.json` and `SHA256SUMS-macos-<arch>` of both to the v0.8.0 release, and
-     add the Mac lines to its notes. The workflow cannot do this itself: given a tag it checks out the tag, and
-     v0.8.0 has no macOS code. The changelog already has the macOS lines under 0.8.0 (`028ab64`).
-  3. Check that the latest CI and "macOS packages" runs on main passed. GitHub's Windows job is unreliable (ROADMAP
-     CI.5): a local `scripts\test.ps1` pass decides (owner: "windows is windows. deal with ci later").
+- **The macOS build is on the v0.8.0 release** (done 2026-11-17, PROGRESS AV): both architectures, signed update
+  files, release notes.
 - **Then ask the owner** whether the merged branches `macos-0.8.0`, `deps-upkeep` and `extension-open-files` may be
   deleted on GitHub. Not asked yet.
-- **Left open on purpose:** #13 (npm group: the extension's type check fails with the newer `@types/chrome`), #14
-  (TypeScript 7 in the extension: six popup tests fail), #16 (TypeScript 7 in the web UI: `svelte-check` 4.7.8 does
-  not accept it). Each has a comment saying so.
+- **Left open on purpose:** #14 and #16 (TypeScript 7; ROADMAP CI.6). #13 and #18 are merged, #19 is closed.
 
 ## What the owner said about Sites (2026-11-16)
 

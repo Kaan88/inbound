@@ -545,6 +545,15 @@
   fingerprint at redirected input and with a wrong one, trusted by the right one, test, mkdir, ls, mv, rm asking for
   `--yes` and then deleting, remove, off; passes. **Not checked:** `sign-in` against a real provider, `trust` of a
   certificate (the same requests as the web UI, which the Host tests cover), Linux.
+- **AV. The open pull request work finished** (2026-11-17, owner: "deal with the unfinished pr work"). The Mac builds of
+  main (run 43789706027, `1de6d90`; the zips' hashes equal the workflow's) were signed here with the release key and
+  uploaded to v0.8.0 for arm64 and x64: `.dmg`, `.zip`, `manifest-macos-<arch>.json`, `SHA256SUMS-macos-<arch>`. The
+  release notes have the Mac lines of the changelog and the notarization note. Merged: #18 test packages `ca1dc79`
+  (all four CI jobs passed), #13 npm group `72954f6` after a types-only fix on its branch (five errors from
+  `@types/chrome` 0.3.7 in `background.ts`; type check, both builds, 339 extension tests, web UI check, 718 tests and
+  build passed here). Closed: #19, a copy of #18. Still open, blocked: #14 and #16 (ROADMAP CI.6). CI on main at
+  `1de6d90`: Linux and macOS passed, Windows failed on one known flaky test (CI.5). Not done: the merged branches
+  `macos-0.8.0`, `deps-upkeep` and `extension-open-files` wait for the owner's word before deletion. This closes AU.
 - **AU. Open for the next session** (2026-11-16, owner: "keep these open for tomorrow"). The Mac files are not on the
   v0.8.0 release yet: download the two artifacts of run 43789035309, sign, upload, add the Mac lines to the release
   notes; then check main's latest CI and macOS runs; then ask whether the three merged branches may be deleted. Also
