@@ -10,11 +10,11 @@ set -u
 export MSYS_NO_PATHCONV=1
 : "${ANDROID_SERIAL:?set ANDROID_SERIAL}"
 SDK="$(cygpath -m "${ANDROID_HOME:-$LOCALAPPDATA/Android/Sdk}")"; ADB="$SDK/platform-tools/adb.exe"
-PKG=app.inbound.trial; EXT=/sdcard/Android/data/$PKG/files; JELLY=org.lineageos.jelly
+PKG=app.inbound.trial; EXT=/sdcard/Android/data/$PKG/files; JELLY=${BROWSER:-org.lineageos.jelly}
 BASE="${BASE:-http://192.168.1.115:5601}"; HERE="$(cd "$(dirname "$0")" && pwd -W)"
 MODE="${1:-}"; shift || true
-if [ "$MODE" = smoke ]; then SIZE=268435456; OUT="${OUT:?set OUT}/smoke"; MINWIN=0; MINDONE=5; GUARD=300
-else SIZE=12884901888; OUT="${OUT:?set OUT}"; MINWIN=480; MINDONE=20; GUARD=${GUARD:-900}; fi
+if [ "$MODE" = smoke ]; then SIZE=${SIZE:-268435456}; OUT="${OUT:?set OUT}/smoke"; MINWIN=0; MINDONE=5; GUARD=300
+else SIZE=${SIZE:-12884901888}; OUT="${OUT:?set OUT}"; MINWIN=${MINWIN:-480}; MINDONE=20; GUARD=${GUARD:-900}; fi
 mkdir -p "$OUT"; ROWS="$OUT/rows.tsv"
 ENVX='DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1'
 now() { python -c 'import time;print(int(time.time()*1000))'; }
