@@ -62,6 +62,7 @@ public sealed partial class LocalPane : UserControl
 
     // A typed folder that isn't there: said in the footer until the next folder opens.
     private string? _footerNote;
+    private string? _pendingNote;
 
     public LocalPane()
     {
@@ -88,6 +89,7 @@ public sealed partial class LocalPane : UserControl
         // Enter or Escape in the path box: the keyboard goes back to the list, not to the menu bar.
         Bar.EditEnded += FocusList;
         KeyDown += OnKeyDown;
+        ItemsList.ContextRequested += ItemsList_ContextRequested;
         AutomationProperties.SetName(this, "This PC folder");
     }
 
@@ -116,6 +118,90 @@ public sealed partial class LocalPane : UserControl
 
     /// <summary>Delete on the list: the window asks, then sends the items to the Recycle Bin.</summary>
     internal event Action? DeleteRequested;
+
+    /// <summary>A command of the context menu (or F2) the window carries out.</summary>
+    internal event Action<LocalCommand>? CommandRequested;
+
+    /// <summary>Whether Upload is offered (a site is shown and its folder has loaded); set by the window.</summary>
+    internal Func<bool>? CanUpload { get; set; }
+
+    /// <summary>The names of the folder shown (for a free "New folder" name).</summary>
+    internal IEnumerable<string> ShownNames => _rows.Select(row => row.Name);
+
+    /// <summary>
+    /// Says <paramref name="text"/> in the footer (an error of Rename, New folder or Delete); with <paramref name="reload"/> the
+    /// folder is read again first and the note shows after it, until the next folder opens.
+    /// </summary>
+    internal void Note(string text, bool reload)
+    {
+        if (reload && _path.Length > 0)
+        {
+            _pendingNote = text;
+            Reload();
+            return;
+        }
+
+        _footerNote = text;
+        SyncFooter();
+        LiveRegion.Announce(CountText);
+    }
+
+    /// <summary>Selects <paramref name="name"/> after the folder is read again (a new folder, a renamed item).</summary>
+    internal void Reload(string? select) => Open(_path, select);
+
+    private void ItemsList_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
+    {
+        var byPointer = e.TryGetPosition(ItemsList, out var point);
+        if (byPointer)
+        {
+            LocalRow? under = null;
+            for (var node = e.OriginalSource as DependencyObject; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node is ListViewItem item)
+                {
+                    under = ItemsList.ItemFromContainer(item) as LocalRow;
+                    break;
+                }
+            }
+
+            if (under is null)
+            {
+                if (ItemsList.SelectedItems.Count > 0) ItemsList.SelectedItems.Clear();
+            }
+            else if (!ItemsList.SelectedItems.Contains(under))
+            {
+                ItemsList.SelectedItems.Clear();
+                ItemsList.SelectedItems.Add(under);
+            }
+        }
+
+        var menu = new MenuFlyout();
+        var groups = SitesCommandRules.LocalMenu(ItemsList.SelectedItems.OfType<LocalRow>().Select(row => row.Line), CanUpload?.Invoke() ?? false);
+        foreach (var group in groups)
+        {
+            if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+            foreach (var command in group)
+            {
+                var item = new MenuFlyoutItem { Text = SitesCommandRules.Label(command) };
+                if (command == LocalCommand.Rename) item.KeyboardAcceleratorTextOverride = "F2";
+                else if (command == LocalCommand.Delete) item.KeyboardAcceleratorTextOverride = "Delete";
+                else if (command == LocalCommand.Refresh) item.KeyboardAcceleratorTextOverride = "F5";
+                var chosen = command;
+                item.Click += (_, _) => CommandRequested?.Invoke(chosen);
+                menu.Items.Add(item);
+            }
+        }
+
+        e.Handled = true;
+        if (byPointer)
+        {
+            menu.ShowAt(ItemsList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
+            return;
+        }
+
+        var selected = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as FrameworkElement : null;
+        menu.ShowAt(selected ?? ItemsList);
+    }
 
     // Reads of this PC's folders run off the UI thread (a share, a sleeping disk, 20 000 entries); the newest Open wins.
     private int _openGeneration;
@@ -155,7 +241,9 @@ public sealed partial class LocalPane : UserControl
 
         // Another folder starts with nothing selected; the same folder read again (sort, F5, after a delete) keeps it.
         var sameFolder = string.Equals(folder, _path, StringComparison.OrdinalIgnoreCase);
-        _footerNote = null;
+        // A note kept for after the read (an error of a rename or a delete) shows now; other folders start without one.
+        _footerNote = _pendingNote;
+        _pendingNote = null;
         _path = folder;
         _rows.Clear();
         foreach (var entry in entries) _rows.Add(new LocalRow(entry));
@@ -212,7 +300,7 @@ public sealed partial class LocalPane : UserControl
         }
     }
 
-    private void ToggleStar()
+    internal void ToggleStar()
     {
         if (_path.Length == 0 || SaveStars is null) return;
         SaveStars(LocalListing.ToggleStar(GetStars?.Invoke() ?? [], _path));
@@ -249,10 +337,12 @@ public sealed partial class LocalPane : UserControl
         if (_footerNote is { } note)
         {
             CountText.Text = note;
+            ToolTipService.SetToolTip(CountText, note);
             return;
         }
 
         var counts = SitesBrowseRules.FooterCounts(_rows.Select(row => row.Line), SelectedRows.Select(row => row.Line));
+        ToolTipService.SetToolTip(CountText, null);
         CountText.Text = SitesBrowseRules.LocalFooter(counts.Files, counts.Folders, counts.Bytes, counts.Selected, counts.SelectedBytes);
     }
 
@@ -274,7 +364,18 @@ public sealed partial class LocalPane : UserControl
         else Open(System.IO.Path.Combine(_path, row.Name));
     }
 
-    private void ItemsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e) => OpenSelectedFolder();
+    private void ItemsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        // Only a double click on a row acts, not one on empty space or the scrollbar.
+        for (var node = e.OriginalSource as DependencyObject; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is ListViewItem)
+            {
+                OpenSelectedFolder();
+                return;
+            }
+        }
+    }
 
     private void ItemsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -297,6 +398,10 @@ public sealed partial class LocalPane : UserControl
                 break;
             case VirtualKey.F5:
                 Reload();
+                e.Handled = true;
+                break;
+            case VirtualKey.F2 when SelectedRows.Count() == 1:
+                CommandRequested?.Invoke(LocalCommand.Rename);
                 e.Handled = true;
                 break;
             case VirtualKey.Delete when SelectedRows.Any():

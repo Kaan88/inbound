@@ -294,8 +294,9 @@ R1 design (2026-11-16, revised after the Fable review the same day):
 ### R2. Desktop: the browse view (`browse`, `remote-only`, `trouble`)
 
 Status 2026-11-17: R2a (the panes, the switch row, the gutter, the trouble state, folder "Some of it") built and
-reviewed; pairs in `compare/`. R2b (toolbar, Site menu, context menus, no-dialog download) and R2c (drag and drop)
-not started. Known pane differences: see PROGRESS "Sites rework R2a".
+reviewed; pairs in `compare/`. R2b (toolbar, the Site menu now named "Remote", context menus, no-dialog download)
+built and reviewed (PROGRESS "Sites rework R2b"). R2c (drag and drop) not started. Known pane differences: see
+PROGRESS "Sites rework R2a".
 
 - `SitesPanel` rebuilt as the mockup's pane: header (icon, name, kind chip, "Not encrypted" chip), path row (Up,
   breadcrumbs, Star, Filter), columns, footer with the selection summary.

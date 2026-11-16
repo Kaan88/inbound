@@ -1,5 +1,44 @@
 # Progress — session handoff
 
+### Sites rework R2b: toolbar, Remote menu, context menus, no-dialog downloads, SITES.11 (2026-11-17)
+
+- **Owner:** "Go on to R2b". Built (Sonnet), reviewed (Opus, 12 findings), fixed (Opus), accepted by me.
+- **Built:** the site toolbar as drawn (Download, Upload | New folder, Rename, Delete on server | Refresh | Pause
+  transfers | Edit remote, Options; Up, Star and Two panes moved into the panes); a "Remote" menu (new name, SITES.12)
+  with every command and its key, shown only with a remote open; context menus in both panes and on empty space
+  (decision 3, capability-gated); double click and Enter on a server file download at once with no dialog, as do the
+  toolbar, the menu and the gutter arrow (decisions 1, 2); "Download to…" asks for a folder; Open downloads to
+  `%TEMP%\Inbound\open\<siteId>\<guid>\` (each file marked ZoneId=3; a program or script asks "Run it?" with Show in
+  folder as the default; folders older than a day are removed); This PC Open, Show in Explorer, Rename, New folder,
+  Recycle Bin; Copy and Paste address (never a password; ports compared as used).
+- **Conflict question:** asked once per batch only when something is already there ("debian-13.2-amd64.iso is already
+  in D:\Downloads\ISOs" / "3 of these are already in …"; "Files inside the folders follow the same choice." when
+  folders are picked; uploads compare without case and ask anyway when the folder is not fully listed). With no
+  linked folder the Host picks the folder by category rules, so the window can't check and sends Keep both; the
+  per-file dialog drawn in `overwrite` is R5.
+- **Not as drawn, my picks:** Upload keeps a small drop-down (a Windows picker can't pick files and folders at once);
+  the question uses radio buttons and Continue (a ContentDialog has three buttons); the ← arrow downloads into the
+  folder This PC shows; Ctrl+Shift+S and Ctrl+T mean Download to… and the view switch while a remote is shown, and
+  keep their old meanings (sort by size, provider drawer) elsewhere; Open and Download to… are off while the window
+  manages another Inbound server.
+- **Review fixes:** see the list in the R2b commit: running programs without a warning, local paths used for another
+  server, one shared Open folder, double click on empty space, uncounted files inside folders, partial upload
+  listing, double starts, bad local names, renaming a file being written, keys acting on the wrong pane, swallowed
+  accelerators, lost errors.
+- **Also:** the Linux (Uno) window links the two Sites files the WinUI project now compiles
+  (`SiteTransferPaths.cs`, `SitePaths.cs`); the Uno build passes. Five `Content.XamlRoot` nullable warnings in Sites
+  files fixed.
+- **Pairs:** `browse-built.png`, `remote-only-built.png` (new toolbar), `remote-menu-built.png`, `conflict-built.png`
+  (before the fix round's wording change). The context menu could not be captured (UI Automation can't open it on
+  the hidden desktop); not seen by anyone yet.
+- **Tests:** Core 2492 pass (new `SitesCommandRulesTests`); solution and Uno builds 0 errors, no warning in a Sites
+  file. **Not checked:** anything by hand in a running window after the fix round (keys, dialogs, Open, double click).
+
+### Owner request: rename "Sites" (2026-11-17)
+
+- Owner: "find a better name than sites btw, it's too similar to site logins." Recorded as ROADMAP SITES.12. Only the
+  words people see change (window, web UI, CLI help, docs); `sites.*` IPC names, code and files stay. Name (owner, 2026-11-17): **Remote files**; one entry is "a remote" (menu "Remote", "Edit remote", "Add a remote", "All remotes"). R2b uses the new words for its new text; the full rename is its own pass after R2.
+
 ### Sites rework R2a: the desktop pane area to the mockup, SITES.11 (2026-11-17)
 
 - **Owner:** "Start R2". R2 is split: R2a the panes (this), R2b toolbar, Site menu, context menus, no-dialog

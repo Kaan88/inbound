@@ -189,6 +189,8 @@ public sealed partial class MainWindow
             OpenSitesOptionsHook();
         };
         panel.StateChanged += UpdateSitesToolbar;
+        panel.CommandRequested += FireSiteCommand;
+        InitSiteMenu();
         WireSiteChanges(panel);
         panel.StateChanged += FollowServerFolder;
         panel.SiteUpdated += updated =>
@@ -239,6 +241,7 @@ public sealed partial class MainWindow
         ProviderNoticeBar.IsOpen = false;
         DownloadToolSet.Visibility = Visibility.Collapsed;
         SitesToolSet.Visibility = Visibility.Visible;
+        SiteMenu.Visibility = Visibility.Visible;
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
         panel.Open(site, keepPlace ? panel.ReopenPath : null);
@@ -258,6 +261,7 @@ public sealed partial class MainWindow
         DownloadListViewport.Visibility = Visibility.Visible;
         JobsScrollTrack.Visibility = _scrollTrackBeforeSites;
         SitesToolSet.Visibility = Visibility.Collapsed;
+        SiteMenu.Visibility = Visibility.Collapsed;
         DownloadToolSet.Visibility = Visibility.Visible;
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
@@ -278,7 +282,6 @@ public sealed partial class MainWindow
     private void UpdateSitesToolbar()
     {
         if (_sitesPanel is not { } panel || !_sitesShown) return;
-        SitesUpButton.IsEnabled = panel.CanGoUp;
         SitesDownloadButton.IsEnabled = !panel.IsLoading && panel.SelectedNames.Count > 0;
         SitesUploadButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
         // SITES.5: one change at a time; Rename takes one item.
@@ -290,24 +293,10 @@ public sealed partial class MainWindow
         SitesRenameButton.IsEnabled = !panel.IsLoading && selected == 1 && !_siteChangeRunning;
         SitesDeleteButton.IsEnabled = !panel.IsLoading && selected > 0 && !_siteChangeRunning;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;
-        // The Host refuses a star on the root, so the button is off there.
-        SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && panel.CanGoUp;
         UpdateTwoPanesArrows();
-        var starred = panel.IsStarred;
-        SitesStarIcon.Glyph = starred ? "" : "";
-        SitesStarLabel.Text = starred ? "Unstar" : "Star";
-        AutomationProperties.SetName(SitesStarButton, starred ? "Unstar folder" : "Star folder");
-        ToolTipService.SetToolTip(SitesStarButton, starred
-            ? "Remove this folder from this site's Starred list"
-            : "Star this folder to find it again in this site's Starred list");
+        SyncSiteMenu();
     }
-
-    private void SitesUpButton_Click(object sender, RoutedEventArgs e) => _sitesPanel?.GoUp();
 
     private void SitesRefreshButton_Click(object sender, RoutedEventArgs e) => _sitesPanel?.Refresh();
 
-    private void SitesStarButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_sitesPanel is { } panel) _ = panel.ToggleStarAsync();
-    }
 }

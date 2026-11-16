@@ -23,7 +23,9 @@ internal sealed class PathBar : UserControl
     private readonly StackPanel _crumbs = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
     private readonly TextBox _edit = new();
     private readonly Grid _boxContent = new();
-    private readonly TextBox _filter = new() { PlaceholderText = "Filter", MinHeight = 0, Padding = new Thickness(8, 4, 8, 4), Width = 150, FontSize = 12 };
+    private readonly TextBox _filter = new() { PlaceholderText = "Filter", MinHeight = 0, Padding = new Thickness(28, 4, 8, 4), FontSize = 12 };
+    // The Filter box with the mockup's search icon over its left edge.
+    private readonly Grid _filterHost = new() { Width = 160 };
     private readonly Grid _root = new() { ColumnSpacing = 8, Padding = new Thickness(8, 6, 8, 6) };
     private bool _editing;
     private bool _starred;
@@ -84,15 +86,19 @@ internal sealed class PathBar : UserControl
         Grid.SetColumn(_star, 2);
 
         _filter.TextChanged += (_, _) => FilterChanged?.Invoke(_filter.Text);
-        _filter.Visibility = Visibility.Collapsed;
+        _filterHost.Visibility = Visibility.Collapsed;
+        var searchIcon = new FontIcon { Glyph = "", FontSize = 12, Margin = new Thickness(10, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+        InboundUi.Follow(searchIcon, "InboundSecondaryTextBrush", brush => searchIcon.Foreground = brush);
+        _filterHost.Children.Add(_filter);
+        _filterHost.Children.Add(searchIcon);
         AutomationProperties.SetName(_filter, "Filter this folder's names");
         ToolTipService.SetToolTip(_filter, "Show only names that contain this text (Ctrl+F)");
-        Grid.SetColumn(_filter, 3);
+        Grid.SetColumn(_filterHost, 3);
 
         _root.Children.Add(_up);
         _root.Children.Add(_box);
         _root.Children.Add(_star);
-        _root.Children.Add(_filter);
+        _root.Children.Add(_filterHost);
         Content = _root;
     }
 
@@ -142,14 +148,14 @@ internal sealed class PathBar : UserControl
     {
         set
         {
-            _filter.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+            _filterHost.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
             if (!value && _filter.Text.Length > 0) _filter.Text = string.Empty;
         }
     }
 
     internal string FilterText => _filter.Text;
 
-    internal bool FilterVisible => _filter.Visibility == Visibility.Visible;
+    internal bool FilterVisible => _filterHost.Visibility == Visibility.Visible;
 
     internal void FocusFilter()
     {

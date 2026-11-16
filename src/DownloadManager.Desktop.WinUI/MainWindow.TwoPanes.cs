@@ -126,8 +126,6 @@ public sealed partial class MainWindow
         return choice;
     }
 
-    private void SitesTwoPanesButton_Click(object sender, RoutedEventArgs e) => SetTwoPanes(!_uiState.SitesTwoPanes);
-
     /// <summary>The view switch: Two panes (true) or Server only (false). Remembered.</summary>
     private void SetTwoPanes(bool twoPanes)
     {
@@ -156,12 +154,6 @@ public sealed partial class MainWindow
     {
         if (_sitesPanel is not { } panel) return;
         var shown = TwoPanesShown;
-        SitesTwoPanesLabel.Text = _uiState.SitesTwoPanes ? "One pane" : "Two panes";
-        AutomationProperties.SetName(SitesTwoPanesButton, _uiState.SitesTwoPanes ? "One pane" : "Two panes");
-        SitesTwoPanesButton.IsEnabled = TwoPanesOffered;
-        ToolTipService.SetToolTip(SitesTwoPanesButton, !TwoPanesOffered
-            ? "Two panes shows this PC's folders, so it is off while the window shows another server"
-            : _uiState.SitesTwoPanes ? "Show only the server's folder" : "Show a folder of this PC beside the server's");
 
         if (_twoPanesChoice is { } two && _serverOnlyChoice is { } only)
         {
@@ -199,6 +191,8 @@ public sealed partial class MainWindow
         };
         local.StateChanged += UpdateTwoPanesArrows;
         local.DeleteRequested += () => _ = DeleteLocalAsync();
+        local.CommandRequested += FireLocalCommand;
+        local.CanUpload = () => _sitesPanel is { IsLoading: false, SiteId: not null };
         Grid.SetColumn(local, 0);
         grid.Children.Add(local);
         _localPane = local;
@@ -321,19 +315,15 @@ public sealed partial class MainWindow
         await UploadAsync(site, panel.Path, local.Path, names);
     }
 
-    private async Task DownloadToPaneAsync()
+    private Task DownloadToPaneAsync() => OnceAsync(DownloadToPaneCoreAsync);
+
+    private async Task DownloadToPaneCoreAsync()
     {
         if (_sitesPanel is not { Site: { } site } panel || _localPane is not { } local) return;
         var names = panel.SelectedNames;
         if (names.Count == 0 || local.Path.Length == 0) return;
-        var choice = await AskTransferAsync($"Download {SiteTransferRules.WhatText(names)} from {site.Name}", local.Path, folderEditable: false,
-            $"From {panel.Path}", primary: "Download", header: "Save in this folder on this PC");
-        if (choice is not { } chosen) return;
-        await StartSiteTransferAsync(new SiteTransferStartRequest
-        {
-            SiteId = site.Id, Direction = "download", RemoteFolder = panel.Path, LocalFolder = local.Path, Names = names,
-            Conflict = chosen.Conflict,
-        });
+        // The arrow aims at the folder of the This PC pane: no dialog, and the batch is asked about only when something is there.
+        await DownloadNamesAsync(site, panel.Path, names, local.Path);
     }
 
     /// <summary>Delete in the This PC pane: asks, then sends the items to the Recycle Bin (Windows only).</summary>
@@ -342,21 +332,21 @@ public sealed partial class MainWindow
         if (!TwoPanesShown || _localPane is not { Visibility: Visibility.Visible } local || local.Selected is not { Count: > 0 } selected) return;
         if (!OperatingSystem.IsWindows())
         {
-            await ShowSitesMessageAsync("Delete", "Deleting on this PC is offered on Windows only; use the file manager.");
+            local.Note("Deleting on this PC is offered on Windows only; use the file manager.", reload: false);
             return;
         }
 
         var paths = selected.Select(entry => Path.Combine(local.Path, entry.Name)).ToList();
-        if (paths.FirstOrDefault(path => SiteTransferRules.LocalInUse(_siteTransfers, path)) is { } used)
+        if (paths.FirstOrDefault(path => SitesCommandRules.LocalItemBusy(_siteTransfers, local.Path, Path.GetFileName(path))) is { } used)
         {
-            await ShowSitesMessageAsync("Delete", $"A site transfer still uses {Path.GetFileName(used)}. Cancel or finish the transfer first.");
+            local.Note($"A remote transfer still uses {Path.GetFileName(used)}. Cancel or finish the transfer first.", reload: false);
             return;
         }
 
         var what = selected.Count == 1 ? $"“{selected[0].Name}”" : $"these {selected.Count} items";
         var dialog = new ContentDialog
         {
-            XamlRoot = Content.XamlRoot,
+            XamlRoot = Content?.XamlRoot,
             Title = "Move to the Recycle Bin?",
             Content = new TextBlock { Text = $"Move {what} from {local.Path} to the Recycle Bin?", TextWrapping = TextWrapping.Wrap },
             PrimaryButtonText = "Move to Recycle Bin",
@@ -388,7 +378,7 @@ public sealed partial class MainWindow
             return problems;
         });
 
-        local.Reload();
-        if (failed.Count > 0) await ShowSitesMessageAsync("Delete", "Not moved to the Recycle Bin:\n" + string.Join("\n", failed.Take(10)));
+        if (failed.Count > 0) local.Note("Not moved to the Recycle Bin: " + string.Join("; ", failed.Take(3)), reload: true);
+        else local.Reload();
     }
 }

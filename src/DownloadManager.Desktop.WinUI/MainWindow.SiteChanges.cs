@@ -69,7 +69,7 @@ public sealed partial class MainWindow
 
             var dialog = new ContentDialog
             {
-                XamlRoot = Content.XamlRoot,
+                XamlRoot = Content?.XamlRoot,
                 Title = "Delete on server",
                 Content = new TextBlock { Text = SiteChangeRules.DeleteQuestion(chosen, count, site.Name), TextWrapping = TextWrapping.Wrap },
                 PrimaryButtonText = "Delete",
@@ -114,7 +114,7 @@ public sealed partial class MainWindow
         panel.Children.Add(problem);
         var dialog = new ContentDialog
         {
-            XamlRoot = Content.XamlRoot,
+            XamlRoot = Content?.XamlRoot,
             Title = title,
             Content = panel,
             PrimaryButtonText = primary,

@@ -52,6 +52,9 @@
     <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
     <!-- UPD.N1: the window's What's new reads install.json; it is Windows-only for now, and turned off on Linux. -->
     <Compile Include="..\DownloadManager.Core\InstalledBuild.cs" Link="InstalledBuild.cs" />
+    <!-- SITES.11 R2b: linked into the WinUI project too (This PC names follow the Host's rules). -->
+    <Compile Include="..\DownloadManager.Sites\SiteTransferPaths.cs" Link="Sites\SiteTransferPaths.cs" />
+    <Compile Include="..\DownloadManager.Sites\SitePaths.cs" Link="Sites\SitePaths.cs" />
     <!-- Linux: a saved server's token is sealed with the Host's own key (its key file, or the desktop keyring). -->
     <Compile Include="..\DownloadManager.Persistence\AesGcmSecretProtector.cs" Link="Servers\AesGcmSecretProtector.cs" />
     <Compile Include="..\DownloadManager.Host.Linux\SecretServiceKeyStore.cs" Link="Servers\SecretServiceKeyStore.cs" />

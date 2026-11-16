@@ -15,6 +15,13 @@ All are dark mode; light mode comes at the end (R7).
 - Test sites: `rclone serve` on 127.0.0.1 (SFTP throttled with `--bwlimit 150k`, WebDAV, FTP, a read-only WebDAV and a
   closed port), with folders seeded to match the mockup's rows.
 
+## R2b (2026-11-17)
+
+`browse-built.png` and `remote-only-built.png` retaken with the R2b toolbar and "Remote" menu; new: `remote-menu-built.png`
+(the menu open; the black margin is the popup's own capture), `conflict-built.png` (the "already there" question,
+before its wording named the file and folder). No context-menu picture: UI Automation can't open it on the hidden
+desktop. `trouble-built.png` is still R2a's (old toolbar).
+
 ## R2a (2026-11-17)
 
 `browse-built.png`, `remote-only-built.png` and `trouble-built.png` are now the R2a panes (same method; the trouble

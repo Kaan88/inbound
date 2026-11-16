@@ -62,6 +62,7 @@ public sealed partial class MainWindow
             local.Reload();
         }
 
+        ResolveOpenWaits(transfers);
         TransfersBar.Show(transfers);
         UpdateSitesChip();
         SyncSiteMarks();
@@ -74,6 +75,8 @@ public sealed partial class MainWindow
         var bulk = SiteTransferRules.BulkPause(_siteTransfers);
         var label = bulk?.Label ?? "Pause transfers";
         SitesPauseAllButton.IsEnabled = bulk is not null;
+        SiteMenuPause.IsEnabled = bulk is not null;
+        SiteMenuPause.Text = label;
         if (SitesPauseAllLabel.Text == label) return;
         SitesPauseAllLabel.Text = label;
         SitesPauseAllIcon.Glyph = bulk?.Type == SitesMessageTypes.TransferResume ? "\uE768" : "\uE769";
@@ -155,21 +158,8 @@ public sealed partial class MainWindow
 
     // ---- Download and Upload ----------------------------------------------------------------------------
 
-    private async void SitesDownloadButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_sitesPanel is not { Site: { } site } panel) return;
-        var names = panel.SelectedNames;
-        if (names.Count == 0) return;
-        var folder = site.LocalFolder is { Length: > 0 } linked ? linked : LocalSettings?.DefaultDownloadDirectory ?? "";
-        var choice = await AskTransferAsync($"Download {SiteTransferRules.WhatText(names)} from {site.Name}", folder, folderEditable: true,
-            $"From {panel.Path}");
-        if (choice is not { } chosen) return;
-        await StartSiteTransferAsync(new SiteTransferStartRequest
-        {
-            SiteId = site.Id, Direction = "download", RemoteFolder = panel.Path, LocalFolder = chosen.Folder, Names = names,
-            Conflict = chosen.Conflict,
-        });
-    }
+    // SITES.11 R2b: no dialog; to the linked folder, or by the Host's category rules (SiteDownloadAsync).
+    private void SitesDownloadButton_Click(object sender, RoutedEventArgs e) => _ = SiteDownloadAsync(askFolder: false);
 
     private async void SitesUploadFiles_Click(object sender, RoutedEventArgs e)
     {
@@ -223,19 +213,36 @@ public sealed partial class MainWindow
         await UploadAsync(site, panel.Path, parent, [new SiteTransferNameDto { Name = name, IsFolder = true }]);
     }
 
-    private async Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names)
+    /// <summary>
+    /// Uploads <paramref name="names"/> into <paramref name="remoteFolder"/>. The names are checked against the server listing
+    /// shown (what is loaded so far); when some are there the batch is asked about once.
+    /// </summary>
+    private Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names) =>
+        OnceAsync(() => UploadCoreAsync(site, remoteFolder, localFolder, names));
+
+    private async Task UploadCoreAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names)
     {
-        var choice = await AskTransferAsync($"Upload {SiteTransferRules.WhatText(names)} to {site.Name}", remoteFolder, folderEditable: false,
-            $"From {localFolder}", primary: "Upload");
-        if (choice is not { } chosen) return;
+        // Compared without case (a server may not tell "A.iso" from "a.iso"); a folder whose pages are not all loaded is
+        // asked about anyway, since what isn't listed may be there.
+        var shown = _sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == SitesBrowseRules.Normalize(remoteFolder);
+        var there = SitesCommandRules.AlreadyThere(names, shown ? _sitesPanel!.ShownNames : [], ignoreCase: true);
+        var complete = shown && _sitesPanel!.ListingComplete;
+        var conflict = SitesCommandRules.Skip;
+        if (SitesCommandRules.ConflictQuestion(there, $"{SitesBrowseRules.Normalize(remoteFolder)} on {site.Name}", names.Any(name => name.IsFolder), complete) is { } ask)
+        {
+            if (await AskConflictAsync(ask) is not { } chosen) return;
+            conflict = chosen;
+        }
+
         await StartSiteTransferAsync(new SiteTransferStartRequest
         {
             SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = names,
-            Conflict = chosen.Conflict,
+            Conflict = conflict,
         });
     }
 
-    private async Task StartSiteTransferAsync(SiteTransferStartRequest request)
+    /// <summary>Starts a batch; the batch as the Host reports it, or null when it did not start (the reason is shown).</summary>
+    private async Task<SiteTransferDto?> StartSiteTransferAsync(SiteTransferStartRequest request)
     {
         SitesDownloadButton.IsEnabled = false;
         SitesUploadButton.IsEnabled = false;
@@ -246,13 +253,14 @@ public sealed partial class MainWindow
             {
                 await ShowSitesMessageAsync(request.Direction == "download" ? "Download" : "Upload",
                     SitesBrowseRules.PointsToOptions(reply.Problem)
-                        ? (reply.Message ?? "The site needs attention.") + " Check it in Options > Sites."
+                        ? (reply.Message ?? "The remote needs attention.") + " Check it in Options > Sites."
                         : reply.Message ?? "The transfer could not start.");
-                return;
+                return null;
             }
 
             if (reply.Transfer is { } added && _siteTransfers.All(t => t.Id != added.Id)) ApplySiteTransfers([.. _siteTransfers, added]);
             TransfersBar.OpenAtBest();
+            return reply.Transfer;
         }
         finally
         {
@@ -260,76 +268,12 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>The target folder (editable for a download) and "If a file is already there"; null when cancelled.</summary>
-    private async Task<(string Folder, string Conflict)?> AskTransferAsync(string title, string folder, bool folderEditable, string from,
-        string primary = "Download", string? header = null)
-    {
-        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
-        panel.Children.Add(new TextBlock { Text = from, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 });
-        var folderBox = new TextBox
-        {
-            Header = header ?? (folderEditable ? "Save in this folder on this PC" : "Into this folder on the site"),
-            Text = folder, IsReadOnly = !folderEditable,
-        };
-        if (folderEditable)
-        {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
-            browse.Click += async (_, _) =>
-            {
-                try
-                {
-                    if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), start: folderBox.Text) is { } picked) folderBox.Text = picked;
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-                {
-                    // The box still takes a typed folder.
-                    folderBox.Header = "Folder on this PC (the folder picker could not open; type the folder)";
-                }
-            };
-            Grid.SetColumn(browse, 1);
-            row.Children.Add(folderBox);
-            row.Children.Add(browse);
-            panel.Children.Add(row);
-        }
-        else
-        {
-            panel.Children.Add(folderBox);
-        }
-
-        var conflict = new ComboBox { Header = "If a file is already there", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var (_, label) in SiteTransferRules.Conflicts) conflict.Items.Add(label);
-        conflict.SelectedIndex = 0;
-        panel.Children.Add(conflict);
-        panel.Children.Add(new TextBlock
-        {
-            Text = "A file that was stopped part way starts again from the beginning.",
-            TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.8,
-        });
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = title,
-            Content = panel,
-            PrimaryButtonText = primary,
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        folderBox.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = !folderEditable || System.IO.Path.IsPathFullyQualified(folderBox.Text.Trim());
-        dialog.IsPrimaryButtonEnabled = !folderEditable || System.IO.Path.IsPathFullyQualified(folderBox.Text.Trim());
-        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return null;
-        var index = Math.Max(0, conflict.SelectedIndex);
-        return (folderEditable ? folderBox.Text.Trim() : folder, SiteTransferRules.Conflicts[index].Value);
-    }
 
     private async Task ShowSitesMessageAsync(string title, string message)
     {
         var dialog = new ContentDialog
         {
-            XamlRoot = Content.XamlRoot,
+            XamlRoot = Content?.XamlRoot,
             Title = title,
             Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
             CloseButtonText = "OK",

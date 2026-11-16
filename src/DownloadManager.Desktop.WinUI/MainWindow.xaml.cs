@@ -251,7 +251,13 @@ public sealed partial class MainWindow : Window
         AddShortcut(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () => ApplySort("size", ascending: false));
+            () =>
+            {
+                // In the Sites view the key is Download to…, wherever the keyboard is (a toolbar or sidebar click leaves it
+                // outside the panes); elsewhere it sorts by size.
+                if (_sitesShown) SitesKeyDownloadTo();
+                else ApplySort("size", ascending: false);
+            });
         // UI.R26: Ctrl+Shift+O opens the server switcher; Ctrl+0 shows this PC and Ctrl+1 to Ctrl+9 the saved servers.
         AddShortcut(
             Windows.System.VirtualKey.O,

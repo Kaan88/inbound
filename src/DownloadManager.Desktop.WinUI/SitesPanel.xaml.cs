@@ -145,6 +145,7 @@ public sealed partial class SitesPanel : UserControl
         LostFocus += OnLostFocus;
         // The list takes Enter for itself (Uno marks it handled before it reaches the panel), so Enter is read on the way in.
         ItemsList.PreviewKeyDown += ItemsList_PreviewKeyDown;
+        ItemsList.ContextRequested += ItemsList_ContextRequested;
         // SITES.4: Download follows what is selected.
         ItemsList.SelectionChanged += (_, e) =>
         {
@@ -362,11 +363,12 @@ public sealed partial class SitesPanel : UserControl
     /// <summary>Ctrl+F in Server only: the keyboard goes to the Filter box.</summary>
     internal void FocusFilter() => Bar.FocusFilter();
 
-    internal async Task ToggleStarAsync()
+    /// <summary>Stars or unstars <paramref name="folder"/> (a folder row of the list), or the folder shown with null.</summary>
+    internal async Task ToggleStarAsync(string? folder = null)
     {
         if (_site is not { } site || Star is null) return;
-        var want = !IsStarred;
-        var path = _path;
+        var path = folder ?? _path;
+        var want = !SitesBrowseRules.IsStarred(site.Stars, path);
         SiteResultDto result;
         try
         {
@@ -1106,7 +1108,8 @@ public sealed partial class SitesPanel : UserControl
 
     private void BuildCrumbs()
     {
-        var crumbs = SitesBrowseRules.Crumbs(_path);
+        // The folder asked for, also while it fails (or has not answered): the start folder stands in for the Host's own answer.
+        var crumbs = SitesBrowseRules.Crumbs(SitesCommandRules.AskedPath(_atStart, _site?.RemoteFolder, _path));
         var parts = new List<(string Text, string Key)>();
         for (var index = 0; index < crumbs.Count; index++)
             parts.Add((index == 0 ? (_site?.Name is { Length: > 0 } name ? name : "/") : crumbs[index].Name, crumbs[index].Path));
@@ -1139,7 +1142,18 @@ public sealed partial class SitesPanel : UserControl
         if (sender is FrameworkElement { Tag: string path }) OpenFolder(path);
     }
 
-    private void ItemsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e) => OpenSelectedFolder();
+    private void ItemsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        // Only a double click on a row acts: empty space or the scrollbar leaves the selection alone.
+        if (RowOf(e.OriginalSource as DependencyObject) is null) return;
+        ActivateSelection();
+    }
+
+    /// <summary>The window manages another Inbound server: Open and Download to… are left out of the menu.</summary>
+    internal bool OtherServer { get; set; }
+
+    /// <summary>Every page of the folder shown is loaded (an upload's "already there" check can trust the names).</summary>
+    internal bool ListingComplete => !_loading && !_failed && _rows.Count >= _total;
 
     private void ItemsList_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -1154,8 +1168,9 @@ public sealed partial class SitesPanel : UserControl
                 DeleteRequested?.Invoke();
                 e.Handled = true;
                 break;
-            case VirtualKey.Enter when ItemsList.SelectedItems.Count == 1 && ItemsList.SelectedItem is SiteItemRow { IsFolder: true }:
-                OpenSelectedFolder();
+            // Ctrl+Enter is Open (the window's); a plain Enter opens a folder or downloads at once, with no dialog.
+            case VirtualKey.Enter when ItemsList.SelectedItems.Count > 0 && !InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
+                ActivateSelection();
                 e.Handled = true;
                 break;
             // Uno's list does not move on Home and End; WinUI's does the same thing.
@@ -1169,12 +1184,104 @@ public sealed partial class SitesPanel : UserControl
         }
     }
 
-    /// <summary>Enter or a double click: a folder opens, ".." goes up.</summary>
-    private void OpenSelectedFolder()
+    /// <summary>A command of the context menu (and Enter on a file) the window carries out.</summary>
+    internal event Action<SiteCommand>? CommandRequested;
+
+    /// <summary>Goes to <paramref name="path"/> of this site ("Paste address", an open request).</summary>
+    internal void GoTo(string path) => OpenFolder(SitesBrowseRules.Normalize(path));
+
+    /// <summary>The folder row that is selected alone, or null: what "Open" opens in the pane.</summary>
+    internal string? SelectedFolderPath =>
+        SelectedRows.Take(2).ToList() is [{ IsFolder: true } only] ? SitesBrowseRules.Join(_path, only.Name) : null;
+
+    /// <summary>
+    /// Enter or a double click (decisions 1 and 2): ".." goes up, a folder opens, files download at once with no dialog.
+    /// </summary>
+    private void ActivateSelection()
     {
-        if (ItemsList.SelectedItem is not SiteItemRow { IsFolder: true } row) return;
-        if (row.IsParent) GoUp();
-        else OpenFolder(SitesBrowseRules.Join(_path, row.Name));
+        var lines = ItemsList.SelectedItems.OfType<SiteItemRow>().Select(row => row.Line).ToList();
+        switch (SitesCommandRules.Activate(lines))
+        {
+            case ActivateAction.GoUp:
+                GoUp();
+                break;
+            case ActivateAction.OpenFolder:
+                if (SelectedFolderPath is { } folder) OpenFolder(folder);
+                break;
+            case ActivateAction.Download:
+                CommandRequested?.Invoke(SiteCommand.Download);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Right click (the row under the pointer is selected first unless it already is), Shift+F10 or the menu key (the
+    /// selection). Items the site cannot do are left out; ".." and empty space show the empty-space menu.
+    /// </summary>
+    private void ItemsList_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
+    {
+        if (_site is null || _loading || ItemsList.Visibility != Visibility.Visible) return;
+        var byPointer = e.TryGetPosition(ItemsList, out var point);
+        if (byPointer)
+        {
+            var under = RowOf(e.OriginalSource as DependencyObject);
+            if (under is null)
+            {
+                if (ItemsList.SelectedItems.Count > 0) ItemsList.SelectedItems.Clear();
+            }
+            else if (!ItemsList.SelectedItems.Contains(under))
+            {
+                ItemsList.SelectedItems.Clear();
+                ItemsList.SelectedItems.Add(under);
+            }
+        }
+
+        var menu = BuildContextMenu();
+        e.Handled = true;
+        if (byPointer)
+        {
+            menu.ShowAt(ItemsList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
+            return;
+        }
+
+        var selected = ItemsList.SelectedIndex >= 0 ? ItemsList.ContainerFromIndex(ItemsList.SelectedIndex) as FrameworkElement : null;
+        menu.ShowAt(selected ?? ItemsList);
+    }
+
+    private SiteItemRow? RowOf(DependencyObject? node)
+    {
+        for (; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is ListViewItem item) return ItemsList.ItemFromContainer(item) as SiteItemRow;
+        }
+
+        return null;
+    }
+
+    private MenuFlyout BuildContextMenu()
+    {
+        var menu = new MenuFlyout();
+        var groups = SitesCommandRules.ServerMenu(_site?.Capabilities, ItemsList.SelectedItems.OfType<SiteItemRow>().Select(row => row.Line), OtherServer);
+        var folderRow = SelectedRows.Take(2).ToList() is [{ IsFolder: true } only] ? SitesBrowseRules.Join(_path, only.Name) : null;
+        foreach (var group in groups)
+        {
+            if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+            foreach (var command in group)
+            {
+                var starred = command == SiteCommand.StarFolder && SitesBrowseRules.IsStarred(_site?.Stars, folderRow);
+                var item = new MenuFlyoutItem { Text = starred ? "Unstar this folder" : SitesCommandRules.Label(command) };
+                if (SitesCommandRules.KeyText(command) is { Length: > 0 } key) item.KeyboardAcceleratorTextOverride = CommandKey.Text(key);
+                var chosen = command;
+                item.Click += (_, _) =>
+                {
+                    if (chosen == SiteCommand.StarFolder) _ = ToggleStarAsync(folderRow);
+                    else CommandRequested?.Invoke(chosen);
+                };
+                menu.Items.Add(item);
+            }
+        }
+
+        return menu;
     }
 
     private void RetryButton_Click(object sender, RoutedEventArgs e) => RetryNow();

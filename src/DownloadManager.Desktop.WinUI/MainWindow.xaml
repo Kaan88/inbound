@@ -111,6 +111,34 @@
                 <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
             </MenuBarItem>
 
+            <!-- SITES.11 R2b: the Remote menu, only while a remote is shown. The keys are read by the Sites view (they work only while it
+                 has the keyboard, never in a text box); the menu shows them as text. -->
+            <MenuBarItem x:Name="SiteMenu" Title="Remote" AccessKey="R" Visibility="Collapsed">
+                <MenuFlyoutItem x:Name="SiteMenuDownload" Text="Download" AccessKey="D" Tag="Download" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDownloadTo" Text="Download to…" AccessKey="T" Tag="DownloadTo" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuOpen" Text="Open" AccessKey="O" Tag="Open" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuUpload" Text="Upload files…" AccessKey="U" Tag="Upload" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuUploadFolder" Text="Upload a folder…" AccessKey="F" Tag="UploadFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuNewFolder" Text="New folder" AccessKey="N" Tag="NewFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuRename" Text="Rename" AccessKey="E" Tag="Rename" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDelete" Text="Delete on server…" AccessKey="V" Tag="Delete" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuRefresh" Text="Refresh" AccessKey="H" Tag="Refresh" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuStar" Text="Star this folder" AccessKey="S" Tag="StarFolder" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSubItem x:Name="SiteMenuStarred" Text="Starred folders" AccessKey="L" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuTwoPanes" Text="Two panes" AccessKey="P" Tag="TwoPanes" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuCopyAddress" Text="Copy address" AccessKey="C" Tag="CopyAddress" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuPause" Text="Pause transfers" AccessKey="A" Tag="Pause" Click="SiteMenuItem_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuEdit" Text="Edit remote" AccessKey="I" Tag="Edit" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuOptions" Text="Options" AccessKey="Y" Tag="Options" Click="SiteMenuItem_Click" />
+            </MenuBarItem>
+
             <MenuBarItem Title="View" AccessKey="V">
                 <MenuFlyoutItem Text="Statistics…" AccessKey="S" Click="MenuStatistics_Click" />
                 <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" AccessKey="G" IsChecked="True" Click="MenuSpeedGraph_Click" />
@@ -120,11 +148,9 @@
                 <MenuFlyoutSubItem Text="Arrange Files" AccessKey="A">
                     <MenuFlyoutItem Text="By Order of Addition" AccessKey="A" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" AccessKey="N" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
-                        <MenuFlyoutItem.KeyboardAccelerators>
-                            <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
-                        </MenuFlyoutItem.KeyboardAccelerators>
-                    </MenuFlyoutItem>
+                    <!-- Ctrl+Shift+S is the window's accelerator (MainWindow.xaml.cs): sort by size, or Download to… in Sites. -->
+                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click"
+                                    KeyboardAcceleratorTextOverride="Ctrl+Shift+S" />
                     <MenuFlyoutItem Text="By Status" AccessKey="T" Tag="status" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Transfer Rate" AccessKey="R" Tag="rate" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Last Try Date" AccessKey="L" Tag="lastTry" Click="MenuSort_Click" />
@@ -323,6 +349,14 @@
                             </StackPanel>
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                        <Button x:Name="SitesRefreshButton" AutomationProperties.Name="Refresh" Style="{StaticResource InboundToolButtonStyle}" Click="SitesRefreshButton_Click"
+                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the site again (F5)">
+                            <StackPanel>
+                                <FontIcon Glyph="&#xE72C;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
+                                <TextBlock Text="Refresh" Style="{StaticResource InboundToolLabelStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                         <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
                         <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
                                 Click="SitesPauseAllButton_Click" IsEnabled="False"
@@ -333,36 +367,18 @@
                             </StackPanel>
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <Button x:Name="SitesUpButton" AutomationProperties.Name="Up" Style="{StaticResource InboundToolButtonStyle}" Click="SitesUpButton_Click"
-                                AutomationProperties.AcceleratorKey="Backspace" ToolTipService.ToolTip="Go to the folder above (Backspace)">
+                        <Button x:Name="SitesEditSiteButton" AutomationProperties.Name="Edit remote" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesEditSiteButton_Click" IsEnabled="False" ToolTipService.ToolTip="Change this remote's address, user, password and folders">
                             <StackPanel>
-                                <FontIcon Glyph="&#xE74A;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                                <TextBlock Text="Up" Style="{StaticResource InboundToolLabelStyle}" />
+                                <FontIcon Glyph="&#xE839;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Edit remote" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
-                        <Button x:Name="SitesRefreshButton" AutomationProperties.Name="Refresh" Style="{StaticResource InboundToolButtonStyle}" Click="SitesRefreshButton_Click"
-                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the site again (F5)">
+                        <Button x:Name="SitesOptionsButton" AutomationProperties.Name="Options" Style="{StaticResource InboundToolButtonStyle}"
+                                Click="SitesOptionsButton_Click" ToolTipService.ToolTip="Open Options on the Sites page">
                             <StackPanel>
-                                <FontIcon Glyph="&#xE72C;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
-                                <TextBlock Text="Refresh" Style="{StaticResource InboundToolLabelStyle}" />
-                            </StackPanel>
-                        </Button>
-                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <Button x:Name="SitesStarButton" AutomationProperties.Name="Star folder" Style="{StaticResource InboundToolButtonStyle}" Click="SitesStarButton_Click"
-                                ToolTipService.ToolTip="Star this folder to find it again in this site's Starred list">
-                            <StackPanel>
-                                <FontIcon x:Name="SitesStarIcon" Glyph="&#xE734;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
-                                <TextBlock x:Name="SitesStarLabel" Text="Star" Style="{StaticResource InboundToolLabelStyle}" />
-                            </StackPanel>
-                        </Button>
-                        <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                        <!-- SITES.5: this PC's folders beside the server's, with arrows between them. Remembered. -->
-                        <!-- R2a: the view switch above the panes replaces this button; it stays hidden until stage R2b removes it. -->
-                        <Button x:Name="SitesTwoPanesButton" Visibility="Collapsed" AutomationProperties.Name="Two panes" Style="{StaticResource InboundToolButtonStyle}"
-                                Click="SitesTwoPanesButton_Click" ToolTipService.ToolTip="Show a folder of this PC beside the server's">
-                            <StackPanel>
-                                <FontIcon Glyph="&#xE89F;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                                <TextBlock x:Name="SitesTwoPanesLabel" Text="Two panes" Style="{StaticResource InboundToolLabelStyle}" />
+                                <FontIcon Glyph="&#xE713;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                                <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
