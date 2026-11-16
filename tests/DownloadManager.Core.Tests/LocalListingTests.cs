@@ -99,4 +99,78 @@ public sealed class LocalListingTests : IDisposable
         Assert.False(SiteTransferRules.LocalInUse(transfers, @"C:\Old"));
         Assert.True(SiteTransferRules.LocalInUse([Batch("paused", "upload", @"C:\Up")], @"C:\Up"));
     }
+
+    // ---- SITES.11 R2a ----
+
+    [Theory]
+    [InlineData("big.bin.63642737.partial", true)]
+    [InlineData("c1.bin.b1dc66bb.partial", true)]
+    [InlineData("report.old.partial", false)]
+    [InlineData("x.6364273.partial", false)]
+    [InlineData("x.636427377.partial", false)]
+    [InlineData("x.6364273G.partial", false)]
+    [InlineData("x.63642737.partial.txt", false)]
+    [InlineData(".63642737.partial", true)]
+    [InlineData("a.partial", false)]
+    public void OnlyARunningTransfersPartialFileIsHidden(string name, bool hidden)
+        => Assert.Equal(hidden, LocalListing.IsTransferPartial(name));
+
+    [Fact]
+    public void ReadHidesAPartialFileButKeepsAFolderWithThatName()
+    {
+        File.WriteAllText(Path.Combine(_root, "keep.iso"), "x");
+        File.WriteAllText(Path.Combine(_root, "keep.iso.63642737.partial"), "x");
+        File.WriteAllText(Path.Combine(_root, "mine.old.partial"), "x");
+        Directory.CreateDirectory(Path.Combine(_root, "dir.63642737.partial"));
+        var (entries, problem) = LocalListing.Read(_root);
+        Assert.Null(problem);
+        Assert.Equal(["dir.63642737.partial", "keep.iso", "mine.old.partial"], entries.Select(entry => entry.Name));
+    }
+
+    [Fact]
+    public void ColumnsSortWithFoldersFirst()
+    {
+        var folder = new LocalEntry("zz", true, -1, null);
+        var small = new LocalEntry("b", false, 1, new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero));
+        var big = new LocalEntry("a", false, 9, new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero));
+        List<string> Order(string key, bool ascending)
+        {
+            var list = new List<LocalEntry> { big, small, folder };
+            list.Sort((x, y) => LocalListing.Compare(x, y, key, ascending));
+            return list.Select(entry => entry.Name).ToList();
+        }
+
+        Assert.Equal(["zz", "b", "a"], Order(SitesBrowseRules.SortSize, true));
+        Assert.Equal(["zz", "a", "b"], Order(SitesBrowseRules.SortSize, false));
+        Assert.Equal(["zz", "a", "b"], Order(SitesBrowseRules.SortModified, true));
+        Assert.Equal(["zz", "a", "b"], Order(SitesBrowseRules.SortName, true));
+    }
+
+    [Fact]
+    public void CrumbsSplitAPathIntoItsFolders()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var crumbs = LocalListing.Crumbs(@"D:\Downloads\ISOs");
+        Assert.Equal(["D:", "Downloads", "ISOs"], crumbs.Select(crumb => crumb.Name));
+        Assert.Equal([@"D:\", @"D:\Downloads", @"D:\Downloads\ISOs"], crumbs.Select(crumb => crumb.Path));
+        Assert.Equal(["D:"], LocalListing.Crumbs(@"D:\").Select(crumb => crumb.Name));
+        Assert.Equal([@"\\nas\share", "x"], LocalListing.Crumbs(@"\\nas\share\x").Select(crumb => crumb.Name));
+    }
+
+    [Fact]
+    public void StarTogglesAFolderAndKeepsTwentyAtMost()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var stars = LocalListing.ToggleStar([], @"D:\One");
+        Assert.Equal([@"D:\One"], stars);
+        Assert.True(LocalListing.IsStarred(stars, @"d:\one\"));
+        stars = LocalListing.ToggleStar(stars, @"D:\Two");
+        Assert.Equal([@"D:\Two", @"D:\One"], stars);
+        Assert.Equal([@"D:\Two"], LocalListing.ToggleStar(stars, @"d:\ONE"));
+        var many = Enumerable.Range(0, 20).Select(i => $@"D:\F{i}").ToList();
+        var added = LocalListing.ToggleStar(many, @"D:\New");
+        Assert.Equal(20, added.Count);
+        Assert.Equal(@"D:\New", added[0]);
+        Assert.DoesNotContain(@"D:\F19", added);
+    }
 }

@@ -51,6 +51,7 @@ internal sealed partial class SitesOptionsPage
     {
         _client = client;
         _window = window;
+        _current = this;
 
         AutomationProperties.SetName(_enable, "Use Sites");
         AutomationProperties.SetName(_download, "Download rclone");
@@ -144,6 +145,12 @@ internal sealed partial class SitesOptionsPage
     {
         _client.SitesChanged -= OnChanged;
         _closing.Cancel();
+        // A closed page no longer opens dialogs; an edit asked for while it was open and not yet shown is dropped.
+        if (ReferenceEquals(_current, this))
+        {
+            _current = null;
+            _editWanted = null;
+        }
     }
 
     // ---- Loading and showing ---------------------------------------------------------------
@@ -174,6 +181,8 @@ internal sealed partial class SitesOptionsPage
 
         _loadStatus.Show(string.Empty);
         Render();
+        _loaded = true;
+        _ = EditWantedAsync();
     }
 
     private async Task LoadSitesAsync()
@@ -423,7 +432,56 @@ internal sealed partial class SitesOptionsPage
 
     private async Task EditAsync(SiteDto site) => await SaveFormAsync(site);
 
+    // SITES.11 R2a: "Edit site" in the browse pane's trouble state opens this page's edit dialog for the site.
+    private static SitesOptionsPage? _current;
+    private static string? _editWanted;
+
+    // The settings and the sites have been read once, so a wanted edit can be answered.
+    private bool _loaded;
+
+    /// <summary>Asks the page (now, or once it has read the sites) to open the edit dialog of <paramref name="siteId"/>.</summary>
+    internal static void RequestEdit(string siteId)
+    {
+        _editWanted = siteId;
+        if (_current is { } page) _ = page.EditWantedAsync();
+    }
+
+    private async Task EditWantedAsync()
+    {
+        // Until the page has read the settings the request waits (LoadAsync asks again); after that it is answered once:
+        // with Sites off or the site gone (deleted meanwhile) it is dropped rather than opening a dialog later.
+        if (_editWanted is not { } id || !_loaded || _closing.IsCancellationRequested) return;
+        // Another call or dialog of this page is open: the request waits and opens when that ends (RunAsync and the
+        // site dialog ask again), and the page says so rather than doing nothing.
+        if (_busy || DialogOpen())
+        {
+            _siteResult.Say("Edit site opens when the dialog or task open here ends.");
+            return;
+        }
+
+        _editWanted = null;
+        if (_status is not { Enabled: true } || _sites.FirstOrDefault(site => site.Id == id) is not { } site) return;
+        await EditAsync(site);
+    }
+
+    private bool DialogOpen()
+        => _window.Content is FrameworkElement { XamlRoot: { } root }
+            && Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Any(popup => popup.Child is ContentDialog);
+
     private async Task SaveFormAsync(SiteDto? existing)
+    {
+        try
+        {
+            await SaveFormCoreAsync(existing);
+        }
+        finally
+        {
+            // An Edit site asked for while this dialog was open opens now.
+            if (!_closing.IsCancellationRequested && _editWanted is not null) _ = EditWantedAsync();
+        }
+    }
+
+    private async Task SaveFormCoreAsync(SiteDto? existing)
     {
         if (_busy || _status is not { Enabled: true }) return;
         SiteDto? saved;
@@ -746,7 +804,12 @@ internal sealed partial class SitesOptionsPage
         finally
         {
             _busy = false;
-            if (!_closing.IsCancellationRequested) Render();
+            if (!_closing.IsCancellationRequested)
+            {
+                Render();
+                // An Edit site asked for while this ran opens now.
+                if (_editWanted is not null) _ = EditWantedAsync();
+            }
         }
     }
 

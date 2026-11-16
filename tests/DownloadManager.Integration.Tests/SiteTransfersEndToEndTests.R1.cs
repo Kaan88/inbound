@@ -126,6 +126,7 @@ public sealed partial class SiteTransfersEndToEndTests
         _servers.Clear();
         var failed = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = siteId, Path = "/pub", Refresh = true });
         Assert.False(failed.Ok);
+        Assert.Equal(SiteProblems.CantReach, failed.Problem);
         Assert.Equal(SiteReach.Trouble, (await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest, new { })).Sites.Single().Reach);
     }
 

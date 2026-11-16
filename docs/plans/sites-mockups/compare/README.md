@@ -15,6 +15,11 @@ All are dark mode; light mode comes at the end (R7).
 - Test sites: `rclone serve` on 127.0.0.1 (SFTP throttled with `--bwlimit 150k`, WebDAV, FTP, a read-only WebDAV and a
   closed port), with folders seeded to match the mockup's rows.
 
+## R2a (2026-11-17)
+
+`browse-built.png`, `remote-only-built.png` and `trouble-built.png` are now the R2a panes (same method; the trouble
+picture is `nas.home.lan` with its SFTP server stopped). The other built pictures are still R0's.
+
 ## The R0 pairs, and what each built picture is
 
 | Screen | Built picture | Note |

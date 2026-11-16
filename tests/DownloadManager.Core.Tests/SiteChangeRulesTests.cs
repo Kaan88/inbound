@@ -46,10 +46,10 @@ public sealed class SiteChangeRulesTests
     {
         Assert.Equal("Same", SitesBrowseRules.HereText(SiteHereStates.Same));
         Assert.Equal("Older here", SitesBrowseRules.HereText(SiteHereStates.OlderHere));
-        Assert.Equal("Partly here", SitesBrowseRules.HereText(SiteHereStates.SomeOfIt));
+        Assert.Equal("Some of it", SitesBrowseRules.HereText(SiteHereStates.SomeOfIt));
         Assert.Equal("Not here", SitesBrowseRules.HereText(SiteHereStates.NotHere));
         Assert.Equal("Different here", SitesBrowseRules.HereText(SiteHereStates.Different));
-        Assert.Equal("Folder here", SitesBrowseRules.HereText(SiteHereStates.FolderHere));
+        Assert.Equal("", SitesBrowseRules.HereText(SiteHereStates.FolderHere));
         Assert.Equal("", SitesBrowseRules.HereText(null));
         Assert.True(SitesBrowseRules.ShowsHere(new SiteDto { LocalFolder = @"C:\Sites
 as" }));

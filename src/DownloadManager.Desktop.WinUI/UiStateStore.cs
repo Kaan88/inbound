@@ -51,6 +51,12 @@ internal sealed class UiState
 
     /// <summary>SITES.5: the Sites view shows this PC's folders beside the server's.</summary>
     public bool SitesTwoPanes { get; set; }
+
+    /// <summary>SITES.11 R2a: the Linked toggle in the gutter: the This PC pane follows the server pane's folder.</summary>
+    public bool SitesLinked { get; set; } = true;
+
+    /// <summary>SITES.11 R2a: starred folders of the This PC pane, newest first, at most 20.</summary>
+    public List<string> LocalStarredFolders { get; set; } = new();
     /// <summary>View > Dark Mode from before the Theme setting was the source (UI.R23). Moved into the setting once,
     /// then cleared; null when it was never set or has moved.</summary>
     public bool? DarkMode { get; set; }

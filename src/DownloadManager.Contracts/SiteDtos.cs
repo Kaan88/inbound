@@ -691,6 +691,12 @@ public static class SiteProblems
     /// <c>sites.openOnce</c> and the site's <c>Id</c>.
     /// </summary>
     public const string PasswordNeeded = "passwordNeeded";
+
+    /// <summary>
+    /// SITES.11 R2: no connection to the server was made (it did not answer, or refused the TCP connection), so nothing
+    /// was signed in with. A client may try again on its own, a few times; any other failure waits for the user.
+    /// </summary>
+    public const string CantReach = "cantReach";
 }
 
 /// <summary>The values of <see cref="SiteDto.Reach"/>.</summary>

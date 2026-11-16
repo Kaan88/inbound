@@ -1,5 +1,36 @@
 # Progress — session handoff
 
+### Sites rework R2a: the desktop pane area to the mockup, SITES.11 (2026-11-17)
+
+- **Owner:** "Start R2". R2 is split: R2a the panes (this), R2b toolbar, Site menu, context menus, no-dialog
+  download; R2c drag and drop.
+- **Built (Sonnet), reviewed twice (Opus), fixed (Opus), accepted by me:** both panes as the mockup's cards (header
+  with icon, name, kind chip; path row with Up, breadcrumbs, Star, Filter in Server only; sortable Name / Size /
+  Modified / On this PC; ".." row; footer with the selection summary), the "Two panes | Server only" switch with the
+  linked-folders line, the gutter (upload, download, Linked toggle), folder "Some of it" through `sites.here` (batches
+  of 100, kept 2 minutes, cancelled on leaving), the trouble state in the pane (Retry now, Edit site, "Trying again at
+  HH:mm", at most 5 automatic tries or 10 minutes), This PC read off the UI thread, local stars, `.partial` hidden.
+  Files: `SitesPanel`, `LocalPane`, new `PathBar.cs` and `PaneColumnHeader.cs`, `MainWindow.TwoPanes.cs`,
+  `SitesBrowseRules.cs` (rules and `SiteHereCache`), `SitesOptionsPage.cs` (`RequestEdit`).
+- **Host (mine, additive):** `SiteProblems.CantReach`, sent only when no connection was made (`SiteErrorText.DidNotAnswer`:
+  dial tcp failures, TLS handshake timeout), so an automatic retry never sends a password. A folder listing gives up
+  after 60 s ("The server did not answer within 60 seconds.", not cantReach): the screenshot run saw a pane stay on
+  "Loading..." for good after its SFTP server was stopped; the client also ends loading on every path now.
+- **Reviews:** the Fable reviewer hit its usage limit (resets Nov 22), so both R2a reviews were by Opus (CLAUDE.md
+  fallback). First review: 17 findings, all fixed. Second: 9 fixed; not changed: the window, web UI and CLI can each
+  retry the same unreachable server; with cantReach meaning "no connection made" none of those tries signs in.
+- **Pairs:** `docs/plans/sites-mockups/compare/browse-built.png`, `remote-only-built.png`, `trouble-built.png` (taken
+  on the hidden desktop before the second fix round, which changed no layout). Looked at by me. Still different in the
+  pane area: the selected row is the app's own grey highlight, not the mockup's blue bar (rule 4, the main list's
+  style); the trouble state's breadcrumbs show only the site, not the folder asked for; the Filter box has no search
+  icon; no Rights column (decision 5). The toolbar, sidebar, transfers bar and status bar are R2b, R3 and R4.
+- **Tests:** Core 2441, Sites 246 (+20 skipped), Server 202, Integration Sites 141 (+6 skipped, which need other
+  setup) pass. New: `SitesBrowseRulesTests` (footers, dates, filter, sort, ".." never acted on, retry limit and time,
+  connection key, here cache), `SiteErrorTextTests.OnlyAConnectionNeverMadeCountsAsNotAnswering`,
+  `ABrowseOfAServerThatGoesQuietEndsWithinTheLimit`, `CantReach` asserted in the e2e trouble test. Solution build: no
+  warning in a changed file. **Not checked:** focus, timers and loading by sight after the second fix round; light mode
+  (the switch's checked text colour is hard-coded per theme: no token exists).
+
 ### Edge extension published (owner, 2026-11-17)
 
 - Owner: "edge extension is also finally published, it can be updated like chrome and firefox now". Recorded in

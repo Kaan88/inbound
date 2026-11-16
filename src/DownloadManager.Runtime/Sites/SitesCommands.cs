@@ -941,6 +941,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         return result;
     }
 
+    /// <summary>The longest one folder's listing may take before the browse gives up (tests shorten it).</summary>
+    internal static TimeSpan ListTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
     private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderOnceAsync(SiteRecord site, string path, CancellationToken cancellationToken)
     {
         RcloneLease lease;
@@ -958,16 +961,25 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             try
             {
                 var fs = await SiteRemote.BuildAsync(site, lease.Client, cancellationToken).ConfigureAwait(false);
+                // SITES.11 R2: a server that stops answering mid-way must not leave a browse waiting for ever.
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                limit.CancelAfter(ListTimeout);
                 var listing = await lease.Client.CallAsync("operations/list", new JsonObject
                 {
                     ["fs"] = fs,
                     ["remote"] = SitePaths.ToRemote(path),
                     // Without MIME types rclone need not look at each file's name; Sites shows none.
                     ["opt"] = new JsonObject { ["noMimeType"] = true },
-                }, cancellationToken).ConfigureAwait(false);
+                }, limit.Token).ConfigureAwait(false);
                 if (listing["list"] is JsonArray { Count: > MaxListingItems } big)
                     return (null, Fail($"The folder holds {big.Count:N0} items, more than Sites can show ({MaxListingItems:N0})."));
                 return (SiteListing.Read(listing), null);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Not cantReach: it may have connected and signed in before going quiet, so the client does not retry on its own.
+                SetReach(site.Id, SiteReach.Trouble);
+                return (null, Fail($"The server did not answer within {ListTimeout.TotalSeconds:0} seconds."));
             }
             catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
             {
@@ -1011,10 +1023,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
                 // Only a connection-class failure says the site is in trouble; rclone not running here does not.
-                if (e is RcloneCallException call && (SiteErrorText.CantReach(call.Message) || SiteErrorText.RefusesTheSite(call.Message)))
+                var call = e as RcloneCallException;
+                if (call is not null && (SiteErrorText.CantReach(call.Message) || SiteErrorText.RefusesTheSite(call.Message)))
                     SetReach(site.Id, SiteReach.Trouble);
                 // RcloneClient has already redacted the text.
-                return (null, Fail(SiteErrorText.Friendly(e.Message)));
+                var failure = Fail(SiteErrorText.Friendly(e.Message));
+                // Only a server that did not answer may be retried by a client on its own: a refused sign-in retried would
+                // send the wrong password again and again (lockouts, fail2ban).
+                if (call is not null && SiteErrorText.DidNotAnswer(call.Message)) failure.Problem = SiteProblems.CantReach;
+                return (null, failure);
             }
         }
     }

@@ -179,7 +179,14 @@ public sealed partial class MainWindow
             // On the provider client's connections of their own: a slow listing never holds up the window's main connection.
             Browse = (request, token) => _remote.BrowseSiteAsync(request, token),
             Star = request => _remote.StarSiteFolderAsync(request),
+            HereLookup = (request, token) => _remote.SiteHereAsync(request, token),
             OpenSitesOptions = OpenSitesOptionsHook,
+        };
+        panel.EditSiteRequested += site =>
+        {
+            // The same edit dialog Options > Sites uses for this site.
+            SitesOptionsPage.RequestEdit(site.Id);
+            OpenSitesOptionsHook();
         };
         panel.StateChanged += UpdateSitesToolbar;
         WireSiteChanges(panel);
@@ -190,7 +197,7 @@ public sealed partial class MainWindow
             if (at >= 0) _sites[at] = updated;
             SyncSiteEntryPoints();
         };
-        SitesHost.Children.Add(panel);
+        AddSitesPanel(panel);
         _sitesPanel = panel;
         ApplyTwoPanes();
         return panel;
@@ -297,7 +304,7 @@ public sealed partial class MainWindow
 
     private void SitesUpButton_Click(object sender, RoutedEventArgs e) => _sitesPanel?.GoUp();
 
-    private void SitesRefreshButton_Click(object sender, RoutedEventArgs e) => _sitesPanel?.Reload();
+    private void SitesRefreshButton_Click(object sender, RoutedEventArgs e) => _sitesPanel?.Refresh();
 
     private void SitesStarButton_Click(object sender, RoutedEventArgs e)
     {

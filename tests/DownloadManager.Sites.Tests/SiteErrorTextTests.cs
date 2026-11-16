@@ -54,4 +54,16 @@ public sealed class SiteErrorTextTests
         Assert.Equal(refuses, SiteErrorText.RefusesTheSite(message));
         Assert.Equal(cantReach, SiteErrorText.CantReach(message));
     }
+
+    [Theory]
+    [InlineData("rclone operations/list failed (500): NewFs: couldn't connect SSH: dial tcp 127.0.0.1:52299: connect: connection refused", true)]
+    [InlineData("rclone operations/list failed (500): Get \"https://dav.example/\": dial tcp: lookup dav.example: no such host", true)]
+    [InlineData("rclone operations/list failed (500): Get \"https://dav.example/\": net/http: TLS handshake timeout", true)]
+    // Connected, then failed: may have been after a password was sent (a ban, a reset, FTP 421), so not retried on its own.
+    [InlineData("rclone operations/list failed (500): NewFs: couldn't connect SSH: ssh: handshake failed: EOF", false)]
+    [InlineData("rclone operations/list failed (500): NewFs: failed to make FTP connection to \"127.0.0.1:21\": 421 Too many connections", false)]
+    [InlineData("rclone operations/list failed (500): NewFs: couldn't connect SSH: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]", false)]
+    [InlineData("rclone operations/list failed (500): 401 Unauthorized: ", false)]
+    public void OnlyAConnectionNeverMadeCountsAsNotAnswering(string message, bool didNotAnswer) =>
+        Assert.Equal(didNotAnswer, SiteErrorText.DidNotAnswer(message));
 }

@@ -357,7 +357,8 @@
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                         <!-- SITES.5: this PC's folders beside the server's, with arrows between them. Remembered. -->
-                        <Button x:Name="SitesTwoPanesButton" AutomationProperties.Name="Two panes" Style="{StaticResource InboundToolButtonStyle}"
+                        <!-- R2a: the view switch above the panes replaces this button; it stays hidden until stage R2b removes it. -->
+                        <Button x:Name="SitesTwoPanesButton" Visibility="Collapsed" AutomationProperties.Name="Two panes" Style="{StaticResource InboundToolButtonStyle}"
                                 Click="SitesTwoPanesButton_Click" ToolTipService.ToolTip="Show a folder of this PC beside the server's">
                             <StackPanel>
                                 <FontIcon Glyph="&#xE89F;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />

@@ -51,7 +51,8 @@ public sealed partial class MainWindow
             && (SiteTransferRules.UploadLanded(before, transfers, shown.Id, panel.Path)
                 || SitesBrowseRules.ShowsHere(shown) && SiteTransferRules.DownloadLandedFrom(before, transfers, shown.Id)))
         {
-            panel.Reload();
+            // What is on this PC changed: the "On this PC" answers are asked for again, not reused.
+            panel.Refresh();
         }
 
         // A download into the folder the This PC pane shows finished: read it again.

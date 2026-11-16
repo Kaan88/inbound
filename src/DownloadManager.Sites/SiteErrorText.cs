@@ -40,6 +40,24 @@ public static class SiteErrorText
     /// Audit 2026-11-15: the server could not be reached at all (SFTP, FTP, or a connection any kind makes over TCP), as
     /// opposed to a failure of one file. A transfer waits for the server to come back instead of using up each file's tries.
     /// </summary>
+    /// <summary>
+    /// SITES.11 R2 review: the connection itself was never made (no TCP connection, or the TLS handshake timed out), so no
+    /// password or key reached the server. Narrower than <see cref="CantReach"/>: a handshake that failed after connecting
+    /// (a ban, a reset) is left out, because a client may try this again on its own.
+    /// </summary>
+    public static bool DidNotAnswer(string message)
+    {
+        if (RefusesTheSite(message)) return false;
+        if (Has(message, "TLS handshake timeout")) return true;
+        var dial = message.IndexOf("dial tcp", StringComparison.OrdinalIgnoreCase);
+        if (dial < 0) return false;
+        var cause = message[dial..];
+        return Has(cause, "no such host") || Has(cause, "actively refused") || Has(cause, "connection refused")
+            || Has(cause, "did not properly respond") || Has(cause, "i/o timeout") || Has(cause, "timed out")
+            || Has(cause, "no route to host") || Has(cause, "network is unreachable")
+            || Has(cause, "unreachable network") || Has(cause, "unreachable host");
+    }
+
     public static bool CantReach(string message)
     {
         if (RefusesTheSite(message)) return false;

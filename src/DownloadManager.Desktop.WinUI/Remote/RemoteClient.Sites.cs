@@ -96,6 +96,14 @@ internal sealed partial class RemoteClient
         return reply.Value ?? new SiteBrowseResultDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
     }
 
+    /// <summary>
+    /// SITES.11: "On this PC" for the folders of one page (<c>sites.here</c>), asked once per page. Null when the Host
+    /// could not say; the browse's own value then stands.
+    /// </summary>
+    public async Task<SiteHereResultDto?> SiteHereAsync(SiteHereRequest request, CancellationToken cancellationToken = default)
+        => (await SitesSlowAsync<SiteHereRequest, SiteHereResultDto>(SitesMessageTypes.Here, request, SitesMessageTypes.HereResult,
+            SitesTestTime, cancellationToken).ConfigureAwait(false)).Value;
+
     /// <summary>Stars or unstars a folder; the answer's <c>Site</c> has the new list of stars.</summary>
     public async Task<SiteResultDto> StarSiteFolderAsync(SiteStarRequest request, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteStarRequest, SiteResultDto>(SitesMessageTypes.Star, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
