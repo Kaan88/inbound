@@ -189,6 +189,24 @@ The server downloads magnets and `.torrent` files itself when the image has the 
   The torrent's state (resume data, the DHT's node list) is kept in `/data/torrents`, so it is in the same backup.
 - The proxy in Options is not used for torrents: they connect directly.
 
+## Sites
+
+The image ships rclone (`/app/tools/rclone/rclone`, the official 1.76.0 build, checked against rclone's signed
+hashes), so Sites works without a download: turn it on in the web UI (Sites in the sidebar, then Use Sites). Saved
+sites, with their passwords and sign-ins sealed, are in `/data/sites`. A newer rclone release is downloaded into
+`/data/tools/rclone` a week after it comes out and checked the same way; one older than the image's is never used.
+
+- **Who may:** every browser signed in with the server's password counts as the admin and may add, change and remove
+  sites. Use my own rclone can't be chosen from a browser.
+- **Folders:** a site's download folder and a transfer's folder must be inside the server's folders
+  (`DOWNLOADMANAGER_ROOTS`), as for downloads.
+- **This device:** a file on a site can be downloaded straight to the browser's device, and a file from the device
+  uploaded to a site; neither touches the server's disk on the way.
+- **Sign-in sites** (Google Drive, OneDrive, Dropbox): rclone's sign-in page listens on the server's own
+  127.0.0.1:53682, which a browser elsewhere can't reach. Use the paste flow the dialog shows: run the
+  `rclone authorize` command it gives on a computer with a browser, and paste the result.
+- linux/amd64 only, like the image.
+
 ## Building the image
 
 ```sh
@@ -238,6 +256,9 @@ All are well under the 100 MB target, and the GC settings save about 4 MiB, so t
 as `docker images` shows it, of which the ASP.NET base is 342 MB; the server and web UI add 3.1 MB and 7-Zip 2.9 MB.
 
 ## Not done in the container
+
+- Sites in the image was built and run once on the owner's test VM (2026-11-15, linux/amd64, ROADMAP SITES.7); the
+  sign-in sites (Drive, OneDrive, Dropbox) were not tried there.
 
 - After an extraction's renames the folder itself is not flushed to disk (Windows does it; Linux skips it), so a
   power cut just then could lose the renames, though not the data.

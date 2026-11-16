@@ -12,6 +12,7 @@ namespace DownloadManager.Desktop.WinUI;
 public sealed partial class MainWindow
 {
     private const string SiteTagPrefix = "site:";
+    private const string SitesHeadingTag = "sites-heading";
 
     private SitesStatusDto? _sitesStatus;
     private List<SiteDto> _sites = [];
@@ -35,8 +36,13 @@ public sealed partial class MainWindow
         });
         connection.ConnectionChanged += (connected, error) =>
         {
-            if (connected && connection == _local) DispatcherQueue.TryEnqueue(() => { _ = ReadSitesAsync(connection); });
+            if (connected && connection == _local) DispatcherQueue.TryEnqueue(() =>
+            {
+                _ = ReadSitesAsync(connection);
+                _ = ReadSiteTransfersAsync(connection);
+            });
         };
+        WireSiteTransfers(connection);
     }
 
     /// <summary>Asks this PC's Host for the switch and the saved sites, once per connection; later changes are pushed.</summary>
@@ -65,6 +71,7 @@ public sealed partial class MainWindow
         _sitesStatus = status;
         _sites = sites;
         SyncSiteEntryPoints();
+        UpdateSitesChip();
         if (!_sitesShown) return;
         var shown = SitesOffered ? _sites.FirstOrDefault(site => site.Id == _shownSiteId) : null;
         if (shown is null) LeaveSites(selectCategory: true);
@@ -75,7 +82,10 @@ public sealed partial class MainWindow
     private void SyncSitesForConnection()
     {
         if (_sitesShown && !SitesOffered) LeaveSites(selectCategory: true);
+        // Two panes shows this PC's folders: it goes while another server is shown, and comes back with this PC.
+        ApplyTwoPanes();
         SyncSiteEntryPoints();
+        UpdateSitesChip();
     }
 
     // ---- Sidebar ----------------------------------------------------------------------------------------
@@ -99,6 +109,34 @@ public sealed partial class MainWindow
             var items = CategoryList.Items.OfType<ListBoxItem>().ToList();
             var anchor = items.FindLastIndex(item => item.Tag is "queues" || (item.Tag is string tag && tag.StartsWith("remote:", StringComparison.Ordinal)));
             var at = anchor + 1;
+
+            // A "Sites" heading above the sites, as the walk asked; not selectable, so the arrow keys pass it.
+            var heading = items.FirstOrDefault(item => item.Tag as string == SitesHeadingTag);
+            if (wanted.Count == 0)
+            {
+                if (heading is not null) CategoryList.Items.Remove(heading);
+            }
+            else
+            {
+                if (heading is null)
+                {
+                    heading = new ListBoxItem
+                    {
+                        Tag = SitesHeadingTag,
+                        IsEnabled = false,
+                        IsTabStop = false,
+                        Padding = new Thickness(14, 8, 8, 2),
+                        MinHeight = 0,
+                        Content = new TextBlock { Text = "Sites", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                    };
+                    AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+                    AutomationProperties.SetName(heading, "Sites");
+                    CategoryList.Items.Insert(Math.Min(at, CategoryList.Items.Count), heading);
+                }
+
+                at = CategoryList.Items.IndexOf(heading) + 1;
+            }
+
             foreach (var site in wanted)
             {
                 var tag = SiteTag(site.Id);
@@ -127,6 +165,8 @@ public sealed partial class MainWindow
         {
             _refreshingCategories = false;
         }
+
+        SyncSiteMarks();
     }
 
     // ---- The view ---------------------------------------------------------------------------------------
@@ -142,6 +182,8 @@ public sealed partial class MainWindow
             OpenSitesOptions = OpenSitesOptionsHook,
         };
         panel.StateChanged += UpdateSitesToolbar;
+        WireSiteChanges(panel);
+        panel.StateChanged += FollowServerFolder;
         panel.SiteUpdated += updated =>
         {
             var at = _sites.FindIndex(site => site.Id == updated.Id);
@@ -150,6 +192,7 @@ public sealed partial class MainWindow
         };
         SitesHost.Children.Add(panel);
         _sitesPanel = panel;
+        ApplyTwoPanes();
         return panel;
     }
 
@@ -191,7 +234,8 @@ public sealed partial class MainWindow
         SitesToolSet.Visibility = Visibility.Visible;
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
-        panel.Open(site, keepPlace ? panel.Path : null);
+        panel.Open(site, keepPlace ? panel.ReopenPath : null);
+        ApplyTwoPanes();
         UpdateSitesToolbar();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, panel.FocusList);
     }
@@ -214,10 +258,11 @@ public sealed partial class MainWindow
         if (selectCategory) SelectSidebarQuietly(_category);
     }
 
-    /// <summary>The speed graph follows its menu item, except in the Sites view, where it is hidden (the Transfers bar comes with SITES.5).</summary>
+    /// <summary>The speed graph follows its menu item, except in the Sites view, where the Transfers bar takes its place (SITES.4).</summary>
     private void UpdateSpeedGraphVisibility()
     {
         SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked && !_sitesShown ? Visibility.Visible : Visibility.Collapsed;
+        TransfersBar.Visibility = _sitesShown ? Visibility.Visible : Visibility.Collapsed;
         UpdateSpeedTimer();
     }
 
@@ -227,9 +272,20 @@ public sealed partial class MainWindow
     {
         if (_sitesPanel is not { } panel || !_sitesShown) return;
         SitesUpButton.IsEnabled = panel.CanGoUp;
+        SitesDownloadButton.IsEnabled = !panel.IsLoading && panel.SelectedNames.Count > 0;
+        SitesUploadButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
+        // SITES.5: one change at a time; Rename takes one item.
+        var selected = panel.SelectedNames.Count;
+        SitesNewFolderButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && !_siteChangeRunning;
+        // SITES.6: an object store has no folder until something is in it, so it offers no New folder.
+        SitesNewFolderButton.Visibility = panel.Site is { } shown && !shown.Capabilities.Contains(SiteCapabilities.NewFolder)
+            ? Visibility.Collapsed : Visibility.Visible;
+        SitesRenameButton.IsEnabled = !panel.IsLoading && selected == 1 && !_siteChangeRunning;
+        SitesDeleteButton.IsEnabled = !panel.IsLoading && selected > 0 && !_siteChangeRunning;
         SitesRefreshButton.IsEnabled = !panel.IsLoading;
         // The Host refuses a star on the root, so the button is off there.
         SitesStarButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && panel.CanGoUp;
+        UpdateTwoPanesArrows();
         var starred = panel.IsStarred;
         SitesStarIcon.Glyph = starred ? "" : "";
         SitesStarLabel.Text = starred ? "Unstar" : "Star";

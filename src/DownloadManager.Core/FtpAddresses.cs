@@ -9,6 +9,9 @@ public static class FtpAddresses
 {
     public const string NotSupported = "FTP addresses aren't supported.";
 
+    /// <summary>SITES.6: where the desktop window sends someone who typed an FTP address: Sites browses FTP servers.</summary>
+    public const string UseSites = "FTP addresses aren't downloaded from here. Add the server under Options > Sites to browse it and download its files.";
+
     public static bool IsFtp(string? address)
         => Uri.TryCreate(address?.Trim(), UriKind.Absolute, out var uri) && IsFtp(uri);
 

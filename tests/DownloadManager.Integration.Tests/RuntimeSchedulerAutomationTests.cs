@@ -223,4 +223,57 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(originalHash, await Hashing.Sha256FileAsync(afterSecond.FinalFilePath));
         Assert.Equal(firstRun.AddMinutes(1), ctx.Service.GetSnapshot().Settings.Schedules.Single(s => s.Id == scheduleId).LastRunAt);
     }
+
+    [Fact]
+    public async Task AScheduleThatAsksForItPausesSiteTransfersAtItsStopAndResumesThemAtItsStart()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var calls = new List<bool>();
+        ctx.Service.AttachSiteSchedule(start => { lock (calls) calls.Add(start); return Task.CompletedTask; });
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto { Id = 1, Name = "Evening", IsRunning = false, MaxConcurrentDownloads = 1, Order = 1 });
+        settings.Queues.Add(new QueueDto { Id = 2, Name = "Other", IsRunning = false, MaxConcurrentDownloads = 1, Order = 2 });
+        var withSites = Guid.NewGuid();
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = withSites, Name = "Evening with sites", QueueId = 1, StartTime = "22:00", StopTime = "23:00", SiteTransfers = true,
+        });
+        // A schedule that does not ask leaves site transfers alone.
+        settings.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Other", QueueId = 2, StartTime = "20:00", StopTime = "21:00" });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.True(ctx.Service.GetSnapshot().Settings.Schedules.Single(s => s.Id == withSites).SiteTransfers);
+
+        var day = new DateTimeOffset(2026, 11, 3, 20, 0, 0, TimeSpan.Zero);
+        await ctx.Service.EvaluateSchedulesAsync(day);
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(1));
+        Assert.Empty(calls);
+
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(2));
+        Assert.Equal([true], calls);
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(3));
+        Assert.Equal([true, false], calls);
+        // The stop acts once.
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(3).AddMinutes(30));
+        Assert.Equal([true, false], calls);
+
+        // The next day the queue is stopped by hand before the stop time: the stop still pauses site transfers.
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(26));
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 1, Action = "stop" })).Ok);
+        await ctx.Service.EvaluateSchedulesAsync(day.AddHours(27));
+        Assert.Equal([true, false, true, false], calls);
+    }
+
+    [Fact]
+    public void AWebSessionCannotChangeWhetherAScheduleHoldsSiteTransfers()
+    {
+        var id = Guid.NewGuid();
+        var current = new SettingsDto { Schedules = [new ScheduleDto { Id = id, SiteTransfers = true }] };
+        var requested = new SettingsDto
+        {
+            Schedules = [new ScheduleDto { Id = id, SiteTransfers = false }, new ScheduleDto { Id = Guid.NewGuid(), SiteTransfers = true }],
+        };
+        DownloadManager.Runtime.Ipc.WebSettingsRules.KeepHostOwned(requested, current);
+        Assert.True(requested.Schedules[0].SiteTransfers);
+        Assert.False(requested.Schedules[1].SiteTransfers);
+    }
 }

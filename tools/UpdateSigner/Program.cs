@@ -68,7 +68,8 @@ if (changelogPath is not null)
         return 2;
     }
 
-    notes = DownloadManager.Contracts.UpdateNotes.From(entry);
+    // MAC.1: Inbound.app's manifests are read only by apps that know "desktop".
+    notes = DownloadManager.Contracts.UpdateNotes.From(entry, spellOutDesktop: !manifestName.StartsWith("manifest-macos-", StringComparison.Ordinal));
     if (DownloadManager.Contracts.UpdateNotes.Problem(notes) is { } problem)
     {
         Console.Error.WriteLine($"The changelog lines of {version} can't go into the manifest: {problem}");

@@ -17,6 +17,12 @@ public sealed record PlatformCapabilities
     /// <summary>A tray icon is there. The hello lists <c>tray</c> only then.</summary>
     public bool SupportsTray { get; init; }
 
+    /// <summary>
+    /// MAC.6: the Host sees a costly network (a phone hotspot, Low Data Mode) and Low Power Mode, so
+    /// <c>pauseOnCostlyNetworkOrLowPower</c> does something. The hello lists <c>savingPauses</c> only then.
+    /// </summary>
+    public bool SupportsSavingPauses { get; init; }
+
     /// <summary><c>host.shutdown</c> ends the process. A server's lifetime belongs to its service manager.</summary>
     public bool SupportsShutdown { get; init; }
 

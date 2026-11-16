@@ -655,3 +655,44 @@ describe('review fixes', () => {
     expect(providerEntries([account(true, true)], [])[0]).toMatchObject({ showWaiting: true, showBrowse: true });
   });
 });
+
+describe('rows kept between updates (PERF.19)', () => {
+  it('keeps the row of a download that did not change, and makes a new one for one that did', () => {
+    const model = emptyModel();
+    const torrent = job('t', 'downloading', { torrent: { name: 't', hasMetadata: true, seeding: false } as unknown as Job['torrent'] });
+    apply(model, { v: 1, id: 'x', type: 'jobs.snapshot', payload: { jobs: [job('a', 'downloading'), job('b', 'queued'), torrent], settings: { downloadGroups: [] }, status: {} } });
+    const first = buildRows(model, 'all', '', new Set());
+    const second = buildRows(model, 'all', '', new Set());
+    const byId = (rows: ReturnType<typeof buildRows>) => new Map(rows.map((row) => [row.id, row]));
+    expect(byId(second).get('a')).toBe(byId(first).get('a'));
+    expect(byId(second).get('b')).toBe(byId(first).get('b'));
+    // A torrent's cells follow the clock, so they are formatted again each time.
+    expect(byId(second).get('t')).not.toBe(byId(first).get('t'));
+
+    apply(model, { v: 1, id: 'y', type: 'job.event', payload: { eventType: 'progress', job: job('a', 'downloading', { receivedBytes: 10, totalBytes: 100 }) } });
+    const third = byId(buildRows(model, 'all', '', new Set()));
+    expect(third.get('a')).not.toBe(byId(second).get('a'));
+    expect(third.get('a')?.view.sizeText).toBe('100 B');
+    expect(third.get('b')).toBe(byId(second).get('b'));
+  });
+});
+
+describe('the jobs table (PERF.19)', () => {
+  it('is replaced on each change and has no prototype, so Svelte does not proxy it', () => {
+    const model = emptyModel();
+    apply(model, { v: 1, id: 'x', type: 'jobs.snapshot', payload: { jobs: [job('a', 'queued')], settings: { downloadGroups: [] }, status: {} } });
+    const first = model.jobs;
+    expect(Object.getPrototypeOf(first)).toBeNull();
+    apply(model, { v: 1, id: 'y', type: 'job.event', payload: { eventType: 'added', job: job('b', 'queued') } });
+    expect(model.jobs).not.toBe(first);
+    expect(Object.getPrototypeOf(model.jobs)).toBeNull();
+    expect(Object.keys(model.jobs).sort()).toEqual(['a', 'b']);
+    expect(Object.keys(first)).toEqual(['a']);
+    apply(model, { v: 1, id: 'z', type: 'job.event', payload: { eventType: 'removed', job: job('a', 'queued') } });
+    expect(Object.keys(model.jobs)).toEqual(['b']);
+    // Removing what isn't there changes nothing.
+    const kept = model.jobs;
+    expect(apply(model, { v: 1, id: 'w', type: 'job.event', payload: { eventType: 'removed', job: job('a', 'queued') } })).toBe(false);
+    expect(model.jobs).toBe(kept);
+  });
+});

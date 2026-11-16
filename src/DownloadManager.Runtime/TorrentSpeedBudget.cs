@@ -3,11 +3,12 @@ using DownloadManager.Core;
 namespace DownloadManager.Runtime;
 
 /// <summary>
-/// T2: the overall speed limit is one budget for HTTP downloads, torrent downloads and torrent uploads
-/// (<see cref="SpeedBudgetSplit"/>). It is split again only while the torrent worker runs, on events that come anyway:
-/// the worker starting or stopping, any download's progress (a torrent's comes about once a second, or every 5 seconds
-/// while no window shows torrents) and a seeding torrent's progress, at most once a second. No timer of its own; with no
-/// worker, HTTP has the whole limit and a progress report costs one lock.
+/// T2: the overall speed limit is one budget for HTTP downloads, torrent downloads, torrent uploads and site transfers
+/// (<see cref="SpeedBudgetSplit"/>). It is split again only while the torrent worker or a site transfer runs, on events
+/// that come anyway: the worker starting or stopping, a site transfer starting or every one ending, any download's
+/// progress (a torrent's comes about once a second, or every 5 seconds while no window shows torrents), a seeding
+/// torrent's progress and a site transfer's, at most once a second. No timer of its own; with neither running, HTTP has
+/// the whole limit and a progress report costs one lock.
 /// </summary>
 public sealed partial class DownloadManagerService
 {
@@ -16,7 +17,10 @@ public sealed partial class DownloadManagerService
     /// <summary>What was last sent to the engines; null before the first.</summary>
     private SpeedShares? _appliedShares;
     /// <summary>The limit, upload cap and worker state the applied shares were made for.</summary>
-    private (long? Limit, long UploadCap, bool Running) _appliedFor;
+    private (long? Limit, long UploadCap, bool Running, bool Sites) _appliedFor;
+    /// <summary>Site transfers (SITES.4): what they run now and how fast, and where their share goes (rclone).</summary>
+    private Func<SpeedDemand>? _siteDemand;
+    private Action<long?>? _applySiteLimit;
     /// <summary>The overall limit and torrent upload cap in force. Only <see cref="ApplySpeedLimits"/> writes them, so a
     /// split that raced a settings change never puts the old ones back.</summary>
     private (long? Limit, long UploadCap) _budgetSettings;
@@ -40,14 +44,32 @@ public sealed partial class DownloadManagerService
         UpdateProgressRate();
     }
 
-    /// <summary>On a download's or a seeding torrent's progress: splits again while the worker runs, at most once a second.</summary>
+    /// <summary>
+    /// Site transfers take part in the overall limit (SITES.4): <paramref name="demand"/> says whether one runs and how fast
+    /// (it must not call back into this service), and <paramref name="apply"/> receives their share (null for no limit).
+    /// While none runs they keep only the floor, so one that starts can't overshoot before the split it triggers.
+    /// </summary>
+    public void AttachSiteTransfers(Func<SpeedDemand> demand, Action<long?> apply)
+    {
+        lock (_budgetSync) (_siteDemand, _applySiteLimit) = (demand, apply);
+        SplitSpeedBudget(null, force: true);
+    }
+
+    /// <summary>A site transfer started or every one stopped: the budget is split again at once.</summary>
+    public void OnSiteTransfersActivityChanged() => SplitSpeedBudget(null, force: false);
+
+    /// <summary>Site transfers measured their speed (about once a second while they run).</summary>
+    public void OnSiteTransfersMeasured() => SplitSpeedBudgetSoon();
+
+    /// <summary>On a download's, a seeding torrent's or a site transfer's progress: splits again while the worker or a
+    /// site transfer runs, at most once a second.</summary>
     private void SplitSpeedBudgetSoon()
     {
-        if (_torrentEngine is null) return;
         var now = _timeProvider.GetTimestamp();
         lock (_budgetSync)
         {
-            if (_appliedFor.Limit is null || !_appliedFor.Running || now - _lastSplitAt < _timeProvider.TimestampFrequency) return; // once a second
+            if (_torrentEngine is null && _siteDemand is null) return;
+            if (_appliedFor.Limit is null || !_appliedFor.Running && !_appliedFor.Sites || now - _lastSplitAt < _timeProvider.TimestampFrequency) return; // once a second
         }
 
         SplitSpeedBudget(null, force: false);
@@ -62,8 +84,11 @@ public sealed partial class DownloadManagerService
         bool measured = false;
         SpeedDemand http = default, download = default, upload = default;
         bool guessLimit;
-        lock (_budgetSync) guessLimit = (settings ?? _budgetSettings).Limit is not null;
-        if (guessLimit && _torrentEngine?.WorkerRunning == true)
+        Func<SpeedDemand>? siteDemand;
+        lock (_budgetSync) (guessLimit, siteDemand) = ((settings ?? _budgetSettings).Limit is not null, _siteDemand);
+        // Read outside the lock too (it takes the site transfers' own lock); whether one runs is decided by this reading.
+        var site = siteDemand?.Invoke() ?? default;
+        if (guessLimit && (_torrentEngine?.WorkerRunning == true || site.Active))
         {
             (http, download, upload) = MeasureDemands();
             measured = true;
@@ -74,43 +99,47 @@ public sealed partial class DownloadManagerService
             if (settings is { } fresh) _budgetSettings = fresh;
             var (limit, uploadCap) = _budgetSettings;
             var running = _torrentEngine?.WorkerRunning == true;
+            var sites = site.Active;
             _lastSplitAt = _timeProvider.GetTimestamp();
-            var sameInputs = _appliedFor == (limit, uploadCap, running);
+            var sameInputs = _appliedFor == (limit, uploadCap, running, sites);
             if (limit is not { } total)
             {
                 if (!force && sameInputs) return;
-                _appliedFor = (null, uploadCap, running);
+                _appliedFor = (null, uploadCap, running, sites);
                 _appliedShares = null;
                 // No overall limit: nothing to share. The torrent upload limit, when set, still caps uploads.
                 _engine.UpdateSharedSpeedLimit(null);
                 _torrentEngine?.UpdateSpeedLimits(null, uploadCap > 0 ? uploadCap : null);
+                _applySiteLimit?.Invoke(null);
                 return;
             }
 
             SpeedShares next;
             long httpShare;
-            if (running)
+            if (running || sites)
             {
-                // A split made while the worker was off (or for other settings) measured nothing worth keeping.
+                // A split made for other kinds (or other settings) measured nothing worth keeping.
                 next = sameInputs && measured && _appliedShares is { } previous
-                    ? SpeedBudgetSplit.Split(total, uploadCap, previous, http, download, upload)
-                    : SpeedBudgetSplit.Initial(total, uploadCap);
+                    ? SpeedBudgetSplit.Split(total, uploadCap, previous, http, download, upload, sites ? site : null, running)
+                    : SpeedBudgetSplit.Initial(total, uploadCap, running, sites);
                 httpShare = next.Http;
             }
             else
             {
-                // No worker: HTTP has the whole limit. The worker keeps an even split for when it starts; the
+                // Nothing else runs: HTTP has the whole limit. The worker keeps an even split for when it starts; the
                 // start itself splits again at once.
                 next = SpeedBudgetSplit.Initial(total, uploadCap);
                 httpShare = total;
             }
 
+            var split = running || sites;
             if (!force && sameInputs && _appliedShares is { } applied &&
-                (running && !measured || !SpeedBudgetSplit.Differs(applied, running ? next : next with { Http = total }))) return;
-            _appliedFor = (limit, uploadCap, running);
-            _appliedShares = running ? next : next with { Http = total };
+                (split && !measured || !SpeedBudgetSplit.Differs(applied, split ? next : next with { Http = total }))) return;
+            _appliedFor = (limit, uploadCap, running, sites);
+            _appliedShares = split ? next : next with { Http = total };
             _engine.UpdateSharedSpeedLimit(httpShare);
             _torrentEngine?.UpdateSpeedLimits(next.TorrentDownload, next.TorrentUpload);
+            _applySiteLimit?.Invoke(sites ? next.Sites : Math.Max(1, total / SpeedBudgetSplit.FloorDivisor));
         }
     }
 

@@ -9,6 +9,7 @@
 #                                                        open the window, close it, then sample Host and window
 #
 # Each instance gets its own copy of the binaries under OUTDIR, so the sampler finds its processes by path.
+# PERF_APP_DIR=<published folder> times a published app (one folder, as Setup installs it) instead of the bin builds.
 set -u
 MODE=$1; OUTDIR=$2; PORT=${PERF_PORT:-5251}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,8 +20,13 @@ now_ms() { date +%s%3N; }
 setup() { # $1 name: copies binaries and starts a Host for a fresh instance
   local name=$1
   INST="$OUTDIR/$name"; rm -rf "$INST"; mkdir -p "$INST/bin" "$INST/data" "$INST/downloads"
-  cp -r "$ROOT/src/DownloadManager.Host/bin/Release/net10.0-windows" "$INST/bin/host"
-  cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$INST/bin/host/desktop"
+  if [ -n "${PERF_APP_DIR:-}" ]; then
+    # A published app folder (scripts/publish.ps1 -Output), Host and window side by side, as Setup installs it (PERF.11).
+    cp -r "$PERF_APP_DIR" "$INST/bin/host"
+  else
+    cp -r "$ROOT/src/DownloadManager.Host/bin/Release/net10.0-windows" "$INST/bin/host"
+    cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$INST/bin/host/desktop"
+  fi
   cp -r "$ROOT/src/DownloadManager.Cli/bin/Release/net10.0" "$INST/bin/cli"
   cp -r "$ROOT/tools/TestServer/bin/Release/net10.0" "$INST/bin/testserver"
   export DOWNLOADMANAGER_INSTANCE="perf-window-$name-$$"

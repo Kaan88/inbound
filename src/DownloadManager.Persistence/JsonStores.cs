@@ -415,9 +415,11 @@ public sealed class JsonJobStore : IJobStore
         // Already ciphertext only when it could not be decrypted at load; keep it as it is.
         if (!string.IsNullOrEmpty(stored.ProtectedUrl) && !SecretProtector.IsProtected(stored.ProtectedUrl))
             stored.ProtectedUrl = SecretProtector.ProtectUrl(stored.ProtectedUrl);
-        var json = JsonSerializer.Serialize(stored, PersistenceJson.Options);
+        // PERF.12: straight to UTF-8 bytes, without a string in between. Still indented: a save's cost is its sync
+        // (about 4 ms against 2 µs to serialise, perf-baseline-windows.md), and the files stay readable.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(stored, PersistenceJson.Options);
         var path = JobPath(job.Id);
-        await AtomicFile.WriteAsync(path, json, cancellationToken).ConfigureAwait(false);
+        await AtomicFile.WriteBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -671,8 +673,8 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
     public async Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default)
     {
         _paths.EnsureCreated();
-        var json = JsonSerializer.Serialize(checkpoint, PersistenceJson.Options);
-        await AtomicFile.WriteAsync(PathFor(checkpoint.JobId), json, cancellationToken).ConfigureAwait(false);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(checkpoint, PersistenceJson.Options);
+        await AtomicFile.WriteBytesAsync(PathFor(checkpoint.JobId), bytes, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default)

@@ -147,6 +147,15 @@ function setsByJob(model: Model): Map<string, ArchiveSet> {
 }
 
 /**
+ * PERF.19: a download's cells and its row, kept per job object. A job event replaces the job (model.ts), so an unchanged
+ * download keeps its object, its cells are not formatted again, and its row stays the same object, which Svelte's keyed
+ * list then leaves alone. A torrent's cells follow the clock (seeding time, a file list it waits for), so a torrent is
+ * always formatted again. Weak maps: a job that is gone takes its entry with it.
+ */
+const viewCache = new WeakMap<Job, { set: ArchiveSet | undefined; view: RowView }>();
+const rowCache = new WeakMap<Job, Row>();
+
+/**
  * The rows for a view. A package of two or more files in the list is one row, with its files under it when expanded; a
  * package of one file is an ordinary row. A package shows in a view when any of its files does, and then lists only
  * those. Remote work without local files yet, and the extraction records with no file on the list, come first in All
@@ -190,7 +199,16 @@ export function buildRows(
   const jobView0 = new Map<string, RowView>();
   const jobViewOf = (job: Job) => {
     let v = jobView0.get(job.id);
-    if (!v) jobView0.set(job.id, (v = jobView(job, sets.get(job.id), goal, now)));
+    if (!v) {
+      const set = sets.get(job.id);
+      const kept = job.torrent ? undefined : viewCache.get(job);
+      if (kept && kept.set === set) v = kept.view;
+      else {
+        v = jobView(job, set, goal, now);
+        if (!job.torrent) viewCache.set(job, { set, view: v });
+      }
+      jobView0.set(job.id, v);
+    }
     return v;
   };
   const matches = (job: Job) => inView(job, view, custom) && matchesView(searchText(jobViewOf(job), job));
@@ -212,7 +230,11 @@ export function buildRows(
 
   for (const entry of sortRows(top, (t) => t.v, sort)) {
     if ('job' in entry) {
-      rows.push({ kind: 'job', id: entry.job.id, job: entry.job, depth: 0, view: entry.v });
+      const kept = rowCache.get(entry.job);
+      const row: Row = kept && kept.kind === 'job' && kept.depth === 0 && kept.view === entry.v
+        ? kept : { kind: 'job', id: entry.job.id, job: entry.job, depth: 0, view: entry.v };
+      rowCache.set(entry.job, row);
+      rows.push(row);
       // An open torrent row lists its files under it; they are no downloads of their own.
       if (expanded.has(entry.job.id) && showsFiles(entry.job.torrent)) rows.push(...torrentFileRows(entry.job, torrentFiles[entry.job.id]));
       continue;

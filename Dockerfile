@@ -135,7 +135,7 @@ COPY --from=torrent-worker-build /out/ /
 # ---- Runtime ------------------------------------------------------------------------------------------------------
 # The regular ASP.NET image (Ubuntu), not the chiseled one: the entrypoint needs a shell, chown and setpriv to give
 # /data to PUID:PGID and then drop root, which a chiseled image (no shell, fixed user) can't do.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Inbound Download Manager" \
@@ -146,7 +146,7 @@ LABEL org.opencontainers.image.title="Inbound Download Manager" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT"
 # The bundled 7-Zip keeps its own terms in /app/tools/7-Zip/License.txt (GNU LGPL with the unRAR restriction), and
-# rclone (for Sites) its MIT licence in /app/tools/rclone/COPYING.
+# rclone (for Sites) its MIT licence in /app/tools/rclone/COPYING. /app/THIRD-PARTY-NOTICES.md lists everything.
 
 ENV DOWNLOADMANAGER_DATA=/data \
     DOWNLOADMANAGER_ROOTS=/downloads \
@@ -161,6 +161,7 @@ ENV DOWNLOADMANAGER_DATA=/data \
 COPY --from=server /out/ /app/
 COPY --from=sevenzip /out/tools/ /app/tools/
 COPY --from=rclone /out/tools/ /app/tools/
+COPY THIRD-PARTY-NOTICES.md /app/THIRD-PARTY-NOTICES.md
 # The Server looks for the torrent worker next to itself (TorrentSetup.FindWorker). DOWNLOADMANAGER_TORRENTS=off turns
 # torrents off without it ever starting.
 COPY --from=torrent-worker --chmod=755 /inbound-torrent /app/inbound-torrent

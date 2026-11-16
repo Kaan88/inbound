@@ -12,6 +12,15 @@ public sealed record SitesConfig
 
     /// <summary>"Update rclone automatically": on by default (owner, 2026-11-15).</summary>
     public bool AutoUpdateRclone { get; init; } = true;
+
+    /// <summary>"Transfers at once": files moving at the same time across all sites, apart from "downloads at once" (owner, 2026-11-15).</summary>
+    public int MaxTransfers { get; init; } = DefaultMaxTransfers;
+
+    public const int DefaultMaxTransfers = 3;
+    public const int MostTransfers = 10;
+
+    /// <summary><see cref="MaxTransfers"/> kept between 1 and <see cref="MostTransfers"/>, whatever the file says.</summary>
+    public int TransfersAtOnce => Math.Clamp(MaxTransfers, 1, MostTransfers);
 }
 
 [JsonSourceGenerationOptions(

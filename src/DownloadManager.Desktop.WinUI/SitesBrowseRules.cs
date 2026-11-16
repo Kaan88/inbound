@@ -1,4 +1,5 @@
 using System.Globalization;
+using DownloadManager.Contracts;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -93,7 +94,23 @@ internal static class SitesBrowseRules
         return $"{leaf} (in {LeafName(parent)})";
     }
 
+    /// <summary>SITES.5: the "On this PC" words for a <see cref="SiteHereStates"/> value; empty when not compared.</summary>
+    public static string HereText(string? here) => here switch
+    {
+        SiteHereStates.Same => "Same",
+        SiteHereStates.OlderHere => "Older here",
+        SiteHereStates.SomeOfIt => "Partly here",
+        SiteHereStates.NotHere => "Not here",
+        SiteHereStates.Different => "Different here",
+        SiteHereStates.FolderHere => "Folder here",
+        _ => "",
+    };
+
+    /// <summary>The column shows for a site with a linked folder on this PC.</summary>
+    public static bool ShowsHere(SiteDto? site) => !string.IsNullOrWhiteSpace(site?.LocalFolder);
+
     /// <summary>A folder shows no size, and neither does a file the server did not give one for (-1).</summary>
+
     public static string SizeText(long size, bool isFolder)
         => isFolder || size < 0 ? string.Empty : UiFormat.Bytes(size);
 
@@ -141,11 +158,15 @@ internal static class SitesBrowseRules
                 return "This site's host key has not been accepted yet. Open Options > Sites to check it and accept it.";
             case "off":
                 return "Sites is off. Turn it on in Options > Sites.";
+            case "certificateNotTrusted":
+                return "This server's certificate is not signed by an authority this PC trusts, so Inbound did not connect. If it is your own server, open Options > Sites and Test the site to see the certificate and choose whether to trust it.";
+            case "signInNeeded":
+                return "This site is not signed in, or the service no longer accepts its sign-in. Open Options > Sites and choose Sign in.";
             default:
                 return host.Length > 0 ? host : "The folder could not be read.";
         }
     }
 
     /// <summary>A problem the user fixes in Options > Sites, so the view offers to open it.</summary>
-    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "off";
+    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "certificateNotTrusted" or "signInNeeded" or "off";
 }

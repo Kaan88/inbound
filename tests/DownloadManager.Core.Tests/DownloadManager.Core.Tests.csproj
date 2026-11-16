@@ -39,6 +39,9 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.WebUi.cs" Link="WinUI\RemoteClient.WebUi.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.Sites.cs" Link="WinUI\RemoteClient.Sites.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SitesRules.cs" Link="WinUI\SitesRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SiteTransferRules.cs" Link="WinUI\SiteTransferRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\SiteChangeRules.cs" Link="WinUI\SiteChangeRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\LocalListing.cs" Link="WinUI\LocalListing.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiForm.cs" Link="WinUI\WebUiForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiFirewall.cs" Link="WinUI\WebUiFirewall.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\TorrentFirewall.cs" Link="WinUI\TorrentFirewall.cs" />
@@ -85,6 +88,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSecrets.cs" Link="WinUI\ServerSecrets.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerSwitch.cs" Link="WinUI\ServerSwitch.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CommandKey.cs" Link="WinUI\CommandKey.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressWindowSet.cs" Link="WinUI\ProgressWindowSet.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\VersionStatus.cs" Link="WinUI\VersionStatus.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\WindowCascadeRules.cs" Link="WinUI\WindowCascadeRules.cs" />

@@ -290,6 +290,18 @@ transfers-at-once limit and the default view.
 - The pinned rclone version is the floor and the first download. Newer ones come through the rclone update check
   above. "Use my own rclone" is the way to run any other version.
 
+## Release notes draft (for the version that ships Sites)
+
+For `changelog.json` when the version is set. No test status goes into release notes.
+
+- New: Sites. Browse and change files on your own servers and cloud storage (SFTP, FTP and FTPS, WebDAV, S3 and
+  S3-compatible storage, Google Drive, OneDrive, Dropbox and Backblaze B2), and move files between them and this PC.
+  Turn it on in Options › Sites; Inbound downloads rclone, which does the work, the first time. Tags: all.
+- New: Sites in the web UI, on a phone too, with files straight to and from the device the browser runs on. Tags:
+  server, all.
+- New: `dm sites` adds, tests, browses and changes sites, and starts and controls transfers. Tags: all.
+- New: Help › About links the third-party notices. Tags: windows, linux.
+
 ## FTP: undoing part of CUT.1
 
 FTP comes back as a kind of site, not as a download address. So most of the cut stays:

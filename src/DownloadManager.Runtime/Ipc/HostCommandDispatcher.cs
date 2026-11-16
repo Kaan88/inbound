@@ -97,8 +97,7 @@ public sealed partial class HostCommandDispatcher
     private List<string> HelloCapabilities(SessionRights rights)
     {
         var capabilities = CapabilitiesOf(rights);
-        if (Sites is not null && string.Equals(rights.Role, ClientRoles.Desktop, StringComparison.Ordinal) && rights.Scope is null)
-            capabilities.Add("sites");
+        if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         return capabilities;
     }
 
@@ -129,6 +128,7 @@ public sealed partial class HostCommandDispatcher
         if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
         // T1: torrent.* is answered, whether or not torrents are turned on in Options (the commands then say so).
         if (rights.Torrents) capabilities.Add("torrents");
+        if (platform.SupportsSavingPauses) capabilities.Add("savingPauses");
         return capabilities;
     }
 
@@ -173,7 +173,15 @@ public sealed partial class HostCommandDispatcher
     /// lifetime that ends when their client goes away (<see cref="IpcOperationLifetime"/>). The rest are quick.
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
-        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck;
+        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
+        || type is SitesMessageTypes.TransferStart
+        // SITES.6b: both read a server's certificate first.
+        || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust
+        // SITES.6c: waits for rclone to print the sign-in address, or for OneDrive to name the drive.
+        || type is SitesMessageTypes.SignIn
+        // SITES.7: each waits on rclone and the server for the next piece.
+        || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
+        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that

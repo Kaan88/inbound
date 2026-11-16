@@ -19,7 +19,7 @@ public sealed class ChangelogTests
     private static readonly string ChangelogPath = Path.Combine("src", "DownloadManager.Contracts", "Changelog", "changelog.json");
 
     /// <summary>The tags changelog.json may use (docs\release-builds.md); a provider's id is the provider tag.</summary>
-    public static readonly string[] AllowedTags = ["all", "desktop", "windows", "webui", "server", "docker", "linux", "extension", "torrents", "torbox"];
+    public static readonly string[] AllowedTags = ["all", "desktop", "windows", "webui", "server", "docker", "linux", "macos", "extension", "torrents", "torbox"];
 
     [Fact]
     public void EveryAllowedTagIsAPlaceTorrentsOrAProvider()
@@ -88,6 +88,7 @@ public sealed class ChangelogTests
                     new ChangelogItem { Text = "Docker only", Tags = ["docker"] },
                     new ChangelogItem { Text = "Extension only", Tags = ["extension"] },
                     new ChangelogItem { Text = "Linux only", Tags = ["linux"] },
+                    new ChangelogItem { Text = "macOS only", Tags = ["macos"] },
                     new ChangelogItem { Text = "Window torrents", Tags = ["windows", "torrents"] },
                     new ChangelogItem { Text = "Window TorBox", Tags = ["windows", "torbox"] },
                     new ChangelogItem { Text = "No place tag", Tags = ["torrents"] },
@@ -108,6 +109,34 @@ public sealed class ChangelogTests
         Assert.Equal(["Web UI · Web only", "Server · Docker only", "Extension · Extension only", "Extension · Extension fix"],
             view.Elsewhere.Select(line => $"{line.Place} · {line.Text}"));
         Assert.Equal("4 changes in the web UI, the server and the browser extension", view.ElsewhereText);
+    }
+
+    [Fact]
+    public void TheMacWindowShowsDesktopAndMacLinesAndNeverTheOtherSystemsOwn()
+    {
+        var view = ChangelogFilter.For([Sample()], ChangelogSurface.MacOS, new ChangelogFeatures(false, []));
+        Assert.Equal(["Everywhere", "Both windows", "macOS only"], view.Versions[0].Sections[0].Lines);
+        Assert.DoesNotContain(view.Elsewhere, line => line.Text.Contains("Linux"));
+        Assert.Contains(view.Elsewhere, line => line.Place == "Windows" && line.Text == "Window only");
+        // And no other app shows or counts a macOS line.
+        foreach (var surface in new[] { ChangelogSurface.Windows, ChangelogSurface.WebUi, ChangelogSurface.Linux })
+        {
+            var other = ChangelogFilter.For([Sample()], surface, new ChangelogFeatures(true, ["torbox"]));
+            Assert.DoesNotContain(other.Versions.SelectMany(v => v.Sections).SelectMany(section => section.Lines), line => line == "macOS only");
+            Assert.DoesNotContain(other.Elsewhere, line => line.Text == "macOS only");
+        }
+    }
+
+    [Fact]
+    public void TheMacManifestKeepsDesktopSoTheMacWindowShowsThoseLines()
+    {
+        var spelt = UpdateNotes.From(Sample());
+        Assert.Equal(["windows", "linux"], spelt.Single(line => line.Text == "Both windows").Tags);
+        var mac = UpdateNotes.From(Sample(), spellOutDesktop: false);
+        Assert.Equal(["desktop"], mac.Single(line => line.Text == "Both windows").Tags);
+        var shown = WhatsNewRules.UpdateNotes(mac, "9.1.0", new ChangelogFeatures(false, []), ChangelogSurface.MacOS);
+        Assert.Contains("Both windows", shown.Lines);
+        Assert.Contains("macOS only", shown.Lines);
     }
 
     [Fact]

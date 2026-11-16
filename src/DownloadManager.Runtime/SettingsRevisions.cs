@@ -256,6 +256,7 @@ public sealed partial class DownloadManagerService
                 ShutdownWhenDone = s.ShutdownWhenDone,
                 ShutdownMode = s.ShutdownMode,
                 ForceShutdown = s.ForceShutdown,
+                SiteTransfers = s.SiteTransfers,
                 StartOnHostStartup = s.StartOnHostStartup, TimedStartEnabled = s.TimedStartEnabled,
                 RepeatEveryMinutes = s.RepeatEveryMinutes,
                 // Run state is owned by the host scheduler, never by a UI payload.

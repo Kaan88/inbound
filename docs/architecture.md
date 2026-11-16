@@ -43,6 +43,14 @@
   those are handled in the window and the web UI, over the same IPC messages, which stay. `dm --help` lists what it
   has; an unknown command gets a one-line error and exit code 2.
 
+- **rclone** (Sites, SITES.1 to SITES.9; `docs/plans/remote-sites.md`) is a child process of the Host, like the
+  torrent worker: `rclone rcd` on a random loopback port with a per-start user and password, `--config ""` (nothing
+  of rclone's own configuration is read or written) and `--rc-serve` (its served files, used for "this device"). It
+  runs only while Sites is on and something uses it, and stops after a minute idle. Saved sites, with their secrets
+  sealed, are Inbound's (`sites\<id>.json`); each use hands rclone the site as an in-memory remote. The desktop apps
+  download rclone from Options › Sites (not in Setup); the Docker image ships it. `DownloadManager.Sites` holds the
+  process, the client and the updater; `Runtime/Sites` holds the commands and transfer batches.
+
 There is deliberately no separate engine process yet: a single writer simplifies
 crash-safe persistence and lifecycle. The engine/persistence assemblies remain
 independent and can move behind IPC later without contract changes.
@@ -59,6 +67,8 @@ Tray        ──▶ Core, Contracts (UI only)
 Desktop     ──▶ Contracts (plus Windows App SDK)
 NativeHost  ──▶ Contracts
 Cli         ──▶ Contracts
+Sites       ──▶ Persistence (rclone process, client, updater, site stores)
+Runtime     ──▶ Core, Contracts, Engine, Persistence, Sites (Sites commands and transfers)
 Tests       ──▶ all of the above
 ```
 
@@ -129,7 +139,15 @@ queues for the per-host fair limiter, and the checkpoint format is unchanged.
   history.jsonl
   logs\host-YYYYMMDD.log
   runtime\host.lock
+  sites\config.json                                 the Sites switch and options
+  sites\<siteId>.json                               a saved site (secrets sealed)
+  sites\transfers\<transferId>.json                 a transfer batch (SITES.4)
+  tools\rclone\<version>\rclone.exe                  rclone, downloaded and checked (SITES.1)
+  sites\rclone\                                     rclone's working folder (trusted certificates)
 ```
+
+Site transfers keep the same payload rule: a download from a site is written by rclone straight into the folder the
+user chose, never into the state directory.
 
 - Job JSON writes use a temp file + `File.Replace`/atomic rename.
 - `.part` is the contiguous payload; segmented data is written with
@@ -204,6 +222,16 @@ recorded. Failure leaves Chrome's download intact.
   for stored site credentials.
 - Destinations are resolved by Host policy; path traversal and reserved names
   are rejected.
+- Sites: rclone listens on loopback only, with credentials made for each start and given through its environment,
+  not its command line. A site's password, key, token or client secret is sealed like every other stored secret
+  (`SecretProtector`: DPAPI on Windows, the AES-GCM key file in the server's data folder, the Linux Host's own choice) and never logged; a server's SSH key or self-signed certificate is trusted
+  only after the user saw its fingerprint. A web session or a server caller is held to its folders on the computer
+  Inbound runs on, and can't choose a program for Sites to run (`docs/ipc-protocol.md`, "Sites").
+- A finished download from the network is handed to Windows as a browser hands over its own (L3,
+  `Runtime/DownloadScan`, `IAttachmentExecute::Save`): the registered antivirus checks it and the internet mark
+  (`Zone.Identifier`, zone 3, the site only) is written, before anything extracts or opens it. A file the antivirus takes
+  away fails the download, which is not retried by itself. Off Windows, or when the check can't run, only the mark is
+  written (REV.4).
 - Download URLs are restricted to http/https (FTP was cut in 0.7.2: an
   ftp:// address is refused with "FTP addresses aren't supported.", and an FTP
   download an older version left fails with it) and cannot address

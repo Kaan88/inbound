@@ -128,7 +128,7 @@ public static partial class RcloneSetup
 }
 
 /// <summary>The environment every rclone the Host starts gets.</summary>
-internal static class RcloneEnvironment
+public static class RcloneEnvironment
 {
     /// <summary>
     /// Removes every <c>RCLONE_*</c> variable the Host inherited: one of them (a config path, a remote, a log level, a

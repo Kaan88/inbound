@@ -6,7 +6,10 @@ param(
     # Bundle the .NET runtime and the Windows App SDK so the app runs on a PC without them.
     [switch]$SelfContained,
     # The native torrent worker (native\torrent-worker\build-windows.cmd), shipped next to the Host. Required.
-    [string]$TorrentWorker
+    [string]$TorrentWorker,
+    # PERF.11: compile a self-contained build ahead of time (ReadyToRun). Off for releases: measured 2026-11-15, it adds
+    # 52 MB, starts the Host 55 ms sooner, and makes the window slower with a long list (docs/plans/perf-baseline-windows.md).
+    [switch]$ReadyToRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,13 +96,29 @@ New-Item -ItemType Directory -Path $Output -Force | Out-Null
 function Publish-Project([string]$project, [string[]]$extraArgs = @()) {
     Write-Host "Publishing $project..."
     $runtimeArgs = if ($SelfContained) { @("-r", "win-x64", "--self-contained", "-p:WindowsAppSDKSelfContained=true") } else { @("--no-self-contained") }
+    # ReadyToRun needs a runtime identifier, so only a self-contained build can have it. Every program gets it: they share
+    # one folder, and a later publish would otherwise put back the plain copy of a library they share.
+    if ($ReadyToRun) {
+        if (-not $SelfContained) { throw "-ReadyToRun needs -SelfContained." }
+        $runtimeArgs += "-p:PublishReadyToRun=true"
+    }
     $argumentList = @("publish", $project, "-c", $Configuration, "-o", $Output) + $runtimeArgs + $extraArgs
     & dotnet @argumentList
     if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
 }
 
 Publish-Project (Join-Path $root "src\DownloadManager.Host\DownloadManager.Host.csproj")
-Publish-Project (Join-Path $root "src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj")
+# PERF.10: a release build compiles the native host with Native AOT: one program that answers the browser in about 30 ms
+# instead of 100 (docs/plans/perf-baseline-windows.md). It needs Visual Studio's C++ tools (the GitHub runners have them);
+# the AOT linker finds them through vswhere, which is not always on PATH.
+$nativeHostArgs = @()
+if ($SelfContained) {
+    $vswhereDir = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer"
+    if ((Test-Path -LiteralPath (Join-Path $vswhereDir "vswhere.exe")) -and ($env:PATH -notlike "*$vswhereDir*")) { $env:PATH = "$vswhereDir;$env:PATH" }
+    # No native symbol file: it is 41 MB, and the managed .pdb files beside it stay as before.
+    $nativeHostArgs = @("-p:PublishAot=true", "-p:NativeDebugSymbols=false")
+}
+Publish-Project (Join-Path $root "src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj") $nativeHostArgs
 Publish-Project (Join-Path $root "src\DownloadManager.Cli\DownloadManager.Cli.csproj")
 
 # The web UI bridge (DownloadManager.Server.exe, started by the Host when "Web UI" is on in Options). Its pages come
@@ -217,7 +236,11 @@ if (Test-Path (Join-Path $extensionDestination "dist")) {
 # The torrent worker was checked at the start.
 Copy-Item -LiteralPath $TorrentWorker (Join-Path $Output "inbound-torrent.exe") -Force
 
+# SITES.9: what others made that ships here, next to the programs (Help > About links it).
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\THIRD-PARTY-NOTICES.md") (Join-Path $Output "THIRD-PARTY-NOTICES.md") -Force
+
 $required = @(
+    "THIRD-PARTY-NOTICES.md",
     "DownloadManager.Host.exe",
     "inbound-torrent.exe",
     "DownloadManager.Desktop.WinUI.exe",
