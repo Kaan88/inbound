@@ -1,11 +1,12 @@
 namespace DownloadManager.Contracts;
 
-/// <summary>Which app shows the notes: the Windows window, the web UI of a server (or of the Windows app's bridge), or the Linux window.</summary>
+/// <summary>Which app shows the notes: the Windows window, the web UI of a server (or of the Windows app's bridge), the Linux window or the macOS one.</summary>
 public enum ChangelogSurface
 {
     Windows,
     WebUi,
     Linux,
+    MacOS,
 }
 
 /// <summary>
@@ -36,9 +37,10 @@ public sealed record ChangelogView(IReadOnlyList<ChangelogShownVersion> Versions
 
 /// <summary>
 /// UPD.N1: which changelog lines an app shows. The Windows app shows lines tagged <c>desktop</c>, <c>windows</c> or
-/// <c>all</c>; the Linux window <c>desktop</c>, <c>linux</c> or <c>all</c>; the web UI <c>webui</c>, <c>server</c>,
+/// <c>all</c>; the Linux window <c>desktop</c>, <c>linux</c> or <c>all</c>; the macOS window <c>desktop</c>, <c>macos</c> or
+/// <c>all</c>; the web UI <c>webui</c>, <c>server</c>,
 /// <c>docker</c> or <c>all</c>. Lines about torrents show only while torrents are on, about
-/// a provider only while an account of it is set. The Windows app and the web UI never show or count Linux-only lines. What is left (the extension, the other app) is folded under one line. The web UI has the
+/// a provider only while an account of it is set. Linux-only and macOS-only lines are shown and counted by that window alone. What is left (the extension, the other app) is folded under one line. The web UI has the
 /// same rules in <c>webui/src/lib/whatsNew.ts</c>.
 /// </summary>
 public static class ChangelogFilter
@@ -104,11 +106,12 @@ public static class ChangelogFilter
         {
             ChangelogSurface.Windows => new[] { ChangelogTags.Desktop, ChangelogTags.Windows },
             ChangelogSurface.Linux => new[] { ChangelogTags.Desktop, ChangelogTags.Linux },
+            ChangelogSurface.MacOS => new[] { ChangelogTags.Desktop, ChangelogTags.MacOS },
             _ => new[] { ChangelogTags.WebUi, ChangelogTags.Server, ChangelogTags.Docker },
         };
         if (places.Any(place => mine.Contains(place))) return Here;
-        // Linux lines are for the Linux window only: the Windows app and the web UI neither show nor count them.
-        return places.Where(place => place != ChangelogTags.Linux).Select(Label).FirstOrDefault();
+        // Linux lines are for the Linux window only, macOS lines for the macOS one: elsewhere they are neither shown nor counted.
+        return places.Where(place => place is not (ChangelogTags.Linux or ChangelogTags.MacOS)).Select(Label).FirstOrDefault();
     }
 
     private static bool Has(IReadOnlyCollection<string> tags, string tag) => tags.Contains(tag, StringComparer.Ordinal);

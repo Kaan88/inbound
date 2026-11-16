@@ -1,5 +1,123 @@
 # Progress — session handoff
 
+### Popup row menu cut off in a short popup, EXT.B10 (2026-11-15)
+
+- **Owner report (screenshot, macOS):** the popup's right-click menu doesn't fit when the popup is small (one download
+  in the list): "not sure if it happens only on mac". It doesn't: any popup shorter than the menu cut it off.
+- **Cause:** `ui/menu.ts` keeps the menu inside the window, but a `position: fixed` menu adds nothing to the page's
+  height, so the browser never grew the popup for it; a menu taller than the popup was clipped.
+- **Fix:** while a menu is open the page's minimum height is the menu's, so the browser grows the popup (to its own
+  limit); the menu is placed again on resize, is never taller than the window (it scrolls instead), and the height
+  is given back on close.
+- **Checked:** `npx tsc --noEmit`, the 339 extension tests, and headless Chromium on a 120 px page with the six-entry
+  menu: 194 px asked for, the menu fully visible once the viewport had grown, height restored on close. **Not
+  checked:** the real popup in Chrome or Edge.
+
+### Keeping dependencies current, CI.4 (2026-11-15, branch `deps-upkeep`)
+
+- **Owner request:** "what can be done to keep the project up to date in the future?", then "yep, bi weekly though".
+  Found while building for macOS: Uno.Sdk was pinned at 6.7.45 since the D7 prototype (2026-11-09), one day before
+  Uno 7.0.5; nothing watched NuGet or npm, only Docker and Actions.
+- **Done:** `.github/dependabot.yml` covers NuGet (every project; Uno.Sdk now in `global.json` `msbuild-sdks`, so the
+  csproj says `Sdk="Uno.Sdk"`), npm (web UI, extension), Docker (root Dockerfile and the torrent worker's build) and
+  Actions, on the 1st and 15th of the month (cron; Dependabot has no two-week interval). Minor and patch updates come
+  grouped; majors come as their own pull requests. The four placeholder packages that keep Uno's dev tools out are
+  ignored. `scripts/check-pins.py` and `.github/workflows/upkeep.yml` check the pins Dependabot can't see (libtorrent,
+  vcpkg baseline, rclone, 7-Zip, appimagetool, nfpm) on the same days and keep one issue, "Pinned tools behind upstream".
+- **Checked:** the checker's pin reading, locally with GitHub's answers stubbed. **Not checked:** the GitHub API calls
+  (blocked in this session), Dependabot itself (it runs only from main, on its schedule), and whether Dependabot
+  finds Uno.Sdk in `global.json`. A Uno.Sdk update also needs THIRD-PARTY-NOTICES.md changed by hand.
+
+### macOS app, MAC.1 (2026-11-15, branch `macos-0.8.0`)
+
+- **Owner request:** "what does it take to get a macos version quickly? use github builds and work on a branch. build
+  should be based on last release." Built on 0.7.7 first (`macos-build`), then the same commits on 0.8.0. Owner,
+  after running it: "macos version matured in a very short time, let's go all in for a pull request."
+- **How:** the Linux Host and the Uno window run on macOS. Unix-socket IPC on macOS too (getpeereid and lstat in place
+  of SO_PEERCRED and statx; sockets in `/tmp/inbound-<uid>`, as a socket path is at most 104 bytes); `DetachedProcess`
+  where Linux used setsid(1); `open`, `open -R` and AppleScript's folder dialog; browsers' manifests under
+  `~/Library/Application Support`; the Host counts a Mac as a desktop (EXT.B9). `scripts/package-macos.sh` and
+  `.github/workflows/macos.yml` build Inbound.app (ad hoc signed) with the torrent worker (osx triplets).
+- **Fixed on the way, from the owner's runs:** trails under transparent windows (macOS windows are solid; Mica is MAC.2);
+  icons missing when started from Finder (Uno reads its files from `Resources/` beside the program); windows opening at
+  half size and resizing past the screen (no screen lookup on macOS, and Uno hands NSWindow.minSize pixels where it
+  takes points); Options coming back tiny from a saved size; a freeze closing Progress Details (a socket disposed
+  under a blocked Accept doesn't wake it on macOS); no way to reopen the window (menu-bar icon, `native/macos-menu`);
+  the reopened window being another app (the Host opens Inbound.app). Uno.Sdk 6.7.49. The Extractions glyph on Uno.
+- **Then, before the pull request (owner: "let's [do] everything we can before the pr", "self update is not done.
+  macos specific changelog entries", "tag a fake version so we can test auto update without a release"):** the
+  macOS updater and release files (MAC.4 above), a `macos` changelog tag with the 0.8.1 entry's Mac lines, `dm sites
+  rclone`, sign-in start as a LaunchAgent, MAC.3, windows kept clear of the Dock, a scrolling sidebar on Uno (owner:
+  "sidebar becomes too long and items on the bottom remain inaccessible"; Windows' ListBox scrolls by itself, so the
+  Windows window is unchanged), and every CI check for the Intel build too (under Rosetta).
+- **Checked:** on GitHub's Mac (CI): the Host and CLI answer; Sites downloads the macOS rclone and runs it; the window
+  is driven by `DOWNLOADMANAGER_UNO_SELFTEST` (real clicks with cliclick on About's OK and Progress Details' close,
+  Options, closing the main window, which ends its process, and opening it again), with screenshots. By the owner on a
+  Mac: the window, downloads, the extension and the menu-bar icon. **Not checked:** a Retina screen in CI (the runner's
+  scale is 1); the last sizing and reopening fixes on the owner's Mac. The Intel build runs every check under
+  Rosetta, and MAC.3 (a newer copy replaces the running Host) passes on both builds; Rosetta's rclone is the arm64 one,
+  as .NET reports the machine's arm64 there.
+- **MAC.5, parity with the Windows Host (owner: "is that all for parity with windows?"):** sleep prevention, the
+  completion power actions, notifications, the Keychain for the secret key, event sounds and copied links, each of which
+  the Linux Host does over D-Bus and so did nothing on a Mac. Left: .torrent and magnet opening; Developer ID and
+  notarization; Mica (Uno 7); a Retina screen and a real Intel Mac.
+- **MAC.6, better on a Mac (owner: "implement fable suggestions except number 10"):** quarantine and "Where from" on
+  finished files, the scheduler woken after sleep and clock changes, ⌘ shortcuts, a menu-bar icon that shows activity
+  and the running downloads, drops on it and a Services entry, Inbound's own notifications with Open / Show in Finder /
+  Retry, the Mac app and Window menus, the Dock badge and progress bar, and an Options choice to pause on a phone
+  hotspot, Low Data Mode or Low Power Mode. **Checked:** unit tests; in the macOS workflow, the marks on a real HTTPS
+  download and the helper's Services entry. **Not checked:** the menus, Dock, drops, Services and notifications on a
+  real Mac. **Self-update:** the owner updated from the `macos-update-test` pre-release on their Mac and it worked
+  (2026-11-15).
+- **The test suites on a Mac (owner, 2026-11-15, run on the owner's Apple silicon Mac):** Engine passed 214 of 214.
+  The full Integration suite had 182 failures. 170 are tests already tagged `Platform=Windows` (they start the Windows
+  Host, PowerShell or cmd.exe, or read the registry or pipe ACLs). Of the other 12:
+  - One real bug, fixed: a rename that only changes the case (`report.pdf` to `Report.pdf`) was refused on APFS, which
+    is case-insensitive by default, as "The target file already exists." The fix is `PathNames.SameFileOtherCase`.
+  - Two menu-bar speed tests expected "1.5", but the Mac's number format gives "1,5". The tests now pin the culture.
+  - Six tests used Windows paths as test data; they now use Unix paths elsewhere.
+  - The adopted-file mark test now checks the quarantine mark on macOS.
+  - Junction, native-host and torrent kill-switch tests are now tagged Windows.
+  The suites were taken off the macOS workflow again because it took too long (owner: "end ci, it takes forever. it's
+  redundant too"). A second run with the fixes on the owner's Mac (`--filter "Platform!=Windows"`, 2026-11-15) passed: 1704 passed,
+  0 failed, 70 skipped. The skipped tests need tools a source checkout doesn't bundle: 7-Zip for 60 archive tests, rclone
+  for 6 Sites tests and the torrent worker for 4.
+  The final build of the PR branch (2026-11-15) failed one Windows test: the golden IPC frames lacked the new MAC.6
+  setting. With that fixed (`d1b5cb1`), it passed: macOS packages on both architectures (run 43769913069) and CI on
+  Windows and Linux (run 43771417513). ⌘Q stays File > Exit
+  (owner: "leave as is").
+- **Fable re-audit (2026-11-15, owner asked; verified before acting):** fixed: saving pauses were refilled by the queue
+  and left downloads user-paused across a restart (now a service-level hold that requeues, `SavingHold.cs`, with an
+  integration test); magnet torrents weren't quarantined; the menu-bar menu was rebuilt under the pointer each second
+  (now after it closes); notifications the user turned off came back through osascript, and other notices weren't
+  Inbound's (one route now); Services registers its port explicitly and hands off to the CLI off the main thread; the
+  helper's first network/power lines could be lost (the Host asks again); a helper that ends releases the hold; an Edit
+  menu for the file panels; the Dock view is made once; the helper is only used from its bundle. Open: ⌘Q ends the Host
+  and its downloads (owner's call); an update zip's architecture isn't checked against the Mac; a notification clicked
+  with no Host running is lost; a Services link is on the CLI's argv while it runs; plus the earlier audit's items
+  below.
+- **Fable audit of the pull request (2026-11-15, owner asked; findings verified before acting):** fixed: the Mac
+  window couldn't save a server's token once the key moved to the Keychain (it now reads the Keychain too); a Host
+  started at sign-in would lose the update restarter when launchd cleans up its process group (`AbandonProcessGroup`);
+  a release or test update could ship without the torrent worker (now fails); macOS 15 has no right-click > Open for
+  unnotarized apps (texts say Open Anyway); shut down and restart used loginwindow's dialog events (now `shut`/`rest`,
+  unverified on a Mac); the LaunchAgent is rewritten only when it changes; a Host run from a terminal keeps its session;
+  the Mac Host's log says macOS. Open from the audit, after merge: swap the bundle atomically (`renamex_np`
+  `RENAME_SWAP`) and in the restarter after the Host exits; App Translocation (run from Downloads or the DMG) turns the
+  updater and sign-in start off with a "move to Applications" note; a locked Keychain fails the Host's start; the
+  signing key in a protected environment and a sign-only job (the repository is public), with a separate test key for
+  test updates; `LSMinimumSystemVersion` 12.0 while .NET 10's supported list starts at macOS 15; `/tmp/inbound-<uid>`
+  can be taken first by another local user; `open -n -a` drops `DOWNLOADMANAGER_DATA`; a CI step that runs a real
+  update end to end.
+- **Review (independent, Haiku; findings verified before acting):** fixed: extraction was refused on every Mac (no
+  hard-link count there; now lstat's `st_nlink`); the updater removed the old bundle while the Host and window still
+  loaded from it (now the restarter removes it after the Host is gone); the window check matched a process name macOS
+  cuts to 16 characters (now `pgrep -f` on the bundle path, with plain launcher paths); the web bridge said "windows" on
+  a Mac; the activation wake-up connection now runs on macOS only. Not a fault: "the launcher stops when no Host runs"
+  (it is `/bin/sh` without `set -e`). Left, named: the update signing key is usable by any branch's manual run (one
+  owner; a protected environment would close it); a Host started from the native host is in the browser's process
+  group until its own `setsid` at start.
+
 ### Android app design in Figma (2026-11-15)
 
 - **Owner request:** design an Android app for Inbound: Material You, default colours from the web UI, a full downloader on the phone (not only a remote for another host), animated, and clear about how it works. Done in Figma.

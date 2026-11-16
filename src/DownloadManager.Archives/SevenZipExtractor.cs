@@ -221,6 +221,19 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
     /// </summary>
     private static void MarkFromZone(string archive, string payload, StagedContent content)
     {
+        // MAC.6: on a Mac the archive's quarantine goes onto what came out of it, as the Archive Utility does.
+        if (OperatingSystem.IsMacOS())
+        {
+            if (DownloadManager.Core.MacFileMarks.ReadQuarantine(archive) is not { } quarantine) return;
+            foreach (var file in content.Files)
+            {
+                try { DownloadManager.Core.MacFileMarks.WriteQuarantine(Path.Combine(payload, file), quarantine); }
+                catch (IOException) { /* the file stands without it */ }
+            }
+
+            return;
+        }
+
         if (DataStreams.ReadZoneId(archive) is not { } zone) return;
         foreach (var file in content.Files)
         {

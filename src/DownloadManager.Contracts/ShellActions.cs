@@ -72,7 +72,7 @@ public static class ShellActions
     {
         if (!OperatingSystem.IsWindows())
         {
-            var open = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+            var open = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
             open.ArgumentList.Add(folder);
             return open;
         }
@@ -89,6 +89,13 @@ public static class ShellActions
         if (!OperatingSystem.IsWindows())
         {
             if (!File.Exists(path)) return OpenFolder(folder ?? path);
+            if (OperatingSystem.IsMacOS())
+            {
+                var reveal = new ProcessStartInfo("open") { UseShellExecute = false };
+                reveal.ArgumentList.Add("-R");
+                reveal.ArgumentList.Add(path);
+                return reveal;
+            }
             var show = new ProcessStartInfo("gdbus") { UseShellExecute = false };
             foreach (var argument in new[] { "call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path",
                          "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems",

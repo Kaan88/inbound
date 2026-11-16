@@ -46,6 +46,13 @@ internal static class WindowPlacement
                     window.Activated -= Restore;
                     var probe = Probe(saved);
                     var (x, y, size) = WindowSizeRules.OnScreen(saved.X, saved.Y, saved.Width, saved.Height, UnoScreens.WorkArea(probe.X, probe.Y));
+                    // Never smaller than the window's minimum: a size saved while macOS windows opened at half size
+                    // (fixed since) came back that small. The minimum is in points on macOS, in pixels elsewhere.
+                    if (appWindow.Presenter is OverlappedPresenter { PreferredMinimumWidth: { } minWidth, PreferredMinimumHeight: { } minHeight })
+                    {
+                        var toPixels = OperatingSystem.IsMacOS() ? UnoScreens.Scale() : 1;
+                        size = new PixelSize(Math.Max(size.Width, (int)Math.Round(minWidth * toPixels)), Math.Max(size.Height, (int)Math.Round(minHeight * toPixels)));
+                    }
                     appWindow.Move(new PointInt32 { X = x, Y = y });
                     appWindow.Resize(new SizeInt32 { Width = size.Width, Height = size.Height });
                 }

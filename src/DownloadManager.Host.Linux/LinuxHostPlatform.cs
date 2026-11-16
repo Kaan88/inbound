@@ -18,7 +18,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         SupportsFolderPicker = true,
         SupportsTray = false,
         SupportsShutdown = true,
-        SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null,
+        SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null || DownloadManager.Core.InstalledBuild.MacApp() is not null,
         SupportsProgramSettings = true,
         SupportsCompletionActions = true,
         // EXT.R11 review: only with a desktop to show a file manager on. A Host without a display has nowhere to open it.
@@ -37,7 +37,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
 
     public PlatformCapabilities Capabilities => TrayAvailable ? WithTray : LinuxCapabilities;
 
-    private static readonly PlatformCapabilities WithTray = LinuxCapabilities with { SupportsTray = true };
+    /// <summary>On a Mac the tray is the menu-bar helper, which also reports the network and Low Power Mode (MAC.6).</summary>
+    private static readonly PlatformCapabilities WithTray = LinuxCapabilities with { SupportsTray = true, SupportsSavingPauses = OperatingSystem.IsMacOS() };
 
     /// <summary>Cancelled when a client or a signal asks the Host to exit.</summary>
     public CancellationToken ExitRequested => _exit.Token;
@@ -58,7 +59,13 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     public void ShowJob(Guid jobId) => LaunchUi([UiArguments.ShowJob, jobId.ToString("D")]);
 
     /// <summary>Whether this Host runs in a desktop session (X11 or Wayland), where a file manager can be shown.</summary>
+    /// <remarks>
+    /// macOS has no DISPLAY: a Mac's Host runs in the user's own session with Finder there, so it has one. Without this
+    /// the extension's double-click (job.open) and Open containing folder (job.reveal) were refused on a Mac with
+    /// "Opening a file is not available here." (EXT.B9).
+    /// </remarks>
     internal static bool HasDesktopSession() =>
+        OperatingSystem.IsMacOS() ||
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) ||
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DISPLAY"));
 
@@ -143,7 +150,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
             }
         }
 
-        var open = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+        var open = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
         open.ArgumentList.Add(path);
         using var _ = Process.Start(open);
     }
@@ -157,6 +164,26 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
 
     private void LaunchUi(IReadOnlyList<string> arguments)
     {
+        // macOS: through Inbound.app, as Finder starts it, so the window is the app's (its Dock icon and name). Started
+        // as a program of its own it was another app with Uno's icon. -n starts a new process even while one runs,
+        // which hands the request to the window that is open and ends, as a second launch does on Linux.
+        if (OperatingSystem.IsMacOS() && AppBundle() is { } bundle)
+        {
+            try
+            {
+                var open = new ProcessStartInfo("open") { UseShellExecute = false };
+                foreach (var argument in new[] { "-n", "-a", bundle, "--args" }) open.ArgumentList.Add(argument);
+                foreach (var argument in arguments) open.ArgumentList.Add(argument);
+                using var _ = Process.Start(open);
+                log.Info($"Opened the window through '{bundle}'.");
+                return;
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                log.Warn($"Could not open Inbound.app ({ex.Message}); starting the window program directly.");
+            }
+        }
+
         var executable = FindUiExecutable();
         if (executable is null)
         {
@@ -181,6 +208,15 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         }
     }
 
+    /// <summary>macOS: the Inbound.app this Host is in (Contents/Resources/host), or null outside one.</summary>
+    internal static string? AppBundle()
+    {
+        var bundle = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
+        return bundle.EndsWith(".app", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(bundle, "Contents", "Info.plist"))
+            ? bundle
+            : null;
+    }
+
     internal static string? FindUiExecutable()
     {
         var overridden = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UI");
@@ -189,6 +225,8 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         {
             AppContext.BaseDirectory,
             Path.Combine(AppContext.BaseDirectory, "desktop"),
+            // macOS: Inbound.app keeps the Host in Contents/Resources/host and the window in Contents/Resources/window.
+            Path.Combine(AppContext.BaseDirectory, "..", "window"),
             // A build from the source tree (Host and window in their own bin folders).
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Debug", "net10.0-desktop"),
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "DownloadManager.Desktop.Uno", "bin", "Release", "net10.0-desktop"),
@@ -211,11 +249,19 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
             var start = string.IsNullOrWhiteSpace(initialPath) ? service.GetSettings().DefaultDownloadDirectory : initialPath;
             if (!Directory.Exists(start)) start = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             const string title = "Choose the destination for this download";
-            foreach (var (program, arguments) in new (string, string[])[]
+            // macOS: Finder's own folder dialog through AppleScript; it answers 1 for Cancel too.
+            var dialogs = OperatingSystem.IsMacOS()
+                ? new (string, string[])[]
+                {
+                    ("osascript", ["-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv) default location (POSIX file (item 2 of argv)))",
+                        "-e", "end run", title, start]),
+                }
+                : new (string, string[])[]
                      {
                          ("kdialog", ["--title", title, "--getexistingdirectory", start]),
                          ("zenity", ["--file-selection", "--directory", "--title", title, "--filename", start.TrimEnd('/') + "/"]),
-                     })
+                     };
+            foreach (var (program, arguments) in dialogs)
             {
                 var result = await RunDialogAsync(program, arguments, cancellationToken).ConfigureAwait(false);
                 if (result is not null) return result;

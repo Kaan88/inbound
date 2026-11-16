@@ -18,7 +18,19 @@ public enum DownloadNoticeKind
     PackageExtractionCompleted,
 }
 
-public sealed record DownloadNotice(DownloadNoticeKind Kind, string Title, string Message);
+public sealed record DownloadNotice(DownloadNoticeKind Kind, string Title, string Message)
+{
+    /// <summary>
+    /// MAC.6: the one download a notice is about, for a notification's Open, Show in Finder and Retry; null for a
+    /// package's. Not part of the notice's equality: two notices that say the same are the same.
+    /// </summary>
+    public Guid? JobId { get; init; }
+
+    public bool Equals(DownloadNotice? other) =>
+        other is not null && Kind == other.Kind && Title == other.Title && Message == other.Message;
+
+    public override int GetHashCode() => HashCode.Combine(Kind, Title, Message);
+}
 
 /// <summary>
 /// Decides what the user is told when downloads and extractions end. A download on its own, or a package
@@ -121,19 +133,19 @@ public sealed class DownloadNotices : IDisposable
             // In a package of any size, the package's own completion speaks for it: a package built one add
             // at a time can have only this file so far.
             // EXT.R12: a download the browser keeps quiet has its finish shown by the browser (icon flash or popup).
-            if (e.ChangeType == "completed" && _service.FindGroupOf(job.Id) is null && !job.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", job.FileName);
+            if (e.ChangeType == "completed" && _service.FindGroupOf(job.Id) is null && !job.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", job.FileName, job.Id);
 
             // A stop isn't marked: it can be undone, and stopping again would say the same thing twice.
             if (e.ChangeType is "completed" or "cancelled" && _service.FindPackageOf(job.Id) is { } member) MarkMayCloseEarly(member);
             if (e.ChangeType == "failed")
             {
                 if (_service.FindPackageOf(job.Id) is { } package) MemberFailed(package, job);
-                else Tell(DownloadNoticeKind.Failed, "Download failed", FailureWords(job));
+                else Tell(DownloadNoticeKind.Failed, "Download failed", FailureWords(job), job.Id);
             }
 
             // A torrent that paused because the disk is full waits for the user as a failed one would.
             if (e.ChangeType == "paused" && job.Failure?.Kind == "diskFull")
-                Tell(DownloadNoticeKind.Failed, "Download stopped", $"{job.FileName}: {job.Failure.Message}");
+                Tell(DownloadNoticeKind.Failed, "Download stopped", $"{job.FileName}: {job.Failure.Message}", job.Id);
 
             SettleAll();
         });
@@ -165,7 +177,7 @@ public sealed class DownloadNotices : IDisposable
             if (tellNow) state.FailureTold = true;
         }
 
-        if (tellNow) Tell(DownloadNoticeKind.Failed, "Download failed", FailureWords(job));
+        if (tellNow) Tell(DownloadNoticeKind.Failed, "Download failed", FailureWords(job), job.Id);
     }
 
     private void OnPackageFinished(object? sender, PackageCompletedEventArgs e) => Guarded(() =>
@@ -179,7 +191,7 @@ public sealed class DownloadNotices : IDisposable
         var jobs = e.JobIds.Select(_service.GetJob).OfType<JobDto>().ToList();
         if (jobs is [var only])
         {
-            if (!only.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", only.FileName);
+            if (!only.QuietWindows) Tell(DownloadNoticeKind.Completed, "Download complete", only.FileName, only.Id);
             return;
         }
 
@@ -364,7 +376,8 @@ public sealed class DownloadNotices : IDisposable
 
     private static string FailureWords(JobDto job) => $"{job.FileName}: {job.Failure?.Message}";
 
-    private void Tell(DownloadNoticeKind kind, string title, string message) => Tell(new DownloadNotice(kind, title, message));
+    private void Tell(DownloadNoticeKind kind, string title, string message, Guid? jobId = null) =>
+        Tell(new DownloadNotice(kind, title, message) { JobId = jobId });
 
     private void Tell(DownloadNotice notice) => Guarded(() => _tell(notice));
 

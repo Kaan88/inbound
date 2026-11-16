@@ -14,7 +14,7 @@
 # has the list and how to update 7-Zip.
 
 # ---- Node, for the two stages below ---------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS node-base
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS node-base
 
 # ---- Web UI: static files only ---------------------------------------------------------------------------------------
 FROM node-base AS webui
@@ -77,7 +77,7 @@ RUN set -eu; \
     chmod 755 /out/tools/rclone/rclone; chmod 644 /out/tools/rclone/COPYING
 
 # ---- The server ---------------------------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS server
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb AS server
 ARG TARGETARCH
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 WORKDIR /src
@@ -135,7 +135,7 @@ COPY --from=torrent-worker-build /out/ /
 # ---- Runtime ------------------------------------------------------------------------------------------------------
 # The regular ASP.NET image (Ubuntu), not the chiseled one: the entrypoint needs a shell, chown and setpriv to give
 # /data to PUID:PGID and then drop root, which a chiseled image (no shell, fixed user) can't do.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Inbound Download Manager" \

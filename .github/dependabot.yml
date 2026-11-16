@@ -1,27 +1,89 @@
-# Dependabot opens pull requests for the Docker base images and the GitHub Actions; it merges nothing, and no workflow
-# here merges its pull requests either. Each one is reviewed and merged by hand.
+# Dependabot opens pull requests for the project's dependencies; it merges nothing, and no workflow here merges its
+# pull requests either. Each one is reviewed and merged by hand. CI runs on each.
 #
-# - docker: the FROM lines of the root Dockerfile, pinned by tag and digest (node:24-alpine, dotnet/sdk:10.0,
-#   dotnet/aspnet:10.0), each named once (the Node stages share a node-base stage). A new digest of the same tag is proposed; a new major version (node 26, .NET 11) is not,
-#   since that is a decision of its own.
+# Every two weeks (owner, 2026-11-15: "bi weekly"): Dependabot has no such interval, so the 1st and the 15th of the month.
+# Minor and patch updates of related packages come as one pull request per group; a new major version comes as a
+# pull request of its own, so it is seen and decided on (Uno 7 went unnoticed for days while 6.7 was pinned).
+#
+# - nuget: the PackageReferences of every project, and Uno.Sdk, which is pinned in global.json (msbuild-sdks) so it can
+#   be found here. A Uno.Sdk update also changes THIRD-PARTY-NOTICES.md by hand.
+# - npm: the web UI and the extension.
+# - docker: the FROM lines of the root Dockerfile and of the torrent worker's build, pinned by tag and digest. A new
+#   digest of the same tag is proposed; a new major version (node 26, .NET 11, Ubuntu 24.04) is not, since that is a
+#   decision of its own.
 # - github-actions: the actions in .github/workflows, pinned by commit with the release named beside each.
+#
+# Not covered here (no Dependabot ecosystem): the vcpkg baseline, libtorrent, rclone, 7-Zip, appimagetool and nfpm.
+# .github/workflows/upkeep.yml checks those on the same days and opens an issue when one is behind.
 version: 2
 updates:
-  - package-ecosystem: docker
-    directory: /
+  - package-ecosystem: nuget
+    directories: ["/", "/src/*", "/tests/*", "/tools/*"]
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "NuGet"
+    ignore:
+      # Placeholders only: they take over references Uno.Sdk adds implicitly, with no assets, so they are never shipped
+      # (see DownloadManager.Desktop.Uno.csproj). Their versions don't matter.
+      - dependency-name: "Uno.Sdk.Extras"
+      - dependency-name: "Uno.Settings.DevServer"
+      - dependency-name: "LibVLCSharp"
+      - dependency-name: "CommonServiceLocator"
+    groups:
+      uno:
+        patterns: ["Uno.*"]
+        update-types: ["minor", "patch"]
+      windows-app-sdk:
+        patterns: ["Microsoft.WindowsAppSDK*", "Microsoft.Windows.SDK.BuildTools"]
+        update-types: ["minor", "patch"]
+      tests:
+        patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet.*"]
+        update-types: ["minor", "patch"]
+      other:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directories: ["/webui", "/extensions/chrome"]
+    schedule:
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "npm"
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker
+    directories: ["/", "/native/torrent-worker"]
+    schedule:
+      interval: cron
+      cronjob: "0 5 1,15 * *"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "Docker"
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Ubuntu's second number is not a minor version: 22.10 was a nine-month release (support ended in 2023), while
+      # 22.04 is long-term. Only new digests of the pinned tag are proposed; a move to another Ubuntu is done by hand.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 5 1,15 * *"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "Actions"
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
