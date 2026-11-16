@@ -208,13 +208,13 @@ if (chrome.downloads.onDeterminingFilename) {
   if (webRequest?.onHeadersReceived) {
     try {
       webRequest.onHeadersReceived.addListener(
-        ((details: chrome.webRequest.WebResponseHeadersDetails) => {
+        ((details: chrome.webRequest.OnHeadersReceivedDetails) => {
           // A download keepInBrowser started again is Firefox's own, however its request is typed.
           if (restartedInBrowser.has(details.url)) return undefined;
           const download = responseDownload(details);
           if (!download) return undefined;
           return onDownloadResponse(details, download).catch(() => ({}));
-        }) as unknown as (details: chrome.webRequest.WebResponseHeadersDetails) => chrome.webRequest.BlockingResponse | undefined,
+        }) as unknown as (details: chrome.webRequest.OnHeadersReceivedDetails) => chrome.webRequest.BlockingResponse | undefined,
         { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame"] },
         ["blocking", "responseHeaders"],
       );
@@ -281,7 +281,7 @@ async function ensureSettingsLoaded(): Promise<void> {
 
 async function loadSettings(): Promise<void> {
   const stored = await chrome.storage.local.get("settings");
-  const migrated = migrateSettings(stored.settings);
+  const migrated = migrateSettings(stored.settings as Parameters<typeof migrateSettings>[0]);
   settings = migrated.settings;
   if (migrated.changed) {
     // Once: a copy that never edited the old allow-list now catches everything except the exclude list.
@@ -777,7 +777,7 @@ function takeSettledFromResponse(item: chrome.downloads.DownloadItem): boolean {
  * accepted it (or the folder window has it); every other answer lets Firefox go on, and then onCreated sees
  * the download as before unless this already said what became of it.
  */
-async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersDetails,
+async function onDownloadResponse(details: chrome.webRequest.OnHeadersReceivedDetails,
   download: ResponseDownload): Promise<chrome.webRequest.BlockingResponse> {
   await ensureSettingsLoaded();
   const proceed: chrome.webRequest.BlockingResponse = {};
@@ -1552,7 +1552,7 @@ async function drawIcon(ring: { color: string; fill: number } | null): Promise<v
     return;
   }
   const images = await ringImages(ring);
-  if (images) await action.setIcon({ imageData: images as unknown as chrome.action.TabIconDetails["imageData"] });
+  if (images) await action.setIcon({ imageData: images } as unknown as chrome.action.TabIconDetails);
 }
 
 /** EXT.R12: a download sent from the browser finished: the popup opens, the icon flashes, or nothing (Settings). */
