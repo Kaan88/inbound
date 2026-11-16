@@ -17,7 +17,9 @@ public sealed partial class MainWindow
     private bool _whatsNewDecided;
 
     /// <summary>Whose lines show: the Windows app's, or the Linux window's when this code is built for it.</summary>
-    private static ChangelogSurface WhatsNewSurface => OperatingSystem.IsWindows() ? ChangelogSurface.Windows : ChangelogSurface.Linux;
+    private static ChangelogSurface WhatsNewSurface => OperatingSystem.IsWindows() ? ChangelogSurface.Windows
+        : OperatingSystem.IsMacOS() ? ChangelogSurface.MacOS
+        : ChangelogSurface.Linux;
 
     /// <summary>The version link in the status bar runs Check for updates (true) or What's new (false).</summary>
     private bool _versionLinkUpdates;

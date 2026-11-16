@@ -1,0 +1,62 @@
+# Checks the pins Dependabot can't see (scripts/check-pins.py): libtorrent, the vcpkg baseline, rclone, 7-Zip,
+# appimagetool and nfpm. On the same days as Dependabot (.github/dependabot.yml): the 1st and the 15th of the month.
+#
+# - Scheduled or by hand: when something is behind, opens an issue "Pinned tools behind upstream", or updates the one
+#   that is open; when nothing is, closes it. Nothing is changed in the code: updating a pin is done by hand.
+# - On a push that changes the checker: only prints the report, so a change to it is seen working.
+# Actions are pinned to the commit of the release named beside each.
+name: Upkeep
+
+on:
+  schedule:
+    - cron: "17 5 1,15 * *"
+  workflow_dispatch:
+  push:
+    paths: ["scripts/check-pins.py", ".github/workflows/upkeep.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    if: github.repository == 'Kaan88/inbound'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the pins with upstream
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/check-pins.py --out "$RUNNER_TEMP/pins.md"
+          cat "$RUNNER_TEMP/pins.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open, update or close the issue
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+        run: |
+          title="Pinned tools behind upstream"
+          number="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title \
+            -q ".[] | select(.title == \"$title\") | .number" | head -n1)"
+          if [ "$BEHIND" -gt 0 ]; then
+            if [ -n "$number" ]; then
+              gh issue edit "$number" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/pins.md"
+              echo "Updated issue #$number ($BEHIND behind)."
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/pins.md"
+            fi
+          elif [ -n "$number" ]; then
+            gh issue close "$number" -R "$GITHUB_REPOSITORY" --comment "Every pinned tool is current as of $(date -u +%F)."
+          else
+            echo "Every pinned tool is current."
+          fi

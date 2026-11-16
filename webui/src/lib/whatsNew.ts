@@ -57,7 +57,7 @@ export interface WhatsNewView {
   elsewhere: ElsewhereLine[];
 }
 
-const places = ['all', 'desktop', 'windows', 'webui', 'server', 'docker', 'linux', 'extension'];
+const places = ['all', 'desktop', 'windows', 'webui', 'server', 'docker', 'linux', 'macos', 'extension'];
 const mine = ['webui', 'server', 'docker'];
 const labels: Record<string, string> = { desktop: 'Desktop', windows: 'Windows', webui: 'Web UI', extension: 'Extension' };
 const placeNames: Record<string, string> = { Desktop: 'the desktop app', Windows: 'the Windows app', 'Web UI': 'the web UI', Extension: 'the browser extension', Server: 'the server' };
@@ -68,7 +68,7 @@ function placeOf(tags: readonly string[], features: Features): string | null {
   if (tags.some((tag) => isProvider(tag) && !features.providers.includes(tag))) return null;
   const tagged = tags.filter((tag) => places.includes(tag));
   if (tagged.length === 0 || tagged.includes('all') || tagged.some((tag) => mine.includes(tag))) return 'here';
-  const other = tagged.find((tag) => tag !== 'linux');
+  const other = tagged.find((tag) => tag !== 'linux' && tag !== 'macos');
   return other ? (labels[other] ?? 'Server') : null;
 }
 

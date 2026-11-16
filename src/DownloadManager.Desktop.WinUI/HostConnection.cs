@@ -1033,7 +1033,7 @@ public static class HostLauncher
 
     public static void EnsureStarted()
     {
-        if (OperatingSystem.IsLinux())
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             EnsureStartedOnLinux();
             return;
@@ -1101,6 +1101,8 @@ public static class HostLauncher
             Path.Combine(AppContext.BaseDirectory, "inbound-host"),
             // The AppImage keeps the window in desktop/ beside the Host.
             Path.Combine(AppContext.BaseDirectory, "..", "inbound-host"),
+            // macOS: Inbound.app keeps the window in Contents/Resources/window and the Host in Contents/Resources/host.
+            Path.Combine(AppContext.BaseDirectory, "..", "host", "inbound-host"),
         };
         for (var i = 0; i < 7 && directory is not null; i++, directory = directory.Parent)
         {
@@ -1114,11 +1116,7 @@ public static class HostLauncher
         if (executable is null) return;
         try
         {
-            var start = new ProcessStartInfo("setsid") { UseShellExecute = false };
-            start.ArgumentList.Add("-f");
-            start.ArgumentList.Add(executable);
-            start.ArgumentList.Add("--background");
-            Process.Start(start)?.Dispose();
+            DetachedProcess.Start(executable, "--background");
         }
         catch (Exception)
         {

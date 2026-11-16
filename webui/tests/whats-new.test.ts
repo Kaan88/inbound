@@ -19,6 +19,7 @@ const sample: ChangelogVersion = {
         { text: 'Server only', tags: ['server'] },
         { text: 'Extension only', tags: ['extension'] },
         { text: 'Linux only', tags: ['linux'] },
+        { text: 'macOS only', tags: ['macos'] },
         { text: 'Web torrents', tags: ['webui', 'torrents'] },
         { text: 'Web TorBox', tags: ['webui', 'torbox'] },
       ],
@@ -34,6 +35,14 @@ class Memory implements KeyValue {
 }
 
 describe("what's new", () => {
+  it('neither shows nor counts lines only for the Linux or the macOS window (MAC.1)', () => {
+    const view = filterChangelog([sample], { torrents: true, providers: ['torbox'] });
+    const lines = view.versions.flatMap((version) => version.sections.flatMap((section) => section.lines));
+    expect(lines).not.toContain('macOS only');
+    expect(view.elsewhere.map((line) => line.text)).not.toContain('macOS only');
+    expect(view.elsewhere.map((line) => line.text)).not.toContain('Linux only');
+  });
+
   it('shows the web UI, server and Docker lines and folds the rest', () => {
     const view = filterChangelog([sample], { torrents: false, providers: [] });
     expect(view.versions).toHaveLength(1);

@@ -249,6 +249,18 @@ public sealed class StagingWalkTests : IDisposable
         Assert.Null(ExtractionSafety.LinkCountIn(stat, Architecture.Arm));
         Assert.Null(ExtractionSafety.LinkCountIn(stat, Architecture.RiscV64));
 
+        // macOS: the u16 st_nlink at 6 of the 64-bit-inode struct stat (MAC.1).
+        BitConverter.GetBytes((ushort)4).CopyTo(stat, 6);
+        Assert.Equal(4u, ExtractionSafety.MacLinkCountIn(stat));
+        if (OperatingSystem.IsMacOS())
+        {
+            var file = _space.WriteSource("mac.txt", "a");
+            Assert.Equal(1u, ExtractionSafety.MacHardLinkCount(file));
+            MakeHardLink(Path.Combine(_space.Root, "mac-second.txt"), file);
+            Assert.Equal(2u, ExtractionSafety.MacHardLinkCount(file));
+            Assert.Null(ExtractionSafety.MacHardLinkCount(Path.Combine(_space.Root, "not-there.txt")));
+        }
+
         if (!OperatingSystem.IsLinux()) return;
         var single = _space.WriteSource("single.txt", "a");
         Assert.Equal(1u, ExtractionSafety.UnixHardLinkCount(single));
