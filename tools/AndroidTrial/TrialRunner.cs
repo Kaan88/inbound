@@ -11,7 +11,7 @@ using DownloadManager.Persistence;
 
 namespace AndroidTrial;
 
-public sealed record TrialRequest(string Url, int Segments, string Dest, string? ExpectedSha256, string RunId, long OnCreateMs);
+public sealed record TrialRequest(string Url, int Segments, string Dest, string? ExpectedSha256, string RunId, long OnCreateMs, IReadOnlyDictionary<string, string>? Extras = null);
 
 internal sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
 {
@@ -45,6 +45,7 @@ internal static class TrialRunner
         try
         {
             if (request.Dest == "raw") await RunRawAsync(request, json, say, cancellationToken).ConfigureAwait(false);
+            else if (request.Dest is "net" or "write" or "sysdm") await NetProbe.RunAsync(context, request, json, say, cancellationToken).ConfigureAwait(false);
             else await RunCoreAsync(context, request, extDir, json, say, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -199,6 +200,7 @@ internal static class TrialRunner
         GC.Collect();
         var alloc0 = GC.GetTotalAllocatedBytes(true);
         int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
+        ThreadSampler.Start();
         var (user0, kernel0) = Cpu();
         long peak = 0;
         using var stopSampler = new CancellationTokenSource();
@@ -225,6 +227,7 @@ internal static class TrialRunner
         }
 
         var (user1, kernel1) = Cpu();
+        json["threadGroups"] = ThreadSampler.Stop();
         var alloc1 = GC.GetTotalAllocatedBytes(true);
         stopSampler.Cancel();
         await sampler.ConfigureAwait(false);

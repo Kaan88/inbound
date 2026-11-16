@@ -19,12 +19,14 @@ for (var i = 0; i < block.Length; i++)
 var port = 0;
 for (var i = 0; i < args.Length - 1; i++)
     if (args[i] == "--port") port = int.Parse(args[i + 1], CultureInfo.InvariantCulture);
+// --lan: listen on every address, so a phone on the same Wi-Fi can reach it (a real link, not adb reverse).
+var lan = args.Contains("--lan");
 
 var builder = WebApplication.CreateBuilder();
 builder.Logging.ClearProviders();
 builder.WebHost.ConfigureKestrel(o =>
 {
-    o.Listen(IPAddress.Loopback, port);
+    o.Listen(lan ? IPAddress.Any : IPAddress.Loopback, port);
     o.Limits.MinResponseDataRate = null;
 });
 var app = builder.Build();

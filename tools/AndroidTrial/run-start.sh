@@ -4,7 +4,7 @@
 # Env: RUNS (cold starts per state, default 5), JOBS (seeded jobs for the second state, default 200; 0 skips it),
 #      SKIP_BUILD=1 (install the newest APK as is), APK_FILE=<prebuilt apk> (install that one, no build), TRIAL_PROFILE=<file.aprof> (VARIANT=customprofile),
 #      PASS_CHECK=1 (also run run-host.sh with the same variant afterwards)
-# Build: dotnet build -c Release -p:RuntimeIdentifier=android-x64 -p:TrialVariant=$VARIANT (nativeaot: dotnet publish). The default
+# Build: dotnet build -c Release -p:RuntimeIdentifier=${RID:-android-x64} ${MINSDK:+-p:SupportedOSPlatformVersion=$MINSDK} -p:TrialVariant=$VARIANT (nativeaot: dotnet publish). The default
 # build is the one with no TrialVariant. Needs a running emulator (start it from Bash). Results: artifacts/android-trial/start-<variant>-<time>/
 set -u
 export MSYS_NO_PATHCONV=1
@@ -13,7 +13,7 @@ SDK="$(cygpath -m "${ANDROID_HOME:-$LOCALAPPDATA/Android/Sdk}")"
 ADB="$SDK/platform-tools/adb.exe"
 VARIANT="${VARIANT:-default}"; RUNS="${RUNS:-5}"; JOBS="${JOBS:-200}"
 PKG=app.inbound.trial; EXT=/sdcard/Android/data/$PKG/files
-OUT="$ROOT/artifacts/android-trial/start-$VARIANT-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$OUT"
+OUT="${OUT_DIR:-$ROOT/artifacts/android-trial/start-$VARIANT-${WARM:+warm-${WARM//,/+}-}$(date +%Y%m%d-%H%M%S)}"; mkdir -p "$OUT"
 "$ADB" get-state >/dev/null 2>&1 || { echo "No device: start the emulator first."; exit 1; }
 PRJ="$ROOT/tools/AndroidTrial/AndroidTrial.csproj"
 
@@ -24,7 +24,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
   [ -n "${TRIAL_PROFILE:-}" ] && VARG="$VARG -p:TrialProfile=$TRIAL_PROFILE"
   if [ "$VARIANT" = nativeaot ]; then VERB=publish; else VERB=build; fi
   echo "== dotnet $VERB $VARG"
-  dotnet $VERB "$PRJ" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=android-x64 $VARG -bl:"$OUT/build.binlog" > "$OUT/build.log" 2>&1
+  dotnet $VERB "$PRJ" -c Release -p:AndroidSdkDirectory="$SDK" -p:RuntimeIdentifier=${RID:-android-x64} ${MINSDK:+-p:SupportedOSPlatformVersion=$MINSDK} $VARG -bl:"$OUT/build.binlog" > "$OUT/build.log" 2>&1
   echo "build exit $?; $(grep -cE 'warning' "$OUT/build.log") warning lines (distinct: $(grep -oE 'warning [A-Z]+[0-9]+' "$OUT/build.log" | sort -u | tr '\n' ' '))" | tee "$OUT/build-summary.txt"
   grep -E "error " "$OUT/build.log" | sort -u | head -10
 fi
@@ -40,6 +40,8 @@ cold() { # label index -> result json + am start -W output
   local label=$1 i=$2 id="$1$2"
   "$ADB" shell am force-stop $PKG; sleep 1
   "$ADB" shell rm -f "$EXT/host-result-$id-add.json" >/dev/null
+  # WARM=<flags>: the phone-trial warm-up (WarmUp.cs) from Application.OnCreate: all|prot|lazyprot|settings|jobs|ipc|host, comma list. Empty = off.
+  if [ -n "${WARM:-}" ]; then "$ADB" shell "mkdir -p $EXT; echo $WARM > $EXT/warm.flag" >/dev/null; else "$ADB" shell "rm -f $EXT/warm.flag" >/dev/null; fi
   "$ADB" shell am start -W -n $PKG/.MainActivity --es mode host --es phase add --es runId "$id" --ez idle true | tr -d '\r' > "$OUT/$id-amstart.txt"
   for _ in $(seq 1 120); do
     "$ADB" shell cat "$EXT/host-result-$id-add.json" 2>/dev/null | tr -d '\r' > "$OUT/$id.json"
