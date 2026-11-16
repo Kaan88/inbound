@@ -13,7 +13,7 @@ SDK="$(cygpath -m "${ANDROID_HOME:-$LOCALAPPDATA/Android/Sdk}")"
 ADB="$SDK/platform-tools/adb.exe"
 VARIANT="${VARIANT:-default}"; RUNS="${RUNS:-5}"; JOBS="${JOBS:-200}"
 PKG=app.inbound.trial; EXT=/sdcard/Android/data/$PKG/files
-OUT="$ROOT/artifacts/android-trial/start-$VARIANT-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$OUT"
+OUT="${OUT_DIR:-$ROOT/artifacts/android-trial/start-$VARIANT-${WARM:+warm-${WARM//,/+}-}$(date +%Y%m%d-%H%M%S)}"; mkdir -p "$OUT"
 "$ADB" get-state >/dev/null 2>&1 || { echo "No device: start the emulator first."; exit 1; }
 PRJ="$ROOT/tools/AndroidTrial/AndroidTrial.csproj"
 
@@ -40,6 +40,8 @@ cold() { # label index -> result json + am start -W output
   local label=$1 i=$2 id="$1$2"
   "$ADB" shell am force-stop $PKG; sleep 1
   "$ADB" shell rm -f "$EXT/host-result-$id-add.json" >/dev/null
+  # WARM=<flags>: the phone-trial warm-up (WarmUp.cs) from Application.OnCreate: all|prot|lazyprot|settings|jobs|ipc|host, comma list. Empty = off.
+  if [ -n "${WARM:-}" ]; then "$ADB" shell "mkdir -p $EXT; echo $WARM > $EXT/warm.flag" >/dev/null; else "$ADB" shell "rm -f $EXT/warm.flag" >/dev/null; fi
   "$ADB" shell am start -W -n $PKG/.MainActivity --es mode host --es phase add --es runId "$id" --ez idle true | tr -d '\r' > "$OUT/$id-amstart.txt"
   for _ in $(seq 1 120); do
     "$ADB" shell cat "$EXT/host-result-$id-add.json" 2>/dev/null | tr -d '\r' > "$OUT/$id.json"

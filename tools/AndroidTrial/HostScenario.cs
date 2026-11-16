@@ -184,6 +184,9 @@ internal static class HostScenario
 
             json["otherFrameTypes"] = frames;
             json["trace"] = StartupTrace.ToJson();
+            json["warm"] = WarmUp.ToJson();
+            var cpu = CpuSnapshot.Take();
+            json["processCpu"] = new JsonObject { ["user"] = Math.Round(cpu.UserS, 2), ["kernel"] = Math.Round(cpu.KernelS, 2), ["threads"] = new JsonArray(cpu.Threads.Select(t => (JsonNode?)new JsonObject { ["name"] = t.Value.Name, ["user"] = Math.Round(t.Value.User, 2), ["kernel"] = Math.Round(t.Value.Kernel, 2) }).Where(n => (double)n!["user"]! + (double)n["kernel"]! >= 0.02).ToArray()) };
             json["doneMs"] = Since();
             return host;
         }

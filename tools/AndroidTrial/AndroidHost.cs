@@ -99,18 +99,22 @@ internal sealed class AndroidHost : IAsyncDisposable
 
     public HostCommandDispatcher Dispatcher { get; }
 
-    public static async Task<AndroidHost> StartAsync(string stateRoot, Action<string> say, CancellationToken ct)
+    public static async Task<AndroidHost> StartAsync(string stateRoot, Action<string> say, CancellationToken ct, bool chooseProtector = true)
     {
         StartupTrace.Mark("host.begin");
         var paths = new StoragePaths(stateRoot);
         paths.EnsureCreated();
         StartupTrace.Mark("host.paths");
-        if (Interlocked.Exchange(ref _protectorSet, 1) == 0)
+        if (chooseProtector && Interlocked.Exchange(ref _protectorSet, 1) == 0)
         {
+          if (WarmUp.Protector is { } early) SecretProtector.Use(early);   // trial: a protector that opens lazily or on a warm-up thread
+          else
+          {
             var keyDir = Path.Combine(stateRoot, "key");
             Directory.CreateDirectory(keyDir);
             SecretProtector.Use(AesGcmSecretProtector.OpenForDataFolder(
                 Path.Combine(keyDir, AesGcmSecretProtector.DefaultFileName), keyDir, discardUnreadable: false));
+          }
         }
 
         StartupTrace.Mark("host.protector");

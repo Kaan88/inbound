@@ -31,6 +31,9 @@
   <PropertyGroup Condition="'$(TrialVariant)' == 'customprofile'"><AndroidEnableProfiledAot>true</AndroidEnableProfiledAot></PropertyGroup>
   <ItemGroup Condition="'$(TrialVariant)' == 'customprofile' And '$(TrialProfile)' != ''"><AndroidAotProfile Include="$(TrialProfile)" /></ItemGroup>
 
+  <!-- -p:TrialEnvFile=<file of KEY=value lines>: runtime environment set before the runtime starts (MONO_LOG_* ...). -->
+  <ItemGroup Condition="'$(TrialEnvFile)' != ''"><AndroidEnvironment Include="$(TrialEnvFile)" /></ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\DownloadManager.Core\DownloadManager.Core.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />

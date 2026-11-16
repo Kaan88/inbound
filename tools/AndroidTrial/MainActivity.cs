@@ -22,7 +22,13 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         StartupTrace.Mark("activity.OnCreate.enter");
+        // Extra "env" = "K=V;K=V": process environment, set before any socket is used (the .NET sockets read their DOTNET_* switches once).
+        if (Intent?.GetStringExtra("env") is { Length: > 0 } envText)
+            foreach (var kv in envText.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                if (kv.Split('=', 2) is [var k, var v]) System.Environment.SetEnvironmentVariable(k, v);
         base.OnCreate(savedInstanceState);
+        // The phone may be unplugged and dozing (Doze rejects the network of a background app): keep the screen on while this window is up. A window flag, not a system setting.
+        Window?.AddFlags(Android.Views.WindowManagerFlags.KeepScreenOn);
         // Time from the process being forked to the first line of our code in the Activity.
         _onCreateMs = SystemClock.ElapsedRealtime() - Android.OS.Process.StartElapsedRealtime;
         var scroll = new ScrollView(this);
@@ -98,7 +104,8 @@ public sealed class MainActivity : Activity
             intent.GetStringExtra("dest") ?? "app",
             intent.GetStringExtra("sha256"),
             intent.GetStringExtra("runId") ?? "run",
-            _onCreateMs);
+            _onCreateMs,
+            AllExtras(intent));
         try
         {
             await Task.Run(() => TrialRunner.RunAsync(this, request, Show, CancellationToken.None));
@@ -108,6 +115,15 @@ public sealed class MainActivity : Activity
             Log.Error("InboundTrial", ex.ToString());
             Show("FATAL " + ex);
         }
+    }
+
+    private static Dictionary<string, string> AllExtras(Intent intent)
+    {
+        var d = new Dictionary<string, string>();
+        if (intent.Extras is { } b)
+            foreach (var key in b.KeySet() ?? [])
+                if (b.Get(key)?.ToString() is { } v) d[key] = v;
+        return d;
     }
 
     private void Show(string line)
