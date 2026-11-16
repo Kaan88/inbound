@@ -32,6 +32,10 @@ public static class SiteRemote
         // rclone does not check an SFTP host key unless told to (SITES.0 point 3), so a site without an accepted key never
         // reaches it: the window asks first.
         if (site.NeedsHostKey) throw new SiteStoreException("The server's key has not been accepted yet.");
+        // SITES.11 review: an address opened once with no password would make rclone offer this PC's ssh-agent keys to
+        // whatever server was typed. Here, so browsing, transfers, folder changes and device streams all stop.
+        if (site is { Unsaved: true, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
+            throw new SiteStoreException("Type the password for this server.");
 
         var fs = new JsonObject
         {

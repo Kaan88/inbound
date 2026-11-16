@@ -41,6 +41,7 @@ public sealed class IpcJsonContextTests
         "NativeHostRegistrationState",    // registry check result
         "JobListEntry", "TorrentListEntry", // saved-list file: JobListJsonContext (web defaults), not IpcJson
         "PlainHttpNotConfirmedException", "RemotePairingEndedException", "RemoteServerException",
+        "SiteAddress",                    // SITES.11: the typed address read on the Host; the address travels as a string
     ];
 
     private static IEnumerable<Type> ContractTypes() => typeof(IpcMessage).Assembly.GetExportedTypes()

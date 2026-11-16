@@ -201,6 +201,89 @@ the automated walk, the walk by sight, the screenshot pairs, then the owner look
   uses (`IHostPlatform`); no new machine action.
 - Protocol version stays 1; fields are additive. Contract tests for each.
 
+R1 design (2026-11-16, revised after the Fable review the same day):
+
+1. **Per-file progress.** `SiteTransferDto.Moving`: the files moving now (at most "transfers at once"), each with
+   `Path`, `Size`, `BytesDone`, `Speed`, `SecondsLeft`; empty when nothing moves, so `sites.transfer.changed` carries it.
+   No per-item copy in `sites.transfer.get` (it would only repeat `Moving`). The progress loop already reads `core/stats`
+   for the batch's group once a second; each `transferring` entry is matched to a moving file by the `srcRemote` its
+   `operations/copyfile` was given, and by nothing else: rclone 1.76 names the entry by the source even when the target
+   is another name (checked: `sub/big.bin` copied to `renamed-copy.bin` is reported as `sub/big.bin`). No pairing by
+   elimination, so one file's bar never shows on another. An entry that matches nothing still counts toward the batch's
+   bytes and speed, as before.
+2. **Time left.** `SiteTransferDto.SecondsLeft`: whole seconds, rounded up, from the bytes still to move and the batch's
+   speed; null unless the batch is running and moving, and null when a file still to move has no known size. One pure
+   rule in Contracts (`SiteTransferTime.SecondsLeft`), used by the Host for the batch and each moving file.
+3. **What a row needs without opening it.**
+   - `Picked` (the first three names picked, from the files' first path segment, in the batch's order) and `PickedCount`,
+     for the title ("isos and 2 more"). Worked out once per batch; old batch files give them too.
+   - `FirstFailedPath` and `FirstFailedError`: the first failed file and why.
+   - `RetryAt` and `RetryReason`: while a running batch waits out a lost connection (the countdown in `trouble`); null
+     once the wait is over.
+   - `FilesStopped`: see 4.
+4. **Stop one file** (the mockup's note: Stop on the row, and per file once opened). `sites.transfer.stopFile`
+   {`Id`, `Path`}: a waiting file is left `stopped`; a moving one is cut (rclone removes its partial file, as for a pause)
+   and left `stopped`. The batch goes on with the others and finishes `done` when nothing failed: a stopped file is not a
+   failure (a batch whose files were all stopped ends `done` with none copied; clients read `FilesStopped`). The stop is
+   decided when the file's ending is recorded, so a stop that races a pause, a failure or a lost connection still leaves
+   it stopped, with no try spent and no batch wait, and it is saved at once (a Host kill can't bring it back). Retry
+   leaves stopped files alone; `sites.transfer.startFile` {`Id`, `Path`} puts one (or a failed one) back in line and runs
+   a finished batch again for it (a web session's folder rules apply, as for Retry). `BytesSetAside` (the sizes of failed
+   and stopped files) is left out of time left, and the bar's whole is `Bytes` less it. A new item state, `stopped`; an
+   older client counts it as waiting, which is the only effect on one.
+5. **Is the site reachable** (the sidebar's dot). `SiteDto.Reach`: `ok`, `trouble` or null (not tried since the Host
+   started). In memory only. A folder listing (browse, Test) and a transfer's files set it; a change sends `sites.changed`.
+   Only connection-class failures (can't reach, sign-in refused, a changed key, an untrusted certificate, a sign-in
+   needed) set `trouble`; one file's own failure, or rclone missing here, does not.
+6. **Last used.** `SiteRecord.LastUsedAt` and `SiteDto.LastUsedAt`. Stamped by a user's first-page `sites.browse` (not a
+   later page, not Refresh, not Test) and by `sites.transfer.start`; not by retries or resumes. `SiteDto` gives the
+   in-memory value at once; the file is written only when the stored value is empty or at least 10 minutes older (idle
+   disk: about six writes an hour while browsing). The write re-reads the site under the site gate and writes nothing
+   when it is gone or unsaved, so a stale copy never overwrites an edit. It runs in the background, one pending per
+   site: a browse never waits for it. `ModifiedAt` stays for the user's own edits. A failed write is logged, not shown.
+7. **An unsaved site ("Open an address once").** `SiteRecord.Unsaved` (`[JsonIgnore]`). `SiteStore` gains a memory layer:
+   `GetAsync` finds an unsaved site; `SaveAsync` on an id held in memory changes only the memory copy (trusting a key,
+   starring and editing work on it as on any site) and never writes a file; `RemoveAsync` drops it; `ListAsync` leaves
+   it out unless asked (`includeUnsaved`), and the trusted-certificates file is written from the list with them. At most
+   8 at once.
+   - `sites.openOnce` {`Address`, `Password`?, `Id`?}: a Contracts `SiteAddress` rule parses `sftp://`, `ftp://` (plain),
+     `ftps://` (explicit TLS), `http://` and `https://` (WebDAV) with an optional `user@`, port and folder. Refused: a
+     password in the address, a query or fragment, control characters, more than 2,048 characters, and whatever
+     `SiteKindCatalog.AddressProblem` refuses. `http://` and `ftp://` answer `Encrypted = false` before any password is
+     asked, so the window can say "Not encrypted" first. `ftps://` on port 990 is implicit TLS. An SFTP site starts with
+     no accepted key, so the usual key question comes first; with no password it answers `passwordNeeded` before rclone
+     is asked, because rclone would otherwise offer this PC's ssh-agent keys to whatever server was typed. Answers a
+     `SiteDto` with `Unsaved = true`, named after the host. An open unsaved site of the same kind, server, port and user
+     is used again rather than opened twice; a ninth is refused, never one evicted.
+   - With `Id`: sets the password of that unsaved site. Refused for any id that is not an open unsaved site: a saved
+     site's keys and passwords are never reached through it.
+   - A browse that fails because the server wants a password answers the new problem `passwordNeeded`.
+   - `sites.close` {`Id`}: forgets an unsaved site as `sites.remove` does (its batches canceled, its listings, reach and
+     last-used dropped, the trusted-certificates file written again). Refused for a saved id, also when "Remember" saved
+     it while its batches were being canceled.
+   - `sites.keep` {`Id`, `Name`?}: "Remember": writes it as a saved site, password and accepted key included. Refused for
+     a saved id.
+   - The same session rights as `sites.save` (a web session may open one; its folders stay held to its roots). An edit
+     (`sites.save` on its id) stays in memory; only `sites.keep` writes it.
+   - `sites.list` includes open unsaved sites, marked `Unsaved`.
+   - A Host restart forgets every unsaved site; a batch left on one fails at its next file with "The site no longer
+     exists."
+8. **Where a download goes with no folder** (decision 1 and 2: no dialog). `sites.transfer.start` with no `LocalFolder`
+   on a site with no linked folder: the category rules of other downloads (Options › folders by category). One folder per
+   batch: the category folder when every picked file is of one category that has a folder and category folders are on;
+   else the download folder (never the last folder used). A picked folder counts as "other". The folder chosen gets the
+   same guards as a named one (a full path, not Inbound's data folder, made when missing). A web session still names its
+   folder.
+9. **Open and reveal** of a finished transfer: no Host change; clients use the existing shell open/reveal.
+10. **Not in R1:** "Some of it" on a folder in the This PC pane (`SiteHere` marks only files). It needs the whole remote
+    folder listed recursively; asked of the owner.
+11. **Found by the review, not changed in R1:** a saved SFTP site with password sign-in and no password also lets rclone
+    offer this PC's ssh-agent keys, and a web session can save such a site (an existing behaviour since SITES.2). Asked
+    of the owner whether to turn the agent off for sites a web session saves. `RetryAt` is an absolute time, so a remote
+    client with a wrong clock shows a wrong countdown. A file stopped at the moment rclone itself dies may leave its
+    partial file (the sweep looks at unfinished files only). Opening an address that is already open reuses the site
+    and ignores the new address's folder. Look-alike characters in a typed server name become the site's name as typed.
+
 ### R2. Desktop: the browse view (`browse`, `remote-only`, `trouble`)
 
 - `SitesPanel` rebuilt as the mockup's pane: header (icon, name, kind chip, "Not encrypted" chip), path row (Up,

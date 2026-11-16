@@ -118,6 +118,31 @@ public static class SitesMessageTypes
     /// <summary><see cref="SiteTransferIdRequest"/>: the batch's failed files are tried again.</summary>
     public const string TransferRetry = "sites.transfer.retry";
 
+    /// <summary>
+    /// SITES.11, <see cref="SiteTransferFileRequest"/>: stops one file of a batch (cut if it is moving, its partial file
+    /// removed by rclone) and leaves it <c>stopped</c>; the batch goes on with the others. Retry leaves it; <see cref="TransferStartFile"/> starts it again. Answered
+    /// with <see cref="TransferResult"/>. A Host from before SITES.11 answers "Unknown Sites request".
+    /// </summary>
+    public const string TransferStopFile = "sites.transfer.stopFile";
+
+    /// <summary>
+    /// SITES.11, <see cref="SiteTransferFileRequest"/>: a stopped (or failed) file goes back in line; a finished batch runs
+    /// again for it. Answered with <see cref="TransferResult"/>.
+    /// </summary>
+    public const string TransferStartFile = "sites.transfer.startFile";
+
+    /// <summary>
+    /// SITES.11, <see cref="SiteOpenOnceRequest"/>: opens an address as an unsaved site (held in memory only, at most
+    /// eight), or sets the password of one. Answered with <see cref="Result"/> (its <c>Site</c> set, <c>Unsaved</c> true).
+    /// </summary>
+    public const string OpenOnce = "sites.openOnce";
+
+    /// <summary>SITES.11, <see cref="SiteIdRequest"/>: forgets an unsaved site, its batches canceled. Refused for a saved site.</summary>
+    public const string Close = "sites.close";
+
+    /// <summary>SITES.11, <see cref="SiteKeepRequest"/>: saves an unsaved site ("Remember"). Refused for a saved site.</summary>
+    public const string Keep = "sites.keep";
+
     /// <summary><see cref="SiteTransferIdRequest"/>: removes a finished batch from the list, or every finished batch when the id is empty.</summary>
     public const string TransferClear = "sites.transfer.clear";
 
@@ -163,7 +188,7 @@ public static class SitesMessageTypes
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
-            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
+            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep
             or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
             or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
 }
@@ -331,6 +356,15 @@ public sealed class SiteDto
 
     /// <summary>SITES.6b: the server certificates this site trusts beyond the system's (FTPS and https sites).</summary>
     public List<SiteTrustedCertificateDto> TrustedCertificates { get; set; } = [];
+
+    /// <summary>SITES.11: a <see cref="SiteReach"/> value, or null when the site was not tried since the Host started.</summary>
+    public string? Reach { get; set; }
+
+    /// <summary>SITES.11: when it was last browsed or a transfer was started on it; null when never.</summary>
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>SITES.11: opened once from an address, not saved; gone when the Host stops unless kept (<c>sites.keep</c>).</summary>
+    public bool Unsaved { get; set; }
 }
 
 public sealed class SiteHostKeyDto
@@ -482,6 +516,28 @@ public sealed class SiteIdRequest
     public string Id { get; set; } = "";
 }
 
+/// <summary>SITES.11: <c>sites.openOnce</c>.</summary>
+public sealed class SiteOpenOnceRequest
+{
+    /// <summary>The address (<see cref="SiteAddress"/>); ignored with <see cref="Id"/>.</summary>
+    public string Address { get; set; } = "";
+
+    /// <summary>The password to sign in with, or null for none (yet).</summary>
+    public string? Password { get; set; }
+
+    /// <summary>An open unsaved site whose password this sets, instead of opening another address.</summary>
+    public string? Id { get; set; }
+}
+
+/// <summary>SITES.11: <c>sites.keep</c>.</summary>
+public sealed class SiteKeepRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>The saved site's name; null keeps the one it has (the server's name).</summary>
+    public string? Name { get; set; }
+}
+
 public sealed class SiteProbeRequest
 {
     public string Host { get; set; } = "";
@@ -579,6 +635,22 @@ public static class SiteProblems
     /// site changed). The client reads the folder again from offset 0.
     /// </summary>
     public const string ListingChanged = "listingChanged";
+
+    /// <summary>
+    /// SITES.11: an unsaved site's server wants a password (or refused the one given); the client asks and sends it with
+    /// <c>sites.openOnce</c> and the site's <c>Id</c>.
+    /// </summary>
+    public const string PasswordNeeded = "passwordNeeded";
+}
+
+/// <summary>The values of <see cref="SiteDto.Reach"/>.</summary>
+public static class SiteReach
+{
+    /// <summary>The last listing or transfer on it worked.</summary>
+    public const string Ok = "ok";
+
+    /// <summary>The last listing or transfer on it could not reach it, or the server refused it.</summary>
+    public const string Trouble = "trouble";
 }
 
 public sealed class SiteResultDto

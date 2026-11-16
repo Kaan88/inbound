@@ -29,6 +29,15 @@ public sealed class SiteTransferNameDto
     public bool IsFolder { get; set; }
 }
 
+/// <summary>SITES.11: one file of a batch, for <c>sites.transfer.stopFile</c>.</summary>
+public sealed class SiteTransferFileRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>As <see cref="SiteTransferItemDto.Path"/>.</summary>
+    public string Path { get; set; } = "";
+}
+
 public sealed class SiteTransferIdRequest
 {
     /// <summary>The batch; for <c>sites.transfer.clear</c> an empty id clears every finished batch.</summary>
@@ -66,16 +75,93 @@ public sealed class SiteTransferDto
     /// <summary>Files moving now.</summary>
     public int FilesRunning { get; set; }
 
+    /// <summary>
+    /// SITES.11: files the user stopped one by one (<c>sites.transfer.stopFile</c>); they are not moved and are not
+    /// failures. Retry leaves them; <c>sites.transfer.startFile</c> starts one again. A batch whose files were all stopped
+    /// ends <c>done</c> with none copied. A Host from before SITES.11 never sends it.
+    /// </summary>
+    public int FilesStopped { get; set; }
+
+    /// <summary>
+    /// SITES.11: the names the user picked (files and folders of the source folder), the first few in the order picked,
+    /// for a row's title ("isos and 2 more"); <see cref="PickedCount"/> is how many there were. Empty from an older Host.
+    /// </summary>
+    public List<string> Picked { get; set; } = [];
+
+    public int PickedCount { get; set; }
+
+    /// <summary>
+    /// SITES.11: the first failed file (as <see cref="SiteTransferItemDto.Path"/>) and why, so a row can say it without
+    /// opening; null when none failed.
+    /// </summary>
+    public string? FirstFailedPath { get; set; }
+
+    public string? FirstFailedError { get; set; }
+
+    /// <summary>
+    /// SITES.11: when a running batch that lost its connection tries again (it waits, doubling up to a minute, before its
+    /// next file); null when it is not waiting so. <see cref="Message"/> is not set while it waits; the last file's error is.
+    /// </summary>
+    public DateTimeOffset? RetryAt { get; set; }
+
+    /// <summary>SITES.11: why it waits for <see cref="RetryAt"/> (the connection error), null otherwise.</summary>
+    public string? RetryReason { get; set; }
+
     /// <summary>Total bytes as listed; files of unknown size count as 0.</summary>
     public long Bytes { get; set; }
 
     public long BytesDone { get; set; }
 
+    /// <summary>
+    /// SITES.11: the bytes of failed and stopped files, which are not going to move: the bar's whole is
+    /// <see cref="Bytes"/> less this, and <see cref="SecondsLeft"/> leaves them out. 0 from an older Host.
+    /// </summary>
+    public long BytesSetAside { get; set; }
+
     /// <summary>Bytes a second over the last few seconds; 0 when nothing moves.</summary>
     public long Speed { get; set; }
 
+    /// <summary>
+    /// SITES.11: whole seconds until the batch is done at <see cref="Speed"/> (<see cref="SiteTransferTime.SecondsLeft"/>);
+    /// null unless it is running and moving, or when a file still to move has no known size.
+    /// </summary>
+    public long? SecondsLeft { get; set; }
+
+    /// <summary>SITES.11: the files moving now (at most "transfers at once"); empty when nothing moves.</summary>
+    public List<SiteTransferMovingDto> Moving { get; set; } = [];
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
+}
+
+/// <summary>SITES.11: one file of a batch while it moves, as rclone last reported it (about once a second).</summary>
+public sealed class SiteTransferMovingDto
+{
+    /// <summary>Relative to the source folder, <c>/</c>-separated, as <see cref="SiteTransferItemDto.Path"/>.</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>The file's size; -1 when unknown.</summary>
+    public long Size { get; set; }
+
+    public long BytesDone { get; set; }
+    public long Speed { get; set; }
+    public long? SecondsLeft { get; set; }
+}
+
+/// <summary>SITES.11: time left, one rule for every client.</summary>
+public static class SiteTransferTime
+{
+    /// <summary>
+    /// Whole seconds, rounded up, to move what is left at <paramref name="speed"/> bytes a second: null when nothing
+    /// moves or the size is unknown (negative), 0 when nothing is left.
+    /// </summary>
+    public static long? SecondsLeft(long size, long bytesDone, long speed)
+    {
+        if (size < 0 || speed <= 0) return null;
+        var left = size - Math.Max(0, bytesDone);
+        if (left <= 0) return 0;
+        return left / speed + (left % speed == 0 ? 0 : 1);
+    }
 }
 
 public sealed class SiteTransferItemDto
@@ -88,7 +174,7 @@ public sealed class SiteTransferItemDto
 
     public long Size { get; set; }
 
-    /// <summary><c>waiting</c>, <c>running</c>, <c>done</c>, <c>skipped</c> or <c>failed</c>.</summary>
+    /// <summary><c>waiting</c>, <c>running</c>, <c>done</c>, <c>skipped</c>, <c>failed</c> or (SITES.11) <c>stopped</c>.</summary>
     public string State { get; set; } = "";
 
     public int Tries { get; set; }

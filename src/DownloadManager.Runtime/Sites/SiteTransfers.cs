@@ -53,6 +53,13 @@ public sealed class SiteTransfers : IAsyncDisposable
         public int ConnectionFailures { get; set; }
 
         public DateTimeOffset? RetryAt { get; set; }
+
+        /// <summary>SITES.11: the connection error the batch waits out until <see cref="RetryAt"/>.</summary>
+        public string? RetryReason { get; set; }
+
+        /// <summary>SITES.11: the picked names, worked out once (an item's path never changes).</summary>
+        public (List<string> First, int Count)? Picked { get; set; }
+
         public string Group => "inbound-transfer-" + Record.Id;
     }
 
@@ -61,6 +68,15 @@ public sealed class SiteTransfers : IAsyncDisposable
         // Never disposed: it holds no timer, and a late Cancel on a disposed source would throw.
         public CancellationTokenSource Stop { get; } = new();
         public Task Task { get; set; } = Task.CompletedTask;
+
+        /// <summary>The <c>srcRemote</c> its copy was given: rclone's stats name a moving file by it (checked with rclone 1.76).</summary>
+        public string? Source { get; set; }
+
+        /// <summary>SITES.11: the user stopped this file on its own; when its copy ends cut, it is left stopped, not waiting.</summary>
+        public bool StopFile { get; set; }
+
+        /// <summary>SITES.11: as rclone last reported this file; null until it has been seen moving.</summary>
+        public (long BytesDone, long Speed)? Progress { get; set; }
     }
 
     /// <summary>A file that can't be moved however often it is tried.</summary>
@@ -104,6 +120,12 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     /// <summary>The speeds were read from rclone (about once a second while files move).</summary>
     public event Action? Measured;
+
+    /// <summary>
+    /// SITES.11: a file reached the site (true), or the site could not be reached or refused the sign-in (false); for the
+    /// site's reach. One file's own failure says nothing about the site.
+    /// </summary>
+    public event Action<string, bool>? Reached;
 
     /// <param name="getSite">The saved site by id, or null when it is gone.</param>
     /// <param name="acquire">A lease on rclone (starting it when needed).</param>
@@ -151,6 +173,12 @@ public sealed class SiteTransfers : IAsyncDisposable
 
         if (_batches.Any(b => b.Dirty)) ScheduleFlushLocked();
     }
+
+    /// <summary>
+    /// SITES.11 (decisions 1 and 2): where a download goes when the request names no folder and the site has no linked
+    /// folder, by the picked names (the Host's category rules); null when there is no such rule here.
+    /// </summary>
+    public Func<IReadOnlyList<SiteTransferNameDto>, string?>? DownloadFolder { get; set; }
 
     /// <summary>After any change, at most about twice a second; for <c>sites.transfer.changed</c>.</summary>
     public event Action<SiteTransfersDto>? Changed;
@@ -237,7 +265,10 @@ public sealed class SiteTransfers : IAsyncDisposable
         var conflict = string.IsNullOrEmpty(request.Conflict) ? SiteTransferConflicts.Skip : request.Conflict;
         if (!SiteTransferConflicts.IsKnown(conflict)) return Fail("Choose Skip, Replace or Keep both for files that are already there.");
         if (SitePaths.Normalize(request.RemoteFolder) is not { } remoteFolder) return Fail("That is not a folder path on the server.");
-        var localFolder = string.IsNullOrWhiteSpace(request.LocalFolder) ? site.LocalFolder : request.LocalFolder.Trim();
+        var localFolder = !string.IsNullOrWhiteSpace(request.LocalFolder) ? request.LocalFolder.Trim()
+            : site.LocalFolder
+            // The same guards follow as for a folder given: a full path, outside Inbound's data; made when missing.
+            ?? (request.Direction == SiteTransferDirections.Download && request.Names is { Count: > 0 } picked && picked.All(n => n?.Name is not null) ? DownloadFolder?.Invoke(picked) : null);
         if (localFolder is null || !Path.IsPathFullyQualified(localFolder)) return Fail("Choose a folder on this PC.");
         localFolder = Path.GetFullPath(localFolder);
         if (IsInside(localFolder, _stateDirectory)) return Fail("Files can't be placed in Inbound's own data folder; choose another folder.");
@@ -374,7 +405,7 @@ public sealed class SiteTransfers : IAsyncDisposable
     }
 
     /// <summary>
-    /// The failed files are tried again. A paused batch stays paused (they run at Resume); a canceled one is not brought back.
+    /// The failed files are tried again; files the user stopped stay stopped (<see cref="StartFileAsync"/>). A paused batch stays paused (they run at Resume); a canceled one is not brought back.
     /// </summary>
     public async Task<SiteTransferResultDto> RetryAsync(string id)
     {
@@ -403,6 +434,83 @@ public sealed class SiteTransfers : IAsyncDisposable
                 batch.Record.FinishedAt = null;
                 (batch.ConnectionFailures, batch.RetryAt) = (0, null);
                 FinishIfDoneLocked(batch);
+            }
+        }
+
+        await SaveQuietlyAsync(batch).ConfigureAwait(false);
+        Pump();
+        RequestBroadcast();
+        lock (_sync) return Ok(batch);
+    }
+
+    /// <summary>
+    /// SITES.11: one file is stopped and left <c>stopped</c>; the batch goes on with the others (and finishes without it).
+    /// A moving file is cut and waited for; rclone removes its partial file as for a pause. A finished file is left as it is.
+    /// </summary>
+    public async Task<SiteTransferResultDto> StopFileAsync(string id, string path)
+    {
+        Batch batch;
+        Running? run;
+        lock (_sync)
+        {
+            if (Find(id) is not { } found) return Fail("That transfer is no longer listed.");
+            batch = found;
+            if (batch.Record.State == SiteTransferStates.Canceled) return Ok(batch);
+            if (batch.Record.Items.FirstOrDefault(i => i.Path == path) is not { } item) return Fail("That file is not in this transfer.");
+            if (!NotFinished(item)) return Ok(batch);
+            if (batch.Active.TryGetValue(item, out run))
+            {
+                run.StopFile = true;
+            }
+            else
+            {
+                item.State = SiteTransferItemStates.Stopped;
+                item.Error = null;
+                item.NotBefore = null;
+                FinishIfDoneLocked(batch);
+            }
+        }
+
+        if (run is not null)
+        {
+            // Outside the lock: the cancel may run the file's ending inline, which takes the lock. The ending saves.
+            run.Stop.Cancel();
+            await WaitQuietlyAsync([run.Task]).ConfigureAwait(false);
+        }
+        else
+        {
+            await SaveQuietlyAsync(batch).ConfigureAwait(false);
+        }
+
+        RequestBroadcast();
+        lock (_sync) return Ok(batch);
+    }
+
+    /// <summary>
+    /// SITES.11: a file the user stopped (or one that failed) goes back in line. A finished batch runs again for it; a
+    /// paused one stays paused (it runs at Resume); a canceled one is not brought back.
+    /// </summary>
+    public async Task<SiteTransferResultDto> StartFileAsync(string id, string path)
+    {
+        Batch batch;
+        lock (_sync)
+        {
+            if (Find(id) is not { } found) return Fail("That transfer is no longer listed.");
+            batch = found;
+            if (batch.Record.State == SiteTransferStates.Canceled) return Fail("A canceled transfer can't be started again; start it anew.");
+            if (batch.Record.Items.FirstOrDefault(i => i.Path == path) is not { } item) return Fail("That file is not in this transfer.");
+            if (item.State is not (SiteTransferItemStates.Stopped or SiteTransferItemStates.Failed)) return Ok(batch);
+            item.State = SiteTransferItemStates.Waiting;
+            item.Tries = 0;
+            item.Error = null;
+            item.NotBefore = null;
+            if (batch.Record.State is SiteTransferStates.Done or SiteTransferStates.Failed)
+            {
+                batch.Record.State = SiteTransferStates.Running;
+                batch.Record.Problem = null;
+                batch.Record.Message = null;
+                batch.Record.FinishedAt = null;
+                (batch.ConnectionFailures, batch.RetryAt) = (0, null);
             }
         }
 
@@ -924,6 +1032,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+            // A stop of this file alone is read in the lock below, with every other ending.
             state = SiteTransferItemStates.Waiting;
         }
         catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
@@ -965,10 +1074,21 @@ public sealed class SiteTransfers : IAsyncDisposable
             _log($"Site transfer {record.Id}: unexpected {e.GetType().Name}: {e.Message}");
         }
 
+        var saveNow = false;
         lock (_sync)
         {
             batch.Active.Remove(item);
             _running--;
+            // Review 2026-11-16: the user stopped this file (the flag may have been set after the copy ended some other
+            // way, while the ending waited for this lock). Unless it got there, it is stopped: no try spent, no batch wait,
+            // and not started again by a pause's Resume or a retry.
+            if (run.StopFile && state is not (SiteTransferItemStates.Done or SiteTransferItemStates.Skipped))
+            {
+                state = SiteTransferItemStates.Stopped;
+                (connection, rcloneGone, retry, error) = (false, false, false, null);
+                saveNow = true;
+            }
+
             if (connection && !token.IsCancellationRequested)
             {
                 // rclone died mid-copy without tidying up: its partial files are looked for before going on.
@@ -988,6 +1108,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                     {
                         var delay = TimeSpan.FromTicks(Math.Min(TimeSpan.FromMinutes(1).Ticks, _firstRetryDelay.Ticks << (batch.ConnectionFailures - 1)));
                         batch.RetryAt = now + delay;
+                        batch.RetryReason = error;
                     }
                 }
             }
@@ -1007,7 +1128,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                     item.NotBefore = _time.GetUtcNow() + TimeSpan.FromTicks(_firstRetryDelay.Ticks << (item.Tries - 1));
                 }
             }
-            else if (state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped)
+            else if (state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped or SiteTransferItemStates.Stopped)
             {
                 item.Error = null;
                 item.NotBefore = null;
@@ -1036,6 +1157,24 @@ public sealed class SiteTransfers : IAsyncDisposable
             batch.Dirty = true;
             ScheduleFlushLocked();
             FinishIfDoneLocked(batch);
+        }
+
+        // A stop is kept at once: after a Host kill before the flush, the file would come back waiting and run.
+        if (saveNow) await SaveQuietlyAsync(batch).ConfigureAwait(false);
+
+        bool? reached = connection || keyProblem is not null || (stopBatch is not null && !connection) ? false
+            : state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped && !(item.Folder && record.Direction == SiteTransferDirections.Download) ? true
+            : null;
+        if (reached is { } ok)
+        {
+            try
+            {
+                Reached?.Invoke(record.SiteId, ok);
+            }
+            catch (Exception e)
+            {
+                _log($"Site transfers: a listener failed: {e.Message}");
+            }
         }
 
         // Outside the lock; not waited for, since this is one of the batch's own files.
@@ -1117,6 +1256,11 @@ public sealed class SiteTransfers : IAsyncDisposable
 
         var to = target ?? item.Path;
         var remote = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, download ? item.Path : to));
+        lock (_sync)
+        {
+            if (batch.Active.TryGetValue(item, out var run)) run.Source = download ? remote : item.Path;
+        }
+
         token.ThrowIfCancellationRequested();
         // Not on the stop token: a stop that cut this call after rclone had made the job would leave the job running with
         // no id to stop it by. The answer is read in full, and a stop that came meanwhile stops the job in WaitForJobAsync.
@@ -1338,7 +1482,12 @@ public sealed class SiteTransfers : IAsyncDisposable
             {
                 if (_running == 0 || _disposed)
                 {
-                    foreach (var batch in _batches) (batch.Speed, batch.InFlight) = (0, 0);
+                    foreach (var batch in _batches)
+                    {
+                        (batch.Speed, batch.InFlight) = (0, 0);
+                        foreach (var run in batch.Active.Values) run.Progress = null;
+                    }
+
                     _progress = null;
                     break;
                 }
@@ -1354,18 +1503,12 @@ public sealed class SiteTransfers : IAsyncDisposable
                 foreach (var batch in active)
                 {
                     var stats = await lease.Client.CallAsync("core/stats", new JsonObject { ["group"] = batch.Group }, limit.Token).ConfigureAwait(false);
-                    long speed = 0, inFlight = 0;
-                    if (stats["transferring"] is JsonArray moving)
+                    var files = ReadTransferring(stats);
+                    lock (_sync)
                     {
-                        foreach (var node in moving)
-                        {
-                            if (node is not JsonObject file) continue;
-                            if (file["bytes"] is JsonValue b && b.TryGetValue<long>(out var bytes)) inFlight += bytes;
-                            if (file["speed"] is JsonValue s && s.TryGetValue<double>(out var rate)) speed += (long)rate;
-                        }
+                        (batch.Speed, batch.InFlight) = (files.Sum(f => f.Speed), files.Sum(f => f.BytesDone));
+                        MatchProgress(batch.Active.Values, files);
                     }
-
-                    lock (_sync) (batch.Speed, batch.InFlight) = (speed, inFlight);
                 }
             }
             catch (Exception e) when (e is OperationCanceledException or RcloneCallException or RcloneUnavailableException)
@@ -1385,6 +1528,55 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
 
         RequestBroadcast();
+    }
+
+    /// <summary>The files in rclone's <c>core/stats</c> <c>transferring</c> list: name, bytes so far and speed.</summary>
+    internal static List<(string Name, long BytesDone, long Speed)> ReadTransferring(JsonObject stats)
+    {
+        var files = new List<(string, long, long)>();
+        if (stats["transferring"] is not JsonArray moving) return files;
+        foreach (var node in moving)
+        {
+            if (node is not JsonObject file) continue;
+            var name = file["name"] is JsonValue n && n.TryGetValue<string>(out var text) ? text : "";
+            var bytes = file["bytes"] is JsonValue b && b.TryGetValue<long>(out var done) ? Math.Max(0, done) : 0;
+            var speed = file["speed"] is JsonValue s && s.TryGetValue<double>(out var rate) && rate > 0 ? (long)rate : 0;
+            files.Add((name, bytes, speed));
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// For each moving file (by the <c>srcRemote</c> its copy was given), the index of its entry in rclone's list, or -1.
+    /// rclone names a file in its stats by that source, whatever the target is called; a file not found shows no progress
+    /// of its own (it still counts in the batch's bytes and speed). No guessing: a wrong pair would show one file's bar on another.
+    /// </summary>
+    internal static int[] MatchTransferring(IReadOnlyList<string?> sources, IReadOnlyList<string> reported)
+    {
+        var match = new int[sources.Count];
+        Array.Fill(match, -1);
+        var taken = new bool[reported.Count];
+        for (var i = 0; i < sources.Count; i++)
+        {
+            if (sources[i] is not { } source) continue;
+            for (var j = 0; j < reported.Count; j++)
+            {
+                if (taken[j] || reported[j] != source) continue;
+                (match[i], taken[j]) = (j, true);
+                break;
+            }
+        }
+
+        return match;
+    }
+
+    private static void MatchProgress(IEnumerable<Running> running, List<(string Name, long BytesDone, long Speed)> files)
+    {
+        var list = running.ToList();
+        var match = MatchTransferring([.. list.Select(r => r.Source)], [.. files.Select(f => f.Name)]);
+        for (var i = 0; i < list.Count; i++)
+            list[i].Progress = match[i] < 0 ? null : (files[match[i]].BytesDone, files[match[i]].Speed);
     }
 
     private void ScheduleFlushLocked()
@@ -1487,13 +1679,16 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     private SiteTransfersDto SnapshotLocked() => new() { Transfers = [.. _batches.Select(ToDto)] };
 
-    private static SiteTransferDto ToDto(Batch batch)
+    private SiteTransferDto ToDto(Batch batch)
     {
         var r = batch.Record;
-        int done = 0, skipped = 0, failed = 0, running = 0;
-        long bytes = 0, bytesDone = 0;
+        int done = 0, skipped = 0, failed = 0, running = 0, stopped = 0;
+        SiteTransferItem? firstFailed = null;
+        long bytes = 0, bytesDone = 0, setAside = 0;
+        var unknownLeft = false;
         foreach (var item in r.Items)
         {
+            if (item.Size < 0 && !item.Folder && NotFinished(item)) unknownLeft = true;
             var size = Math.Max(0, item.Size);
             bytes += size;
             switch (item.State)
@@ -1508,13 +1703,26 @@ public sealed class SiteTransfers : IAsyncDisposable
                     break;
                 case SiteTransferItemStates.Failed:
                     failed++;
+                    setAside += size;
+                    firstFailed ??= item;
                     break;
                 case SiteTransferItemStates.Running:
                     running++;
                     break;
+                case SiteTransferItemStates.Stopped:
+                    stopped++;
+                    setAside += size;
+                    break;
             }
         }
 
+        batch.Picked ??= PickedNames(r.Items);
+        // Only while the wait lasts: after it the files are tried again, and the batch is not waiting any more.
+        var waiting = r.State == SiteTransferStates.Running && batch.RetryAt is { } at && at > _time.GetUtcNow();
+
+        var moving = batch.Active.Count > 0;
+        var speed = moving ? batch.Speed : 0;
+        var shownDone = Math.Min(bytes, bytesDone + (moving ? batch.InFlight : 0));
         return new SiteTransferDto
         {
             Id = r.Id,
@@ -1533,15 +1741,56 @@ public sealed class SiteTransfers : IAsyncDisposable
             FilesSkipped = skipped,
             FilesFailed = failed,
             FilesRunning = running,
+            FilesStopped = stopped,
+            Picked = [.. batch.Picked.Value.First],
+            PickedCount = batch.Picked.Value.Count,
+            FirstFailedPath = firstFailed?.Path,
+            FirstFailedError = firstFailed?.Error,
+            RetryAt = waiting ? batch.RetryAt : null,
+            RetryReason = waiting ? batch.RetryReason : null,
             Bytes = bytes,
-            BytesDone = Math.Min(bytes, bytesDone + (batch.Active.Count > 0 ? batch.InFlight : 0)),
-            Speed = batch.Active.Count > 0 ? batch.Speed : 0,
+            BytesDone = shownDone,
+            Speed = speed,
+            SecondsLeft = r.State == SiteTransferStates.Running && moving && !unknownLeft ? SiteTransferTime.SecondsLeft(bytes - setAside, shownDone, speed) : null,
+            BytesSetAside = setAside,
+            Moving = [.. batch.Active
+                .Where(a => a.Value.Progress is not null)
+                .OrderBy(a => a.Key.Path, StringComparer.Ordinal)
+                .Select(a => new SiteTransferMovingDto
+                {
+                    Path = a.Key.Path,
+                    Size = a.Key.Size,
+                    BytesDone = a.Value.Progress!.Value.BytesDone,
+                    Speed = a.Value.Progress!.Value.Speed,
+                    SecondsLeft = SiteTransferTime.SecondsLeft(a.Key.Size, a.Value.Progress!.Value.BytesDone, a.Value.Progress!.Value.Speed),
+                })],
             CreatedAt = r.CreatedAt,
             FinishedAt = r.FinishedAt,
         };
     }
 
-    private static SiteTransferResultDto Ok(Batch batch) => new() { Ok = true, Transfer = ToDto(batch) };
+    /// <summary>How many picked names <see cref="SiteTransferDto.Picked"/> holds at most.</summary>
+    internal const int PickedShown = 3;
+
+    /// <summary>
+    /// SITES.11: the names picked, from the files' first path segment (a picked folder brings files under its name), in
+    /// the order of the batch's files; the first <see cref="PickedShown"/> and how many there are.
+    /// </summary>
+    internal static (List<string> First, int Count) PickedNames(IEnumerable<SiteTransferItem> items)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var first = new List<string>(PickedShown);
+        foreach (var item in items)
+        {
+            var slash = item.Path.IndexOf('/', StringComparison.Ordinal);
+            var name = slash < 0 ? item.Path : item.Path[..slash];
+            if (seen.Add(name) && first.Count < PickedShown) first.Add(name);
+        }
+
+        return (first, seen.Count);
+    }
+
+    private SiteTransferResultDto Ok(Batch batch) => new() { Ok = true, Transfer = ToDto(batch) };
 
     private static SiteTransferResultDto Fail(string message) => new() { Ok = false, Message = message };
 

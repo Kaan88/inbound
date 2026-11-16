@@ -208,6 +208,7 @@ public sealed class ServerApp : IAsyncDisposable
         // the program, and a newer one is downloaded into the data folder. Folders on this computer are the roots.
         var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
             updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new DownloadManager.Core.ProxiedClientHandler(engine), log.Info));
+        sites.Transfers.DownloadFolder = service.SiteDownloadFolder; // SITES.11: a download with no folder named
         var dispatcher = new HostCommandDispatcher(service, new ServerPlatform(), log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives, roots) : null,

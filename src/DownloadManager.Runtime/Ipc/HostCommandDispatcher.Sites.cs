@@ -59,9 +59,10 @@ public sealed partial class HostCommandDispatcher
     {
         switch (message.Type)
         {
-            case SitesMessageTypes.TransferResume or SitesMessageTypes.TransferRetry:
+            case SitesMessageTypes.TransferResume or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferStartFile:
             {
-                // Pause, cancel, get and clear move nothing; these start the batch's files moving again.
+                // Pause, cancel, get, clear and stopFile move nothing; these start the batch's files moving again
+                // (a file request has the same Id field).
                 var id = message.GetPayload<SiteTransferIdRequest>()?.Id ?? "";
                 if (sites.TransferLocalFolder(id) is not { } folder) return null; // no such batch: Sites says so
                 return roots.Allowed(folder) is null ? roots.OutsideTextFor(folder) : null;

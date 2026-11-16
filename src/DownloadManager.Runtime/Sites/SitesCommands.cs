@@ -104,6 +104,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), AcquireAsync,
             () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention, preventSleep);
         _transfers.Changed += change => TransfersChanged?.Invoke(this, change);
+        _transfers.Reached += (siteId, ok) => SetReach(siteId, ok ? SiteReach.Ok : SiteReach.Trouble);
         if (_config.Enabled)
         {
             StartUpdateLoop();
@@ -164,7 +165,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
                     new SiteChangeResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
-                    or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear => IpcMessage.Create(SitesMessageTypes.TransferResult,
+                    or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear or SitesMessageTypes.TransferStopFile or SitesMessageTypes.TransferStartFile => IpcMessage.Create(SitesMessageTypes.TransferResult,
                     new SiteTransferResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
             };
@@ -227,7 +228,18 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.RcloneCheck:
                 return IpcMessage.Create(SitesMessageTypes.Status, await CheckRcloneAsync(cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.TransferStart:
-                return Transfer(request, await _transfers.StartAsync(request.GetPayload<SiteTransferStartRequest>() ?? new SiteTransferStartRequest(), cancellationToken).ConfigureAwait(false));
+            {
+                var start = request.GetPayload<SiteTransferStartRequest>() ?? new SiteTransferStartRequest();
+                var started = await _transfers.StartAsync(start, cancellationToken).ConfigureAwait(false);
+                if (started.Ok) Touch(start.SiteId);
+                return Transfer(request, started);
+            }
+            case SitesMessageTypes.OpenOnce:
+                return Result(request, await OpenOnceAsync(request.GetPayload<SiteOpenOnceRequest>() ?? new SiteOpenOnceRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Close:
+                return Result(request, await CloseAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Keep:
+                return Result(request, await KeepAsync(request.GetPayload<SiteKeepRequest>() ?? new SiteKeepRequest(), cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.TransferPause:
                 return Transfer(request, await _transfers.PauseAsync(TransferId(request)).ConfigureAwait(false));
             case SitesMessageTypes.TransferResume:
@@ -238,6 +250,16 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 return Transfer(request, await _transfers.RetryAsync(TransferId(request)).ConfigureAwait(false));
             case SitesMessageTypes.TransferClear:
                 return Transfer(request, await _transfers.ClearAsync(TransferId(request)).ConfigureAwait(false));
+            case SitesMessageTypes.TransferStopFile:
+            {
+                var file = request.GetPayload<SiteTransferFileRequest>() ?? new SiteTransferFileRequest();
+                return Transfer(request, await _transfers.StopFileAsync(file.Id ?? "", file.Path ?? "").ConfigureAwait(false));
+            }
+            case SitesMessageTypes.TransferStartFile:
+            {
+                var file = request.GetPayload<SiteTransferFileRequest>() ?? new SiteTransferFileRequest();
+                return Transfer(request, await _transfers.StartFileAsync(file.Id ?? "", file.Path ?? "").ConfigureAwait(false));
+            }
             default:
                 return Result(request, new SiteResultDto { Ok = false, Message = $"Unknown Sites request {request.Type}." });
         }
@@ -530,7 +552,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     }
 
     private async Task<List<SiteDto>> ListAsync(CancellationToken cancellationToken) =>
-        [.. (await _sites.ListAsync(cancellationToken).ConfigureAwait(false)).Select(ToDto).Select(MarkSigningIn)];
+        [.. (await _sites.ListAsync(cancellationToken, includeUnsaved: true).ConfigureAwait(false)).Select(ToDto).Select(MarkSigningIn)];
 
     private async Task<SiteResultDto> SaveAsync(SiteSaveRequest request, CancellationToken cancellationToken)
     {
@@ -614,6 +636,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     // Stars are folders on the same server; another server forgets them with its keys.
                     Stars = sameServer ? existing!.Stars : [],
                     CreatedAt = existing?.CreatedAt ?? now,
+                    LastUsedAt = existing?.LastUsedAt,
+                    // SITES.11: an edit of an address opened once keeps it unsaved (the store holds it in memory).
+                    Unsaved = existing?.Unsaved ?? false,
                     ModifiedAt = now,
                 };
                 if (signsIn)
@@ -661,15 +686,29 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         return new SiteResultDto { Ok = true, Site = ToDto(saved) };
     }
 
-    private async Task<SiteResultDto> RemoveAsync(string id, CancellationToken cancellationToken)
+    /// <param name="unsavedOnly">SITES.11 <c>sites.close</c>: refused, inside the gate, when the site is (by now) a saved one.</param>
+    private async Task<SiteResultDto> RemoveAsync(string id, CancellationToken cancellationToken, bool unsavedOnly = false)
     {
         bool removed;
         var hadCertificates = false;
-        if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
-        CancelSignIn(id);
+        if (!unsavedOnly)
+        {
+            if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
+            CancelSignIn(id);
+        }
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (unsavedOnly)
+            {
+                // Checked and its batches canceled under the gate, which "Remember" takes too: a site kept meanwhile
+                // stays saved, its transfers untouched.
+                if (!_sites.IsUnsaved(id)) return Fail("That site was saved meanwhile; remove it in Options › Sites.");
+                await _transfers.CancelSiteAsync(id, "Canceled because the address was closed.").ConfigureAwait(false);
+                CancelSignIn(id);
+            }
+
             hadCertificates = SiteStore.IsId(id) && await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is { TrustedCertificates.Count: > 0 };
             removed = SiteStore.IsId(id) && await _sites.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
         }
@@ -679,6 +718,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
 
         ForgetListings(id);
+        ForgetMemory(id);
         if (!removed) return Fail("That site no longer exists.");
         if (hadCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -797,6 +837,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
             listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow());
             StoreListing(site.Id, generation, listing);
+            // SITES.11: a user's first page; a later page and Refresh are not a new use.
+            if (offset == 0 && !request.Refresh) Touch(site.Id);
         }
 
         return new SiteBrowseResultDto
@@ -881,7 +923,17 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     {
         if (site.NeedsHostKey)
             return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
+        // SITES.11 review: with no password rclone would offer this PC's ssh-agent keys to whatever server was typed.
+        if (site is { Unsaved: true, Kind: SiteKinds.Sftp, SealedPassword: null })
+            return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.PasswordNeeded, Message = "Type the password for this server." });
 
+        var result = await ListFolderOnceAsync(site, path, cancellationToken).ConfigureAwait(false);
+        if (result.Items is not null) SetReach(site.Id, SiteReach.Ok);
+        return result;
+    }
+
+    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderOnceAsync(SiteRecord site, string path, CancellationToken cancellationToken)
+    {
         RcloneLease lease;
         try
         {
@@ -910,6 +962,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
             catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
             {
+                SetReach(site.Id, SiteReach.Trouble);
                 return (null, new SiteResultDto
                 {
                     Ok = false,
@@ -923,10 +976,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
             catch (SiteSignInNeededException e)
             {
+                SetReach(site.Id, SiteReach.Trouble);
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.SignInNeeded, Message = e.Message });
             }
             catch (RcloneCallException e) when (SiteErrorText.IsSignInRefused(e.Message))
             {
+                SetReach(site.Id, SiteReach.Trouble);
                 return (null, new SiteResultDto
                 {
                     Ok = false, Problem = SiteProblems.SignInNeeded,
@@ -935,10 +990,20 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
             catch (RcloneCallException e) when (SiteErrorText.IsUntrustedCertificate(e.Message))
             {
+                SetReach(site.Id, SiteReach.Trouble);
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.CertificateNotTrusted, Message = SiteErrorText.Friendly(e.Message) });
+            }
+            catch (RcloneCallException e) when (site.Unsaved && SiteErrorText.RefusesTheSite(e.Message))
+            {
+                // An address opened once: the server wants a password, or another one.
+                SetReach(site.Id, SiteReach.Trouble);
+                return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.PasswordNeeded, Message = SiteErrorText.Friendly(e.Message) });
             }
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
             {
+                // Only a connection-class failure says the site is in trouble; rclone not running here does not.
+                if (e is RcloneCallException call && (SiteErrorText.CantReach(call.Message) || SiteErrorText.RefusesTheSite(call.Message)))
+                    SetReach(site.Id, SiteReach.Trouble);
                 // RcloneClient has already redacted the text.
                 return (null, Fail(SiteErrorText.Friendly(e.Message)));
             }
@@ -1176,7 +1241,15 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         return (uri.Host, uri.Port, null);
     }
 
-    private static SiteDto ToDto(SiteRecord site) => new()
+    private SiteDto ToDto(SiteRecord site)
+    {
+        var dto = ToDtoOfFile(site);
+        (dto.Reach, dto.LastUsedAt) = MemoryOf(site);
+        dto.Unsaved = site.Unsaved;
+        return dto;
+    }
+
+    private static SiteDto ToDtoOfFile(SiteRecord site) => new()
     {
         Id = site.Id,
         Name = site.Name,

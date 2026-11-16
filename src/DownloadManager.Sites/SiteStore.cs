@@ -109,6 +109,19 @@ public sealed record SiteRecord
 
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
+
+    /// <summary>
+    /// SITES.11: when the user last browsed it or started a transfer on it, as last written (at most every ten minutes;
+    /// the Host keeps the newer value in memory). Null when never.
+    /// </summary>
+    public DateTimeOffset? LastUsedAt { get; init; }
+
+    /// <summary>
+    /// SITES.11, "Open an address once": held in the Host's memory only (<see cref="SiteStore"/>), never written to a file
+    /// until the user keeps it. Never part of a site file.
+    /// </summary>
+    [JsonIgnore]
+    public bool Unsaved { get; init; }
 }
 
 /// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
@@ -170,6 +183,12 @@ public sealed class SiteStore
     private readonly Action<string>? _log;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    // SITES.11: the unsaved sites, by id. Changed under _gate and this lock; read under this lock.
+    private readonly Dictionary<string, SiteRecord> _unsaved = new(StringComparer.Ordinal);
+
+    /// <summary>The most unsaved sites open at once.</summary>
+    public const int MaxUnsaved = 8;
+
     public SiteStore(string stateDirectory, Action<string>? log = null)
     {
         _folder = Path.Combine(stateDirectory, "sites");
@@ -178,10 +197,17 @@ public sealed class SiteStore
 
     public string Folder => _folder;
 
-    public async Task<IReadOnlyList<SiteRecord>> ListAsync(CancellationToken cancellationToken = default)
+    /// <param name="includeUnsaved">SITES.11: the unsaved sites too (marked <see cref="SiteRecord.Unsaved"/>).</param>
+    public async Task<IReadOnlyList<SiteRecord>> ListAsync(CancellationToken cancellationToken = default, bool includeUnsaved = false)
     {
-        if (!Directory.Exists(_folder)) return [];
         var sites = new List<SiteRecord>();
+        List<SiteRecord> open = [];
+        if (includeUnsaved)
+        {
+            lock (_unsaved) open.AddRange(_unsaved.Values);
+        }
+
+        if (!Directory.Exists(_folder)) return Sorted(open);
         foreach (var file in Directory.EnumerateFiles(_folder, "*.json"))
         {
             // Only files named by a site id: the folder also holds Sites' own config.json.
@@ -190,23 +216,49 @@ public sealed class SiteStore
             if (site is not null) sites.Add(site);
         }
 
-        return [.. sites.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)];
+        // One being kept may be in both places for a moment (KeepAsync writes the file first): the file wins.
+        sites.AddRange(open.Where(o => !sites.Any(s => s.Id == o.Id)));
+        return Sorted(sites);
     }
+
+    private static List<SiteRecord> Sorted(List<SiteRecord> sites) =>
+        [.. sites.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(s => s.Id, StringComparer.Ordinal)];
 
     public async Task<SiteRecord?> GetAsync(string id, CancellationToken cancellationToken = default)
     {
         var path = PathFor(id);
+        lock (_unsaved)
+        {
+            if (_unsaved.TryGetValue(id, out var open)) return open;
+        }
+
         return File.Exists(path) ? await ReadAsync(path, cancellationToken).ConfigureAwait(false) : null;
     }
 
+    /// <summary>
+    /// Writes a saved site. SITES.11: a site whose id is held unsaved changes only its memory copy and stays unsaved (only
+    /// <see cref="KeepAsync"/> writes it); a record marked unsaved whose id is no longer open is refused, so a closed
+    /// address never comes back as a file.
+    /// </summary>
     public async Task SaveAsync(SiteRecord site, CancellationToken cancellationToken = default)
     {
         Validate(site);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(site, SitesJsonContext.Default.SiteRecord);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await AtomicFile.WriteBytesAsync(PathFor(site.Id), bytes, cancellationToken).ConfigureAwait(false);
+            lock (_unsaved)
+            {
+                if (_unsaved.ContainsKey(site.Id))
+                {
+                    _unsaved[site.Id] = site with { Unsaved = true };
+                    return;
+                }
+            }
+
+            if (site.Unsaved) throw new SiteStoreException("That address is no longer open.");
+            var path = PathFor(site.Id);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(site, SitesJsonContext.Default.SiteRecord);
+            await AtomicFile.WriteBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -221,9 +273,74 @@ public sealed class SiteStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            lock (_unsaved)
+            {
+                if (_unsaved.Remove(id)) return true;
+            }
+
             if (!File.Exists(path)) return false;
             File.Delete(path);
             return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>SITES.11: an unsaved site is open under that id.</summary>
+    public bool IsUnsaved(string id)
+    {
+        lock (_unsaved) return _unsaved.ContainsKey(id);
+    }
+
+    /// <summary>SITES.11: holds a new unsaved site in memory (a new id). Refused past <see cref="MaxUnsaved"/>.</summary>
+    public async Task AddUnsavedAsync(SiteRecord site, CancellationToken cancellationToken = default)
+    {
+        site = site with { Unsaved = true };
+        Validate(site);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (File.Exists(PathFor(site.Id))) throw new SiteStoreException("That id is taken.");
+            lock (_unsaved)
+            {
+                if (_unsaved.ContainsKey(site.Id)) throw new SiteStoreException("That id is taken.");
+                if (_unsaved.Count >= MaxUnsaved) throw new SiteStoreException($"At most {MaxUnsaved} addresses can be open at once; close one first.");
+                _unsaved[site.Id] = site;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// SITES.11, "Remember": writes an unsaved site as a saved one (named <paramref name="name"/> when given) and drops the
+    /// memory copy. The saved record, or null when no unsaved site has that id.
+    /// </summary>
+    public async Task<SiteRecord?> KeepAsync(string id, string? name, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var path = PathFor(id);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SiteRecord? open;
+            lock (_unsaved) _unsaved.TryGetValue(id, out open);
+            if (open is null) return null;
+            var kept = open with
+            {
+                Unsaved = false,
+                Name = string.IsNullOrWhiteSpace(name) ? open.Name : name.Trim(),
+                ModifiedAt = now,
+            };
+            Validate(kept);
+            // Written before the memory copy goes, so the site is never in neither place.
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(kept, SitesJsonContext.Default.SiteRecord);
+            await AtomicFile.WriteBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
+            lock (_unsaved) _unsaved.Remove(id);
+            return kept;
         }
         finally
         {

@@ -186,7 +186,8 @@ public sealed partial class SitesCommands
 
     private async Task WriteTrustedCertificatesLockedAsync(CancellationToken cancellationToken)
     {
-        var trusted = (await _sites.ListAsync(cancellationToken).ConfigureAwait(false))
+        // SITES.11: an unsaved site's trusted certificates count while it is open.
+        var trusted = (await _sites.ListAsync(cancellationToken, includeUnsaved: true).ConfigureAwait(false))
             .SelectMany(s => s.TrustedCertificates).Where(c => c.Matches()).DistinctBy(c => c.Fingerprint).ToList();
         var path = TrustedCertificatesPath;
         if (trusted.Count == 0)

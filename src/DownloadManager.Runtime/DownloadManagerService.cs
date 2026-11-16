@@ -5573,6 +5573,30 @@ public sealed partial class DownloadManagerService
         return null;
     }
 
+    /// <summary>
+    /// SITES.11 (sites-rework.md decisions 1 and 2): the folder a site download goes to when none was named and the site
+    /// has no linked folder. One folder per batch: the category folder when every picked file is of one category (a
+    /// folder counts as "other") and that category has a folder under the rules of other downloads; else the download
+    /// folder. The last folder used is not looked at: a download with no dialog must land where the rules say.
+    /// </summary>
+    public string SiteDownloadFolder(IReadOnlyList<SiteTransferNameDto> picked)
+    {
+        lock (_sync)
+        {
+            string? category = null;
+            foreach (var name in picked)
+            {
+                var of = name.IsFolder ? "other"
+                    : _settings.CustomCategories.FirstOrDefault(c => c.Extensions.Contains(Path.GetExtension(name.Name).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id
+                      ?? FileCategories.For(name.Name);
+                if (category is null) category = of;
+                else if (category != of) return Path.GetFullPath(_settings.DefaultDownloadDirectory);
+            }
+
+            return ResolveDestination(null, "", useLastFolder: false, useCategoryFolder: true, categoryId: category ?? "other");
+        }
+    }
+
     private string ResolveDestination(string? requested, string fileName, bool useLastFolder = true, bool useCategoryFolder = true, string? categoryId = null)
     {
         if (!string.IsNullOrWhiteSpace(requested))

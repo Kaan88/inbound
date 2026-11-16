@@ -1,5 +1,39 @@
 # Progress — session handoff
 
+### Sites rework R1: what the Host adds, SITES.11 (2026-11-16)
+
+- **Owner:** "built is crap, I want mockup" (go-ahead for R1 against the mockup). Each step reviewed by the same Fable
+  agent; its findings were applied (below).
+- **Done (Host, IPC protocol 1, additive), design in `docs/plans/sites-rework.md`, "R1 design":**
+  - Per-file progress: `SiteTransferDto.Moving` (path, size, bytes, speed, time left), matched on the `srcRemote` rclone
+    names a moving file by (checked with rclone 1.76: a copy to another name is reported by its source).
+  - `SecondsLeft` for the batch and each file (one rule, `SiteTransferTime`), leaving out failed and stopped files
+    (`BytesSetAside`).
+  - Row fields: `Picked`/`PickedCount` (title), `FirstFailedPath`/`FirstFailedError`, `RetryAt`/`RetryReason`
+    (trouble countdown), `FilesStopped`.
+  - Stop one file (`sites.transfer.stopFile`, item state `stopped`) and start it again (`sites.transfer.startFile`);
+    Retry stays failed-only. A stop that races a pause or a failure still ends stopped, and is saved at once.
+  - `SiteDto.Reach` (`ok`/`trouble`, memory only, from connection-class failures) and `SiteDto.LastUsedAt` (memory at
+    once, the file at most every 10 minutes, written in the background under the site gate).
+  - "Open an address once": `sites.openOnce`, `sites.close`, `sites.keep`; `SiteAddress` parses sftp, ftp, ftps (990 =
+    implicit) and http(s) WebDAV and refuses passwords, `?`/`#`, control characters and long input. Unsaved sites live
+    in `SiteStore`'s memory (at most 8); edits, key trust and stars stay in memory; only `keep` writes a file. An
+    unsaved SFTP site without a password answers `passwordNeeded` before rclone is asked (rclone would otherwise offer
+    this PC's ssh-agent keys to the typed server).
+  - A download with no folder and no linked folder follows the category rules, one folder per batch
+    (`DownloadManagerService.SiteDownloadFolder`, wired in the Windows Host, the Linux/macOS Host and the server).
+- **Tests:** `SiteTransferProgressTests`, `SitesOpenOnceTests`, `RuntimeServiceTests.SiteFolder`, and
+  `SiteTransfersEndToEndTests.R1` against real rclone 1.76 (`rclone serve sftp`): progress per file for a download and
+  an upload, stop and start one file, a pause racing a stop, reach and last used, the no-folder download.
+  Full local suite after both reviews (`scripts	est.ps1`, rclone 1.76 for the Sites tests): Core 2388, Engine 214,
+  Integration 2073 + 10 skipped, TorBox 323, Archives 401, Containers 188, Torrents 94 + 29 skipped, Server 202, Tray 3;
+  extension typecheck and tests; web UI 718 tests and svelte-check clean.
+- **Questions for the owner:** (1) "Some of it" on a folder in the This PC pane needs the whole remote folder listed
+  recursively; build it, or mark files only? (2) A saved SFTP site with password sign-in and no password lets rclone
+  use this PC's ssh-agent, and a web session can save one (since SITES.2): turn the agent off for such sites?
+- **Not done:** no window or web UI uses the new fields yet (R2 onward). Not changed: rclone's connection cache is not
+  cleared when an unsaved site is closed; a batch on a site that vanished at restart fails file by file.
+
 ### Sites rework R0: baseline screenshots, SITES.11 (2026-11-16)
 
 - **Owner:** "start" (R0), then "keep the app hidden without taking over my mouse and keyboard", and "after every

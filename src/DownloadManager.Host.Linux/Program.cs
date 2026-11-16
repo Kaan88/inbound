@@ -170,6 +170,7 @@ internal static class Program
         var sites = new DownloadManager.Runtime.Sites.SitesCommands(paths.Root, log.Info,
             updater: DownloadManager.Runtime.Sites.SitesCommands.CreateUpdater(paths.Root, new ProxiedClientHandler(engine), log.Info),
             sleepPrevention: sharedSleep.Share(), preventSleep: () => service.GetSettings().PreventSleepWhileDownloading);
+        sites.Transfers.DownloadFolder = service.SiteDownloadFolder; // SITES.11: a download with no folder named
         var dispatcher = new HostCommandDispatcher(service, platform, log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,

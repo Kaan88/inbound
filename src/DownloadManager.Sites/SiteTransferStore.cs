@@ -51,6 +51,9 @@ public static class SiteTransferItemStates
     public const string Done = "done";
     public const string Skipped = "skipped";
     public const string Failed = "failed";
+
+    /// <summary>SITES.11: stopped by the user on its own; not moved, not a failure, started again by Retry.</summary>
+    public const string Stopped = "stopped";
 }
 
 /// <summary>
