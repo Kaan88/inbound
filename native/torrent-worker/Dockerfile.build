@@ -8,7 +8,7 @@
 #
 # vcpkg is checked out at the manifest's builtin-baseline; libtorrent comes from the overlay port in ports/ (tag and
 # SHA-512 pinned there). vcpkg counts VCPKG_FORCE_SYSTEM_BINARIES as on whenever it is set (even to 0), so leave it unset.
-FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS build
+FROM ubuntu:22.10@sha256:e322f4808315c387868a9135beeb11435b5b83130a8599fd7d0014452c34f489 AS build
 ARG TARGET=x64
 ARG VCPKG_COMMIT=e54ef0fcc9a82033a61e51002552a910a5d57282
 # JOBS caps parallel compiles. With one job per core, the owner's 20-core test VM stopped answering (even SSH)
