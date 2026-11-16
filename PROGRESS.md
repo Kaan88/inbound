@@ -97,6 +97,22 @@
   - **With three downloads (screen on, unlocked, screenshot `downloads2.png` seen by me):** 103 MB PSS (emulator 104); 885 frames, 11 janky (1.24%), 50th/90th/95th/99th percentile 5/5/6/14 ms (emulator 0.3% janky).
   - **Not measured:** first frame, a clean unlocked cold start, the other three toolkits on a phone. A first pass had the screen off for the download part and is not used (`meminfo.txt`, `gfxinfo.txt` in the same folder).
   - Phone afterwards: app removed, timeout back to 30000.
+- **Battery on the S24 FE, long run (2026-11-16, phone charged, 118 GB free; raw files `artifacts\android-trial\phone-08-battery-s24-long` in the `idm-android-phone` worktree):** the mark is **met against Edge on this phone: no difference at this resolution**. Engine 5.9 to 6.1 mWh per GiB (mean 6.0), Edge 5.6 to 6.3 (mean 5.9); one counter step is +/-0.4 per run. This replaces the short run above, whose 4 GiB files were too small. Same script; 24 GiB per run, windows 330 to 362 s, brightness manual at 40, battery 99% to 87%.
+
+  | Run (in order) | Download s | MiB/s | Window s | mAh | mWh | Net mWh per GiB | Temp start/max C | Battery % |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | engine, 1 connection | 219.6 | 111.9 | 329.6 | 45.13 | 192.1 | 6.1 | 29.3 / 35.4 | 99 to 97 |
+  | Edge | 230.6 | 106.6 | 361.6 | 47.50 | 201.5 | 6.3 | 33.4 / 37.9 | 97 to 95 |
+  | engine, 8 connections | 219.5 | 112.0 | 362.0 | 45.13 | 190.7 | 5.9 | 35.3 / 38.4 | 95 to 93 |
+  | Edge | 227.9 | 107.8 | 331.6 | 42.75 | 179.7 | 5.6 | 36.1 / 39.6 | 93 to 91 |
+  | engine, 1 connection | 220.0 | 111.7 | 333.2 | 45.13 | 188.6 | 6.0 | 37.4 / 39.8 | 91 to 89 |
+  | Edge | 225.8 | 108.8 | 362.1 | 45.13 | 187.7 | 5.8 | 37.2 / 40.5 | 89 to 87 |
+
+  - **Baseline is one idle window only:** 11.88 mAh in 363.0 s at 4177 mV = 492 mW, taken last with the phone warm (37 C). The first idle window is not usable: at 100% the counter stayed at its full value (4.75 mAh in 898 s). Because all six windows are nearly the same length, the baseline hardly changes the comparison: without subtracting it the engine is 7.9 to 8.0 mWh per GiB and Edge 7.5 to 8.4.
+  - Edge's time is from the intent to the link going quiet (one tap on Download, as before); all three files complete at 25,769,803,776 bytes. The rows.tsv figures for Edge (216 to 221 s) start at the first bytes after the tap and are about 10 s short. Before three windows the script waited 30 to 90 s for the phone to cool below 38 C. Engine CPU 3.7 to 4.3 s per GB at 1 connection, 5.9 at 8.
+  - **Not measured:** Chrome (still fails on the test server), screen off, mobile data, a second idle window.
+  - Phone afterwards: brightness automatic, timeout 600000 (the value found at the start of this run; someone had changed it from 30000), trial app removed, files deleted.
+- **Native toolkit app, clean cold start on the S24 FE (2026-11-16, unlocked, screen on, checked per start; `starts3-unlocked.txt`):** six starts with 200 jobs: first frame (`am start -W` TotalTime) 184 to 202 ms, list fully drawn 761 to 794 ms. So the 2.5 to 3.0 s above came from the lock screen, and the default (Mono) build is inside the 2 s cold mark on this phone. Not measured: warm start, the Mi 8 Lite.
 
 ### Android app design in Figma (2026-11-15)
 
