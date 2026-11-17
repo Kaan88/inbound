@@ -132,15 +132,15 @@
 <div class="mx-auto max-w-4xl px-4 py-5">
   {#if siteId}
     <div class="mb-3 flex items-center gap-2">
-      <a class="btn-icon" href="#/sites" title="All sites" aria-label="All sites"><Icon name="chevron-left" size={18} /></a>
-      <h1 class="min-w-0 flex-1 truncate text-[22px] font-semibold">{site?.name ?? 'Site'}</h1>
+      <a class="btn-icon" href="#/sites" title="All remotes" aria-label="All remotes"><Icon name="chevron-left" size={18} /></a>
+      <h1 class="min-w-0 flex-1 truncate text-[22px] font-semibold">{site?.name ?? 'Remote'}</h1>
     </div>
     {#if !status?.enabled}
-      <p class="text-[13px] text-muted">Sites are off. <a class="link" href="#/sites">Turn them on</a> first.</p>
+      <p class="text-[13px] text-muted">Remote files are off. <a class="link" href="#/sites">Turn them on</a> first.</p>
     {:else if site}
-      {#key site.id}<SiteBrowser {site} />{/key}
+      {#key site.id}<SiteBrowser {site} onedit={() => void edit(site)} />{/key}
     {:else}
-      <p class="text-[13px] text-muted">That site no longer exists. <a class="link" href="#/sites">All sites</a></p>
+      <p class="text-[13px] text-muted">That remote no longer exists. <a class="link" href="#/sites">All remotes</a></p>
     {/if}
   {:else}
     <h1 class="text-[22px] font-semibold">Sites</h1>
