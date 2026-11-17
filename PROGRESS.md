@@ -125,6 +125,10 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Owner's step 2 choices (2026-11-17):** mechanism: "Transfer job + service" (a UIDT job on Android 14+, a dataSync
+  foreground service on 12 and 13, where there is no cap); after a reboot: "Notify with Resume" (a notification after
+  boot, "N downloads paused · Resume"; I also try whether a silent resume is allowed and report it); Wi-Fi only:
+  "Not metered" (Android's own meaning, the one the job constraint uses).
 - **Step 2 started (2026-11-17): Android's background rules read.** A Sonnet agent read the official pages; a second
   agent re-read the five facts the choice rests on, all confirmed (6 h per 24 h cap on dataSync services for targetSdk
   35+, reset by opening the app; no dataSync start from BOOT_COMPLETED for targetSdk 35+; UIDT jobs on API 34+ need

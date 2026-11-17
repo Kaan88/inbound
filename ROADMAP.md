@@ -659,7 +659,9 @@ whether rclone is a Setup component that can be unticked.
   - [x] Build plan step 1, the NativeAOT gate (2026-11-17, branch `android-app`): passed on the S24 FE and the
     Mi 8 Lite (200 jobs drawn under 2 s, a 256 MiB download with equal hash, resume after a kill proven from the
     server's byte count). Evidence in PROGRESS "Android app, step 1".
-- [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
+- [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume). Owner, 2026-11-17:
+  a user-initiated data transfer job on Android 14+ and a dataSync foreground service on 12 and 13; after a reboot a
+  notification with Resume; Wi-Fi only means "not metered".
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
