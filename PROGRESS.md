@@ -2,6 +2,13 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Fable review of the Android queue (2026-11-17, at 7573792b; agent `a77883b7d95665eea`).** No high findings; 16
+  in all (medium: the https/pin path never run on a phone, the TLS export can fail silently or not relink, a certificate
+  refusal stops a host for good; then the first snapshot applied in quadratic time, a broken Keystore key failing every
+  pairing, a failed download holding its name, and lower ones). Disagrees with two Opus refutations (device-to-device
+  transfer, certificate refusal stopping). Owner's answer on the failed-name finding: "Free the name (Recommended)": only
+  downloads that can still write hold a name; a failed one is checked again when retried (Runtime, desktop too). Fixes in
+  progress; the same Fable agent approves them.
 - **First usable APK on the owner's desktop (2026-11-17).** `Desktop\Inbound-android-first-usable-9a6ec0ef.apk`:
   release build of 9a6ec0ef, arm64, min SDK 31, target 35, signed with the Android debug key (no release key yet),
   `probe_url`/`crash_now` absent from the binary, the TLS callback exported (`llvm-nm -D`). Owner retried the failing
