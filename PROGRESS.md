@@ -196,6 +196,7 @@
   ResumeActivity (not exported). Not checked on a phone yet (S24, Mi 8 Lite); the API 34+ hold-run reschedule and the
   onStopJob race not exercised on a device. No test for the verifying flag (a job can't be held in Verifying in a
   test). Tests: Integration 2038 passed, 32 skipped; Mobile 164. Builds: no new warnings (arm64 test, release, x64).
+- **Owner (2026-11-17), Android 12/13 Wi-Fi back while hidden:** "Tap to resume" (as built in f4f65c0).
 - **Step 2 milestone review (Opus workflow, 2026-11-17, 62620c9..246033e).** Five area reviewers, three refuters per
   finding (68 agents): 15 confirmed (about 10 distinct after duplicates), 6 refuted. Most severe: while the metered rule
   holds, Schedule returns before UpdateSleepPrevention, so the wake lock (and the Wi-Fi lock below 34) stays held on
