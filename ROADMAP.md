@@ -674,7 +674,8 @@ whether rclone is a Setup component that can be unticked.
     Pause all paused, and the paused notification stayed up after Resume.
   - Fixed 2026-11-17 (46fb9bf, 05b6009, f4f65c0), emulator only so far; S24 recheck pending. Open: two downloads added a
     second apart both got the name "bench (4).bin" (seen on the API 33 emulator); check whether the Runtime's name
-    choice can give two jobs the same destination (desktop too) before step 3.
+    choice can give two jobs the same destination (desktop too) before step 3. Fixed in 1532aa8. S24 recheck of the
+    list, Pause all and Resume fixes passed (owner's hand, 2026-11-17).
   - Owner, 2026-11-17, on Android 12 and 13 when Wi-Fi comes back while the app is hidden: "Tap to resume" (downloads
     stay held; the notification says "Wi-Fi is back · Tap to resume N downloads"; opening the app resumes them).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).

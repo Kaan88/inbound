@@ -196,6 +196,15 @@
   ResumeActivity (not exported). Not checked on a phone yet (S24, Mi 8 Lite); the API 34+ hold-run reschedule and the
   onStopJob race not exercised on a device. No test for the verifying flag (a job can't be held in Verifying in a
   test). Tests: Integration 2038 passed, 32 skipped; Mobile 164. Builds: no new warnings (arm64 test, release, x64).
+- **Step 2, S24 recheck of the fixes (2026-11-17, c72d311 test build), by the owner's hand:** two downloads added
+  through the test hook both appeared at the top of the list with moving progress; Pause all said "2 downloads paused"
+  with a still icon; Resume removed the paused notice and both ran again (log: "resume set: +2 (pause all)", "2 of 2
+  remembered download(s)"). Not yet on a real phone: the 14+ hold-job re-request, the stop/start race.
+- **Same final name for two unfinished downloads (1532aa8, Runtime, desktop too):** the add checked only files on disk,
+  so a second add of a name whose first download was still a part file got the same final path. Now a path held by an
+  unfinished job or an add in progress is skipped (Rename/Overwrite take the next "(n)", Fail refuses). Two tests shown
+  failing before. Full Integration: 2038 passed, 32 skipped, 2 failed (two job-removal timing tests that passed alone;
+  to watch).
 - **Owner (2026-11-17), Android 12/13 Wi-Fi back while hidden:** "Tap to resume" (as built in f4f65c0).
 - **Step 2 milestone review (Opus workflow, 2026-11-17, 62620c9..246033e).** Five area reviewers, three refuters per
   finding (68 agents): 15 confirmed (about 10 distinct after duplicates), 6 refuted. Most severe: while the metered rule
