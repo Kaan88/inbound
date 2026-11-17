@@ -388,7 +388,7 @@ Written out 2026-11-17 (owner: "looks perfect ... write and start the next one";
 ### R7. Closing
 
 **R7 closed and released in 0.9.0 (2026-11-18).** The release-notes draft in `remote-sites.md` was used. The owner
-walked only part of `docs/plans/0.9.0-checklist.md`; the Linux Uno build and the light-mode pass were not done.
+walked only part of `docs/plans/0.9.0-checklist.md`; the Linux window (Uno) builds but was not tried on Linux, and the light-mode pass is deferred.
 
 - The owner walks a test build. Light mode pass. Linux Uno builds.
 - `remote-sites.md`, `new-frontend-guide.md`, `PROGRESS.md`, `ROADMAP.md`, `CLAUDE.md` updated; the 19 final pairs

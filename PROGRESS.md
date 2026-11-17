@@ -19,7 +19,7 @@
     still unticked and worth checking against the release.
   - Extension stores: Chrome Web Store and Edge Add-ons 0.7.0 were submitted for review 2026-11-17; confirm they
     went live.
-  - Not done: Linux Uno build (Linux deferred); a run with the extension installed against the web UI; real SFTP,
+  - Not done: a run of the Linux window on Linux (it builds; Linux deferred); a run with the extension installed against the web UI; real SFTP,
     Trust, browser sign-in and Drive.
 - **Owner's test copy:** `artifacts/app-r9`, started by the launcher `artifacts/r7/Start Inbound test.cmd` (its own
   Host and data in `artifacts/r7/data`).
