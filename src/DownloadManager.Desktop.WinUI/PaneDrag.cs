@@ -89,6 +89,8 @@ internal sealed class PaneDrag
     /// <summary>The row under the pointer, its container and line; all null over empty space.</summary>
     private (ListViewItem? Container, SitesBrowseRules.PaneLine? Line) RowAt(DragEventArgs e)
     {
+        // A hidden list (the other view) or one without a window has no rows to hit.
+        if (_list.Visibility != Visibility.Visible || _list.XamlRoot is null) return (null, null);
         foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(e.GetPosition(null), _list))
         {
             for (DependencyObject? node = element; node is not null; node = VisualTreeHelper.GetParent(node))
@@ -102,29 +104,44 @@ internal sealed class PaneDrag
 
     private void OnOver(object sender, DragEventArgs e)
     {
-        var (container, line) = RowAt(e);
-        var plan = Planner?.Invoke(SourceOf(e.DataView), line) ?? SitesCommandRules.DropPlan.No;
-        e.Handled = true;
-        if (plan.Kind == SitesCommandRules.DropKind.NoDrop)
+        try
         {
-            // The no-drop cursor; a short caption says why when there is one (another server). No Drop event follows.
-            e.AcceptedOperation = DataPackageOperation.None;
-            if (plan.Caption.Length > 0)
+            var (container, line) = RowAt(e);
+            var plan = Planner?.Invoke(SourceOf(e.DataView), line) ?? SitesCommandRules.DropPlan.No;
+            e.Handled = true;
+            var ui = e.DragUIOverride;
+            if (plan.Kind == SitesCommandRules.DropKind.NoDrop)
             {
-                e.DragUIOverride.Caption = plan.Caption;
-                e.DragUIOverride.IsCaptionVisible = true;
-                e.DragUIOverride.IsGlyphVisible = false;
+                // The no-drop cursor; a short caption says why when there is one (another server). No Drop event follows.
+                e.AcceptedOperation = DataPackageOperation.None;
+                if (plan.Caption.Length > 0 && ui is not null)
+                {
+                    ui.Caption = plan.Caption;
+                    ui.IsCaptionVisible = true;
+                    ui.IsGlyphVisible = false;
+                }
+
+                Clear();
+                return;
             }
 
-            Clear();
-            return;
-        }
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            if (ui is not null)
+            {
+                ui.Caption = plan.Caption;
+                ui.IsCaptionVisible = true;
+                ui.IsGlyphVisible = plan.Kind == SitesCommandRules.DropKind.Do;
+            }
 
-        e.AcceptedOperation = DataPackageOperation.Copy;
-        e.DragUIOverride.Caption = plan.Caption;
-        e.DragUIOverride.IsCaptionVisible = true;
-        e.DragUIOverride.IsGlyphVisible = plan.Kind == SitesCommandRules.DropKind.Do;
-        Light(plan.Kind == SitesCommandRules.DropKind.Do && line is not null ? container : null);
+            Light(plan.Kind == SitesCommandRules.DropKind.Do && line is not null ? container : null);
+        }
+        catch (Exception ex)
+        {
+            // A drag over the pane never takes the window down; the drop is just not offered.
+            UiTrace.Write($"Drag over a pane failed: {ex.GetType().Name}");
+            e.AcceptedOperation = DataPackageOperation.None;
+            Clear();
+        }
     }
 
     private async void OnDrop(object sender, DragEventArgs e)

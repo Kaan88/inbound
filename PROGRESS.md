@@ -1,5 +1,40 @@
 # Progress — session handoff
 
+### Sites rework R3: the transfers list, SITES.11 (2026-11-17); Fable catch-up review of R2
+
+- **Owner:** "start" (R3), later "resume, fable is available for reviews". Built (Sonnet), reviewed by Opus, then by
+  the Fable reviewer (back from its limit), fixed (Opus) over four rounds, walked on the final build by me, accepted.
+- **Built:** the opened transfers bar is a list in the main list's look (File Name with direction arrow and batch
+  chevron, Size, Status with bar, Time left, Transfer rate, Description); a batch opens in place to its files (moving
+  files with their own bar; first 500, then "Show more"; re-read at most every 2 s, 10 s above 1,000 files); selection,
+  context menu and keys (Stop, Resume, Retry, Stop or Start this file, Open, Open folder, Show on the remote, Cancel
+  transfer, Remove from list; Enter or double click opens a finished row); tabs "Running and waiting (n) / Failed (n) /
+  Done (n)" (running batches first), Clear done (done and canceled only) and Retry all; the closed bar is a card with
+  per-direction speeds ("Transfers ↓ 19.1 MB/s ↑ 6.2 MB/s 3 running · 2 waiting · 1 failed") above the list card; the
+  height is dragged and remembered; the Downloads chip reads "Remote files · 3 running · … · 25.3 MB/s". The Files
+  button and dialog are gone. Rules in `SiteTransferRules.cs` (incl. a tested `Reconcile` that moves only rows that
+  changed place).
+- **Open on a transfer:** a downloaded file goes through the Remote files Open (ZoneId=3, "Run it?" for programs); a
+  skipped file or an upload's source opens plainly; a one-name batch opens the name it was saved under (Keep both).
+- **Host (additive):** a refused upload names the remote and folder ("gdrive did not take the file in /: the folder is
+  gone or can't be written.", "{remote} refused the write to {folder}. …") and is not retried; FTP 4xx after `stor: `
+  gives the server's words and keeps its tries; an unreadable file on this PC says so; a locked file keeps its tries;
+  file names are stripped before matching (`SiteErrorText.UploadFailure`, `SiteTransfers.FileFailure`). Matched
+  phrases include strings captured from rclone 1.76 against read-only SFTP and FTP servers.
+- **Fable catch-up of R2 (Opus had reviewed it while Fable was at its limit), all fixed:** upload from this PC's picker
+  is off while managing another Inbound server (it sent this PC's paths there; older than R2); Open asks when the mark
+  of the web can't be written; more runnable types (.iso, .vhd, .rdp, .msu, .jnlp …); This PC's Open asks before
+  running a program; drag-over null checks; an Open wait survives a stale list; a late Edit remote request is dropped
+  after 5 s; Download to… says why on another server. Also: the opt-in first-chance trace (`ui-trace.log`) carries
+  full local paths; never attach one made with it.
+- **Walk (final build, hidden desktop, trace on: no exception):** pairs `transfers-built.png`, `failed-built.png`,
+  `downloads-built.png`, new `batch-built.png` and `done-built.png` (1600 x 1000, not cropped). Differences left: a
+  batch of small files shows no Time left or rate while between files; the sidebar is R4's; the context menu can't be
+  captured on the hidden desktop. Test data: transfers started with `dm sites get/put` at a 25 MB/s test speed limit.
+- **Tests:** Core 2524, Sites 264 (+20 Linux-only skipped, with `INBOUND_RCLONE` set; without it 12 more skip),
+  Integration Site* 142 (+6), Server 202 pass. Solution and Uno builds 0 errors, no warning in a changed file.
+  **Not checked by anyone:** keys, drag of the height, focus kept across moves, and the context menu, by hand.
+
 ### R2 owner walk: crash on opening a remote, fixed (2026-11-17)
 
 - **Owner:** "it crashed when I clicked the first site". Windows logged 0xc000027b in Microsoft.UI.Xaml.dll (a stowed

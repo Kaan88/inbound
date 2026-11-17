@@ -81,7 +81,7 @@ public sealed partial class MainWindow
 
     private async Task UploadDroppedAsync(SiteDto site, string target, string localFolder, List<SiteTransferNameDto> names)
     {
-        if (!await OnceAsync(() => UploadCoreAsync(site, target, localFolder, names))) SetSitesStatus(SitesCommandRules.TransferStartingText);
+        if (!await OnceAsync(() => UploadCoreAsync(site, target, localFolder, names, serverPaths: false))) SetSitesStatus(SitesCommandRules.TransferStartingText);
     }
 
     private static FileAttributes? AttributesOf(string path)

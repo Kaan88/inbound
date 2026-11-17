@@ -15,6 +15,12 @@ All are dark mode; light mode comes at the end (R7).
 - Test sites: `rclone serve` on 127.0.0.1 (SFTP throttled with `--bwlimit 150k`, WebDAV, FTP, a read-only WebDAV and a
   closed port), with folders seeded to match the mockup's rows.
 
+## R3 (2026-11-17)
+
+`transfers-built.png`, `failed-built.png` and `downloads-built.png` are the R3 transfers list, taken on the final build
+at 1600 x 1000 (not cropped to the mockup's 1360 x 800); new: `batch-built.png` (a batch opened in place) and
+`done-built.png`. `transfers-done-built.png` is still R0's.
+
 ## R2b (2026-11-17)
 
 `browse-built.png` and `remote-only-built.png` retaken with the R2b toolbar and "Remote" menu; new: `remote-menu-built.png`

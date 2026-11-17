@@ -189,6 +189,7 @@ public sealed partial class MainWindow
             OpenSitesOptionsHook();
         };
         panel.StateChanged += UpdateSitesToolbar;
+        panel.SelectMissing += name => SetSitesStatus($"{name} wasn't found on the first page of this folder.");
         panel.CommandRequested += FireSiteCommand;
         WireServerDrag(panel);
         InitSiteMenu();
@@ -285,6 +286,8 @@ public sealed partial class MainWindow
         if (_sitesPanel is not { } panel || !_sitesShown) return;
         SitesDownloadButton.IsEnabled = !panel.IsLoading && panel.SelectedNames.Count > 0;
         SitesUploadButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null;
+        // Files picked on this PC can't be read by another server ("A folder…" picks on that server).
+        SitesUploadFilesItem.IsEnabled = !_connection.IsRemote;
         // SITES.5: one change at a time; Rename takes one item.
         var selected = panel.SelectedNames.Count;
         SitesNewFolderButton.IsEnabled = !panel.IsLoading && panel.SiteId is not null && !_siteChangeRunning;

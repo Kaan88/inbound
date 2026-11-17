@@ -111,6 +111,13 @@ public sealed partial class MainWindow : Window
         SpeedGraph.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
         ShowSpeedGraphMenuItem.IsChecked = _uiState.ShowSpeedGraph;
         SpeedGraph.IsExpanded = _uiState.SpeedGraphExpanded;
+        // Applied (clamped to the window) once the bar has its window; only a drag changes what is remembered.
+        TransfersBar.WantedHeight = _uiState.TransfersBarHeight;
+        TransfersBar.HeightChanged += () =>
+        {
+            _uiState.TransfersBarHeight = TransfersBar.WantedHeight;
+            SaveUiStateQuietly("the transfers height");
+        };
         SpeedGraph.ExpandedChanged += (_, _) => SaveUiState();
         _speedHistoryTimer.Tick += (_, _) =>
         {
@@ -435,6 +442,7 @@ public sealed partial class MainWindow : Window
             _uiState.HideCategories = _hideCategories;
             _uiState.ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked;
             _uiState.SpeedGraphExpanded = SpeedGraph.IsExpanded;
+            _uiState.TransfersBarHeight = TransfersBar.WantedHeight;
             _uiState.ShowTorrentInfo = TorrentInfoMenuItem.IsChecked;
             // AppTheme writes the start-up hint itself; this keeps a save from here putting an older one back.
             _uiState.Theme = AppTheme.Choice;

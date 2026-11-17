@@ -51,9 +51,10 @@ internal static class SitesCommandRules
 
     /// <summary>
     /// While the window manages another Inbound server, a download lands on that server's disks: "Open" (a file opened on
-    /// this PC) and "Download to…" (a folder picked on this PC) can't work there, so they are off, as Two panes is.
+    /// this PC), "Download to…" (a folder picked on this PC) and "Upload files…" (files picked on this PC, which that server
+    /// can't read) can't work there, so they are off, as Two panes is. "Upload a folder…" picks on that server and stays.
     /// </summary>
-    public static bool OffForOtherServer(SiteCommand command) => command is SiteCommand.Open or SiteCommand.DownloadTo;
+    public static bool OffForOtherServer(SiteCommand command) => command is SiteCommand.Open or SiteCommand.DownloadTo or SiteCommand.Upload;
 
     private static List<List<SiteCommand>> ServerMenuAll(IReadOnlyCollection<string>? capabilities, IEnumerable<SitesBrowseRules.PaneLine> selected)
     {
@@ -342,6 +343,9 @@ internal static class SitesCommandRules
         ".wsf", ".wsh", ".wsc", ".hta", ".msi", ".msp", ".mst", ".msc", ".msh", ".lnk", ".url", ".website", ".reg", ".cpl", ".inf",
         ".jar", ".appx", ".appxbundle", ".msix", ".msixbundle", ".appinstaller", ".application", ".appref-ms", ".gadget", ".scf",
         ".sct", ".chm", ".settingcontent-ms", ".library-ms", ".xll", ".py", ".pyw", ".diagcab", ".vb",
+        // Also run, mount or install something, or open a connection, when opened.
+        ".ws", ".jnlp", ".rdp", ".theme", ".themepack", ".search-ms", ".searchConnector-ms", ".msu", ".cab", ".iso", ".img", ".vhd",
+        ".vhdx", ".wsb", ".pyz", ".pyc", ".ade", ".adp", ".mde", ".accde", ".xbap", ".one",
     };
 
     /// <summary>A file "Open" asks about before running: a program, script, installer or shortcut.</summary>
@@ -353,6 +357,13 @@ internal static class SitesCommandRules
     }
 
     public static string RunQuestion(string name, string remote) => $"{name} is a program or script from {remote}. Run it?";
+
+    /// <summary>A downloaded file the mark of the web could not be written to: Windows won't warn about it, so Open asks.</summary>
+    public static string UnmarkedQuestion(string name, string remote) =>
+        $"{name} came from {remote}, but it could not be marked as from the internet, so Windows won't warn about it. Open it anyway?";
+
+    /// <summary>A program or script on this PC that the This PC pane's Open would run.</summary>
+    public static string LocalRunQuestion(string name) => $"{name} is a program or script. Run it?";
 
     // ---- This PC names -----------------------------------------------------------------------------------
 

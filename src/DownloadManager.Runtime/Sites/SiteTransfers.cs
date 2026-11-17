@@ -1062,10 +1062,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException or IOException or UnauthorizedAccessException)
         {
             state = SiteTransferItemStates.Failed;
-            error = e is RcloneCallException call && IsGone(call.Message)
-                ? (record.Direction == SiteTransferDirections.Download ? "The file is no longer on the server." : "The file is no longer on this PC.")
-                : SiteErrorText.Friendly(e.Message);
-            retry = e is not SiteStoreException && !(e is RcloneCallException gone && IsGone(gone.Message));
+            (error, retry) = FileFailure(e, record, item);
         }
         catch (Exception e)
         {
@@ -1460,6 +1457,28 @@ public sealed class SiteTransfers : IAsyncDisposable
     }
 
     private static bool NotFinished(SiteTransferItem item) => item.State is SiteTransferItemStates.Waiting or SiteTransferItemStates.Running;
+
+    /// <summary>
+    /// A file's failure (not the connection's, not the sign-in's): its words and whether its tries go on. An upload this PC
+    /// can't read, or that the server refuses to write, is said so and not tried again; an FTP server's 4xx keeps the tries.
+    /// "No longer there" is not read from an FTP server's reply ("stor: 450 … file does not exist"): those are its words.
+    /// </summary>
+    internal static (string Error, bool Retry) FileFailure(Exception e, SiteTransferRecord record, SiteTransferItem item)
+    {
+        var upload = record.Direction != SiteTransferDirections.Download;
+        var problem = upload && e is RcloneCallException write
+            ? SiteErrorText.UploadFailure(write.Message, record.LocalFolder, item.Path, item.Target)
+            : UploadProblem.None;
+        var gone = e is RcloneCallException call && IsGone(call.Message)
+            && !(upload && call.Message.Contains("stor: ", StringComparison.OrdinalIgnoreCase));
+        var error = problem != UploadProblem.None
+            ? SiteErrorText.UploadText(problem, e.Message, record.SiteName, record.RemoteFolder, item.Path)
+            : gone
+                ? (upload ? "The file is no longer on this PC." : "The file is no longer on the server.")
+                : SiteErrorText.Friendly(e.Message);
+        var retry = (problem is UploadProblem.None or UploadProblem.ServerDeclined) && e is not SiteStoreException && !gone;
+        return (error, retry);
+    }
 
     private static bool IsGone(string message) =>
         message.Contains("object not found", StringComparison.OrdinalIgnoreCase)

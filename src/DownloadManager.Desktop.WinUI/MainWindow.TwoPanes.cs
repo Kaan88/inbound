@@ -102,7 +102,7 @@ public sealed partial class MainWindow
     /// One half of the view switch: a toggle with the segmented look. The template's checked brushes are replaced by the
     /// app's tokens (the default is the accent fill); the brush objects stay and their colours follow the theme.
     /// </summary>
-    private static ToggleButton ViewChoice(string text)
+    internal static ToggleButton ViewChoice(string text)
     {
         var choice = new ToggleButton { Content = text, Padding = new Thickness(14, 4, 14, 4), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5) };
         AutomationProperties.SetName(choice, text);

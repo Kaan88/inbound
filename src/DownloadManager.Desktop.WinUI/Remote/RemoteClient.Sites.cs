@@ -152,6 +152,14 @@ internal sealed partial class RemoteClient
             SitesMessageTypes.TransferResult, SitesTestTime, cancellationToken).ConfigureAwait(false));
     }
 
+    /// <summary>SITES.11: stops one file of a batch (<see cref="SitesMessageTypes.TransferStopFile"/>) or starts it again (<see cref="SitesMessageTypes.TransferStartFile"/>).</summary>
+    public async Task<SiteTransferResultDto> SiteTransferFileActionAsync(string type, string id, string path, CancellationToken cancellationToken = default)
+    {
+        if (type is not (SitesMessageTypes.TransferStopFile or SitesMessageTypes.TransferStartFile)) throw new ArgumentException("Not a file action.", nameof(type));
+        return TransferResult(await SitesSlowAsync<SiteTransferFileRequest, SiteTransferResultDto>(type, new SiteTransferFileRequest { Id = id, Path = path },
+            SitesMessageTypes.TransferResult, SitesTestTime, cancellationToken).ConfigureAwait(false));
+    }
+
     /// <summary>One batch with its files.</summary>
     public async Task<SiteTransferResultDto> GetSiteTransferAsync(string id, CancellationToken cancellationToken = default)
         => TransferResult(await SitesQuickAsync<SiteTransferIdRequest, SiteTransferResultDto>(SitesMessageTypes.TransferGet,

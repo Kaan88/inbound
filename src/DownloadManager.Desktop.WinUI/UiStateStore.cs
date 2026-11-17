@@ -55,6 +55,9 @@ internal sealed class UiState
     /// <summary>SITES.11 R2a: the Linked toggle in the gutter: the This PC pane follows the server pane's folder.</summary>
     public bool SitesLinked { get; set; } = true;
 
+    /// <summary>SITES.11 R3: the opened Transfers list's height as last dragged; null for the default.</summary>
+    public double? TransfersBarHeight { get; set; }
+
     /// <summary>SITES.11 R2a: starred folders of the This PC pane, newest first, at most 20.</summary>
     public List<string> LocalStarredFolders { get; set; } = new();
     /// <summary>View > Dark Mode from before the Theme setting was the source (UI.R23). Moved into the setting once,

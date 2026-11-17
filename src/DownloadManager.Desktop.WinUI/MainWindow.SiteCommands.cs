@@ -23,7 +23,18 @@ public sealed partial class MainWindow
     // Opens being started (before the Host answers with a transfer id), by OpenKey, so a second Open of the same file waits.
     private readonly HashSet<string> _openStarting = [];
 
-    private sealed record OpenWait(string Path, string Key, string SiteName);
+    private sealed record OpenWait(string Path, string Key, string SiteName)
+    {
+        /// <summary>Its batch was in a list once (a batch that is then missing twice in a row was cleared).</summary>
+        public bool Seen { get; init; }
+
+        /// <summary>
+        /// Lists in a row without its batch. One is not enough: a list read before the start can be applied after it.
+        /// </summary>
+        public int Misses { get; init; }
+
+        public DateTimeOffset Added { get; init; } = DateTimeOffset.UtcNow;
+    }
 
     // Download, Download to…, Upload and Open are starting (a dialog, a picker or the Host's answer is awaited): Enter, the
     // menu and a double click while that runs don't start a second batch.
@@ -67,7 +78,7 @@ public sealed partial class MainWindow
         panel.OtherServer = !thisPc;
         SiteMenuDownloadTo.IsEnabled = ready && picked > 0 && thisPc;
         SiteMenuOpen.IsEnabled = ready && one && thisPc;
-        SiteMenuUpload.IsEnabled = ready;
+        SiteMenuUpload.IsEnabled = ready && thisPc;
         SiteMenuUploadFolder.IsEnabled = ready;
         var canNewFolder = site?.Capabilities.Contains(SiteCapabilities.NewFolder) != false;
         SiteMenuNewFolder.Visibility = canNewFolder ? Visibility.Visible : Visibility.Collapsed;
@@ -306,7 +317,11 @@ public sealed partial class MainWindow
         if (_sitesPanel is not { Site: { } site } panel || panel.IsLoading) return;
         var names = panel.SelectedNames;
         if (names.Count == 0) return;
-        if (askFolder && _connection.IsRemote) return;
+        if (askFolder && _connection.IsRemote)
+        {
+            SetSitesStatus($"{SitesCommandRules.Label(SiteCommand.DownloadTo).TrimEnd('…')} works for this PC's own remotes only.");
+            return;
+        }
         var folder = site.LocalFolder is { Length: > 0 } linked && Path.IsPathFullyQualified(linked) ? linked : null;
         if (askFolder)
         {
@@ -491,9 +506,23 @@ public sealed partial class MainWindow
             var transfer = transfers.FirstOrDefault(t => t.Id == id);
             if (transfer is null)
             {
+                // A just-started batch may not be in a list yet, and a list read before the start can arrive after it: a wait
+                // goes once its batch was seen and then missed from two lists in a row (cleared), or after 30 s unseen, and the
+                // status line says so.
+                var misses = wait.Misses + 1;
+                var gone = wait.Seen ? misses >= 2 : DateTimeOffset.UtcNow - wait.Added >= TimeSpan.FromSeconds(30);
+                if (!gone)
+                {
+                    _openWaits[id] = wait with { Misses = misses };
+                    continue;
+                }
+
                 _openWaits.Remove(id);
+                SetSitesStatus($"{Path.GetFileName(wait.Path)} won't open: its transfer is no longer listed.");
                 continue;
             }
+
+            if (!wait.Seen || wait.Misses > 0) _openWaits[id] = wait with { Seen = true, Misses = 0 };
 
             if (transfer.State is not ("done" or "failed" or "canceled")) continue;
             _openWaits.Remove(id);
@@ -514,11 +543,14 @@ public sealed partial class MainWindow
     private async Task OpenDownloadedAsync(OpenWait wait)
     {
         var name = Path.GetFileName(wait.Path);
+        // Off Windows there is no mark to write, and nothing that would read it.
+        var marked = !OperatingSystem.IsWindows();
         if (OperatingSystem.IsWindows())
         {
             try
             {
                 await Task.Run(() => File.WriteAllText(wait.Path + ":Zone.Identifier", SitesCommandRules.ZoneIdentifierText));
+                marked = true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -526,19 +558,13 @@ public sealed partial class MainWindow
             }
         }
 
-        if (SitesCommandRules.IsRunnable(name))
+        // A program, or a file Windows won't warn about because the mark could not be written, is asked about first.
+        var runnable = SitesCommandRules.IsRunnable(name);
+        if (runnable || !marked)
         {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = Content?.XamlRoot,
-                Title = "Run this file?",
-                Content = new TextBlock { Text = SitesCommandRules.RunQuestion(name, wait.SiteName), TextWrapping = TextWrapping.Wrap },
-                PrimaryButtonText = "Show in folder",
-                SecondaryButtonText = "Run",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            var answer = await DialogGuard.ShowAsync(dialog);
+            var answer = await AskBeforeOpeningAsync(runnable ? "Run this file?" : "Open this file?",
+                runnable ? SitesCommandRules.RunQuestion(name, wait.SiteName) : SitesCommandRules.UnmarkedQuestion(name, wait.SiteName),
+                runnable ? "Run" : "Open");
             if (answer is null)
             {
                 SetSitesStatus($"{name} is downloaded but not opened: another dialog is open.");
@@ -555,6 +581,22 @@ public sealed partial class MainWindow
         }
 
         StartShell(ShellActions.OpenFile(wait.Path, WindowHandle), name);
+    }
+
+    /// <summary>Show in folder (the default), <paramref name="go"/> (Run or Open) or Cancel; null when another dialog is open.</summary>
+    private Task<ContentDialogResult?> AskBeforeOpeningAsync(string title, string question, string go)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content?.XamlRoot,
+            Title = title,
+            Content = new TextBlock { Text = question, TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = "Show in folder",
+            SecondaryButtonText = go,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        return DialogGuard.ShowAsync(dialog);
     }
 
     private void StartShell(System.Diagnostics.ProcessStartInfo start, string name)
@@ -634,6 +676,14 @@ public sealed partial class MainWindow
             case LocalCommand.Open when selected is [var item]:
                 var full = Path.Combine(local.Path, item.Name);
                 if (item.IsFolder) local.Open(full);
+                else if (SitesCommandRules.IsRunnable(item.Name))
+                {
+                    // A program or script is asked about first, as a remote file is; Show in folder is the default.
+                    var answer = await AskBeforeOpeningAsync("Run this file?", SitesCommandRules.LocalRunQuestion(item.Name), "Run");
+                    if (answer is null) local.Note($"{item.Name} was not opened: another dialog is open.", reload: false);
+                    else if (answer == ContentDialogResult.Primary) StartShell(ShellActions.RevealFile(full), item.Name);
+                    else if (answer == ContentDialogResult.Secondary) StartShell(ShellActions.OpenFile(full, WindowHandle), item.Name);
+                }
                 else
                 {
                     try

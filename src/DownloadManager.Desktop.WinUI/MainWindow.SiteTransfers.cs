@@ -25,7 +25,9 @@ public sealed partial class MainWindow
         if (_transfersBarWired) return;
         _transfersBarWired = true;
         TransfersBar.Act = (type, id) => _remote.SiteTransferActionAsync(type, id);
+        TransfersBar.ActFile = (type, id, path) => _remote.SiteTransferFileActionAsync(type, id, path);
         TransfersBar.Details = id => _remote.GetSiteTransferAsync(id);
+        TransfersBar.LocalCommandRequested += (command, row) => OnTransferLocalCommand(command, row);
     }
 
     /// <summary>Asks for the batches once per connection; later changes are pushed.</summary>
@@ -104,10 +106,10 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>The status chip: shown while a batch runs, waits, is paused or failed, and Sites is offered here.</summary>
+    /// <summary>The status chip ("Remote files · 2 running · 156 MB/s"): shown while a batch runs, waits, is paused or failed, and remote files are offered here.</summary>
     private void UpdateSitesChip()
     {
-        var text = SitesOffered ? SiteTransferRules.Summary(_siteTransfers) : null;
+        var text = SitesOffered ? SiteTransferRules.ChipText(_siteTransfers) : null;
         var visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
         if (SitesChip.Visibility != visibility) SitesChip.Visibility = visibility;
         if (text is null || SitesChipText.Text == text) return;
@@ -164,6 +166,12 @@ public sealed partial class MainWindow
     private async void SitesUploadFiles_Click(object sender, RoutedEventArgs e)
     {
         if (_sitesPanel is not { Site: { } site } panel) return;
+        if (_connection.IsRemote)
+        {
+            SetSitesStatus($"{SitesCommandRules.Label(SiteCommand.Upload).TrimEnd('…')} works for this PC's own remotes only.");
+            return;
+        }
+
         IReadOnlyList<string> files;
         try
         {
@@ -210,18 +218,26 @@ public sealed partial class MainWindow
             return;
         }
 
-        await UploadAsync(site, panel.Path, parent, [new SiteTransferNameDto { Name = name, IsFolder = true }]);
+        // Managing another server, the folder was picked in that server's folder browser: its own path.
+        await UploadAsync(site, panel.Path, parent, [new SiteTransferNameDto { Name = name, IsFolder = true }], serverPaths: _connection.IsRemote);
     }
 
     /// <summary>
     /// Uploads <paramref name="names"/> into <paramref name="remoteFolder"/>. The names are checked against the server listing
     /// shown (what is loaded so far); when some are there the batch is asked about once.
     /// </summary>
-    private Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names) =>
-        OnceAsync(() => UploadCoreAsync(site, remoteFolder, localFolder, names));
+    private Task UploadAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names, bool serverPaths = false) =>
+        OnceAsync(() => UploadCoreAsync(site, remoteFolder, localFolder, names, serverPaths));
 
-    private async Task UploadCoreAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names)
+    private async Task UploadCoreAsync(SiteDto site, string remoteFolder, string localFolder, List<SiteTransferNameDto> names, bool serverPaths)
     {
+        // Paths picked on this PC (a picker, a pane, a drop) mean nothing to another server: it would read its own disks.
+        if (_connection.IsRemote && !serverPaths)
+        {
+            SetSitesStatus("Uploading files from this PC works for this PC's own remotes only.");
+            return;
+        }
+
         // Compared without case (a server may not tell "A.iso" from "a.iso"); a folder whose pages are not all loaded is
         // asked about anyway, since what isn't listed may be there.
         var target = SitesBrowseRules.Normalize(remoteFolder);
@@ -301,7 +317,8 @@ public sealed partial class MainWindow
             }
 
             if (reply.Transfer is { } added && _siteTransfers.All(t => t.Id != added.Id)) ApplySiteTransfers([.. _siteTransfers, added]);
-            TransfersBar.OpenAtBest();
+            // Just started: it is on Running, whatever failed before.
+            TransfersBar.OpenOnRunning();
             return reply.Transfer;
         }
         finally
@@ -310,6 +327,121 @@ public sealed partial class MainWindow
         }
     }
 
+
+    // ---- Open, Open folder, Show on the remote (R3, decision 4) -----------------------------------------
+
+    private void OnTransferLocalCommand(SiteTransferRules.TransferCommand command, SiteTransferRules.TransferRef row)
+    {
+        switch (command)
+        {
+            case SiteTransferRules.TransferCommand.Open:
+                _ = OpenTransferAsync(row, reveal: false);
+                break;
+            case SiteTransferRules.TransferCommand.OpenFolder:
+                _ = OpenTransferAsync(row, reveal: true);
+                break;
+            case SiteTransferRules.TransferCommand.ShowOnRemote:
+                _ = ShowTransferOnRemoteAsync(row);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Open and Open folder act on this PC: a download's file, an upload's source. A folder opens in Explorer. A downloaded
+    /// file opens as an opened remote file does (<see cref="OpenDownloadedAsync"/>: marked as from the internet, a program
+    /// asked about first); an upload's source is the user's own file and just opens.
+    /// </summary>
+    private async Task OpenTransferAsync(SiteTransferRules.TransferRef row, bool reveal)
+    {
+        // The bar lists this PC's Host's batches; a window managing another server never opens them here.
+        if (_connection.IsRemote || !SitesOffered) return;
+        var path = SiteTransferRules.LocalTarget(row);
+        var batch = row.Batch;
+        if (row.Item is null && SiteTransferRules.IsDownload(batch) && batch.PickedCount == 1 && batch.Picked.Count == 1)
+        {
+            // One picked name: what landed may have another name (Keep both). Its files as read by the bar, or read now; when
+            // neither tells, the batch's folder opens.
+            var items = TransfersBar.FilesOf(batch.Id);
+            if (items is null)
+            {
+                try
+                {
+                    var reply = await _remote.GetSiteTransferAsync(batch.Id);
+                    items = reply.Ok ? reply.Items : null;
+                }
+                catch (Exception ex)
+                {
+                    // The batch's folder opens instead; the status line says why.
+                    UiTrace.Write($"Reading a transfer's files for Open failed: {ex.GetType().Name}");
+                    SetSitesStatus($"The files of that transfer could not be read ({ex.Message}); its folder opens instead.");
+                }
+            }
+
+            var (landed, file) = items is null ? (null, null) : SiteTransferRules.PickedLocal(batch, items);
+            path = landed ?? batch.LocalFolder;
+            if (file is not null) row = new SiteTransferRules.TransferRef(batch, file);
+        }
+
+        var name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        if (name.Length == 0) name = path;
+        var folder = batch.LocalFolder;
+        // The checks touch the disk (a slow or sleeping drive): off the UI thread.
+        var (isFolder, isFile, folderThere) = await Task.Run(() =>
+            (Directory.Exists(path), File.Exists(path), folder.Length > 0 && Directory.Exists(folder)));
+        if (isFolder)
+        {
+            StartShell(ShellActions.OpenFolder(path), name);
+            return;
+        }
+
+        if (!isFile)
+        {
+            // The file was moved or deleted: its folder is still worth showing.
+            if (reveal && folderThere)
+            {
+                StartShell(ShellActions.OpenFolder(folder), name);
+                return;
+            }
+
+            await ShowSitesMessageAsync(reveal ? "Open folder" : "Open", $"{name} is no longer on this PC at {path}.");
+            return;
+        }
+
+        if (reveal)
+        {
+            StartShell(ShellActions.RevealFile(path), name);
+            return;
+        }
+
+        // A copied download opens as an opened remote file does; a skipped one (already the user's) and an upload's source plainly.
+        if (SiteTransferRules.OpensAsDownloaded(row))
+        {
+            await OpenDownloadedAsync(new OpenWait(path, batch.Id, batch.SiteName));
+            return;
+        }
+
+        StartShell(ShellActions.OpenFile(path, WindowHandle), name);
+    }
+
+    /// <summary>Goes to the remote's folder of this transfer in the Remote files view and selects the file or folder there.</summary>
+    private async Task ShowTransferOnRemoteAsync(SiteTransferRules.TransferRef row)
+    {
+        if (_connection.IsRemote) return;
+        if (_sites.FirstOrDefault(site => site.Id == row.Batch.SiteId) is not { } site || !SitesOffered)
+        {
+            await ShowSitesMessageAsync("Show on the remote", $"{row.Batch.SiteName} is not among your remotes any more.");
+            return;
+        }
+
+        var (folder, select) = SiteTransferRules.RemoteTarget(row);
+        if (!_sitesShown || _shownSiteId != site.Id)
+        {
+            ShowSite(site.Id);
+            SyncSiteEntryPoints();
+        }
+
+        _sitesPanel?.Open(site, folder, select, sayIfMissing: true);
+    }
 
     private async Task ShowSitesMessageAsync(string title, string message)
     {

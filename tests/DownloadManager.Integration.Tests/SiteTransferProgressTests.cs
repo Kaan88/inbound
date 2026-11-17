@@ -77,6 +77,47 @@ public sealed class SiteTransferProgressTests
     }
 
     [Fact]
+    public void AFilesFailureSaysWhoseItIsAndWhetherItIsTriedAgain()
+    {
+        static DownloadManager.Sites.SiteTransferRecord Batch(string direction) => new()
+        {
+            Direction = direction, SiteName = "nas.home.lan", RemoteFolder = "/media/isos", LocalFolder = @"C:\In",
+        };
+        var item = new DownloadManager.Sites.SiteTransferItem { Path = "a.iso" };
+        var upload = Batch(DownloadManager.Sites.SiteTransferDirections.Upload);
+
+        // Captured from rclone 1.76.0 against rclone's read-only FTP server: the server's 4xx words, and the usual tries
+        // (FTP's 4xx is "not now"); not "no longer on this PC", though the words say "file does not exist".
+        var (error, retry) = SiteTransfers.FileFailure(
+            new DownloadManager.Sites.RcloneCallException("operations/copyfile", 500, "update stor: 450 \"error during transfer: file does not exist\""), upload, item);
+        Assert.Equal("nas.home.lan did not take the file in /media/isos: error during transfer: file does not exist", error);
+        Assert.True(retry);
+
+        // A source deleted on this PC meanwhile: no longer on this PC, not tried again.
+        (error, retry) = SiteTransfers.FileFailure(
+            new DownloadManager.Sites.RcloneCallException("operations/copyfile", 500, "object not found"), upload, item);
+        Assert.Equal("The file is no longer on this PC.", error);
+        Assert.False(retry);
+
+        // A write the server refuses: said so, not tried again.
+        (error, retry) = SiteTransfers.FileFailure(
+            new DownloadManager.Sites.RcloneCallException("operations/copyfile", 500, "Update Create failed: sftp: \"Permission denied\" (SSH_FX_PERMISSION_DENIED)"), upload, item);
+        Assert.Equal("nas.home.lan refused the write to /media/isos. Check that this sign-in may write there.", error);
+        Assert.False(retry);
+
+        // A file another program holds open: the usual tries.
+        (_, retry) = SiteTransfers.FileFailure(new DownloadManager.Sites.RcloneCallException("operations/copyfile", 500,
+            "failed to open source object: open C:\\In\\a.iso: The process cannot access the file because it is being used by another process."), upload, item);
+        Assert.True(retry);
+
+        // A download whose file left the server.
+        (error, retry) = SiteTransfers.FileFailure(
+            new DownloadManager.Sites.RcloneCallException("operations/copyfile", 500, "object not found"), Batch(DownloadManager.Sites.SiteTransferDirections.Download), item);
+        Assert.Equal("The file is no longer on the server.", error);
+        Assert.False(retry);
+    }
+
+    [Fact]
     public void TheNewFieldsTravelInTheContract()
     {
         var dto = new SiteTransferDto

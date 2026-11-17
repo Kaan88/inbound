@@ -145,7 +145,13 @@ public sealed class SitesCommandRulesTests
     [InlineData("trick.exe. ", true)]
     [InlineData("notes.txt", false)]
     [InlineData("photo.jpg", false)]
-    [InlineData("disk.iso", false)]
+    [InlineData("disk.iso", true)]
+    [InlineData("work.rdp", true)]
+    [InlineData("update.msu", true)]
+    [InlineData("box.wsb", true)]
+    [InlineData("notes.one", true)]
+    [InlineData("q.search-ms", true)]
+    [InlineData("song.mp3", false)]
     [InlineData("exe", false)]
     [InlineData("archive.exe.zip", false)]
     public void ProgramsAndScriptsAreAskedAboutBeforeRunning(string name, bool runnable)
@@ -156,6 +162,9 @@ public sealed class SitesCommandRulesTests
     {
         Assert.Equal("setup.exe is a program or script from nas.home.lan. Run it?", SitesCommandRules.RunQuestion("setup.exe", "nas.home.lan"));
         Assert.Contains("ZoneId=3", SitesCommandRules.ZoneIdentifierText);
+        Assert.Equal("report.pdf came from nas, but it could not be marked as from the internet, so Windows won't warn about it. Open it anyway?",
+            SitesCommandRules.UnmarkedQuestion("report.pdf", "nas"));
+        Assert.Equal("tool.exe is a program or script. Run it?", SitesCommandRules.LocalRunQuestion("tool.exe"));
         Assert.StartsWith("[ZoneTransfer]", SitesCommandRules.ZoneIdentifierText);
     }
 
@@ -179,6 +188,10 @@ public sealed class SitesCommandRulesTests
     {
         Assert.True(SitesCommandRules.OffForOtherServer(SiteCommand.Open));
         Assert.True(SitesCommandRules.OffForOtherServer(SiteCommand.DownloadTo));
+        // Files picked on this PC can't be read by another server; a folder is picked on that server.
+        Assert.True(SitesCommandRules.OffForOtherServer(SiteCommand.Upload));
+        Assert.False(SitesCommandRules.OffForOtherServer(SiteCommand.UploadFolder));
+        Assert.DoesNotContain(SiteCommand.Upload, SitesCommandRules.ServerMenu(All, [], otherServer: true).SelectMany(g => g));
         Assert.False(SitesCommandRules.OffForOtherServer(SiteCommand.Download));
         var menu = SitesCommandRules.ServerMenu(All, [File("a.iso")], otherServer: true).SelectMany(g => g).ToList();
         Assert.DoesNotContain(SiteCommand.Open, menu);

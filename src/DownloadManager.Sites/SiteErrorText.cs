@@ -1,5 +1,17 @@
 namespace DownloadManager.Sites;
 
+/// <summary>What <see cref="SiteErrorText.UploadFailure"/> found.</summary>
+public enum UploadProblem
+{
+    None,
+    LocalUnreadable,
+    Refused,
+    NotTaken,
+
+    /// <summary>An FTP server's 4xx reply to the write ("stor: 450 …"): said in its own words, and tried again as usual.</summary>
+    ServerDeclined,
+}
+
 /// <summary>
 /// Plain words for rclone's errors when a site is used (browse, Test). The texts were taken from rclone 1.76.0 runs on
 /// Windows and the Go network errors it wraps on Linux; anything not recognised comes back as it was, already redacted by
@@ -125,6 +137,100 @@ public static class SiteErrorText
         if (message.TrimEnd().EndsWith("directory not found", StringComparison.OrdinalIgnoreCase))
             return "That folder is not on the server.";
         return message;
+    }
+
+    /// <summary>
+    /// SITES.11: why an upload's file failed, when it is one that trying again won't fix: this PC's file could not be read,
+    /// the server refused the write (a read-only share, a sign-in that may only read), or a WebDAV server answered 404 to
+    /// the copy (the folder is gone, or the server won't write). Only rclone's, Go's and the protocols' own phrases are
+    /// read, and the file's and folders' own names (<paramref name="names"/>, as paths relative to the batch) are taken
+    /// out first, so a file called "403 Forbidden.txt" is not one. Phrases from rclone 1.76.0 against read-only servers;
+    /// FTP's 450 is not read (rclone's own server says it for other things too).
+    /// </summary>
+    public static UploadProblem UploadFailure(string message, string localFolder, params string?[] names)
+    {
+        // A file another program holds open (Windows' sharing violation) may be free at the next try: the usual tries.
+        if (Has(message, "being used by another process") || Has(message, "The process cannot access the file")) return UploadProblem.None;
+        if (Has(message, "failed to open source object") || LocalUnreadable(message, localFolder)) return UploadProblem.LocalUnreadable;
+        var text = WithoutNames(message, names);
+        if (Has(text, "403 Forbidden") || Has(text, "405 Method Not Allowed")
+            || Has(text, "SSH_FX_PERMISSION_DENIED") || Has(text, "SSH_FX_WRITE_PROTECT")
+            || Has(text, "sftp: \"Read only file system\"")
+            || Has(text, ": permission denied") || Has(text, ": read-only file system"))
+            return UploadProblem.Refused;
+        // FTP: the reply code right after rclone's "stor: " (also "update stor: ").
+        var stor = text.LastIndexOf("stor: ", StringComparison.OrdinalIgnoreCase);
+        if (stor >= 0 && text[(stor + 6)..] is var reply)
+        {
+            if (reply.StartsWith("550 ", StringComparison.Ordinal) || reply.StartsWith("553 ", StringComparison.Ordinal)) return UploadProblem.Refused;
+            // 4xx is FTP's "not now": the server's own words, and the file's usual tries.
+            if (reply.Length >= 4 && reply[0] == '4' && char.IsAsciiDigit(reply[1]) && char.IsAsciiDigit(reply[2]) && reply[3] == ' ')
+                return UploadProblem.ServerDeclined;
+        }
+
+        if (Has(text, "Not Found: 404")
+            && (Has(text, "operations/copyfile") || Has(text, "operations/movefile") || Has(text, "operations/mkdir") || Has(text, "moveto")))
+            return UploadProblem.NotTaken;
+        return UploadProblem.None;
+    }
+
+    /// <summary>The words for <see cref="UploadFailure"/>; <see cref="UploadProblem.None"/> is <see cref="Friendly"/>.</summary>
+    public static string UploadText(UploadProblem problem, string message, string siteName, string folder, string fileName) => problem switch
+    {
+        UploadProblem.LocalUnreadable => $"This PC's file could not be read: {Leaf(fileName)}.",
+        UploadProblem.Refused => $"{siteName} refused the write to {folder}. Check that this sign-in may write there.",
+        UploadProblem.NotTaken => $"{siteName} did not take the file in {folder}: the folder is gone or can't be written.",
+        UploadProblem.ServerDeclined => $"{siteName} did not take the file in {folder}: {ServerWords(message)}",
+        _ => Friendly(message),
+    };
+
+    // Go's "open <path>: permission denied" (or Windows' "Access is denied.") about a path in the batch's folder on this PC.
+    private static bool LocalUnreadable(string message, string localFolder)
+    {
+        var folder = localFolder.Replace('\\', '/').TrimEnd('/');
+        if (folder.Length == 0) return false;
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(message,
+                     "open (?<path>[^\r\n]+?): (permission denied|Access is denied)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            var path = match.Groups["path"].Value.Trim('"').Replace('\\', '/');
+            if (path.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    // The names (and each folder of them) where they stand as a path part: after a slash, a backslash or a quote, and before
+    // one of those, a colon or the end (so a folder "Read" leaves sftp's "Read only file system" alone).
+    private static string WithoutNames(string message, string?[] names)
+    {
+        var parts = names.Where(name => !string.IsNullOrEmpty(name))
+            .SelectMany(name => name!.Split('/', '\\').Append(name!))
+            .Where(part => part.Length > 0).Distinct(StringComparer.Ordinal).OrderByDescending(part => part.Length);
+        foreach (var part in parts)
+        {
+            message = System.Text.RegularExpressions.Regex.Replace(message, "(?<=[/\\\\\"])" + System.Text.RegularExpressions.Regex.Escape(part) + "(?=[/\\\\\":]|$)", "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        return message;
+    }
+
+    // An FTP reply after rclone's "stor: ": the words in its quotes, else what follows the code.
+    private static string ServerWords(string message)
+    {
+        var stor = message.LastIndexOf("stor: ", StringComparison.OrdinalIgnoreCase);
+        var reply = stor >= 0 ? message[(stor + 6)..].Trim() : message.Trim();
+        var open = reply.IndexOf('"');
+        var close = reply.LastIndexOf('"');
+        if (open >= 0 && close > open) return reply[(open + 1)..close];
+        return reply.Length > 4 ? reply[4..].Trim() : reply;
+    }
+
+    private static string Leaf(string path)
+    {
+        var trimmed = path.TrimEnd('/', '\\');
+        var cut = trimmed.LastIndexOfAny(['/', '\\']);
+        return cut < 0 ? trimmed : trimmed[(cut + 1)..];
     }
 
     private static bool Has(string text, string part) => text.Contains(part, StringComparison.OrdinalIgnoreCase);

@@ -52,6 +52,8 @@ internal sealed partial class SitesOptionsPage
         _client = client;
         _window = window;
         _current = this;
+        // An edit asked for when Options did not open (or long ago) is not answered by a later Options.
+        if (_editWanted is not null && Environment.TickCount64 - _editWantedAt > 5000) _editWanted = null;
 
         AutomationProperties.SetName(_enable, "Use Sites");
         AutomationProperties.SetName(_download, "Download rclone");
@@ -435,6 +437,7 @@ internal sealed partial class SitesOptionsPage
     // SITES.11 R2a: "Edit site" in the browse pane's trouble state opens this page's edit dialog for the site.
     private static SitesOptionsPage? _current;
     private static string? _editWanted;
+    private static long _editWantedAt;
 
     // The settings and the sites have been read once, so a wanted edit can be answered.
     private bool _loaded;
@@ -443,6 +446,7 @@ internal sealed partial class SitesOptionsPage
     internal static void RequestEdit(string siteId)
     {
         _editWanted = siteId;
+        _editWantedAt = Environment.TickCount64;
         if (_current is { } page) _ = page.EditWantedAsync();
     }
 

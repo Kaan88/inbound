@@ -311,6 +311,9 @@ PROGRESS "Sites rework R2a".
 
 ### R3. Desktop: transfers (`transfers`, `failed`, `downloads`)
 
+Status 2026-11-17: built, reviewed (Opus, Fable) and walked on the final build; pairs in `compare/`; see PROGRESS
+"Sites rework R3". Not yet seen by the owner.
+
 - The opened bar is a list with the main list's row template and column header: File Name (arrow by direction,
   chevron on a batch), Size, Status with the progress bar, Time left, Transfer rate, Description (from, to, why).
 - A batch opens to its files in place (the package pattern the main list already has). The "Files" button and its

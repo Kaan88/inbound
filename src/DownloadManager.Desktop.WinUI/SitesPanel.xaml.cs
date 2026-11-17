@@ -117,6 +117,10 @@ public sealed partial class SitesPanel : UserControl
     // Opening a folder anew or F5: its "On this PC" answers are asked for again rather than reused.
     private bool _askHereAgain;
     private string? _selectAfter;
+    private bool _sayIfMissing;
+
+    /// <summary>A name <see cref="Open"/> was to select is not among the rows read (only the first page is read).</summary>
+    internal event Action<string>? SelectMissing;
     private bool _failed;
 
     // The trouble state: the failures in a row, the countdown to the next automatic try, and when this site was last listed.
@@ -270,9 +274,13 @@ public sealed partial class SitesPanel : UserControl
 
     internal bool IsLoading => _loading;
 
-    /// <summary>Shows a site, at <paramref name="path"/> or, with null, at the folder the site starts in.</summary>
-    internal void Open(SiteDto site, string? path = null)
+    /// <summary>
+    /// Shows a site, at <paramref name="path"/> or, with null, at the folder the site starts in; <paramref name="select"/> is the
+    /// name to select in it once listed.
+    /// </summary>
+    internal void Open(SiteDto site, string? path = null, string? select = null, bool sayIfMissing = false)
     {
+        _sayIfMissing = sayIfMissing && select is not null;
         if (_site?.Id != site.Id)
         {
             _lastListedAt = null;
@@ -286,6 +294,7 @@ public sealed partial class SitesPanel : UserControl
         _path = path is null ? SitesBrowseRules.Root : SitesBrowseRules.Normalize(path);
         _atStart = path is null;
         _askHereAgain = true;
+        _selectAfter = select;
         _ = LoadAsync(path, refresh: false, append: false);
     }
 
@@ -796,14 +805,19 @@ public sealed partial class SitesPanel : UserControl
 
     private void RestoreSelection()
     {
+        var say = _sayIfMissing;
+        _sayIfMissing = false;
         if (_rows.Count == 0)
         {
+            if (say && _selectAfter is { } gone) SelectMissing?.Invoke(gone);
             _selectAfter = null;
             return;
         }
 
         var wanted = _selectAfter;
         _selectAfter = null;
+        var found = wanted is null ? null : _rows.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, wanted, StringComparison.Ordinal));
+        if (say && wanted is not null && found is null) SelectMissing?.Invoke(wanted);
         var row = (wanted is null ? null : _view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, wanted, StringComparison.Ordinal)))
             ?? _view.FirstOrDefault(item => !item.IsParent) ?? _view.FirstOrDefault();
         if (row is null) return;
