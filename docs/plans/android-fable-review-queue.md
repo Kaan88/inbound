@@ -42,6 +42,8 @@ each slice and step; Fable reviews everything below once the Android work is com
 
 Owner, 2026-11-17: "after first version finishes, have it review." Fable reviews everything above as soon as the first
 usable APK is on the owner's desktop (not only after all milestones).
+Owner, 2026-11-17: "from now on, have fable review fixes approved by same fable agent." The fixes for Fable's
+findings go back to the same Fable agent for approval (record its agent id here when it starts).
 
 ## Done (Fable reviewed it)
 
