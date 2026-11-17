@@ -260,6 +260,16 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, pipe, type, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
         }
 
+        // Waiting for the schedule starts the batch later, so it is held as a resume is; not waiting only keeps it paused.
+        Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferSchedule,
+            new SiteTransferScheduleRequest { Id = "outsidebatch", Wait = true })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferSchedule,
+            new SiteTransferScheduleRequest { Id = "outsidebatch", Wait = false })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferSchedule,
+            new SiteTransferScheduleRequest { Id = "insidebatch", Wait = true })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, pipe, SitesMessageTypes.TransferSchedule,
+            new SiteTransferScheduleRequest { Id = "outsidebatch", Wait = true })).Type);
+
         Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferPause, new SiteTransferIdRequest { Id = "outsidebatch" })).Type);
         sites.Seen.Clear();
 

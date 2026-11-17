@@ -1306,14 +1306,11 @@ public sealed class SiteTransfers : IAsyncDisposable
         // A stop is kept at once: after a Host kill before the flush, the file would come back waiting and run.
         if (saveNow) await SaveQuietlyAsync(batch).ConfigureAwait(false);
 
-        bool? reached = connection || keyProblem is not null || (stopBatch is not null && !connection) ? false
-            : state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped && !(item.Folder && record.Direction == SiteTransferDirections.Download) ? true
-            : null;
-        if (reached is { } ok)
+        foreach (var (siteId, ok) in ReachOf(record, item, state, connection || keyProblem is not null || stopBatch is not null))
         {
             try
             {
-                Reached?.Invoke(record.SiteId, ok);
+                Reached?.Invoke(siteId, ok);
             }
             catch (Exception e)
             {
@@ -1325,6 +1322,36 @@ public sealed class SiteTransfers : IAsyncDisposable
         foreach (var stop in others.Stops) stop.Cancel();
         Pump();
         RequestBroadcast();
+    }
+
+    /// <summary>
+    /// The remotes a file's ending says something about, for their dots in the sidebar. A success counts only where the
+    /// server was really contacted: a download's empty folder and a download skipped because the file is here touched
+    /// only this disk. Between two remotes a copied file reached both, a made folder or a skip (looked up there) only
+    /// the target; a failed connection there is not told apart by side, so it marks neither.
+    /// </summary>
+    internal static IEnumerable<(string SiteId, bool Ok)> ReachOf(SiteTransferRecord record, SiteTransferItem item, string state, bool failed)
+    {
+        var between = record.Direction == SiteTransferDirections.Between;
+        if (failed)
+        {
+            if (!between) yield return (record.SiteId, false);
+            yield break;
+        }
+
+        if (record.Direction == SiteTransferDirections.Download)
+        {
+            if (state == SiteTransferItemStates.Done && !item.Folder) yield return (record.SiteId, true);
+        }
+        else if (record.Direction == SiteTransferDirections.Upload)
+        {
+            if (state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped) yield return (record.SiteId, true);
+        }
+        else if (between && state is SiteTransferItemStates.Done or SiteTransferItemStates.Skipped)
+        {
+            if (state == SiteTransferItemStates.Done && !item.Folder) yield return (record.SiteId, true);
+            if (record.TargetSiteId is { Length: > 0 } target) yield return (target, true);
+        }
     }
 
     // Audit 2026-11-15: every kind of site, not only SFTP (SiteErrorText reads rclone's and Go's fixed phrases).

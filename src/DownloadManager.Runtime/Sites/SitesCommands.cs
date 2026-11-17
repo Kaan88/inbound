@@ -773,7 +773,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         return (saved, null);
     }
 
-    /// <param name="unsavedOnly">SITES.11 <c>sites.close</c>: refused, inside the gate, when the site is (by now) a saved one.</param>
+    /// <param name="unsavedOnly">
+    /// SITES.11 <c>sites.close</c>: refused, inside the gate, when the site is (by now) a saved one; its batches are
+    /// canceled after the gate, once the record is gone.
+    /// </param>
     private async Task<SiteResultDto> RemoveAsync(string id, CancellationToken cancellationToken, bool unsavedOnly = false)
     {
         bool removed;
@@ -787,21 +790,23 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (unsavedOnly)
-            {
-                // Checked and its batches canceled under the gate, which "Remember" takes too: a site kept meanwhile
-                // stays saved, its transfers untouched.
-                if (!_sites.IsUnsaved(id)) return Fail("That remote was saved meanwhile; remove it in Options › Remote files.");
-                await _transfers.CancelSiteAsync(id, "Canceled because the address was closed.").ConfigureAwait(false);
-                CancelSignIn(id);
-            }
-
+            // Checked and removed under the gate, which "Remember" takes too: a site kept meanwhile stays saved, its
+            // transfers untouched; once removed here, "Remember" no longer finds it.
+            if (unsavedOnly && !_sites.IsUnsaved(id)) return Fail("That remote was saved meanwhile; remove it in Options › Remote files.");
             hadCertificates = SiteStore.IsId(id) && await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is { TrustedCertificates.Count: > 0 };
             removed = SiteStore.IsId(id) && await _sites.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (unsavedOnly && removed)
+        {
+            // After the gate, as for a saved remote: a file being stopped may still need a lease, and leases are taken
+            // under the gate.
+            await _transfers.CancelSiteAsync(id, "Canceled because the address was closed.").ConfigureAwait(false);
+            CancelSignIn(id);
         }
 
         ForgetListings(id);

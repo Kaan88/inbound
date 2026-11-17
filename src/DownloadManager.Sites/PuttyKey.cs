@@ -134,12 +134,16 @@ public static class PuttyKey
         fields["Algorithm"] = first[(colon + 1)..].Trim();
         for (index++; index < lines.Length; index++)
         {
-            var line = lines[index].Trim();
-            if (line.Length == 0) continue;
-            colon = line.IndexOf(": ", StringComparison.Ordinal);
-            if (colon < 0) return null;
+            // Header lines are not trimmed: the comment is part of the MAC, so its own spaces count, and PuTTYgen
+            // writes an empty comment as "Comment: " (or "Comment:" once an editor strips the trailing space).
+            var line = lines[index];
+            if (line.Trim().Length == 0) continue;
+            colon = line.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0) return null;
             var name = line[..colon];
-            var value = line[(colon + 2)..];
+            var value = line[(colon + 1)..];
+            if (name == "Comment") { if (value.StartsWith(' ')) value = value[1..]; }
+            else value = value.Trim();
             if (name is "Public-Lines" or "Private-Lines")
             {
                 if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var count) || count > 1000 || index + count >= lines.Length)

@@ -78,6 +78,14 @@ public sealed partial class HostCommandDispatcher
                 if (sites.TransferLocalFolder(id) is not { } folder) return null; // no such batch: Sites says so
                 return roots.Allowed(folder) is null ? roots.OutsideTextFor(folder) : null;
             }
+            case SitesMessageTypes.TransferSchedule:
+            {
+                // Waiting for the schedule starts the batch at the schedule's start, so it is held as a resume is;
+                // Wait = false only keeps it paused.
+                var schedule = message.GetPayload<SiteTransferScheduleRequest>();
+                if (schedule is not { Wait: true } || sites.TransferLocalFolder(schedule.Id) is not { } folder) return null;
+                return roots.Allowed(folder) is null ? roots.OutsideTextFor(folder) : null;
+            }
             case SitesMessageTypes.SetEnabled:
                 return message.GetPayload<SitesSetEnabledRequest>()?.OwnRclonePath is not null ? OwnRcloneHere : null;
             case SitesMessageTypes.Save:

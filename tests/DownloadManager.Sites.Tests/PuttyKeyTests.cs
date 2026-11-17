@@ -86,6 +86,33 @@ public sealed class PuttyKeyTests
         Assert.Equal([.. EdSeed, .. EdPublic], fields[1]);
     }
 
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("", "pass")]
+    [InlineData("trailing ", null)]
+    [InlineData(" both ", "pass")]
+    public void AnEmptyCommentOrOneWithEdgeSpacesIsReadAsWritten(string comment, string? passphrase)
+    {
+        var publicBlob = Blob(W("ssh-ed25519"), S(EdPublic));
+        var ppk = Ppk(2, "ssh-ed25519", comment, publicBlob, Blob(S(EdSeed)), passphrase);
+
+        var (text, problem) = PuttyKey.ToOpenSsh(ppk, passphrase);
+
+        Assert.Null(problem);
+        var (_, pub, fields) = ReadOpenSsh(text!);
+        Assert.Equal(publicBlob, pub);
+        Assert.Equal(comment, Encoding.UTF8.GetString(fields[2]));
+    }
+
+    [Fact]
+    public void AnEmptyCommentWhoseTrailingSpaceWasStrippedIsStillRead()
+    {
+        var publicBlob = Blob(W("ssh-ed25519"), S(EdPublic));
+        var ppk = Ppk(3, "ssh-ed25519", "", publicBlob, Blob(S(EdSeed)), null).Replace("Comment: \r\n", "Comment:\r\n", StringComparison.Ordinal);
+
+        Assert.Null(PuttyKey.ToOpenSsh(ppk, null).Problem);
+    }
+
     [Fact]
     public void AWrongOrMissingPassphraseIsRefusedAndAChangedFileFailsItsCheck()
     {
