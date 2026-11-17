@@ -1329,10 +1329,17 @@ public sealed partial class SitesPanel : UserControl
         return null;
     }
 
+    /// <summary>
+    /// SITES.14: the left pane of Two panes, showing a remote. Its menu copies to the right pane, previews, copies paths and
+    /// refreshes (<see cref="SitesCommandRules.LeftRemoteMenu"/>); changes are made in the right pane.
+    /// </summary>
+    internal bool CopyPane { get; set; }
+
     private MenuFlyout BuildContextMenu()
     {
         var menu = new MenuFlyout();
-        var groups = SitesCommandRules.ServerMenu(_site?.Capabilities, ItemsList.SelectedItems.OfType<SiteItemRow>().Select(row => row.Line), OtherServer);
+        var lines = ItemsList.SelectedItems.OfType<SiteItemRow>().Select(row => row.Line);
+        var groups = CopyPane ? SitesCommandRules.LeftRemoteMenu(lines) : SitesCommandRules.ServerMenu(_site?.Capabilities, lines, OtherServer);
         var folderRow = SelectedRows.Take(2).ToList() is [{ IsFolder: true } only] ? SitesBrowseRules.Join(_path, only.Name) : null;
         foreach (var group in groups)
         {
@@ -1340,7 +1347,10 @@ public sealed partial class SitesPanel : UserControl
             foreach (var command in group)
             {
                 var starred = command == SiteCommand.StarFolder && SitesBrowseRules.IsStarred(_site?.Stars, folderRow);
-                var item = new MenuFlyoutItem { Text = starred ? "Unstar this folder" : SitesCommandRules.Label(command) };
+                var item = new MenuFlyoutItem
+                {
+                    Text = starred ? "Unstar this folder" : CopyPane ? SitesCommandRules.LeftRemoteLabel(command) : SitesCommandRules.Label(command),
+                };
                 if (SitesCommandRules.KeyText(command) is { Length: > 0 } key) item.KeyboardAcceleratorTextOverride = CommandKey.Text(key);
                 var chosen = command;
                 item.Click += (_, _) =>

@@ -26,6 +26,27 @@ public sealed class SitesCommandRulesTests
     }
 
     [Fact]
+    public void TheLeftRemotePaneCopiesToTheRightAndChangesNothing()
+    {
+        var one = SitesCommandRules.LeftRemoteMenu([File("a.txt")]);
+        Assert.Equal([SiteCommand.Download, SiteCommand.Preview], one[0]);
+        Assert.Equal([SiteCommand.CopyPath], one[1]);
+        Assert.Equal([SiteCommand.Refresh], one[2]);
+        Assert.Equal("Copy to the right pane", SitesCommandRules.LeftRemoteLabel(SiteCommand.Download));
+        Assert.Equal("Preview", SitesCommandRules.LeftRemoteLabel(SiteCommand.Preview));
+
+        var several = SitesCommandRules.LeftRemoteMenu([File("a"), Folder("b")]).SelectMany(g => g).ToList();
+        Assert.DoesNotContain(SiteCommand.Preview, several);
+        Assert.DoesNotContain(SiteCommand.Rename, several);
+        Assert.DoesNotContain(SiteCommand.Delete, several);
+        Assert.DoesNotContain(SiteCommand.Preview, SitesCommandRules.LeftRemoteMenu([Folder("x")]).SelectMany(g => g));
+
+        // Nothing selected, or only "..": the folder's own items.
+        Assert.Equal([[SiteCommand.Refresh, SiteCommand.CopyPath]], SitesCommandRules.LeftRemoteMenu([]));
+        Assert.Equal([[SiteCommand.Refresh, SiteCommand.CopyPath]], SitesCommandRules.LeftRemoteMenu([Up]));
+    }
+
+    [Fact]
     public void PreviewIsOfferedForOneFileOnly()
     {
         Assert.Contains(SiteCommand.Preview, SitesCommandRules.ServerMenu(All, [File("a.txt")]).SelectMany(g => g));

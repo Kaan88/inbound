@@ -49,7 +49,9 @@ public partial class App : Application
                 _tracingException = true;
                 try
                 {
-                    UiTrace.Write($"First-chance {e.Exception.GetType().Name} 0x{e.Exception.HResult:X8}: {e.Exception.Message}\n{e.Exception.StackTrace}");
+                    // At first chance the exception's own stack holds only the throwing frame; the caller's stack says
+                    // which of the window's code made the call (it found the SITES.14 left-pane crash).
+                    UiTrace.Write($"First-chance {e.Exception.GetType().Name} 0x{e.Exception.HResult:X8}: {e.Exception.Message}\n{e.Exception.StackTrace}\n  called from:\n{Environment.StackTrace}");
                 }
                 finally
                 {

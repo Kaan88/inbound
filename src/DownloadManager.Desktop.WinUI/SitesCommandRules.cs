@@ -88,6 +88,23 @@ internal static class SitesCommandRules
         return groups;
     }
 
+    /// <summary>
+    /// SITES.14: the menu of the left pane when it shows a remote. Download copies into the right pane's folder; Preview is
+    /// for one file; nothing changes the remote (that is done in the right pane). With nothing selected: Refresh and Copy
+    /// path (the folder's).
+    /// </summary>
+    public static List<List<SiteCommand>> LeftRemoteMenu(IEnumerable<SitesBrowseRules.PaneLine> selected)
+    {
+        var picked = SitesBrowseRules.SelectedForAction(selected);
+        if (picked.Count == 0) return [[SiteCommand.Refresh, SiteCommand.CopyPath]];
+        var first = new List<SiteCommand> { SiteCommand.Download };
+        if (picked.Count == 1 && !picked[0].IsFolder) first.Add(SiteCommand.Preview);
+        return [first, [SiteCommand.CopyPath], [SiteCommand.Refresh]];
+    }
+
+    /// <summary>The left remote pane's words: its Download copies into the right pane's folder.</summary>
+    public static string LeftRemoteLabel(SiteCommand command) => command == SiteCommand.Download ? "Copy to the right pane" : Label(command);
+
     /// <summary>The This PC pane's context menu as groups. <paramref name="canUpload"/>: a site is shown and its folder has loaded.</summary>
     public static List<List<LocalCommand>> LocalMenu(IEnumerable<SitesBrowseRules.PaneLine> selected, bool canUpload)
     {

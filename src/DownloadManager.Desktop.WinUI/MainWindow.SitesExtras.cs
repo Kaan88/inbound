@@ -48,10 +48,13 @@ public sealed partial class MainWindow
 
     // ---- Preview ----------------------------------------------------------------------------------------
 
-    /// <summary>Space and "Preview": the start of the file selected, as text or an image, in a dialog.</summary>
-    private async Task PreviewSelectedAsync()
+    /// <summary>
+    /// Space and "Preview": the start of the file selected in <paramref name="from"/> (the right pane when null), as text or
+    /// an image, in a dialog.
+    /// </summary>
+    private async Task PreviewSelectedAsync(SitesPanel? from = null)
     {
-        if (_sitesPanel is not { Site: { } site } panel || panel.SelectedFileName is not { } name) return;
+        if ((from ?? _sitesPanel) is not { Site: { } site } panel || panel.SelectedFileName is not { } name) return;
         var path = SitesBrowseRules.Join(panel.Path, name);
         using var cancel = new CancellationTokenSource();
         var body = new Grid { MinWidth = 420, MaxWidth = 720 };

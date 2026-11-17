@@ -34,6 +34,7 @@ public sealed partial class MainWindow
     private string? _leftSiteId;
     private bool _syncingLeftSource;
     private string? _leftSourceSignature;
+    private bool _leftSourcesPending;
     private string? _followedSiteId;
     private string? _followedServerPath;
 
@@ -218,6 +219,10 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(_leftSource, "Left pane shows");
         ToolTipService.SetToolTip(_leftSource, "What the left pane shows: a folder of this PC or any remote");
         _leftSource.SelectionChanged += (_, _) => OnLeftSourceChanged();
+        _leftSource.DropDownClosed += (_, _) =>
+        {
+            if (_leftSourcesPending) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshLeftSources);
+        };
         Grid.SetColumn(_leftSource, 0);
         grid.Children.Add(_leftSource);
         RefreshLeftSources();
@@ -358,28 +363,65 @@ public sealed partial class MainWindow
 
     // ---- The left pane's source (SITES.14) --------------------------------------------------------------
 
-    /// <summary>"This PC" and every remote, with the choice kept; called when the remotes change.</summary>
+    /// <summary>
+    /// "This PC" and every remote, with the choice kept; called when the remotes change. Only a change of the remotes
+    /// (added, removed, renamed) touches the items, and then in place. The items used to be cleared and made again on the
+    /// next sites broadcast after a choice (the choice was part of the signature), which comes within moments of opening
+    /// the remote: the next layout (the right pane's path bar forces one) failed with E_UNEXPECTED and ended the window
+    /// (stowed exception; SITES.14 owner report, 2026-11-17).
+    /// </summary>
     private void RefreshLeftSources()
     {
         if (_leftSource is not { } box) return;
-        var signature = string.Join(';', _sites.Select(site => site.Id + "|" + site.Name)) + ";" + _leftSiteId;
+        var signature = string.Join(';', _sites.Select(site => site.Id + "|" + site.Name));
         if (signature == _leftSourceSignature && box.Items.Count > 0) return;
+        // An open list is not changed under the pointer: it is brought up to date once it has closed.
+        if (box.IsDropDownOpen)
+        {
+            _leftSourcesPending = true;
+            return;
+        }
+
+        _leftSourcesPending = false;
         _leftSourceSignature = signature;
+        var wanted = new List<(string Text, string? Id)> { ("This PC", null) };
+        wanted.AddRange(_sites.Select(site => (site.Name, (string?)site.Id)));
+        var selected = _leftSiteId is null ? 0 : Math.Max(0, wanted.FindIndex(entry => entry.Id == _leftSiteId));
         _syncingLeftSource = true;
         try
         {
-            box.Items.Clear();
-            box.Items.Add(new ComboBoxItem { Content = "This PC", Tag = null });
-            var selected = 0;
-            foreach (var site in _sites)
+            var selectedTextChanged = false;
+            for (var index = 0; index < wanted.Count; index++)
             {
-                box.Items.Add(new ComboBoxItem { Content = site.Name, Tag = site.Id });
-                if (site.Id == _leftSiteId) selected = box.Items.Count - 1;
+                var (text, id) = wanted[index];
+                if (index < box.Items.Count && box.Items[index] is ComboBoxItem item)
+                {
+                    if (!Equals(item.Content, text))
+                    {
+                        item.Content = text;
+                        selectedTextChanged |= index == box.SelectedIndex;
+                    }
+
+                    item.Tag = id;
+                }
+                else
+                {
+                    box.Items.Add(new ComboBoxItem { Content = text, Tag = id });
+                }
             }
 
+            while (box.Items.Count > wanted.Count) box.Items.RemoveAt(box.Items.Count - 1);
+
             // The remote on the left was removed: the pane goes back to This PC.
-            if (_leftSiteId is not null && selected == 0) _leftSiteId = null;
-            box.SelectedIndex = selected;
+            if (_leftSiteId is not null && selected == 0)
+            {
+                _leftSiteId = null;
+                _leftRemote?.Stop();
+            }
+
+            // The closed box keeps showing the words the item had when it was chosen: a renamed choice is chosen again.
+            if (selectedTextChanged) box.SelectedIndex = -1;
+            if (box.SelectedIndex != selected) box.SelectedIndex = selected;
         }
         finally
         {
@@ -438,16 +480,19 @@ public sealed partial class MainWindow
                     panel.Refresh();
                     break;
                 case SiteCommand.Preview:
-                    SetSitesStatus("Preview works in the right pane.");
+                    _ = PreviewSelectedAsync(panel);
                     break;
                 case SiteCommand.CopyPath:
                     CopyText(SitesCommandRules.Paths(panel.Path, [.. panel.SelectedNames.Select(name => name.Name)]), "Path copied");
                     break;
                 default:
+                    // F2 or Delete on the keyboard: the left pane's own menu offers no change.
                     SetSitesStatus("Rename, delete and the other changes are done in the right pane. Choose the remote there.");
                     break;
             }
         };
+        // Its own menu (SitesCommandRules.LeftRemoteMenu), which the panel builds anew on each right click.
+        panel.CopyPane = true;
         panel.ServerOnly = false;
         Grid.SetColumn(panel, 0);
         Grid.SetRow(panel, 1);
