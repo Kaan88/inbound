@@ -6,7 +6,8 @@
 # WIPE=1 is required: the run uninstalls the app first, which deletes its job list and key on that phone.
 # Env: RUNS (cold starts, default 5), LIMIT_MS (cold-start mark, default 2000), PORT (test server, default 8765),
 #      SIZE (download bytes, default 256 MiB), KILL_BPS (per-connection throttle for the kill run, default 500000, so 256 MiB
-#      takes about a minute on 8 connections), KILL_AFTER (seconds before the kill, default 20).
+#      takes about a minute on 8 connections), KILL_AFTER (seconds before the kill, default 20), HTTPS_PROBE_URL (an https
+#      address the app's own HTTP stack must reach, default https://example.com/; empty skips it).
 # Needs: a TEST build (-TestBuild: the adb hooks), the phone unlocked (checked before each timing; the run fails otherwise).
 # The screen is kept on without changing any setting: a Shift key press every 15 s counts as user activity (owner: the
 # screen turns off; a locked phone made a cold start look 3x slower in the trial).
@@ -138,6 +139,22 @@ adbt shell am start -n $PKG/.MainActivity --ei seed 200 --ei real 0 >/dev/null
 seeded="$(wait_log "$since" 'seeded=' 240)" || { fail "seeding did not finish"; ourlog "$since" > "$OUT/log-seed.txt"; exit 1; }
 say "seed: ${seeded#*InboundTest: }"
 ourlog "$since" > "$OUT/log-seed.txt"
+
+# 1b. HTTPS in this build (Fable review, finding 2): one GET with SocketsHttpHandler, the engine's handler, must be answered.
+#     A NativeAOT build that lost its TLS callback export fails every handshake and fails here. Needs the phone online;
+#     HTTPS_PROBE_URL= (empty) skips it.
+HTTPS_PROBE_URL="${HTTPS_PROBE_URL-https://example.com/}"
+if [ -n "$HTTPS_PROBE_URL" ]; then
+  since="$(now)"
+  adbt shell am start -n $PKG/.MainActivity --es probe_url "'$HTTPS_PROBE_URL'" >/dev/null
+  if line="$(wait_log "$since" 'probe sockets: ' 60)"; then
+    case "$line" in
+      *"probe sockets: "[23][0-9][0-9]*) say "https probe: ${line#*InboundTest: }" ;;
+      *) fail "https probe: ${line#*InboundTest: }" ;;
+    esac
+  else fail "https probe: no answer in 60 s"; fi
+  ourlog "$since" > "$OUT/log-https-probe.txt"
+fi
 sleep 3
 adbt exec-out screencap -p > "$OUT/list-200.png"
 

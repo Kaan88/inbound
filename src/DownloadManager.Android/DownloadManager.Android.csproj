@@ -79,14 +79,44 @@
   <ItemGroup Condition="'$(PublishAot)' == 'true'">
     <LinkerArg Include="-Wl,--undefined=$(_InboundTlsJniSymbol)" />
   </ItemGroup>
+  <!-- Fails the build instead of shipping an APK whose TLS fails (Fable review, finding 2): no exports file, an exports file
+       without the "global:" this edits, or a written file without the symbol are errors. A changed exports file deletes the
+       native binary, so the link runs again even when LinkNative's own inputs (which don't include the exports file) are
+       older than the .so, as in an obj built before this fix. After the link the .so's dynamic symbols must list it. -->
   <Target Name="_InboundExportTlsJniCallback" AfterTargets="IlcCompile" BeforeTargets="LinkNative"
-          Condition="'$(PublishAot)' == 'true' and '$(ExportsFile)' != '' and Exists('$(ExportsFile)')">
+          Condition="'$(PublishAot)' == 'true' and '$(TargetPlatformIdentifier)' == 'android'">
+    <Error Condition="'$(ExportsFile)' == '' or !Exists('$(ExportsFile)')"
+           Text="NativeAOT exports file not found ('$(ExportsFile)'): $(_InboundTlsJniSymbol) can't be exported, so every HTTPS connection would fail." />
     <PropertyGroup>
       <_InboundExports>$([System.IO.File]::ReadAllText('$(ExportsFile)'))</_InboundExports>
+      <_InboundHasTlsExport>$(_InboundExports.Contains('$(_InboundTlsJniSymbol)'))</_InboundHasTlsExport>
     </PropertyGroup>
-    <WriteLinesToFile File="$(ExportsFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+    <Error Condition="'$(_InboundHasTlsExport)' != 'True' and !$(_InboundExports.Contains('global:'))"
+           Text="The NativeAOT exports file '$(ExportsFile)' has no 'global:' section to add $(_InboundTlsJniSymbol) to (the ILCompiler changed its format)." />
+    <WriteLinesToFile File="$(ExportsFile)" Overwrite="true"
                       Lines="$(_InboundExports.Replace('global:', 'global:%0A        $(_InboundTlsJniSymbol);'))"
-                      Condition="!$(_InboundExports.Contains('$(_InboundTlsJniSymbol)'))" />
+                      Condition="'$(_InboundHasTlsExport)' != 'True'" />
+    <Delete Files="$(NativeBinary)" Condition="'$(_InboundHasTlsExport)' != 'True' and '$(NativeBinary)' != ''" />
+    <PropertyGroup>
+      <_InboundExportsAfter>$([System.IO.File]::ReadAllText('$(ExportsFile)'))</_InboundExportsAfter>
+    </PropertyGroup>
+    <Error Condition="!$(_InboundExportsAfter.Contains('$(_InboundTlsJniSymbol)'))"
+           Text="$(_InboundTlsJniSymbol) is still missing from '$(ExportsFile)' after adding it." />
+  </Target>
+
+  <Target Name="_InboundCheckTlsJniExported" AfterTargets="LinkNative"
+          Condition="'$(PublishAot)' == 'true' and '$(TargetPlatformIdentifier)' == 'android'">
+    <Error Condition="'$(_NdkBinDir)' == '' or !Exists('$(NativeBinary)')"
+           Text="Can't check the native library for $(_InboundTlsJniSymbol): NDK bin folder '$(_NdkBinDir)', library '$(NativeBinary)'." />
+    <Exec Command="&quot;$(_NdkBinDir)llvm-readelf&quot; --dyn-syms --wide &quot;$(NativeBinary)&quot;" ConsoleToMSBuild="true" StandardOutputImportance="low" EchoOff="true">
+      <Output TaskParameter="ConsoleOutput" ItemName="_InboundDynSyms" />
+    </Exec>
+    <PropertyGroup>
+      <_InboundDynSymsText>@(_InboundDynSyms)</_InboundDynSymsText>
+    </PropertyGroup>
+    <Error Condition="!$(_InboundDynSymsText.Contains('$(_InboundTlsJniSymbol)'))"
+           Text="$(NativeBinary) does not export $(_InboundTlsJniSymbol) (llvm-readelf --dyn-syms): every HTTPS connection would fail. Delete the obj folder and build again." />
+    <Message Importance="normal" Text="TLS callback exported: $(_InboundTlsJniSymbol) in $(NativeBinary)" />
   </Target>
 
 </Project>
