@@ -18,6 +18,10 @@ each slice and step; Fable reviews everything below once the Android work is com
 - Step 2 from S2 on: 27cdcbb (keep-alive, notifications, wake lock, user-stop detection), 63b860f (device results), and
   every later step 2 commit (S3 on). Fable had seen S0, the spike, 9f02bcd and the design up to section 8; the S2 review
   was stopped unfinished when the owner gave the rule above.
+  Step 2 closed 2026-11-17 at b2e5b2a: S3 (1a8da86), S5 (e9b91e4, 665729f), the Opus milestone review's fixes and the
+  owner's S24 reports (46fb9bf, 05b6009, f4f65c0), same-name destinations (1532aa8, Runtime, desktop too). The Opus
+  review's full result (15 confirmed, 6 refuted) is summarised in PROGRESS; Fable should look hardest at InboundBackground
+  and Services (lifecycle), ResumeList, and the Runtime changes that ship on Windows.
 - Steps 3 and 6 (screens, remote hosts) and the first usable APK, then the rest of the plan.
 
 ## Done (Fable reviewed it)
