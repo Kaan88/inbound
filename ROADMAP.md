@@ -659,7 +659,9 @@ whether rclone is a Setup component that can be unticked.
   - [x] Build plan step 1, the NativeAOT gate (2026-11-17, branch `android-app`): passed on the S24 FE and the
     Mi 8 Lite (200 jobs drawn under 2 s, a 256 MiB download with equal hash, resume after a kill proven from the
     server's byte count). Evidence in PROGRESS "Android app, step 1".
-- [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume). Owner, 2026-11-17:
+- [x] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume). Done 2026-11-17 (closed at
+  b2e5b2a; S24 runs: screen off, Recents swipe, reboot, Wi-Fi only, crash guard; Opus milestone review fixed; Fable
+  approved 2026-11-18, PROGRESS "Fable approved the fixes"). Owner, 2026-11-17:
   a user-initiated data transfer job on Android 14+ and a dataSync foreground service on 12 and 13; after a reboot a
   notification with Resume; Wi-Fi only means "not metered". Later the same day, after the S24 spike showed a persisted
   job comes back by itself: "Resume silently" after a reboot on 14+ (12 and 13 keep the Resume notification); a Task
@@ -681,7 +683,9 @@ whether rclone is a Setup component that can be unticked.
     list, Pause all and Resume fixes passed (owner's hand, 2026-11-17).
   - Owner, 2026-11-17, on Android 12 and 13 when Wi-Fi comes back while the app is hidden: "Tap to resume" (downloads
     stay held; the notification says "Wi-Fi is back · Tap to resume N downloads"; opening the app resumes them).
-- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). Owner's answers to the step 3
+- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). Built, in use on the S24
+  (2026-11-18), Opus milestone review fixed and Fable approved; partial until the light-mode, dynamic-colour and TalkBack
+  walks on a phone (light-mode checks deferred by the owner to the end). Owner's answers to the step 3
   questions (2026-11-17): selection starts with "Long-press"; tapping a finished row: "Open Details"; Stop in Details:
   "No Stop, Pause only" (these three match what is built); failures: "Short reason in row, full in Details";
   notifications: "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped);
@@ -689,7 +693,9 @@ whether rclone is a Setup component that can be unticked.
   notifications, and hiding the summary card and chips while selecting with a filter on.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
-- [ ] ANDROID.7 Other hosts (pairing, host switcher). Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
+- [ ] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18). https with a self-signed
+  certificate passed on the emulator (trust, pin, swapped and expired certificates); open: a server with a publicly
+  trusted certificate, and https pairing on a phone. Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
   report on the counting rate figure fixed ("Good now"). HTTPS on the phone failed in the NativeAOT build (owner's report "secure
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
@@ -701,6 +707,8 @@ whether rclone is a Setup component that can be unticked.
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
 - Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,
   remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
+  Done 2026-11-18: release APK of d9f45a6e (with the owner's icon) on the S24 and the desktop, after Fable's approval.
+  Next: ANDROID.5 (step 4).
   Reviews: an Opus agent per milestone (step); Fable once after all milestones ("until completion meant all the
   milestones, until then use opus for single mileston reviews"). Then (2026-11-17): "after first version finishes,
   have it review": Fable reviews the queue once the first usable APK is on the owner's desktop.
