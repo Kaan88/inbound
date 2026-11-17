@@ -174,7 +174,9 @@ Test build with `Spike.cs` (a UIDT job that only logs a heartbeat every 15 s). L
 What it changes:
 - After a reboot, a persisted session job brings the process back by itself on API 34+, so downloads *can* resume
   silently. The owner chose "Notify with Resume"; the design said the owner is asked if a silent resume is possible
-  (section 2.5). Asked 2026-11-17.
+  (section 2.5). **Owner, 2026-11-17: "Resume silently"** (replaces "Notify with Resume" on API 34+): the session job
+  is persisted; when it runs after a reboot it starts the Host, which resumes what reconcile resumes (user pauses and a
+  Task Manager Stop stay paused), with the usual ongoing notification. On 31 to 33 the Resume notification stays.
 - The boot path cannot depend on `BOOT_COMPLETED` on Samsung. On API 34+ the persisted job is the boot hook (it can
   post the Resume notification itself, or resume). On 31 to 33 there is no such job; the receiver stays, best effort.
 - Notification actions may be broadcasts on API 37 (tested); `ResumeActivity` is only needed where an activity is

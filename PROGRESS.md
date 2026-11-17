@@ -131,6 +131,8 @@
   (`ApplicationExitInfo` reason 10, "STOP APP"); a broadcast notification action can schedule the job with the app not
   visible; a persisted UIDT job runs again by itself after a reboot; `BOOT_COMPLETED` did not reach the app within 3
   minutes. The S24 was rebooted once (owner allowed it); no phone setting was changed.
+  **Owner's answer (2026-11-17): after a reboot, "Resume silently"** on Android 14+ (the persisted job resumes what
+  the Host would resume; user pauses and a Task Manager Stop stay paused); 12 and 13 keep the Resume notification.
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to

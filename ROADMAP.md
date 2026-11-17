@@ -661,7 +661,10 @@ whether rclone is a Setup component that can be unticked.
     server's byte count). Evidence in PROGRESS "Android app, step 1".
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume). Owner, 2026-11-17:
   a user-initiated data transfer job on Android 14+ and a dataSync foreground service on 12 and 13; after a reboot a
-  notification with Resume; Wi-Fi only means "not metered".
+  notification with Resume; Wi-Fi only means "not metered". Later the same day, after the S24 spike showed a persisted
+  job comes back by itself: "Resume silently" after a reboot on 14+ (12 and 13 keep the Resume notification); a Task
+  Manager Stop means "Stay paused"; test 12/13 on an emulator now. Done: S0, the Host's metered-network rule (401beb5);
+  the spike (6bc8c90).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
