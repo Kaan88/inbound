@@ -21,6 +21,9 @@ internal static class RunTracker
     private static string? _path;
     private static bool? _decision;
 
+    /// <summary>This run's id (the process state summary), or null before <see cref="Begin"/>.</summary>
+    public static byte[]? OwnId { get { lock (Gate) return _own; } }
+
     /// <summary>Process start (Application.OnCreate): remember the previous run's id, save this run's.</summary>
     public static void Begin(Context c)
     {

@@ -56,6 +56,12 @@ public static class NotificationText
 
     public const string Resuming = "Resuming downloads";
 
+    /// <summary>The boot notice's second line (API 31 to 33): opening the app resumes what was running.</summary>
+    public const string BootBody = "Tap to resume";
+
+    /// <summary>The crash-loop guard's notification title; its action is "Resume".</summary>
+    public const string PausedAfterErrors = "Downloads paused after repeated errors";
+
     /// <summary>Title of the notification shown while downloads wait for a network that isn't metered (mockup A7).</summary>
     public const string WaitingTitle = "Waiting for Wi-Fi";
 

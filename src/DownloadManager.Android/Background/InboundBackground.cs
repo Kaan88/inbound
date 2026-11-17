@@ -22,6 +22,7 @@ internal static class InboundBackground
     private static bool _visible;
     private static bool _pausedAll;
     private static bool _hiddenLogged;
+    private static bool _guardLogged;
     private static OngoingText? _shown;
     private static bool _pausedShown;
     private static bool _waitingShown;
@@ -66,6 +67,8 @@ internal static class InboundBackground
             host.Activity.Changed += OnChanged;
         }
 
+        // The boot notice (API 31 to 33) said what would resume: the Host is up now, which resumes it.
+        Notifications.Cancel(app, Notifications.BootId);
         // A change between the snapshot and this subscription is covered by looking now.
         Evaluate();
     }
@@ -137,6 +140,18 @@ internal static class InboundBackground
 
             if (s.KeepAlive)
             {
+                if (CrashGuardStore.Tripped)
+                {
+                    // Repeated crashes during downloads: no session starts on its own. The user is in control only when the app is visible and
+                    // something is running again (they resumed it): then the guard starts over.
+                    if (_visible && s.ActiveCount > 0) CrashGuardStore.Reset("a download was resumed in the app");
+                    else
+                    {
+                        if (!_guardLogged) { _guardLogged = true; Log.Warn(InboundApplication.Tag, "crash guard tripped: no session started"); }
+                        return;
+                    }
+                }
+
                 // Something runs again (a resume, a new start): "paused" is no longer the news.
                 if (s.ActiveCount > 0) _pausedAll = false;
                 _holdDone = false;
@@ -232,7 +247,7 @@ internal static class InboundBackground
         var s = Summary;
         Log.Info("InboundTest",
             $"keepalive={(s.KeepAlive ? "true" : "false")} why={why} running={KeepAliveRunning} visible={_visible} active={s.ActiveCount} paused={s.PausedCount} " +
-            $"waiting={s.WaitingCount} noresume={s.NoResumeOnMeteredCount} metered={NetworkMonitor.Current} holds={_host?.Service.WaitingForMeteredNetwork} rate={s.BytesPerSecond:0} received={s.ActiveReceivedBytes} total={s.ActiveTotalBytes} first={s.First?.Name} api={Android.OS.Build.VERSION.SdkInt}");
+            $"waiting={s.WaitingCount} noresume={s.NoResumeOnMeteredCount} metered={NetworkMonitor.Current} holds={_host?.Service.WaitingForMeteredNetwork} rate={s.BytesPerSecond:0} received={s.ActiveReceivedBytes} total={s.ActiveTotalBytes} first={s.First?.Name} crash={CrashGuardStore.Count} api={Android.OS.Build.VERSION.SdkInt}");
     }
 #endif
 }
@@ -342,6 +357,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
         lock (_gate)
         {
             if (!ReferenceEquals(_service, service)) return;
+            CrashGuardStore.SessionEnded();
             _service = null;
             _params = null;
             _requestedAt = DateTimeOffset.MinValue;
@@ -400,6 +416,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
                 if (s is not null && p is not null) s.JobFinished(p, false);
                 else Scheduler.Cancel(JobId);
                 Log.Info(InboundApplication.Tag, "session job finished");
+                CrashGuardStore.SessionEnded();
             }
             catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "session stop: " + ex.Message); }
         }
@@ -418,6 +435,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             var estimate = SessionBytes.Estimate(summary);
             var s = _service;
             var p = _params;
+            CrashGuardStore.SessionEnded();
             var ok = Schedule(NetworkType.Unmetered, estimate, "hold job" + (s is not null ? " over the running session" : ""));
             if (!ok && s is not null && p is not null)
             {
@@ -496,6 +514,7 @@ internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
         lock (_gate)
         {
             _running = false;
+            CrashGuardStore.SessionEnded();
             // Before the start command ran there is nothing to stop yet: the service sees it is no longer wanted and stops itself.
             if (!_started)
             {
@@ -534,6 +553,7 @@ internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
         {
             if (gen != _gen) return;
             _running = false;
+            CrashGuardStore.SessionEnded();
             _started = false;
         }
     }

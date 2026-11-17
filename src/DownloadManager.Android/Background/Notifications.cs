@@ -15,6 +15,8 @@ internal static class Notifications
     public const int OngoingId = 1001;
     public const int PausedId = 1002;
     public const int WaitingId = 1003;
+    public const int BootId = 1004;
+    public const int GuardId = 1005;
 
     /// <summary>MainActivity extra of the "Resume" action: resume everything, then keep the process alive (the app is visible then).</summary>
     public const string ExtraResumeAll = "resume_all";
@@ -139,6 +141,26 @@ internal static class Notifications
         b.SetOnlyAlertOnce(true);
         b.SetAutoCancel(true);
         b.SetContentIntent(OpenApp(c, false));
+        b.AddAction(new Notification.Action.Builder(null, "Resume", OpenApp(c, true)).Build());
+        return b.Build()!;
+    }
+
+    /// <summary>API 31 to 33 after a reboot: "N downloads paused" / "Tap to resume". The tap opens the app (a direct activity intent), which starts the Host; its start resumes them.</summary>
+    public static Notification BootNotice(Context c, int count)
+    {
+        var b = Builder(c, OngoingChannel, NotificationText.Paused(count), NotificationText.BootBody);
+        b.SetAutoCancel(true);
+        b.SetContentIntent(OpenApp(c, false));
+        return b.Build()!;
+    }
+
+    /// <summary>The crash-loop guard: downloads stay paused until the user resumes. "Resume" (and the tap) open the app with the resume-all extra.</summary>
+    public static Notification PausedAfterErrors(Context c)
+    {
+        var b = Builder(c, OngoingChannel, NotificationText.PausedAfterErrors, null);
+        b.SetOnlyAlertOnce(true);
+        b.SetAutoCancel(true);
+        b.SetContentIntent(OpenApp(c, true));
         b.AddAction(new Notification.Action.Builder(null, "Resume", OpenApp(c, true)).Build());
         return b.Build()!;
     }

@@ -24,6 +24,8 @@ public sealed class InboundApplication : Application
         base.OnCreate();
         // Every process start, whatever started it (the app, a job, a notification action): this run's id, and the previous run's kept for the Host start.
         RunTracker.Begin(this);
+        // Right after: accounts for a run that ended in a crash or ANR with a session open (the crash-loop guard).
+        CrashGuardStore.Begin(this);
         InboundBackground.Init(this);
         // Before any Host: its first report of the network comes from here.
         NetworkMonitor.Init(this);
@@ -57,7 +59,7 @@ public sealed class InboundApplication : Application
                 // The network is read here and reported before the Host's InitializeAsync (its first Schedule is already held).
                 var metered = NetworkMonitor.Current;
                 var host = await AndroidHost.StartAsync(root, AndroidHost.SharedDownloadFolder, new AndroidSleepPrevention(app),
-                    RunTracker.LastRunStoppedByUser(app), metered, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
+                    RunTracker.LastRunStoppedByUser(app) || CrashGuardStore.HostStartsPaused(), metered, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
                 // The Host used the "stopped by the user" decision in its start: the older runs are explained.
                 RunTracker.HostConsumed();
                 NetworkMonitor.OnHostStarted(host, metered);

@@ -135,6 +135,8 @@ public sealed class MainActivity : AppCompatActivity
         if (intent is null || !intent.GetBooleanExtra(Notifications.ExtraResumeAll, false)) return;
         intent.RemoveExtra(Notifications.ExtraResumeAll);
         if (redelivered) return;
+        // The user chose to resume (also after the crash-loop guard paused things): the guard starts over.
+        Inbound.App.Background.CrashGuardStore.Reset("Resume in the notification");
         var app = ApplicationContext!;
         _ = Task.Run(async () =>
         {

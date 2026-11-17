@@ -25,6 +25,16 @@ internal sealed class SessionJobService : JobService
     {
         if (p is null) return false;
         Log.Info(InboundApplication.Tag, $"session job start id={p.JobId} pid={Process.MyPid()}");
+        if (CrashGuardStore.Tripped)
+        {
+            // Repeated crashes during downloads: no session, no Host. The notification says so and offers Resume; the persisted job is dropped.
+            Log.Warn(InboundApplication.Tag, "session job: crash guard tripped, not running; downloads stay paused until the user resumes");
+            Notifications.Notify(this, Notifications.GuardId, Notifications.PausedAfterErrors(this));
+            ((JobScheduler)GetSystemService(JobSchedulerService)!).Cancel(p.JobId);
+            return false;
+        }
+
+        CrashGuardStore.SessionBegan();
         var keep = InboundBackground.KeepAlive as UidtKeepAlive;
         if (keep is null) return false;
         keep.Attach(this, p);
@@ -87,6 +97,7 @@ internal sealed class KeepAliveService : Service
             return StartCommandResult.NotSticky;
         }
 
+        CrashGuardStore.SessionBegan();
         InboundBackground.SessionStarted();
         // Not sticky: a killed service is not brought back unseen; the app starts it again when it is opened.
         return StartCommandResult.NotSticky;

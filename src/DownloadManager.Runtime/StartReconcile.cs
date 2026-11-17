@@ -93,4 +93,8 @@ public static class StartReconcile
         var outcome = Decide(job, settings, userStopped);
         return outcome.State == DownloadState.Queued && outcome.StartMode != StartMode.Later;
     }
+
+    /// <summary>How many of the jobs <see cref="WouldResumeAtStart"/> says go on by themselves once the Host runs.</summary>
+    public static int CountWouldResume(IEnumerable<DownloadJob> jobs, AppSettings settings, bool userStopped)
+        => jobs.Count(job => WouldResumeAtStart(job, settings, userStopped));
 }

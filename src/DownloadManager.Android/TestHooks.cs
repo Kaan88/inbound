@@ -18,9 +18,11 @@ namespace Inbound.App;
 ///       forces the network reported to the Host as metered or not (the phone's own network is untouched).
 ///   am start -n app.inbound.android/.MainActivity --ez wifi_only true|false
 ///       sets "Download only on Wi-Fi" (DownloadOnlyOnUnmeteredNetwork) until the app has a settings screen for it.
+///   am start -n app.inbound.android/.MainActivity --ez crash_now true
+///       2 s later an unhandled exception on a background thread ends the process (a crash with whatever runs); the crash-loop guard counts it.
 ///   am start -n app.inbound.android/.MainActivity --ez log_state true
 ///       logs one "InboundTest keepalive=true|false why=hook running=... active=... paused=... waiting=... noresume=... metered=... holds=..." line (the keep-alive and ActivitySummary
-///       state); the same line is also logged on every keep-alive flip (why=flip).
+///       state, and crash=N, the crash-loop guard's count); the same line is also logged on every keep-alive flip (why=flip).
 /// Logs "InboundTest" lines ("seeded=...", "added accepted=...") for the script to wait on.
 /// </summary>
 internal static class TestHooks
@@ -59,6 +61,18 @@ internal static class TestHooks
         {
             intent.RemoveExtra("log_state");
             Inbound.App.Background.InboundBackground.LogState("hook");
+        }
+
+        if (intent.GetBooleanExtra("crash_now", false))
+        {
+            intent.RemoveExtra("crash_now");
+            Log.Warn(Tag, "crash_now: an unhandled exception on a background thread in 2 s");
+            // A plain thread: an unhandled exception on it ends the process, which is what a device script needs to produce a crash with a download running.
+            new System.Threading.Thread(() =>
+            {
+                System.Threading.Thread.Sleep(2000);
+                throw new InvalidOperationException("crash_now test hook");
+            }) { IsBackground = true }.Start();
         }
 
         var seed = intent.GetIntExtra("seed", 0);
