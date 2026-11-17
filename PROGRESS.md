@@ -2,6 +2,11 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **First usable APK on the owner's desktop (2026-11-17).** `Desktop\Inbound-android-first-usable-9a6ec0ef.apk`:
+  release build of 9a6ec0ef, arm64, min SDK 31, target 35, signed with the Android debug key (no release key yet),
+  `probe_url`/`crash_now` absent from the binary, the TLS callback exported (`llvm-nm -D`). Owner retried the failing
+  link on the S24 after the HTTPS fix: "Works now". Next: Fable reviews the queue (owner: "after first version
+  finishes, have it review"); the same Fable agent approves the fixes to its findings.
 - **HTTPS failed on the phone (owner, S24, 2026-11-17: "same download link errors on phone with a message: secure
   connection failed").** Every https download failed in the NativeAOT build. Found with a test-build probe hook
   (`probe_url`): SocketsHttpHandler threw `AuthenticationException` while `AndroidMessageHandler` got 200, and the log

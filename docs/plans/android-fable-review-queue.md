@@ -32,13 +32,20 @@ each slice and step; Fable reviews everything below once the Android work is com
   Accept, the per-pin HttpClient cache, the probe handshake), pairing and unpair in HostDirectory, KeystoreSecretStore,
   that no password or token reaches a log, file or backup; and RemoteHostConnection's reconnect diff and pending
   requests.
-- Follow-ups after 425d72d1 (failure reasons, Open and Finished notifications, server folder chooser, server name):
-  in progress; add their commits here when they land.
+- Follow-ups after 425d72d1: fc43614d (short failure reason, Open on the progress notification and grouped Finished
+  notices with Open through the FileProvider, server folder chooser over `folders.browse`, the server's own name in the
+  pairing answer: ServerAuth.cs and RemotePairResult, middle-cut Save to), merged with the review fixes in 8f6c327b.
 - The Opus milestone review of steps 3 and 6 (workflow, at 425d72d1): 28 confirmed, 7 refuted; all 28 fixed in
   e37cbad2 (branch `android-fix36`, PROGRESS.md "milestone review fixed"). Look hardest at: Navigator (page tokens,
   see-through overlay, accessibility hiding), RemoteHostConnection's keep-alive and reply-timeout drop, the shared
   Contracts change (keep-alive parameters, certificate words by pin), HostEntry.ConnectionStamp and the page restore.
-- The first usable APK (owner's desktop), then the rest of the plan.
+- First S24 use against the owner's desktop Inbound (2026-11-17): af7f65c9 (summary rate shown once a second, not
+  animated) and 9a6ec0ef (HTTPS in the NativeAOT build: the csproj keeps and exports
+  `Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate`; every https download failed before).
+  Look at: whether the exports target is robust (incremental builds, x64, a future SDK that exports it itself) and
+  whether any other JNI callback of the runtime is missing the same way.
+- The first usable APK, on the owner's desktop 2026-11-17: release build of 9a6ec0ef, arm64, min SDK 31, target 35,
+  signed with the debug key (no release key yet), no test hooks in the binary.
 
 Owner, 2026-11-17: "after first version finishes, have it review." Fable reviews everything above as soon as the first
 usable APK is on the owner's desktop (not only after all milestones).
