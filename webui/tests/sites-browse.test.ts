@@ -15,8 +15,10 @@ const sftp = {
   hostKeys: [], trustedCertificates: [], remoteFolder: '/', authMethod: 'password',
 } as unknown as Site;
 
-// The one guard on source text: the Sites screens never hand a download to the browser by a link's download attribute.
+// The one guard on source text: a file goes to the browser only through startDeviceDownload, from the dialog.
 const sitesScreens = import.meta.glob(['../src/screens/sites/*.svelte', '../src/screens/SitesScreen.svelte'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const allSources = import.meta.glob(['../src/**/*.svelte', '../src/**/*.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const helperSource = allSources['../src/lib/deviceDownload.ts'];
 
 describe('bug 1: a download goes to the server, not the browser', () => {
   const triggers: DownloadTrigger[] = ['button', 'enter', 'doubleClick', 'menu', 'arrow'];
@@ -37,13 +39,26 @@ describe('bug 1: a download goes to the server, not the browser', () => {
     expect(downloadWhere('dialog', [file('a.iso'), file('b.iso')], 'device')).toBe('server');
   });
 
-  it('no Sites screen uses a download attribute', () => {
+  it('the download attribute lives only in startDeviceDownload, called only from the dialog\'s device choice', () => {
     const names = Object.keys(sitesScreens);
     expect(names.length).toBeGreaterThanOrEqual(4);
     for (const name of names) {
       expect(sitesScreens[name], name).not.toMatch(/<a\b[^>]*\sdownload\b/);
       expect(sitesScreens[name], name).not.toMatch(/\.download\s*=/);
     }
+    // The helper sets it, once, inside itself.
+    const body = helperSource.slice(helperSource.indexOf('export function startDeviceDownload('));
+    expect(helperSource.match(/\.download\s*=/g)).toHaveLength(1);
+    expect(body).toMatch(/\.download\s*=/);
+    // One caller in the whole web UI: SiteBrowser's confirmDownload, after the device check.
+    const callers = Object.entries(allSources).flatMap(([name, text]) =>
+      (text.match(/startDeviceDownload\(/g) ?? []).map(() => name)).filter((name) => !name.endsWith('lib/deviceDownload.ts'));
+    expect(callers).toEqual(['../src/screens/sites/SiteBrowser.svelte']);
+    const browser = allSources['../src/screens/sites/SiteBrowser.svelte'];
+    const confirm = browser.slice(browser.indexOf('function confirmDownload('));
+    const call = confirm.indexOf('startDeviceDownload(');
+    expect(call).toBeGreaterThan(confirm.indexOf("downloadWhere('dialog', current.items, current.where) !== 'device'"));
+    expect(call).toBeLessThan(confirm.indexOf('\n  function ', 1));
   });
 
   it('Enter and a double click on a file download; on one folder they open it', () => {
@@ -140,6 +155,8 @@ describe('keys and controls inside a row', () => {
   it("shows only keys the list answers; Ctrl+U and Ctrl+Shift+C are the browser's", () => {
     expect(commandKey('upload')).toBe('');
     expect(commandKey('copyAddress')).toBe('');
+    expect(commandKey('newFolder')).toBe('');
+    expect(commandKey('downloadTo')).toBe('Ctrl+Shift+S');
     expect(commandKey('refresh')).toBe('F5');
   });
 });

@@ -7,6 +7,7 @@
   import FolderPicker from '../../components/FolderPicker.svelte';
   import Icon from '../../components/Icon.svelte';
   import { copyText } from '../../lib/clipboard';
+  import { startDeviceDownload } from '../../lib/deviceDownload';
   import { bytes, dateTime } from '../../lib/format';
   import { LongPress } from '../../lib/longpress';
   import { store } from '../../lib/store.svelte';
@@ -367,8 +368,9 @@
         dialogError = 'Only one file at a time goes to this device.';
         return;
       }
-      // It stops when the tab is closed, which the dialog said. The server sends it as an attachment, so the page stays.
-      window.location.assign(deviceDownloadUrl(site.id, joinPath(path, actionable(current.items)[0].name)));
+      // It stops when the tab is closed, which the dialog said. A server error shows as a failed download, not a new page.
+      const item = actionable(current.items)[0];
+      startDeviceDownload(deviceDownloadUrl(site.id, joinPath(path, item.name)), item.name);
       closeDialogs();
       return;
     }
@@ -579,7 +581,6 @@
     else if (event.key === 'F5') { event.preventDefault(); void open(path, true); }
     else if (event.key === 'Backspace' && path !== '/') { event.preventDefault(); void open(parentPath(path)); }
     else if (ctrl && event.shiftKey && event.key.toLowerCase() === 's') { event.preventDefault(); downloadTo(chosen); }
-    else if (ctrl && event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); newFolder(); }
   }
 
   function sortBy(key: SortKey) {

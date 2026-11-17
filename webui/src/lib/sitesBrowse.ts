@@ -186,8 +186,8 @@ export function commandLabel(command: RemoteCommand): string {
 }
 
 /**
- * The key shown beside a menu item. Only keys the list itself answers: Ctrl+U (view source) and Ctrl+Shift+C (the
- * browser's inspector) are left to the browser, as the plan names neither.
+ * The key shown beside a menu item. Only keys the list itself answers: Ctrl+U (view source), Ctrl+Shift+C (the
+ * browser's inspector) and Ctrl+Shift+N (Chrome's incognito window) are left to the browser.
  */
 export function commandKey(command: RemoteCommand): string {
   switch (command) {
@@ -195,7 +195,6 @@ export function commandKey(command: RemoteCommand): string {
     case 'downloadTo': return 'Ctrl+Shift+S';
     case 'rename': return 'F2';
     case 'delete': return 'Delete';
-    case 'newFolder': return 'Ctrl+Shift+N';
     case 'refresh': return 'F5';
     default: return '';
   }
