@@ -611,7 +611,7 @@
       </div>
     {/if}
 
-    <section class="card flex min-w-0 flex-1 flex-col overflow-hidden" aria-label="Files on {site.name}">
+    <section class="card @container flex min-w-0 flex-1 flex-col overflow-hidden" aria-label="Files on {site.name}">
       <header class="flex items-center gap-2 border-b border-divider px-3 py-2 text-[13px]">
         <Icon name={site.kind === 'sftp' || site.kind === 'ftp' ? 'server' : 'cloud'} size={16} class="text-muted" />
         <span class="min-w-0 truncate font-semibold">{site.name}</span>
@@ -655,10 +655,10 @@
         {/if}
         <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted" role="presentation">
           <input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} />
-          <button class="flex-1 text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
-          <button class="hidden w-24 text-right sm:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
-          <button class="hidden w-40 text-left md:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
-          {#if showsHere}<button class="hidden w-28 text-left sm:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>On {hostName}{arrow('here')}</button>{/if}
+          <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
+          <button class="hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
+          <button class="hidden w-40 text-left @xl:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
+          {#if showsHere}<button class="hidden w-28 text-left @xs:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>On {hostName}{arrow('here')}</button>{/if}
           <span class="w-9"></span>
         </div>
         {#if path !== '/'}
@@ -688,11 +688,11 @@
               <span class="flex min-w-0 flex-1 items-center gap-2">
                 <Icon name={item.isFolder ? 'folder' : 'file'} size={16} class="shrink-0 text-muted" />
                 <span class="truncate">{item.name}</span>
-                {#if showsHere && hereText(item.here)}<span class="shrink-0 text-[12px] text-muted sm:hidden">· {hereText(item.here)}</span>{/if}
+                {#if showsHere && hereText(item.here)}<span class="shrink-0 text-[12px] text-muted @xs:hidden">· {hereText(item.here)}</span>{/if}
               </span>
-              <span class="tabular hidden w-24 text-right text-muted sm:block">{sizeText(item, bytes)}</span>
-              <span class="hidden w-40 text-muted md:block">{item.modified ? dateTime(item.modified) : ''}</span>
-              {#if showsHere}<span class="hidden w-28 truncate sm:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
+              <span class="tabular hidden w-24 text-right text-muted @xs:block">{sizeText(item, bytes)}</span>
+              <span class="hidden w-40 text-muted @xl:block">{item.modified ? dateTime(item.modified) : ''}</span>
+              {#if showsHere}<span class="hidden w-28 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
               <span class="flex w-9 shrink-0 justify-end">
                 <button class="row-menu" aria-label="Actions for {item.name}" aria-haspopup="menu" title="More actions" onclick={(event) => moreButton(row, event)}><Icon name="more" size={16} /></button>
               </span>
@@ -744,7 +744,7 @@
     <div class="space-y-3 text-[13px]">
       <p>{sizeSum > 0 ? `${bytes(sizeSum)} from ` : 'From '}<strong>{site.name}</strong>.</p>
       <label class="flex items-start gap-2"><input type="radio" name="download-where" value="server" bind:group={downloadBox.where} />
-        <span>To {hostName}{box.folder ? `, in ${box.folder}` : ''} <span class="text-muted">(keeps going if you close this tab)</span></span></label>
+        <span class="min-w-0 break-all">To {hostName}{box.folder ? `, in ${box.folder}` : ''} <span class="text-muted">(keeps going if you close this tab)</span></span></label>
       <label class="flex items-start gap-2 {deviceDownloadAllowed(box.items) ? '' : 'opacity-60'}"><input type="radio" name="download-where" value="device" bind:group={downloadBox.where} disabled={!deviceDownloadAllowed(box.items)} />
         <span>To this device, through the browser <span class="text-muted">({deviceDownloadAllowed(box.items) ? 'stops if you close this tab' : 'one file at a time'})</span></span></label>
       {#if box.where === 'server'}

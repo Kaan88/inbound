@@ -129,7 +129,7 @@
   }
 </script>
 
-<div class="mx-auto max-w-4xl px-4 py-5">
+<div class="mx-auto px-4 py-5 {siteId ? 'max-w-6xl' : 'max-w-4xl'}">
   {#if siteId}
     <div class="mb-3 flex items-center gap-2">
       <a class="btn-icon" href="#/sites" title="All remotes" aria-label="All remotes"><Icon name="chevron-left" size={18} /></a>
