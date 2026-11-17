@@ -76,6 +76,9 @@
   <ItemGroup>
     <Compile Include="..\Shared\TestPaths.cs" Link="Shared\TestPaths.cs" />
     <Compile Include="..\Shared\JsonSampleFiller.cs" Link="Shared\JsonSampleFiller.cs" />
+    <!-- The phone app's in-process Host connection: no Android types in it, so it is linked and tested here. -->
+    <Compile Include="..\..\src\DownloadManager.Android\Host\InProcessHostConnection.cs" Link="Android\InProcessHostConnection.cs" />
+    <ProjectReference Include="..\..\src\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
   </ItemGroup>
 
 </Project>

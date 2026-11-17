@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- What the phone app's screens show and do, as plain classes (no Android types). They talk to the Host through
+       IHostConnection, so the in-process Host (Android) and a remote Host (later) serve the same screens. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,27 @@
+<resources>
+  <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
+    <item name="colorPrimary">#4AA3F0</item>
+    <item name="colorOnPrimary">#0E1B2A</item>
+    <item name="colorPrimaryContainer">#2B3A4F</item>
+    <item name="colorOnPrimaryContainer">#D6E6FA</item>
+    <item name="colorSecondaryContainer">#2B3A4F</item>
+    <item name="colorOnSecondaryContainer">#D6E6FA</item>
+    <item name="colorSurface">#141414</item>
+    <item name="colorOnSurface">#F2F2F2</item>
+    <item name="colorSurfaceVariant">#383838</item>
+    <item name="colorOnSurfaceVariant">#A3A3A3</item>
+    <item name="colorSurfaceContainer">#1C1C1C</item>
+    <item name="colorSurfaceContainerLow">#202020</item>
+    <item name="colorSurfaceContainerHigh">#262626</item>
+    <item name="colorOutline">#343434</item>
+    <item name="android:colorBackground">#141414</item>
+    <item name="colorError">#F58B8B</item>
+  </style>
+  <color name="state_done">#5DC879</color>
+  <color name="state_failed">#F58B8B</color>
+  <color name="state_waiting">#E0A93E</color>
+</resources>

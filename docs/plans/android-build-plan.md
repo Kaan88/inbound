@@ -48,7 +48,9 @@ empty states, errors). Ask, do not skip and do not invent. The known faults of t
   (Opus) review the code critically and rewrite what falls short yourself, not by sending it back; you decide what
   is accepted and you re-run the checks yourself before recording a figure. After every major change or decision,
   the same Fable reviewer agent reviews it (spawn once, continue it with SendMessage); verify its findings before
-  acting. Durability, concurrency, the service lifecycle and anything touching `src/DownloadManager.{Core,Engine,
+  acting. **When Fable hits its usage limit** (owner, 2026-11-16: "when, not if"), an Opus agent reviews instead and
+  the review is written to `docs/plans/android-fable-review-queue.md`, for Fable to check once the limit resets.
+  Durability, concurrency, the service lifecycle and anything touching `src/DownloadManager.{Core,Engine,
   Persistence,Runtime,Contracts}` stay with you.
 - **The mockup is the spec.** Build each screen from its image in `docs/plans/android-mockups/` (and the Figma file,
   linked in `android-app.md`), not from a text summary. A screen is done only when a screenshot from a phone sits
@@ -152,7 +154,8 @@ Inbound server through the server's existing API.
 
 **After that, each needs its own go-ahead and is not planned here:** Sites (ANDROID.8, only if rclone can ship in
 the APK), TorBox, torrents and archives (ANDROID.9, screens not designed), release (ANDROID.10: signing key,
-update check, third-party notices). Ask the owner after step 3 whether a first signed build should go out before
+updates, third-party notices). Updates are not only a check (owner, 2026-11-17): the app downloads the new APK itself and
+offers Install through the system installer. Ask the owner after step 3 whether a first signed build should go out before
 steps 4 to 6 are finished.
 
 ## 5. What "tested" means here

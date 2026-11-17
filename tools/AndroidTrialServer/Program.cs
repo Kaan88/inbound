@@ -21,6 +21,9 @@ for (var i = 0; i < args.Length - 1; i++)
     if (args[i] == "--port") port = int.Parse(args[i + 1], CultureInfo.InvariantCulture);
 // --lan: listen on every address, so a phone on the same Wi-Fi can reach it (a real link, not adb reverse).
 var lan = args.Contains("--lan");
+// --log: one line per GET when it ends, "SENT start=<first byte> bytes=<bytes written>", so a script can tell a resume
+// (requests after a restart add up to less than the file) from a download that started again from zero.
+var logSent = args.Contains("--log");
 
 var builder = WebApplication.CreateBuilder();
 builder.Logging.ClearProviders();
@@ -83,18 +86,25 @@ app.MapMethods("/bench.bin", ["GET", "HEAD"], async (HttpContext context) =>
 
     var sw = Stopwatch.StartNew();
     long sent = 0;
-    for (var pos = start; pos <= end;)
+    try
     {
-        var offset = (int)(pos % BlockLength);
-        var n = (int)Math.Min(bps > 0 ? Math.Min(BlockLength - offset, 64 * 1024) : BlockLength - offset, end - pos + 1);
-        await res.Body.WriteAsync(block.AsMemory(offset, n), context.RequestAborted).ConfigureAwait(false);
-        pos += n;
-        sent += n;
-        if (bps > 0)
+        for (var pos = start; pos <= end;)
         {
-            var delay = TimeSpan.FromSeconds(sent / (double)bps) - sw.Elapsed;
-            if (delay > TimeSpan.Zero) await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
+            var offset = (int)(pos % BlockLength);
+            var n = (int)Math.Min(bps > 0 ? Math.Min(BlockLength - offset, 64 * 1024) : BlockLength - offset, end - pos + 1);
+            await res.Body.WriteAsync(block.AsMemory(offset, n), context.RequestAborted).ConfigureAwait(false);
+            pos += n;
+            sent += n;
+            if (bps > 0)
+            {
+                var delay = TimeSpan.FromSeconds(sent / (double)bps) - sw.Elapsed;
+                if (delay > TimeSpan.Zero) await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
+            }
         }
+    }
+    finally
+    {
+        if (logSent) Console.WriteLine(FormattableString.Invariant($"SENT start={start} bytes={sent}"));
     }
 });
 

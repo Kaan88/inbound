@@ -1,0 +1,56 @@
+# Android app: reviews for Fable to check
+
+Owner, 2026-11-16: "when, not if, fable hits a limit - use opus, but write notes for fable so that it can check when my
+limit resets."
+
+The build plan (section 2) asks for one standing Fable reviewer. When Fable is out of quota, an Opus agent reviews
+instead and the review is written here. When the owner's limit resets, send Fable every open entry (the code it names,
+not the Opus findings first, so its read is its own), then compare, act on what holds, and mark the entry done.
+
+Each entry: date; what was reviewed (commit, or files if uncommitted); who reviewed; findings and what was done; what
+Fable should look at.
+
+## Open
+
+- **2026-11-17, step 1 final (the step-1 commit on `android-app`).** Owner, 2026-11-17: "fable can't be used. make a
+  note for later." So the final step-1 review is Opus's. Fable already reviewed the code twice before this (see Done);
+  since its second review these changed, and Fable has not seen them:
+  - `src/DownloadManager.Android/Host/InProcessHostConnection.cs`: `SendDirectAsync` no longer catches a callback that
+    throws (the snapshot failure fails the open); `Deliver` still catches for events.
+  - `src/DownloadManager.Android/Host/AndroidHost.cs` and `InboundApplication.cs`: `HostLeftRunningException` when a
+    failed start could not be shut down; the cached host task is then kept, so no second start in that process.
+  - `src/DownloadManager.Android/MainActivity.cs`: start-failure Snackbar and "Try again"; nullable-correct insets listener.
+  - `tests/DownloadManager.Integration.Tests/InProcessHostConnectionTests.cs`: the rewritten overlap test, the throw-on-
+    snapshot tests.
+  - `tools/AndroidApp/run-gate.sh`: server-byte proof for step 4, MARK2 timing, keep-awake paused during cold starts.
+  Fable's own open points from review 2 not acted on: point 5 (the lazy connection's dispose window) and review 1 point 8
+  (a late event bringing back a removed row). Ask Fable to judge those again.
+  Opus findings (2026-11-17) and what was done, checked by me in the code before acting:
+  1. A late progress event could bring back a removed row (the Host announces progress outside its lock); in one batch it
+     overwrote the pending removal. Held. Fixed: `DownloadsModel` keeps the removed ids (ids are never reused: every job
+     gets `Guid.NewGuid()`) and drops later events for them, at arrival and when a batch is applied. The old test
+     `A_removed_job_that_comes_back_is_a_new_row` encoded the opposite and was replaced; three tests added.
+  2. A dispose between the lazy connection creating the inner one and the inner open attaching its callback let the open
+     re-attach it, so hello, snapshot and held events reached a disposed screen (no session leaked). Held. Fixed:
+     `InProcessSession.Attach`/`Close` under its lock; an open after close does nothing; the model also ignores frames
+     once disposed. Tests: `A_connection_disposed_before_it_is_opened_stays_closed` (reads the dispatcher's session
+     table), two model tests.
+  3. The test named "disposed while its session is being opened" disposed from the hello, not in that window. Held:
+     renamed to `..._disposed_from_the_hello_...`; the window is covered by the new test in 2.
+  4. Gate: an empty server or phone hash could compare equal; the server start was not checked. Held, fixed.
+  5. Gate: an empty file name would make the cleanup pattern match other apps' part files. Held, fixed (`safe_name`).
+  6. Gate: key presses reach the foreground app; the reverse was removed even if set before. Held: header reworded,
+     a reverse set before the run is kept.
+  7. Gate: the resume proof is sound; `AFTER < SIZE` is the real guard. Comment says so now.
+  8. `HostLeftRunningException` after an ordinary start failure. Not held: on a service that never initialized,
+     `ShutdownAsync` finds no jobs, the package check starts as a completed task, and both quiet saves return early.
+  9. Add during a rotation at cold start gives a "not added" toast. Kept as is (rare, says so); step 2 moves the Host
+     into a service anyway.
+  Found by me while running the final gates (not by the review): the gate timed the Mi 8 Lite's cold starts with the
+  screen dozing (no keyguard, so the lock check passed): 588-657 ms, against 391-424 ms awake. The gate now wakes the
+  phone and refuses to time a start unless it is awake. Fable: check these fixes, and whether 1 and 2 are now airtight.
+
+## Done (Fable reviewed it)
+
+- **2026-11-16, step 1 (uncommitted, before the first step-1 commit).** Fable reviewed the step-1 code itself (no
+  Opus stand-in). Findings and what was done are in PROGRESS, "Android app, step 1".

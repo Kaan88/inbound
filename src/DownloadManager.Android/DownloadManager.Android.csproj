@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Inbound phone app. Not part of DownloadManager.slnx (the solution is built without the android workload):
+       build it with scripts/build-android.ps1.
+         emulator: Debug, default (Mono) runtime, android-x64
+         phone:    Release, NativeAOT (dotnet publish), android-arm64
+       -p:InboundTestBuild=true makes a TEST build: minimum Android 11 (API 30, so the Android 11 test phone can run it) and the
+       adb test hooks (INBOUND_TEST_BUILD). A release build is never below API 31. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>app.inbound.android</ApplicationId>
+    <ApplicationTitle>Inbound</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.0.1</ApplicationDisplayVersion>
+    <RootNamespace>Inbound.App</RootNamespace>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>$(NoWarn);CA1416;CS1591;NU1701</NoWarn>
+    <SupportedOSPlatformVersion>31</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <!-- Owner, 2026-11-16: test builds may go down to API 30; release builds stay at 31. -->
+  <!-- A test build has its own bin and obj folders, so its APK (with the hooks, minimum API 30) is never at a release APK's path. -->
+  <PropertyGroup Condition="'$(InboundTestBuild)' == 'true'">
+    <SupportedOSPlatformVersion>30</SupportedOSPlatformVersion>
+    <DefineConstants>$(DefineConstants);INBOUND_TEST_BUILD</DefineConstants>
+    <OutputPath>bin\$(Configuration)-test\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)-test\</IntermediateOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishAot>true</PublishAot>
+    <DefineConstants>$(DefineConstants);INBOUND_RELEASE_ENV</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Debug (emulator): a self-contained APK that adb install can install, not the fast-deployment one. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+  </PropertyGroup>
+
+  <!-- Release runtime environment (the sockets read this switch once, at first use). Also set in code by InboundApplication,
+       because AndroidEnvironment is a Mono-runtime feature and may not reach a NativeAOT process. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <AndroidEnvironment Include="inbound-env.txt" />
+  </ItemGroup>
+
+  <Target Name="InboundCheckMinimumApi" BeforeTargets="BeforeBuild" Condition="'$(InboundTestBuild)' != 'true' And '$(SupportedOSPlatformVersion)' != '31'">
+    <Error Text="Only a test build (-p:InboundTestBuild=true) may have a minimum Android version other than 31." />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.13.0.2" />
+    <PackageReference Include="Xamarin.AndroidX.RecyclerView" Version="1.4.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -662,7 +662,9 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.7 Other hosts (pairing, host switcher).
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
-- [ ] ANDROID.10 Release (signing, distribution, updates).
+- [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it
+  should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
+  itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
 - arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
 - Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
   signed APK on the releases page with an update check. Nothing waits for the owner.

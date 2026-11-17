@@ -11,6 +11,7 @@
     <Project Path="src/DownloadManager.Engine/DownloadManager.Engine.csproj" />
     <Project Path="src/DownloadManager.Host/DownloadManager.Host.csproj" />
     <Project Path="src/DownloadManager.Host.Linux/DownloadManager.Host.Linux.csproj" />
+    <Project Path="src/DownloadManager.Mobile/DownloadManager.Mobile.csproj" />
     <Project Path="src/DownloadManager.NativeHost/DownloadManager.NativeHost.csproj" />
     <Project Path="src/DownloadManager.Persistence/DownloadManager.Persistence.csproj" />
     <Project Path="src/DownloadManager.Providers.TorBox/DownloadManager.Providers.TorBox.csproj" />
@@ -26,6 +27,7 @@
     <Project Path="tests/DownloadManager.Core.Tests/DownloadManager.Core.Tests.csproj" />
     <Project Path="tests/DownloadManager.Engine.Tests/DownloadManager.Engine.Tests.csproj" />
     <Project Path="tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj" />
+    <Project Path="tests/DownloadManager.Mobile.Tests/DownloadManager.Mobile.Tests.csproj" />
     <Project Path="tests/DownloadManager.Server.Tests/DownloadManager.Server.Tests.csproj" />
     <Project Path="tests/DownloadManager.Sites.Tests/DownloadManager.Sites.Tests.csproj" />
     <Project Path="tests/DownloadManager.TestSupport/DownloadManager.TestSupport.csproj" />
