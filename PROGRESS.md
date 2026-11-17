@@ -125,6 +125,12 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Step 2, S0 done (401beb5):** the Host holds downloads on a metered network when the new setting is on (8 tests).
+  **Spike S-1 on the S24 FE (API 37), 2026-11-17** (`android-step2-design.md` section 7): a UIDT job survives screen
+  lock and a Recents swipe; Task Manager Stop kills without `onStopJob` and is visible at the next start
+  (`ApplicationExitInfo` reason 10, "STOP APP"); a broadcast notification action can schedule the job with the app not
+  visible; a persisted UIDT job runs again by itself after a reboot; `BOOT_COMPLETED` did not reach the app within 3
+  minutes. The S24 was rebooted once (owner allowed it); no phone setting was changed.
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to

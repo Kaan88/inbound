@@ -155,3 +155,27 @@ network signal and "Use data", S4 finished notifications and open/reveal, S5 boo
 `ApplicationExitInfo` (reason user-requested) marks the jobs that were running as paused by the user. Android 12 and
 13: an Android 13 emulator now ("Emulator now"). The Wi-Fi-only check may mark the home Wi-Fi metered on one test
 phone, read first and restored ("Yes, set it back").
+
+## 7. Spike S-1 results (S24 FE, Android 17 / API 37, 2026-11-17)
+
+Test build with `Spike.cs` (a UIDT job that only logs a heartbeat every 15 s). Logs and screenshots in
+`artifacts/android-app/step2/` (git-ignored).
+
+| Question | What happened |
+|---|---|
+| Scheduled while visible | `schedule` success, `onStartJob` at once (15:40:14). |
+| Screen off and locked | Kept running (heartbeats on through the lock). |
+| Swipe from Recents | The activity was removed; the process (same pid) and the job went on (heartbeats 14 to 16 after the swipe). |
+| Task Manager "Stop" (the Recents "active apps" sheet) | Process killed at once ("fully stop ... by user request"), **`onStopJob` not called**, job dropped ("because of user stop"). At the next start `ApplicationExitInfo` has reason 10 (user requested), sub-reason "STOP APP" (an adb force-stop gives "FORCE STOP"; a reinstall reason 16). So "Stay paused" can be built on it. |
+| Schedule from a notification action, app not visible (launcher on top) | A **broadcast** action scheduled the UIDT job successfully and it started (15:47:01). The activity route was not needed. |
+| Persisted UIDT job across a reboot | **It ran again by itself** about 50 s after boot (after the owner unlocked), without the app being opened. |
+| `BOOT_COMPLETED` receiver | **Not called** within 3 minutes of boot on this Samsung (the receiver is registered; the broadcast was sent to others). Not relied on. |
+
+What it changes:
+- After a reboot, a persisted session job brings the process back by itself on API 34+, so downloads *can* resume
+  silently. The owner chose "Notify with Resume"; the design said the owner is asked if a silent resume is possible
+  (section 2.5). Asked 2026-11-17.
+- The boot path cannot depend on `BOOT_COMPLETED` on Samsung. On API 34+ the persisted job is the boot hook (it can
+  post the Resume notification itself, or resume). On 31 to 33 there is no such job; the receiver stays, best effort.
+- Notification actions may be broadcasts on API 37 (tested); `ResumeActivity` is only needed where an activity is
+  wanted. Still to try on API 34 (no phone; emulator image not installed) and 33 (emulator).

@@ -108,6 +108,14 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnNewIntent(intent);
         if (_model is not null) TestHooks.Run(_model, intent);
+        SpikeHooks.Run(this, intent);
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        // After the first frame, so the activity is visible when a spike schedules a UIDT job.
+        Window?.DecorView.Post(() => SpikeHooks.Run(this, Intent));
     }
 #endif
 
