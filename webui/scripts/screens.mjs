@@ -774,7 +774,8 @@ if (davAddress) {
   await capture(`${at++}-remote-files-transfers`, signedIn, async (p, v) => {
     await openRemote(p, v);
     await p.getByRole('button', { name: /^Transfers/ }).click();
-    await p.getByRole('button', { name: /^Done/ }).click();
+    // The phone list has no tabs: finished transfers sit at its end (R7).
+    if (!/phone/.test(v.name)) await p.getByRole('button', { name: /^Done/ }).click();
   });
 }
 

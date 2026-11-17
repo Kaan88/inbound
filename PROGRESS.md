@@ -1,30 +1,46 @@
 # Progress — session handoff
 
-### Where to pick up (2026-11-17, before the owner clears the context)
+### Where to pick up (2026-11-17, evening)
 
-- **Done today and pushed:** SITES.11 R3, R4, R5 and R6a (see the sections below). Main is clean apart from the
-  untracked `.claude/`. The test servers for `artifacts/r0` (rclone sftp 22022, ftp 22121, webdav 28080, 28081) may
-  still be running; no test window or test Host is.
-- **Next, in this order the owner can change:**
-  1. **SITES.11 R6b** (web UI): the transfers list with the main list's row component, All remotes and Add a remote
-     tiles, sidebar entries, the Transfers bar, phone width (one pane, tick boxes, action bar, bottom sheets),
-     `npm run screens` with the Sites screens at 1360 and 390 px, `sites.here` for folders, and one run with the
-     extension installed. Optional small Host change: `folders.browse` listing a server folder's files, so Two panes'
-     left side and "Files on the server" upload match `web-two`/`web-upload`. The owner asked before R6b was started
-     about the extension, so R6b is **not started**.
-  2. **EXT.R14** (owner, 2026-11-17): the toolbar icon's green progress ring "has to be a bit more obvious and eye
-     catching", plus a finished mark. Unrelated to R6b; can run alongside.
-  3. **EXT.R15** (owner, 2026-11-17): "open the popup when a download finishes" as an opt-in setting **in a test
-     extension only**, for the owner to try; not in the store builds.
-  4. **SITES.11 R7:** the owner walks a test build, light mode, Linux Uno build, docs, release; SITES.12 rename pass
-     for older text.
-- **Method (owner):** Sonnet builds, Opus fixes, the Fable reviewer reviews each step, the main agent accepts; walk on
-  a hidden desktop (`scripts/run-on-hidden-desktop.ps1`, `scripts/ui-drive-hidden.sh`) with
-  `DOWNLOADMANAGER_TRACE_EXCEPTIONS=1`; pictures beside the mockups in `docs/plans/sites-mockups/compare/`; commit
-  and push each step.
-- **Not walked by hand yet (owner can try in the test copy):** plain Delete to the Recycle Bin and Shift+Delete on
-  This PC, Windows' own question on a network share, keys and right-click menus in the window, a real save with Test
-  and Trust in Add a remote, browser sign-in from the new form; Drive listing in the web UI with a real Drive account.
+- **Done today and pushed:** SITES.11 R6b, the R7 checks and walk fixes, Fable's final review and its fix round;
+  SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
+  effort checks each major addition, Fable reviews once at the end.
+- **Waiting for the owner:**
+  1. **Walk a test build** (R7): Remote files on the desktop and the web UI, phone width too; light mode pictures in
+     `docs/plans/sites-mockups/compare/light/`.
+  2. **Try the popup test extension** (EXT.R15): `extensions/chrome/dist-test-popup` (Load unpacked; same ID, so
+     remove the store copy first or use another profile). Then decide whether it ships.
+  3. **Question:** the store builds already have Options > "On finish: Flash the icon / Open the popup / Do nothing"
+     (EXT.R12). Keep "Open the popup" in the store builds, or only in the test build?
+  4. **Pick from the ideas** in ROADMAP SITES.13 (Remote files) and EXT.R16 (extension popup/tooltip).
+  5. **Release** (version 0.9.0 per `docs/plans/sites-rework.md`, extension version bump for EXT.R14); draft notes in
+     `docs/plans/remote-sites.md`.
+- **Not done:** Linux Uno build (Linux deferred); a run with the extension installed against the web UI; real SFTP,
+  Trust, browser sign-in and Drive.
+
+### Sites rework R7: checks, walk fixes, final review (SITES.11, 2026-11-17)
+
+- **Full tests (before the last two fix rounds):** Core 2571, Sites 252 (+32 skipped), Server 202, Tray 3,
+  Integration 2052 (+43 skipped; `CancellingARunningPackage…` and `TheAppsBatchStillOpensItsWindows` failed once
+  under load and passed three reruns each), webui 783, extension 349. After the fixes: Core 2571, Sites 252, webui
+  795, extension 351; solution 0 errors.
+- **Walk fixes (Opus):** the extension hint bar no longer covers the Remote files pages (`SitesHost` in row 1);
+  Add a remote tile text uses the window's theme (was dark grey in light); "Remote only" on both clients (the mockup's
+  "Server only" clashes with SITES.12); phone transfers as cards without tabs; phone delete as a bottom sheet with
+  full-width buttons; the walk's transfers step copes with a finished download.
+- **Fable's final review, fixed (Opus):** Close on an address opened once now asks when it has transfers (the Host
+  cancels them); a refused Trust after Save is shown; leftover "site" words in the web UI and a wider words test;
+  the extension tooltip puts off/paused first; the one-folder delete count was one too many (the Host counts the
+  folder); the store packagers and `sign-extension-firefox.ps1` refuse the popup test build; the finished ring is
+  blue, unlike the green progress; phone transfer cards have a long-press sheet with their actions and an × on
+  finished ones; the speed graph and status bar are hidden on Remote files pages at phone width; "Already on the
+  server" / "Already on this PC" with Yes, Some of it, No on both clients and "Downloads from /x go to D:\…"; opening
+  a ninth address says which one was closed. Fable's ideas went to ROADMAP SITES.13 and EXT.R16.
+- **Pictures:** retaken after the fixes: `compare/phone-*-built.png`, `web-home-built.png`, `web-transfers-built.png`
+  and the `compare/light/` set (desktop and web). An Opus look at a sample found no overlap or unreadable text;
+  left as is: the faint selection of an unfocused list in light (WinUI's standard, same as the main list), the
+  "Download" word before the name on phone transfer cards, and the This PC path cut at its start without a mark.
+- **Not walked:** the desktop delete dialogs in light; the run with the extension installed.
 
 ### Sites rework R6b: web transfers, All remotes, Add a remote, sidebar, phone, SITES.11 (2026-11-17)
 
