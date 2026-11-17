@@ -1138,28 +1138,17 @@ public sealed partial class DownloadManagerService
             }
         }
 
-        // A failed or cancelled download held no final name (owner, 2026-11-17: "Free the name"), so another may have
-        // taken it meanwhile: the name is checked again now, with this download's own duplicate policy.
-        var rename = PlanNameForRestart(runtime);
-        if (rename.Error is { } nameError)
-            return new JobActionResponse { Ok = false, Error = nameError, Job = GetJob(id) };
-        if (rename.To is not null && !MovePartForRename(runtime, rename, out var moveError))
-            return new JobActionResponse { Ok = false, Error = moveError, Job = GetJob(id) };
-
         lock (_sync)
         {
-            if (rename.To is not null) _reservedFinalPaths.Remove(NormalizePath(rename.To));
             if (!_jobs.TryGetValue(id, out runtime))
             {
                 return new JobActionResponse { Ok = false, Error = "Job not found." };
             }
 
-            if (rename.To is not null)
-            {
-                runtime.Job.FinalFilePath = rename.To;
-                runtime.Job.FileName = Path.GetFileName(rename.To);
-                runtime.Job.PartFilePath = rename.NewPart!;
-            }
+            // A failed or cancelled download held no final name (owner, 2026-11-17: "Free the name"): checked again, and
+            // taken, in this lock with the Queued below, so nothing can take it in between.
+            if (ClaimNameLocked(runtime.Job) is { } nameError)
+                return new JobActionResponse { Ok = false, Error = nameError, Job = Map(runtime.Job) };
 
             runtime.PauseRequested = false;
             runtime.CancelRequested = false;
@@ -1488,6 +1477,7 @@ public sealed partial class DownloadManagerService
     private async Task ResumeAllCoreAsync(CancellationToken cancellationToken)
     {
         List<JobRuntime> resumed;
+        List<JobRuntime> refused = [];
         lock (_sync)
         {
             // Audit 2 L13: what was paused or failed and can go on. A download the user cancelled stays cancelled, and
@@ -1496,9 +1486,17 @@ public sealed partial class DownloadManagerService
                 .Where(r => !r.Starting && r.Runner is not { IsCompleted: false } && !r.Job.RemovalPending &&
                             r.Job.State is DownloadState.Paused or DownloadState.Failed && r.Job.CanResume)
                 .ToList();
-            foreach (var runtime in resumed)
+            foreach (var runtime in resumed.ToList())
             {
-                // As a single Resume does.
+                // As a single Resume does, its name too: one in order takes it, and one whose policy refuses stays failed.
+                if (ClaimNameLocked(runtime.Job) is { } nameError)
+                {
+                    RefuseNameLocked(runtime.Job, nameError);
+                    resumed.Remove(runtime);
+                    refused.Add(runtime);
+                    continue;
+                }
+
                 runtime.PauseRequested = false;
                 runtime.CancelRequested = false;
                 runtime.CancelledForRemoval = false;
@@ -1518,6 +1516,12 @@ public sealed partial class DownloadManagerService
         {
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "queued");
+        }
+
+        foreach (var runtime in refused)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "updated");
         }
 
         Schedule();
@@ -2044,6 +2048,14 @@ public sealed partial class DownloadManagerService
                         {
                             // The pause is still settling; requeue once the runner exits.
                             runtime.ResumeWhenStopped = true;
+                            continue;
+                        }
+
+                        // A failed one held no name; it takes it again, or a free one, or stays failed (as Resume does).
+                        if (ClaimNameLocked(runtime.Job) is { } nameError)
+                        {
+                            RefuseNameLocked(runtime.Job, nameError);
+                            renamed.Add(runtime);
                             continue;
                         }
 
@@ -3597,6 +3609,10 @@ public sealed partial class DownloadManagerService
                 }
                 else
                 {
+                    // A failed or cancelled one held no name and is started again below, so it takes one first (as Resume does).
+                    if (!finished && ClaimNameLocked(runtime.Job) is { } nameError)
+                        return new JobActionResponse { Ok = false, Error = nameError, Job = Map(runtime.Job) };
+
                     runtime.PauseRequested = false;
                     runtime.CancelRequested = false;
                     runtime.CancelledForRemoval = false;
@@ -5664,7 +5680,7 @@ public sealed partial class DownloadManagerService
     /// <summary>
     /// Whether a download still holds its final name: it can still write there. Completed, cancelled and failed ones don't
     /// (owner, 2026-11-17: "Free the name"), except a failed one its queue will try again on its own (QueueRetryAt), which
-    /// counts as unfinished everywhere else too. A retry checks the name again (<see cref="PlanNameForRestart"/>).
+    /// counts as unfinished everywhere else too. A retry checks the name again (<see cref="ClaimNameLocked"/>).
     /// </summary>
     private static bool HoldsFinalName(DownloadJob job) =>
         job.State is not (DownloadState.Completed or DownloadState.Cancelled)
@@ -5692,66 +5708,49 @@ public sealed partial class DownloadManagerService
             && !string.IsNullOrWhiteSpace(r.Job.FinalFilePath) && PathNames.Comparer.Equals(NormalizePath(r.Job.FinalFilePath), full));
     }
 
-    /// <summary>What a restart of a download that held no name does with it: nothing, a new name (reserved), or a refusal.</summary>
-    private readonly record struct RestartName(string? To, string? NewPart, string? Error);
-
     /// <summary>
-    /// A failed or cancelled download is about to run again. Its final name may have gone to another download meanwhile (one
-    /// running, or one that finished there) or, for Rename and Fail, to a file now on disk that isn't its own. Rename and
-    /// Overwrite (which means a file already there, never another download's) take the next free "(n)"; Fail refuses the
-    /// restart. A name nobody took is kept.
+    /// A failed or cancelled download is about to run again (Resume, Resume all, a queue start, a new address). Its final
+    /// name may have gone meanwhile to another download (running, or one that finished there) or, for Rename and Fail, to a
+    /// file now on disk that isn't its own. Rename and Overwrite (which means a file already there, never another
+    /// download's) take the next free "(n)"; Fail refuses: the refusal is returned and nothing changes. A name nobody took
+    /// is kept. Call it under <c>_sync</c> and set the job Queued in the same lock, so nothing takes the name in between.
+    /// Only the name changes: the part file keeps its stored path (old final name plus the job id, unique by the id), which
+    /// the engine, its checkpoint and the leftover scan all read from the job, so nothing is moved and a kill before the
+    /// save loses nothing.
     /// </summary>
-    private RestartName PlanNameForRestart(JobRuntime runtime)
+    private string? ClaimNameLocked(DownloadJob job)
     {
-        lock (_sync)
+        if (HoldsFinalName(job) || string.IsNullOrWhiteSpace(job.FinalFilePath)) return null;
+        var path = job.FinalFilePath;
+        var takenByDownload = FinalPathTakenLocked(path) || CompletedJobAtLocked(path, job.Id);
+        var onDisk = (File.Exists(path) || Directory.Exists(path)) && !PathNames.Same(job.WrittenFinalPath, path);
+        if (!(job.ConflictPolicy == ConflictPolicy.Overwrite ? takenByDownload : takenByDownload || onDisk)) return null;
+        if (job.ConflictPolicy == ConflictPolicy.Fail)
+            return takenByDownload ? $"Another download already saves to {path}." : $"A file already exists at {path}.";
+
+        var directory = Path.GetDirectoryName(path)!;
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var extension = Path.GetExtension(path);
+        for (var number = 1; number < 10000; number++)
         {
-            var job = runtime.Job;
-            if (HoldsFinalName(job) || string.IsNullOrWhiteSpace(job.FinalFilePath)) return default;
-            var path = job.FinalFilePath;
-            var takenByDownload = FinalPathTakenLocked(path) || CompletedJobAtLocked(path, job.Id);
-            var onDisk = (File.Exists(path) || Directory.Exists(path)) && !PathNames.Same(job.WrittenFinalPath, path);
-            if (!(job.ConflictPolicy == ConflictPolicy.Overwrite ? takenByDownload : takenByDownload || onDisk)) return default;
-            if (job.ConflictPolicy == ConflictPolicy.Fail)
-                return new RestartName(null, null, takenByDownload
-                    ? $"Another download already saves to {path}."
-                    : $"A file already exists at {path}.");
-
-            var directory = Path.GetDirectoryName(path)!;
-            var stem = Path.GetFileNameWithoutExtension(path);
-            var extension = Path.GetExtension(path);
-            for (var number = 1; number < 10000; number++)
-            {
-                var candidate = Path.Combine(directory, $"{stem} ({number}){extension}");
-                if (File.Exists(candidate) || Directory.Exists(candidate) || FinalPathTakenLocked(candidate)
-                    || CompletedJobAtLocked(candidate, job.Id)) continue;
-                _reservedFinalPaths.Add(NormalizePath(candidate));
-                // Nothing restarts it on its own while its part file is moved.
-                job.QueueRetryAt = null;
-                return new RestartName(candidate, BuildPartPath(candidate, job.Id), null);
-            }
-
-            return new RestartName(null, null, "Could not find an available filename.");
+            var candidate = Path.Combine(directory, $"{stem} ({number}){extension}");
+            if (File.Exists(candidate) || Directory.Exists(candidate) || FinalPathTakenLocked(candidate)
+                || CompletedJobAtLocked(candidate, job.Id)) continue;
+            job.FinalFilePath = candidate;
+            job.FileName = Path.GetFileName(candidate);
+            return null;
         }
+
+        return "Could not find an available filename.";
     }
 
-    /// <summary>Moves the part file (and the bytes in it) to the new name's part path; false, with the reservation dropped, when it can't.</summary>
-    private bool MovePartForRename(JobRuntime runtime, RestartName rename, out string? error)
+    /// <summary>A download that would have run again but whose name its Fail policy refuses: it stays failed, saying why.</summary>
+    private static void RefuseNameLocked(DownloadJob job, string error)
     {
-        error = null;
-        string oldPart;
-        lock (_sync) oldPart = runtime.Job.PartFilePath;
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(oldPart) && File.Exists(oldPart) && !PathNames.Same(oldPart, rename.NewPart))
-                File.Move(oldPart, rename.NewPart!);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            lock (_sync) _reservedFinalPaths.Remove(NormalizePath(rename.To!));
-            error = $"Couldn't give the download a free name: {ex.Message}";
-            return false;
-        }
+        job.State = DownloadState.Failed;
+        job.QueueRetryAt = null;
+        job.Failure = new JobFailure(FailureKind.DestinationUnavailable, error, false, true, DateTimeOffset.UtcNow);
+        job.Touch();
     }
 
     private static bool TryValidateUrl(string? value, out Uri uri, out string error)

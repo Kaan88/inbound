@@ -13,7 +13,7 @@ public sealed partial class RuntimeServiceTests
     private const int FailedNameSize = 256 * 1024;
 
     /// <summary>A failed download of file.zip saved before the service starts, with an empty part file.</summary>
-    private static async Task<(StoragePaths Paths, string Destination, Guid Id, string PartPath)> FailedFileZipAsync(string url, string policy)
+    private static async Task<(StoragePaths Paths, string Destination, Guid Id, string PartPath)> FailedFileZipAsync(string url, string policy, bool fromQueue = false)
     {
         var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
         var paths = new StoragePaths(Path.Combine(root, "state"));
@@ -34,6 +34,7 @@ public sealed partial class RuntimeServiceTests
             PartFilePath = part,
             ConflictPolicy = Enum.Parse<ConflictPolicy>(policy, ignoreCase: true),
             State = DownloadState.Failed,
+            QueueProcessing = fromQueue,
             Failure = new JobFailure(FailureKind.Network, "The connection was lost.", true, true, DateTimeOffset.UtcNow),
         });
         return (paths, destination, id, part);
@@ -87,7 +88,9 @@ public sealed partial class RuntimeServiceTests
         var renamed = Path.Combine(destination, "file (1).zip");
         Assert.Equal(renamed, retry.Job!.FinalFilePath, StringComparer.OrdinalIgnoreCase);
         Assert.Equal("file (1).zip", retry.Job.FileName);
-        Assert.False(File.Exists(oldPart)); // its part file went with the name
+        // Only the name changes: the part file stays where it is, still this job's by its id.
+        Assert.Equal(oldPart, retry.Job.PartFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.True(File.Exists(oldPart));
         var retried = await ctx.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         var running = await ctx.WaitFor(other.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         Assert.Equal(renamed, retried.FinalFilePath, StringComparer.OrdinalIgnoreCase);
@@ -125,5 +128,88 @@ public sealed partial class RuntimeServiceTests
         var done = await ctx.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
         Assert.Equal(Path.Combine(destination, "file.zip"), done.FinalFilePath, StringComparer.OrdinalIgnoreCase);
         Assert.Equal(Sha256Of(531, FailedNameSize), await Hashing.Sha256FileAsync(done.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task ResumeAllGivesAFailedDownloadWhoseNameAnotherNowUsesAFreeNameUnderRename()
+    {
+        var (paths, destination, id, oldPart) = await FailedFileZipAsync($"{_server.BaseAddress}/file/file.zip?size={FailedNameSize}&seed=541", "rename");
+        await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination);
+        var other = await ctx.Service.AddJobAsync(SlowFileZip(destination, 542));
+        Assert.True(other.Accepted, other.Error);
+        await ctx.WaitFor(other.Job!.Id, j => j.ReceivedBytes > 0);
+
+        await ctx.Service.ResumeAllAsync();
+
+        var retried = await ctx.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var running = await ctx.WaitFor(other.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(Path.Combine(destination, "file (1).zip"), retried.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(Path.Combine(destination, "file.zip"), running.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(Sha256Of(541, FailedNameSize), await Hashing.Sha256FileAsync(retried.FinalFilePath));
+        Assert.Equal(Sha256Of(542, FailedNameSize), await Hashing.Sha256FileAsync(running.FinalFilePath));
+        Assert.False(File.Exists(oldPart));
+    }
+
+    [Fact]
+    public async Task ResumeAllUnderOverwriteLeavesTheFileOfTheDownloadThatTookTheNameAlone()
+    {
+        var (paths, destination, id, _) = await FailedFileZipAsync($"{_server.BaseAddress}/file/file.zip?size={FailedNameSize}&seed=551", "overwrite");
+        await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination);
+        var other = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/file.zip?size={FailedNameSize}&seed=552",
+            DestinationDirectory = destination,
+            FileName = "file.zip",
+            ConflictPolicy = "rename",
+            Source = "cli",
+        });
+        Assert.True(other.Accepted, other.Error);
+        var finished = await ctx.WaitFor(other.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(Path.Combine(destination, "file.zip"), finished.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+
+        await ctx.Service.ResumeAllAsync();
+
+        var retried = await ctx.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(Path.Combine(destination, "file (1).zip"), retried.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(Sha256Of(551, FailedNameSize), await Hashing.Sha256FileAsync(retried.FinalFilePath));
+        Assert.Equal(Sha256Of(552, FailedNameSize), await Hashing.Sha256FileAsync(finished.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task ResumeAllUnderFailLeavesItFailedWithTheReason()
+    {
+        var (paths, destination, id, oldPart) = await FailedFileZipAsync($"{_server.BaseAddress}/file/file.zip?size={FailedNameSize}&seed=561", "fail");
+        await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination);
+        var other = await ctx.Service.AddJobAsync(SlowFileZip(destination, 562));
+        Assert.True(other.Accepted, other.Error);
+        await ctx.WaitFor(other.Job!.Id, j => j.ReceivedBytes > 0);
+
+        await ctx.Service.ResumeAllAsync();
+
+        var job = ctx.Service.GetJob(id)!;
+        Assert.Equal("failed", job.State);
+        Assert.Contains("Another download already saves to", job.Failure?.Message);
+        Assert.Equal(Path.Combine(destination, "file.zip"), job.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.True(File.Exists(oldPart));
+        await ctx.WaitFor(other.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task StartingTheQueueGivesAFailedDownloadWhoseNameAnotherNowUsesAFreeName()
+    {
+        var (paths, destination, id, _) = await FailedFileZipAsync($"{_server.BaseAddress}/file/file.zip?size={FailedNameSize}&seed=571", "rename", fromQueue: true);
+        await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination);
+        var other = await ctx.Service.AddJobAsync(SlowFileZip(destination, 572));
+        Assert.True(other.Accepted, other.Error);
+        await ctx.WaitFor(other.Job!.Id, j => j.ReceivedBytes > 0);
+
+        var started = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" });
+
+        Assert.True(started.Ok, started.Error);
+        var retried = await ctx.WaitFor(id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var running = await ctx.WaitFor(other.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(Path.Combine(destination, "file (1).zip"), retried.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(Sha256Of(571, FailedNameSize), await Hashing.Sha256FileAsync(retried.FinalFilePath));
+        Assert.Equal(Sha256Of(572, FailedNameSize), await Hashing.Sha256FileAsync(running.FinalFilePath));
     }
 }
