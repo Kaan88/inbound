@@ -122,8 +122,18 @@
   `app.inbound.android`), `src/DownloadManager.Mobile` (UI-agnostic model), the Host core in process through an
   in-process session on the real dispatcher. Gate: `tools/AndroidApp/run-gate.sh`; raw output in
   `artifacts/android-app/step1/` (git-ignored). Runs on the code of 0a59ae3, test build (adb hooks), 17,847,428 bytes.
-  Fable's review fixes (aaaced8) change the model, the connection and the host start after these runs: **the gate is to
-  be run again on aaaced8** (both phones were off adb when it was pushed).
+  Fable's review fixes (aaaced8) changed the model, the connection and the host start after these runs, so the gate was
+  run again on them (2026-11-17, source fb4a0d0 = aaaced8's code; the gate now prints both, and that the APK is
+  NativeAOT). **Final: PASS on both phones** (`gate-s24fe-reviewed`, `gate-mi8lite-reviewed`):
+
+  | | S24 FE | Mi 8 Lite |
+  |---|---|---|
+  | cold start to drawn list, 200 jobs | 215-232 ms (660 ms on the first timed start) | 395-415 ms |
+  | memory after the starts (PSS / RSS) | 97.3 / 184.9 MB | 51.7 / 103.5 MB |
+  | 256 MiB download, hash equal | about 3 s | about 9 s |
+  | killed after 20 s, reopened | resumed: 83.4 MB before, 187.5 MB after | resumed: 82.8 MB before, 208.0 MB after |
+
+  The earlier runs on 0a59ae3's code, for comparison:
 
   | | S24 FE (API 37) `gate-s24fe-final` | Mi 8 Lite (API 30, test min) `gate-mi8lite-final` |
   |---|---|---|
