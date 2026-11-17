@@ -5,7 +5,30 @@
 - **Done today and pushed:** SITES.11 R6b, the R7 checks and walk fixes, Fable's final review and its fix round;
   SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
   effort checks each major addition, Fable reviews once at the end.
-- **Owner, 2026-11-17 evening:** "implement all 13 items. be efficient with tokens. can be reviewed after." Plus the reports in ROADMAP SITES.14 (Manage remotes window order, All remotes empty-text overlap, Test result layout, Two panes with any remote on the left, .ppk keys, web bridge target folder not showing files, no sign of a big folder starting, still graph). Working on all of them (SITES.13, SITES.14, EXT.R16).
+- **Owner, 2026-11-17 evening:** "implement all 13 items. be efficient with tokens. can be reviewed after." Built in one
+  workflow (Opus for the Host, Sonnet for the clients), merged, **not reviewed yet**, not tried in a running app:
+  - **Host:** `folders.browse` `files: "all"` (the web bridge's target folder now lists files: SITES.14 bug); PuTTY .ppk
+    (format 2, plain or with passphrase; format 3 without one; format 3 with a passphrase refused with the PuTTYgen
+    hint; tested with keys written from the spec, not with real PuTTYgen); `sites.remember` (last folder, sort);
+    per-remote down/up limits (a limited remote moves one file at a time); `sites.preview` (2 MiB, images by signature,
+    SVG as text); copy between remotes (`direction: "between"`); `sites.sync.plan`/`run` (one way, never deletes);
+    `waitForSchedule`, `sites.transfer.schedule`, `sites.sync.schedule` run by the scheduler. `docs/ipc-protocol.md`.
+  - **Desktop:** Options comes to the front from All remotes; empty-list text below the headings; Test result as one
+    separated block with a fingerprint card; Copy path / Copy address; Save tests first ("Save anyway" on failure;
+    not for browser sign-in kinds); Two panes with the right pane the selected remote and a source switcher on the
+    left (This PC or any remote, the same one too); preview; limits in Edit remote; Sync linked folder with the plan
+    and a schedule choice; .ppk in the key picker. Not built: "Start at…" on a single transfer; rename/delete in the
+    left remote pane; the left pane's source is not remembered between runs.
+  - **Web:** a big folder shows "Preparing…" and a toast at once; the speed graph counts Remote files transfers; a
+    toast with Show when a transfer finishes; phone Select all and filter; Copy path/address; Save tests first; the
+    target folder lists files and refreshes; remember folder and sort; Two panes left switchable; preview; limits;
+    sync. Not built: Two panes on the phone; multi-select upload from the left pane.
+  - **Extension:** "Finished just now" divider and Clear finished (hides rows in the popup; does not delete the app's
+    history); tooltip names the newest finished file; "Show a notification" choice with Open and Show in folder
+    (buttons in Chrome/Edge only).
+  - Tests after the merge: Core 2574, Sites 260 (+32 skipped), Integration Site/Cli 211 and dispatcher 309 (one test
+    updated for "all"), Server 202, webui 819, extension 360; solution 0 errors.
+  - Test copy republished to `artifactspp-r8` (r7's was in use); the launcher points there.
 - **Waiting for the owner:**
   1. **Walk the test copy** (R7): `artifacts\r7\Start Inbound test.cmd` starts `artifacts\app-r7` (published
      2026-11-17 from main, Medium label) with its own Host and data in `artifacts\r7\data`. Not started by me.
