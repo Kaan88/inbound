@@ -75,6 +75,28 @@ internal static class TestHooks
             }) { IsBackground = true }.Start();
         }
 
+        // probe_url: one GET with the engine's kind of handler (SocketsHttpHandler) and one with the platform's, each logged with
+        // the full exception chain, to tell a TLS fault of the build from one of the server.
+        var probeUrl = intent.GetStringExtra("probe_url");
+        if (!string.IsNullOrEmpty(probeUrl))
+        {
+            intent.RemoveExtra("probe_url");
+            _ = Task.Run(async () =>
+            {
+                foreach (var (name, handler) in new (string, HttpMessageHandler)[]
+                         { ("sockets", new SocketsHttpHandler()), ("android", new Xamarin.Android.Net.AndroidMessageHandler()) })
+                {
+                    try
+                    {
+                        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+                        using var r = await client.GetAsync(probeUrl, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                        Log.Info(Tag, $"probe {name}: {(int)r.StatusCode}");
+                    }
+                    catch (System.Exception ex) { Log.Error(Tag, $"probe {name}: {ex}"); }
+                }
+            });
+        }
+
         var seed = intent.GetIntExtra("seed", 0);
         var real = intent.GetIntExtra("real", 3);
         var server = intent.GetStringExtra("server") ?? "http://127.0.0.1:8765";

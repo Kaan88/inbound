@@ -687,7 +687,8 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
 - [ ] ANDROID.7 Other hosts (pairing, host switcher). Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
-  report on the counting rate figure fixed ("Good now"). Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
+  report on the counting rate figure fixed ("Good now"). HTTPS on the phone failed in the NativeAOT build (owner's report "secure
+  connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
   asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.

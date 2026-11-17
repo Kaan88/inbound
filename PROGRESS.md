@@ -2,6 +2,16 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **HTTPS failed on the phone (owner, S24, 2026-11-17: "same download link errors on phone with a message: secure
+  connection failed").** Every https download failed in the NativeAOT build. Found with a test-build probe hook
+  (`probe_url`): SocketsHttpHandler threw `AuthenticationException` while `AndroidMessageHandler` got 200, and the log
+  showed `UnsatisfiedLinkError: ... DotnetProxyTrustManager.verifyRemoteCertificate`. .NET's Java trust manager calls
+  that JNI function in the app's native library, but the NativeAOT link dropped it (`--gc-sections`) and the generated
+  version script did not export it (only `JNI_OnLoad`, `JNI_OnUnload` and the Java.Interop init were exported). Fixed in
+  the Android csproj: `-Wl,--undefined=` keeps it and a target adds it to the exports file between `IlcCompile` and
+  `LinkNative`. After: `llvm-nm -D` lists it; on the S24 both probes got 200 and an https download of 1 MiB from a
+  public test server finished at full size (file deleted). The phone's pairing to an https server and https downloads
+  on a remote host are unaffected (the server downloads). Not yet: the owner's own link again.
 - **Steps 3 and 6 on the S24 against the owner's desktop Inbound (2026-11-17, 8f6c327b plus the rate fix).** The owner
   paired the phone with the Windows app's web UI (0.8.0, http://192.168.1.115:8080, plain http with the tick, the owner
   typed the password): the desktop's downloads showed, a download added on the phone "apperaed and instantly started

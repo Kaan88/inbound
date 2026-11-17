@@ -65,4 +65,28 @@
     <ProjectReference Include="..\DownloadManager.Mobile\DownloadManager.Mobile.csproj" />
   </ItemGroup>
 
+  <!--
+    HTTPS on NativeAOT (found 2026-11-17 on the S24: every https download failed with "secure connection failed").
+    SslStream's Java trust manager (net.dot.android.crypto.DotnetProxyTrustManager) calls back into native code through
+    the JNI function below. In the NativeAOT link nothing references it, so -gc-sections drops it and the generated
+    version script does not export it: Java throws UnsatisfiedLinkError in checkServerTrusted and every TLS handshake
+    fails. Keep it (undefined root) and add it to the exports list after ILC writes the list, before the native link.
+    Remove once the Android SDK or ILCompiler does this itself.
+  -->
+  <PropertyGroup>
+    <_InboundTlsJniSymbol>Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate</_InboundTlsJniSymbol>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <LinkerArg Include="-Wl,--undefined=$(_InboundTlsJniSymbol)" />
+  </ItemGroup>
+  <Target Name="_InboundExportTlsJniCallback" AfterTargets="IlcCompile" BeforeTargets="LinkNative"
+          Condition="'$(PublishAot)' == 'true' and '$(ExportsFile)' != '' and Exists('$(ExportsFile)')">
+    <PropertyGroup>
+      <_InboundExports>$([System.IO.File]::ReadAllText('$(ExportsFile)'))</_InboundExports>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(ExportsFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="$(_InboundExports.Replace('global:', 'global:%0A        $(_InboundTlsJniSymbol);'))"
+                      Condition="!$(_InboundExports.Contains('$(_InboundTlsJniSymbol)'))" />
+  </Target>
+
 </Project>
