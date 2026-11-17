@@ -164,6 +164,16 @@
   The first Mi 8 Lite run does not count: the throttle is per connection, so it finished in 27 s, before the screen
   went off. Not yet tried: a Recents swipe and a reboot with a real download, 30 minutes with the screen off, the
   Pause all and Resume actions, Android 13 (emulator), battery restricted.
+- **Step 2, S5 (2026-11-17): boot notice on Android 12 and 13, crash-loop guard** (e9b91e4, 665729f). Checked on the
+  Android 13 emulator (`inbound33`, x64 test build): the background check (`run-background.sh`, 100 MB at 60 KB/s per
+  connection) finished with the screen off after 214 s through the foreground service, equal hash, keep-alive off at
+  the end. A reboot during a download posted "1 download paused · Tap to resume" (id 1004; log: "boot: 2 jobs, 1 would
+  resume"; the guard read the reboot as no exit record and reset). Three crashes in a row (`crash_now`, exit reason 5)
+  during a download counted 1, 2, 3 and tripped: the Host started with the download paused and no session. Lead fix
+  found there (665729f): opening the app while tripped said nothing about why the download was paused; the notice
+  ("Downloads paused after repeated errors", id 1005) is now posted at every tripped Host start. Rerun: notice up after
+  the third crash; Resume reset the count and the download ran again. Not tried: the boot notice on a real 12/13 phone
+  (none here), the API 34+ tripped-job path.
 - **Step 2, S3 (2026-11-17): Wi-Fi only on the phone, and the Opus review's eight S2 fixes.** The phone reports the
   network before the Host starts and on every change (`NetworkMonitor`); "Waiting for Wi-Fi · N will resume" with
   "Use data"; a download that can't resume goes on with a warning and Stop when the phone is unlocked, and is stopped at
