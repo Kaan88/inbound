@@ -251,7 +251,7 @@ describe('sorting, filter and footer', () => {
 
 describe('the context menu', () => {
   it('one file', () => {
-    expect(remoteMenu(['newFolder'], [file('a')])).toEqual([['download', 'downloadTo'], ['rename', 'delete', 'newFolder'], ['copyPath', 'copyAddress']]);
+    expect(remoteMenu(['newFolder'], [file('a')])).toEqual([['download', 'downloadTo', 'preview'], ['rename', 'delete', 'newFolder'], ['copyPath', 'copyAddress']]);
   });
   it('one folder can be starred; several cannot be renamed', () => {
     expect(remoteMenu([], [folder('a')]).at(-1)).toEqual(['copyPath', 'copyAddress', 'starFolder']);

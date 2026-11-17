@@ -141,7 +141,7 @@ export function linkedLine(localFolder: string | null | undefined, remoteFolder:
 
 export type RemoteCommand =
   | 'download' | 'downloadTo' | 'rename' | 'delete' | 'newFolder' | 'upload' | 'refresh' | 'pasteAddress'
-  | 'copyAddress' | 'copyPath' | 'starFolder';
+  | 'copyAddress' | 'copyPath' | 'starFolder' | 'preview';
 
 /**
  * The context menu as groups (a separator goes between groups; empty groups are left out). Nothing selected is the
@@ -158,7 +158,7 @@ export function remoteMenu(capabilities: readonly string[] | undefined, selected
     return groups;
   }
   const one = picked.length === 1;
-  groups.push(['download', 'downloadTo']);
+  groups.push(one && !picked[0].isFolder ? ['download', 'downloadTo', 'preview'] : ['download', 'downloadTo']);
   const change: RemoteCommand[] = [];
   if (one) change.push('rename');
   change.push('delete');
@@ -183,6 +183,7 @@ export function commandLabel(command: RemoteCommand): string {
     case 'copyAddress': return 'Copy address';
     case 'copyPath': return 'Copy path';
     case 'starFolder': return 'Star this folder';
+    case 'preview': return 'Preview';
   }
 }
 
@@ -311,20 +312,21 @@ const samePath = (a: string, b: string) => {
  * and the parent of an allowed folder (D:\Downloads gives D:\) is outside what it may use, so an allowed folder itself
  * cannot go up; one inside it can.
  */
-export function uploadSourceProblem(serverPath: string | null | undefined, roots: readonly string[]): string | null {
+export function uploadSourceProblem(serverPath: string | null | undefined, roots: readonly string[], isFolder = true): string | null {
   const path = (serverPath ?? '').trim();
   if (!path) return 'Choose a folder on the server.';
   const root = roots.find((item) => samePath(item, path));
   if (root) return `Choose a folder inside ${root}.`;
+  if (!isFolder) return splitServerFolder(path) ? null : 'Choose a file on the server.';
   if (!splitServerFolder(path)) return 'Choose a folder on the server.';
   return null;
 }
 
-export function serverUpload(siteId: string, remoteFolder: string, serverPath: string, conflict = 'keepBoth', roots: readonly string[] = []): TransferStart | null {
-  if (uploadSourceProblem(serverPath, roots)) return null;
+export function serverUpload(siteId: string, remoteFolder: string, serverPath: string, conflict = 'keepBoth', roots: readonly string[] = [], isFolder = true): TransferStart | null {
+  if (uploadSourceProblem(serverPath, roots, isFolder)) return null;
   const split = splitServerFolder(serverPath);
   if (!split) return null;
-  return { siteId, direction: 'upload', remoteFolder, localFolder: split.parent, names: [{ name: split.name, isFolder: true }], conflict };
+  return { siteId, direction: 'upload', remoteFolder, localFolder: split.parent, names: [{ name: split.name, isFolder }], conflict };
 }
 
 // ---- Copy and paste an address ---------------------------------------------------------------------------------------

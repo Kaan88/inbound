@@ -27,7 +27,7 @@ describe('transfer rows offer only what a transfer supports', () => {
   });
 
   it('a paused batch resumes; a failed one with failed files retries and can be removed', () => {
-    expect(menu([transfer({ state: 'paused' })])).toEqual([['resume'], ['showOnRemote'], ['cancel']]);
+    expect(menu([transfer({ state: 'paused' })])).toEqual([['resume', 'wait'], ['showOnRemote'], ['cancel']]);
     expect(menu([transfer({ state: 'failed', filesFailed: 1, filesRunning: 0 })])).toEqual([['retry'], ['showOnRemote'], ['remove']]);
   });
 
@@ -35,12 +35,12 @@ describe('transfer rows offer only what a transfer supports', () => {
     const groups = menu([transfer({ state: 'done', filesRunning: 0, filesDone: 1 })]).flat();
     expect(groups).toEqual(['showOnRemote', 'remove']);
     const all = ['running', 'paused', 'failed', 'done', 'canceled'].flatMap((state) => menu([transfer({ state, filesFailed: state === 'failed' ? 1 : 0 })]).flat());
-    for (const command of all) expect(['stop', 'resume', 'retry', 'showOnRemote', 'cancel', 'remove']).toContain(command);
+    for (const command of all) expect(['stop', 'resume', 'wait', 'retry', 'showOnRemote', 'cancel', 'remove']).toContain(command);
   });
 
   it('with several rows a command shows when any can take it, and "Show on the remote" only for one', () => {
     const rows = [transfer(), transfer({ id: 't2', state: 'paused' })];
-    expect(menu(rows)).toEqual([['stop', 'resume'], ['cancel']]);
+    expect(menu(rows)).toEqual([['stop', 'resume', 'wait'], ['cancel']]);
     expect(valid('stop', rows[1])).toBe(false);
   });
 

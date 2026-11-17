@@ -37,6 +37,7 @@ export function tabLabel(transfers: readonly SiteTransfer[], tab: TransferTab): 
 }
 
 export const isDownload = (t: Pick<SiteTransfer, 'direction'>) => t.direction === 'download';
+export const isBetween = (t: Pick<SiteTransfer, 'direction'>) => t.direction === 'between';
 
 const number = (value: number) => value.toLocaleString('en-US');
 
@@ -47,25 +48,29 @@ export function countText(t: SiteTransfer): string {
 
 /** The name column: "Download ubuntu.iso", "Download photos (1,204 files)", "Upload 2 files". */
 export function title(t: SiteTransfer): string {
-  const verb = isDownload(t) ? 'Download' : 'Upload';
+  const verb = isBetween(t) ? 'Copy' : isDownload(t) ? 'Download' : 'Upload';
   const picked = t.picked ?? [];
   const pickedCount = t.pickedCount ?? 0;
-  if (pickedCount <= 0 || picked.length === 0) return isDownload(t) ? `Download from ${t.siteName}` : `Upload to ${t.siteName}`;
+  if (pickedCount <= 0 || picked.length === 0) {
+    return isBetween(t) ? `Copy from ${t.siteName} to ${t.targetSiteName ?? 'another remote'}` : isDownload(t) ? `Download from ${t.siteName}` : `Upload to ${t.siteName}`;
+  }
   if (pickedCount === 1) return t.files > 1 || t.folders > 0 ? `${verb} ${picked[0]} (${countText(t)})` : `${verb} ${picked[0]}`;
   return t.folders === 0 && t.files === pickedCount ? `${verb} ${pickedCount} files` : `${verb} ${pickedCount} items`;
 }
 
 /** Where from and to, as the mockup draws it. */
 export function route(t: SiteTransfer): string {
+  if (isBetween(t)) return `${t.siteName} to ${t.targetSiteName ?? ''}`;
   return isDownload(t) ? `${t.siteName} to ${t.localFolder}` : `${t.localFolder} to ${t.siteName} ${t.remoteFolder}`;
 }
 
 export function fullRoute(t: SiteTransfer): string {
+  if (isBetween(t)) return `${t.siteName} ${t.remoteFolder} to ${t.targetSiteName ?? ''} ${t.targetFolder ?? ''}`;
   return isDownload(t) ? `${t.siteName} ${t.remoteFolder} to ${t.localFolder}` : `${t.localFolder} to ${t.siteName} ${t.remoteFolder}`;
 }
 
 /** The phone card's "A to B" line: the remote and the computer Inbound runs on, in the batch's direction. */
-export const routeLine = (t: SiteTransfer, hostName: string) => (isDownload(t) ? `${t.siteName} to ${hostName}` : `${hostName} to ${t.siteName}`);
+export const routeLine = (t: SiteTransfer, hostName: string) => (isBetween(t) ? `${t.siteName} to ${t.targetSiteName ?? ''}` : isDownload(t) ? `${t.siteName} to ${hostName}` : `${hostName} to ${t.siteName}`);
 
 /** How far a batch is, 0 to 100: the bytes done of those still to move, or the files done when no size is known. */
 export function progress(t: SiteTransfer): number {
@@ -87,9 +92,9 @@ export function status(t: SiteTransfer): TransferStatus {
       if (isPreparing(t)) return { text: 'Preparing… (counting files)', kind: 'waiting', percent: null };
       if ((t.filesRunning ?? 0) === 0) return { text: 'Waiting', kind: 'waiting', percent: null };
       const percent = progress(t);
-      return { text: `${isDownload(t) ? 'Downloading' : 'Uploading'} ${percent.toFixed(1)}%`, kind: 'active', percent };
+      return { text: `${isBetween(t) ? 'Copying' : isDownload(t) ? 'Downloading' : 'Uploading'} ${percent.toFixed(1)}%`, kind: 'active', percent };
     }
-    case 'paused': return { text: 'Paused', kind: 'waiting', percent: null };
+    case 'paused': return { text: t.waitsForSchedule ? 'Waits for a schedule' : 'Paused', kind: 'waiting', percent: null };
     case 'failed': return { text: 'Failed', kind: 'failed', percent: null };
     case 'canceled': return { text: 'Canceled', kind: 'neutral', percent: null };
     default:
@@ -149,15 +154,15 @@ export const canCancel = (t: SiteTransfer) => t.state === 'running' || t.state =
 export const canClear = (t: SiteTransfer) => t.state === 'done' || t.state === 'failed' || t.state === 'canceled';
 
 /** The commands the web has for a transfer: the desktop's, minus Open and Open folder (they need this PC's shell). */
-export type TransferCommand = 'stop' | 'resume' | 'retry' | 'showOnRemote' | 'cancel' | 'remove';
+export type TransferCommand = 'stop' | 'resume' | 'wait' | 'retry' | 'showOnRemote' | 'cancel' | 'remove';
 
 export const commandLabel = (command: TransferCommand): string => ({
-  stop: 'Stop', resume: 'Resume', retry: 'Retry', showOnRemote: 'Show on the remote', cancel: 'Cancel transfer', remove: 'Remove from list',
+  stop: 'Stop', resume: 'Resume', wait: 'Wait for a schedule', retry: 'Retry', showOnRemote: 'Show on the remote', cancel: 'Cancel transfer', remove: 'Remove from list',
 })[command];
 
 /** The Host message a command sends. */
 export const commandType = (command: TransferCommand): string | null => ({
-  stop: 'sites.transfer.pause', resume: 'sites.transfer.resume', retry: 'sites.transfer.retry', showOnRemote: null,
+  stop: 'sites.transfer.pause', resume: 'sites.transfer.resume', wait: 'sites.transfer.schedule', retry: 'sites.transfer.retry', showOnRemote: null,
   cancel: 'sites.transfer.cancel', remove: 'sites.transfer.clear',
 })[command];
 
@@ -165,6 +170,7 @@ export function valid(command: TransferCommand, t: SiteTransfer): boolean {
   switch (command) {
     case 'stop': return canPause(t);
     case 'resume': return canResume(t);
+    case 'wait': return t.state === 'paused' && !t.waitsForSchedule;
     case 'retry': return canRetry(t);
     case 'showOnRemote': return true;
     case 'cancel': return canCancel(t);
@@ -175,7 +181,7 @@ export function valid(command: TransferCommand, t: SiteTransfer): boolean {
 /** The menu of the selected rows, in groups: a command shows when it is valid for any selected row; "Show on the remote" for one. */
 export function menu(selection: readonly SiteTransfer[]): TransferCommand[][] {
   if (!selection.length) return [];
-  const layout: TransferCommand[][] = [['stop', 'resume', 'retry'], ['showOnRemote'], ['cancel', 'remove']];
+  const layout: TransferCommand[][] = [['stop', 'resume', 'wait', 'retry'], ['showOnRemote'], ['cancel', 'remove']];
   return layout
     .map((group) => group.filter((command) => (command === 'showOnRemote' ? selection.length === 1 : selection.some((t) => valid(command, t)))))
     .filter((group) => group.length > 0);

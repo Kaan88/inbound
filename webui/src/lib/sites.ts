@@ -55,6 +55,47 @@ export interface Site {
   lastUsedAt?: string | null;
   /** An address opened once: held in memory by the Host, not saved. */
   unsaved?: boolean;
+  /** SITES.13: the last folder and the sort order, kept by the Host with the remote (sites.remember). */
+  lastFolder?: string | null;
+  sort?: string | null;
+  sortDescending?: boolean;
+  /** Speed limits in KB/s, 0 for none. */
+  downLimit?: number;
+  upLimit?: number;
+  scheduledSync?: SiteSyncRequest | null;
+}
+
+export interface SiteSyncRequest {
+  siteId: string;
+  direction: 'download' | 'upload';
+  remoteFolder: string;
+  localFolder?: string | null;
+}
+
+export interface SiteSyncPlan {
+  ok: boolean;
+  message?: string | null;
+  problem?: string | null;
+  direction: string;
+  remoteFolder: string;
+  localFolder: string;
+  files: { path: string; size: number; reason: 'new' | 'changed' }[];
+  count: number;
+  bytes: number;
+  same: number;
+  newerThere: number;
+}
+
+export interface SitePreview {
+  ok: boolean;
+  message?: string | null;
+  problem?: string | null;
+  name: string;
+  kind: 'text' | 'image' | 'none';
+  mimeType?: string | null;
+  data?: string | null;
+  size: number;
+  truncated: boolean;
 }
 
 export interface SiteKind {
@@ -145,6 +186,11 @@ export interface SiteTransfer {
   retryReason?: string | null;
   firstFailedPath?: string | null;
   firstFailedError?: string | null;
+  /** SITES.13: a copy between two remotes names its target; a batch may wait for a schedule. */
+  targetSiteId?: string | null;
+  targetSiteName?: string | null;
+  targetFolder?: string | null;
+  waitsForSchedule?: boolean;
 }
 
 /** What the Add a site form holds; secrets are blank unless typed (a blank one keeps the saved one). */
@@ -169,6 +215,9 @@ export interface SiteForm {
   region: string;
   clientId: string;
   clientSecret: string;
+  /** Speed limits in KB/s as typed; blank is no limit. */
+  downLimit: string;
+  upLimit: string;
 }
 
 export const problems = {
@@ -206,6 +255,8 @@ export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
       region: existing.region ?? '',
       clientId: existing.clientId ?? '',
       clientSecret: '',
+      downLimit: existing.downLimit ? String(existing.downLimit) : '',
+      upLimit: existing.upLimit ? String(existing.upLimit) : '',
     };
   }
   return {
@@ -228,7 +279,25 @@ export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
     region: '',
     clientId: '',
     clientSecret: '',
+    downLimit: '',
+    upLimit: '',
   };
+}
+
+export const maxLimitKb = 10_000_000;
+
+/** A speed limit box: blank is none (0); otherwise whole KB/s up to 10,000,000. Null when the Host would not take it. */
+export function limitValue(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return 0;
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value <= maxLimitKb ? value : null;
+}
+
+export function limitProblem(form: Pick<SiteForm, 'downLimit' | 'upLimit'>): string | null {
+  return limitValue(form.downLimit) === null || limitValue(form.upLimit) === null
+    ? `A speed limit is a whole number of KB/s up to ${maxLimitKb.toLocaleString('en-US')}; leave it empty for no limit.` : null;
 }
 
 /** The sites.save request for a form: only the kind's own fields, and a secret only when one was typed. */
@@ -243,6 +312,8 @@ export function saveRequest(form: SiteForm, kind: SiteKind | undefined): Record<
     remoteFolder: text(form.remoteFolder),
     localFolder: text(form.localFolder) || undefined,
     authMethod: form.authMethod,
+    downLimit: limitValue(form.downLimit) ?? undefined,
+    upLimit: limitValue(form.upLimit) ?? undefined,
   };
   if (fields.has('host')) request.host = text(form.host);
   if (fields.has('port')) request.port = Number(form.port) || kind?.defaultPort || 0;
