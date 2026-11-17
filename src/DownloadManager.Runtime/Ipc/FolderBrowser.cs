@@ -8,8 +8,9 @@ namespace DownloadManager.Runtime.Ipc;
 /// <c>folders.browse</c> and <c>folders.create</c> for a Host whose clients can't show a folder dialog on its disk. Only
 /// folders under the allowed roots are reachable. Every path is resolved first, links and <c>..</c> included, the way
 /// the file system itself would (as <c>realpath</c> does), and the root check and the listing use that resolved path,
-/// so a link inside a root that points outside it leads nowhere. Files are listed only when asked for, and then only
-/// archive files (<see cref="FolderBrowseFiles.Archives"/>), under the same rules as the folders.
+/// so a link inside a root that points outside it leads nowhere. Files are listed only when asked for: the archive files
+/// (<see cref="FolderBrowseFiles.Archives"/>) or all of them (<see cref="FolderBrowseFiles.All"/>, SITES.14), under the
+/// same rules as the folders.
 /// </summary>
 public sealed class FolderBrowser
 {
@@ -37,11 +38,15 @@ public sealed class FolderBrowser
 
     public FolderBrowseResult Browse(string? path) => Browse(path, null);
 
-    /// <param name="files">Null for folders only; <see cref="FolderBrowseFiles.Archives"/> for the archive files too.</param>
+    /// <param name="files">
+    /// Null for folders only; <see cref="FolderBrowseFiles.Archives"/> for the archive files too;
+    /// <see cref="FolderBrowseFiles.All"/> for every file.
+    /// </param>
     public FolderBrowseResult Browse(string? path, string? files)
     {
         var archives = string.Equals(files, FolderBrowseFiles.Archives, StringComparison.Ordinal);
-        if (files is not null && !archives) return Failed("Only archive files can be listed.");
+        var all = string.Equals(files, FolderBrowseFiles.All, StringComparison.Ordinal);
+        if (files is not null && !archives && !all) return Failed("Only archive files or all files can be listed.");
         if (string.IsNullOrWhiteSpace(path))
         {
             return new FolderBrowseResult
@@ -84,15 +89,15 @@ public sealed class FolderBrowser
                 }
             }
 
-            if (archives)
+            if (archives || all)
             {
                 foreach (var file in new DirectoryInfo(real).EnumerateFiles("*", options))
                 {
                     if (!OperatingSystem.IsWindows() && file.Name.StartsWith('.')) continue;
-                    if (!ArchiveNames.IsChooserName(file.Name)) continue;
+                    if (archives && !ArchiveNames.IsChooserName(file.Name)) continue;
                     // As for folders: a link is listed only when what it leads to is inside the roots.
                     if (file.LinkTarget is not null && Allowed(file.FullName) is null) continue;
-                    found.Add(new FolderFileDto { Name = file.Name, Path = file.FullName, Size = SizeOf(file) });
+                    found.Add(new FolderFileDto { Name = file.Name, Path = file.FullName, Size = SizeOf(file), Modified = ModifiedOf(file) });
                     if (found.Count > MaxFolders)
                     {
                         truncated = true;
@@ -164,6 +169,20 @@ public sealed class FolderBrowser
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return 0;
+        }
+    }
+
+    /// <summary>When the file (a link's target) was last written, or null when that can't be read.</summary>
+    private static DateTimeOffset? ModifiedOf(FileInfo file)
+    {
+        try
+        {
+            var info = file.LinkTarget is null ? file : file.ResolveLinkTarget(returnFinalTarget: true) as FileInfo;
+            return info is { Exists: true } ? new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

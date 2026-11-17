@@ -685,7 +685,9 @@ folder dialog) and get `error` "Folder browsing is not available here." A web se
   `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`) and the first piece of a split 7z, zip, RAR or
   tar set (`name.7z.001`); not a lone `.gz` or `.xz`, any other `.001`, or a set's later pieces. Each has `name`,
   `path` and `size` (a link's target's size), under the same rules as the folders (hidden ones left out, a link only
-  when it leads inside the roots, at most 2,000). Any other `files` value is refused.
+  when it leads inside the roots, at most 2,000). `files: "all"` (SITES.14, for the web's "Files on the server" pane)
+  lists every file under the same rules, each also with `modified` (last write, UTC; null when unreadable). Any other
+  `files` value is refused (a Host from before SITES.14 refuses `all` as well, so a client falls back to folders only).
 - `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
   new folder. A name with a slash, a leading or trailing space or a trailing dot, `.`, `..`, a colon, a control
   character, more than 255 bytes, a character or device name Windows can't keep (`<>"|?*`, `CON`) or the app's own
