@@ -711,7 +711,11 @@ whether rclone is a Setup component that can be unticked.
   Owner, 2026-11-18, asked whether a first signed build goes out before steps 4 and 5: "Sign now (Recommended)". So
   next: the signing part of ANDROID.10 pulled forward (a permanent release key kept with the update key in
   Downloads\secrets and in the encrypted secrets backup, never committed; the next APK signed with it; the owner
-  reinstalls once, since the debug-signed app can't be updated in place), then ANDROID.5 (step 4).
+  reinstalls once, since the debug-signed app can't be updated in place), then ANDROID.5 (step 4). Key made
+  2026-11-18: `Downloads\secrets\inbound-android-release.jks` (PKCS12, alias `inbound`, RSA 4096, valid to 2076, cert
+  SHA-256 3746bf5a…8f0457), password in `inbound-android-release.properties` / `.pass` next to it; backed up in the
+  encrypted `inbound-release-secrets` bundle of the private secrets repo (round trip checked). Still to do: sign the
+  release build with it (build property, no password in the repo), the owner's one reinstall.
   Reviews: an Opus agent per milestone (step); Fable once after all milestones ("until completion meant all the
   milestones, until then use opus for single mileston reviews"). Then (2026-11-17): "after first version finishes,
   have it review": Fable reviews the queue once the first usable APK is on the owner's desktop.

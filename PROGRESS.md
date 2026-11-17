@@ -2,6 +2,17 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Android release key and cleanup (2026-11-18).** Owner: "put the signing key to my repo" with the secrets repo's
+  encryption key. The Android release key was generated (there was none; the app was debug-signed):
+  `Downloads\secrets\inbound-android-release.jks` (PKCS12, alias `inbound`, RSA 4096, valid to 2076, cert SHA-256
+  3746bf5a…8f0457) with its password in `inbound-android-release.properties` and `.pass`. Added to the encrypted
+  `inbound-release-secrets` bundle in the private secrets repo with the existing key file (read only; unchanged since
+  2026-11-11), decrypted again and compared file by file, uploaded, the remote copy compared with the verified one, and
+  the repo's README updated. A first try failed before any upload (Git Bash's openssl could not open the key file by its
+  /c/ path). Not committed anywhere else. Cleanup: emulators stopped; the step 3 agent's AndroidTrialServer (port
+  5601) stopped; merged worktrees and branches removed (fable, fix36, s3, s6); key copies and the broken APK deleted from
+  the scratch folder; no adb reverse or test file left on the S24. Next: sign the release build with the key, then
+  step 4.
 - **Android status (2026-11-18, d9f45a6e).** Step 2 (ANDROID.3) done. Steps 3 and 6 (ANDROID.4, ANDROID.7) built,
   reviewed by Opus and Fable, fixes approved by the same Fable agent, and in use on the owner's S24; still partial
   (ANDROID.4: light mode, dynamic colour, TalkBack on a phone; ANDROID.7: a publicly trusted https server, https
