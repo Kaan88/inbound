@@ -206,6 +206,7 @@ public sealed class HostDirectoryTests
 
         Assert.True(hosts.Select(paired.Id));
         Assert.Equal(paired.Id, hosts.Current.Id);
+        await hosts.SavedAsync();
         Assert.Equal(paired.Id, list.Saved.CurrentId);
         Assert.True(hosts.Capabilities.IsRemote);
         Assert.False(hosts.Capabilities.CanOpenFiles);
@@ -262,6 +263,7 @@ public sealed class HostDirectoryTests
         Assert.IsType<RemoteHostConnection>(connection);
         await connection.OpenAsync(_ => { }, CancellationToken.None);
         await Until.TrueAsync(() => hosts.Hosts[1].HostKind == HostKinds.Linux, "the kind was noted");
+        await hosts.SavedAsync();
         Assert.Equal(HostKinds.Linux, list.Saved.Servers[0].HostKind);
     }
 

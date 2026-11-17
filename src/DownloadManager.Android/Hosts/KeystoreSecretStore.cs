@@ -10,8 +10,10 @@ namespace Inbound.App.Hosts;
 /// <summary>
 /// The paired servers' tokens (ANDROID.7), encrypted with AES-256-GCM under a key that lives in the Android Keystore and
 /// never leaves it. Only the IV and the ciphertext are written, to the app's private preferences (the app has
-/// allowBackup="false", so they are not backed up either). A token that can't be decrypted any more (the key was reset)
-/// reads as null and the host asks to be paired again. Nothing here is ever logged.
+/// allowBackup="false" and data extraction rules that exclude everything, so they are neither backed up nor carried to a
+/// new phone by a device-to-device transfer). A token that can't be decrypted any more (the key was reset) reads as null
+/// and the host asks to be paired again. A key the Keystore can't use any more is replaced at the next write. Nothing
+/// here is ever logged.
 /// </summary>
 internal sealed class KeystoreSecretStore(Context context) : ISecretStore
 {
@@ -51,8 +53,23 @@ internal sealed class KeystoreSecretStore(Context context) : ISecretStore
     {
         lock (Gate)
         {
-            var cipher = Cipher.GetInstance(Transformation)!;
-            cipher.Init(CipherMode.EncryptMode, ExistingKey() ?? NewKey());
+            Cipher cipher;
+            try
+            {
+                cipher = Cipher.GetInstance(Transformation)!;
+                cipher.Init(CipherMode.EncryptMode, ExistingKey() ?? NewKey());
+            }
+            catch (Java.Lang.Exception)
+            {
+                // The key is there but unusable (invalidated, or the Keystore lost it): every write would fail and so every
+                // pairing. A new key, once; tokens under the old one could not be read any more anyway (Fable finding 5).
+                var store = KeyStore.GetInstance(KeyStoreName)!;
+                store.Load(null);
+                store.DeleteEntry(Alias);
+                cipher = Cipher.GetInstance(Transformation)!;
+                cipher.Init(CipherMode.EncryptMode, NewKey());
+            }
+
             var sealedBytes = cipher.DoFinal(System.Text.Encoding.UTF8.GetBytes(secret))!;
             var saved = Convert.ToBase64String(cipher.GetIV()!) + ":" + Convert.ToBase64String(sealedBytes);
             // Commit, not Apply: the pairing is reported as saved only once it is on disk.

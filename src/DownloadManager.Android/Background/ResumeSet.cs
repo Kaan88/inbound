@@ -9,7 +9,8 @@ namespace Inbound.App.Background;
 
 /// <summary>
 /// The downloads a notification's "Resume" restarts (<see cref="ResumeList"/>), kept in the state folder with an atomic write: Pause all adds
-/// what it paused, a start the crash guard paused adds what that start paused, and Resume takes the list, resumes those and clears it.
+/// what it is about to pause (before pausing), a start the crash guard paused adds what that start paused, and Resume reads the list,
+/// resumes those still paused and then takes them out.
 /// </summary>
 internal static class ResumeSet
 {
@@ -62,19 +63,31 @@ internal static class ResumeSet
         catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "resume set: " + ex.Message); return 0; }
     }
 
-    /// <summary>The list, emptied (Resume takes it once).</summary>
-    public static IReadOnlyList<Guid> Take(Context c)
+    /// <summary>The list as it is (Resume reads it, resumes, then <see cref="Remove"/>s what it read).</summary>
+    public static IReadOnlyList<Guid> Peek(Context c)
     {
+        try
+        {
+            lock (Gate) return ReadLocked(c);
+        }
+        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "resume set: " + ex.Message); return []; }
+    }
+
+    /// <summary>Takes <paramref name="ids"/> out of the list; ids added meanwhile stay.</summary>
+    public static void Remove(Context c, IEnumerable<Guid> ids)
+    {
+        var list = ids.ToList();
+        if (list.Count == 0) return;
         try
         {
             lock (Gate)
             {
-                var ids = ReadLocked(c);
-                if (ids.Count > 0) WriteLocked(c, []);
-                return ids;
+                var existing = ReadLocked(c);
+                var left = ResumeList.Without(existing, list);
+                if (left.Count != existing.Count) WriteLocked(c, left);
             }
         }
-        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "resume set: " + ex.Message); return []; }
+        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "resume set: " + ex.Message); }
     }
 
     /// <summary>
@@ -91,10 +104,14 @@ internal static class ResumeSet
             try
             {
                 var host = await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
-                var ids = Take(app);
+                // Read, resume, then clear: a process killed in between keeps the list, and a second Resume restarts only
+                // what is still paused (Fable finding 15).
+                var ids = Peek(app);
+                var toResume = ResumeList.ToResume(ids, id => host.Service.GetJob(id)?.State);
                 var resumed = 0;
-                foreach (var id in ids)
+                foreach (var id in toResume)
                     if ((await host.Service.ResumeAsync(id).ConfigureAwait(false)).Ok) resumed++;
+                Remove(app, ids);
                 Log.Info(InboundApplication.Tag, $"resume ({why}): {resumed} of {ids.Count} remembered download(s)");
                 InboundBackground.Evaluate();
             }

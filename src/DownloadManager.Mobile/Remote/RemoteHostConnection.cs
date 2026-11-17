@@ -18,7 +18,12 @@ public enum RemoteConnectionStatus
     /// <summary>The screen is not shown: the socket is closed on purpose and nothing is tried.</summary>
     Paused,
 
-    /// <summary>Trying again can't help (the pairing ended, plain http may not be used, or the certificate is not the trusted one): nothing more is tried.</summary>
+    /// <summary>
+    /// Trying again can't help by itself: the pairing ended or plain http may not be used (nothing more is tried), or the
+    /// certificate is not the trusted one. A refused certificate can be passing (a network that intercepts connections, a
+    /// clock not yet set after boot), so that one is tried again on a network change, when the screen is shown again, and
+    /// once a minute while shown.
+    /// </summary>
     Stopped,
 }
 
@@ -39,7 +44,8 @@ public sealed record RemoteConnectionState(RemoteConnectionStatus Status, string
 /// </para>
 /// <para>
 /// Reconnecting waits 2 s, then twice as long each time, up to about a minute (<see cref="ReconnectBackoff"/>). A token the
-/// server refuses, or plain http the user didn't allow, stops it for good (<see cref="RemoteConnectionStatus.Stopped"/>).
+/// server refuses, or plain http the user didn't allow, stops it for good (<see cref="RemoteConnectionStatus.Stopped"/>). A
+/// refused certificate shows as stopped too, but is tried again (no token is sent before the certificate is accepted).
 /// No polling: while connected only the server's pushes and the socket's keep-alive move; while not shown
 /// (<see cref="SetActive"/> false) the socket is closed and nothing runs at all. The keep-alive is a ping every
 /// <see cref="KeepAliveInterval"/> that must be answered within <see cref="KeepAliveTimeout"/>, so a server that vanished
@@ -97,6 +103,10 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
     private Task? _loop;
     private bool _active = true;
     private bool _stopped;
+    // The last try's certificate was refused: shown as Stopped, commands fail at once, but the loop tries again (Fable finding 3).
+    private bool _refused;
+    // Environment.TickCount64 of the last frame read from the server (any session).
+    private long _lastFrameAt;
     private bool _disposed;
     private bool _gotSnapshot;
     private RemoteConnectionState _state = new(RemoteConnectionStatus.Connecting, null);
@@ -202,7 +212,7 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_stopped) throw new RemoteServerException(_state.Message ?? RemoteWords.NotConnected(_target.Name));
+            if (_stopped || _refused) throw new RemoteServerException(_state.Message ?? RemoteWords.NotConnected(_target.Name));
             ready = _ready.Task;
         }
 
@@ -218,18 +228,28 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
 
         var completion = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.Id] = completion;
+        var sentAt = Environment.TickCount64;
         try
         {
+            // Registered after the session ended (its FailPending already ran): fail now instead of waiting out the timeout.
+            // The session resets _ready under the gate before failing what is pending, so one of the two always sees this one.
+            lock (_gate)
+            {
+                if (!_ready.Task.IsCompletedSuccessfully || !ReferenceEquals(_ready.Task.Result, client))
+                    throw new IOException(RemoteWords.Lost(_target.Name));
+            }
+
             // The caller's token never reaches the socket's send: cancelling it there would abort the whole socket, not
             // this one call. The caller stops waiting instead; the send itself is bounded by the socket (finding 1).
             await client.SendAsync(request, CancellationToken.None).WaitAsync(cancellationToken).ConfigureAwait(false);
-            return await completion.Task.WaitAsync(_replyTimeout, cancellationToken).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(ReplyTimeoutFor(request), cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException ex)
         {
             // No reply from a socket that looks open: it may be dead without a close. That session ends and the loop connects
-            // again (and the strip says so) instead of every command waiting out its own timeout.
-            DropSession(client);
+            // again (and the strip says so) instead of every command waiting out its own timeout. A server that sent other
+            // frames meanwhile is alive and only slow with this one: its session stays (Fable finding 16).
+            if (Interlocked.Read(ref _lastFrameAt) <= sentAt) DropSession(client);
             throw new RemoteServerException(RemoteWords.Failure(_target.Name, ex));
         }
         catch (ObjectDisposedException) when (!Disposed)
@@ -241,6 +261,17 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         {
             _pending.TryRemove(request.Id, out _);
         }
+    }
+
+    /// <summary>
+    /// A removal that deletes files can take long on the server (many or large files, a slow disk): it gets the slow
+    /// commands' wait. Every other quick command gets the usual one.
+    /// </summary>
+    private TimeSpan ReplyTimeoutFor(IpcMessage request)
+    {
+        if (request.Type != MessageTypes.JobRemove) return _replyTimeout;
+        try { return request.GetPayload<JobActionRequest>().DeleteFile ? SlowReplyTimeout : _replyTimeout; }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException or NotSupportedException) { return _replyTimeout; }
     }
 
     /// <summary>Ends the session of <paramref name="client"/> if it is still the current one.</summary>
@@ -257,7 +288,7 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         get { lock (_gate) return _disposed; }
     }
 
-    private enum Outcome { Retry, Asked, Stop }
+    private enum Outcome { Retry, Asked, Stop, Refused }
 
     private async Task RunAsync(CancellationToken stop)
     {
@@ -304,7 +335,9 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
             if (outcome == Outcome.Asked) continue;
             try
             {
-                await wake.WaitAsync(_backoff.Next(), stop).ConfigureAwait(false);
+                // A refused certificate waits for a network change, the screen shown again, or the longest wait.
+                var wait = outcome == Outcome.Refused ? _backoff.Maximum : _backoff.Next();
+                await wake.WaitAsync(wait, stop).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -353,7 +386,13 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
                 catch (Exception e) { _onError?.Invoke(e); }
             }
 
-            while (await client.ReadAsync(token).ConfigureAwait(false) is { } message) Handle(message);
+            lock (_gate) _refused = false;
+            while (await client.ReadAsync(token).ConfigureAwait(false) is { } message)
+            {
+                Interlocked.Exchange(ref _lastFrameAt, Environment.TickCount64);
+                Handle(message);
+            }
+
             SetState(RemoteConnectionStatus.Retrying, RemoteWords.Lost(_target.Name));
             return Outcome.Retry;
         }
@@ -361,11 +400,18 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         {
             return Outcome.Asked;
         }
-        catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException or ServerCertificateRefusedException)
+        catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
         {
             lock (_gate) _stopped = true;
             SetState(RemoteConnectionStatus.Stopped, RemoteWords.Failure(_target.Name, ex));
             return Outcome.Stop;
+        }
+        catch (ServerCertificateRefusedException ex)
+        {
+            // Not for good: a captive portal or a clock not yet set refuses the same way, and nothing was sent (Fable finding 3).
+            lock (_gate) _refused = true;
+            SetState(RemoteConnectionStatus.Stopped, RemoteWords.Failure(_target.Name, ex));
+            return Outcome.Refused;
         }
         catch (Exception ex)
         {
@@ -539,7 +585,7 @@ public static class RemoteWords
     public static string Failure(string name, Exception ex) => ex switch
     {
         RemotePairingEndedException => $"{name} no longer accepts this phone. Remove it from the host list and connect to it again.",
-        ServerCertificateRefusedException => $"{name} showed a certificate that isn't the one this phone trusts for it. If it has a new certificate, remove it from the host list and connect to it again.",
+        ServerCertificateRefusedException => $"{name} showed a certificate that isn't the one this phone trusts for it. A network that intercepts connections (a hotel or café sign-in page) looks the same, so compare the fingerprint before trusting a new certificate. If {name} has a new certificate, remove it from the host list and connect to it again.",
         PlainHttpNotConfirmedException => $"{name}'s address starts with http://, and sending its sign-in unencrypted wasn't allowed. Connect to it again to allow that.",
         ProtocolMismatchException => $"{name} runs a version of Inbound this app can't talk to. Update both to the same release.",
         RemoteServerException => ex.Message.Contains("again", StringComparison.Ordinal) ? ex.Message : ex.Message + " Trying again shortly.",

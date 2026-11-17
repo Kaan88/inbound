@@ -3,6 +3,7 @@ using Android.App.Job;
 using Android.Content;
 using Android.OS;
 using Android.Util;
+using DownloadManager.Mobile;
 
 [assembly: UsesPermission("android.permission.POST_NOTIFICATIONS")]
 [assembly: UsesPermission("android.permission.FOREGROUND_SERVICE")]
@@ -127,9 +128,13 @@ internal sealed class PauseAllReceiver : BroadcastReceiver
             try
             {
                 var host = await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
+                // Resume restarts these, and only these. Written before the pause, so a process killed right after it loses
+                // nothing; what the pause did not pause after all is taken out again (Fable finding 15).
+                var candidates = ResumeList.PauseCandidates(host.Service.GetSnapshot().Jobs);
+                ResumeSet.Add(app, candidates, "pause all");
                 var paused = await host.Service.PauseAllAsync().ConfigureAwait(false);
-                // Resume restarts these, and only these.
                 ResumeSet.Add(app, paused, "pause all");
+                ResumeSet.Remove(app, candidates.Except(paused));
                 // After the pause: the news is "paused" only once it has happened.
                 InboundBackground.MarkPauseAll();
                 Log.Info(InboundApplication.Tag, "pause all (notification)");

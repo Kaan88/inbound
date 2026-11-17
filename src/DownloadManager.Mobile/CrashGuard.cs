@@ -62,6 +62,14 @@ public static class CrashGuard
     public static CrashGuardState SessionEnded(CrashGuardState s, byte[] runId) =>
         s.SessionRunId is { } own && own.AsSpan().SequenceEqual(runId) ? new CrashGuardState(0, null) : s;
 
+    /// <summary>
+    /// A command only the user sends that starts downloads (add, resume, retry, download again, resume all): it resets a tripped
+    /// guard. A download the queue starts on its own does not, even with the app visible (Fable finding 9).
+    /// </summary>
+    public static bool IsUserStart(string messageType) => messageType is DownloadManager.Contracts.MessageTypes.JobAdd
+        or DownloadManager.Contracts.MessageTypes.JobResume or DownloadManager.Contracts.MessageTypes.JobRetry
+        or DownloadManager.Contracts.MessageTypes.JobRedownload or DownloadManager.Contracts.MessageTypes.JobsResumeAll;
+
     /// <summary>The user resumed: the guard starts over.</summary>
     public static CrashGuardState Reset(CrashGuardState s) => s with { Count = 0 };
 

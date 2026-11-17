@@ -49,7 +49,7 @@ public sealed class MainActivity : AppCompatActivity
         // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
         // chip and the "Files are saved on ..." strip go in the search bar's slots. Hosts/HostChoice.cs, Hosts/HostBar.cs. ---
         _connection = Hosts.HostChoice.Connect(this, () => new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
-            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e)));
+            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e), Background.InboundBackground.UserStartedDownloads));
         var hosts = Hosts.HostChoice.Hosts(this);
         Capabilities = hosts.Capabilities;
         HostName = hosts.Current.Name;

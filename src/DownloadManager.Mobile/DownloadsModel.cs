@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using DownloadManager.Contracts;
 
 namespace DownloadManager.Mobile;
@@ -55,7 +56,8 @@ public sealed class DownloadsModel : IDisposable
         _timer = new Timer(_ => Flush(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
-    public ObservableCollection<JobRow> Rows { get; } = new();
+    /// <summary>The rows, newest first. The snapshot arrives as one <see cref="NotifyCollectionChangedAction.Reset"/>, later jobs one by one.</summary>
+    public RowCollection Rows { get; } = new();
 
     /// <summary>The folder new downloads go to when none is named, from the snapshot's settings; empty until the snapshot is shown.</summary>
     public string DefaultDownloadDirectory { get; private set; } = "";
@@ -65,6 +67,9 @@ public sealed class DownloadsModel : IDisposable
 
     /// <summary>The Host's last hello (its kind and what it offers, such as folder browsing); null until it has said.</summary>
     public HostHelloDto? Hello { get; private set; }
+
+    /// <summary>True (on the UI thread) once the snapshot is shown: <see cref="Settings"/> are the Host's, not defaults.</summary>
+    public bool SnapshotShown => _shown;
 
     /// <summary>Raised on the UI thread once, after the snapshot's rows are in <see cref="Rows"/> (also for an empty snapshot).</summary>
     public event Action? FirstSnapshotShown;
@@ -142,14 +147,19 @@ public sealed class DownloadsModel : IDisposable
     {
         if (Disposed) return;
         ApplySettings(snap.Settings ?? new SettingsDto());
+        // One Reset for the whole snapshot: a row at a time made every listener rebuild per row, quadratic for a long list
+        // on the UI thread (Fable review, finding 4).
+        var rows = new List<JobRow>(snap.Jobs.Count);
         foreach (var j in snap.Jobs.OrderByDescending(x => x.CreatedAt))
         {
             var row = new JobRow { Id = j.Id };
             row.ApplyFrom(j);
             _byId[j.Id] = row;
             _shownAt[j.Id] = j.UpdatedAt;
-            Rows.Add(row);
+            rows.Add(row);
         }
+
+        Rows.Load(rows);
 
         _shown = true;
         FirstSnapshotShown?.Invoke();
@@ -334,6 +344,21 @@ public sealed class DownloadsModel : IDisposable
             _disposed = true;
             _timer.Dispose();
         }
+    }
+}
+
+/// <summary>The model's rows: an <see cref="ObservableCollection{T}"/> that can take many rows with one change notice.</summary>
+public sealed class RowCollection : ObservableCollection<JobRow>
+{
+    /// <summary>Replaces the contents with <paramref name="rows"/> and raises one <see cref="NotifyCollectionChangedAction.Reset"/>.</summary>
+    public void Load(IEnumerable<JobRow> rows)
+    {
+        CheckReentrancy();
+        Items.Clear();
+        foreach (var row in rows) Items.Add(row);
+        OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 }
 

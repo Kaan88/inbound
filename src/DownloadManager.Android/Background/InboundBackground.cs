@@ -145,6 +145,15 @@ internal static class InboundBackground
 
     private static void OnChanged() => Evaluate();
 
+    /// <summary>The user sent a command that starts downloads (through the app's own connection): a tripped guard starts over.</summary>
+    public static void UserStartedDownloads()
+    {
+        if (!CrashGuardStore.Tripped) return;
+        CrashGuardStore.Reset("the user started or resumed a download in the app");
+        lock (Gate) _guardLogged = false;
+        Evaluate();
+    }
+
     /// <summary>A session (job or service) has started and posted its plain notification: the next look replaces it with the real one.</summary>
     public static void SessionStarted()
     {
@@ -181,14 +190,11 @@ internal static class InboundBackground
             {
                 if (CrashGuardStore.Tripped)
                 {
-                    // Repeated crashes during downloads: no session starts on its own. The user is in control only when the app is visible and
-                    // something is running again (they resumed it): then the guard starts over.
-                    if (_visible && s.ActiveCount > 0) CrashGuardStore.Reset("a download was resumed in the app");
-                    else
-                    {
-                        if (!_guardLogged) { _guardLogged = true; Log.Warn(InboundApplication.Tag, "crash guard tripped: no session started"); }
-                        return;
-                    }
+                    // Repeated crashes during downloads: no session starts on its own. Only a command of the user (resume, add, retry
+                    // in the app, or Resume in the notification) starts the guard over (UserStartedDownloads); a download the queue
+                    // started while the app was visible does not (Fable finding 9).
+                    if (!_guardLogged) { _guardLogged = true; Log.Warn(InboundApplication.Tag, "crash guard tripped: no session started"); }
+                    return;
                 }
 
                 // Something runs again (a resume, a new start): "paused" is no longer the news.

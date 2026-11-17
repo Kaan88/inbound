@@ -45,6 +45,12 @@ public sealed class HostDirectory
     private readonly AskCall _ask;
     private readonly UnpairCall _unpair;
     private readonly HostEntry _phone = new();
+    // Writes of hosts.json, newest wins: a change takes a copy and a version under _gate, the write runs under _fileGate (never
+    // the other way round), and a copy older than what is on disk is not written.
+    private readonly object _fileGate = new();
+    private long _version;
+    private long _written;
+    private Task _lastSave = Task.CompletedTask;
     private HostListData _data;
 
     /// <param name="clientName">The name the server lists this phone under, such as "Inbound on Galaxy S24 FE".</param>
@@ -97,7 +103,7 @@ public sealed class HostDirectory
             if (Find(id) is null) return false;
             if (_data.CurrentId == id) return true;
             _data.CurrentId = id;
-            SaveQuietly();
+            SaveBehind();
         }
 
         Changed?.Invoke();
@@ -182,7 +188,7 @@ public sealed class HostDirectory
                 var index = existing is null ? -1 : _data.Servers.IndexOf(existing);
                 if (index >= 0) _data.Servers[index] = entry;
                 else _data.Servers.Add(entry);
-                try { _store.Save(_data); }
+                try { Write(Copy(), ++_version); }
                 catch
                 {
                     if (index >= 0) _data.Servers[index] = existing!;
@@ -224,20 +230,31 @@ public sealed class HostDirectory
     /// </summary>
     public async Task<bool> RemoveAsync(string id, CancellationToken cancellationToken = default)
     {
-        ServerTarget? target;
+        HostEntry removed;
+        HostListData data;
+        long version;
         lock (_gate)
         {
             var entry = _data.Servers.FirstOrDefault(s => s.Id == id);
             if (entry is null) return true;
-            target = TargetFor(entry);
+            removed = entry.Copy();
             _data.Servers.Remove(entry);
             if (_data.CurrentId == id) _data.CurrentId = HostEntry.PhoneId;
-            SaveQuietly();
-            try { _secrets.Delete(SecretPrefix + id); }
-            catch (Exception e) when (e is not OutOfMemoryException) { /* the entry is gone, so the secret is never read again */ }
+            data = Copy();
+            version = ++_version;
         }
 
         Changed?.Invoke();
+        // The file and the Keystore off the caller's thread, the UI's (Fable finding 12). The token is read for the unpair
+        // before it is deleted; the entry is already gone from the list, so nothing else reads it.
+        var target = await Task.Run(() =>
+        {
+            WriteQuietly(data, version);
+            var found = TargetFor(removed);
+            try { _secrets.Delete(SecretPrefix + id); }
+            catch (Exception e) when (e is not OutOfMemoryException) { /* the entry is gone, so the secret is never read again */ }
+            return found;
+        }, CancellationToken.None).ConfigureAwait(false);
         if (target is null) return false;
         try { return await _unpair(target, cancellationToken).ConfigureAwait(false); }
         catch (Exception e) when (e is not OutOfMemoryException) { return false; }
@@ -282,15 +299,44 @@ public sealed class HostDirectory
             if (entry.HostKind == (hostKind ?? entry.HostKind) && entry.LastSeenAt is { } last && now - last < TimeSpan.FromMinutes(1)) return;
             entry.HostKind = hostKind ?? entry.HostKind;
             entry.LastSeenAt = now;
-            SaveQuietly();
+            // Not on the caller's thread: that is a connection's read loop (Fable finding 12).
+            SaveBehind();
         }
 
         Changed?.Invoke();
     }
 
-    private void SaveQuietly()
+    /// <summary>Completes when the changes made so far are written (or failed to be): for tests.</summary>
+    public Task SavedAsync()
     {
-        try { _store.Save(_data); }
+        lock (_gate) return _lastSave;
+    }
+
+    // Under _gate.
+    private HostListData Copy() => new() { Version = _data.Version, CurrentId = _data.CurrentId, Servers = _data.Servers.Select(s => s.Copy()).ToList() };
+
+    /// <summary>Under _gate: the list as it is now is written on a pool thread.</summary>
+    private void SaveBehind()
+    {
+        var data = Copy();
+        var version = ++_version;
+        _lastSave = _lastSave.ContinueWith(_ => WriteQuietly(data, version), CancellationToken.None,
+            TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    private void Write(HostListData data, long version)
+    {
+        lock (_fileGate)
+        {
+            if (version <= _written) return; // a newer list is already on disk
+            _store.Save(data);
+            _written = version;
+        }
+    }
+
+    private void WriteQuietly(HostListData data, long version)
+    {
+        try { Write(data, version); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Shown as chosen for this run; the next start shows what was last saved.

@@ -63,7 +63,7 @@ internal sealed class AndroidHost : IAsyncDisposable
     private readonly Action<string> _say;
 
     private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, ActivityState activity,
-        ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, Action<string> say)
+        ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, EventHandler<AppSettings> onSettings, Action<string> say)
     {
         Service = service;
         Dispatcher = dispatcher;
@@ -72,12 +72,14 @@ internal sealed class AndroidHost : IAsyncDisposable
         _sleep = sleep;
         _onJob = onJob;
         _onWait = onWait;
+        _onSettings = onSettings;
         _say = say;
     }
 
     private readonly ISleepPrevention _sleep;
     private readonly EventHandler<JobChangeEventArgs> _onJob;
     private readonly EventHandler<bool> _onWait;
+    private readonly EventHandler<AppSettings> _onSettings;
 
     /// <summary>What the keep-alive and the notifications read: fed by the service's job events, snapshot first.</summary>
     public ActivityState Activity { get; }
@@ -131,8 +133,11 @@ internal sealed class AndroidHost : IAsyncDisposable
         var activity = new ActivityState();
         EventHandler<JobChangeEventArgs> onJob = (_, e) => activity.OnJobChanged(e.Job, e.ChangeType);
         EventHandler<bool> onWait = (_, waiting) => activity.SetNetworkWait(waiting);
+        // A queue started or stopped (or the queues changed): its queued jobs do or don't keep the process alive (Fable finding 8).
+        EventHandler<AppSettings> onSettings = (_, settings) => activity.SetQueues(DownloadManagerService.MapSettings(settings).Queues);
         service.JobChanged += onJob;
         service.MeteredWaitChanged += onWait;
+        service.SettingsChanged += onSettings;
         try
         {
             // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
@@ -160,12 +165,13 @@ internal sealed class AndroidHost : IAsyncDisposable
             activity.ApplySnapshot(snapshot.Jobs, snapshot.Status, snapshot.Settings.Queues);
             var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log);
             dispatcher.Start();
-            return new AndroidHost(service, dispatcher, engine, activity, sleep, onJob, onWait, say);
+            return new AndroidHost(service, dispatcher, engine, activity, sleep, onJob, onWait, onSettings, say);
         }
         catch (Exception startError)
         {
             service.JobChanged -= onJob;
             service.MeteredWaitChanged -= onWait;
+            service.SettingsChanged -= onSettings;
             activity.Dispose();
             // Nothing half-started may keep writing to the state folder: a later start must be the only writer.
             try { await service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
@@ -187,6 +193,7 @@ internal sealed class AndroidHost : IAsyncDisposable
         Dispatcher.Stop();
         Service.JobChanged -= _onJob;
         Service.MeteredWaitChanged -= _onWait;
+        Service.SettingsChanged -= _onSettings;
         Activity.Dispose();
         try { await Service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] shutdown: " + ex.GetType().Name + ": " + ex.Message); }

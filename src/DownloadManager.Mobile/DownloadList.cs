@@ -278,6 +278,16 @@ public sealed class DownloadList : IDisposable
         return new DeletePlan(rows.Count, withFiles, title);
     }
 
+    /// <summary>The rows' groups when a delete was asked, to tell later whether they changed.</summary>
+    public static RowGroup[] Groups(IReadOnlyList<JobRow> rows) => rows.Select(r => r.Group).ToArray();
+
+    /// <summary>
+    /// True when a delete question asked with <paramref name="plan"/> and <paramref name="groups"/> still fits the rows: none
+    /// changed its group (a download that finished meanwhile) and the files to delete are the same count.
+    /// </summary>
+    public static bool SamePlan(IReadOnlyList<JobRow> rows, DeletePlan plan, IReadOnlyList<RowGroup> groups) =>
+        rows.Count == groups.Count && rows.Select(r => r.Group).SequenceEqual(groups) && PlanDelete(rows) == plan;
+
     private static string Shorten(string name) => name.Length <= 36 ? name : name[..33] + "...";
 
     public void Dispose()

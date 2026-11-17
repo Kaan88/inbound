@@ -102,11 +102,16 @@ internal sealed class NewDownloadScreen
         UpdateButton();
     }
 
+    // A connection count restored before the Host's settings came: kept until they come, then clamped to their limit, not
+    // to the default limit of settings not yet known (Fable finding 14).
+    private int? _restoredConnections;
+
     // The folder and the connection limit come from the Host's settings; a value the user chose stays, within the new limit.
     private void ShowSettings()
     {
         _showSaveTo?.Invoke();
-        _model.Connections = Math.Clamp(_model.Connections, 1, _model.MaxConnections);
+        _model.Connections = Math.Clamp(_restoredConnections ?? _model.Connections, 1, _model.MaxConnections);
+        if (_host.SnapshotShown) _restoredConnections = null;
         if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
         else
         {
@@ -140,9 +145,8 @@ internal sealed class NewDownloadScreen
         _referrer.Text = state.GetString("referrer");
         _description.Text = state.GetString("description");
         _sha.Text = state.GetString("sha");
-        _model.Connections = Math.Clamp(state.GetInt("connections", _model.Connections), 1, _model.MaxConnections);
-        if (_connectionsBlock.Visibility == ViewStates.Visible) _slider.Value = _model.Connections;
-        _connectionsValue.Text = _model.Connections.ToString();
+        _restoredConnections = Math.Max(1, state.GetInt("connections", _model.Connections));
+        ShowSettings();
         if (state.GetString("destination") is { Length: > 0 } destination) { _model.Destination = destination; _showSaveTo?.Invoke(); }
         var exists = (ConflictChoice)state.GetInt("exists", (int)ConflictChoice.Rename);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.Check(exists switch

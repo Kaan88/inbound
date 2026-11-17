@@ -140,7 +140,8 @@ internal sealed class InProcessSession : IClientSession
 }
 
 /// <summary><see cref="IHostConnection"/> over an <see cref="InProcessSession"/> and the in-process dispatcher.</summary>
-internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, Action<Exception>? onError = null) : IHostConnection
+/// <param name="onUserStart">Told before a command of the user that starts downloads (<see cref="CrashGuard.IsUserStart"/>): it lifts a tripped crash guard.</param>
+internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, Action<Exception>? onError = null, Action? onUserStart = null) : IHostConnection
 {
     private readonly InProcessSession _session = new() { OnError = onError };
 
@@ -167,6 +168,8 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
     {
         // A closed screen sends nothing to the Host (a command after dispose ran there before).
         ObjectDisposedException.ThrowIf(_session.Closed, this);
+        // The user starting downloads is what lifts a tripped crash guard (never a queue start of its own).
+        if (onUserStart is not null && CrashGuard.IsUserStart(request.Type)) onUserStart();
         var reply = _session.ExpectReplyAsync(request);
         try
         {
@@ -195,7 +198,7 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
 /// then waits for the session (and fails if the Host could not start). Disposing at any point, even while the Host is
 /// still starting, leaves no session registered.
 /// </summary>
-internal sealed class LazyInProcessConnection(Task<HostCommandDispatcher> host, Action<Exception>? onError = null) : IHostConnection
+internal sealed class LazyInProcessConnection(Task<HostCommandDispatcher> host, Action<Exception>? onError = null, Action? onUserStart = null) : IHostConnection
 {
     private readonly object _gate = new();
     private readonly TaskCompletionSource<InProcessHostConnection> _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -211,7 +214,7 @@ internal sealed class LazyInProcessConnection(Task<HostCommandDispatcher> host, 
             lock (_gate)
             {
                 if (_disposed) return;
-                _inner = inner = new InProcessHostConnection(started, onError);
+                _inner = inner = new InProcessHostConnection(started, onError, onUserStart);
             }
 
             await inner.OpenAsync(onFrame, cancellationToken).ConfigureAwait(false);

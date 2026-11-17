@@ -192,6 +192,7 @@ internal static class DeleteFlow
     public static void Confirm(Context c, IReadOnlyList<JobRow> rows, bool canDeleteFiles, Action<bool> remove)
     {
         var plan = DownloadList.PlanDelete(rows);
+        var groups = DownloadList.Groups(rows);
         var b = new MaterialAlertDialogBuilder(c).SetTitle(plan.Title)!;
         if (!plan.HasFiles || !canDeleteFiles)
         {
@@ -201,7 +202,13 @@ internal static class DeleteFlow
         {
             var choice = 0;
             b.SetSingleChoiceItems([DeletePlan.KeepFiles, plan.DeleteFilesLabel], 0, (_, e) => choice = e.Which)!
-                .SetPositiveButton("Delete", (_, _) => remove(choice == 1))!
+                .SetPositiveButton("Delete", (_, _) =>
+                {
+                    // A download that finished (or failed) while the question was open has other files now: "delete the file"
+                    // would take the finished file the user never chose to delete. Ask again with what is there now (Fable finding 13).
+                    if (choice == 1 && !DownloadList.SamePlan(rows, plan, groups)) Confirm(c, rows, canDeleteFiles, remove);
+                    else remove(choice == 1);
+                })!
                 .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null);
         }
 

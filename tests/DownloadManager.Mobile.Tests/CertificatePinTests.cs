@@ -178,8 +178,9 @@ public sealed class CertificatePinTests
         Assert.Equal(RemoteConnectionStatus.Stopped, connection.State.Status);
         Assert.Contains("certificate", connection.State.Message);
         Assert.Contains("connect to it again", connection.State.Message);
-        await Task.Delay(100);
-        Assert.Equal(1, server.Attempts);
+        // Not for good any more (Fable finding 3): a captive portal looks the same, so it is tried again at the longest wait.
+        await Until.TrueAsync(() => connection.State.Status == RemoteConnectionStatus.Connected, "tried again");
+        Assert.Equal(2, server.Attempts);
     }
 }
 

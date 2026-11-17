@@ -40,6 +40,8 @@ public sealed class PairingSheet : BottomSheetDialogFragment
         var addressLayout = v.FindViewById<TextInputLayout>(Resource.Id.pair_address_layout)!;
         var address = v.FindViewById<TextInputEditText>(Resource.Id.pair_address)!;
         var password = v.FindViewById<TextInputEditText>(Resource.Id.pair_password)!;
+        // Never in the saved view state either (a recreated sheet, or a state Bundle written to disk at process death).
+        password.SaveEnabled = false;
         var name = v.FindViewById<TextInputEditText>(Resource.Id.pair_name)!;
         var plainHttp = v.FindViewById<MaterialCheckBox>(Resource.Id.pair_plain_http)!;
         var error = v.FindViewById<TextView>(Resource.Id.pair_error)!;

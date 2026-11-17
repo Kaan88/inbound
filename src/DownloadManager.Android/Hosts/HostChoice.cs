@@ -99,7 +99,9 @@ internal static class HostChoice
         public static NetworkWatch? Start(Context context, IRemoteStatus remote)
         {
             if (context.GetSystemService(Context.ConnectivityService) is not ConnectivityManager manager) return null;
-            var watch = new NetworkWatch(manager, remote);
+            // The baseline is the network now (none while offline), so the first callback after coming back online is a new
+            // network and the connection tries at once instead of waiting out its backoff (Fable finding 7).
+            var watch = new NetworkWatch(manager, remote) { _current = manager.ActiveNetwork };
             try { manager.RegisterDefaultNetworkCallback(watch); }
             catch (Java.Lang.Exception) { return null; }
             return watch;
@@ -113,12 +115,11 @@ internal static class HostChoice
 
         public override void OnAvailable(Network network)
         {
-            // The first call is the network at registration. A later, different one means the socket may be on a network
-            // that is gone: open it again.
+            // The first call is the network at registration, the same as the baseline then. A different one means the socket
+            // may be on a network that is gone (or there was none): open it again.
             var previous = _current;
             _current = network;
-            if (previous is null) return;
-            if (!previous.Equals(network)) _remote.RetryNow(dropCurrent: true);
+            if (!network.Equals(previous)) _remote.RetryNow(dropCurrent: true);
         }
     }
 }
