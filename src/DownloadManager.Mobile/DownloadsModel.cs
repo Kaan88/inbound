@@ -60,6 +60,9 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>The folder new downloads go to when none is named, from the snapshot's settings; empty until the snapshot is shown.</summary>
     public string DefaultDownloadDirectory { get; private set; } = "";
 
+    /// <summary>The Host's settings as the snapshot (and later settings.changed frames) carried them; defaults until the snapshot is shown.</summary>
+    public SettingsDto Settings { get; private set; } = new();
+
     /// <summary>Raised on the UI thread once, after the snapshot's rows are in <see cref="Rows"/> (also for an empty snapshot).</summary>
     public event Action? FirstSnapshotShown;
 
@@ -118,7 +121,8 @@ public sealed class DownloadsModel : IDisposable
     private void ApplySnapshot(SnapshotDto snap)
     {
         if (Disposed) return;
-        DefaultDownloadDirectory = snap.Settings?.DefaultDownloadDirectory ?? "";
+        Settings = snap.Settings ?? new SettingsDto();
+        DefaultDownloadDirectory = Settings.DefaultDownloadDirectory ?? "";
         foreach (var j in snap.Jobs.OrderByDescending(x => x.CreatedAt))
         {
             var row = new JobRow { Id = j.Id };
@@ -190,22 +194,90 @@ public sealed class DownloadsModel : IDisposable
     /// is one of <see cref="StartModes"/>. The reply says whether the Host accepted it (an address it cannot use comes back with an
     /// <see cref="AddJobResponse.Error"/>, it does not throw). The new row arrives as a job event, not from this call.
     /// </summary>
-    public async Task<AddJobResponse> AddAsync(string url, string? destination = null, string? fileName = null,
-        string startMode = StartModes.StartNow, CancellationToken cancellationToken = default)
-    {
-        var request = IpcMessage.Create(MessageTypes.JobAdd, new AddJobRequest
+    public Task<AddJobResponse> AddAsync(string url, string? destination = null, string? fileName = null,
+        string startMode = StartModes.StartNow, CancellationToken cancellationToken = default) =>
+        AddAsync(new AddJobRequest
         {
             Url = url,
             DestinationDirectory = string.IsNullOrWhiteSpace(destination) ? null : destination,
             FileName = string.IsNullOrEmpty(fileName) ? null : fileName,
             StartMode = startMode,
-            Source = "android",
-            ConflictPolicy = "rename",
-        });
-        var reply = await _host.RequestAsync(request, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    /// <summary>Command job.add with a request built by a screen (New download); the source is always this app and the policy is whatever the request says.</summary>
+    public async Task<AddJobResponse> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
+    {
+        request.Source = "android";
+        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobAdd, request), cancellationToken).ConfigureAwait(false);
         return reply.Type == MessageTypes.JobAddResult
             ? reply.GetPayload<AddJobResponse>()
             : new AddJobResponse { Accepted = false, Error = "The Host answered with " + reply.Type + "." };
+    }
+
+    /// <summary>Command file.metadata: what the Host can tell about an address before it is added (name, size). Never throws for a bad address; the result says.</summary>
+    public async Task<FileMetadataResult> ProbeAsync(string url, CancellationToken cancellationToken = default)
+    {
+        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.FileMetadata, new FileMetadataRequest { Url = url }), cancellationToken).ConfigureAwait(false);
+        return reply.Type == MessageTypes.FileMetadataResult
+            ? reply.GetPayload<FileMetadataResult>()
+            : new FileMetadataResult { Ok = false, Error = "The Host answered with " + reply.Type + "." };
+    }
+
+    private async Task<CommandResult> ActionAsync(string type, Guid id, bool deleteFile = false, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reply = await _host.RequestAsync(IpcMessage.Create(type, new JobActionRequest { JobId = id, DeleteFile = deleteFile }), cancellationToken).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host answered with " + reply.Type + ".");
+            var r = reply.GetPayload<JobActionResponse>();
+            return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Error ?? "The Host refused.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) { return CommandResult.Fail(e.Message); }
+    }
+
+    public Task<CommandResult> PauseAsync(Guid id) => ActionAsync(MessageTypes.JobPause, id);
+
+    public Task<CommandResult> ResumeAsync(Guid id) => ActionAsync(MessageTypes.JobResume, id);
+
+    public Task<CommandResult> RetryAsync(Guid id) => ActionAsync(MessageTypes.JobRetry, id);
+
+    /// <summary>Adds the download again from its address, under a new name when the file is there (the Host's Redownload).</summary>
+    public Task<CommandResult> RedownloadAsync(Guid id) => ActionAsync(MessageTypes.JobRedownload, id);
+
+    /// <summary>Command jobs.pauseAll / jobs.resumeAll (the summary card's button).</summary>
+    public async Task<CommandResult> PauseAllAsync(bool pause)
+    {
+        try
+        {
+            var reply = await _host.RequestAsync(IpcMessage.Create(pause ? MessageTypes.JobsPauseAll : MessageTypes.JobsResumeAll, new JobActionRequest()), CancellationToken.None).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.HostActionResult) return CommandResult.Fail("The Host answered with " + reply.Type + ".");
+            var r = reply.GetPayload<HostActionResult>();
+            return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Message ?? "The Host refused.");
+        }
+        catch (Exception e) { return CommandResult.Fail(e.Message); }
+    }
+
+    /// <summary>Command job.remove for one or more downloads: the list entry, and with <paramref name="deleteFile"/> the file (or part file) too.</summary>
+    public async Task<CommandResult> RemoveAsync(IReadOnlyCollection<Guid> ids, bool deleteFile)
+    {
+        if (ids.Count == 0) return CommandResult.Success;
+        try
+        {
+            var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobRemove,
+                new JobActionRequest { JobId = ids.First(), JobIds = ids.ToList(), DeleteFile = deleteFile }), CancellationToken.None).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host answered with " + reply.Type + ".");
+            var r = reply.GetPayload<JobActionResponse>();
+            return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Error ?? "The Host refused.");
+        }
+        catch (Exception e) { return CommandResult.Fail(e.Message); }
+    }
+
+    /// <summary>Command job.segments: the connections' progress of one running download (empty when none).</summary>
+    public async Task<IReadOnlyList<SegmentDto>> SegmentsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobSegments, new JobActionRequest { JobId = id }), cancellationToken).ConfigureAwait(false);
+        return reply.Type == MessageTypes.JobSegmentsResult ? reply.GetPayload<List<SegmentDto>>() ?? new List<SegmentDto>() : Array.Empty<SegmentDto>();
     }
 
     /// <summary>True once <see cref="Dispose"/> ran (the screen went away).</summary>
@@ -223,4 +295,12 @@ public sealed class DownloadsModel : IDisposable
             _timer.Dispose();
         }
     }
+}
+
+/// <summary>The outcome of a command that only says yes or no.</summary>
+public readonly record struct CommandResult(bool Ok, string? Error)
+{
+    public static CommandResult Success => new(true, null);
+
+    public static CommandResult Fail(string error) => new(false, error);
 }

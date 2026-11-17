@@ -6,6 +6,12 @@ namespace DownloadManager.Mobile;
 /// <summary>How a row is coloured: what the state means to the person, not the engine's word for it.</summary>
 public enum StatusKind { Active, Done, Failed, Waiting, Neutral }
 
+/// <summary>Which state view a row belongs to (the filter chips of the Downloads screen).</summary>
+public enum RowGroup { Active, Queued, Paused, Finished, Failed }
+
+/// <summary>What the button at the end of a row does.</summary>
+public enum RowAction { None, Pause, Resume, Retry, ShowInFolder }
+
 /// <summary>One row of the Downloads screen. Raises PropertyChanged on the UI thread only (the model posts).</summary>
 public sealed class JobRow : INotifyPropertyChanged
 {
@@ -16,6 +22,21 @@ public sealed class JobRow : INotifyPropertyChanged
     private bool _indeterminate;
 
     public Guid Id { get; init; }
+
+    private RowGroup _group = RowGroup.Queued;
+    private RowAction _action = RowAction.None;
+
+    /// <summary>The state view of the row; changes when the job changes state.</summary>
+    public RowGroup Group { get => _group; private set => Set(ref _group, value, nameof(Group)); }
+
+    /// <summary>What the row's end button does now.</summary>
+    public RowAction Action { get => _action; private set => Set(ref _action, value, nameof(Action)); }
+
+    /// <summary>The file name the Host knows, empty until it does (<see cref="Name"/> falls back to the address).</summary>
+    public string FileName { get; private set; } = "";
+
+    /// <summary>The job as the Host last sent it (the Details screen reads what a row does not carry).</summary>
+    public JobDto Job { get; private set; } = new();
 
     /// <summary>When the job was added; the list is newest first.</summary>
     public DateTimeOffset CreatedAt { get; private set; }
@@ -50,8 +71,10 @@ public sealed class JobRow : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
-    public void ApplyFrom(JobDto j)
+    public void ApplyFrom(JobDto j, DateTimeOffset? now = null)
     {
+        Job = j;
+        FileName = j.FileName ?? "";
         Name = string.IsNullOrEmpty(j.FileName) ? j.Url : j.FileName;
         CreatedAt = j.CreatedAt;
         var state = (j.State ?? "").ToLowerInvariant();
@@ -64,7 +87,7 @@ public sealed class JobRow : INotifyPropertyChanged
             case "verifying":
                 RateHistory.Add((float)rate);
                 if (RateHistory.Count > MaxRates) RateHistory.RemoveAt(0);
-                Kind = StatusKind.Active;
+                Kind = StatusKind.Active; Group = RowGroup.Active; Action = RowAction.Pause;
                 ShowBar = true;
                 Indeterminate = state != "downloading" || total is null or 0;
                 Progress = total is > 0 ? Math.Clamp(j.ReceivedBytes / (double)total.Value, 0, 1) : 0;
@@ -74,24 +97,25 @@ public sealed class JobRow : INotifyPropertyChanged
                 Subtitle = string.Join(" · ", parts);
                 break;
             case "completed":
-                Kind = StatusKind.Done; ShowBar = false; Indeterminate = false; Progress = 1;
-                Subtitle = "Finished · " + Fmt.Bytes(total ?? j.ReceivedBytes);
+                Kind = StatusKind.Done; Group = RowGroup.Finished; ShowBar = false; Indeterminate = false; Progress = 1;
+                Action = j.FileRemovedAfterExtraction ? RowAction.None : RowAction.ShowInFolder;
+                Subtitle = "Finished · " + Fmt.Bytes(total ?? j.ReceivedBytes) + (j.CompletedAt is { } done ? " · " + Fmt.When(done, now ?? DateTimeOffset.Now) : "");
                 break;
             case "paused":
-                Kind = StatusKind.Waiting; ShowBar = total is > 0; Indeterminate = false;
+                Kind = StatusKind.Waiting; Group = RowGroup.Paused; Action = RowAction.Resume; ShowBar = total is > 0; Indeterminate = false;
                 Progress = total is > 0 ? Math.Clamp(j.ReceivedBytes / (double)total.Value, 0, 1) : 0;
                 Subtitle = "Paused" + (total is > 0 ? $" · {Fmt.Bytes(j.ReceivedBytes)} of {Fmt.Bytes(total.Value)}" : "");
                 break;
             case "failed":
             case "cancelled":
-                Kind = StatusKind.Failed; ShowBar = false; Indeterminate = false;
+                Kind = StatusKind.Failed; Group = RowGroup.Failed; Action = RowAction.Retry; ShowBar = false; Indeterminate = false;
                 Subtitle = (state == "failed" ? "Failed" : "Cancelled") + (string.IsNullOrEmpty(j.StatusNote) ? "" : " · " + j.StatusNote);
                 break;
             case "retrywaiting":
-                Kind = StatusKind.Waiting; ShowBar = false; Indeterminate = false; Subtitle = "Waiting to retry";
+                Kind = StatusKind.Waiting; Group = RowGroup.Queued; Action = RowAction.Pause; ShowBar = false; Indeterminate = false; Subtitle = "Waiting to retry";
                 break;
             default:
-                Kind = StatusKind.Neutral; ShowBar = false; Indeterminate = false;
+                Kind = StatusKind.Neutral; Group = RowGroup.Queued; Action = RowAction.Resume; ShowBar = false; Indeterminate = false;
                 Subtitle = "Queued" + (total is > 0 ? " · " + Fmt.Bytes(total.Value) : "");
                 break;
         }
