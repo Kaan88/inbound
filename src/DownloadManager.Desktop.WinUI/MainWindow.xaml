@@ -948,10 +948,11 @@
             </Border>
                 <!-- UI.R32, A: the sidebar's My provider entry shows the panel here, in place of the list. -->
                 <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
-                <!-- SITES.3: a saved site's folders, in place of the list. -->
-                <Grid x:Name="SitesHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
+                <!-- SITES.3: a saved site's folders, in place of the list. Row 1 only, so the bars above (the extension hint) push it
+                     down rather than cover it (R7). -->
+                <Grid x:Name="SitesHost" Grid.Row="1" Grid.ColumnSpan="2" Visibility="Collapsed" />
                 <!-- SITES.11 R4: All remotes, in place of the list. -->
-                <Grid x:Name="SitesHomeHost" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" />
+                <Grid x:Name="SitesHomeHost" Grid.Row="1" Grid.ColumnSpan="2" Visibility="Collapsed" />
             </Grid>
             </SplitView>
         </Grid>

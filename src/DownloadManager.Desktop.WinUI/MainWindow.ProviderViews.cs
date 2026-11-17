@@ -63,7 +63,7 @@ public sealed partial class MainWindow
     {
         foreach (var shortcut in Shortcuts(Windows.System.VirtualKey.T, Windows.System.VirtualKeyModifiers.Control, () =>
         {
-            // In the Sites view Ctrl+T is the view switch (Two panes / Server only); elsewhere the provider drawer.
+            // In the Sites view Ctrl+T is the view switch (Two panes / Remote only); elsewhere the provider drawer.
             if (_sitesShown) SitesKeyTwoPanes();
             else ToggleProviderDrawer();
         })) yield return shortcut;

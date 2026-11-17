@@ -6,7 +6,7 @@ import {
 } from '../src/lib/sitesHome';
 import {
   barSpeeds, barSummary, canCancel, canClear, canPause, canResume, canRetry, clearDoneTargets, description, inTab, menu, pauseAllAction, progress, spaceCommand,
-  status, tabLabel, tabOf, title, valid,
+  phoneButton, phoneHeader, phoneRows, status, tabLabel, tabOf, title, valid,
 } from '../src/lib/sitesTransfers';
 
 const transfer = (over: Partial<SiteTransfer> = {}): SiteTransfer => ({
@@ -245,5 +245,32 @@ describe('the words (SITES.12)', () => {
       const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
       expect(markup, path).not.toMatch(/\b(All sites|Add a site|Your sites|Edit site|Use Sites)\b|>\s*Sites\s*</);
     }
+  });
+});
+
+describe('a phone\'s transfer list (R7)', () => {
+  const moving = transfer({ id: 'm' });
+  const queued = transfer({ id: 'q', filesRunning: 0, bytesDone: 0 });
+  const paused = transfer({ id: 'p', state: 'paused' });
+  const failed = transfer({ id: 'f', state: 'failed', filesFailed: 1 });
+  const done = transfer({ id: 'd', state: 'done' });
+
+  it('lists what runs and waits, then what failed, and leaves finished ones off', () => {
+    expect(phoneRows([done, failed, queued, moving, paused]).map((t) => t.id)).toEqual(['m', 'p', 'q', 'f']);
+  });
+
+  it('says "N running · M waiting · K failed" in place of the tabs', () => {
+    expect(phoneHeader([moving, queued, paused, failed, done])).toBe('1 running · 2 waiting · 1 failed');
+    expect(phoneHeader([moving])).toBe('1 running');
+    expect(phoneHeader([done])).toBe('Nothing is moving');
+  });
+
+  it('gives a moving card Pause and a waiting or failed card ×', () => {
+    expect(phoneButton(moving)).toBe('stop');
+    expect(phoneButton(queued)).toBe('cancel');
+    expect(phoneButton(paused)).toBe('cancel');
+    expect(phoneButton(failed)).toBe('remove');
+    expect(phoneButton(transfer({ state: 'failed', filesFailed: 0, problem: 'auth' }))).toBe('cancel');
+    expect(phoneButton(done)).toBeNull();
   });
 });

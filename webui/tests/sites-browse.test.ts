@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
-  actionable, activation, addressOf, autoRetryAllowed, commandKey, commandLabel, countText, deviceDownloadAllowed, downloadTarget, downloadWhere,
+  actionable, activation, deleteText, addressOf, autoRetryAllowed, commandKey, commandLabel, countText, deviceDownloadAllowed, downloadTarget, downloadWhere,
   filterMatches, footerText, keptSelection, kindChip, nextSort, onRowControl, pathFromText, remoteMenu, retryAtText, retryDelaySeconds, rowKeys,
   rowsOf, serverDownload, serverFolder, serverUpload, sortRows, splitServerFolder, troubleTitle, troubleWhy, uploadSourceProblem,
   type DownloadTrigger,
 } from '../src/lib/sitesBrowse';
 import type { Site, SiteItem } from '../src/lib/sites';
+
+describe('the delete sheet says "N items (size)" (R7)', () => {
+  const size = (n: number) => `${n} B`;
+  const count = { files: 1800, folders: 42, bytes: 900, sizeUnknown: false };
+  it('names a folder and what is inside it, once counted', () => {
+    expect(deleteText([{ name: 'backups', isFolder: true }], null, size)).toBe("backups and everything in it will be deleted on the server. This can't be undone. Counting what is in it…");
+    expect(deleteText([{ name: 'backups', isFolder: true }], count, size)).toBe("backups and the 1,842 items inside it (900 B) will be deleted on the server. This can't be undone.");
+  });
+  it('counts several items with their size', () => {
+    expect(deleteText([{ name: 'a', isFolder: false }, { name: 'b', isFolder: false }], { files: 2, folders: 0, bytes: 10, sizeUnknown: false }, size)).toBe("2 items (10 B) will be deleted on the server. This can't be undone.");
+  });
+});
 
 const file = (name: string, size = 10, extra: Partial<SiteItem> = {}): SiteItem => ({ name, isFolder: false, size, ...extra });
 const folder = (name: string): SiteItem => ({ name, isFolder: true, size: 0 });

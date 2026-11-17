@@ -6,7 +6,7 @@
   import type { SiteTransfer } from '../../lib/sites';
   import {
     canClear, clearDoneTargets, commandLabel, commandType, description, emptyMessage, fullRoute, inTab, isDownload, menu as commandMenu,
-    pauseAllAction, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
+    pauseAllAction, phoneButton, phoneHeader, phoneRows, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
     type TransferCommand, type TransferTab,
   } from '../../lib/sitesTransfers';
 
@@ -18,7 +18,17 @@
   let selected = $state<Set<string>>(new Set());
   let menuAt = $state<{ items: MenuItem[]; x: number; y: number } | null>(null);
 
-  const rows = $derived(inTab(transfers, tab));
+  // A phone (R7, the mockup): one list without tabs or tick boxes, a header that counts, one button per card.
+  let phone = $state(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches);
+  $effect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 767px)');
+    const changed = () => (phone = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
+
+  const rows = $derived(phone ? phoneRows(transfers) : inTab(transfers, tab));
   const chosen = $derived(rows.filter((row) => selected.has(row.id)));
   const clearable = $derived(clearDoneTargets(transfers));
   const retryable = $derived(retryFailedTargets(transfers));
@@ -88,7 +98,8 @@
 
 <div class="flex min-h-0 flex-1 flex-col">
   <div class="flex flex-wrap items-center gap-2 px-3 py-2">
-    <div class="segmented" role="group" aria-label="Transfers">
+    <span class="text-[13px] text-muted md:hidden">{phoneHeader(transfers)}</span>
+    <div class="segmented max-md:hidden" role="group" aria-label="Transfers">
       {#each ['active', 'failed', 'done'] as const as name (name)}
         <button aria-pressed={tab === name} onclick={() => (tab = name)}>{tabLabel(transfers, name)}</button>
       {/each}
@@ -96,7 +107,7 @@
     <span class="flex-1"></span>
     {#if pauseAll}<button class="btn max-md:hidden" onclick={() => runAll(pauseAll.type, pauseAll.ids)}><Icon name={pauseAll.type.endsWith('pause') ? 'pause' : 'play'} size={15} /> {pauseAll.label}</button>{/if}
     {#if retryable.length}<button class="btn max-md:hidden" onclick={() => runAll('sites.transfer.retry', retryable)}><Icon name="retry" size={15} /> Retry failed</button>{/if}
-    <button class="btn max-md:ml-auto" disabled={!clearable.length} onclick={() => runAll('sites.transfer.clear', clearable)}><Icon name="sweep" size={15} /> Clear done</button>
+    <button class="btn max-md:hidden" disabled={!clearable.length} onclick={() => runAll('sites.transfer.clear', clearable)}><Icon name="sweep" size={15} /> Clear done</button>
   </div>
 
   <div class="tl-grid hidden border-y border-divider bg-chrome text-[12px] font-semibold md:grid" role="row">
@@ -108,7 +119,7 @@
     {/if}
     {#each rows as row (row.id)}
       {@const st = status(row)}
-      <!-- A row is one transfer batch: a click selects it, a long press or the "…" opens its menu. -->
+      <!-- A row is one transfer batch: a click selects it, a long press or the "…" opens its menu (on a phone, its one button). -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
       <div class="tl-row border-b border-divider/60 text-[12.5px] {selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'}" role="row" aria-selected={selected.has(row.id)}
         onclick={() => (selected = new Set([row.id]))}
@@ -122,6 +133,13 @@
           <span class="min-w-0 flex-1 truncate">{title(row)}</span>
           <button class="tl-menu" aria-label="Actions for {title(row)}" aria-haspopup="menu" onclick={(event) => { event.stopPropagation(); const box = (event.currentTarget as HTMLElement).getBoundingClientRect(); open(row, box.left, box.bottom + 2); }}><Icon name="more" size={16} /></button>
         </span>
+        {#if phone}
+          {@const command = phoneButton(row)}
+          {#if command}
+            <button class="tl-phone-btn" aria-label="{command === 'stop' ? 'Pause' : command === 'cancel' ? 'Cancel' : 'Remove'} {title(row)}"
+              onclick={(event) => { event.stopPropagation(); void run(command, [row]); }}><Icon name={command === 'stop' ? 'pause' : 'close'} size={16} /></button>
+          {/if}
+        {/if}
         <span class="tl-size tabular text-right">{sizeText(row)}</span>
         <span class="tl-status min-w-0">
           <span class="block truncate tone-{st.kind}">{st.text}<span class="md:hidden">{row.state === 'failed' && description(row) ? `: ${description(row)}` : ''}{rateText(row) ? ` · ${rateText(row)}` : ''}{timeLeft(row) ? ` · ${timeLeft(row)}` : ''}</span></span>
@@ -156,13 +174,15 @@
   /* A phone: each transfer is lines, as in the mockup: name and size, then status with rate and time, then where. */
   @media (max-width: 767px) {
     .tl-grid { display: none; }
-    .tl-row { grid-template-columns: 44px 1fr; grid-template-areas: 'check name' 'check status' 'check route'; row-gap: 2px; padding-top: 8px; padding-bottom: 8px; }
-    .tl-check { grid-area: check; }
+    .tl-row { grid-template-columns: 1fr 44px; grid-template-areas: 'name act' 'status act' 'route act'; padding-left: 12px; row-gap: 2px; padding-top: 8px; padding-bottom: 8px; }
+    .tl-check { display: none; }
+    .tl-phone-btn { grid-area: act; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; border-radius: 6px; color: var(--text); }
+    .tl-phone-btn:hover { background: var(--hover); }
     .tl-name { grid-area: name; font-size: 14px; }
     .tl-status { grid-area: status; }
     .tl-route { grid-area: route; font-size: 11.5px; }
     .tl-eta, .tl-rate, .tl-size, .tl-desc { display: none; }
-    .tl-menu { opacity: 1; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; color: var(--text); }
+    .tl-menu { display: none; }
   }
-  @media (pointer: coarse) { .tl-menu { opacity: 1; } }
+  @media (pointer: coarse) and (min-width: 768px) { .tl-menu { opacity: 1; } }
 </style>

@@ -9,7 +9,7 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// SITES.5 / SITES.11 R2a (remote-sites.md, "Clients"; sites-rework.md `browse`, `remote-only`): the view switch row
-/// ("Two panes | Server only", with the linked-folders line), and the panes under it: a folder of this PC on the left, the
+/// ("Two panes | Remote only", with the linked-folders line), and the panes under it: a folder of this PC on the left, the
 /// server's on the right, and a gutter between them with Upload, Download and Linked. The arrows start the same Host
 /// transfers as Download and Upload; the left pane only reads and (on Windows) sends to the Recycle Bin. Two panes is
 /// offered for this PC's own Host only: another server's sites move files to and from that server's disks, not this PC's.
@@ -70,7 +70,7 @@ public sealed partial class MainWindow
 
         // Toggle buttons, so UI Automation reads which view is on (Toggle state); the look stays the segmented one.
         _twoPanesChoice = ViewChoice("Two panes");
-        _serverOnlyChoice = ViewChoice("Server only");
+        _serverOnlyChoice = ViewChoice("Remote only");
         _twoPanesChoice.Click += (_, _) => SetTwoPanes(true);
         _serverOnlyChoice.Click += (_, _) => SetTwoPanes(false);
         var choices = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
@@ -130,7 +130,7 @@ public sealed partial class MainWindow
         return choice;
     }
 
-    /// <summary>The view switch: Two panes (true) or Server only (false). Remembered.</summary>
+    /// <summary>The view switch: Two panes (true) or Remote only (false). Remembered.</summary>
     private void SetTwoPanes(bool twoPanes)
     {
         if (twoPanes && !TwoPanesOffered) return;
@@ -249,7 +249,7 @@ public sealed partial class MainWindow
 
     private void UpdateTwoPanesArrows()
     {
-        // The linked-folders line follows the site (also in Server only).
+        // The linked-folders line follows the site (also in Remote only).
         if (_linkedLine is not null && _linkedLineText is not null)
         {
             var line = _sitesPanel?.Site is { } shownSite ? SitesBrowseRules.LinkedLine(shownSite.LocalFolder, shownSite.RemoteFolder) : null;

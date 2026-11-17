@@ -220,3 +220,24 @@ export function barSpeeds(transfers: readonly SiteTransfer[]): { down: number; u
 }
 
 export const failedCount = (transfers: readonly SiteTransfer[]) => transfers.filter((t) => t.state === 'failed').length;
+
+// ---- A phone (R7) --------------------------------------------------------------------------------------------------------
+
+/** A phone shows one list, no tabs: what runs and waits, then what failed. Finished batches stay off it. */
+export const phoneRows = (transfers: readonly SiteTransfer[]): SiteTransfer[] => [...inTab(transfers, 'active'), ...inTab(transfers, 'failed')];
+
+/** A phone's header in place of the tabs: "2 running · 1 waiting · 1 failed" (paused batches count as waiting). */
+export function phoneHeader(transfers: readonly SiteTransfer[]): string {
+  const moving = transfers.filter(isStarted).length;
+  const waits = transfers.filter((t) => (t.state === 'running' && !isStarted(t)) || t.state === 'paused').length;
+  const failed = failedCount(transfers);
+  const parts = [moving ? `${moving} running` : '', waits ? `${waits} waiting` : '', failed ? `${failed} failed` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Nothing is moving';
+}
+
+/** A phone card's one button: Pause on a batch that moves, × on one that waits or failed (cancel it, or take it off the list). */
+export function phoneButton(t: SiteTransfer): TransferCommand | null {
+  if (isStarted(t)) return 'stop';
+  if (t.state === 'running' || t.state === 'paused' || t.state === 'failed') return canCancel(t) ? 'cancel' : canClear(t) ? 'remove' : null;
+  return null;
+}

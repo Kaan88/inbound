@@ -19,7 +19,8 @@
 <Dialog {title} {onclose} {sheet}>
   <p class="text-[13px]">{text}</p>
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>{keep}</button>
-    <button class={danger ? 'btn-danger' : 'btn-primary'} disabled={busy} onclick={onconfirm}>{confirm}</button>
+    <!-- A sheet on a phone: the two buttons full width, the action on top and Cancel under it (the mockup's sheets). -->
+    <button class="btn {sheet ? 'max-sm:order-2 max-sm:w-full max-sm:justify-center max-sm:min-h-11' : ''}" onclick={onclose}>{keep}</button>
+    <button class="{danger ? 'btn-danger' : 'btn-primary'} {sheet ? 'max-sm:order-1 max-sm:w-full max-sm:justify-center max-sm:min-h-11' : ''}" disabled={busy} onclick={onconfirm}>{confirm}</button>
   {/snippet}
 </Dialog>

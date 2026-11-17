@@ -762,7 +762,14 @@ if (davAddress) {
     await page.getByRole('checkbox', { name: /Select ubuntu/ }).check();
     await page.getByRole('toolbar', { name: 'Remote files' }).getByRole('button', { name: 'Download', exact: true }).click();
     await page.getByRole('button', { name: /^Transfers/ }).click();
-    await page.getByText(/Download ubuntu\.iso/).first().waitFor({ timeout: 30000 });
+    // A small file can finish before the list opens, so it may already be on the Done tab (R7).
+    const row = page.getByText(/Download ubuntu\.iso/).first();
+    try {
+      await row.waitFor({ timeout: 10000 });
+    } catch {
+      await page.getByRole('button', { name: /^Done/ }).click();
+      await row.waitFor({ timeout: 30000 });
+    }
   });
   await capture(`${at++}-remote-files-transfers`, signedIn, async (p, v) => {
     await openRemote(p, v);

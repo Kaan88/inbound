@@ -230,7 +230,7 @@ public sealed partial class SitesPanel : UserControl
     /// <summary>A star changed the site; the window keeps its copy (and the sidebar) in step.</summary>
     internal event Action<SiteDto>? SiteUpdated;
 
-    /// <summary>Server only: the Filter box shows and the footer says where downloads go.</summary>
+    /// <summary>Remote only: the Filter box shows and the footer says where downloads go.</summary>
     internal bool ServerOnly
     {
         get => _serverOnly;
@@ -387,7 +387,7 @@ public sealed partial class SitesPanel : UserControl
         Reload();
     }
 
-    /// <summary>Ctrl+F in Server only: the keyboard goes to the Filter box.</summary>
+    /// <summary>Ctrl+F in Remote only: the keyboard goes to the Filter box.</summary>
     internal void FocusFilter() => Bar.FocusFilter();
 
     /// <summary>Stars or unstars <paramref name="folder"/> (a folder row of the list), or the folder shown with null.</summary>

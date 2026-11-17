@@ -28,7 +28,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <!-- The segmented control is built in code (the Two panes / Server only look). -->
+                <!-- The segmented control is built in code (the Two panes / Remote only look). -->
                 <Border x:Name="TabHost" BorderThickness="1" CornerRadius="7" Padding="2" />
                 <TextBlock x:Name="ErrorText" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" MaxLines="2"
                            TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Assertive"

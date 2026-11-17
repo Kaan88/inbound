@@ -10,7 +10,7 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// SITES.11 R2a: the row under a pane's header (sites-rework.md, `browse`): an Up button, the path as clickable parts in a
-/// box, a Star button, and, in Server only, a Filter box. Used by the server pane and the This PC pane so the two read as a
+/// box, a Star button, and, in Remote only, a Filter box. Used by the server pane and the This PC pane so the two read as a
 /// pair. A pane with <see cref="Editable"/> turns the box into a text box when its empty part is clicked.
 /// </summary>
 internal sealed class PathBar : UserControl

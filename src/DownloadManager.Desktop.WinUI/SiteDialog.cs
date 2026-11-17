@@ -487,7 +487,7 @@ internal sealed class SiteDialog
     {
         var xamlRoot = root.XamlRoot!;
         _xamlRoot = xamlRoot;
-        BuildTiles(tiles);
+        BuildTiles(tiles, root.ActualTheme);
         var dialog = new ContentDialog
         {
             XamlRoot = xamlRoot,
@@ -633,8 +633,9 @@ internal sealed class SiteDialog
 
     // ---- Tiles -----------------------------------------------------------------------------------------
 
-    private void BuildTiles(IReadOnlyList<SiteTile> tiles)
+    private void BuildTiles(IReadOnlyList<SiteTile> tiles, ElementTheme theme)
     {
+        // The tiles are not in the tree yet, so their own ActualTheme is unset: take the window's (R7, light theme).
         _tiles.Children.Add(new TextBlock { Text = "What kind of place is it?", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         const int columns = 4;
         for (var c = 0; c < columns; c++) _tileGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -643,9 +644,9 @@ internal sealed class SiteDialog
         {
             var tile = tiles[i];
             var body = new StackPanel { Spacing = 4 };
-            body.Children.Add(new FontIcon { Glyph = tile.Glyph, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Left, Foreground = InboundTheme.Brush("InboundIconInfoBrush", _tiles) });
+            body.Children.Add(new FontIcon { Glyph = tile.Glyph, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Left, Foreground = InboundTheme.Brush("InboundIconInfoBrush", theme) });
             body.Children.Add(new TextBlock { Text = tile.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            body.Children.Add(new TextBlock { Text = tile.Line, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _tiles) });
+            body.Children.Add(new TextBlock { Text = tile.Line, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", theme) });
             var button = new Button
             {
                 Content = body,

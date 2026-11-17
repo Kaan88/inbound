@@ -467,4 +467,20 @@ export function lastListedText(listedMs: number, nowMs: number): string {
   return `Last listed ${Math.floor(age / 86_400_000)} d ago`;
 }
 
+/** The delete question's words, with "N items (size)" once the server has counted (R7, the mockup's delete sheet). */
+export function deleteText(
+  list: readonly Pick<SiteItem, 'name' | 'isFolder'>[],
+  count: { files: number; folders: number; bytes: number; sizeUnknown: boolean } | null,
+  size: (n: number) => string,
+): string {
+  const items = count ? count.files + count.folders : 0;
+  const sized = count && !count.sizeUnknown && count.bytes ? ` (${size(count.bytes)})` : '';
+  const plural = (n: number) => `${n.toLocaleString()} item${n === 1 ? '' : 's'}`;
+  let what: string;
+  if (list.length === 1 && !list[0].isFolder) what = `${list[0].name}${sized}`;
+  else if (list.length === 1) what = count ? `${list[0].name} and the ${plural(items)} inside it${sized}` : `${list[0].name} and everything in it`;
+  else what = count ? `${plural(list.length)}${items > list.length ? `, ${plural(items)} with what is inside them,` : ''}${sized}` : `${plural(list.length)}, and everything in their folders,`;
+  return `${what} will be deleted on the server. This can't be undone.${count ? '' : ' Counting what is in it…'}`;
+}
+
 export { crumbs, hereText, parentPath };

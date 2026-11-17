@@ -263,7 +263,7 @@ internal static class SitesBrowseRules
     };
 
     /// <summary>
-    /// The server pane's footer. Selected: "1 of 6 selected · 5.8 GB · 2 already on this PC"; in Server only the last part
+    /// The server pane's footer. Selected: "1 of 6 selected · 5.8 GB · 2 already on this PC"; in Remote only the last part
     /// says where downloads go. Nothing selected: "6 items · 2 already on this PC". The ".." line is never counted by the caller.
     /// </summary>
     public static string ServerFooter(int shown, long total, int selected, long selectedBytes, int sameCount, bool linked, bool serverOnly, string? linkedFolder)

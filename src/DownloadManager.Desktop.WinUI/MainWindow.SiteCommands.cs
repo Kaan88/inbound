@@ -91,7 +91,7 @@ public sealed partial class MainWindow
         // The Host refuses a star on the root.
         SiteMenuStar.IsEnabled = ready && panel.CanGoUp;
         SiteMenuStar.Text = panel.IsStarred ? "Unstar this folder" : "Star this folder";
-        SiteMenuTwoPanes.Text = TwoPanesShown ? "Server only" : "Two panes";
+        SiteMenuTwoPanes.Text = TwoPanesShown ? "Remote only" : "Two panes";
         SiteMenuTwoPanes.IsEnabled = TwoPanesOffered;
         SiteMenuCopyAddress.IsEnabled = site is not null;
         // An address opened once is not edited; it can be remembered from All remotes.

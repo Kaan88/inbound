@@ -17,7 +17,7 @@
   } from '../../lib/sites';
   import type { FolderBrowseResult } from '../../lib/types';
   import {
-    actionable, activation, addressesOf, autoRetryAllowed, commandKey, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
+    actionable, activation, addressesOf, autoRetryAllowed, commandKey, deleteText, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
     filterMatches, fixButtonText, fixable, footerText, hereTone, isCantReach, keptSelection, kindChip, lastListedText, linkedLine, nextSort,
     notRetryingText, onRowControl, pathFromText, remoteMenu, retryAtText, retryDelaySeconds, rowKeys, rowsOf, serverDownload, serverFolder,
     serverUpload, sizeText, sortRows, troubleTitle, troubleWhy, uploadSourceProblem,
@@ -861,9 +861,8 @@
   </Dialog>
 {:else if deleting}
   {@const list = deleting}
-  <AskDialog title="Delete on {site.name}?" danger busy={busy} confirm="Delete" sheet
-    text={(list.length === 1 ? `${list[0].name}${list[0].isFolder ? ' and everything in it' : ''}` : `${list.length} items, and everything in their folders,`) + ` will be deleted on the server. This can't be undone.`
-      + (deleteCount ? ` That is ${deleteCount.files.toLocaleString()} file${deleteCount.files === 1 ? '' : 's'}${deleteCount.sizeUnknown || !deleteCount.bytes ? '' : ` (${bytes(deleteCount.bytes)})`}.` : dialogError ? '' : ' Counting what is in it…')
+  <AskDialog title="Delete on {site.name}?" danger busy={busy} confirm="Delete on server" sheet
+    text={(dialogError ? deleteText(list, null, bytes).replace(' Counting what is in it…', '') : deleteText(list, deleteCount, bytes))
       + (dialogError ? ` ${dialogError}` : '')}
     onconfirm={() => remove(list)} onclose={closeDialogs} />
 {:else if downloadBox}
