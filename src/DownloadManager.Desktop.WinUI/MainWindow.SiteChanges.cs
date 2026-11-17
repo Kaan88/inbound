@@ -58,26 +58,9 @@ public sealed partial class MainWindow
         };
         await RunSiteChangeAsync(async () =>
         {
-            SetSitesStatus("Counting what would be deleted…");
-            var count = await _remote.CountSiteItemsAsync(request);
-            SetSitesStatus(null);
-            if (!count.Ok)
-            {
-                await ShowSitesMessageAsync("Delete on server", count.Message ?? "What would be deleted could not be counted.");
-                return;
-            }
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = Content?.XamlRoot,
-                Title = "Delete on server",
-                Content = new TextBlock { Text = SiteChangeRules.DeleteQuestion(chosen, count, site.Name), TextWrapping = TextWrapping.Wrap },
-                PrimaryButtonText = "Delete",
-                CloseButtonText = "Cancel",
-                // Delete never goes by a stray Enter.
-                DefaultButton = ContentDialogButton.Close,
-            };
-            if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+            // SITES.11 R5: the dialog opens at once and the Host's count (sites.count) fills in while it is up.
+            // The count is cancelled when the dialog closes.
+            if (!await ConfirmDeleteAsync(chosen, SiteChangeRules.DeletePlace.Server, site.Name, token => _remote.CountSiteItemsAsync(request, token))) return;
 
             SetSitesStatus("Deleting on the server…");
             var result = await _remote.DeleteSiteItemsAsync(request);

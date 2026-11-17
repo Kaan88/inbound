@@ -213,37 +213,45 @@ public sealed partial class MainWindow
         // asked about anyway, since what isn't listed may be there.
         var target = SitesBrowseRules.Normalize(remoteFolder);
         var shown = _sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == target;
-        IEnumerable<string>? existing;
+        List<SiteItemDto>? existing;
         bool complete;
         if (shown)
         {
-            existing = _sitesPanel!.ShownNames;
+            existing = [.. _sitesPanel!.ShownItems];
             complete = _sitesPanel.ListingComplete;
         }
         else
         {
             // Another folder (a drop on a folder row): its first page, as the pane asks for it, is read to look.
-            (existing, complete) = await ReadServerNamesAsync(site, target);
+            (existing, complete) = await ReadServerItemsAsync(site, target);
         }
 
-        var conflict = SitesCommandRules.Skip;
+        // SITES.11 R5: each name already there is asked about on its own, with both copies' size and date; the choices go
+        // out as one batch each (the Host takes one choice per batch).
+        var choices = new Dictionary<string, string>(StringComparer.Ordinal);
+        var other = SitesCommandRules.Skip;
         string? unread = null;
         if (existing is null)
         {
             // Not readable: nothing to ask about; Skip keeps what is there.
             unread = SitesCommandRules.UnreadTargetText(target);
         }
-        else if (SitesCommandRules.ConflictQuestion(SitesCommandRules.AlreadyThere(names, existing, ignoreCase: true), $"{target} on {site.Name}",
-                     names.Any(name => name.IsFolder), complete) is { } ask)
+        else
         {
-            if (await AskConflictAsync(ask) is not { } chosen) return;
-            conflict = chosen;
+            List<KeyValuePair<string, SitesCommandRules.ConflictSide>> targets =
+                [.. existing.Select(item => new KeyValuePair<string, SitesCommandRules.ConflictSide>(item.Name, new SitesCommandRules.ConflictSide(item.Size, item.Modified)))];
+            // The other server's disks are not this PC's: nothing to look at there.
+            var sources = _connection.IsRemote ? [] : await Task.Run(() => LocalSides(localFolder, names));
+            var pairs = SitesCommandRules.ConflictPairs(names, sources, targets, ignoreCase: true);
+            if (await AskConflictsAsync(pairs, upload: true, $"{target} on {site.Name}", names.Any(name => name.IsFolder), complete,
+                    [.. targets.Select(t => t.Key)], SitesCommandRules.TimesArePrecise(site.Kind)) is not { } answer) return;
+            choices = answer.Choices;
+            other = answer.Other;
         }
 
-        var started = await StartSiteTransferAsync(new SiteTransferStartRequest
+        var started = await StartConflictBatchesAsync(names, choices, other, (conflict, batch) => new SiteTransferStartRequest
         {
-            SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = names,
-            Conflict = conflict,
+            SiteId = site.Id, Direction = "upload", RemoteFolder = remoteFolder, LocalFolder = localFolder, Names = batch, Conflict = conflict,
         });
         if (started is not null && unread is not null) SetSitesStatus(unread);
     }
@@ -252,7 +260,7 @@ public sealed partial class MainWindow
     /// The names in a server folder that is not the one shown: one sites.browse of its first page (the request the pane
     /// makes). Complete when that page holds the whole folder; null names when it could not be read.
     /// </summary>
-    private async Task<(IEnumerable<string>? Names, bool Complete)> ReadServerNamesAsync(SiteDto site, string folder)
+    private async Task<(List<SiteItemDto>? Items, bool Complete)> ReadServerItemsAsync(SiteDto site, string folder)
     {
         try
         {
@@ -262,7 +270,7 @@ public sealed partial class MainWindow
                 Id = site.Id, Path = folder, Offset = 0, Limit = SitesBrowseRules.PageSize,
             }, limit.Token);
             if (!result.Ok) return (null, false);
-            return ([.. result.Items.Select(item => item.Name)], result.Items.Count >= result.Total);
+            return ([.. result.Items], result.Items.Count >= result.Total);
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException or TimeoutException)
         {

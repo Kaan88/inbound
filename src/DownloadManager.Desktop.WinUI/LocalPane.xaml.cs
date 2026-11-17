@@ -189,6 +189,7 @@ public sealed partial class LocalPane : UserControl
                 var item = new MenuFlyoutItem { Text = SitesCommandRules.Label(command) };
                 if (command == LocalCommand.Rename) item.KeyboardAcceleratorTextOverride = "F2";
                 else if (command == LocalCommand.Delete) item.KeyboardAcceleratorTextOverride = "Delete";
+                else if (command == LocalCommand.DeleteForGood) item.KeyboardAcceleratorTextOverride = "Shift+Delete";
                 else if (command == LocalCommand.Refresh) item.KeyboardAcceleratorTextOverride = "F5";
                 var chosen = command;
                 item.Click += (_, _) => CommandRequested?.Invoke(chosen);
@@ -409,7 +410,10 @@ public sealed partial class LocalPane : UserControl
                 e.Handled = true;
                 break;
             case VirtualKey.Delete when SelectedRows.Any():
-                DeleteRequested?.Invoke();
+                // Shift+Delete deletes for good (after its own question), as in Explorer.
+                if (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+                    CommandRequested?.Invoke(LocalCommand.DeleteForGood);
+                else DeleteRequested?.Invoke();
                 e.Handled = true;
                 break;
         }

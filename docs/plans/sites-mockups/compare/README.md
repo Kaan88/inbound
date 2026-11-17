@@ -15,6 +15,12 @@ All are dark mode; light mode comes at the end (R7).
 - Test sites: `rclone serve` on 127.0.0.1 (SFTP throttled with `--bwlimit 150k`, WebDAV, FTP, a read-only WebDAV and a
   closed port), with folders seeded to match the mockup's rows.
 
+## R5 and R6a (2026-11-17)
+
+`delete-built.png`, `overwrite-built.png` and `delete-permanently-built.png` (owner request, no mockup) are R5 at
+1376 x 808. `web-site-built.png`, `web-two-built.png`, `web-download-built.png` and `web-upload-built.png` are R6a,
+Chromium 1360 x 820, dark.
+
 ## R4 (2026-11-17)
 
 `home-built.png` (All remotes), `add-tiles-built.png` (taken after Back from the form) and `add-fields-built.png` are

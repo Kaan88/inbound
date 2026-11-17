@@ -269,6 +269,15 @@ public sealed partial class MainWindow
         var ready = TwoPanesShown && !panel.IsLoading && panel.SiteId is not null && local.Path.Length > 0;
         _uploadArrow.IsEnabled = ready && local.Selected.Count > 0;
         _downloadArrow.IsEnabled = ready && panel.SelectedNames.Count > 0;
+        SyncDeleteForGoodMenu();
+    }
+
+    /// <summary>The Remote menu's "Delete permanently on This PC…": shown with two panes, on while This PC has a selection (Windows only).</summary>
+    private void SyncDeleteForGoodMenu()
+    {
+        var shown = TwoPanesShown && _localPane is { Visibility: Visibility.Visible };
+        SiteMenuDeleteForGood.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        SiteMenuDeleteForGood.IsEnabled = shown && OperatingSystem.IsWindows() && _localPane is { Path.Length: > 0 } local && local.Selected.Count > 0;
     }
 
     /// <summary>The server pane moved: a linked site's This PC pane goes to the matching folder when it is there.</summary>
@@ -331,59 +340,87 @@ public sealed partial class MainWindow
         await DownloadNamesAsync(site, panel.Path, names, local.Path);
     }
 
-    /// <summary>Delete in the This PC pane: asks, then sends the items to the Recycle Bin (Windows only).</summary>
-    private async Task DeleteLocalAsync()
+    /// <summary>
+    /// Delete in the This PC pane: asks, then sends the items to the Recycle Bin. With <paramref name="forGood"/> (Shift+Delete,
+    /// "Delete permanently…"): asks with the count and the tick, then deletes them for good; an item in use is left and named.
+    /// Windows only.
+    /// </summary>
+    private async Task DeleteLocalAsync(bool forGood = false)
     {
-        if (!TwoPanesShown || _localPane is not { Visibility: Visibility.Visible } local || local.Selected is not { Count: > 0 } selected) return;
+        if (!TwoPanesShown || _localPane is not { Visibility: Visibility.Visible } local || local.Path.Length == 0) return;
+        if (local.Selected is not { Count: > 0 } selected)
+        {
+            if (forGood) local.Note("Select what to delete in This PC first.", reload: false);
+            return;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             local.Note("Deleting on this PC is offered on Windows only; use the file manager.", reload: false);
             return;
         }
 
-        var paths = selected.Select(entry => Path.Combine(local.Path, entry.Name)).ToList();
-        if (paths.FirstOrDefault(path => SitesCommandRules.LocalItemBusy(_siteTransfers, local.Path, Path.GetFileName(path))) is { } used)
+        var folder = local.Path;
+        var paths = selected.Select(entry => Path.Combine(folder, entry.Name)).ToList();
+        string? Busy() => paths.FirstOrDefault(path => SitesCommandRules.LocalItemBusy(_siteTransfers, folder, Path.GetFileName(path))) is { } used
+            ? $"A remote transfer still uses {Path.GetFileName(used)}. Cancel or finish the transfer first."
+            : null;
+        if (Busy() is { } busy)
         {
-            local.Note($"A remote transfer still uses {Path.GetFileName(used)}. Cancel or finish the transfer first.", reload: false);
+            local.Note(busy, reload: false);
             return;
         }
 
-        var what = selected.Count == 1 ? $"“{selected[0].Name}”" : $"these {selected.Count} items";
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content?.XamlRoot,
-            Title = "Move to the Recycle Bin?",
-            Content = new TextBlock { Text = $"Move {what} from {local.Path} to the Recycle Bin?", TextWrapping = TextWrapping.Wrap },
-            PrimaryButtonText = "Move to Recycle Bin",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+        // SITES.11 R5: the same shape as Delete on server; the Recycle Bin, a network folder (Windows may delete outright, and
+        // asks), or for good with the count of what goes.
+        var place = forGood ? SiteChangeRules.DeletePlace.ForGood : SiteChangeRules.LocalDeletePlace(folder, OnNetworkDrive(folder));
+        Func<CancellationToken, Task<DownloadManager.Contracts.SiteCountResultDto>>? count = forGood
+            ? token => Task.Run(() => LocalRecycle.Count(paths, token), token)
+            : null;
+        var chosen = selected.Select(entry => new DownloadManager.Contracts.SiteTransferNameDto { Name = entry.Name, IsFolder = entry.IsFolder }).ToList();
+        if (!await ConfirmDeleteAsync(chosen, place, remoteName: null, count)) return;
 
-        var failed = await Task.Run(() =>
+        // The dialog was up a while: a transfer may have started on one of them since.
+        if (Busy() is { } busyNow)
         {
-            var problems = new List<string>();
-            foreach (var path in paths)
+            local.Note(busyNow, reload: false);
+            return;
+        }
+
+        string? note;
+        try
+        {
+            if (forGood)
             {
-                try
-                {
-                    if (Directory.Exists(path))
-                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin, Microsoft.VisualBasic.FileIO.UICancelOption.DoNothing);
-                    else if (File.Exists(path))
-                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin, Microsoft.VisualBasic.FileIO.UICancelOption.DoNothing);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or OperationCanceledException)
-                {
-                    problems.Add($"{Path.GetFileName(path)}: {ex.Message}");
-                }
+                var (left, cutShort) = await Task.Run(() => LocalRecycle.DeleteForGood(folder, paths));
+                note = SiteChangeRules.LocalDeleteNote(place, left, cutShort);
             }
+            else
+            {
+                note = SiteChangeRules.LocalDeleteNote(place, await LocalRecycle.RecycleAsync(paths, WindowHandle));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Never lost: what happened is said, and the folder is read again to show what is still there.
+            note = $"The delete stopped: {ex.Message}";
+        }
 
-            return problems;
-        });
-
-        if (failed.Count > 0) local.Note("Not moved to the Recycle Bin: " + string.Join("; ", failed.Take(3)), reload: true);
+        if (note is not null) local.Note(note, reload: true);
         else local.Reload();
+    }
+
+    /// <summary>Whether a folder is on a mapped network drive (a UNC path is told by its spelling).</summary>
+    private static bool OnNetworkDrive(string folder)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(folder);
+            return root is { Length: > 0 } && !SiteChangeRules.IsUncPath(root) && new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

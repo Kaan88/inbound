@@ -146,17 +146,21 @@ internal static class SiteTransferRules
     /// </summary>
     public static bool LocalInUse(IReadOnlyList<SiteTransferDto> transfers, string path)
     {
-        var target = path.TrimEnd('\\', '/');
+        var target = SamePathForm(path);
         foreach (var t in transfers)
         {
             if (CanClear(t) && !CanResume(t) || string.IsNullOrEmpty(t.LocalFolder)) continue;
-            var folder = t.LocalFolder.TrimEnd('\\', '/');
+            // The batch's folder is the item or anywhere inside it (a subfolder of a picked folder too), whichever separator.
+            var folder = SamePathForm(t.LocalFolder);
             if (string.Equals(folder, target, StringComparison.OrdinalIgnoreCase)
                 || folder.StartsWith(target + "\\", StringComparison.OrdinalIgnoreCase)) return true;
         }
 
         return false;
     }
+
+    /// <summary>A path with one separator and no trailing one, for comparing two spellings of a folder on this PC.</summary>
+    public static string SamePathForm(string path) => path.Replace('/', '\\').TrimEnd('\\');
 
     // ---- The list's cells (R3): what each column of a row says ------------------------------------------
 

@@ -57,6 +57,7 @@ public sealed partial class MainWindow
         Key(SiteMenuNewFolder, SitesCommandRules.KeyText(SiteCommand.NewFolder));
         Key(SiteMenuRename, SitesCommandRules.KeyText(SiteCommand.Rename));
         Key(SiteMenuDelete, SitesCommandRules.KeyText(SiteCommand.Delete));
+        Key(SiteMenuDeleteForGood, "Shift+Delete");
         Key(SiteMenuRefresh, SitesCommandRules.KeyText(SiteCommand.Refresh));
         Key(SiteMenuStar, "Ctrl+D");
         Key(SiteMenuTwoPanes, "Ctrl+T");
@@ -85,6 +86,7 @@ public sealed partial class MainWindow
         SiteMenuNewFolder.IsEnabled = ready && !_siteChangeRunning;
         SiteMenuRename.IsEnabled = ready && one && !_siteChangeRunning;
         SiteMenuDelete.IsEnabled = ready && picked > 0 && !_siteChangeRunning;
+        SyncDeleteForGoodMenu();
         SiteMenuRefresh.IsEnabled = site is not null && !panel.IsLoading;
         // The Host refuses a star on the root.
         SiteMenuStar.IsEnabled = ready && panel.CanGoUp;
@@ -131,6 +133,9 @@ public sealed partial class MainWindow
                 break;
             case "Options":
                 OpenSitesOptionsHook();
+                break;
+            case "DeleteForGood":
+                FireLocalCommand(LocalCommand.DeleteForGood);
                 break;
             case { } name when Enum.TryParse<SiteCommand>(name, out var command):
                 FireSiteCommand(command);
@@ -342,76 +347,36 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// Starts a download of <paramref name="names"/>. With a folder (the linked one, a picked one, the This PC pane's) the names
-    /// are checked against it off the UI thread and the batch is asked about once when some are there. With no folder the
-    /// Host picks one by the category rules, which the window does not know, so it can't look: KeepBoth then, so nothing is
-    /// overwritten or skipped without being asked (the per-file question of overwrite-mockup.png is stage R5).
+    /// Starts a download of <paramref name="names"/>. With a folder (the linked one, a picked one, the This PC pane's) the folder is
+    /// read off the UI thread and each name already there is asked about, one file at a time (SITES.11 R5); the choices go out as
+    /// one batch each. With no folder the Host picks one by the category rules, which the window does not know, so it can't
+    /// look: Keep both then, so nothing is overwritten or skipped without being asked.
     /// </summary>
     private async Task<SiteTransferDto?> DownloadNamesAsync(SiteDto site, string remoteFolder, List<SiteTransferNameDto> names, string? folder)
     {
-        var conflict = SitesCommandRules.KeepBoth;
+        var choices = new Dictionary<string, string>(StringComparer.Ordinal);
+        var other = SitesCommandRules.KeepBoth;
         // The linked folder of a site of another Inbound server is on that server's disks: this PC can't look in it.
         if (folder is not null && !_connection.IsRemote)
         {
-            var existing = await Task.Run(() => NamesIn(folder));
-            var there = SitesCommandRules.AlreadyThere(names, existing, ignoreCase: OperatingSystem.IsWindows());
-            conflict = SitesCommandRules.Skip;
-            if (SitesCommandRules.ConflictQuestion(there, folder, names.Any(name => name.IsFolder), targetComplete: true) is { } ask)
-            {
-                if (await AskConflictAsync(ask) is not { } chosen) return null;
-                conflict = chosen;
-            }
+            var targets = await Task.Run(() => LocalTargets(folder));
+            var ignoreCase = OperatingSystem.IsWindows();
+            var sources = new Dictionary<string, SitesCommandRules.ConflictSide>(StringComparer.Ordinal);
+            // What the server says of the picked files is known when their folder is the one the pane shows.
+            if (_sitesPanel is { } panel && panel.SiteId == site.Id && SitesBrowseRules.Normalize(panel.Path) == SitesBrowseRules.Normalize(remoteFolder))
+                foreach (var item in panel.ShownItems) sources[item.Name] = new SitesCommandRules.ConflictSide(item.Size, item.Modified);
+            var pairs = SitesCommandRules.ConflictPairs(names, sources, targets, ignoreCase);
+            if (await AskConflictsAsync(pairs, upload: false, folder, names.Any(name => name.IsFolder), complete: true, [.. targets.Select(t => t.Key)],
+                    SitesCommandRules.TimesArePrecise(site.Kind)) is not { } answer)
+                return null;
+            choices = answer.Choices;
+            other = answer.Other;
         }
 
-        return await StartSiteTransferAsync(new SiteTransferStartRequest
+        return await StartConflictBatchesAsync(names, choices, other, (conflict, batch) => new SiteTransferStartRequest
         {
-            SiteId = site.Id, Direction = "download", RemoteFolder = remoteFolder, LocalFolder = folder ?? "", Names = names, Conflict = conflict,
+            SiteId = site.Id, Direction = "download", RemoteFolder = remoteFolder, LocalFolder = folder ?? "", Names = batch, Conflict = conflict,
         });
-    }
-
-    /// <summary>The names of the files and folders in <paramref name="folder"/>; empty when it can't be read.</summary>
-    private static List<string> NamesIn(string folder)
-    {
-        try
-        {
-            return Directory.Exists(folder) ? [.. Directory.EnumerateFileSystemEntries(folder).Select(path => Path.GetFileName(path))] : [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// The batch question (Skip them, the default; Replace; Keep both); the choice, or null on Cancel. When another dialog is
-    /// open the question can't show: that is said, and nothing starts.
-    /// </summary>
-    private async Task<string?> AskConflictAsync(SitesCommandRules.ConflictAsk ask)
-    {
-        var body = new StackPanel { Spacing = 10 };
-        foreach (var note in ask.Notes) body.Children.Add(new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap });
-        var choices = new RadioButtons();
-        foreach (var (_, label) in SitesCommandRules.ConflictChoices) choices.Items.Add(label);
-        choices.SelectedIndex = 0;
-        body.Children.Add(choices);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content?.XamlRoot,
-            Title = ask.Title,
-            Content = body,
-            PrimaryButtonText = "Continue",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        var answer = await DialogGuard.ShowAsync(dialog);
-        if (answer is null)
-        {
-            SetSitesStatus("Another dialog is open; close it and try again.");
-            return null;
-        }
-
-        if (answer != ContentDialogResult.Primary) return null;
-        return SitesCommandRules.ConflictChoices[Math.Max(0, choices.SelectedIndex)].Value;
     }
 
     // ---- Open -------------------------------------------------------------------------------------------
@@ -713,6 +678,9 @@ public sealed partial class MainWindow
                 break;
             case LocalCommand.Delete:
                 await DeleteLocalAsync();
+                break;
+            case LocalCommand.DeleteForGood:
+                await DeleteLocalAsync(forGood: true);
                 break;
             case LocalCommand.NewFolder:
                 await NewLocalFolderAsync(local);

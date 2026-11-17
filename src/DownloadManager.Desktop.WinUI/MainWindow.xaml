@@ -124,6 +124,7 @@
                 <MenuFlyoutItem x:Name="SiteMenuNewFolder" Text="New folder" AccessKey="N" Tag="NewFolder" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuRename" Text="Rename" AccessKey="E" Tag="Rename" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuDelete" Text="Delete on server…" AccessKey="V" Tag="Delete" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuDeleteForGood" Text="Delete permanently on This PC…" AccessKey="M" Tag="DeleteForGood" Click="SiteMenuItem_Click" Visibility="Collapsed" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="SiteMenuRefresh" Text="Refresh" AccessKey="H" Tag="Refresh" Click="SiteMenuItem_Click" />
                 <MenuFlyoutSeparator />

@@ -251,6 +251,9 @@ public sealed partial class SitesPanel : UserControl
     /// <summary>The names listed so far in the folder shown (for a free "New folder" name).</summary>
     internal IEnumerable<string> ShownNames => _rows.Select(row => row.Name);
 
+    /// <summary>The items of the folder shown, with size and last-changed (for the overwrite question).</summary>
+    internal IEnumerable<SiteItemDto> ShownItems => _rows.Where(row => !row.IsParent).Select(row => row.Item);
+
     /// <summary>SITES.5: F2 and Delete on the list; the window asks and acts.</summary>
     internal event Action? RenameRequested;
     internal event Action? DeleteRequested;

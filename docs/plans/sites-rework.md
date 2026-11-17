@@ -342,6 +342,8 @@ rework R4" for what is not as drawn.
 - Both dialogs compared and corrected. Local delete says Recycle Bin.
 - A full pass over every desktop pair with the owner's notes from R2 to R4.
 
+Status 2026-11-17: done; see PROGRESS "Sites rework R5".
+
 Written out 2026-11-17 (owner: "looks perfect ... write and start the next one"; no notes on R2 to R4):
 
 - **Delete on server** (`delete`): a warning icon and "Delete on server?"; the name in bold and what goes with it

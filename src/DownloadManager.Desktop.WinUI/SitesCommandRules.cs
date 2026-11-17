@@ -13,7 +13,7 @@ internal enum SiteCommand
 /// <summary>What a command of the This PC pane is.</summary>
 internal enum LocalCommand
 {
-    Upload, Open, ShowInExplorer, Rename, Delete, NewFolder, Refresh,
+    Upload, Open, ShowInExplorer, Rename, Delete, DeleteForGood, NewFolder, Refresh,
 }
 
 /// <summary>What Enter or a double click does on the selection of the server pane.</summary>
@@ -100,7 +100,7 @@ internal static class SitesCommandRules
         }
 
         if (first.Count > 0) groups.Add(first);
-        groups.Add(one ? [LocalCommand.Rename, LocalCommand.Delete] : [LocalCommand.Delete]);
+        groups.Add(one ? [LocalCommand.Rename, LocalCommand.Delete, LocalCommand.DeleteForGood] : [LocalCommand.Delete, LocalCommand.DeleteForGood]);
         groups.Add([LocalCommand.NewFolder]);
         return groups;
     }
@@ -129,6 +129,7 @@ internal static class SitesCommandRules
         LocalCommand.ShowInExplorer => "Show in Explorer",
         LocalCommand.Rename => "Rename",
         LocalCommand.Delete => "Delete (Recycle Bin)",
+        LocalCommand.DeleteForGood => "Delete permanently…",
         LocalCommand.NewFolder => "New folder",
         LocalCommand.Refresh => "Refresh",
         _ => command.ToString(),
@@ -212,6 +213,206 @@ internal static class SitesCommandRules
         (Replace, "Replace"),
         (KeepBoth, "Keep both"),
     ];
+
+    // ---- The overwrite question, one file at a time (SITES.11 R5) ----------------------------------------------
+
+    /// <summary>One side of a name that is on both: its size (-1 when not known) and last-changed moment.</summary>
+    internal readonly record struct ConflictSide(long Size, DateTimeOffset? Modified);
+
+    /// <summary>A picked name and the same name in the target, with what is known of each. A side can be null (not looked at).</summary>
+    internal sealed record ConflictPair(string Name, bool IsFolder, ConflictSide? Source, ConflictSide? Target);
+
+    /// <summary>How old the target is against the source.</summary>
+    internal enum TargetAge { Unknown, Newer, Older, Same }
+
+    /// <summary>Moments this close count as the same (file systems and servers keep time to different precision).</summary>
+    public static readonly TimeSpan SameMoment = TimeSpan.FromSeconds(2);
+
+    /// <summary>Replace is recommended only for a target older than the source by more than this, and only with <see cref="TimesArePrecise"/>.</summary>
+    public static readonly TimeSpan ReplaceRecommendedAfter = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// Whether a remote's file times are good enough to recommend Replace on: SFTP, WebDAV and the cloud kinds are; FTP (with or
+    /// without TLS) is not (a listing may give minutes, local time or no year), nor a kind not known.
+    /// </summary>
+    public static bool TimesArePrecise(string? kind) => kind is { Length: > 0 } && !string.Equals(kind, SiteKindCatalog.Ftp, StringComparison.OrdinalIgnoreCase);
+
+    internal static TargetAge AgeOf(ConflictPair pair)
+    {
+        if (pair.IsFolder || pair.Source?.Modified is not { Year: > 1 } source || pair.Target?.Modified is not { Year: > 1 } target) return TargetAge.Unknown;
+        var difference = target - source;
+        if (difference.Duration() <= SameMoment) return TargetAge.Same;
+        return difference > TimeSpan.Zero ? TargetAge.Newer : TargetAge.Older;
+    }
+
+    /// <summary>The picked names that are in the target, as pairs (in picked order). Sides come from the dictionaries by name.</summary>
+    internal static List<ConflictPair> ConflictPairs(IEnumerable<SiteTransferNameDto> picked, IReadOnlyDictionary<string, ConflictSide> sources,
+        IReadOnlyList<KeyValuePair<string, ConflictSide>> targets, bool ignoreCase)
+    {
+        var comparer = ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var there = new Dictionary<string, ConflictSide>(comparer);
+        foreach (var (name, side) in targets) there.TryAdd(name, side);
+        var pairs = new List<ConflictPair>();
+        foreach (var name in picked)
+        {
+            if (!there.TryGetValue(name.Name, out var target)) continue;
+            ConflictSide? source = sources.TryGetValue(name.Name, out var known) ? known : null;
+            pairs.Add(new ConflictPair(name.Name, name.IsFolder, source, target));
+        }
+
+        return pairs;
+    }
+
+    /// <summary>
+    /// The Keep both name the question may promise, or null to say "under a numbered name". The Host picks its name itself when
+    /// the copy goes (it looks for each candidate in the target), so a name is shown only when the window's look is sure to be
+    /// the Host's: the target is listed in full and neither the name nor a candidate is there in another case only (a server
+    /// may or may not tell "A.txt" from "a.txt").
+    /// </summary>
+    public static string? ShownKeepBothName(string name, IReadOnlyCollection<string> taken, bool targetComplete)
+    {
+        if (!targetComplete) return null;
+        var exact = new HashSet<string>(taken, StringComparer.Ordinal);
+        if (!exact.Contains(name)) return null;
+        var loose = new HashSet<string>(taken, StringComparer.OrdinalIgnoreCase);
+        for (var number = 2; number < 1000; number++)
+        {
+            var candidate = SiteTransferPaths.Numbered(name, number);
+            if (exact.Contains(candidate)) continue;
+            return loose.Contains(candidate) ? null : candidate;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The choice for names the question did not show (not listed in a target only partly listed): the one "Do this for the
+    /// others" applied, when it was ticked and the target is partly listed; otherwise Skip.
+    /// </summary>
+    public static string ChoiceForUnlisted(bool targetComplete, string? appliedToOthers) =>
+        !targetComplete && appliedToOthers is Skip or Replace or KeepBoth ? appliedToOthers : Skip;
+
+    /// <summary>"notes (2).txt": the first number from 2 that is not in <paramref name="taken"/>; the Host's own rule (SiteTransferPaths.Numbered).</summary>
+    public static string KeepBothName(string name, IEnumerable<string> taken, bool ignoreCase)
+    {
+        var used = new HashSet<string>(taken, ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        for (var number = 2; number < 1000; number++)
+        {
+            var candidate = SiteTransferPaths.Numbered(name, number);
+            if (!used.Contains(candidate)) return candidate;
+        }
+
+        return SiteTransferPaths.Numbered(name, 2);
+    }
+
+    /// <summary>"notes.txt is newer on the server" / "is older on" / "is already on"; "this PC" for a download. A folder is always "already".</summary>
+    internal static string OverwriteTitle(ConflictPair pair, bool upload)
+    {
+        var where = upload ? "the server" : "this PC";
+        return AgeOf(pair) switch
+        {
+            TargetAge.Newer => $"{pair.Name} is newer on {where}",
+            TargetAge.Older => $"{pair.Name} is older on {where}",
+            _ => $"{pair.Name} is already on {where}",
+        };
+    }
+
+    /// <summary>The two rows ("On this PC", "On the server") with size, date and "(newer)", source first; none for a folder.</summary>
+    internal static List<(string Label, string Text)> OverwriteRows(ConflictPair pair, bool upload)
+    {
+        if (pair.IsFolder) return [];
+        var age = AgeOf(pair);
+        var source = SideText(pair.Source, age == TargetAge.Older);
+        var target = SideText(pair.Target, age == TargetAge.Newer);
+        return upload ? [("On this PC", source), ("On the server", target)] : [("On the server", source), ("On this PC", target)];
+    }
+
+    private static string SideText(ConflictSide? side, bool newer)
+    {
+        var parts = new List<string>();
+        if (side is { } known)
+        {
+            if (SitesBrowseRules.SizeText(known.Size, isFolder: false) is { Length: > 0 } size) parts.Add(size);
+            if (SitesBrowseRules.ModifiedText(known.Modified) is { Length: > 0 } moment) parts.Add(moment);
+        }
+
+        var text = parts.Count == 0 ? "not known" : string.Join(" · ", parts);
+        return newer ? text + " (newer)" : text;
+    }
+
+    internal readonly record struct OverwriteChoice(string Value, string Label, bool Recommended);
+
+    /// <summary>
+    /// Skip, Replace, Keep both, in that order, worded for the direction and the ages. The safer one is marked: Skip when the
+    /// target is newer, the same or not known, Replace only when the target is older by more than a day on a remote whose
+    /// times are precise (<see cref="TimesArePrecise"/>). <paramref name="keepName"/> is the name Keep both gives
+    /// (<see cref="ShownKeepBothName"/>), or null for "under a numbered name"; folders say the new copies are numbered.
+    /// </summary>
+    internal static OverwriteChoice[] OverwriteChoices(ConflictPair pair, bool upload, string? keepName, bool preciseTimes)
+    {
+        var age = AgeOf(pair);
+        var copy = upload ? "the server copy" : "the copy on this PC";
+        string skip, replace, keep;
+        if (pair.IsFolder)
+        {
+            skip = "Skip files that are already there";
+            replace = "Replace files that are already there";
+            keep = "Keep both, number the new copies";
+        }
+        else
+        {
+            skip = upload ? "Skip, keep the server copy" : "Skip, keep the copy on this PC";
+            replace = age switch
+            {
+                TargetAge.Newer => $"Replace {copy} with the older file",
+                TargetAge.Older => $"Replace {copy} with the newer file",
+                _ => $"Replace {copy}",
+            };
+            var verb = upload ? "upload" : "download";
+            keep = keepName is { Length: > 0 } ? $"Keep both, {verb} as {keepName}" : $"Keep both, {verb} under a numbered name";
+        }
+
+        // Replace only on times that can be trusted and a clear gap; Skip otherwise (it loses nothing).
+        var replaceFirst = preciseTimes && age == TargetAge.Older
+            && pair.Source?.Modified is { } source && pair.Target?.Modified is { } target && source - target > ReplaceRecommendedAfter;
+        return
+        [
+            new OverwriteChoice(Skip, skip, !replaceFirst),
+            new OverwriteChoice(Replace, replace, replaceFirst),
+            new OverwriteChoice(KeepBoth, keep, false),
+        ];
+    }
+
+    public const string RecommendedMark = " (recommended)";
+
+    /// <summary>"Do this for the other 3 files" (or "items" when a folder is among them); null when none are left.</summary>
+    public static string? ApplyToOthersLabel(int others, bool anyFolder)
+    {
+        if (others <= 0) return null;
+        var noun = anyFolder ? (others == 1 ? "item" : "items") : (others == 1 ? "file" : "files");
+        return others == 1 ? $"Do this for the other {noun}" : $"Do this for the other {others.ToString(CultureInfo.InvariantCulture)} {noun}";
+    }
+
+    internal readonly record struct ConflictBatch(string Conflict, IReadOnlyList<SiteTransferNameDto> Names);
+
+    /// <summary>
+    /// The batches to send, one per choice (Skip, Replace, Keep both; the Host takes one choice per batch). A name with no choice
+    /// of its own (not in the target, or not looked at) goes with <paramref name="otherChoice"/>. A file the user chose to skip
+    /// is not sent at all; a folder always is, since what is inside it follows the choice and may be new.
+    /// </summary>
+    internal static List<ConflictBatch> ConflictBatches(IReadOnlyList<SiteTransferNameDto> picked, IReadOnlyDictionary<string, string> choices, string otherChoice = Skip)
+    {
+        var groups = new Dictionary<string, List<SiteTransferNameDto>> { [Skip] = [], [Replace] = [], [KeepBoth] = [] };
+        foreach (var name in picked)
+        {
+            var has = choices.TryGetValue(name.Name, out var own);
+            if (has && own == Skip && !name.IsFolder) continue;
+            var choice = has ? own! : otherChoice;
+            groups[groups.ContainsKey(choice) ? choice : Skip].Add(name);
+        }
+
+        return [.. new[] { Skip, Replace, KeepBoth }.Where(key => groups[key].Count > 0).Select(key => new ConflictBatch(key, groups[key]))];
+    }
 
     // ---- Copy address -----------------------------------------------------------------------------------
 
@@ -386,11 +587,11 @@ internal static class SitesCommandRules
     {
         var path = Path.Combine(folder, name);
         if (SiteTransferRules.LocalInUse(transfers, path)) return true;
-        var here = folder.TrimEnd('\\', '/');
+        var here = SiteTransferRules.SamePathForm(folder);
         foreach (var t in transfers)
         {
             if (SiteTransferRules.CanClear(t) && !SiteTransferRules.CanResume(t) || string.IsNullOrEmpty(t.LocalFolder)) continue;
-            if (!string.Equals(t.LocalFolder.TrimEnd('\\', '/'), here, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(SiteTransferRules.SamePathForm(t.LocalFolder), here, StringComparison.OrdinalIgnoreCase)) continue;
             if (t.Picked.Any(picked => string.Equals(picked.Split('/', '\\')[0], name, StringComparison.OrdinalIgnoreCase))) return true;
         }
 

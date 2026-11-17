@@ -61,12 +61,13 @@ public sealed class SitesCommandRulesTests
     {
         var one = SitesCommandRules.LocalMenu([File("a")], canUpload: true);
         Assert.Equal([LocalCommand.Upload, LocalCommand.Open, LocalCommand.ShowInExplorer], one[0]);
-        Assert.Equal([LocalCommand.Rename, LocalCommand.Delete], one[1]);
+        Assert.Equal([LocalCommand.Rename, LocalCommand.Delete, LocalCommand.DeleteForGood], one[1]);
+        Assert.Equal("Delete permanently…", SitesCommandRules.Label(LocalCommand.DeleteForGood));
         Assert.Equal([LocalCommand.NewFolder], one[2]);
 
         var two = SitesCommandRules.LocalMenu([File("a"), File("b")], canUpload: false);
         Assert.Equal(2, two.Count);
-        Assert.Equal([LocalCommand.Delete], two[0]);
+        Assert.Equal([LocalCommand.Delete, LocalCommand.DeleteForGood], two[0]);
 
         var empty = SitesCommandRules.LocalMenu([Up], canUpload: true);
         Assert.Single(empty);
@@ -229,6 +230,13 @@ public sealed class SitesCommandRulesTests
         Assert.False(SitesCommandRules.LocalItemBusy([done], @"D:\ISOs", "old.iso"));
         // The batch's folder itself, renamed from the folder above it.
         Assert.True(SitesCommandRules.LocalItemBusy([running], @"D:\", "ISOs"));
+        // A batch writing into a folder deep inside the picked one (either separator) keeps it from a delete too.
+        var deep = new SiteTransferDto { Id = "deep", State = "running", LocalFolder = @"D:\ISOs\docs\2025\march", Picked = ["a.pdf"] };
+        Assert.True(SitesCommandRules.LocalItemBusy([deep], @"D:\ISOs", "docs"));
+        Assert.True(SitesCommandRules.LocalItemBusy([deep], @"D:\", "ISOs"));
+        Assert.False(SitesCommandRules.LocalItemBusy([deep], @"D:\ISOs", "doc"));
+        var slashed = new SiteTransferDto { Id = "s", State = "queued", LocalFolder = "D:/ISOs/docs/sub", Picked = ["a.pdf"] };
+        Assert.True(SitesCommandRules.LocalItemBusy([slashed], "D:/ISOs", "docs"));
     }
 
     [Fact]

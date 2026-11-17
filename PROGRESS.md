@@ -1,5 +1,34 @@
 # Progress — session handoff
 
+### Sites rework R5: delete, overwrite, permanent delete on This PC, SITES.11 (2026-11-17)
+
+- Built (Sonnet), reviewed by Fable twice (dialogs, then the data-loss paths alone), fixed twice (Opus), walked on the
+  hidden desktop by me, accepted.
+- **Delete on server** (`delete`): warning icon, the bold name with the files inside and size, "Inbound cannot bring
+  them back. Nothing on this PC is touched.", the "I understand that N files will be deleted" tick for folders (off
+  until the count is in), red "Delete on server", Cancel the default. Counts files, so it says "files", not "items".
+- **Delete on This PC:** the same shape, to the Recycle Bin, one shell call on its own STA thread with
+  `FOF_NO_CONNECTED_ELEMENTS` (page.htm no longer takes page_files) and Windows' own "delete permanently?" for what
+  the bin can't take; network folders say so. **Old fault fixed:** the previous VB call deleted such items for good
+  without asking.
+- **Delete permanently on This PC** (owner request): Shift+Delete, "Delete permanently…" in the pane menu, "Delete
+  permanently on This PC…" in the Remote menu; the server dialog's shape with count and tick. Plain .NET deletes:
+  links and junctions removed, never followed; in-use and read-only files left and named; read-only folders cleared.
+- **Guards for both:** full paths only; no `.`/`..` segments, wildcards, drive or share roots; a name ending in a dot
+  or space is left alone (Windows would act on another item); a folder with a transfer writing anywhere inside it is
+  busy (mixed `/` and `\` spellings used to slip through; fixed). Errors are noted and the pane always reloads.
+- **Overwrite, one file at a time** (`overwrite`): both copies with size, date and "(newer)", Skip / Replace / Keep
+  both under the Host's name, "(recommended)" (Replace only when the target is older by more than a day on a remote
+  with precise times, never FTP), "Do this for the other N files"; one batch per choice; used by every download and
+  upload path. Continue sits left of Cancel (ContentDialog order; Esc stays Cancel).
+- **Walk:** permanent delete of a test folder with the tick (gone, pane reloaded), Delete on server dialog (cancelled),
+  overwrite on a download (cancelled); trace on, no exception. Pairs: `delete-built.png`, `overwrite-built.png`, and
+  `delete-permanently-built.png` (no mockup). **Not walked:** Recycle Bin delete and Shift+Delete (they need real
+  keys or a right click, which the hidden desktop refuses), Windows' own question on a share.
+- **Full pass:** the owner looked at R2 to R4 in the running test app ("looks perfect") with no notes, so the pairs
+  were not retaken.
+- Tests: Core 2571 pass; solution and Uno 0 errors, no warning in a changed file.
+
 ### Sites rework R6a: web browse view and both web bugs, SITES.11 (2026-11-17)
 
 - Owner: "start r6 on the side". Built (Sonnet) in a worktree, reviewed (Fable), fixed (Opus), walked in Chromium
