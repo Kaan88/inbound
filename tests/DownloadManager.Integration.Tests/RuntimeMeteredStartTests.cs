@@ -362,6 +362,8 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("paused", job.State);
         Assert.True(job.PausedByUser);
         Assert.Equal(bytes, job.ReceivedBytes);
+        // The phone's Resume after its crash guard restarts what the start paused.
+        Assert.Equal(new[] { id }, b.Service.PausedAtStart);
         await Task.Delay(600);
         Assert.Equal("paused", b.Job(id).State);
         Assert.Equal(bytes, b.Job(id).ReceivedBytes);
@@ -387,6 +389,7 @@ public sealed partial class RuntimeServiceTests
         await Task.Delay(300);
         Assert.Equal("paused", b.Job(id).State);
         Assert.True(b.Job(id).PausedByUser);
+        Assert.Equal(new[] { id }, b.Service.PausedAtStart);
         await b.Service.ResumeAsync(id);
         await b.UntilAsync(() => b.Job(id).State is "completed" or "failed", "the resumed job to finish");
         Assert.Equal("completed", b.Job(id).State);
@@ -401,6 +404,19 @@ public sealed partial class RuntimeServiceTests
         await b.Service.InitializeAsync(lastRunStoppedByUser: true);
         Assert.Equal("queued", b.Job(id).State);
         Assert.False(b.Job(id).PausedByUser);
+        Assert.Empty(b.Service.PausedAtStart);
+    }
+
+    [Fact]
+    public async Task StoppedByTheUserAJobTheUserHadPausedIsNotCountedAsPausedAtStart()
+    {
+        // The crash guard's Resume must not restart a download the user paused before.
+        var (ctx, id, _) = await OnDiskJobAsync(job => { Interrupted(job); job.State = DownloadState.Paused; job.PausedByUser = true; }, wifiOnly: false, "stopped-userpaused.bin", 969);
+        await using var _ = ctx;
+        await using var b = new Booted(ctx.Paths);
+        await b.Service.InitializeAsync(lastRunStoppedByUser: true);
+        Assert.Equal("paused", b.Job(id).State);
+        Assert.Empty(b.Service.PausedAtStart);
     }
 
     /// <summary>The pure rule and the real reconcile give the same answer for each stored shape.</summary>

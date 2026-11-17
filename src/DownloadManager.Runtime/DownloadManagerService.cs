@@ -202,6 +202,17 @@ public sealed partial class DownloadManagerService
     /// The previous run was stopped by the user (Android's Stop or Force stop). Downloads that were running then stay Paused
     /// as the user's own pause, even though the app is now opened; see <see cref="StartReconcile"/>. Queued jobs are not touched.
     /// </param>
+    private readonly List<Guid> _pausedAtStart = new();
+
+    /// <summary>
+    /// The jobs this start left paused because of the "stopped by the user" option (they were running or waiting): a phone's
+    /// "Resume" after its crash guard restarts these, not downloads the user had paused before. Empty without that option.
+    /// </summary>
+    public IReadOnlyList<Guid> PausedAtStart
+    {
+        get { lock (_pausedAtStart) return _pausedAtStart.ToList(); }
+    }
+
     public async Task InitializeAsync(bool lastRunStoppedByUser, CancellationToken cancellationToken = default)
     {
         _lastRunStoppedByUser = lastRunStoppedByUser;
@@ -1388,7 +1399,8 @@ public sealed partial class DownloadManagerService
         finally { _persistGate.Release(); }
     }
 
-    public async Task PauseAllAsync(CancellationToken cancellationToken = default)
+    /// <summary>Pauses everything that can pause. Returns the ids it paused (a phone's "Resume" restarts only those).</summary>
+    public async Task<IReadOnlyList<Guid>> PauseAllAsync(CancellationToken cancellationToken = default)
     {
         List<JobRuntime> paused;
         lock (_sync)
@@ -1416,6 +1428,7 @@ public sealed partial class DownloadManagerService
 
         // Stop All stops seeding too (T2).
         StopSeedingWhere(_ => true);
+        return paused.Select(r => r.Job.Id).ToList();
     }
 
     public async Task ResumeAllAsync(CancellationToken cancellationToken = default)
@@ -4178,7 +4191,12 @@ public sealed partial class DownloadManagerService
         }
 
         // Interrupted runs and exit pauses (audit 2 M11): one rule shared with the Android boot count.
+        var wasUserPaused = job.State == DownloadState.Paused && job.PausedByUser;
         changed |= StartReconcile.Apply(job, _settings, _lastRunStoppedByUser);
+        if (_lastRunStoppedByUser && !wasUserPaused && job.State == DownloadState.Paused && job.PausedByUser)
+        {
+            lock (_pausedAtStart) _pausedAtStart.Add(job.Id);
+        }
 
         if (job.State == DownloadState.Cancelled && job.DeleteFileOnCancel && File.Exists(job.PartFilePath))
         {
@@ -4355,6 +4373,25 @@ public sealed partial class DownloadManagerService
         // A queue stopped here by its quota is announced like one stopped mid-download, so clients (the phone's keep-alive)
         // don't go on counting it as running.
         var quotaStopped = false;
+        var meteredHeld = false;
+        lock (_sync)
+        {
+            if (!_initialized || _shuttingDown || _updateQuiescing)
+            {
+                return;
+            }
+
+            // Held for a metered network: nothing starts, but the jobs that were preempted or stopped are winding down, so the
+            // sleep prevention must still be re-evaluated (it is otherwise only released at the end of this method).
+            meteredHeld = MeteredRuleHoldsLocked();
+        }
+
+        if (meteredHeld)
+        {
+            UpdateSleepPrevention();
+            return;
+        }
+
         lock (_sync)
         {
             if (!_initialized || _shuttingDown || _updateQuiescing || MeteredRuleHoldsLocked())
@@ -5718,8 +5755,9 @@ public sealed partial class DownloadManagerService
             RequestedConnections = job.RequestedConnections,
             ActiveConnections = job.ActiveConnections,
             WaitingForHost = WaitingHostShown(job),
+            // Not while verifying: the file is finishing, so "stopping starts over" would be wrong and its Stop does nothing.
             RunningOnMeteredWithoutResume = job.RunningOnMeteredWithoutResume &&
-                job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting,
+                job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting,
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
             CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),

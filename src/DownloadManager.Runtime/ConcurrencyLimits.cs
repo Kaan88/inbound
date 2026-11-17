@@ -185,7 +185,7 @@ public sealed partial class DownloadManagerService
         foreach (var runtime in _jobs.Values)
         {
             var want = holds && !runtime.Job.IsTerminal && (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
-                       !runtime.PauseRequested && !runtime.CancelRequested && WhyNotPreemptable(runtime) is not null;
+                       !runtime.PauseRequested && !runtime.CancelRequested && !IsFinishing(runtime) && WhyNotResumable(runtime.Job) is not null;
             if (runtime.Job.RunningOnMeteredWithoutResume == want) continue;
             runtime.Job.RunningOnMeteredWithoutResume = want;
             runtime.ResumeKnownChecked = false;
@@ -287,9 +287,7 @@ public sealed partial class DownloadManagerService
             foreach (var runtime in _jobs.Values.Where(r => r.Job.RunningOnMeteredWithoutResume && !r.Job.IsTerminal &&
                          (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested).ToList())
             {
-                var phase = runtime.LastPhase ?? string.Empty;
-                if (runtime.Job.State == DownloadState.Verifying || phase.StartsWith("Verifying", StringComparison.Ordinal) ||
-                    phase.StartsWith("Finaliz", StringComparison.Ordinal)) continue;
+                if (IsFinishing(runtime)) continue;
                 PreemptLocked(runtime);
                 stopped.Add(runtime);
             }
@@ -326,16 +324,20 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>Null when stopping now keeps everything downloaded so far; otherwise why not.</summary>
-    private static string? WhyNotPreemptable(JobRuntime runtime)
-    {
-        var job = runtime.Job;
-        var phase = runtime.LastPhase ?? string.Empty;
-        if (job.State == DownloadState.Verifying || phase.StartsWith("Verifying", StringComparison.Ordinal) ||
-            phase.StartsWith("Finaliz", StringComparison.Ordinal))
-        {
-            return "it is verifying or finishing its file.";
-        }
+    private static string? WhyNotPreemptable(JobRuntime runtime) =>
+        IsFinishing(runtime) ? "it is verifying or finishing its file." : WhyNotResumable(runtime.Job);
 
+    /// <summary>Verifying or finishing its file: left alone, and never flagged as "can't resume" (it is about to end).</summary>
+    private static bool IsFinishing(JobRuntime runtime)
+    {
+        var phase = runtime.LastPhase ?? string.Empty;
+        return runtime.Job.State == DownloadState.Verifying || phase.StartsWith("Verifying", StringComparison.Ordinal) ||
+               phase.StartsWith("Finaliz", StringComparison.Ordinal);
+    }
+
+    /// <summary>Null when the job's data so far survives a stop; otherwise why not.</summary>
+    private static string? WhyNotResumable(DownloadJob job)
+    {
         if (job.ReceivedBytes == 0)
         {
             return null;

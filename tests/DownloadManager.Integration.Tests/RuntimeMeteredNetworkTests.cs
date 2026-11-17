@@ -94,6 +94,27 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task TheSleepPreventionIsReleasedWhileTheRuleHoldsAfterTheRunWindsDown()
+    {
+        // Review of step 2: Schedule returned before re-evaluating the sleep prevention while the rule held, so the phone's
+        // wake lock stayed held on mobile data until the network changed or the settings were saved.
+        var sleep = new RecordingSleepPrevention();
+        await using var ctx = await ServiceContext.CreateAsync(_server, sleepPrevention: sleep);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.PreventSleepWhileDownloading = true;
+        settings.DownloadOnlyOnUnmeteredNetwork = true;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var job = await AddSlowAsync(ctx, "metered-sleep.bin", 3 * Mb, 947, 512 * 1024, 2);
+        await ctx.WaitFor(job.Id, j => j.State == "downloading" && j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
+        await WaitForSleepAsync(sleep, true);
+
+        await ctx.Service.SetNetworkMeteredAsync(true);
+        await SettledCheckpointAsync(ctx, job.Id);
+        await WaitForSleepAsync(sleep, false);
+        Assert.Equal("queued", ctx.Service.GetJob(job.Id)!.State);
+    }
+
+    [Fact]
     public async Task AJobPausedByTheUserStaysPausedThroughMeteredAndBack()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
