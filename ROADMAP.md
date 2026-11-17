@@ -672,6 +672,9 @@ whether rclone is a Setup component that can be unticked.
   - "icon also keeps animating in paused mode": the paused notification uses the animated download icon.
   - Found in the same check: Resume restarted every paused download (about 200 old test entries too), not only what
     Pause all paused, and the paused notification stayed up after Resume.
+  - Fixed 2026-11-17 (46fb9bf, 05b6009, f4f65c0), emulator only so far; S24 recheck pending. Open: two downloads added a
+    second apart both got the name "bench (4).bin" (seen on the API 33 emulator); check whether the Runtime's name
+    choice can give two jobs the same destination (desktop too) before step 3.
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
