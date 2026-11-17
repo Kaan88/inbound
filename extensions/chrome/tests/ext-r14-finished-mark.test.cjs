@@ -172,7 +172,7 @@ test('EXT.R14: a finish marks the icon (check and count) until the popup opens, 
         }
         assert.equal(log.badge.at(-1), '1');
         assert.ok(icons.at(-1).imageData, 'the last icon is the drawn full ring');
-        assert.match(titles.at(-1), /a download has finished/);
+        assert.match(titles.at(-1), /a.zip finished/);
         assert.deepEqual(harness.session.finishedIds, [JOB], 'kept for a worker restart');
 
         // The popup opens: the finished one is named, the mark clears.
@@ -329,4 +329,109 @@ test('EXT.R15: never over the ask-where-to-save popup: while it is open, no seco
   assert.deepEqual(popups, []);
   assert.equal(badge, '1');
   assert.equal(flashed, true);
+});
+
+// ---- EXT.R16 -----------------------------------------------------------------------------------------------------
+
+test('EXT.R16: the tooltip names the newest finished file', () => {
+  assert.match(status.finishedTitle(1, 'ubuntu.iso'), /ubuntu\.iso finished/);
+  assert.match(status.finishedTitle(3, 'ubuntu.iso'), /ubuntu\.iso and 2 more finished/);
+  assert.match(status.finishedTitle(2), /2 downloads have finished/, 'no name: the old words');
+  assert.deepEqual(status.keepNames({ a: 'a.zip', b: 'b.zip' }, ['b']), { b: 'b.zip' });
+  assert.deepEqual(status.parseFinishedNames({ a: 'x', b: 3, c: '' }), { a: 'x' });
+});
+
+test('EXT.R16: a "Finished just now" divider above the promoted rows, and cleared finished rows are not drawn', () => {
+  const { installDom } = require('./dom-harness.cjs');
+  const page = installDom('popup.html');
+  try {
+    const { renderPopupRows, withoutCleared } = page.load('popup-list.ts');
+    const el = page.document.getElementById('jobs');
+    const jobs = [
+      { id: 'a', fileName: 'a.zip', state: 'downloading', receivedBytes: 1, totalBytes: 10 },
+      { id: 'b', fileName: 'b.zip', state: 'completed', receivedBytes: 10, totalBytes: 10 },
+      { id: 'c', fileName: 'c.zip', state: 'completed', receivedBytes: 10, totalBytes: 10 },
+    ];
+    const handlers = { onAction() {}, onOpen() {} };
+    const view = { paired: false, serverName: '', groupsOk: {}, finishedFirst: ['c'] };
+    assert.equal(renderPopupRows(el, jobs, view, handlers), 3);
+    const texts = [...el.children].map((child) => child.classList.contains('group-row') ? `#${child.textContent}` : child.textContent);
+    assert.equal(texts[0], '#Finished just now');
+    assert.match(texts[1], /c\.zip/);
+    assert.equal(texts[2], '#Earlier');
+    renderPopupRows(el, jobs, { ...view, finishedFirst: [] }, handlers);
+    assert.equal(el.querySelectorAll('.finished-divider').length, 0, 'no promoted row: no divider');
+    assert.deepEqual(withoutCleared(jobs, new Set(['b', 'a'])).map((job) => job.id), ['a', 'c'], 'only finished ones leave');
+    assert.equal(renderPopupRows(el, jobs, { ...view, hiddenIds: new Set(['b', 'c']) }, handlers), 1);
+  } finally { page.restore(); }
+});
+
+/** One finish with the given choice; then the notification's buttons (or its body) are clicked. */
+async function finishWithNotice({ refuseButtons = false, onFinish = 'notify' } = {}) {
+  global.__inboundFlashMs = 1;
+  try {
+    let result;
+    await withCanvas(async () => {
+      const made = iconChrome({ ...catching, onFinish });
+      const notes = [];
+      const clicks = { button: [], body: [] };
+      made.harness.chrome.notifications.create = (id, options) => {
+        if (typeof id !== 'string') return;
+        notes.push({ id, options });
+        if (refuseButtons && options.buttons) throw new Error('Property buttons is unsupported.');
+      };
+      made.harness.chrome.notifications.onButtonClicked = { addListener: (fn) => clicks.button.push(fn) };
+      made.harness.chrome.notifications.onClicked = { addListener: (fn) => clicks.body.push(fn) };
+      const popups = [];
+      made.harness.chrome.action.openPopup = async (options) => { popups.push(options); };
+      await withBackground(made.harness, async () => {
+        await sendOne(made.harness);
+        emit(made.harness, { eventType: 'progress', job: job() });
+        await settle(() => made.icons.length > 0 && made.icons.at(-1).imageData);
+        const before = made.icons.length;
+        emit(made.harness, { eventType: 'completed', job: job({ state: 'completed' }) });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        result = { notes, badge: made.log.badge.at(-1), flashed: made.icons.length - before > 1, popups, title: made.titles.at(-1), sent: [] };
+        const first = notes[0];
+        if (!first) return;
+        const click = async (fire, type) => {
+          fire();
+          const request = await answerNative(made.harness, type, { ok: true });
+          result.sent.push({ type: request.type, jobId: request.payload.jobId });
+        };
+        if (!refuseButtons) {
+          await click(() => clicks.button[0](first.id, 0), 'job.open');
+          await click(() => clicks.button[0](first.id, 1), 'job.reveal');
+        } else {
+          await click(() => clicks.body[0](first.id), 'job.reveal');
+        }
+      });
+    });
+    return result;
+  } finally { delete global.__inboundFlashMs; }
+}
+
+test('EXT.R16: "Show a notification" shows Open and Show in folder, runs them on the app, and keeps the finished mark', async () => {
+  const made = await finishWithNotice();
+  assert.equal(made.notes.length, 1);
+  assert.equal(made.notes[0].id, `inbound-finished:${JOB}`);
+  assert.equal(made.notes[0].options.message, 'a.zip');
+  assert.deepEqual(made.notes[0].options.buttons.map((button) => button.title), ['Open', 'Show in folder']);
+  assert.equal(made.badge, '1');
+  assert.equal(made.flashed, false);
+  assert.deepEqual(made.popups, []);
+  assert.match(made.title, /a\.zip finished/);
+  assert.deepEqual(made.sent, [{ type: 'job.open', jobId: JOB }, { type: 'job.reveal', jobId: JOB }]);
+});
+
+test('EXT.R16: where the browser refuses buttons (Firefox) the notification is shown without them; a click shows the folder', async () => {
+  const made = await finishWithNotice({ refuseButtons: true });
+  assert.equal(made.notes.length, 2);
+  assert.equal(made.notes.at(-1).options.buttons, undefined);
+  assert.deepEqual(made.sent, [{ type: 'job.reveal', jobId: JOB }]);
+});
+
+test('EXT.R16: "Flash the icon" shows no notification', async () => {
+  const made = await finishWithNotice({ onFinish: 'flash' });
+  assert.equal(made.notes.length, 0);
 });
