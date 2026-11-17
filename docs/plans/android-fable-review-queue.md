@@ -22,7 +22,20 @@ each slice and step; Fable reviews everything below once the Android work is com
   owner's S24 reports (46fb9bf, 05b6009, f4f65c0), same-name destinations (1532aa8, Runtime, desktop too). The Opus
   review's full result (15 confirmed, 6 refuted) is summarised in PROGRESS; Fable should look hardest at InboundBackground
   and Services (lifecycle), ResumeList, and the Runtime changes that ship on Windows.
-- Steps 3 and 6 (screens, remote hosts) and the first usable APK, then the rest of the plan.
+- Step 3, core screens (ANDROID.4): 1eefe88 (screen logic in Mobile), 815c99ac (views, themes, motion, back), merged
+  a3834898. Built by Sonnet agents (one stopped by accident and restarted); checked on the API 33 emulator only.
+  Look at: MainActivity and Navigator lifecycle (recreate, process death, the step 2 Resume guard after the rewrite),
+  selection and delete-with-file, motion with "Remove animations", TalkBack labels.
+- Step 6, other hosts (ANDROID.7): 003c335 (RemoteHostConnection, host list), 06d219c (switcher, pairing, strip),
+  c18c8ef5 (owner's answers: certificate pin at pairing, one-shot figures), integrated into step 3's screens in
+  425d72d1. Security-sensitive, look hardest at: Contracts/ServerCertificates.cs (shared with the desktop D9 client:
+  Accept, the per-pin HttpClient cache, the probe handshake), pairing and unpair in HostDirectory, KeystoreSecretStore,
+  that no password or token reaches a log, file or backup; and RemoteHostConnection's reconnect diff and pending
+  requests.
+- Follow-ups after 425d72d1 (failure reasons, Open and Finished notifications, server folder chooser, server name):
+  in progress; add their commits here when they land.
+- The Opus milestone review of steps 3 and 6 (workflow, at 425d72d1) and its fixes: pending.
+- The first usable APK (owner's desktop), then the rest of the plan.
 
 ## Done (Fable reviewed it)
 
