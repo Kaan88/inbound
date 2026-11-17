@@ -15,7 +15,7 @@
   // The transfers between remote files and this computer (SITES.11 R6b): the main download list's look (its columns, its
   // two-line rows on a phone, its status colours and bar), with a view model of its own. A row offers only what a transfer
   // supports (lib/sitesTransfers: menu), so none of the download list's commands leak in.
-  let { transfers, onshow, tab = $bindable('active') }: { transfers: SiteTransfer[]; onshow: (siteId: string) => void; tab?: TransferTab } = $props();
+  let { transfers, onshow, tab = $bindable('active'), reveal = $bindable(null) }: { transfers: SiteTransfer[]; onshow: (siteId: string) => void; tab?: TransferTab; reveal?: string | null } = $props();
 
   let selected = $state<Set<string>>(new Set());
   let menuAt = $state<{ items: MenuItem[]; x: number; y: number } | null>(null);
@@ -35,6 +35,14 @@
   const clearable = $derived(clearDoneTargets(transfers));
   const retryable = $derived(retryFailedTargets(transfers));
   const pauseAll = $derived(pauseAllAction(transfers));
+
+  // A toast's Show: pick that row once it is in the list.
+  $effect(() => {
+    if (reveal && rows.some((row) => row.id === reveal)) {
+      selected = new Set([reveal]);
+      reveal = null;
+    }
+  });
 
   // A row that left the tab leaves the selection.
   $effect(() => {

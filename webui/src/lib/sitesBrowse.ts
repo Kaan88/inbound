@@ -141,7 +141,7 @@ export function linkedLine(localFolder: string | null | undefined, remoteFolder:
 
 export type RemoteCommand =
   | 'download' | 'downloadTo' | 'rename' | 'delete' | 'newFolder' | 'upload' | 'refresh' | 'pasteAddress'
-  | 'copyAddress' | 'starFolder';
+  | 'copyAddress' | 'copyPath' | 'starFolder';
 
 /**
  * The context menu as groups (a separator goes between groups; empty groups are left out). Nothing selected is the
@@ -164,7 +164,7 @@ export function remoteMenu(capabilities: readonly string[] | undefined, selected
   change.push('delete');
   if (canNewFolder) change.push('newFolder');
   groups.push(change);
-  const last: RemoteCommand[] = ['copyAddress'];
+  const last: RemoteCommand[] = ['copyPath', 'copyAddress'];
   if (one && picked[0].isFolder) last.push('starFolder');
   groups.push(last);
   return groups;
@@ -181,6 +181,7 @@ export function commandLabel(command: RemoteCommand): string {
     case 'refresh': return 'Refresh';
     case 'pasteAddress': return 'Paste address';
     case 'copyAddress': return 'Copy address';
+    case 'copyPath': return 'Copy path';
     case 'starFolder': return 'Star this folder';
   }
 }
@@ -355,6 +356,11 @@ export function addressOf(site: Site, path: string): string {
 
 export function addressesOf(site: Site, folder: string, names: readonly string[]): string {
   return names.length === 0 ? addressOf(site, folder) : names.map((name) => addressOf(site, joinPath(folder, name))).join('\n');
+}
+
+/** "Copy path": the path of each name in the folder, one a line; the folder's own when nothing is named. */
+export function pathsOf(folder: string, names: readonly string[]): string {
+  return names.length === 0 ? folder : names.map((name) => joinPath(folder, name)).join('\n');
 }
 
 /** "Paste address": the path of this remote that the text names, or null. A path from "/" is taken as it is. */

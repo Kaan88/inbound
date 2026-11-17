@@ -24,6 +24,7 @@
   import SitesScreen from './screens/SitesScreen.svelte';
   import StatisticsScreen from './screens/StatisticsScreen.svelte';
   import { kindChip } from './lib/sitesBrowse';
+  import { graphRates, withRate } from './lib/sitesTransfers';
   import { activityWords, allRemotes, arrowsText, badge as siteBadge, dotWords, heading as remoteHeading, inTrouble as siteInTrouble, listed as listedRemotes, waitingCount } from './lib/sitesHome';
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
   import TorrentAdd from './screens/TorrentAdd.svelte';
@@ -223,7 +224,7 @@
   const count = $derived(counts(store.model));
   const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
   // The same figure the speed graph shows (U-WU-14); nothing while the server can't be reached (U-WU-3).
-  const totalSpeed = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
+  const totalSpeed = $derived(withRate(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0), graphRates(store.model.siteTransfers).down));
   const offline = $derived(store.connection !== 'open' && store.connection !== 'connecting' && store.connection !== 'signedOut');
   const offlineText = $derived(
     store.connection === 'incompatible' ? connectionText.incompatible
@@ -524,6 +525,7 @@
     <div class="pointer-events-auto flex max-w-md items-start gap-2 rounded-md border border-divider bg-surface px-3 py-2 text-[13px] shadow-lg {toast.tone === 'error' ? 'border-l-4 border-l-icon-danger' : ''}" role={toast.tone === 'error' ? 'alert' : 'status'}>
       <Icon name={toast.tone === 'error' ? 'alert' : 'info'} size={16} class="mt-0.5 shrink-0 {toast.tone === 'error' ? 'text-icon-danger' : 'text-icon-info'}" />
       <span class="min-w-0 flex-1">{toast.text}</span>
+      {#if toast.transferId}<button class="text-accent hover:underline" onclick={() => { store.showTransfer = toast.transferId ?? null; if (screen.kind !== 'sites') location.hash = '#/sites'; store.dismiss(toast.id); }}>Show</button>{/if}
       {#if toast.jobId}<button class="text-accent hover:underline" onclick={() => { if (screen.kind !== 'list') location.hash = '#/all'; store.showJob = toast.jobId ?? null; store.dismiss(toast.id); }}>Show</button>{/if}
       <button class="text-muted hover:text-text" aria-label="Dismiss" onclick={() => store.dismiss(toast.id)}><Icon name="close" size={14} /></button>
     </div>

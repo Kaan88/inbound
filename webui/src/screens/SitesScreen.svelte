@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Icon from '../components/Icon.svelte';
   import { store } from '../lib/store.svelte';
@@ -8,7 +8,7 @@
     type Site, type SiteKind, type SiteResult, type SitesStatus,
   } from '../lib/sites';
   import { allRemotes, busyRemotes, closeQuestion, phoneRemotesLine, unfinishedOn } from '../lib/sitesHome';
-  import type { TransferTab } from '../lib/sitesTransfers';
+  import { tabOf, type TransferTab } from '../lib/sitesTransfers';
   import RemotesHome from './sites/RemotesHome.svelte';
   import SiteBrowser from './sites/SiteBrowser.svelte';
   import SiteDialog from './sites/SiteDialog.svelte';
@@ -23,6 +23,17 @@
 
   let transfersOpen = $state(false);
   let transfersTab = $state<TransferTab>('active');
+  // A toast's Show (a transfer finished or began): the list opens on its tab with that row picked.
+  let reveal = $state<string | null>(null);
+  $effect(() => {
+    const id = store.showTransfer;
+    if (!id) return;
+    const found = untrack(() => store.model.siteTransfers.find((item) => item.id === id));
+    transfersOpen = true;
+    if (found) transfersTab = tabOf(found);
+    reveal = id;
+    store.showTransfer = null;
+  });
 
   let kinds = $state<SiteKind[]>([]);
   let editing = $state<Site | null | undefined>(undefined); // undefined: closed; null: a new site
@@ -236,7 +247,7 @@
     {#if transfersOpen}
       <section id="remote-transfers" class="flex h-[42%] min-h-[210px] flex-col border-t border-divider bg-surface max-md:h-auto max-md:min-h-0 max-md:flex-1" aria-label="Transfers with {store.texts.hostName}">
         <h2 class="border-b border-divider px-3 py-2 text-[15px] font-semibold md:hidden">Transfers</h2>
-        <TransferList {transfers} bind:tab={transfersTab} onshow={open} />
+        <TransferList {transfers} bind:tab={transfersTab} bind:reveal onshow={open} />
       </section>
     {/if}
     <TransfersBar {transfers} bind:open={transfersOpen} />
