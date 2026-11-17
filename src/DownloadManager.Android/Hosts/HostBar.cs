@@ -42,6 +42,8 @@ internal static class HostBar
             CloseIcon = activity.GetDrawable(Resource.Drawable.ic_expand_more),
             CloseIconVisible = true,
             ContentDescription = $"Downloads shown from {host.Name}. Change host",
+            // The drop-down mark is the chip's close icon, which TalkBack would otherwise read as "Remove <name>" (finding 23).
+            CloseIconContentDescription = "Change host",
         };
         // A1/C6: a filled pill inside the search bar, the host's icon in the primary colour, no outline.
         chip.ChipBackgroundColor = ColorStateList.ValueOf(new Android.Graphics.Color(Inbound.App.Screens.Motion.Attr(activity, Resource.Attribute.colorSurfaceContainerHighest)));
@@ -106,14 +108,17 @@ internal static class HostBar
         _ => HostWords.SavedOn(name),
     };
 
-    /// <summary>A different host chosen (here or in another screen) builds this activity again on that host.</summary>
+    /// <summary>
+    /// A different host chosen (here or in another screen), or the shown server paired again (a new token, certificate or
+    /// plain http choice), builds this activity again on that host's new connection (findings 3, 7).
+    /// </summary>
     private static void RecreateOnSwitch(AppCompatActivity activity)
     {
         var hosts = HostChoice.Hosts(activity);
-        var shown = hosts.Current.Id;
+        var shown = hosts.Current.ConnectionStamp;
         Action changed = () => activity.RunOnUiThread(() =>
         {
-            if (activity.IsFinishing || activity.IsDestroyed || hosts.Current.Id == shown) return;
+            if (activity.IsFinishing || activity.IsDestroyed || hosts.Current.ConnectionStamp == shown) return;
             activity.Recreate();
         });
         hosts.Changed += changed;

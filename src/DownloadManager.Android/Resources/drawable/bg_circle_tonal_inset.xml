@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The row's action circle (40 dp) inside its 48 dp touch target. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/bg_circle_tonal" android:inset="4dp" />

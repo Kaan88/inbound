@@ -56,6 +56,21 @@ internal static class Motion
         animator.Start();
     }
 
+    /// <summary>Fades <paramref name="view"/> out in real time (as <see cref="CrossFade"/>, for when animators are off), then runs <paramref name="done"/>.</summary>
+    public static void FadeOut(View view, int ms, Action done)
+    {
+        var animator = new Android.Animation.TimeAnimator();
+        animator.Time += (_, e) =>
+        {
+            var t = Math.Min(1f, e.TotalTime / (float)ms);
+            view.Alpha = 1f - t;
+            if (t < 1f) return;
+            animator.Cancel();
+            done();
+        };
+        animator.Start();
+    }
+
     /// <summary>Navigation: 200 ms fade through.</summary>
     public static Google.Android.Material.Transition.MaterialFadeThrough Fade()
     {

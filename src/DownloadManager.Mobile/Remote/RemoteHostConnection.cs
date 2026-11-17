@@ -34,13 +34,17 @@ public sealed record RemoteConnectionState(RemoteConnectionStatus Status, string
 /// The screens see one stream, as from the in-process Host: the hello, the snapshot, then events. After a reconnect the
 /// new snapshot is not passed on again (a model takes one snapshot); it is compared with what the screens were shown and
 /// the difference comes as job events: <c>removed</c> for a job that is gone, <c>added</c> for a new one and
-/// <see cref="ResyncEvent"/> for one that changed meanwhile. The hello is passed on at every connect.
+/// <see cref="ResyncEvent"/> for one that changed meanwhile, and its settings as a <c>settings.changed</c> frame. The hello is
+/// passed on at every connect.
 /// </para>
 /// <para>
 /// Reconnecting waits 2 s, then twice as long each time, up to about a minute (<see cref="ReconnectBackoff"/>). A token the
 /// server refuses, or plain http the user didn't allow, stops it for good (<see cref="RemoteConnectionStatus.Stopped"/>).
 /// No polling: while connected only the server's pushes and the socket's keep-alive move; while not shown
-/// (<see cref="SetActive"/> false) the socket is closed and nothing runs at all.
+/// (<see cref="SetActive"/> false) the socket is closed and nothing runs at all. The keep-alive is a ping every
+/// <see cref="KeepAliveInterval"/> that must be answered within <see cref="KeepAliveTimeout"/>, so a server that vanished
+/// without closing (power or network gone) ends the session in well under a minute; a quick command that gets no reply in
+/// time ends it too, and the loop connects again.
 /// </para>
 /// </summary>
 public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
@@ -63,8 +67,14 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
     /// <summary>One request and its reply on a connection of its own (<see cref="RemoteServerHttp.SendIpcAsync"/>).</summary>
     public delegate Task<IpcMessage> OneShot(ServerTarget target, IpcMessage request, CancellationToken cancellationToken);
 
+    /// <summary>How often the phone's socket pings the server while connected.</summary>
+    public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>How long a ping may wait for its answer before the socket counts as dead.</summary>
+    public static readonly TimeSpan KeepAliveTimeout = TimeSpan.FromSeconds(20);
+
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DefaultReplyTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan SlowReplyTimeout = TimeSpan.FromMinutes(6);
 
     private readonly ServerTarget _target;
@@ -72,6 +82,7 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
     private readonly OneShot _sendOnce;
     private readonly ReconnectBackoff _backoff;
     private readonly TimeSpan _connectWait;
+    private readonly TimeSpan _replyTimeout;
     private readonly Action<Exception>? _onError;
     private readonly object _gate = new();
     private readonly CancellationTokenSource _stop = new();
@@ -96,15 +107,19 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
     /// <param name="backoff">For tests: the waits between tries.</param>
     /// <param name="connectWait">How long a command sent while not connected waits for the connection (default 10 s).</param>
     /// <param name="onError">Told when a frame handler throws; the frame is skipped and the connection goes on.</param>
+    /// <param name="replyTimeout">For tests: how long a quick command waits for its reply before the session is dropped (default 60 s).</param>
     public RemoteHostConnection(ServerTarget target, Connector? connect = null, OneShot? sendOnce = null, ReconnectBackoff? backoff = null,
-        TimeSpan? connectWait = null, Action<Exception>? onError = null)
+        TimeSpan? connectWait = null, Action<Exception>? onError = null, TimeSpan? replyTimeout = null)
     {
         if (target.IsLocal) throw new ArgumentException("A remote connection needs a server.", nameof(target));
         _target = target;
-        _connect = connect ?? (async (t, hello, ct) => await ServerConnector.ConnectAsync(t, hello, TimeSpan.FromSeconds(10), ct).ConfigureAwait(false));
+        // The phone's own keep-alive (the desktop's D9 client keeps its own defaults): a missing pong ends the socket.
+        _connect = connect ?? (async (t, hello, ct) => await WebSocketIpcClient.ConnectAsync(t, hello, TimeSpan.FromSeconds(10), ct,
+            KeepAliveInterval, KeepAliveTimeout).ConfigureAwait(false));
         _sendOnce = sendOnce ?? RemoteServerHttp.SendIpcAsync;
         _backoff = backoff ?? new ReconnectBackoff();
         _connectWait = connectWait ?? TimeSpan.FromSeconds(10);
+        _replyTimeout = replyTimeout ?? DefaultReplyTimeout;
         _onError = onError;
     }
 
@@ -205,8 +220,17 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         _pending[request.Id] = completion;
         try
         {
-            await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            return await completion.Task.WaitAsync(ReplyTimeout, cancellationToken).ConfigureAwait(false);
+            // The caller's token never reaches the socket's send: cancelling it there would abort the whole socket, not
+            // this one call. The caller stops waiting instead; the send itself is bounded by the socket (finding 1).
+            await client.SendAsync(request, CancellationToken.None).WaitAsync(cancellationToken).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(_replyTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            // No reply from a socket that looks open: it may be dead without a close. That session ends and the loop connects
+            // again (and the strip says so) instead of every command waiting out its own timeout.
+            DropSession(client);
+            throw new RemoteServerException(RemoteWords.Failure(_target.Name, ex));
         }
         catch (ObjectDisposedException) when (!Disposed)
         {
@@ -216,6 +240,15 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         finally
         {
             _pending.TryRemove(request.Id, out _);
+        }
+    }
+
+    /// <summary>Ends the session of <paramref name="client"/> if it is still the current one.</summary>
+    private void DropSession(IIpcConnection client)
+    {
+        lock (_gate)
+        {
+            if (_ready.Task.IsCompletedSuccessfully && ReferenceEquals(_ready.Task.Result, client)) _session?.Cancel();
         }
     }
 
@@ -376,6 +409,8 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         }
 
         if (dto is null) return;
+        // Settings changed while away (the default folder, connections, queues): the screens apply them as a settings.changed.
+        if (dto.Settings is { } settings) Deliver(IpcMessage.Create(MessageTypes.SettingsChanged, settings));
         var fresh = new Dictionary<Guid, JobDto>();
         foreach (var job in dto.Jobs) fresh[job.Id] = job;
         foreach (var (id, gone) in _shown.ToArray())

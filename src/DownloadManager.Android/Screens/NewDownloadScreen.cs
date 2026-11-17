@@ -13,6 +13,7 @@ namespace Inbound.App.Screens;
 internal sealed class NewDownloadScreen
 {
     private readonly MainActivity _activity;
+    private readonly DownloadsModel _host;
     private readonly NewDownloadModel _model;
     private readonly Handler _ui = new(Looper.MainLooper!);
     private readonly TextInputEditText _address, _name, _referrer, _description, _sha;
@@ -26,9 +27,11 @@ internal sealed class NewDownloadScreen
     private bool _setting;
     private bool _busy;
 
-    public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address)
+    /// <param name="saved">What the page held before the activity was rebuilt (rotation, process death), or null.</param>
+    public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address, Bundle? saved = null)
     {
         _activity = activity;
+        _host = host;
         _model = new NewDownloadModel(host);
         Root = LayoutInflater.From(activity)!.Inflate(Resource.Layout.new_download, null, false)!;
         InsetsListener.Pad(Root.FindViewById<View>(Resource.Id.new_top)!, top: true, bottom: false);
@@ -54,16 +57,11 @@ internal sealed class NewDownloadScreen
         _download = Root.FindViewById<MaterialButton>(Resource.Id.new_download_btn)!;
 
         SetUpSaveTo(host);
-        if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
-        else
-        {
-            _slider.ValueTo = _model.MaxConnections;
-            _slider.Value = _model.Connections;
-            // The slider's label formatter is called whenever the value changes, which is the one hook the generated binding allows (its change listener cannot be implemented in C#).
-            _slider.SetLabelFormatter(new ValueFormatter(v => { _model.Connections = (int)v; _connectionsValue.Text = ((int)v).ToString(); }));
-        }
-
-        _connectionsValue.Text = _model.Connections.ToString();
+        // The slider's label formatter is called whenever the value changes, which is the one hook the generated binding allows (its change listener cannot be implemented in C#).
+        _slider.SetLabelFormatter(new ValueFormatter(v => { _model.Connections = (int)v; _connectionsValue.Text = ((int)v).ToString(); }));
+        ShowSettings();
+        // The Host's settings can come later (a page restored before the snapshot) or change (finding 13).
+        _host.SettingsChanged += OnSettings;
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_now);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.Check(Resource.Id.exists_rename);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) => { if (on) _model.StartLater = id == Resource.Id.when_later; }));
@@ -84,15 +82,78 @@ internal sealed class NewDownloadScreen
         _description.TextChanged += (_, _) => _model.Description = _description.Text;
         _sha.TextChanged += (_, _) => { _model.Sha256 = _sha.Text; _shaLayout.Error = _model.ChecksumError; UpdateButton(); };
         Root.FindViewById<View>(Resource.Id.more_header)!.Click += (_, _) => ToggleMore();
-        Root.FindViewById<View>(Resource.Id.new_close)!.Click += (_, _) => _activity.CloseRowPage();
-        Root.FindViewById<View>(Resource.Id.new_cancel)!.Click += (_, _) => _activity.CloseRowPage();
+        Root.FindViewById<View>(Resource.Id.new_close)!.Click += (_, _) => _activity.CloseRowPage(Root);
+        Root.FindViewById<View>(Resource.Id.new_cancel)!.Click += (_, _) => _activity.CloseRowPage(Root);
         _download.Click += (_, _) => Submit();
 
-        if (!string.IsNullOrEmpty(address)) _address.Text = address;
+        if (saved is not null) Restore(saved);
+        else if (!string.IsNullOrEmpty(address)) _address.Text = address;
         UpdateButton();
     }
 
     public View Root { get; }
+
+    /// <summary>The page has gone: it no longer follows the Host's settings.</summary>
+    public void Dispose() => _host.SettingsChanged -= OnSettings;
+
+    private void OnSettings()
+    {
+        ShowSettings();
+        UpdateButton();
+    }
+
+    // The folder and the connection limit come from the Host's settings; a value the user chose stays, within the new limit.
+    private void ShowSettings()
+    {
+        _showSaveTo?.Invoke();
+        _model.Connections = Math.Clamp(_model.Connections, 1, _model.MaxConnections);
+        if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
+        else
+        {
+            _connectionsBlock.Visibility = ViewStates.Visible;
+            _slider.ValueTo = _model.MaxConnections;
+            _slider.Value = _model.Connections;
+        }
+
+        _connectionsValue.Text = _model.Connections.ToString();
+    }
+
+    /// <summary>What the page holds, for a rebuilt activity (finding 16). A name the Host found is not kept: the check runs again.</summary>
+    public void Save(Bundle state)
+    {
+        state.PutString("address", _address.Text ?? "");
+        if (_model.FileNameEdited) state.PutString("name", _model.FileName);
+        state.PutString("referrer", _referrer.Text ?? "");
+        state.PutString("description", _description.Text ?? "");
+        state.PutString("sha", _sha.Text ?? "");
+        state.PutInt("connections", _model.Connections);
+        if (_model.Destination is { } destination) state.PutString("destination", destination);
+        state.PutInt("exists", (int)_model.IfExists);
+        state.PutBoolean("later", _model.StartLater);
+        state.PutBoolean("more", _moreBody.Visibility == ViewStates.Visible);
+    }
+
+    private void Restore(Bundle state)
+    {
+        _address.Text = state.GetString("address") ?? "";
+        if (state.GetString("name") is { Length: > 0 } name) _name.Text = name;
+        _referrer.Text = state.GetString("referrer");
+        _description.Text = state.GetString("description");
+        _sha.Text = state.GetString("sha");
+        _model.Connections = Math.Clamp(state.GetInt("connections", _model.Connections), 1, _model.MaxConnections);
+        if (_connectionsBlock.Visibility == ViewStates.Visible) _slider.Value = _model.Connections;
+        _connectionsValue.Text = _model.Connections.ToString();
+        if (state.GetString("destination") is { Length: > 0 } destination) { _model.Destination = destination; _showSaveTo?.Invoke(); }
+        var exists = (ConflictChoice)state.GetInt("exists", (int)ConflictChoice.Rename);
+        Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.Check(exists switch
+        {
+            ConflictChoice.Overwrite => Resource.Id.exists_overwrite,
+            ConflictChoice.Fail => Resource.Id.exists_fail,
+            _ => Resource.Id.exists_rename,
+        });
+        if (state.GetBoolean("later")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_later);
+        if (state.GetBoolean("more")) { _moreBody.Visibility = ViewStates.Visible; _chevron.Rotation = 180f; }
+    }
 
     /// <summary>The field is focused and the keyboard comes up when the page opens empty.</summary>
     public void FocusAddress()
@@ -104,6 +165,8 @@ internal sealed class NewDownloadScreen
 
     // The phone saves into its own folder (the field only shows it). A server's folders are the server's: the field opens a chooser that
     // browses them through the connection, when the server offers that; otherwise it shows the server's default folder as before.
+    private Action? _showSaveTo;
+
     private void SetUpSaveTo(DownloadsModel host)
     {
         var field = Root.FindViewById<TextInputEditText>(Resource.Id.save_to)!;
@@ -129,6 +192,7 @@ internal sealed class NewDownloadScreen
             field.Post(Fit);
         }
 
+        _showSaveTo = Show;
         Show();
         if (!remote || !FolderPicker.Offered(host)) return;
         field.Enabled = true;
@@ -148,6 +212,7 @@ internal sealed class NewDownloadScreen
         _model.Address = _address.Text ?? "";
         _addressLayout.Error = _model.AddressError;
         if (_pendingCheck is not null) { _ui.RemoveCallbacks(_pendingCheck); _pendingCheck = null; }
+        ShowName(); // a name found for the previous address goes with it (finding 9)
         if (_model.IsMany)
         {
             _manyNote.Visibility = ViewStates.Visible;
@@ -199,13 +264,7 @@ internal sealed class NewDownloadScreen
                 _checkIcon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(ctx.GetColor(Resource.Color.state_done)));
                 _checkTitle.Text = _model.CheckText;
                 _checkSub.Text = "The server answered";
-                if (!string.IsNullOrEmpty(_model.FileName) && _name.Text != _model.FileName)
-                {
-                    _setting = true;
-                    _name.Text = _model.FileName;
-                    _setting = false;
-                }
-
+                ShowName();
                 break;
             case CheckState.Failed:
             case CheckState.Refused:
@@ -223,6 +282,15 @@ internal sealed class NewDownloadScreen
     }
 
     private void UpdateButton() => _download.Enabled = _model.CanDownload && !_busy;
+
+    // The field shows the model's name unless the user typed one (then it is already what the field holds).
+    private void ShowName()
+    {
+        if (_model.FileNameEdited || (_name.Text ?? "") == _model.FileName) return;
+        _setting = true;
+        _name.Text = _model.FileName;
+        _setting = false;
+    }
 
     private void ToggleMore()
     {
@@ -248,7 +316,8 @@ internal sealed class NewDownloadScreen
                 _busy = false;
                 UpdateButton();
                 if (result.Error is { } error) { _activity.ShowMessage(error); return; }
-                _activity.CloseRowPage();
+                // Only this page: if it was closed meanwhile and another one opened, that one stays (finding 18).
+                _activity.CloseRowPage(Root);
                 _activity.ShowMessage(NewDownloadModel.Describe(result));
             });
         });

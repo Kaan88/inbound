@@ -283,13 +283,18 @@ public sealed class WebSocketIpcClient : IIpcConnection
     // goes only to the address the user typed, and no proxy is used: a proxy (or one found by WPAD) would see the token
     // over plain http. Over https the certificate is the system's choice or the target's pin.
 
+    /// <param name="keepAliveInterval">How often to ping the server; null keeps the platform's default.</param>
+    /// <param name="keepAliveTimeout">With <paramref name="keepAliveInterval"/>: how long a ping may go unanswered before the
+    /// socket is aborted (a server gone without a close). Null keeps the default: pings that are never checked.</param>
     public static async Task<WebSocketIpcClient> ConnectAsync(ServerTarget target, ClientHelloDto hello, TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, TimeSpan? keepAliveInterval = null, TimeSpan? keepAliveTimeout = null)
     {
         ServerAddress.EnsureMaySend(target);
         var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Authorization", "Bearer " + target.Token);
         socket.Options.CollectHttpResponseDetails = true;
+        if (keepAliveInterval is { } interval) socket.Options.KeepAliveInterval = interval;
+        if (keepAliveTimeout is { } pongWait) socket.Options.KeepAliveTimeout = pongWait;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(10));
         try
@@ -300,7 +305,7 @@ public sealed class WebSocketIpcClient : IIpcConnection
         {
             var status = socket.HttpStatusCode;
             socket.Dispose();
-            if (ServerCertificates.IsCertificateFailure(ex)) throw new ServerCertificateRefusedException(target.Name);
+            if (ServerCertificates.IsCertificateFailure(ex)) throw new ServerCertificateRefusedException(target.Name, target.CertificatePin is not null);
             throw RemoteServerHttp.Describe(status, ex is OperationCanceledException);
         }
         catch
@@ -477,7 +482,13 @@ public static class RemoteServerHttp
         }
         catch (HttpRequestException ex) when (ServerCertificates.IsCertificateFailure(ex))
         {
-            return new RemotePairResult { Error = $"The server at {address} showed a certificate that isn't trusted. Check the address, then connect again to see the certificate." };
+            // Only a caller that pinned a certificate (the phone) can show one to trust; the desktop window can't (finding 5).
+            return new RemotePairResult
+            {
+                Error = certificatePin is not null
+                    ? $"The server at {address} showed a certificate that isn't trusted. Check the address, then connect again to see the certificate."
+                    : $"The server at {address} showed a certificate that isn't trusted on this device. Check the address and the server's certificate.",
+            };
         }
         catch (HttpRequestException)
         {
@@ -573,7 +584,7 @@ public static class RemoteServerHttp
         }
         catch (HttpRequestException ex) when (ServerCertificates.IsCertificateFailure(ex))
         {
-            throw new ServerCertificateRefusedException(target.Name);
+            throw new ServerCertificateRefusedException(target.Name, target.CertificatePin is not null);
         }
         catch (HttpRequestException ex)
         {

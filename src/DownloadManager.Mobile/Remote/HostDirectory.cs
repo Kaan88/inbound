@@ -209,8 +209,10 @@ public sealed class HostDirectory
             }
         }
 
-        // The old token of a server paired again is of no use any more.
-        if (replaced is not null && replaced.Token != paired.Token) _ = ForgetAsync([replaced]);
+        // The old token of a server paired again is of no use any more. It is forgotten with the certificate just checked: the
+        // usual reason to pair again is a new certificate, which the old pin would refuse (finding 4).
+        if (replaced is { Token: { } oldToken } && oldToken != paired.Token)
+            _ = ForgetAsync([ServerTarget.Remote(entry.Id, replaced.Name, address, oldToken, entry.PlainHttpConfirmed, pin)]);
         Changed?.Invoke();
         return new PairOutcome(entry.Copy(), null);
     }

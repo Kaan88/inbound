@@ -75,6 +75,12 @@ public sealed class DownloadList : IDisposable
     /// <summary>The selection changed (also when it became empty).</summary>
     public event Action? SelectionChanged;
 
+    /// <summary>
+    /// A selected row changed state, so what the selection bar offers (<see cref="CanResumeSelection"/>,
+    /// <see cref="CanPauseSelection"/>) may have changed; the selection itself did not.
+    /// </summary>
+    public event Action? SelectedRowsChanged;
+
     public DownloadFilter Filter
     {
         get => _filter;
@@ -131,27 +137,46 @@ public sealed class DownloadList : IDisposable
     private void OnRowChanged(object? s, PropertyChangedEventArgs e)
     {
         // Membership depends on the state view and the name; the summary on the rate, state and progress.
-        if (e.PropertyName is nameof(JobRow.Group) or nameof(JobRow.Name)) SyncVisible();
+        if (e.PropertyName is nameof(JobRow.Group) or nameof(JobRow.Name))
+        {
+            if (SyncVisible()) SelectionChanged?.Invoke();
+            else if (e.PropertyName == nameof(JobRow.Group) && s is JobRow moved && _selected.Contains(moved.Id)) SelectedRowsChanged?.Invoke();
+        }
+        else if (e.PropertyName == nameof(JobRow.Action) && s is JobRow r && _selected.Contains(r.Id)) SelectedRowsChanged?.Invoke();
+
         QueueRecompute();
     }
 
-    /// <summary>Visible becomes the matching rows by removing the rows that no longer match, then inserting the ones that now do.</summary>
-    private void SyncVisible()
+    /// <summary>
+    /// Visible becomes the matching rows by removing the rows that no longer match, then inserting the ones that now do. A
+    /// selected row that is no longer shown leaves the selection, so a bulk action never reaches a row the user can't see
+    /// (finding 10). True when that changed the selection.
+    /// </summary>
+    private bool SyncVisible()
     {
         var target = _model.Rows.Where(Matches).ToList();
         var keep = new HashSet<JobRow>(target);
+        var unselected = false;
         for (var i = Visible.Count - 1; i >= 0; i--)
-            if (!keep.Contains(Visible[i])) Visible.RemoveAt(i);
+        {
+            if (keep.Contains(Visible[i])) continue;
+            unselected |= _selected.Remove(Visible[i].Id);
+            Visible.RemoveAt(i);
+        }
+
         for (var i = 0; i < target.Count; i++)
         {
             if (i < Visible.Count && ReferenceEquals(Visible[i], target[i])) continue;
             Visible.Insert(i, target[i]);
         }
+
+        // Selected ids that are not on screen (a row the list never showed) go too.
+        return (_selected.RemoveWhere(id => !Visible.Any(r => r.Id == id)) > 0) | unselected;
     }
 
     private void Rebuild()
     {
-        SyncVisible();
+        if (SyncVisible()) SelectionChanged?.Invoke();
         Recompute();
     }
 
@@ -204,7 +229,7 @@ public sealed class DownloadList : IDisposable
 
     public bool IsSelected(JobRow r) => _selected.Contains(r.Id);
 
-    public IReadOnlyList<JobRow> SelectedRows => _model.Rows.Where(r => _selected.Contains(r.Id)).ToList();
+    public IReadOnlyList<JobRow> SelectedRows => Visible.Where(r => _selected.Contains(r.Id)).ToList();
 
     /// <summary>Long press: starts the selection with this row. Does nothing for a row that is already selected.</summary>
     public void StartSelecting(JobRow r)

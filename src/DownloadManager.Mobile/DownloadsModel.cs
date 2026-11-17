@@ -69,6 +69,9 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>Raised on the UI thread once, after the snapshot's rows are in <see cref="Rows"/> (also for an empty snapshot).</summary>
     public event Action? FirstSnapshotShown;
 
+    /// <summary>Raised on the UI thread after <see cref="Settings"/> changed: the snapshot's, then each settings.changed frame's.</summary>
+    public event Action? SettingsChanged;
+
     /// <summary>Opens the session; the snapshot arrives as a frame and is shown through <see cref="Rows"/>.</summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -92,6 +95,19 @@ public sealed class DownloadsModel : IDisposable
             _gotSnapshot = true;
             var snap = m.GetPayload<SnapshotDto>();
             _post(() => ApplySnapshot(snap));
+        }
+        else if (m.Type == MessageTypes.SettingsChanged)
+        {
+            // Settings the Host changed later (here, on the desktop, or while a remote host was away): New download and Details follow.
+            SettingsDto settings;
+            try { settings = m.GetPayload<SettingsDto>(); }
+            catch (Exception e) when (e is System.IO.InvalidDataException or System.Text.Json.JsonException) { return; } // not one: ignored
+            _post(() =>
+            {
+                if (Disposed || !_shown) return;
+                ApplySettings(settings);
+                SettingsChanged?.Invoke();
+            });
         }
         else if (m.Type == MessageTypes.JobEvent && _gotSnapshot)
         {
@@ -125,8 +141,7 @@ public sealed class DownloadsModel : IDisposable
     private void ApplySnapshot(SnapshotDto snap)
     {
         if (Disposed) return;
-        Settings = snap.Settings ?? new SettingsDto();
-        DefaultDownloadDirectory = Settings.DefaultDownloadDirectory ?? "";
+        ApplySettings(snap.Settings ?? new SettingsDto());
         foreach (var j in snap.Jobs.OrderByDescending(x => x.CreatedAt))
         {
             var row = new JobRow { Id = j.Id };
@@ -138,6 +153,13 @@ public sealed class DownloadsModel : IDisposable
 
         _shown = true;
         FirstSnapshotShown?.Invoke();
+        SettingsChanged?.Invoke();
+    }
+
+    private void ApplySettings(SettingsDto settings)
+    {
+        Settings = settings;
+        DefaultDownloadDirectory = settings.DefaultDownloadDirectory ?? "";
     }
 
     private void Flush()

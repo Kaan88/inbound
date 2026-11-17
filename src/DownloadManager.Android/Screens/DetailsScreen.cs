@@ -22,15 +22,21 @@ internal sealed class DetailsScreen
     private readonly MaterialButton _main;
     private readonly View _again, _connCard;
     private readonly LinearLayout _segments, _info;
+    private readonly Func<bool> _canAsk;
+    private readonly List<(string Label, TextView Value, View Row)> _lines = new();
     private bool _closed;
     private bool _polling;
+    private bool _visible = true;
+    private bool _renderQueued;
     private IReadOnlyList<float> _fractions = Array.Empty<float>();
 
-    public DetailsScreen(MainActivity activity, DownloadsModel model, JobRow row)
+    /// <param name="canAsk">False while the Host can't be asked (a remote host that isn't connected): no polling then.</param>
+    public DetailsScreen(MainActivity activity, DownloadsModel model, JobRow row, Func<bool> canAsk)
     {
         _activity = activity;
         _model = model;
         _row = row;
+        _canAsk = canAsk;
         Root = LayoutInflater.From(activity)!.Inflate(Resource.Layout.details, null, false)!;
         InsetsListener.Pad(Root, top: true, bottom: true);
         _percent = Root.FindViewById<TextView>(Resource.Id.hero_percent)!;
@@ -46,7 +52,7 @@ internal sealed class DetailsScreen
         _info = Root.FindViewById<LinearLayout>(Resource.Id.info_lines)!;
         Root.FindViewById<TextView>(Resource.Id.details_title)!.Text = row.Name;
 
-        Root.FindViewById<View>(Resource.Id.details_back)!.Click += (_, _) => _activity.CloseRowPage();
+        Root.FindViewById<View>(Resource.Id.details_back)!.Click += (_, _) => _activity.CloseRowPage(Root);
         Root.FindViewById<View>(Resource.Id.details_more)!.Click += (_, _) => ShowMenu(Root.FindViewById<View>(Resource.Id.details_more)!);
         _main.Click += (_, _) => OnMain();
         _again.Click += (_, _) => Fire(_model.RedownloadAsync(_row.Id), "Added again");
@@ -54,6 +60,7 @@ internal sealed class DetailsScreen
 
         _row.PropertyChanged += OnRowChanged;
         _model.Rows.CollectionChanged += OnRows;
+        _model.SettingsChanged += QueueRender;
         Render();
         StartPolling();
     }
@@ -62,24 +69,45 @@ internal sealed class DetailsScreen
 
     public JobRow Row => _row;
 
-    /// <summary>Stops listening; called when the page has gone.</summary>
+    /// <summary>Stops listening and polling; called when the page has gone, and when the activity is destroyed with it open.</summary>
     public void Dispose()
     {
         _closed = true;
+        _ui.RemoveCallbacksAndMessages(null);
         _row.PropertyChanged -= OnRowChanged;
         _model.Rows.CollectionChanged -= OnRows;
+        _model.SettingsChanged -= QueueRender;
     }
 
+    /// <summary>
+    /// The app went to the background (false) or came back (true): no polling while nothing is shown (findings 11, 15), and it
+    /// starts again when the page is seen again.
+    /// </summary>
+    public void SetVisible(bool visible)
+    {
+        _visible = visible;
+        if (visible) { QueueRender(); StartPolling(); }
+    }
+
+    // One render per batch of row changes (a progress update changes several properties), and the info lines are updated in
+    // place, so TalkBack keeps its place while the download runs (finding 25).
     private void OnRowChanged(object? s, PropertyChangedEventArgs e)
     {
-        Render();
+        QueueRender();
         StartPolling();
+    }
+
+    private void QueueRender()
+    {
+        if (_renderQueued || _closed) return;
+        _renderQueued = true;
+        _ui.Post(() => { _renderQueued = false; Render(); });
     }
 
     private void OnRows(object? s, NotifyCollectionChangedEventArgs e)
     {
         // The download was removed (here or elsewhere): there is nothing left to show.
-        if (e.Action == NotifyCollectionChangedAction.Remove && e.OldItems?.Contains(_row) == true && !_closed) _activity.CloseRowPage();
+        if (e.Action == NotifyCollectionChangedAction.Remove && e.OldItems?.Contains(_row) == true && !_closed) _activity.CloseRowPage(Root);
     }
 
     private void Render()
@@ -120,8 +148,22 @@ internal sealed class DetailsScreen
         _connNote.Text = running ? "Part file in " + DetailsInfo.FolderName(j.DestinationDirectory) : "";
         BindSegments();
 
+        var lines = DetailsInfo.Lines(j, _model.Settings, DateTimeOffset.Now).ToList();
+        if (lines.Count == _lines.Count && lines.Select(l => l.Label).SequenceEqual(_lines.Select(l => l.Label)))
+        {
+            for (var i = 0; i < lines.Count; i++)
+            {
+                if (_lines[i].Value.Text == lines[i].Value) continue;
+                _lines[i].Value.Text = lines[i].Value;
+                _lines[i].Row.ContentDescription = lines[i].Label + ", " + lines[i].Value;
+            }
+
+            return;
+        }
+
         _info.RemoveAllViews();
-        foreach (var line in DetailsInfo.Lines(j, _model.Settings, DateTimeOffset.Now)) _info.AddView(InfoRow(line));
+        _lines.Clear();
+        foreach (var line in lines) _info.AddView(InfoRow(line));
     }
 
     private View InfoRow(InfoLine line)
@@ -138,6 +180,7 @@ internal sealed class DetailsScreen
         value.SetTextColor(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnSurface)));
         row.AddView(value, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
         row.ContentDescription = line.Label + ", " + line.Value;
+        _lines.Add((line.Label, value, row));
         return row;
     }
 
@@ -165,14 +208,16 @@ internal sealed class DetailsScreen
         }
     }
 
-    // One request a second while the page is open and the download runs; nothing runs otherwise.
+    // One request a second while the page is shown, the download runs and the Host can be asked; nothing runs otherwise.
+    private bool MayPoll => !_closed && _visible && _row.Group == RowGroup.Active && _canAsk();
+
     private void StartPolling()
     {
-        if (_polling || _closed || _row.Group != RowGroup.Active) return;
+        if (_polling || !MayPoll) return;
         _polling = true;
         void Tick()
         {
-            if (_closed || _row.Group != RowGroup.Active) { _polling = false; return; }
+            if (!MayPoll) { _polling = false; return; }
             _ = Task.Run(async () =>
             {
                 IReadOnlyList<SegmentDto> segments;
