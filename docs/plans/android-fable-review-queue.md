@@ -53,6 +53,11 @@ Owner, 2026-11-17: "from now on, have fable review fixes approved by same fable 
 findings go back to the same Fable agent for approval (record its agent id here when it starts).
 Fable review of the Open entries started 2026-11-17 at 7573792b (worktree `idm-android-fable`); agent id
 `a77883b7d95665eea` (continue it with SendMessage for fix approval).
+Fixes for its 16 findings, 2026-11-17: 0f535a9f (Runtime: failed downloads free their name, owner's "Free the name"),
+d51d5e4b (TLS export target fails loudly, post-link check, gate https probe), 7e3f69d7 (the app and Mobile fixes), with
+the emulator https pass and per-finding notes in PROGRESS "Fable review fixed". Waiting for the same Fable agent's approval.
+Owner, 2026-11-17: "update my phone and desktop apk after this fable approves": once Fable approves the fixes, install
+the release build on the S24 and replace the APK on the owner's desktop.
 
 ## Done (Fable reviewed it)
 

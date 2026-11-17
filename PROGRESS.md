@@ -2,6 +2,57 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Fable review fixed (2026-11-17, 0f535a9f, d51d5e4b, 7e3f69d7; waiting for the same Fable agent's approval).** Every
+  finding was checked in the code first; all 16 held. Per finding:
+  1. https pairing and pin on a phone: **run** on the API 33 emulator with the x64 NativeAOT test build of 7e3f69d7 against
+     a real DownloadManager.Server (0.8.0 code of this branch, plain http on 127.0.0.1:8099, made-up password) behind a
+     test-only TLS front in the scratch folder (the server speaks plain http, `docs/docker.md`; self-signed certs and keys
+     made there, never committed), address `https://10.0.2.2:8443`. The probe showed the fingerprint of cert A (equal to the
+     one the front printed) with "Trust this certificate"; trusted, paired (server log: "A desktop app was paired"), the
+     list connected; sent to Home and back: reconnected. Cert B swapped in: the strip said the certificate isn't the one
+     trusted (with the new words), the front logged "handshake FAILED ... nothing forwarded" and the server log has no
+     request (no token sent). Cert A back: reconnected by itself 61 s later (finding 3). Expired cert at pairing: "The
+     server's certificate expired on 17 November 2025. Trusting it would not help", no trust offered. Logcat: no password,
+     no `ibt_` token. Not done: a CA-trusted certificate (needs a system CA on the emulator image; skipped). Screens and
+     logs in `artifacts/android-app/fable-fixes/` (p1 to p4, proxy.log, server.log).
+  2. TLS export: **fixed** (d51d5e4b): errors for no exports file, no `global:`, or the symbol still missing after the
+     write; a changed exports file deletes the native binary so the link reruns; after the link `llvm-readelf --dyn-syms`
+     must list the symbol. The x64 test obj from before 9a6ec0ef (its .so had no such export, `llvm-nm -D`) relinked and
+     passed the check. The gate (`run-gate.sh`) makes one https GET with SocketsHttpHandler (`HTTPS_PROBE_URL`); the hook
+     answered 200 on the emulator (the gate script itself was not run: it wipes the app and wants an arm64 phone). Other JNI
+     natives: the APK's dex declares 157 `native` methods; the .so exports only `JNI_OnLoad`, `JNI_OnUnload`,
+     `JavaInteropRuntime.init` and the TLS callback. The ACW `n_*` methods and `mono.android.Runtime.register` are bound by
+     registration (every screen works). `Runtime.notifyTimeZoneChanged` has no caller in this app (no
+     NotifyTimeZoneChanges receiver in the merged manifest); time zone changed on the emulator with the app running
+     (`service call alarm 3`, Istanbul to New York and back): no UnsatisfiedLinkError, no crash. `propagateUncaughtException`,
+     `ManagedPeer`, `JavaProxyObject`, `JavaObject` and the stream adapters were not exercised; not exported, so they work
+     only if registered at start (not proven). Lists in `artifacts/android-app/fable-fixes/jni/`.
+  3. Certificate refusal: **fixed**: Stopped with words, commands fail at once, but RetryNow, SetActive(true) and the longest
+     backoff while shown try again. Words: a network that intercepts connections looks the same; compare the fingerprint.
+  4. First snapshot: **fixed**, one Reset (`RowCollection.Load`); test: 3000 jobs, one row change, one summary.
+  5. Keystore key unusable: **fixed**, delete the alias, new key, retry once (not run on a device: no way to invalidate the
+     key on the emulator without a lock screen change).
+  6. Failed names: **fixed** in the Runtime (0f535a9f, desktop too, ROADMAP ANDROID.3 line): only downloads that can still
+     write hold a name (a failed one with a queue retry pending still does); a retry checks again, Rename/Overwrite take
+     the next "(n)" and move the part file, Fail refuses. 4 Integration tests.
+  7. First OnAvailable: **fixed**, baseline is `ActiveNetwork` at start.
+  8. SetQueues: **fixed**, AndroidHost forwards the service's SettingsChanged (queue start/stop goes through it).
+  9. Crash guard: **fixed**, only a user command that starts downloads lifts it (through the in-process connection's hook).
+  10. Device transfer: **fixed**, `data_extraction_rules.xml` excludes every domain for both; comment corrected.
+  11. **fixed**, `SaveEnabled = false`.
+  12. **fixed** for Seen and Select (written on the pool, newest wins) and RemoveAsync (file and Keystore on the pool).
+      Left: `TargetFor` when a screen builds its connection (one Keystore read in OnCreate; moving it means an async
+      connection factory) and InboundBackground.Evaluate's lock scope (its fields and the notification order rely on it;
+      not clearly safe, left as is).
+  13. **fixed**, asks again when a row's group changed while the question was open.
+  14. **fixed**, the restored count is kept until the snapshot's settings, then clamped.
+  15. **fixed**, ids written before the pause; Resume reads, resumes the still paused, then removes them.
+  16. **fixed**: no session drop when other frames came meanwhile; a remove with files gets the 6-minute wait; a request
+      registered after FailPending fails at once.
+  Tests: Mobile 340 passed; Server 208 passed; Integration `RuntimeServiceTests|InProcessHostConnection` 809 passed
+  (`--blame-hang-timeout 5m`). Warnings: the x64 NativeAOT test build has the same 78 distinct warnings as
+  `build-s24-pass2-arm64-test.txt` (`artifacts/android-app/fable-fixes/build-x64-test.txt`); no new compiler warnings in
+  the test builds (the two xUnit1031 and two Integration CS86xx are older).
 - **Fable review of the Android queue (2026-11-17, at 7573792b; agent `a77883b7d95665eea`).** No high findings; 16
   in all (medium: the https/pin path never run on a phone, the TLS export can fail silently or not relink, a certificate
   refusal stops a host for good; then the first snapshot applied in quadratic time, a broken Keystore key failing every
