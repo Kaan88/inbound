@@ -1138,11 +1138,27 @@ public sealed partial class DownloadManagerService
             }
         }
 
+        // A failed or cancelled download held no final name (owner, 2026-11-17: "Free the name"), so another may have
+        // taken it meanwhile: the name is checked again now, with this download's own duplicate policy.
+        var rename = PlanNameForRestart(runtime);
+        if (rename.Error is { } nameError)
+            return new JobActionResponse { Ok = false, Error = nameError, Job = GetJob(id) };
+        if (rename.To is not null && !MovePartForRename(runtime, rename, out var moveError))
+            return new JobActionResponse { Ok = false, Error = moveError, Job = GetJob(id) };
+
         lock (_sync)
         {
+            if (rename.To is not null) _reservedFinalPaths.Remove(NormalizePath(rename.To));
             if (!_jobs.TryGetValue(id, out runtime))
             {
                 return new JobActionResponse { Ok = false, Error = "Job not found." };
+            }
+
+            if (rename.To is not null)
+            {
+                runtime.Job.FinalFilePath = rename.To;
+                runtime.Job.FileName = Path.GetFileName(rename.To);
+                runtime.Job.PartFilePath = rename.NewPart!;
             }
 
             runtime.PauseRequested = false;
@@ -5645,6 +5661,15 @@ public sealed partial class DownloadManagerService
         return path;
     }
 
+    /// <summary>
+    /// Whether a download still holds its final name: it can still write there. Completed, cancelled and failed ones don't
+    /// (owner, 2026-11-17: "Free the name"), except a failed one its queue will try again on its own (QueueRetryAt), which
+    /// counts as unfinished everywhere else too. A retry checks the name again (<see cref="PlanNameForRestart"/>).
+    /// </summary>
+    private static bool HoldsFinalName(DownloadJob job) =>
+        job.State is not (DownloadState.Completed or DownloadState.Cancelled)
+        && (job.State != DownloadState.Failed || job.QueueRetryAt is not null);
+
     private bool FinalPathTakenLocked(string path)
     {
         var full = NormalizePath(path);
@@ -5652,11 +5677,81 @@ public sealed partial class DownloadManagerService
         foreach (var runtime in _jobs.Values)
         {
             var job = runtime.Job;
-            if (job.State == DownloadState.Completed || string.IsNullOrWhiteSpace(job.FinalFilePath)) continue;
+            if (!HoldsFinalName(job) || string.IsNullOrWhiteSpace(job.FinalFilePath)) continue;
             if (PathNames.Comparer.Equals(NormalizePath(job.FinalFilePath), full)) return true;
         }
 
         return false;
+    }
+
+    /// <summary>Another download in the list finished at <paramref name="path"/> (its file, not one that was there before).</summary>
+    private bool CompletedJobAtLocked(string path, Guid except)
+    {
+        var full = NormalizePath(path);
+        return _jobs.Values.Any(r => r.Job.Id != except && r.Job.State == DownloadState.Completed
+            && !string.IsNullOrWhiteSpace(r.Job.FinalFilePath) && PathNames.Comparer.Equals(NormalizePath(r.Job.FinalFilePath), full));
+    }
+
+    /// <summary>What a restart of a download that held no name does with it: nothing, a new name (reserved), or a refusal.</summary>
+    private readonly record struct RestartName(string? To, string? NewPart, string? Error);
+
+    /// <summary>
+    /// A failed or cancelled download is about to run again. Its final name may have gone to another download meanwhile (one
+    /// running, or one that finished there) or, for Rename and Fail, to a file now on disk that isn't its own. Rename and
+    /// Overwrite (which means a file already there, never another download's) take the next free "(n)"; Fail refuses the
+    /// restart. A name nobody took is kept.
+    /// </summary>
+    private RestartName PlanNameForRestart(JobRuntime runtime)
+    {
+        lock (_sync)
+        {
+            var job = runtime.Job;
+            if (HoldsFinalName(job) || string.IsNullOrWhiteSpace(job.FinalFilePath)) return default;
+            var path = job.FinalFilePath;
+            var takenByDownload = FinalPathTakenLocked(path) || CompletedJobAtLocked(path, job.Id);
+            var onDisk = (File.Exists(path) || Directory.Exists(path)) && !PathNames.Same(job.WrittenFinalPath, path);
+            if (!(job.ConflictPolicy == ConflictPolicy.Overwrite ? takenByDownload : takenByDownload || onDisk)) return default;
+            if (job.ConflictPolicy == ConflictPolicy.Fail)
+                return new RestartName(null, null, takenByDownload
+                    ? $"Another download already saves to {path}."
+                    : $"A file already exists at {path}.");
+
+            var directory = Path.GetDirectoryName(path)!;
+            var stem = Path.GetFileNameWithoutExtension(path);
+            var extension = Path.GetExtension(path);
+            for (var number = 1; number < 10000; number++)
+            {
+                var candidate = Path.Combine(directory, $"{stem} ({number}){extension}");
+                if (File.Exists(candidate) || Directory.Exists(candidate) || FinalPathTakenLocked(candidate)
+                    || CompletedJobAtLocked(candidate, job.Id)) continue;
+                _reservedFinalPaths.Add(NormalizePath(candidate));
+                // Nothing restarts it on its own while its part file is moved.
+                job.QueueRetryAt = null;
+                return new RestartName(candidate, BuildPartPath(candidate, job.Id), null);
+            }
+
+            return new RestartName(null, null, "Could not find an available filename.");
+        }
+    }
+
+    /// <summary>Moves the part file (and the bytes in it) to the new name's part path; false, with the reservation dropped, when it can't.</summary>
+    private bool MovePartForRename(JobRuntime runtime, RestartName rename, out string? error)
+    {
+        error = null;
+        string oldPart;
+        lock (_sync) oldPart = runtime.Job.PartFilePath;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(oldPart) && File.Exists(oldPart) && !PathNames.Same(oldPart, rename.NewPart))
+                File.Move(oldPart, rename.NewPart!);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lock (_sync) _reservedFinalPaths.Remove(NormalizePath(rename.To!));
+            error = $"Couldn't give the download a free name: {ex.Message}";
+            return false;
+        }
     }
 
     private static bool TryValidateUrl(string? value, out Uri uri, out string error)
