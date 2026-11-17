@@ -664,7 +664,14 @@ whether rclone is a Setup component that can be unticked.
   notification with Resume; Wi-Fi only means "not metered". Later the same day, after the S24 spike showed a persisted
   job comes back by itself: "Resume silently" after a reboot on 14+ (12 and 13 keep the Resume notification); a Task
   Manager Stop means "Stay paused"; test 12/13 on an emulator now. Done: S0, the Host's metered-network rule (401beb5);
-  the spike (6bc8c90).
+  the spike (6bc8c90); S2, S3, S5 (1a8da86, e9b91e4, 665729f). Open: the milestone review's fixes and the owner's
+  reports from the S24 hand check (2026-11-17), all bugs to fix in step 2:
+  - "download is running but no progress in app. normal?": the list did not show a download added after the screen
+    opened (it kept the rows it had at open).
+  - Pause all's notification said "201 downloads paused" for one download (it counts every paused download).
+  - "icon also keeps animating in paused mode": the paused notification uses the animated download icon.
+  - Found in the same check: Resume restarted every paused download (about 200 old test entries too), not only what
+    Pause all paused, and the paused notification stayed up after Resume.
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.

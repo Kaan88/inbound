@@ -164,6 +164,23 @@
   The first Mi 8 Lite run does not count: the throttle is per connection, so it finished in 27 s, before the screen
   went off. Not yet tried: a Recents swipe and a reboot with a real download, 30 minutes with the screen off, the
   Pause all and Resume actions, Android 13 (emulator), battery restricted.
+- **Step 2, S24 checks (2026-11-17, 246033e).** Reboot on Android 14+ (`tools/AndroidApp/run-swipe-reboot.sh`, server
+  on the LAN because adb reverse does not survive a reboot): a download running when the phone rebooted went on after
+  the owner unlocked it, with Inbound never opened (the persisted session job started the Host; "last run stopped by
+  user=False"), finished with an equal hash; the server sent 1.7 MB more than the file in total, so it resumed rather
+  than starting over. A first run with adb reverse failed the download after the reboot (server unreachable; the
+  script's fault). Recents swipe, Pause all and Resume done by the owner's hand (the S24 locks too fast for scripted
+  taps): after the swipe Inbound was gone from Recents, the same process went on and the progress grew; Pause all
+  stopped the transfer (no further requests), ended the session job and posted the paused notification; Resume opened
+  the app and the downloads ran again. **Bugs found** (recorded in ROADMAP ANDROID.3): the list missed a download added
+  after it opened (owner: "download is running but no progress in app. normal?"); the paused notification counted 201
+  for one download; its icon animates (owner: "icon also keeps animating in paused mode"); Resume restarted every
+  paused download, not only what Pause all paused; the paused notification stayed after Resume.
+- **Step 2 milestone review (Opus workflow, 2026-11-17, 62620c9..246033e).** Five area reviewers, three refuters per
+  finding (68 agents): 15 confirmed (about 10 distinct after duplicates), 6 refuted. Most severe: while the metered rule
+  holds, Schedule returns before UpdateSleepPrevention, so the wake lock (and the Wi-Fi lock below 34) stays held on
+  mobile data; on 31 to 33 downloads resume with no foreground service when Wi-Fi returns while the app is hidden; an
+  onStopJob that races the job's start leaves a dead job attached. Fixes in progress.
 - **Step 2, S5 (2026-11-17): boot notice on Android 12 and 13, crash-loop guard** (e9b91e4, 665729f). Checked on the
   Android 13 emulator (`inbound33`, x64 test build): the background check (`run-background.sh`, 100 MB at 60 KB/s per
   connection) finished with the screen off after 214 s through the foreground service, equal hash, keep-alive off at
