@@ -125,6 +125,8 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
+  recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to
   its questions: Task Manager Stop: "Stay paused" (treated as the user's own pause, even when the app is opened);
   Android 12 and 13: "Emulator now" (an Android 13 emulator for the service path during this step); the Wi-Fi-only
