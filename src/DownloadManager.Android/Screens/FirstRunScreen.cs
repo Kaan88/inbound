@@ -66,10 +66,32 @@ internal sealed class FirstRunScreen
         icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(on ? _activity.GetColor(Resource.Color.state_done) : Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
     }
 
+    private const string AskedKey = "notifications_asked";
+
     private void AskNotifications()
     {
         if (!OperatingSystem.IsAndroidVersionAtLeast(33)) return;
-        _activity.RequestPermissions(["android.permission.POST_NOTIFICATIONS"], 1);
+        const string permission = "android.permission.POST_NOTIFICATIONS";
+        var prefs = new PrefsStore(_activity);
+        // Once the system stops showing its dialog (denied before, no rationale to show), asking again does nothing: the app's
+        // notification settings are opened instead, where they can still be turned on (finding 19).
+        if (prefs.GetBool(AskedKey) && !_activity.ShouldShowRequestPermissionRationale(permission))
+        {
+            try
+            {
+                var settings = new Intent(Settings.ActionAppNotificationSettings);
+                settings.PutExtra(Settings.ExtraAppPackage, _activity.PackageName);
+                _activity.StartActivity(settings);
+                return;
+            }
+            catch (ActivityNotFoundException)
+            {
+                // No such screen on this phone: the dialog is asked for, as the first time.
+            }
+        }
+
+        prefs.SetBool(AskedKey, true);
+        _activity.RequestPermissions([permission], 1);
     }
 
     private void AskBattery()

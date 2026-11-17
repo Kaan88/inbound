@@ -43,6 +43,15 @@ public sealed class HostEntry
     [JsonIgnore]
     public bool IsPhone => Id == PhoneId;
 
+    /// <summary>
+    /// What a connection to this host is built from, apart from the token itself: the host, and for a server its pairing (when,
+    /// which token, which certificate, plain http allowed). A screen whose host still has the same stamp has the right connection;
+    /// another stamp (another host, or the same server paired again) means it must be built again.
+    /// </summary>
+    [JsonIgnore]
+    public string ConnectionStamp => IsPhone ? PhoneId
+        : string.Join('|', Id, Address, TokenId, PairedAt?.ToUnixTimeMilliseconds(), CertificatePin, PlainHttpConfirmed);
+
     [JsonIgnore]
     public Uri? AddressUri => Address is not null && Uri.TryCreate(Address, UriKind.Absolute, out var uri) ? uri : null;
 

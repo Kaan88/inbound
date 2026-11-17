@@ -6,7 +6,12 @@
     <item name="android:windowLightStatusBar">false</item>
     <item name="android:windowLightNavigationBar">false</item>
     <item name="colorPrimary">#4AA3F0</item>
-    <item name="colorControlActivated">#4AA3F0</item>
+    <!-- Follows colorPrimary, so dynamic colour reaches radio buttons and switches too. -->
+    <item name="colorControlActivated">?attr/colorPrimary</item>
+    <!-- Inverse roles (snackbars) from the Inbound palette: the other theme's surface, text and primary. -->
+    <item name="colorSurfaceInverse">#E6E6E6</item>
+    <item name="colorOnSurfaceInverse">#1A1A1A</item>
+    <item name="colorPrimaryInverse">#1F6FC5</item>
     <item name="colorOnPrimary">#0E1B2A</item>
     <item name="colorPrimaryContainer">#2B3A4F</item>
     <item name="colorOnPrimaryContainer">#D6E6FA</item>

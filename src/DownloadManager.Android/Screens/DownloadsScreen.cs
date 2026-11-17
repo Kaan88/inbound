@@ -64,6 +64,7 @@ internal sealed class DownloadsScreen
         BuildChips(page.FindViewById<ViewGroup>(Resource.Id.chips)!);
         _list.SummaryChanged += OnSummary;
         _list.SelectionChanged += OnSelection;
+        _list.SelectedRowsChanged += OnSelectedRowsChanged;
         _model.FirstSnapshotShown += () => { _adapter.Live(); OnSummary(); };
         OnSummary();
         OnSelection();
@@ -169,6 +170,13 @@ internal sealed class DownloadsScreen
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
         _adapter.RefreshAll();
         _activity.UpdateBack();
+    }
+
+    // A selected row changed state: the bar's Pause and Resume follow (finding 14). The rows redraw themselves.
+    private void OnSelectedRowsChanged()
+    {
+        _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
+        _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
     }
 
     private void ToggleAll()
@@ -370,7 +378,7 @@ internal sealed class DownloadsScreen
                 _owner.Watch(row, true);
                 animate = false;
                 // The card that a page is open from stays hidden until the page has closed.
-                Card.Visibility = ReferenceEquals(Card, Navigator.HiddenCard) ? ViewStates.Invisible : ViewStates.Visible;
+                Card.Visibility = ReferenceEquals(Card, _s._activity.HiddenCard) ? ViewStates.Invisible : ViewStates.Visible;
             }
 
             var ctx = ItemView.Context!;

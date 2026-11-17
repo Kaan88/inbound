@@ -16,6 +16,9 @@ public enum ConflictChoice { Rename, Overwrite, Fail }
 public sealed class NewDownloadModel
 {
     private readonly DownloadsModel _host;
+    // The address, the check and a found name change together: the check's result is applied on the thread its probe ended on,
+    // while the user types on the UI thread (review of steps 3 and 6, finding 12).
+    private readonly object _gate = new();
     private int _checkVersion;
     private string _address = "";
     private string _fileName = "";
@@ -51,14 +54,18 @@ public sealed class NewDownloadModel
         set
         {
             value ??= "";
-            if (_address == value) return;
-            _address = value;
-            _checkVersion++;
-            Check = CheckState.Idle;
-            CheckText = null;
-            Urls = Expand(_address, out var err);
-            AddressError = err;
-            if (Urls.Count != 1 && !_fileNameEdited) _fileName = "";
+            lock (_gate)
+            {
+                if (_address == value) return;
+                _address = value;
+                _checkVersion++;
+                Check = CheckState.Idle;
+                CheckText = null;
+                Urls = Expand(_address, out var err);
+                AddressError = err;
+                // A name the Host found belongs to the address it was found for; only the user's own name stays (finding 9).
+                if (!_fileNameEdited) _fileName = "";
+            }
         }
     }
 
@@ -75,11 +82,20 @@ public sealed class NewDownloadModel
 
     public bool IsMany => Urls.Count > 1;
 
-    /// <summary>A name only makes sense for one file; the user's edit wins over what the Host found.</summary>
+    /// <summary>
+    /// A name only makes sense for one file; the user's edit wins over what the Host found. Clearing the field gives the
+    /// choice back to the Host's name.
+    /// </summary>
     public string FileName
     {
-        get => _fileName;
-        set { _fileName = value ?? ""; _fileNameEdited = true; }
+        get { lock (_gate) return _fileName; }
+        set { lock (_gate) { _fileName = value ?? ""; _fileNameEdited = _fileName.Length > 0; } }
+    }
+
+    /// <summary>The user typed the name (it is kept when the address changes); false for a name the Host found, or none.</summary>
+    public bool FileNameEdited
+    {
+        get { lock (_gate) return _fileNameEdited; }
     }
 
     /// <summary>The name field is hidden for several downloads.</summary>
@@ -126,21 +142,30 @@ public sealed class NewDownloadModel
     /// </summary>
     public async Task CheckAsync(CancellationToken cancellationToken = default)
     {
-        if (Urls.Count != 1 || AddressError is not null) return;
-        var version = ++_checkVersion;
-        var url = Urls[0];
-        Check = CheckState.Checking;
-        CheckText = null;
+        int version;
+        string url;
+        lock (_gate)
+        {
+            if (Urls.Count != 1 || AddressError is not null) return;
+            version = ++_checkVersion;
+            url = Urls[0];
+            Check = CheckState.Checking;
+            CheckText = null;
+        }
+
         FileMetadataResult result;
         try { result = await _host.ProbeAsync(url, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
         catch (Exception e) { result = new FileMetadataResult { Ok = false, Error = e.Message }; }
-        if (version != _checkVersion) return;
-        if (result.AddRefused) { Check = CheckState.Refused; CheckText = result.Error ?? "This address can't be added."; return; }
-        if (!result.Ok) { Check = CheckState.Failed; CheckText = Readable(result.Error); return; }
-        Check = CheckState.Ready;
-        CheckText = result.TotalBytes is > 0 ? Fmt.Bytes(result.TotalBytes.Value) : "Size not given by the server";
-        if (!_fileNameEdited && !string.IsNullOrWhiteSpace(result.FileName)) _fileName = result.FileName;
+        lock (_gate)
+        {
+            if (version != _checkVersion) return;
+            if (result.AddRefused) { Check = CheckState.Refused; CheckText = result.Error ?? "This address can't be added."; return; }
+            if (!result.Ok) { Check = CheckState.Failed; CheckText = Readable(result.Error); return; }
+            Check = CheckState.Ready;
+            CheckText = result.TotalBytes is > 0 ? Fmt.Bytes(result.TotalBytes.Value) : "Size not given by the server";
+            if (!_fileNameEdited) _fileName = string.IsNullOrWhiteSpace(result.FileName) ? "" : result.FileName;
+        }
     }
 
     /// <summary>
@@ -157,11 +182,13 @@ public sealed class NewDownloadModel
     public IReadOnlyList<AddJobRequest> BuildRequests()
     {
         var list = new List<AddJobRequest>();
+        string fileName;
+        lock (_gate) fileName = _fileName;
         foreach (var u in Urls)
             list.Add(new AddJobRequest
             {
                 Url = u,
-                FileName = Urls.Count == 1 && !string.IsNullOrWhiteSpace(_fileName) ? _fileName.Trim() : null,
+                FileName = Urls.Count == 1 && !string.IsNullOrWhiteSpace(fileName) ? fileName.Trim() : null,
                 StartMode = StartLater ? StartModes.Later : StartModes.StartNow,
                 Connections = Connections,
                 Referrer = string.IsNullOrWhiteSpace(Referrer) ? null : Referrer.Trim(),

@@ -27,8 +27,11 @@ public sealed class ServerCertificateInfo
 }
 
 /// <summary>The server's certificate was refused: not one this device trusts, and not the one pinned at pairing.</summary>
-public sealed class ServerCertificateRefusedException(string name) : RemoteServerException(
-    $"{name}'s certificate is not the one trusted for it. If the server has a new certificate, pair with it again.");
+/// <param name="pinned">A certificate was trusted at pairing (the words then say to pair again); false for system trust
+/// only, such as the desktop window, which has no way to trust a certificate itself.</param>
+public sealed class ServerCertificateRefusedException(string name, bool pinned = false) : RemoteServerException(pinned
+    ? $"{name}'s certificate is not the one trusted for it. If the server has a new certificate, pair with it again."
+    : $"{name}'s certificate isn't trusted on this device. Check the server's address and its certificate.");
 
 /// <summary>
 /// Certificate trust for another Inbound over https (owner, 2026-11-17: "pin at pairing"). A certificate is accepted when

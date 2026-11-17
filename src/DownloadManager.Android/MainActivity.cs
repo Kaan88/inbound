@@ -53,6 +53,9 @@ public sealed class MainActivity : AppCompatActivity
         var hosts = Hosts.HostChoice.Hosts(this);
         Capabilities = hosts.Capabilities;
         HostName = hosts.Current.Name;
+        // The phone's own Host runs whatever host is shown: its downloads, their reconcile and resume, and the keep-alive of
+        // step 2 must not wait until the user looks at This phone again (review of steps 3 and 6, finding 6).
+        if (Capabilities.IsRemote) StartPhoneHost();
         Hosts.HostBar.Place(this, FindViewById<ViewGroup>(Resource.Id.host_chip_slot)!, FindViewById<ViewGroup>(Resource.Id.host_strip_slot)!, _connection);
         // --- end of the step 6 hook ---
         _model = new DownloadsModel(_connection, a => RunOnUiThread(a));
@@ -71,6 +74,7 @@ public sealed class MainActivity : AppCompatActivity
         if (savedInstanceState?.GetBoolean("on_settings") == true) bottom.SelectedItemId = Resource.Id.nav_settings;
         _model.Rows.CollectionChanged += OnRowsForFinished;
         ShowFirstRunIfNeeded();
+        RestorePage(savedInstanceState);
         _nav.UpdateBack();
 #if INBOUND_TEST_BUILD
         // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
@@ -113,7 +117,43 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnSaveInstanceState(outState);
         outState.PutBoolean("on_settings", _onSettings);
+        // The open page comes back after a rotation or a process death, with what was typed into it (finding 16).
+        if (_nav?.PageOpen != true) return;
+        if (_details is not null) outState.PutString("details_job", _details.Row.Id.ToString());
+        else if (_newDownload is not null)
+        {
+            var page = new Bundle();
+            _newDownload.Save(page);
+            outState.PutBundle("new_download", page);
+        }
     }
+
+    private void RestorePage(Bundle? saved)
+    {
+        if (saved is null || _model is null) return;
+        if (saved.GetBundle("new_download") is { } page) { OpenNewDownload(null, page); return; }
+        if (!Guid.TryParse(saved.GetString("details_job"), out var id)) return;
+        // Its row is known once the snapshot is shown; a download that is gone meanwhile has no page to come back to.
+        var model = _model;
+        void Shown()
+        {
+            model.FirstSnapshotShown -= Shown;
+            if (model.Rows.FirstOrDefault(r => r.Id == id) is { } row) OpenDetails(row, null);
+        }
+
+        model.FirstSnapshotShown += Shown;
+    }
+
+    private void StartPhoneHost()
+    {
+        var started = InboundApplication.GetHostAsync(this);
+        _ = started.ContinueWith(t => Log.Error(InboundApplication.Tag, "host: the phone's Host did not start: " + t.Exception?.InnerException),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+    }
+
+    /// <summary>The shown server's connection gave up (pairing ended, certificate refused): only a rebuilt screen tries again.</summary>
+    internal bool ConnectionStopped =>
+        _connection is DownloadManager.Mobile.Remote.IRemoteStatus { State.Status: DownloadManager.Mobile.Remote.RemoteConnectionStatus.Stopped };
 
     private static async Task<DownloadManager.Runtime.Ipc.HostCommandDispatcher> DispatcherAsync(Task<AndroidHost> host) =>
         (await host.ConfigureAwait(false)).Dispatcher;
@@ -121,21 +161,38 @@ public sealed class MainActivity : AppCompatActivity
     private void ShowFirstRunIfNeeded()
     {
         if (!FirstRunState.ShouldShow(_prefs!.GetBool(FirstRunKey))) return;
-        // Connected to another Inbound from the first-run screen: the switch rebuilt this activity on that host, set-up is done.
-        if (Capabilities.IsRemote) { _prefs.SetBool(FirstRunKey, true); return; }
+        // Connected to another Inbound from the first-run screen: that host is shown without it. Set-up is not done, though:
+        // the first time This phone is shown again, the screen comes back for its notifications and battery rows (finding 8).
+        if (Capabilities.IsRemote) return;
         var host = FindViewById<FrameLayout>(Resource.Id.first_run_host)!;
+        var behind = new[] { FindViewById<View>(Resource.Id.column)!, FindViewById<View>(Resource.Id.overlay)! };
         _firstRun = new FirstRunScreen(this, AndroidHost.SharedDownloadFolder, () => Hosts.PairingSheet.Show(this), () =>
         {
             _prefs.SetBool(FirstRunKey, true);
-            host.Animate()!.Alpha(0f).SetDuration(200).WithEndAction(new Java.Lang.Runnable(() =>
+            void Gone()
             {
                 host.Visibility = ViewStates.Gone;
                 host.RemoveAllViews();
+                host.Alpha = 1f;
                 _firstRun = null;
-            }))!.Start();
+                foreach (var v in behind) Reachable(v, true);
+            }
+
+            // With animations removed the system's animators don't run; the fade is done by hand then (finding 21).
+            if (Motion.Reduced(this)) Motion.FadeOut(host, 200, Gone);
+            else host.Animate()!.Alpha(0f).SetDuration(200).WithEndAction(new Java.Lang.Runnable(Gone))!.Start();
         });
         host.AddView(_firstRun.Root);
         host.Visibility = ViewStates.Visible;
+        // TalkBack and the keyboard stay on the first-run screen, not on the Downloads screen under it (findings 17, 20).
+        AndroidX.Core.View.ViewCompat.SetAccessibilityPaneTitle(_firstRun.Root, "Welcome to Inbound");
+        foreach (var v in behind) Reachable(v, false);
+    }
+
+    private static void Reachable(View view, bool reachable)
+    {
+        view.ImportantForAccessibility = reachable ? ImportantForAccessibility.Auto : ImportantForAccessibility.NoHideDescendants;
+        if (view is ViewGroup g) g.DescendantFocusability = reachable ? DescendantFocusability.BeforeDescendants : DescendantFocusability.BlockDescendants;
     }
 
     public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Android.Content.PM.Permission[] grantResults)
@@ -154,11 +211,22 @@ public sealed class MainActivity : AppCompatActivity
     {
         if (_onSettings == settings) return;
         _onSettings = settings;
-        // Navigation: 200 ms fade through.
-        AndroidX.Transitions.TransitionManager.BeginDelayedTransition(FindViewById<ViewGroup>(Resource.Id.pages)!,
-            Motion.Fade());
-        FindViewById<View>(Resource.Id.downloads_root)!.Visibility = settings ? ViewStates.Gone : ViewStates.Visible;
-        FindViewById<View>(Resource.Id.settings_root)!.Visibility = settings ? ViewStates.Visible : ViewStates.Gone;
+        var downloads = FindViewById<View>(Resource.Id.downloads_root)!;
+        var settingsPage = FindViewById<View>(Resource.Id.settings_root)!;
+        if (Motion.Reduced(this))
+        {
+            // With animations removed the fade through would be a cut; a cross-fade by hand instead (finding 21).
+            var (from, to) = settings ? (downloads, settingsPage) : (settingsPage, downloads);
+            Motion.CrossFade(from, to, 150, () => from.Visibility = ViewStates.Gone);
+        }
+        else
+        {
+            // Navigation: 200 ms fade through.
+            AndroidX.Transitions.TransitionManager.BeginDelayedTransition(FindViewById<ViewGroup>(Resource.Id.pages)!, Motion.Fade());
+            downloads.Visibility = settings ? ViewStates.Gone : ViewStates.Visible;
+            settingsPage.Visibility = settings ? ViewStates.Visible : ViewStates.Gone;
+        }
+
         _nav?.UpdateBack();
     }
 
@@ -216,22 +284,29 @@ public sealed class MainActivity : AppCompatActivity
         };
     }
 
-    internal void OpenDetails(JobRow row, View card)
+    internal void OpenDetails(JobRow row, View? card)
     {
         if (_nav is null || _model is null || _nav.PageOpen) return;
-        _details = new DetailsScreen(this, _model, row);
-        _nav.Open(_details.Root, card, () => _downloads?.CardOf(row), OnPageClosed);
+        var connection = _connection;
+        // No polling while a remote host isn't connected: the requests could only wait and fail.
+        _details = new DetailsScreen(this, _model, row, () => connection is not DownloadManager.Mobile.Remote.IRemoteStatus remote
+            || remote.State.Status == DownloadManager.Mobile.Remote.RemoteConnectionStatus.Connected);
+        _nav.Open(_details.Root, card, () => _downloads?.CardOf(row), OnPageClosed, "Details");
     }
 
-    internal void OpenNewDownload(string? link)
+    internal void OpenNewDownload(string? link, Bundle? saved = null)
     {
         if (_nav is null || _model is null || _nav.PageOpen) return;
-        _newDownload = new NewDownloadScreen(this, _model, link);
-        _nav.Open(_newDownload.Root, null, null, OnPageClosed);
-        if (link is null) _newDownload.FocusAddress();
+        _newDownload = new NewDownloadScreen(this, _model, link, saved);
+        _nav.Open(_newDownload.Root, null, null, OnPageClosed, "New download");
+        if (link is null && saved is null) _newDownload.FocusAddress();
     }
 
-    internal void CloseRowPage() => _nav?.Close();
+    /// <summary>Closes <paramref name="page"/> if it is still the open page (a late call for a page already gone does nothing).</summary>
+    internal void CloseRowPage(View page) => _nav?.Close(page);
+
+    /// <summary>The row card a page is open from (kept hidden by the list until the page has closed).</summary>
+    internal View? HiddenCard => _nav?.HiddenCard;
 
     internal void ConfirmDeleteFromDetails(JobRow row) => _downloads?.ConfirmDelete([row]);
 
@@ -239,6 +314,7 @@ public sealed class MainActivity : AppCompatActivity
     {
         _details?.Dispose();
         _details = null;
+        _newDownload?.Dispose();
         _newDownload = null;
         var imm = (Android.Views.InputMethods.InputMethodManager)GetSystemService(InputMethodService)!;
         imm.HideSoftInputFromWindow(FindViewById<View>(Resource.Id.root)!.WindowToken, 0);
@@ -275,11 +351,13 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnStart();
         InboundBackground.SetVisible(true);
+        _details?.SetVisible(true);
     }
 
     protected override void OnStop()
     {
         InboundBackground.SetVisible(false);
+        _details?.SetVisible(false); // no polling while nothing is shown (findings 11, 15)
         base.OnStop();
     }
 
@@ -300,6 +378,10 @@ public sealed class MainActivity : AppCompatActivity
     protected override void OnDestroy()
     {
         base.OnDestroy();
+        // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).
+        _nav?.Dispose();
+        _details?.Dispose();
+        _details = null;
         _downloads?.Dispose();
         _model?.Dispose();
         if (_connection is not null) _ = _connection.DisposeAsync().AsTask();

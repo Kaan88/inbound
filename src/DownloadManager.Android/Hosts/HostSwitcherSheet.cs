@@ -80,9 +80,12 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
             var id = host.Id;
             row.Click += (_, _) =>
             {
+                var screen = Activity as MainActivity;
                 Dismiss();
-                // Every screen built on the old host is recreated on this one (HostBar).
-                Hosts.Select(id);
+                // Every screen built on the old host is recreated on this one (HostBar). The shown host whose connection gave
+                // up is built again, so it tries again (finding 7).
+                if (shown && screen is { ConnectionStopped: true }) screen.Recreate();
+                else Hosts.Select(id);
             };
             if (!host.IsPhone) row.LongClick += (_, _) => AskRemove(host, rows, inflater);
             rows.AddView(row);

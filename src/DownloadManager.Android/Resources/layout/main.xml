@@ -10,8 +10,9 @@
     <com.google.android.material.bottomnavigation.BottomNavigationView android:id="@+id/nav" android:layout_width="match_parent" android:layout_height="wrap_content"
         app:menu="@menu/nav" app:labelVisibilityMode="labeled" android:background="?attr/colorSurfaceContainer" />
   </LinearLayout>
+  <!-- No background: the page is opaque, and the list stays drawn under a page that grows or fades in (Navigator). -->
   <FrameLayout android:id="@+id/overlay" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
-      android:background="?android:colorBackground" android:clickable="true" android:focusable="true" />
+      android:clickable="true" android:focusable="false" />
   <FrameLayout android:id="@+id/first_run_host" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
       android:background="?android:colorBackground" android:clickable="true" android:focusable="true" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
