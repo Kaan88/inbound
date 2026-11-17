@@ -58,6 +58,11 @@ updates:
       npm:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript 7 (the native compiler) has no JavaScript API: the extension's tests call ts.transpileModule, and
+      # svelte-check 4.7 accepts TypeScript 5 or 6 only. Lift this when both support 7 (PRs 14 and 16, 2026-11-17).
+      - dependency-name: "typescript"
+        versions: [">=7"]
 
   - package-ecosystem: docker
     directories: ["/", "/native/torrent-worker"]
