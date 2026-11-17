@@ -7,7 +7,9 @@
   (ANDROID.4: light mode, dynamic colour, TalkBack on a phone; ANDROID.7: a publicly trusted https server, https
   pairing on a phone). First usable APK delivered. Next: step 4 (ANDROID.5, catching links), then step 5 (ANDROID.6),
   then ANDROID.10 (signing, auto update) and ANDROID.11 (web UI recommends the app). Owner asked to be asked after step
-  3 whether a first signed build goes out before steps 4 to 6 finish: not yet asked.
+  3 whether a first signed build goes out before steps 4 to 6 finish. Asked 2026-11-18; owner: "Sign now
+  (Recommended)": make the release key now (kept like the update key, backed up encrypted, never committed), sign the
+  next APK with it, owner reinstalls once; then step 4.
 - **Release APK crashed at start; launcher icon (2026-11-18).** The release build of b104f6eb installed on the S24 crashed
   at every start (owner: "I can't check, app crashes"): `ClassNotFoundException: net.dot.jni.nativeaot.NativeAotRuntimeProvider`.
   The `obj\Release` folder was stale: its generated Java sources lacked `NativeAotRuntimeProvider.java`, which the

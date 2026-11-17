@@ -708,7 +708,10 @@ whether rclone is a Setup component that can be unticked.
 - Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,
   remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
   Done 2026-11-18: release APK of d9f45a6e (with the owner's icon) on the S24 and the desktop, after Fable's approval.
-  Next: ANDROID.5 (step 4).
+  Owner, 2026-11-18, asked whether a first signed build goes out before steps 4 and 5: "Sign now (Recommended)". So
+  next: the signing part of ANDROID.10 pulled forward (a permanent release key kept with the update key in
+  Downloads\secrets and in the encrypted secrets backup, never committed; the next APK signed with it; the owner
+  reinstalls once, since the debug-signed app can't be updated in place), then ANDROID.5 (step 4).
   Reviews: an Opus agent per milestone (step); Fable once after all milestones ("until completion meant all the
   milestones, until then use opus for single mileston reviews"). Then (2026-11-17): "after first version finishes,
   have it review": Fable reviews the queue once the first usable APK is on the owner's desktop.
