@@ -32,7 +32,8 @@ FAILS=0
 say() { echo "$*" | tee -a "$OUT/summary.txt"; }
 fail() { say "FAIL: $*"; FAILS=$((FAILS + 1)); }
 adbt() { timeout "${T:-60}" "$ADB" "$@"; }            # no adb call may hang the run (an am start -W once never returned)
-locked() { adbt shell dumpsys window | tr -d '\r' | grep -q "isKeyguardShowing=true"; }
+# Fails closed: only a seen "isKeyguardShowing=false" counts as unlocked (an adb timeout or a renamed field is "locked").
+locked() { ! adbt shell dumpsys window | tr -d '\r' | grep -q "isKeyguardShowing=false"; }
 # A phone with no lock screen can doze with no keyguard showing; a cold start timed then was ~50% slower (Mi 8 Lite,
 # 2026-11-17: 588-657 ms dozing, 391-424 ms awake). KEYCODE_WAKEUP wakes it and does nothing when it is awake.
 wake() { adbt shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1; }
@@ -48,6 +49,11 @@ safe_name() { case "$1" in ""|.*|*/*|*\'*) return 1;; esac; return 0; }
 
 say "device: $(adbt shell getprop ro.product.model | tr -d '\r') sdk $(adbt shell getprop ro.build.version.sdk | tr -d '\r') serial $ANDROID_SERIAL"
 say "apk: $APK ($(stat -c %s "$APK") bytes)"
+# What ran: a NativeAOT build carries the app as one native library and no managed assemblies; and the commit it came from.
+if unzip -l "$APK" | grep -q "lib/arm64-v8a/libDownloadManager.Android.so" && ! unzip -l "$APK" | grep -qE "assemblies/|\.dll$"; then
+  say "build: NativeAOT (lib/arm64-v8a/libDownloadManager.Android.so, no managed assemblies)"
+else fail "the APK is not a NativeAOT arm64 build"; fi
+say "source: $(git -C "$ROOT" rev-parse --short HEAD)$(git -C "$ROOT" diff --quiet HEAD -- src tests tools scripts || echo ' (with uncommitted changes)')"
 wake
 locked && { say "FAIL: the phone is locked; unlock it and run again"; exit 1; }
 

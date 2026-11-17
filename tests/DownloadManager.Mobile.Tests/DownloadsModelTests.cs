@@ -207,6 +207,77 @@ public sealed class DownloadsModelTests
         Assert.Empty(model.Rows);
     }
 
+    // Fable B3 (2026-11-17): a progress frame mapped before "completed" but delivered after it must not undo it.
+    [Fact]
+    public async Task A_late_progress_frame_does_not_undo_a_newer_state()
+    {
+        var (model, host, _) = Make();
+        await model.StartAsync(CancellationToken.None);
+        var t = new DateTimeOffset(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+        var a = Jobs.Make("downloading", "a.bin", total: 100, received: 50);
+        a.UpdatedAt = t;
+        host.Snapshot("/dl", a);
+        host.Event(Copy(a, "completed", 100, t.AddMilliseconds(200)), "updated");
+        host.Event(Copy(a, "downloading", 90, t.AddMilliseconds(100)), "progress");
+        Assert.Equal(StatusKind.Done, model.Rows[0].Kind);
+        host.Event(Copy(a, "downloading", 95, t.AddMilliseconds(300)), "progress");   // newer progress is applied
+        Assert.Equal(0.95, model.Rows[0].Progress, 3);
+    }
+
+    [Fact]
+    public async Task A_late_progress_frame_does_not_undo_a_newer_state_in_the_same_batch()
+    {
+        var host = new FakeHostConnection();
+        var posted = new List<Action>();
+        using var model = new DownloadsModel(host, a => { lock (posted) posted.Add(a); }, TimeSpan.FromMilliseconds(30));
+        await model.StartAsync(CancellationToken.None);
+        var t = new DateTimeOffset(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+        var a = Jobs.Make("downloading", "a.bin", total: 100, received: 50);
+        a.UpdatedAt = t;
+        host.Snapshot("/dl", a);
+        posted[0]();
+        posted.Clear();
+        host.Event(Copy(a, "paused", 80, t.AddMilliseconds(200)), "paused");
+        host.Event(Copy(a, "downloading", 70, t.AddMilliseconds(100)), "progress");
+        for (var i = 0; i < 100 && posted.Count == 0; i++) await Task.Delay(20);
+        Assert.Single(posted);
+        posted[0]();
+        Assert.Equal(0.8, model.Rows[0].Progress, 3);
+        Assert.NotEqual(StatusKind.Active, model.Rows[0].Kind);
+    }
+
+    [Fact]
+    public async Task A_progress_frame_far_older_than_the_last_is_applied_so_a_clock_set_back_cannot_freeze_a_row()
+    {
+        var (model, host, _) = Make();
+        await model.StartAsync(CancellationToken.None);
+        var t = new DateTimeOffset(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+        var a = Jobs.Make("downloading", "a.bin", total: 100, received: 10);
+        a.UpdatedAt = t;
+        host.Snapshot("/dl", a);
+        host.Event(Copy(a, "downloading", 20, t.AddHours(-1)), "progress");
+        Assert.Equal(0.2, model.Rows[0].Progress, 3);
+    }
+
+    // Fable B4: a job removed before this session's snapshot is in neither the list nor the removed set.
+    [Fact]
+    public async Task A_progress_frame_for_an_unknown_job_adds_no_row()
+    {
+        var (model, host, _) = Make();
+        await model.StartAsync(CancellationToken.None);
+        host.Snapshot();
+        host.Event(Jobs.Make("downloading", "ghost.bin", total: 10, received: 5), "progress");
+        Assert.Empty(model.Rows);
+        host.Event(Jobs.Make("queued", "new.bin"), "added");
+        Assert.Single(model.Rows);
+    }
+
+    private static JobDto Copy(JobDto j, string state, long received, DateTimeOffset at) => new()
+    {
+        Id = j.Id, Url = j.Url, FileName = j.FileName, State = state, TotalBytes = j.TotalBytes, ReceivedBytes = received,
+        Progress = j.TotalBytes is > 0 ? (double)received / j.TotalBytes.Value : null, CreatedAt = j.CreatedAt, UpdatedAt = at,
+    };
+
     [Fact]
     public async Task Frames_after_dispose_change_nothing()
     {

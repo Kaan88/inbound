@@ -218,6 +218,12 @@ public sealed class MainActivity : AppCompatActivity
         public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position, IList<Java.Lang.Object> payloads) =>
             ((Holder)holder).Bind(_model.Rows[position], payloads.Count > 0);
 
+        public override void OnViewRecycled(Java.Lang.Object holder)
+        {
+            ((Holder)holder).Unbind();
+            base.OnViewRecycled(holder);
+        }
+
         public void Watch(JobRow row, bool on)
         {
             if (on) row.PropertyChanged += OnRowChanged; else row.PropertyChanged -= OnRowChanged;
@@ -250,6 +256,13 @@ public sealed class MainActivity : AppCompatActivity
             _name = v.FindViewById<TextView>(Resource.Id.name)!;
             _subtitle = v.FindViewById<TextView>(Resource.Id.subtitle)!;
             _bar = v.FindViewById<LinearProgressIndicator>(Resource.Id.bar)!;
+        }
+
+        /// <summary>A recycled holder stops watching its row, so a row gone from the list keeps no listener.</summary>
+        public void Unbind()
+        {
+            if (_row is not null) _owner.Watch(_row, false);
+            _row = null;
         }
 
         public void Bind(JobRow row, bool animate)

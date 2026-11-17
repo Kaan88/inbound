@@ -246,6 +246,17 @@ public sealed class InProcessHostConnectionTests : IAsyncLifetime
 
     // The window the lazy connection can hit (review, 2026-11-17): its DisposeAsync runs after the inner connection exists but
     // before the inner OpenAsync attaches the callback. The close must win: no frame, and no session left registered.
+    // Fable B8 (2026-11-17): a command on a connection that was opened and then disposed used to reach the Host.
+    [Fact]
+    public async Task A_command_after_dispose_is_refused_and_never_reaches_the_host()
+    {
+        var connection = new InProcessHostConnection(_dispatcher);
+        await connection.OpenAsync(_ => { }, CancellationToken.None).WaitAsync(Bound);
+        await connection.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => connection.RequestAsync(AddLater(), CancellationToken.None).WaitAsync(Bound));
+        Assert.Empty(_service.GetSnapshot().Jobs);
+    }
+
     [Fact]
     public async Task A_connection_disposed_before_it_is_opened_stays_closed()
     {

@@ -72,7 +72,7 @@ internal sealed class AndroidHost : IAsyncDisposable
     public HostCommandDispatcher Dispatcher { get; }
 
     /// <param name="stateRoot">The app's private folder for settings, job list and checkpoints (metadata only).</param>
-    /// <param name="defaultDownloadFolder">Becomes the default download folder setting on the first run (no settings file yet).</param>
+    /// <param name="defaultDownloadFolder">Becomes the default download folder while that setting is still the built-in default (nobody set one).</param>
     public static async Task<AndroidHost> StartAsync(string stateRoot, string defaultDownloadFolder, Action<string> say, CancellationToken ct)
     {
         var paths = new StoragePaths(stateRoot);
@@ -97,8 +97,6 @@ internal sealed class AndroidHost : IAsyncDisposable
                 AllowLocalNetwork = true,
             },
             checkpoints: checkpointStore);
-        // First run on this phone: no settings file yet. Read before the service starts, which writes one.
-        var firstRun = !File.Exists(paths.SettingsFile);
         DownloadManagerService service;
         try
         {
@@ -115,9 +113,11 @@ internal sealed class AndroidHost : IAsyncDisposable
             await service.InitializeAsync(ct).ConfigureAwait(false);
             service.TrayAvailable = false;
 
-            // Default destination on first run only: the shared Download folder, directly (owner, 2026-11-16: no subfolder, so
-            // no Video/ or Compressed/ category folders either). Later starts leave the user's settings as they are.
-            if (firstRun)
+            // Default destination while none was ever set: the shared Download folder, directly (owner, 2026-11-16: no
+            // subfolder, so no Video/ or Compressed/ category folders either). Decided by the setting itself, not by whether a
+            // settings file exists, so a first start that wrote settings but died before this (or whose update was refused)
+            // is put right at the next start. The built-in default is the app's private folder, which nobody can pick or see.
+            if (service.GetSettings().DefaultDownloadDirectory == AppSettings.GetDefaultDownloadDirectory())
             {
                 var settings = service.GetSettings();
                 settings.DefaultDownloadDirectory = defaultDownloadFolder;

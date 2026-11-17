@@ -148,7 +148,15 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
     public async Task OpenAsync(Action<IpcMessage> onFrame, CancellationToken cancellationToken)
     {
         if (!_session.Attach(onFrame)) return;
-        await dispatcher.OpenSessionAsync(_session, cancellationToken).ConfigureAwait(false);
+        try { await dispatcher.OpenSessionAsync(_session, cancellationToken).ConfigureAwait(false); }
+        catch
+        {
+            // Registered before the hello and snapshot were sent: a failure there must not leave it registered.
+            _session.Close();
+            dispatcher.CloseSession(_session);
+            throw;
+        }
+
         // Disposed while the dispatcher registered it: that close may have run first, so close it again.
         if (_session.Closed) dispatcher.CloseSession(_session);
         else _session.GoLive();
@@ -157,6 +165,8 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
     /// <summary>One command, the same way a transport does it (compatibility check, then dispatch); waits for its reply.</summary>
     public async Task<IpcMessage> RequestAsync(IpcMessage request, CancellationToken cancellationToken)
     {
+        // A closed screen sends nothing to the Host (a command after dispose ran there before).
+        ObjectDisposedException.ThrowIf(_session.Closed, this);
         var reply = _session.ExpectReplyAsync(request);
         try
         {

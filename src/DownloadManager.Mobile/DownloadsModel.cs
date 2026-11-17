@@ -22,6 +22,20 @@ public sealed class DownloadsModel : IDisposable
     // Jobs the Host said are gone. Ids are never reused, so any later event for one is stale (the Host announces progress
     // outside its lock, so a progress frame can arrive after the removal) and must not bring the row back.
     private readonly HashSet<Guid> _removed = new();
+    // The UpdatedAt of the last state shown per job (UI thread only), so a progress frame mapped before a newer change
+    // (announced outside the Host's lock, so it can arrive after "paused" or "completed") does not undo it.
+    private readonly Dictionary<Guid, DateTimeOffset> _shownAt = new();
+
+    /// <summary>
+    /// A progress frame older than what is already known for the job. Only progress is judged: every other change is
+    /// applied as it comes. A frame more than <see cref="StaleWindow"/> older is applied anyway, so a phone clock set back
+    /// cannot freeze a row (a stale frame in flight is milliseconds old).
+    /// </summary>
+    private static bool IsStaleProgress(JobDto incoming, string type, DateTimeOffset known) =>
+        type.Equals("progress", StringComparison.OrdinalIgnoreCase)
+        && incoming.UpdatedAt < known && known - incoming.UpdatedAt < StaleWindow;
+
+    private static readonly TimeSpan StaleWindow = TimeSpan.FromSeconds(5);
     private readonly object _gate = new();
     private readonly Timer _timer;
     private bool _flushScheduled;
@@ -76,6 +90,7 @@ public sealed class DownloadsModel : IDisposable
             lock (_gate)
             {
                 if (_removed.Contains(e.Job.Id)) return;
+                if (_pending.TryGetValue(e.Job.Id, out var waiting) && IsStaleProgress(e.Job, e.EventType, waiting.Job.UpdatedAt)) return;
                 if (IsRemoval(e.EventType)) _removed.Add(e.Job.Id);
                 _pending[e.Job.Id] = (e.Job, e.EventType);
                 if (_flushScheduled) return;
@@ -103,6 +118,7 @@ public sealed class DownloadsModel : IDisposable
             var row = new JobRow { Id = j.Id };
             row.ApplyFrom(j);
             _byId[j.Id] = row;
+            _shownAt[j.Id] = j.UpdatedAt;
             Rows.Add(row);
         }
 
@@ -127,6 +143,7 @@ public sealed class DownloadsModel : IDisposable
             {
                 if (IsRemoval(type))
                 {
+                    _shownAt.Remove(job.Id);
                     if (_byId.Remove(job.Id, out var gone)) Rows.Remove(gone);
                     continue;
                 }
@@ -136,7 +153,11 @@ public sealed class DownloadsModel : IDisposable
                 lock (_gate) wasRemoved = _removed.Contains(job.Id);
                 if (wasRemoved) continue;
 
+                if (_shownAt.TryGetValue(job.Id, out var known) && IsStaleProgress(job, type, known)) continue;
                 if (_byId.TryGetValue(job.Id, out var row)) row.ApplyFrom(job);
+                // A job the list does not know is added by any change but progress: a progress frame for an unknown job is
+                // one that outlived it (removed before this session's snapshot), and a new job always arrives as "added".
+                else if (type.Equals("progress", StringComparison.OrdinalIgnoreCase)) continue;
                 else
                 {
                     row = new JobRow { Id = job.Id };
@@ -144,6 +165,8 @@ public sealed class DownloadsModel : IDisposable
                     _byId[job.Id] = row;
                     Rows.Insert(InsertIndexFor(row), row);
                 }
+
+                _shownAt[job.Id] = job.UpdatedAt;
             }
         });
     }
