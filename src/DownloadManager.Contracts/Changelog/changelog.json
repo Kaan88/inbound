@@ -27,6 +27,7 @@
           "title": "Fixes",
           "items": [
             { "text": "A window that was last left very small opens at its least size, and Options can't be made smaller than its pages.", "tags": ["desktop"] },
+            { "text": "Raising the connections of a download that runs on one connection now splits it into more parts, while it runs or when it is started again.", "tags": ["all"] },
             { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] },
             { "text": "Manage remotes on All remotes opens Options in front, and its empty list no longer overlaps the column headings.", "tags": ["desktop"] },
             { "text": "Files copied to a remote through the desktop bridge show in the web UI's target folder, and a folder with many files shows that it is loading.", "tags": ["webui", "server"] }
