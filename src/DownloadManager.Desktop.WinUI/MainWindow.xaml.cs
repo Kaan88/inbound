@@ -3851,6 +3851,7 @@ public sealed partial class MainWindow : Window
             var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
             var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
+            var connectionsPerServer = SettingsWindow.Number("Connections per server, all downloads", settings.MaxConnectionsPerHost, 1, 64);
             var speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
                 settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
                 1, OptionsSettingsRebase.SpeedLimitMaxKb, "Unlimited");
@@ -3863,7 +3864,7 @@ public sealed partial class MainWindow : Window
             void AddSiteLimitRow(string pattern, int? max)
             {
                 var site = new TextBox { Header = "Site", Text = pattern, PlaceholderText = "example.com or *.example.com" };
-                var limit = SettingsWindow.Number("Connections", max, 1, 32);
+                var limit = SettingsWindow.Number("Connections per download", max, 1, 32);
                 limit.Width = 140;
                 var remove = new Button { Content = "Remove", VerticalAlignment = VerticalAlignment.Bottom };
                 var row = new Grid { ColumnSpacing = 8 };
@@ -4198,10 +4199,14 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload,
                 SettingsWindow.Hint(ShellWords.PostDownloadProgramGets), postDownloadNote);
             window.AddPage("Connection", "\uE774",
-                maxConcurrent, connections, speedLimit,
+                maxConcurrent, connections,
+                SettingsWindow.Hint(ShellWords.ConnectionsPerDownloadHint),
+                connectionsPerServer,
+                SettingsWindow.Hint(ShellWords.ConnectionsPerServerHint),
+                speedLimit,
                 SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
                 SettingsWindow.Section("Per-site limits"),
-                SettingsWindow.Hint("Most connections a download may open to these sites. *.example.com covers its subdomains."),
+                SettingsWindow.Hint(ShellWords.PerSiteLimitsHint + " *.example.com covers its subdomains."),
                 siteLimitEmpty, siteLimitPanel, addSiteLimit,
                 savingPausesKnown ? SettingsWindow.Section("Saving data and power") : null,
                 savingPausesKnown ? pauseWhenSaving : null,
@@ -4299,6 +4304,8 @@ public sealed partial class MainWindow : Window
                     return ("Maximum simultaneous downloads must be between 1 and 16.", ConnectionPage);
                 if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32)
                     return ("Connections per download must be between 1 and 32.", ConnectionPage);
+                if (WholeNumber(connectionsPerServer) is not { } perServerValue || perServerValue is < 1 or > 64)
+                    return ("Connections per server must be between 1 and 64.", ConnectionPage);
                 long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
                 if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ConnectionPage);
                 if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168)
@@ -4340,6 +4347,7 @@ public sealed partial class MainWindow : Window
                 }).ToList();
                 settings.MaxConcurrentDownloads = max;
                 settings.DefaultConnections = connectionsValue;
+                settings.MaxConnectionsPerHost = perServerValue;
                 settings.GlobalSpeedLimitBytesPerSecond = limit;
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;

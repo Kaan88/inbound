@@ -28,6 +28,17 @@ internal static class ShellWords
     /// </summary>
     public const string PostDownloadProgramGets = "It gets the finished file's full path as its only argument.";
 
+    /// <summary>CONN.1: the three connection limits, said the same in the desktop Options, the other-server window and the web UI.</summary>
+    public const string ConnectionsPerDownloadHint = "Each new download asks for this many. It never gets more than the per-server limit below, and downloads from one server share that limit.";
+
+    public const string ConnectionsPerServerHint = "Up to 32 for one download.";
+
+    public const string PerSiteLimitsHint = "Caps each download from that site, below the per-server limit.";
+
+    /// <summary>CONN.1: the Downloads menu's per-download item when the per-server limit is the lower of the two.</summary>
+    public static string ConnectionsPerDownloadMenu(int perDownload, int perServer)
+        => perDownload > perServer ? $"Connections per Download: {perDownload} ({perServer} per server applies)" : $"Connections per Download: {perDownload}";
+
     /// <summary>
     /// Review 5:E4: what an error says when the app refused an action and gave no reason. Not "the host rejected": it says
     /// who couldn't, and what to do next. <paramref name="serverName"/> is another server's name; null for this PC, whose

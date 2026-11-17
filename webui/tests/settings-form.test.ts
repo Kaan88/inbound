@@ -69,7 +69,7 @@ describe('validateForm', () => {
     expect(validateForm(form)?.message).toBe('Connections per download must be between 1 and 32.');
     form.defaultConnections = 8;
     form.maxConnectionsPerHost = 65;
-    expect(validateForm(form)?.message).toBe('Connections per site must be between 1 and 64.');
+    expect(validateForm(form)?.message).toBe('Connections per server must be between 1 and 64.');
     form.maxConnectionsPerHost = 64;
     form.speedKb = -5;
     expect(validateForm(form)?.message).toBe('Speed limit must be between 1 and 10000000 KB/s.');

@@ -12,7 +12,7 @@
     extractAgainQuestion, extractSummary, leftExtracting, planForRows, removeQuestion as archiveRemoveQuestion, targetOf, type ArchivePasswordTarget,
   } from '../lib/archives';
   import {
-    archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteBatches, deleteCompletedText, deletePlan,
+    archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, connectionsPerDownloadLabel, serverConnectionOptions, deleteBatches, deleteCompletedText, deletePlan,
     downloadChoices, emptyText, fileCommands, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, notCurrentView, offersDownloadAll, parseSort,
     pauseTargets, planFileMenu, priorityTargets, queueText, remoteEnterAction, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
@@ -916,9 +916,14 @@
         items: downloadChoices.map((n) => ({ label: `${n} at a time`, checked: s?.maxConcurrentDownloads === n, onselect: () => saveLimit((x) => { x.maxConcurrentDownloads = n; }) })),
       },
       {
-        label: `Connections per Download: ${s?.defaultConnections ?? ''}`,
+        label: connectionsPerDownloadLabel(s?.defaultConnections, s?.maxConnectionsPerHost),
         disabled: !s,
         items: connectionChoices.map((n) => ({ label: n === 1 ? '1 connection' : `${n} connections`, checked: s?.defaultConnections === n, onselect: () => saveLimit((x) => { x.defaultConnections = n; }) })),
+      },
+      {
+        label: `Connections per server: ${s?.maxConnectionsPerHost ?? ''}`,
+        disabled: !s,
+        items: serverConnectionOptions(s?.maxConnectionsPerHost).map((n) => ({ label: n === 1 ? '1 connection' : `${n} connections`, checked: s?.maxConnectionsPerHost === n, onselect: () => saveLimit((x) => { x.maxConnectionsPerHost = n; }) })),
       },
       {
         label: `Speed Limit: ${speedLimitLabel(limit)}`,

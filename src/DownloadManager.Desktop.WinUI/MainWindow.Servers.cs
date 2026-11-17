@@ -1005,7 +1005,7 @@ public sealed partial class MainWindow
 
         TextBox? directory = null;
         CheckBox? useCategoryFolders = null, useTorrentCategoryFolders = null;
-        NumberBox? maxConcurrent = null, connections = null, speedLimit = null;
+        NumberBox? maxConcurrent = null, connections = null, connectionsPerServer = null, speedLimit = null;
         CheckBox? autoResume = null;
         TextBox? postDownload = null;
         if (theirs is not null)
@@ -1028,12 +1028,16 @@ public sealed partial class MainWindow
 
             maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", theirs.MaxConcurrentDownloads, 1, 16);
             connections = SettingsWindow.Number("Connections per download", theirs.DefaultConnections, 1, 32);
+            connectionsPerServer = SettingsWindow.Number("Connections per server, all downloads", theirs.MaxConnectionsPerHost, 1, 64);
             speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
                 theirs.GlobalSpeedLimitBytesPerSecond is > 0 ? theirs.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null, 1, 10_000_000, "Unlimited");
             speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
             serverControls.Add(SettingsWindow.Section("Connection"));
             serverControls.Add(maxConcurrent);
             serverControls.Add(connections);
+            serverControls.Add(SettingsWindow.Hint(ShellWords.ConnectionsPerDownloadHint));
+            serverControls.Add(connectionsPerServer);
+            serverControls.Add(SettingsWindow.Hint(ShellWords.ConnectionsPerServerHint));
             serverControls.Add(speedLimit);
             serverControls.Add(SettingsWindow.Hint("Leave the speed limit empty for unlimited."));
             if (pages.AutoResume)
@@ -1122,13 +1126,14 @@ public sealed partial class MainWindow
             if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168) return ("Update interval must be 1-168 hours.", ThisPcPage);
             var sounds = new Dictionary<string, string>(mine.EventSoundFiles, StringComparer.OrdinalIgnoreCase);
             if (!soundEditor.TryApplyTo(sounds, out var soundError)) return (soundError ?? "Invalid sound choice.", SoundsPage);
-            if (maxConcurrent is not null && connections is not null && speedLimit is not null)
+            if (maxConcurrent is not null && connections is not null && connectionsPerServer is not null && speedLimit is not null)
             {
                 if (WholeNumber(maxConcurrent) is not { } max || max is < 1 or > 16) return ("Maximum simultaneous downloads must be between 1 and 16.", ServerPage);
                 if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32) return ("Connections per download must be between 1 and 32.", ServerPage);
+                if (WholeNumber(connectionsPerServer) is not { } perServerValue || perServerValue is < 1 or > 64) return ("Connections per server must be between 1 and 64.", ServerPage);
                 long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
                 if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ServerPage);
-                if (await SaveServerSideAsync(max, connectionsValue, limit) is { } serverProblem) return (serverProblem, ServerPage);
+                if (await SaveServerSideAsync(max, connectionsValue, perServerValue, limit) is { } serverProblem) return (serverProblem, ServerPage);
             }
 
             return await SaveThisPcSideAsync(checkInterval, sounds);
@@ -1136,7 +1141,7 @@ public sealed partial class MainWindow
 
         // The server first: if it doesn't take its settings, nothing is changed anywhere. Only its own fields; this
         // PC's choices go back to it as it has them. Null once saved.
-        async Task<string?> SaveServerSideAsync(int max, int connectionsValue, long? limit)
+        async Task<string?> SaveServerSideAsync(int max, int connectionsValue, int perServerValue, long? limit)
         {
             SettingsDto serverAtSave;
             try
@@ -1154,6 +1159,7 @@ public sealed partial class MainWindow
             if (useTorrentCategoryFolders is not null) edited.UseTorrentCategoryFolders = useTorrentCategoryFolders.IsChecked == true;
             edited.MaxConcurrentDownloads = max;
             edited.DefaultConnections = connectionsValue;
+            edited.MaxConnectionsPerHost = perServerValue;
             edited.GlobalSpeedLimitBytesPerSecond = limit;
             if (autoResume is not null) edited.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
             if (postDownload is not null) edited.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text) ? null : postDownload.Text.Trim();

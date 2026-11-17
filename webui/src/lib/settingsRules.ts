@@ -263,6 +263,10 @@ export function composeProxyAddress(type: number, hostPort: string | null | unde
 // Per-site limits (review 5:F6b): a row each, a site and its connections, as Site logins has; no typed "pattern=max".
 export interface ProfileRow { key: number; pattern: string; max: number | null }
 
+// CONN.1: the three connection limits, worded as in the desktop Options.
+export const connectionsPerDownloadHint = 'Each new download asks for this many. It never gets more than the per-server limit below, and downloads from one server share that limit.';
+export const connectionsPerServerHint = 'Up to 32 for one download.';
+export const perSiteLimitsHint = 'Caps each download from that site, below the per-server limit.';
 export const siteLimitNeedsSite = 'Enter a site for each per-site limit, or remove it.';
 
 export function profileRows(profiles: ConnectionProfile[] | undefined): ProfileRow[] {
@@ -457,7 +461,7 @@ export function validateAll(
   const connections = whole(form.defaultConnections);
   if (connections === null || connections < 1 || connections > 32) problems.push({ message: 'Connections per download must be between 1 and 32.', page: 'connection', field: 'set-connections' });
   const perSite = whole(form.maxConnectionsPerHost);
-  if (perSite === null || perSite < 1 || perSite > 64) problems.push({ message: 'Connections per site must be between 1 and 64.', page: 'connection', field: 'set-host' });
+  if (perSite === null || perSite < 1 || perSite > 64) problems.push({ message: 'Connections per server must be between 1 and 64.', page: 'connection', field: 'set-host' });
   const limit = whole(form.speedKb);
   const speedUntouched = limit === form.speedKbAtOpen;
   if (!speedUntouched && limit !== null && (limit < 1 || limit > maxSpeedKb)) problems.push({ message: `Speed limit must be between 1 and ${maxSpeedKb} KB/s.`, page: 'connection', field: 'set-speed' });

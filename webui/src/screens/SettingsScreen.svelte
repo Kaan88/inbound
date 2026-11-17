@@ -10,7 +10,7 @@
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
     mergeEditedSettings, archiveChanges, captureLabel, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
-    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, torrentFoldersHint, torrentSameFolders, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
+    connectionsPerDownloadHint, connectionsPerServerHint, perSiteLimitsHint, isUnsupportedReply, nextRowKey, problemsText, proxyTypes, torrentEncryptions, torrentFoldersHint, torrentSameFolders, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
   } from '../lib/settingsRules';
   import { hostKindOf } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
@@ -536,18 +536,24 @@
       <h1 class="mb-3 text-[18px] font-semibold">Connection</h1>
       <div class="grid max-w-xl gap-3 sm:grid-cols-2">
         <div><label class="label" for="set-concurrent">Maximum simultaneous downloads</label><input id="set-concurrent" class="field" type="number" min="1" max="16" required bind:value={form.maxConcurrentDownloads} aria-invalid={invalid('set-concurrent')} /></div>
-        <div><label class="label" for="set-connections">Connections per download</label><input id="set-connections" class="field" type="number" min="1" max="32" required bind:value={form.defaultConnections} aria-invalid={invalid('set-connections')} /></div>
-        <div><label class="label" for="set-host">Connections per site</label><input id="set-host" class="field" type="number" min="1" max="64" required bind:value={form.maxConnectionsPerHost} aria-invalid={invalid('set-host')} /></div>
+        <div class="sm:col-span-2">
+          <label class="label" for="set-connections">Connections per download</label><input id="set-connections" class="field" type="number" min="1" max="32" required bind:value={form.defaultConnections} aria-invalid={invalid('set-connections')} />
+          <p class="hint mt-1">{connectionsPerDownloadHint}</p>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label" for="set-host">Connections per server, all downloads</label><input id="set-host" class="field" type="number" min="1" max="64" required bind:value={form.maxConnectionsPerHost} aria-invalid={invalid('set-host')} />
+          <p class="hint mt-1">{connectionsPerServerHint}</p>
+        </div>
         <div><label class="label" for="set-speed">Total speed limit, all downloads (KB/s)</label><input id="set-speed" class="field" type="number" min="1" max="10000000" placeholder="Unlimited" bind:value={form.speedKb} aria-invalid={invalid('set-speed')} /></div>
         <p class="hint sm:col-span-2">Leave the speed limit empty for unlimited.</p>
         <div class="sm:col-span-2">
           {@render section('Per-site limits')}
-          <p class="hint mt-1">Most connections a download may open to these sites. *.example.com covers its subdomains.</p>
+          <p class="hint mt-1">{perSiteLimitsHint} *.example.com covers its subdomains.</p>
           <div class="mt-2 grid gap-2">
             {#each form.profiles as row, i (row.key)}
               <div class="flex items-end gap-2">
                 <div class="min-w-0 flex-1"><label class="label" for="profile-site-{row.key}">Site</label><input id="profile-site-{row.key}" class="field" aria-invalid={invalid(`profile-site-${row.key}`)} bind:value={row.pattern} placeholder="example.com or *.example.com" spellcheck="false" /></div>
-                <div class="w-28"><label class="label" for="profile-max-{row.key}">Connections</label><input id="profile-max-{row.key}" class="field" type="number" min="1" max="32" aria-invalid={invalid(`profile-max-${row.key}`)} bind:value={row.max} /></div>
+                <div class="w-28"><label class="label" for="profile-max-{row.key}">Connections per download</label><input id="profile-max-{row.key}" class="field" type="number" min="1" max="32" aria-invalid={invalid(`profile-max-${row.key}`)} bind:value={row.max} /></div>
                 <button class="btn-danger" type="button" aria-label="Remove this per-site limit" onclick={() => form?.profiles.splice(i, 1)}>Remove</button>
               </div>
             {:else}
