@@ -132,7 +132,7 @@ jobs:
           $name = "inbound-bridge-$extensionVersion-firefox.xpi"
           $updates = [IO.File]::ReadAllText("extensions\firefox-updates.json") | ConvertFrom-Json
           $entry = @($updates.addons.'inbound-bridge@kaan88'.updates | Where-Object { $_.version -eq $extensionVersion })
-          if ($entry.Count -ne 1) { throw "extensions\firefox-updates.json has no entry for extension $extensionVersion." }
+          if ($entry.Count -ne 1) { throw "extensions\firefox-updates.json has no entry for extension $extensionVersion. If AMO hasn't approved it yet, run Windows build by hand with this tag and no_firefox_xpi ticked (docs\release-builds.md, CI.2 step 2)." }
           $wanted = $entry[0].update_hash
           $folder = "artifacts\firefox-addon"
           New-Item -ItemType Directory -Path $folder -Force | Out-Null
