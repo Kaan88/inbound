@@ -38,6 +38,20 @@ if (-not $NoFirefoxXpi) {
     if (-not (Test-Path -LiteralPath $FirefoxXpiPath -PathType Leaf)) {
         throw "The signed Firefox add-on is missing: $FirefoxXpiPath. Run scripts\sign-extension-firefox.ps1 -ReleaseTag v$Version, or pass -NoFirefoxXpi."
     }
+    # A listed XPI (downloaded from AMO after approval, no update_url) and an unlisted one (update_url on main) are both
+    # fine; it must be this extension version, with the add-on's ID, and signed.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $xpiZip = [IO.Compression.ZipFile]::OpenRead($FirefoxXpiPath)
+    try {
+        $xpiNames = @($xpiZip.Entries | ForEach-Object FullName)
+        $xpiReader = [IO.StreamReader]::new($xpiZip.GetEntry('manifest.json').Open())
+        try { $xpiManifest = $xpiReader.ReadToEnd() | ConvertFrom-Json } finally { $xpiReader.Dispose() }
+    }
+    finally { $xpiZip.Dispose() }
+    if ($xpiNames -notcontains 'META-INF/mozilla.rsa' -and $xpiNames -notcontains 'META-INF/cose.sig') { throw "$FirefoxXpiPath is not signed by addons.mozilla.org." }
+    if ($xpiManifest.version -ne $extensionVersion -or $xpiManifest.browser_specific_settings.gecko.id -ne 'inbound-bridge@kaan88') {
+        throw "$FirefoxXpiPath is not extension $extensionVersion of inbound-bridge@kaan88."
+    }
     # Firefox's update file must point at this release and this exact file, or updates would fail or go elsewhere.
     $firefoxHash = (Get-FileHash -LiteralPath $FirefoxXpiPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $firefoxUpdates = [IO.File]::ReadAllText((Join-Path $root "extensions\firefox-updates.json")) | ConvertFrom-Json

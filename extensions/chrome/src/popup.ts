@@ -319,9 +319,14 @@ function drawList(): void {
   });
   if (shown === 0 && !checking) {
     list.classList.add("hidden");
-    empty.replaceChildren(...emptyState("download", "tint-info", "No downloads yet",
-      ["Downloads you send from this browser, and the app's own, appear here."],
-      { label: "Download all links on this page", run: () => void downloadAll() }));
+    // Everything left was cleared with "Clear finished": say so, and offer to bring the finished ones back.
+    empty.replaceChildren(...(jobs.length > 0 && clearedIds.size > 0
+      ? emptyState("download", "tint-info", "Finished downloads are hidden from this list",
+        ["Clear finished hides them here; nothing was deleted."],
+        { label: "Show them", run: showCleared })
+      : emptyState("download", "tint-info", "No downloads yet",
+        ["Downloads you send from this browser, and the app's own, appear here."],
+        { label: "Download all links on this page", run: () => void downloadAll() })));
     empty.classList.remove("hidden");
   } else {
     list.classList.remove("hidden");
@@ -601,6 +606,14 @@ function clearFinished(): void {
   finishedFirst = finishedFirst.filter((id) => !clearedIds.has(id));
   try { void chrome.storage.session.set({ [CLEARED_KEY]: [...clearedIds].slice(-200) }); } catch { /* kept for this popup only */ }
   say("Finished downloads cleared from this list");
+  renderList();
+  renderStatusBar();
+}
+
+/** Brings back the finished downloads that "Clear finished" hid. */
+function showCleared(): void {
+  clearedIds = new Set();
+  try { void chrome.storage.session.set({ [CLEARED_KEY]: [] }); } catch { /* kept for this popup only */ }
   renderList();
   renderStatusBar();
 }

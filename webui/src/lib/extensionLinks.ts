@@ -8,13 +8,13 @@ export type ExtensionLink = { browser: 'chrome' | 'edge' | 'firefox'; name: stri
 
 export const chromeStoreUrl = 'https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm';
 export const edgeStoreUrl = 'https://microsoftedge.microsoft.com/addons/detail/ifoagddcenmjpbklkhghbdmgplldcdci';
-/** Firefox's add-on is signed by Mozilla but not listed on Firefox Add-ons; the .xpi is on each GitHub release. */
-export const firefoxReleaseUrl = 'https://github.com/Kaan88/inbound/releases/latest';
+/** Firefox's add-on is listed on Firefox Add-ons (addons.mozilla.org). */
+export const firefoxAddonsUrl = 'https://addons.mozilla.org/firefox/addon/inbound-download-manager/';
 
 export const extensionLinks: readonly ExtensionLink[] = [
   { browser: 'chrome', name: 'Chrome', from: 'Chrome Web Store', url: chromeStoreUrl },
   { browser: 'edge', name: 'Edge', from: 'Microsoft Edge Add-ons', url: edgeStoreUrl },
-  { browser: 'firefox', name: 'Firefox', from: 'The latest release on GitHub: drag the .xpi file onto Firefox', url: firefoxReleaseUrl },
+  { browser: 'firefox', name: 'Firefox', from: 'Firefox Add-ons', url: firefoxAddonsUrl },
 ];
 
 /**

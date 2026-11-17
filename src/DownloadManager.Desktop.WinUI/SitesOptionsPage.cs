@@ -18,7 +18,7 @@ internal sealed partial class SitesOptionsPage
     private readonly RemoteClient _client;
     private readonly SettingsWindow _window;
     private readonly CancellationTokenSource _closing = new();
-    private readonly CheckBox _enable = new() { Content = "Use remote files" };
+    private readonly CheckBox _enable = new() { Content = "Use Remote files" };
     private readonly StatusLine _switchResult = new("Remote files switch result");
     private readonly TextBlock _rcloneLine = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly TextBlock _offerLine = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };

@@ -1,11 +1,14 @@
 [CmdletBinding()]
 param(
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    # The self-distributed build, which names extensions/firefox-updates.json as its update_url. The default is the
+    # listed one for addons.mozilla.org, which has none (Firefox updates it from the store).
+    [switch]$Unlisted
 )
 
 # Builds the zip to upload to addons.mozilla.org (AMO) for signing (EXT.E1). Firefox runs only signed
-# add-ons in its release builds, so this zip is not installable as it is: upload it as an unlisted
-# version from the owner's AMO account and install the signed .xpi AMO returns. The manifest comes from
+# add-ons in its release builds, so this zip is not installable as it is: upload it to the owner's AMO account (as a
+# listed version, or with -Unlisted as an unlisted one) and install the signed .xpi AMO returns. The manifest comes from
 # build.mjs --target firefox (gecko ID, event page, no Chrome key); this checks it before zipping.
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +21,7 @@ $geckoId = "inbound-bridge@kaan88"
 if (-not $NoBuild) {
     Push-Location $extension
     try {
-        & npm run build:firefox
+        if ($Unlisted) { & npm run build:firefox -- --unlisted } else { & npm run build:firefox }
         if ($LASTEXITCODE -ne 0) { throw "The Firefox build failed." }
     }
     finally { Pop-Location }
@@ -31,6 +34,9 @@ $problems = [Collections.Generic.List[string]]::new()
 if ($manifest.manifest_version -ne 3) { $problems.Add("manifest_version is not 3.") }
 if ($manifest.version -ne $package.version) { $problems.Add("manifest version $($manifest.version) differs from package.json $($package.version).") }
 if ($manifest.browser_specific_settings.gecko.id -ne $geckoId) { $problems.Add("The gecko ID is not $geckoId.") }
+$hasUpdateUrl = $null -ne $manifest.browser_specific_settings.gecko.PSObject.Properties['update_url']
+if ($Unlisted -and -not $hasUpdateUrl) { $problems.Add("The unlisted build has no update_url.") }
+if (-not $Unlisted -and $hasUpdateUrl) { $problems.Add("The listed build must have no update_url (AMO updates it).") }
 if ($manifest.PSObject.Properties.Name -contains 'key') { $problems.Add("The manifest still has Chrome's key.") }
 if ($manifest.background.PSObject.Properties.Name -contains 'service_worker') { $problems.Add("The background is a service worker; Firefox needs background.scripts.") }
 foreach ($file in @($manifest.background.scripts) + @($manifest.action.default_popup, $manifest.options_ui.page) +

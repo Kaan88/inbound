@@ -12,8 +12,9 @@ test('EXT.E1: the Firefox manifest is the Chrome one with its own ID, an event p
   const manifest = firefoxManifest(chromeManifest);
   assert.equal(FIREFOX_EXTENSION_ID, 'inbound-bridge@kaan88');
   assert.equal(manifest.browser_specific_settings.gecko.id, FIREFOX_EXTENSION_ID);
-  // Self-distributed: Firefox updates it from the file on main (an https address is required).
-  assert.equal(manifest.browser_specific_settings.gecko.update_url, FIREFOX_UPDATE_URL);
+  // Listed on AMO: no update_url, Firefox updates it from the store. Only the unlisted build names the file on main.
+  assert.equal('update_url' in manifest.browser_specific_settings.gecko, false);
+  assert.equal(firefoxManifest(chromeManifest, { unlisted: true }).browser_specific_settings.gecko.update_url, FIREFOX_UPDATE_URL);
   assert.match(FIREFOX_UPDATE_URL, /^https:\/\/raw\.githubusercontent\.com\/Kaan88\/inbound\/main\//);
   assert.equal('update_url' in (chromeManifest.browser_specific_settings?.gecko ?? {}), false);
   assert.deepEqual(manifest.background, { scripts: ['background.js'] });

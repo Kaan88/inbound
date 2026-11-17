@@ -703,7 +703,7 @@ if (davAddress) {
     // The switch, as a person turns it on (the Host uses the rclone next to it, or downloads one).
     await app(page, '#/sites');
     // The switch sits in the closed options below the list once it is on.
-    if (!(await page.getByRole('button', { name: 'Add a remote' }).count())) await page.getByRole('checkbox', { name: 'Use remote files' }).check();
+    if (!(await page.getByRole('button', { name: 'Add a remote' }).count())) await page.getByRole('checkbox', { name: 'Use Remote files' }).check();
     await page.getByRole('button', { name: 'Add a remote' }).waitFor();
     if (await page.locator('main').getByText(remoteName, { exact: true }).count()) return; // a run before this one added it
     await page.getByRole('button', { name: 'Add a remote' }).click();

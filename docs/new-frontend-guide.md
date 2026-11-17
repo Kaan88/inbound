@@ -64,7 +64,7 @@ The WinUI window is the reference (`CLAUDE.md`, "UI structure"). The web UI revi
 - **Queues and Scheduler:** queues, priority, schedules, quotas, completion actions, sleep prevention.
 - **Options:** the settings pages, saved with one OK/Cancel/Apply, with unsaved edits on other pages kept.
 - **Shell:** open file, open folder, reveal; tray and notifications, completion dialog and sound, updater.
-- **Browser extension:** Get it links per browser (`BrowserBridge.ChromeStoreUrl`, `EdgeStoreUrl`, `FirefoxReleaseUrl`),
+- **Browser extension:** Get it links per browser (`BrowserBridge.ChromeStoreUrl`, `EdgeStoreUrl`, `FirefoxAddonsUrl`),
   the status from `extensionsSeen` where the Host gives it, and the one-time hint until an extension connects
   (`extensions.seen` ends it live; see "Browser extensions seen" in `docs/ipc-protocol.md`).
 - **Providers:** TorBox and the containers/archives flows, if the Host reports `remote` and `archives`.

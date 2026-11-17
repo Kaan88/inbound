@@ -447,7 +447,7 @@ export function troubleWhy(problem: string | null | undefined, message: string |
     case problems.hostKeyNotAccepted:
       return "This remote's server key has not been accepted yet. Press Check the key to see it and accept it.";
     case problems.off:
-      return 'Remote files are off. Turn them on in Options > Remote files.';
+      return 'Remote files are off. Turn them on under Remote files options on this page.';
     case problems.certificateNotTrusted:
       return "This server's certificate is not signed by an authority the server trusts, so Inbound did not connect. If it is your own server, press Check the certificate to see it and choose whether to trust it.";
     case problems.signInNeeded:

@@ -203,7 +203,7 @@
             <div class="mt-2 space-y-2">
               <label class="flex items-center gap-2">
                 <input type="checkbox" checked={status.enabled} disabled={switching} onchange={(event) => setEnabled(event.currentTarget.checked, event.currentTarget)} />
-                Use remote files
+                Use Remote files
               </label>
               {#if status.enabled}
                 <p class="hint">{rcloneLine(status)}</p>
