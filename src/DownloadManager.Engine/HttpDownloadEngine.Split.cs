@@ -95,8 +95,74 @@ public sealed partial class HttpDownloadEngine
     }
 
     /// <summary>
-    /// The running stream stopped for a raised count, its bytes flushed and counted. Hands them to a segmented run,
-    /// or returns null when that can't be done, for the stream to go on.
+    /// Asks the server for one byte while the stream keeps running, and returns its answer only when it proves the
+    /// stream's bytes can be the start of a segmented file. A failed or refused probe costs the stream nothing, and
+    /// leaves what the job knows about range support as it was.
+    /// </summary>
+    private async Task<SegmentedPlan?> ProbeRunningSplitAsync(DownloadJob job, TransferState state, CancellationToken cancellationToken)
+    {
+        var probe = await ProbeSegmentedOnceAsync(job, hasLocalData: true, cancellationToken, recordRangeSupport: false)
+            .ConfigureAwait(false);
+        if (probe.Failure is not null || probe.Plan is not { } plan)
+        {
+            return null;
+        }
+
+        return plan.Total >= SegmentedMinimumBytes &&
+               state.Total == plan.Total &&
+               (job.ExpectedTotalBytes is not > 0 || job.ExpectedTotalBytes == plan.Total) &&
+               !ValidatorsConflict(state.ETag, state.LastModified, plan.ETag, plan.LastModified)
+            ? plan
+            : null;
+    }
+
+    /// <summary>
+    /// A segmented run from a one-stream checkpoint found the server refusing a range. The prefix the stream wrote
+    /// was never touched by a segment, so the part is cut back to it and the one-stream checkpoint saved again, for
+    /// the stream to go on from there rather than from zero.
+    /// </summary>
+    private async Task KeepSingleStreamPrefixAsync(DownloadJob job, DownloadCheckpoint checkpoint)
+    {
+        var prefix = checkpoint.CompletedBytes;
+        try
+        {
+            using (var part = new FileStream(job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+            {
+                if (part.Length < prefix)
+                {
+                    throw new IOException("The part file is shorter than the bytes the stream wrote.");
+                }
+
+                part.SetLength(prefix);
+                part.Flush(flushToDisk: true);
+            }
+
+            if (_checkpoints is not null)
+            {
+                var single = new DownloadCheckpoint
+                {
+                    JobId = job.Id,
+                    Url = job.Url,
+                    FinalUrl = job.FinalUrl,
+                    ETag = checkpoint.ETag,
+                    LastModified = checkpoint.LastModified,
+                    TotalBytes = checkpoint.TotalBytes,
+                    ContentType = checkpoint.ContentType,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+                single.Segments.Add(new SegmentCheckpoint { Start = 0, End = checkpoint.Segments[0].End, Completed = prefix });
+                await _checkpoints.SaveAsync(single, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await ResetSegmentedAsync(job).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The running stream stopped for a raised count after a probe proved the split possible, its bytes flushed and
+    /// counted. Hands them to a segmented run, or returns null when that can't be done, for the stream to go on.
     /// </summary>
     private async Task<DownloadResult?> TrySplitSingleStreamAsync(
         DownloadJob job,
@@ -106,7 +172,7 @@ public sealed partial class HttpDownloadEngine
         CancellationToken cancellationToken)
     {
         var completed = state.RecordedBytes;
-        if (state.Total is not { } total || completed <= 0)
+        if (single.TakePlan() is not { } plan || state.Total is not { } total || completed <= 0)
         {
             single.Declined();
             return null;
@@ -141,11 +207,11 @@ public sealed partial class HttpDownloadEngine
         DownloadResult? result;
         try
         {
-            result = await TryExecuteSegmentedAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
+            result = await TryExecuteSegmentedAsync(job, checkpoint, progress, cancellationToken, plan).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Stopped during the probe: the one-stream checkpoint saved before it stands.
+            // Stopped before the split began: the one-stream checkpoint saved before it stands.
             return DownloadResult.Fail(DownloadState.Cancelled,
                 new JobFailure(FailureKind.Cancelled, "The download was cancelled.", false, true, DateTimeOffset.UtcNow),
                 completed, total);
@@ -158,7 +224,7 @@ public sealed partial class HttpDownloadEngine
 
         if (!SingleStreamDataHolds(job, completed))
         {
-            // The segmented run began and then found the server refusing ranges, and reset the part.
+            // The prefix could not be kept after the server refused a range, and the part was reset.
             state.RestartFromZero();
         }
 
@@ -171,13 +237,39 @@ public sealed partial class HttpDownloadEngine
         return null;
     }
 
-    /// <summary>A transfer on one stream, which a raised connection count stops so that it can be split.</summary>
-    private sealed class SingleStreamRun(DownloadJob job, TransferState state) : IDisposable
+    /// <summary>
+    /// A transfer on one stream, which a raised connection count splits. A raise first probes the server while the
+    /// stream runs on; only a probe that proves the split stops the stream (<see cref="SplitToken"/>).
+    /// </summary>
+    private sealed class SingleStreamRun : IDisposable
     {
         private readonly object _sync = new();
+        private readonly DownloadJob _job;
+        private readonly TransferState _state;
+        private readonly Func<CancellationToken, Task<SegmentedPlan?>> _probe;
+        private readonly Func<bool> _refused;
+        private readonly CancellationTokenSource _lifetime = new();
         private CancellationTokenSource _split = new();
+        private int _connections;
+        private int _changes;
         private bool _wanted;
+        private bool _probing;
+        private SegmentedPlan? _plan;
         private bool _disposed;
+
+        public SingleStreamRun(
+            DownloadJob job,
+            TransferState state,
+            int connectionsAtStart,
+            Func<CancellationToken, Task<SegmentedPlan?>> probe,
+            Func<bool> refused)
+        {
+            _job = job;
+            _state = state;
+            _connections = connectionsAtStart;
+            _probe = probe;
+            _refused = refused;
+        }
 
         /// <summary>Cancelled when the stream should stop to be split. A fresh one after a declined split.</summary>
         public CancellationToken SplitToken
@@ -191,30 +283,106 @@ public sealed partial class HttpDownloadEngine
             }
         }
 
-        /// <summary>The job's count changed: a raise above one splits the stream once its size and range support are known.</summary>
+        /// <summary>The probe's answer that stopped the stream, taken once by the split.</summary>
+        public SegmentedPlan? TakePlan()
+        {
+            lock (_sync)
+            {
+                var plan = _plan;
+                _plan = null;
+                return plan;
+            }
+        }
+
+        /// <summary>The job's count changed: only a raise asks for a split; a drop to one connection drops the wish.</summary>
         public void ConnectionsChanged()
         {
             lock (_sync)
             {
-                _wanted = job.RequestedConnections > 1;
+                var count = _job.RequestedConnections;
+                if (count > _connections) _wanted = true;
+                else if (count <= 1) _wanted = false;
+                _connections = count;
+                _changes++;
             }
 
             SplitIfWanted();
         }
 
+        /// <summary>
+        /// Starts the probe for a wanted split once the stream's size is known and it has durable bytes. Called on a
+        /// change, at the response headers and after each checkpoint save.
+        /// </summary>
         public void SplitIfWanted()
         {
-            CancellationTokenSource? toCancel = null;
+            // Outside the lock: it takes the engine's own.
+            if (_refused())
+            {
+                return;
+            }
+
+            int changes;
             lock (_sync)
             {
-                if (!_disposed && _wanted && !_split.IsCancellationRequested &&
-                    job.RequestedConnections > 1 &&
-                    job.ResumeSupported == true &&
-                    state.Total is { } total && total >= SegmentedMinimumBytes &&
-                    total - state.Bytes >= 2 * MinimumStealBytes)
+                if (_disposed || !_wanted || _probing || _split.IsCancellationRequested ||
+                    _job.RequestedConnections <= 1 ||
+                    _job.ResumeSupported == false ||
+                    _state.RecordedBytes <= 0 ||
+                    _state.Total is not { } total || total < SegmentedMinimumBytes ||
+                    total - _state.RecordedBytes < 2 * MinimumStealBytes)
                 {
+                    return;
+                }
+
+                _probing = true;
+                changes = _changes;
+            }
+
+            _ = ProbeThenSplitAsync(changes);
+        }
+
+        private async Task ProbeThenSplitAsync(int changes)
+        {
+            SegmentedPlan? plan = null;
+            try
+            {
+                plan = await _probe(_lifetime.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Stopped with the run, or a probe that failed: no split, and the stream never noticed.
+            }
+
+            CancellationTokenSource? toCancel = null;
+            var again = false;
+            lock (_sync)
+            {
+                _probing = false;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                if (plan is not null && _wanted && _job.RequestedConnections > 1)
+                {
+                    _plan = plan;
                     toCancel = _split;
                 }
+                else if (_changes == changes)
+                {
+                    // Only another change tries again.
+                    _wanted = false;
+                }
+                else
+                {
+                    again = true;
+                }
+            }
+
+            if (again)
+            {
+                SplitIfWanted();
+                return;
             }
 
             // Outside the lock: cancelling runs the transfer's cancellation callbacks.
@@ -234,6 +402,7 @@ public sealed partial class HttpDownloadEngine
             lock (_sync)
             {
                 _wanted = false;
+                _plan = null;
                 if (_split.IsCancellationRequested)
                 {
                     _split.Dispose();
@@ -246,9 +415,21 @@ public sealed partial class HttpDownloadEngine
         {
             lock (_sync)
             {
+                if (_disposed) return;
                 _disposed = true;
                 _split.Dispose();
             }
+
+            try
+            {
+                _lifetime.Cancel();
+            }
+            catch (AggregateException)
+            {
+                // A probe's cancellation callback failed; the run is over anyway.
+            }
+
+            _lifetime.Dispose();
         }
     }
 }
