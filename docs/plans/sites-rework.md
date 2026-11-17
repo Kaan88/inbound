@@ -392,6 +392,13 @@ Written out 2026-11-17 (owner: "looks perfect ... write and start the next one";
   stay in the repo as the acceptance evidence.
 - Release.
 
+**R7 so far (2026-11-17):** SITES.12 rename everywhere visible; full test run (Core 2571, Sites 252, Server 202, Tray
+3, Integration 2052 with two load-related failures that passed on three reruns, webui 783, extension 349); web
+pictures in four variants and desktop light pictures in `compare/light/`; walk fixes (hint bar no longer covers the
+Remote files pages, tile text in light, "Remote only" on both clients where the mockup says "Server only", phone
+transfer cards and delete sheet); Fable's final review and its fix round. Not done: the owner's walk, a Linux Uno
+build (Linux deferred), release.
+
 ## What could go wrong, and the guard
 
 | Risk | Guard |
