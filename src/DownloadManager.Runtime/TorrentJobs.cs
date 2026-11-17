@@ -451,26 +451,8 @@ public sealed partial class DownloadManagerService : ITorrentJobSink
     private async Task<bool> ReconcileTorrentAsync(DownloadJob job)
     {
         var changed = false;
-        if (job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting or DownloadState.Verifying)
-        {
-            job.State = job.AutoResumeAfterRestart && _settings.AutoResumeUnfinishedOnStartup
-                ? DownloadState.Queued
-                : DownloadState.Paused;
-            changed = true;
-        }
-
-        // Audit 2 M11: paused only because the Host exited while it ran; it goes on as the single-file rule does.
-        if (job.PausedByExit)
-        {
-            if (job.State == DownloadState.Paused && !job.PausedByUser &&
-                job.AutoResumeAfterRestart && _settings.AutoResumeUnfinishedOnStartup)
-            {
-                job.State = DownloadState.Queued;
-                job.StartMode = StartMode.StartNow;
-            }
-            job.PausedByExit = false;
-            changed = true;
-        }
+        // Interrupted runs and exit pauses: the single-file rule (audit 2 M11), shared with the Android boot count.
+        changed |= StartReconcile.Apply(job, _settings, _lastRunStoppedByUser);
 
         // An older build turned a finished torrent whose files were missing into this failure (review 2 M3): it is
         // completed again, and the check below gives it the note instead.

@@ -128,6 +128,8 @@ public sealed partial class HostCommandDispatcher
         if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
         // T1: torrent.* is answered, whether or not torrents are turned on in Options (the commands then say so).
         if (rights.Torrents) capabilities.Add("torrents");
+        // The platform reports metered networks, so settings.downloadOnlyOnUnmeteredNetwork means something (the phone).
+        if (platform.SupportsMeteredNetworkRule) capabilities.Add("meteredNetworkRule");
         return capabilities;
     }
 

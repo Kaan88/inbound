@@ -307,6 +307,13 @@ public sealed class DownloadJob
     public string? WaitingForHost { get; set; }
 
     /// <summary>
+    /// Set while the metered-network rule holds and this running job is kept going anyway, because stopping it would lose
+    /// what it has (its server can't resume, or hasn't said). Runtime only, like <see cref="WaitingForHost"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool RunningOnMeteredWithoutResume { get; set; }
+
+    /// <summary>
     /// When this job last started running in this Host's lifetime (review 5:T3). Unlike <see cref="StartedAt"/>, which
     /// is the first start ever, it is set again on every start, so a resumed or restored job counts from now. Memory only.
     /// </summary>

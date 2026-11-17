@@ -68,6 +68,12 @@ public sealed class JobDto
     /// has none. Null otherwise. Added in protocol 1 without a bump: older clients ignore it.
     /// </summary>
     public string? WaitingForHost { get; set; }
+    /// <summary>
+    /// True while downloads are held for a not-metered network and this running download keeps going because its server
+    /// can't resume (or hasn't said), so stopping it would start it over. A phone warns and offers Stop. Additive: false from
+    /// an older Host.
+    /// </summary>
+    public bool RunningOnMeteredWithoutResume { get; set; }
     public double? BytesPerSecond { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
     public bool? ResumeSupported { get; set; }

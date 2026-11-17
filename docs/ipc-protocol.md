@@ -745,10 +745,13 @@ keeps three things out of a client's hands, and tells every client when the sett
   while the platform reports a metered network: nothing starts, and running ones go back to `queued` with their data
   (not paused by the user), so they go on by themselves on a network that isn't metered. Only a platform with
   `PlatformCapabilities.SupportsMeteredNetworkRule` (the phone) reports networks, so elsewhere the setting does nothing
-  and a frontend doesn't show it. `status.waitingForMeteredNetwork` is true while the rule holds, and **`network.wait`**
+  and a frontend doesn't show it; the hello's capabilities name the platforms that do, as **`meteredNetworkRule`** (appended
+  last, only when `SupportsMeteredNetworkRule`). `status.waitingForMeteredNetwork` is true while the rule holds, and **`network.wait`**
   (Host push, payload `{ "waiting": true }`) is sent to every session that takes events when that changes. Both are
   additive; an older Host sends neither. "Use data" on the phone lifts the rule until the network is next reported not
-  metered.
+  metered (only while the rule holds; changing the setting ends a lift). A running download whose server can't resume
+  (or hasn't said) is not stopped: `job.runningOnMeteredWithoutResume` is true on it while the rule holds, so a frontend
+  can warn that stopping it starts over (additive; false from an older Host).
 
 ### Browser extensions seen (UI.R41)
 

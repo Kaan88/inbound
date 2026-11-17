@@ -56,9 +56,11 @@ public sealed partial class DownloadManagerService
     private async Task RequeueExcessAsync(CancellationToken cancellationToken)
     {
         List<JobRuntime> requeued;
+        List<JobRuntime> flagged;
         lock (_sync)
         {
             requeued = EnforceConcurrencyLimitsLocked();
+            flagged = RefreshNoResumeFlagsLocked();
         }
 
         foreach (var runtime in requeued)
@@ -67,6 +69,7 @@ public sealed partial class DownloadManagerService
             Raise(runtime, "queued");
         }
 
+        foreach (var runtime in flagged) Raise(runtime, "updated");
         AnnounceMeteredWait();
     }
 
@@ -162,6 +165,33 @@ public sealed partial class DownloadManagerService
     private bool _networkMetered;
     private bool _meteredLifted;
     private bool _meteredWaitAnnounced;
+    // Decide and deliver under one gate (taken before _sync, never inside it), so two callers can't deliver out of order.
+    private readonly object _meteredAnnounceGate = new();
+
+    /// <summary>The previous run was stopped by the user; see <see cref="InitializeAsync(bool, CancellationToken)"/>.</summary>
+    private bool _lastRunStoppedByUser;
+
+    /// <summary>
+    /// Sets <see cref="DownloadJob.RunningOnMeteredWithoutResume"/> on running jobs the held rule leaves running because they
+    /// can't stop without losing work, and clears it everywhere else. Returns the jobs whose flag changed. Re-evaluated
+    /// whenever limits are re-enforced (network report, "Use data", settings), not on every progress tick.
+    /// </summary>
+    private List<JobRuntime> RefreshNoResumeFlagsLocked()
+    {
+        var changed = new List<JobRuntime>();
+        var holds = MeteredRuleHoldsLocked();
+        foreach (var runtime in _jobs.Values)
+        {
+            var want = holds && (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
+                       !runtime.PauseRequested && !runtime.CancelRequested && WhyNotPreemptable(runtime) is not null;
+            if (runtime.Job.RunningOnMeteredWithoutResume == want) continue;
+            runtime.Job.RunningOnMeteredWithoutResume = want;
+            runtime.Job.Touch();
+            changed.Add(runtime);
+        }
+
+        return changed;
+    }
 
     /// <summary>Raised, outside the lock, when <see cref="WaitingForMeteredNetwork"/> changes.</summary>
     public event EventHandler<bool>? MeteredWaitChanged;
@@ -176,19 +206,36 @@ public sealed partial class DownloadManagerService
 
     private void AnnounceMeteredWait()
     {
-        bool holds;
-        lock (_sync)
+        lock (_meteredAnnounceGate)
         {
-            holds = MeteredRuleHoldsLocked();
-            if (holds == _meteredWaitAnnounced) return;
-            _meteredWaitAnnounced = holds;
+            bool holds;
+            lock (_sync)
+            {
+                holds = MeteredRuleHoldsLocked();
+                if (holds == _meteredWaitAnnounced) return;
+                _meteredWaitAnnounced = holds;
+            }
+
+            try
+            {
+                MeteredWaitChanged?.Invoke(this, holds);
+            }
+            catch (Exception ex)
+            {
+                // A listener's failure must not reach the settings save or the network report that caused it.
+                _log?.Invoke($"A metered-wait listener failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
-        MeteredWaitChanged?.Invoke(this, holds);
     }
 
     /// <summary>
     /// The platform reports the active network: metered or not. Metered with the setting on sends running downloads back to
     /// the queue (data kept) and holds the queue; not metered lets go, ends a "Use data" lift, and starts what waits.
+    /// <para>
+    /// Order: a platform should report the network <b>before</b> <see cref="InitializeAsync(CancellationToken)"/>, so the first
+    /// <c>Schedule()</c> after reconcile is already held. A report before initialize only stores the state (nothing is saved,
+    /// no job is touched, nothing is announced); initialize then announces it against the loaded settings.
+    /// </para>
     /// </summary>
     public async Task SetNetworkMeteredAsync(bool metered, CancellationToken cancellationToken = default)
     {
@@ -196,9 +243,48 @@ public sealed partial class DownloadManagerService
         {
             _networkMetered = metered;
             if (!metered) _meteredLifted = false;
+            if (!_initialized) return;
         }
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         Schedule();
+    }
+
+    /// <summary>
+    /// Only while the metered rule holds: stops the running downloads flagged <see cref="DownloadJob.RunningOnMeteredWithoutResume"/>
+    /// (the phone's Stop on the warning, or the platform when the phone is locked as the rule starts to hold) and puts them back to
+    /// Queued, never paused by the user. Their partial data can't be resumed, so they start over from zero on a network that isn't
+    /// metered, as the engine restarts any download whose server can't resume. A job allowed to go on stays allowed until it ends
+    /// or the rule lets go. One verifying or finishing its file is left alone. Returns how many were stopped; 0 when the rule
+    /// doesn't hold.
+    /// </summary>
+    public async Task<int> StopNonResumableOnMeteredAsync(CancellationToken cancellationToken = default)
+    {
+        List<JobRuntime> stopped = new();
+        List<JobRuntime> flagged;
+        lock (_sync)
+        {
+            if (!_initialized || _shuttingDown || !MeteredRuleHoldsLocked()) return 0;
+            foreach (var runtime in _jobs.Values.Where(r => r.Job.RunningOnMeteredWithoutResume &&
+                         (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested).ToList())
+            {
+                var phase = runtime.LastPhase ?? string.Empty;
+                if (runtime.Job.State == DownloadState.Verifying || phase.StartsWith("Verifying", StringComparison.Ordinal) ||
+                    phase.StartsWith("Finaliz", StringComparison.Ordinal)) continue;
+                PreemptLocked(runtime);
+                stopped.Add(runtime);
+            }
+
+            flagged = RefreshNoResumeFlagsLocked();
+        }
+
+        foreach (var runtime in stopped)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "queued");
+        }
+
+        foreach (var runtime in flagged.Except(stopped)) Raise(runtime, "updated");
+        return stopped.Count;
     }
 
     /// <summary>"Use data": the rule stays off until the network is next reported not metered.</summary>
@@ -206,7 +292,15 @@ public sealed partial class DownloadManagerService
     {
         // Only a metered network can be lifted: a tap that lands after the network turned not metered must not carry over
         // to the next metered one.
-        lock (_sync) _meteredLifted = _networkMetered;
+        // A rule that doesn't hold (setting off, or not metered) has nothing to lift, and the lift must not outlive it.
+        List<JobRuntime> flagged;
+        lock (_sync)
+        {
+            if (MeteredRuleHoldsLocked()) _meteredLifted = true;
+            flagged = RefreshNoResumeFlagsLocked();
+        }
+
+        foreach (var runtime in flagged) Raise(runtime, "updated");
         AnnounceMeteredWait();
         Schedule();
     }

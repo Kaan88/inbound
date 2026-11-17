@@ -190,8 +190,21 @@ public sealed partial class DownloadManagerService
     public PathRoots? Roots { get; set; }
     public string StateDirectory => _paths.Root;
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default)
+        => InitializeAsync(lastRunStoppedByUser: false, cancellationToken);
+
+    /// <summary>
+    /// Loads and reconciles what is on disk, then starts scheduling. Order for a platform that reports its network (the
+    /// phone): call <see cref="SetNetworkMeteredAsync"/> first, which only stores the state before this, so the first
+    /// <c>Schedule()</c> here is already held.
+    /// </summary>
+    /// <param name="lastRunStoppedByUser">
+    /// The previous run was stopped by the user (Android's Stop or Force stop). Downloads that were running then stay Paused
+    /// as the user's own pause, even though the app is now opened; see <see cref="StartReconcile"/>. Queued jobs are not touched.
+    /// </param>
+    public async Task InitializeAsync(bool lastRunStoppedByUser, CancellationToken cancellationToken = default)
     {
+        _lastRunStoppedByUser = lastRunStoppedByUser;
         await _jobStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         _settings.Revision = StartingRevision(_timeProvider);
@@ -253,8 +266,10 @@ public sealed partial class DownloadManagerService
         // A crash can land between a job's final save and its package's, so this may have news.
         await AdoptUntrackedPackagesAsync(cancellationToken).ConfigureAwait(false);
         await AnnouncePackageCompletionsAsync(cancellationToken).ConfigureAwait(false);
-        _initialized = true;
+        lock (_sync) _initialized = true;
         Schedule();
+        // The loaded settings and a network reported before now decide whether downloads are held; tell listeners if so.
+        AnnounceMeteredWait();
         StartSchedulerLoop();
         ResumeSeedingAfterStart();
     }
@@ -1765,6 +1780,8 @@ public sealed partial class DownloadManagerService
             // queue being replaced (under _sync only), so the live value wins over the copy made before.
             foreach (var queue in next.Queues)
                 queue.ArmedScheduleId = _settings.Queues.FirstOrDefault(current => current.Id == queue.Id)?.ArmedScheduleId;
+            // "Use data" lifts the rule as it stood; a changed setting starts afresh.
+            if (_settings.DownloadOnlyOnUnmeteredNetwork != next.DownloadOnlyOnUnmeteredNetwork) _meteredLifted = false;
             _settings = next;
             reconnected = [];
             // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
@@ -4160,27 +4177,8 @@ public sealed partial class DownloadManagerService
             changed = true;
         }
 
-        if (job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting or DownloadState.Verifying)
-        {
-            job.State = job.AutoResumeAfterRestart && _settings.AutoResumeUnfinishedOnStartup
-                ? DownloadState.Queued
-                : DownloadState.Paused;
-            changed = true;
-        }
-
-        // Audit 2 M11: paused only because the Host exited while it ran (tray Exit, an update, logoff), so it goes on
-        // as one a kill interrupted does. A pause by the user, a queue stop or a quota is not this mark.
-        if (job.PausedByExit)
-        {
-            if (job.State == DownloadState.Paused && !job.PausedByUser &&
-                job.AutoResumeAfterRestart && _settings.AutoResumeUnfinishedOnStartup)
-            {
-                job.State = DownloadState.Queued;
-                job.StartMode = StartMode.StartNow;
-            }
-            job.PausedByExit = false;
-            changed = true;
-        }
+        // Interrupted runs and exit pauses (audit 2 M11): one rule shared with the Android boot count.
+        changed |= StartReconcile.Apply(job, _settings, _lastRunStoppedByUser);
 
         if (job.State == DownloadState.Cancelled && job.DeleteFileOnCancel && File.Exists(job.PartFilePath))
         {
@@ -5704,6 +5702,8 @@ public sealed partial class DownloadManagerService
             RequestedConnections = job.RequestedConnections,
             ActiveConnections = job.ActiveConnections,
             WaitingForHost = WaitingHostShown(job),
+            RunningOnMeteredWithoutResume = job.RunningOnMeteredWithoutResume &&
+                job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying,
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
             CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),
