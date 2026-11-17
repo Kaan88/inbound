@@ -26,6 +26,27 @@
   This PC, Windows' own question on a network share, keys and right-click menus in the window, a real save with Test
   and Trust in Add a remote, browser sign-in from the new form; Drive listing in the web UI with a real Drive account.
 
+### Sites rework R6b: web transfers, All remotes, Add a remote, sidebar, phone, SITES.11 (2026-11-17)
+
+- Built (Sonnet), checked and phone screens redone to the mockup (Opus, low), accepted by me; Fable reviews the whole
+  run at the end. Walked by the builder against a real Server and `rclone serve webdav` at 1360 and 390 px, no
+  console errors.
+- **Built:** `lib/sitesTransfers.ts` and `lib/sitesHome.ts` (ports of the desktop rules); `TransferList.svelte` (the
+  main list's look, own view model; Stop, Resume, Retry, Show on the remote, Cancel transfer, Remove from list) and
+  `TransfersBar.svelte`; `RemotesHome.svelte` (All remotes, "Open an address once", menu); Add/Edit remote as tiles
+  then the short form with Test through `sites.testDraft` and inline Trust; sidebar "Remote files" entries with
+  ↓n ↑n, waiting count and progress line; folders' "Some of it" (`sites.here`); phone: header with the remote and
+  path, rows with tick boxes and "already on <server>", action bar, bottom sheets, transfer cards with Pause
+  transfers and Retry failed. New words only ("remote"). `screens.mjs` walks it (`INBOUND_SITES_DAV`).
+- **Not as drawn:** the transfer row copies the main list's row rather than sharing it (it lives inside
+  `ListScreen.svelte`); no Open / Open folder on a transfer, no per-file Stop/Start, no files inside a batch; no "Ask
+  each time" or "More…" tiles (no Host support); the switch and rclone options sit under All remotes; the app header
+  stays above the phone screens; Two panes' left side lists server folders only and upload sends a server folder (no
+  `folders.browse` file listing; Host change left out); no Rights column.
+- **Not walked:** the run with the extension installed (R6a's source guard covers "to the server never reaches the
+  browser"); real SFTP, Trust, browser sign-in, Drive; Open an address once with a password.
+- Tests: webui 783 pass (31 new); check 0 errors 0 warnings; build OK.
+
 ### Extension: bolder ring and finished count (EXT.R14); test-only open-popup build (EXT.R15) (2026-11-17)
 
 - Built (Sonnet), checked by Opus (low), accepted. **Ring:** 3 px at 16 and 6 px at 32, white halo and grey track so
