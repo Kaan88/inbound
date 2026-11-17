@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- C5 "Where downloads run": the hosts, the shown one ticked, then "Connect to another Inbound". Rows are added in code. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="8dp" android:paddingBottom="24dp">
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingLeft="8dp" android:paddingBottom="16dp" android:text="Where downloads run"
+      android:textAppearance="?attr/textAppearanceHeadlineSmall" android:textColor="?attr/colorOnSurface" />
+  <LinearLayout android:id="@+id/host_rows" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+  <com.google.android.material.button.MaterialButton android:id="@+id/host_connect" style="@style/Widget.Material3.Button.TextButton.Icon" android:layout_width="wrap_content" android:layout_height="wrap_content"
+      android:layout_marginTop="8dp" android:text="Connect to another Inbound" app:icon="@drawable/ic_add" />
+</LinearLayout>

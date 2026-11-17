@@ -1,5 +1,61 @@
 # Progress — session handoff
 
+### Android step 6: other hosts (ANDROID.7), branch `android-s6` (2026-11-17)
+
+- **Built (not yet on a device; no emulator or phone was used, the step 3 agent had the emulator):** the phone shows
+  either its own Host or another Inbound (the Windows app with its web UI on, or the headless server).
+  - **Server API and sign-in, reused as they are:** the desktop window's D9 client in `Contracts/RemoteServer.cs`:
+    `POST /api/pair` with the server's password and role `remoteClient` (the password is not kept), then the WebSocket
+    `/api/ws?hello=1` with `Authorization: Bearer` (snapshot, then events, commands on it) and one `POST /api/ipc` for
+    the calls that wait on the network (the protocol doc's list). No new auth scheme, no server change. The
+    extension's code pairing was not used: a code only ever makes an extension-role token, which can't manage downloads.
+  - **`src/DownloadManager.Mobile/Remote/`:** `RemoteHostConnection` (an `IHostConnection`, so the screens and
+    `DownloadsModel` work unchanged): reconnects 2 s doubling to about a minute; after a reconnect it compares the new
+    snapshot with what the screens were shown and sends the difference as job events (`removed`, `added`, `resync`),
+    because a model takes one snapshot; stops for good on a refused token or unconfirmed plain http; closes the socket
+    while the activity is stopped and connects again at once when it starts (no polling, no socket in the background);
+    a command sent while it connects waits up to 10 s, then fails with words. `HostDirectory` (this phone plus the paired
+    servers, which one is shown, pair, re-pair at the same address, remove with unpair on the server, last seen and kind),
+    `HostListFile` (`hosts.json` in the app's files, atomic write, no token), `HostCapabilities` (a remote host hides open,
+    show in folder, the phone's folder picker and the phone's background notes), `HostConnections.ForCurrent`.
+  - **`src/DownloadManager.Android/Hosts/`:** `KeystoreSecretStore` (AES-256-GCM, key in the Android Keystore, only IV and
+    ciphertext in private preferences; unreadable means "pair again"), `HostChoice` (the process's host list; the
+    connection follows the activity's start and stop and the default network), `HostBar` (the host chip and the C6 strip
+    "Files are saved on ..." or why the host can't be reached), `HostSwitcherSheet` (C5), `PairingSheet` (address,
+    password, optional name, the plain-http tick). Resources `host_*.xml`, `ic_host_*`, `ic_check`, `ic_expand_more`.
+  - **MainActivity:** one marked hook (connection from `HostChoice.Connect`, `HostBar.Install` into the app bar). A host
+    switch recreates the activity on the new host's connection.
+  - **Contracts:** the pairing form now serialises from a small generated context (no reflection under NativeAOT); the
+    JSON is the same, and Contracts has one IL2026/IL3050 pair less.
+- **Tested:** `tests/DownloadManager.Mobile.Tests` 197 pass (new: `RemoteHostConnectionTests` over a fake socket,
+  `HostDirectoryTests`); `tests/DownloadManager.Server.Tests` 204 pass, with two new `MobileRemoteHostTests` against a
+  real server on loopback (state under `artifacts/test-work`): pairing, then add, pause, resume (file bytes equal),
+  delete with the file, through `DownloadsModel`; and a pairing removed on the server stopping the phone, remove on the
+  phone unpairing. `IpcJsonContextTests` pass.
+- **Build:** x64 test build, logs `artifacts/android-app/step6/build*-x64-test.txt`. No new compiler warning. New only as
+  ILC reachability: IL2026/IL3050 on `WebSocketIpcClient` send/read, `RemoteServerHttp.SendIpcAsync` and `IpcFraming`,
+  all serialising `IpcMessage` with `IpcJson.Options` (registered in `IpcJsonContext`), the same group as the existing ones.
+- **Left for after the step 3 merge:** the chip goes in step 3's search bar and the strip under it (`HostBar.CreateChip`,
+  `CreateStrip` instead of `Install`); the hook moves to step 3's MainActivity; Details, New download and multiselect use
+  `HostChoice.Hosts(ctx).Capabilities` to hide phone-only actions; New download's folder field on a remote host (a
+  server folder chooser via `folders.browse`, not the phone's picker). Device checks: cleartext http to a LAN server from
+  the NativeAOT build, Keystore on both phones, the strip in light and dark, TalkBack on the sheets.
+- **Questions for the owner (step 6):**
+  1. The How it works board says the remote is reached "over HTTPS, paired once, as the browser extension pairs". The
+     server pairs apps by its password (as the desktop window does); the extension's code pairing only makes
+     extension tokens. Built with the password. Should a code (shown in the web UI) pair the phone instead? That needs a
+     server change (a code that makes a `remoteClient` token).
+  2. HTTPS with a self-signed certificate: the desktop window and the extension trust only certificates the system
+     trusts; pinning one at pairing is a "later step" in D9. The phone does the same (system trust only, nothing else
+     accepted). Build pinning (show the fingerprint at pairing, trust only that), or leave it?
+  3. Plain `http://` to another machine: allowed, after one tick in the pairing screen per server (the desktop's rule).
+     Drop the tick?
+  4. C5 shows live figures for every host ("Windows · 5 active · 32 MB/s", "12 queued"). Getting them for hosts not on
+     screen needs a connection to each while the sheet is open. Built: kind and "last seen" only, no extra connections.
+     Want one-shot figures while the sheet is open?
+  5. C5 calls the headless server "Docker"; the server only says `server`, which may also be an AppImage. Shown as
+     "Server". Fine?
+
 ### Android first trial (ANDROID.2), branch `android-trial` (2026-11-15)
 
 - **Go-ahead:** the owner answered "Yes, start ANDROID.2" to "perf is recorded done on Windows, with only deferred Linux items left: does that count as done?".

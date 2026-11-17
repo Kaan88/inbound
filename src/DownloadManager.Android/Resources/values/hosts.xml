@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ANDROID.7 (C5, C6): the strip shown while another Inbound's downloads are on screen ("Files are saved on ..."). -->
+<resources>
+  <color name="host_strip_bg">#FBE3CC</color>
+  <color name="host_strip_fg">#6B3A00</color>
+</resources>

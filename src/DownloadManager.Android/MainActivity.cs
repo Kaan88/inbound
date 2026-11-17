@@ -22,7 +22,7 @@ namespace Inbound.App;
 public sealed class MainActivity : AppCompatActivity
 {
     private DownloadsModel? _model;
-    private LazyInProcessConnection? _connection;
+    private IHostConnection? _connection; // step 6: the shown host's, not always the in-process one
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -43,8 +43,12 @@ public sealed class MainActivity : AppCompatActivity
             return insets;
         }));
 
-        _connection = new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
-            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e));
+        // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
+        // chip and the "Files are saved on ..." strip go in the app bar. Hosts/HostChoice.cs, Hosts/HostBar.cs. ---
+        _connection = Hosts.HostChoice.Connect(this, () => new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
+            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e)));
+        Hosts.HostBar.Install(this, FindViewById<AndroidX.AppCompat.Widget.Toolbar>(Resource.Id.toolbar)!, (ViewGroup)appbar, _connection);
+        // --- end of the step 6 hook ---
         _model = new DownloadsModel(_connection, a => RunOnUiThread(a));
         var adapter = new RowAdapter(_model, list);
         list.SetLayoutManager(new LinearLayoutManager(this));

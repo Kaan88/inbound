@@ -705,17 +705,23 @@ public static class RemoteServerHttp
     private static string? Text(JsonElement body, string name) =>
         body.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    private static ByteArrayContent JsonContent<T>(T value)
+    /// <summary>The pairing form, from generated metadata: the phone app's NativeAOT build pairs without reflection (ANDROID.7).</summary>
+    private static ByteArrayContent JsonContent(PairForm value)
     {
-        var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(value, IpcJson.Options));
+        var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(value, PairFormJsonContext.Default.PairForm));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
         return content;
     }
 
-    private sealed class PairForm
+    internal sealed class PairForm
     {
         public string Password { get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
         public string Role { get; init; } = string.Empty;
     }
 }
+
+/// <summary>The same JSON as <see cref="IpcJson.Options"/> gave the pairing form (camelCase names).</summary>
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(RemoteServerHttp.PairForm))]
+internal sealed partial class PairFormJsonContext : JsonSerializerContext;
