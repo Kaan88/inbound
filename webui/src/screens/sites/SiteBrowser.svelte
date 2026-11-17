@@ -25,6 +25,13 @@
   } from '../../lib/sitesBrowse';
   import { startedText } from '../../lib/sitesTransfers';
   import { applyHere, hereNames, needsPassword, phoneActions, phoneRowLine } from '../../lib/sitesHome';
+  import {
+    betweenCopy, betweenProblem, canPreview, finishedSince, previewImageSrc, previewNote, previewText, planShown, planSummary, rememberFolder,
+    rememberSort, saveSource, savedSource, sortFromSite, sourceFromValue, startFolder, syncDirectionLabel, syncNote, syncRequest, touches,
+    type SyncDirection,
+  } from '../../lib/sitesExtras';
+  import type { SitePreview, SiteSyncPlan } from '../../lib/sites';
+  import RemoteColumn from './RemoteColumn.svelte';
   import ServerFolders from './ServerFolders.svelte';
   import SiteFix from './SiteFix.svelte';
 
@@ -32,7 +39,8 @@
   // files to and from the server Inbound runs on (the default) or this device, and change the remote.
   let { site, onedit }: { site: Site; onedit?: () => void } = $props();
 
-  let path = $state(untrack(() => site.remoteFolder || '/'));
+  // The folder it was last left in and the sort it was last given come back (SITES.13, kept by the Host with the remote).
+  let path = $state(untrack(() => startFolder(site)));
   let items = $state<SiteItem[]>([]);
   let total = $state(0);
   let listing = $state<string | null>(null);
@@ -47,13 +55,41 @@
   let selected = $state<Set<string>>(new Set());
   let focusKey = $state<string | null>(null);
   let anchorKey: string | null = null;
-  let sortKey = $state<SortKey>('name');
-  let ascending = $state(true);
+  let sortKey = $state<SortKey>(untrack(() => sortFromSite(site).key));
+  let ascending = $state(untrack(() => sortFromSite(site).ascending));
   let filter = $state('');
   let view = $state<'two' | 'server'>(readView());
   let leftPath = $state('');
   let leftSelected = $state<string | null>(null);
+  let leftFile = $state<string | null>(null);
   let serverRoots = $state<string[]>([]);
+  // The left pane: the server's folders, or any remote (SITES.14). The right pane is always this remote.
+  let leftChoice = $state(savedSource());
+  let leftRemotePath = $state('/');
+  let leftPicked = $state<SiteItem[]>([]);
+  let leftRefresh = $state(0);
+  const leftSource = $derived(sourceFromValue(leftChoice, store.model.sites));
+  const leftSite = $derived(leftSource.kind === 'remote' ? (store.model.sites.find((item) => item.id === leftSource.siteId) ?? null) : null);
+  function chooseLeft(value: string) {
+    leftChoice = sourceFromValue(value, store.model.sites).kind === 'server' ? 'server' : value;
+    leftRemotePath = '/';
+    leftPicked = [];
+    saveSource(leftChoice);
+  }
+
+  // A transfer that finished changes a folder: the server's, or a remote's (this one or the left pane's). List it again.
+  let lastTransfers = untrack(() => store.model.siteTransfers);
+  $effect(() => {
+    const now = store.model.siteTransfers;
+    untrack(() => {
+      const done = finishedSince(lastTransfers, now);
+      lastTransfers = now;
+      if (!done.length) return;
+      const changed = done.map(touches);
+      if (changed.some((entry) => entry.server) || changed.some((entry) => leftSite && entry.remoteIds.includes(leftSite.id))) leftRefresh++;
+      if (changed.some((entry) => entry.remoteIds.includes(site.id))) void open(path, true);
+    });
+  });
   let listEl: HTMLElement | undefined = $state();
 
   function readView(): 'two' | 'server' {
@@ -77,8 +113,11 @@
     view, leftSelected, leftShown: leftPath, linkedFolder: site.localFolder, defaultDownloadDirectory: store.model.settings?.defaultDownloadDirectory,
   }));
   // What the arrow from the left pane uploads: the folder chosen there, else the one it shows.
-  const uploadFrom = $derived(leftSelected || leftPath || '');
-  const uploadFromProblem = $derived(uploadSourceProblem(uploadFrom, serverRoots));
+  const uploadFrom = $derived(leftFile || leftSelected || leftPath || '');
+  const uploadFromProblem = $derived(uploadSourceProblem(uploadFrom, serverRoots, !leftFile));
+  // Between two remotes: the right pane's choice goes to the left pane's folder, and the left pane's choice to this one.
+  const copyOutProblem = $derived(leftSite ? betweenProblem(site.id, path, leftSite.id, leftRemotePath, chosen) : null);
+  const copyInProblem = $derived(leftSite ? betweenProblem(leftSite.id, leftRemotePath, site.id, path, leftPicked) : null);
   const hostName = $derived(store.texts.hostName);
   const footer = $derived(footerText({
     shown: shown.length, total: Math.max(total, items.length), selected: chosen.length, selectedBytes: chosen.reduce((sum, item) => sum + (item.isFolder || item.size < 0 ? 0 : item.size), 0),
@@ -158,6 +197,11 @@
       path = result.path;
       items = more ? [...items, ...result.items] : result.items;
       void loadHere(mine, result.path, result.items);
+      if (!more) {
+        const remember = rememberFolder(site, result.path);
+        // A convenience: an older Host that does not know it, or a failure, is not worth a message.
+        if (remember) void store.ask<SiteResult>('sites.remember', remember).catch(() => undefined);
+      }
       total = result.total;
       listing = result.listing ?? null;
       listedAt = Date.now();
@@ -435,10 +479,10 @@
   }
 
   /** A server folder up into this remote folder: the dialog and the arrow between the panes both come here. */
-  async function startUpload(serverPath: string): Promise<boolean> {
-    const start = serverUpload(site.id, path, serverPath, 'keepBoth', serverRoots);
+  async function startUpload(serverPath: string, isFolder = true): Promise<boolean> {
+    const start = serverUpload(site.id, path, serverPath, 'keepBoth', serverRoots, isFolder);
     if (!start) {
-      dialogError = uploadSourceProblem(serverPath, serverRoots) ?? 'Choose a folder on the server.';
+      dialogError = uploadSourceProblem(serverPath, serverRoots, isFolder) ?? 'Choose a folder on the server.';
       return false;
     }
     const result = await store.ask<{ ok: boolean; message?: string }>('sites.transfer.start', start);
@@ -463,9 +507,81 @@
   async function uploadFromLeft() {
     dialogError = '';
     try {
-      if (!(await startUpload(uploadFrom))) store.toast(dialogError || 'The upload did not start.', 'error');
+      if (!(await startUpload(uploadFrom, !leftFile))) store.toast(dialogError || 'The upload did not start.', 'error');
     } catch (failure) {
       store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
+    }
+  }
+
+  /** Remote to remote: the Host copies between the two servers; nothing passes through this browser (SITES.13 #4). */
+  async function copyBetween(fromId: string, fromFolder: string, toId: string, toFolder: string, list: SiteItem[]) {
+    const start = betweenCopy(fromId, fromFolder, toId, toFolder, list);
+    const wrong = betweenProblem(fromId, fromFolder, toId, toFolder, list);
+    if (!start || wrong) { store.toast(wrong ?? 'Choose something to copy.', 'error'); return; }
+    try {
+      const result = await store.ask<{ ok: boolean; message?: string; transfer?: SiteTransfer }>('sites.transfer.start', start);
+      if (!result.ok) { store.toast(result.message ?? 'The copy did not start.', 'error'); return; }
+      store.toast(`Copying ${list.length === 1 ? list[0].name : `${list.length} items`}. Its progress is under Transfers.`, 'info', undefined, result.transfer?.id);
+      if (result.transfer && !store.model.siteTransfers.some((item) => item.id === result.transfer!.id)) store.model.siteTransfers = [result.transfer, ...store.model.siteTransfers];
+    } catch (failure) {
+      store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
+    }
+  }
+
+  // ---- Preview (SITES.13 #9): the first 2 MiB of a text or image file, in a dialog ----
+
+  let previewBox = $state<{ name: string; loading: boolean; result: SitePreview | null; error: string } | null>(null);
+  async function openPreview(item: SiteItem) {
+    const box = { name: item.name, loading: true, result: null as SitePreview | null, error: '' };
+    previewBox = box;
+    try {
+      const result = await store.ask<SitePreview>('sites.preview', { id: site.id, path: joinPath(path, item.name) });
+      if (previewBox === box) previewBox = { ...box, loading: false, result };
+    } catch (failure) {
+      if (previewBox === box) previewBox = { ...box, loading: false, error: failure instanceof Error ? failure.message : String(failure) };
+    }
+  }
+
+  // ---- Sync a linked folder (SITES.13 #6): the plan first, then Start ----
+
+  let syncBox = $state<{ direction: SyncDirection; remoteFolder: string; localFolder: string; plan: SiteSyncPlan | null; planning: boolean; wait: boolean; every: boolean; error: string } | null>(null);
+  function openSync() {
+    syncBox = { direction: 'download', remoteFolder: path, localFolder: site.scheduledSync?.localFolder || site.localFolder || '', plan: null, planning: false, wait: false, every: !!site.scheduledSync, error: '' };
+  }
+  async function planSync(box: NonNullable<typeof syncBox>) {
+    if (!box.localFolder.trim()) { box.error = `Choose a folder on ${hostName}.`; return; }
+    box.error = '';
+    box.planning = true;
+    box.plan = null;
+    try {
+      const plan = await store.ask<SiteSyncPlan>('sites.sync.plan', syncRequest(site, box.direction, box.remoteFolder, box.localFolder));
+      if (syncBox !== box) return;
+      if (!plan.ok) box.error = plan.message ?? 'The folders could not be compared.';
+      else box.plan = plan;
+    } catch (failure) {
+      box.error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
+      box.planning = false;
+    }
+  }
+  async function runSync(box: NonNullable<typeof syncBox>) {
+    busy = true;
+    box.error = '';
+    try {
+      const request = syncRequest(site, box.direction, box.remoteFolder, box.localFolder);
+      if (box.every !== !!site.scheduledSync || box.every) {
+        const scheduled = await store.ask<SiteResult>('sites.sync.schedule', { ...request, enabled: box.every });
+        if (!scheduled.ok) { box.error = scheduled.message ?? 'The schedule was not saved.'; return; }
+      }
+      const result = await store.ask<{ ok: boolean; message?: string; transfer?: SiteTransfer | null }>('sites.sync.run', { ...request, waitForSchedule: box.wait });
+      if (!result.ok) { box.error = result.message ?? 'The sync did not start.'; return; }
+      store.toast(result.transfer ? (box.wait ? 'The sync waits for a schedule. It is under Transfers.' : 'Sync started. Its progress is under Transfers.') : (result.message ?? 'Nothing to copy: the folders match.'), 'info', undefined, result.transfer?.id);
+      if (result.transfer && !store.model.siteTransfers.some((item) => item.id === result.transfer!.id)) store.model.siteTransfers = [result.transfer, ...store.model.siteTransfers];
+      syncBox = null;
+    } catch (failure) {
+      box.error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
+      busy = false;
     }
   }
 
@@ -535,6 +651,7 @@
       case 'newFolder': newFolder(); break;
       case 'upload': openUpload(); break;
       case 'refresh': void open(path, true); break;
+      case 'preview': if (canPreview(chosen)) void openPreview(chosen[0]); break;
       case 'pasteAddress': void pasteAddress(); break;
       case 'copyAddress': void copyAddress(); break;
       case 'copyPath': void copyPath(); break;
@@ -634,6 +751,8 @@
 
   function sortBy(key: SortKey) {
     ({ key: sortKey, ascending } = nextSort(sortKey, ascending, key));
+    const remember = rememberSort(site, sortKey, ascending);
+    if (remember) void store.ask<SiteResult>('sites.remember', remember).catch(() => undefined);
   }
   const arrow = (key: SortKey) => (sortKey === key ? (ascending ? ' ▲' : ' ▼') : '');
 
@@ -652,6 +771,7 @@
     <button class="btn-danger" disabled={!chosen.length} onclick={() => askDelete(chosen)}><Icon name="trash" size={15} /> Delete on server</button>
     <span class="mx-1 h-5 w-px bg-divider" aria-hidden="true"></span>
     <button class="btn" disabled={loading} onclick={() => open(path, true)}><Icon name="refresh" size={15} /> Refresh</button>
+    <button class="btn" title="Copy what is new or changed in this folder, one way, with a list first" onclick={openSync}><Icon name="retry" size={15} /> Sync…</button>
     {#if onedit}<button class="btn" onclick={onedit}><Icon name="settings" size={15} /> Edit remote</button>{/if}
     <input bind:this={picker} type="file" multiple class="hidden" onchange={(event) => { staged((event.currentTarget as HTMLInputElement).files); (event.currentTarget as HTMLInputElement).value = ''; }} />
   </div>
@@ -674,6 +794,7 @@
       {#if path !== '/'}<button class="btn-icon" title="Up one folder" aria-label="Up one folder" disabled={loading} onclick={() => open(parentPath(path))}><Icon name="up" size={16} /></button>{/if}
       <button class="btn-icon" title="Upload" aria-label="Upload" onclick={openUpload}><Icon name="upload" size={16} /></button>
       {#if canMakeFolder}<button class="btn-icon" title="New folder" aria-label="New folder" onclick={newFolder}><Icon name="folder-plus" size={16} /></button>{/if}
+      <button class="btn-icon" title="Sync this folder" aria-label="Sync this folder" onclick={openSync}><Icon name="retry" size={16} /></button>
       <button class="btn-icon" disabled={loading} title="Refresh" aria-label="Refresh" onclick={() => open(path, true)}><Icon name="refresh" size={16} /></button>
       {#if onedit}<button class="btn-icon" title="Edit remote" aria-label="Edit remote" onclick={onedit}><Icon name="settings" size={16} /></button>{/if}
     </div>
@@ -721,13 +842,23 @@
   <div class="flex items-stretch gap-3">
     {#if view === 'two'}
       <div class="contents max-md:hidden">
-      <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:roots={serverRoots} initial={defaultFolder} />
-      <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
-        <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
-          disabled={!chosen.length} onclick={() => download(chosen, 'arrow')}><Icon name="chevron-left" size={16} /></button>
-        <button class="btn-icon" title={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`} aria-label={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`}
-          disabled={!!uploadFromProblem} onclick={uploadFromLeft}><Icon name="chevron-right" size={16} /></button>
-      </div>
+      {#if leftSite}
+        <RemoteColumn site={leftSite} bind:path={leftRemotePath} bind:picked={leftPicked} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft} />
+        <div class="flex flex-col justify-center gap-2" role="group" aria-label="Copy between the panes">
+          <button class="btn-icon" title={copyOutProblem ?? `Copy the selection into ${leftSite.name} ${leftRemotePath}`} aria-label={copyOutProblem ?? `Copy the selection into ${leftSite.name} ${leftRemotePath}`}
+            disabled={!chosen.length || !!copyOutProblem} onclick={() => copyBetween(site.id, path, leftSite.id, leftRemotePath, chosen)}><Icon name="chevron-left" size={16} /></button>
+          <button class="btn-icon" title={copyInProblem ?? `Copy the left selection into ${site.name} ${path}`} aria-label={copyInProblem ?? `Copy the left selection into ${site.name} ${path}`}
+            disabled={!leftPicked.length || !!copyInProblem} onclick={() => copyBetween(leftSite.id, leftRemotePath, site.id, path, leftPicked)}><Icon name="chevron-right" size={16} /></button>
+        </div>
+      {:else}
+        <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:file={leftFile} bind:roots={serverRoots} initial={defaultFolder} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft} />
+        <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
+          <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
+            disabled={!chosen.length} onclick={() => download(chosen, 'arrow')}><Icon name="chevron-left" size={16} /></button>
+          <button class="btn-icon" title={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`} aria-label={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`}
+            disabled={!!uploadFromProblem} onclick={uploadFromLeft}><Icon name="chevron-right" size={16} /></button>
+        </div>
+      {/if}
       </div>
     {/if}
 
@@ -945,6 +1076,65 @@
   {#if pickingServerFolder}
     <FolderPicker initial={box.serverFolder} onpick={(picked) => { if (uploadBox) uploadBox.serverFolder = picked; pickingServerFolder = false; }} onclose={() => (pickingServerFolder = false)} />
   {/if}
+{:else if previewBox}
+  {@const box = previewBox}
+  <Dialog title="Preview {box.name}" onclose={() => (previewBox = null)} wide sheet>
+    {#if box.loading}
+      <p class="text-[13px] text-muted">Reading the start of the file…</p>
+    {:else if box.error}
+      <p class="text-[13px] text-error" role="alert">{box.error}</p>
+    {:else if box.result}
+      {@const result = box.result}
+      {@const image = previewImageSrc(result)}
+      {#if result.ok && image}
+        <img class="mx-auto max-h-[60dvh] max-w-full rounded border border-divider object-contain" src={image} alt={box.name} />
+      {:else if result.ok && result.kind === 'text'}
+        <pre class="max-h-[60dvh] overflow-auto whitespace-pre-wrap break-words rounded border border-divider bg-control p-3 font-mono text-[12px]">{previewText(result)}</pre>
+      {/if}
+      <p class="mt-2 text-[12.5px] {result.ok ? 'text-muted' : 'text-error'}" role={result.ok ? undefined : 'alert'}>{previewNote(result, bytes)}</p>
+    {/if}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (previewBox = null)}>Close</button>
+    {/snippet}
+  </Dialog>
+{:else if syncBox}
+  {@const box = syncBox}
+  <Dialog title="Sync {site.name}" onclose={() => (syncBox = null)} wide sheet>
+    <div class="space-y-3 text-[13px]">
+      <div class="segmented w-full" role="group" aria-label="Direction">
+        {#each ['download', 'upload'] as const as direction (direction)}
+          <button class="flex-1 text-center" aria-pressed={box.direction === direction} onclick={() => { if (syncBox) { syncBox.direction = direction; syncBox.plan = null; } }}>{syncDirectionLabel(direction, hostName, site.name)}</button>
+        {/each}
+      </div>
+      <div>
+        <label class="label" for="sync-remote">Folder on {site.name}</label>
+        <input id="sync-remote" class="field" bind:value={syncBox.remoteFolder} oninput={() => { if (syncBox) syncBox.plan = null; }} autocomplete="off" />
+      </div>
+      <FolderField id="sync-local" label="Folder on {hostName}" bind:value={syncBox.localFolder} hint={site.localFolder ? undefined : 'Not linked to a folder yet; Edit remote can link one.'} />
+      <p class="text-[12px] text-muted">{syncNote}</p>
+      {#if box.plan}
+        <p role="status">{planSummary(box.plan, bytes)}</p>
+        {#if box.plan.files.length}
+          <ul class="max-h-48 divide-y divide-divider overflow-auto rounded border border-divider text-[12.5px]" aria-label="Files to copy">
+            {#each box.plan.files.slice(0, planShown) as file (file.path)}
+              <li class="flex items-center gap-2 px-2 py-1"><span class="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
+                <span class="tabular shrink-0 text-muted">{file.size >= 0 ? bytes(file.size) : ''}</span>
+                <span class="shrink-0 rounded-full border border-divider px-2 text-[11.5px] text-muted">{file.reason === 'new' ? 'New' : 'Changed'}</span></li>
+            {/each}
+          </ul>
+          {#if box.plan.count > Math.min(box.plan.files.length, planShown)}<p class="text-[12px] text-muted">The first {Math.min(box.plan.files.length, planShown).toLocaleString('en-US')} of {box.plan.count.toLocaleString('en-US')} are listed.</p>{/if}
+        {/if}
+      {/if}
+      <label class="flex items-start gap-2"><input type="checkbox" bind:checked={syncBox.wait} /><span>Wait for a schedule to start it</span></label>
+      <label class="flex items-start gap-2"><input type="checkbox" bind:checked={syncBox.every} /><span>Sync this folder again at the start of every schedule</span></label>
+      {#if box.error}<p class="text-[12.5px] text-error" role="alert">{box.error}</p>{/if}
+    </div>
+    {#snippet footer()}
+      <button class="btn-primary" disabled={busy || box.planning || !box.plan || box.plan.count === 0} onclick={() => syncBox && runSync(syncBox)}>Start</button>
+      <button class="btn" disabled={box.planning} onclick={() => syncBox && planSync(syncBox)}>{box.planning ? 'Comparing…' : box.plan ? 'Compare again' : 'Compare'}</button>
+      <button class="btn" onclick={() => (syncBox = null)}>Cancel</button>
+    {/snippet}
+  </Dialog>
 {:else if replacing.length}
   {@const file = replacing[0].file}
   <AskDialog title="Replace {file.name}?" confirm="Replace" keep="Keep the old one" danger

@@ -4,7 +4,7 @@
   import FolderField from '../../components/FolderField.svelte';
   import Icon from '../../components/Icon.svelte';
   import { store } from '../../lib/store.svelte';
-  import { newForm, saveRequest, type Site, type SiteHostKey, type SiteKind, type SiteResult } from '../../lib/sites';
+  import { limitProblem, newForm, saveRequest, type Site, type SiteHostKey, type SiteKind, type SiteResult } from '../../lib/sites';
   import { advancedLabel, draftTestText, formName, formSignature, needsTestBeforeSave, saveButtonText, hostLacks, kindOfTile, methodLabel, switchableKinds, tileOf, tilesFor, type Tile } from '../../lib/sitesHome';
 
   // Add a remote (SITES.11 R6b, `add-tiles` then `add-fields`): kind tiles first, then the short form for the kind with
@@ -107,6 +107,8 @@
   }
 
   async function save() {
+    const wrongLimit = limitProblem(form);
+    if (wrongLimit) { problem = wrongLimit; advanced = true; return; }
     // Not tried since it changed: try it first. A failure shows its result and the button reads "Save anyway".
     if (needsTestBeforeSave(formSignature(request()), testedSignature, signs)) {
       await runTest();
@@ -209,9 +211,9 @@
       {/if}
       {#if has('key') && form.authMethod === 'key'}
         <div class="sm:col-span-2">
-          <label class="label" for="site-key">Key file (paste its text, or choose the file)</label>
+          <label class="label" for="site-key">Key file (an OpenSSH or PuTTY .ppk key: paste its text, or choose the file)</label>
           <textarea id="site-key" class="field font-mono text-[12px]" rows="3" bind:value={form.privateKey} placeholder={existing?.hasPrivateKey ? 'Saved; paste to change' : '-----BEGIN OPENSSH PRIVATE KEY-----'}></textarea>
-          <label class="btn mt-1 inline-flex cursor-pointer">Choose a key file…<input type="file" class="hidden" onchange={(event) => { void readKey(event.currentTarget.files); event.currentTarget.value = ''; }} /></label>
+          <label class="btn mt-1 inline-flex cursor-pointer">Choose a key file…<input type="file" accept=".ppk,.pem,.key,.txt,text/plain,application/x-putty-private-key,*/*" class="hidden" onchange={(event) => { void readKey(event.currentTarget.files); event.currentTarget.value = ''; }} /></label>
         </div>
         <div class="sm:col-span-2">
           <label class="label" for="site-passphrase">Key passphrase</label>
@@ -243,6 +245,15 @@
           <label class="label" for="site-folder">Start in folder on the remote</label>
           <input id="site-folder" class="field" bind:value={form.remoteFolder} placeholder="/" autocomplete="off" />
         </div>
+        <div>
+          <label class="label" for="site-down">Download speed limit (KB/s)</label>
+          <input id="site-down" class="field" inputmode="numeric" bind:value={form.downLimit} placeholder="No limit" autocomplete="off" />
+        </div>
+        <div>
+          <label class="label" for="site-up">Upload speed limit (KB/s)</label>
+          <input id="site-up" class="field" inputmode="numeric" bind:value={form.upLimit} placeholder="No limit" autocomplete="off" />
+        </div>
+        <p class="hint sm:col-span-2">A remote with a limit moves one file at a time. {limitProblem(form) ?? ''}</p>
         {#if signs}
           <p class="hint sm:col-span-2">Your own app registration is optional; leave these empty to use rclone's.</p>
           <div><label class="label" for="site-client">Client ID</label><input id="site-client" class="field" bind:value={form.clientId} autocomplete="off" /></div>
