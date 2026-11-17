@@ -31,7 +31,7 @@ public sealed class ConnectionRaiseTests(TestServerFixture fixture) : IDisposabl
         catch (IOException) { /* best effort */ }
     }
 
-    private HttpDownloadEngine Engine()
+    private HttpDownloadEngine Engine(IDownloadCheckpointStore? checkpoints = null)
     {
         Directory.CreateDirectory(Destination);
         Paths.EnsureCreated();
@@ -47,7 +47,7 @@ public sealed class ConnectionRaiseTests(TestServerFixture fixture) : IDisposabl
                 MaxConnectionsPerHost = 8,
                 CheckpointInterval = TimeSpan.FromMilliseconds(200),
             },
-            checkpoints: Checkpoints);
+            checkpoints: checkpoints ?? Checkpoints);
         _engines.Add(engine);
         return engine;
     }
@@ -330,6 +330,124 @@ public sealed class ConnectionRaiseTests(TestServerFixture fixture) : IDisposabl
         Assert.Equal(1 + 1 + 3, _server.OddRangeRequests(name));
     }
 
+    /// <summary>Runs <paramref name="job"/> on one stream until it has saved more than a megabyte, then stops it.</summary>
+    private async Task<DownloadCheckpoint> StopOneStreamAsync(HttpDownloadEngine engine, DownloadJob job)
+    {
+        var bytes = 0L;
+        using (var stop = new CancellationTokenSource())
+        {
+            var first = engine.ExecuteAsync(job, null, new SyncProgress(p => Interlocked.Exchange(ref bytes, p.ReceivedBytes)), stop.Token);
+            await UntilAsync(() => Interlocked.Read(ref bytes) > Megabyte, "the single stream to be under way");
+            stop.Cancel();
+            Assert.Equal(DownloadState.Cancelled, (await first.WaitAsync(Patience)).FinalState);
+        }
+
+        var checkpoint = await Checkpoints.LoadAsync(job.Id);
+        Assert.NotNull(checkpoint);
+        Assert.Single(checkpoint!.Segments);
+        Assert.True(checkpoint.CompletedBytes > 0);
+        return checkpoint;
+    }
+
+    /// <summary>
+    /// A resumed split whose segments are refused keeps the stream's prefix. The one-stream checkpoint is saved before
+    /// the part is cut back, so a kill between the two leaves a checkpoint that resumes from the prefix; cut first,
+    /// the split checkpoint beside a short part started over.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedResumeSplitSavesTheOneStreamCheckpointBeforeCuttingThePart()
+    {
+        const int size = 8 * Megabyte;
+        const int seed = 971;
+        var job = OddJob("raise-refused-order.bin", "closed", size, seed, 2 * Megabyte);
+        var saved = await StopOneStreamAsync(Engine(), job);
+
+        var split = false;
+        long? partAtSave = null;
+        var store = new HookedCheckpointStore(Checkpoints, checkpoint =>
+        {
+            if (checkpoint.Segments.Count > 1) split = true;
+            else if (split && partAtSave is null) partAtSave = new FileInfo(job.PartFilePath).Length;
+        });
+        job.RequestedConnections = 4;
+        var least = long.MaxValue;
+        var result = await Engine(store).ExecuteAsync(job, saved, new SyncProgress(p => InterlockedMin(ref least, p.ReceivedBytes)),
+            CancellationToken.None).WaitAsync(Patience);
+
+        await AssertFileAsync(result, seed, size);
+        Assert.True(split, "the resume never tried the split");
+        Assert.NotNull(partAtSave);
+        Assert.True(partAtSave > saved.CompletedBytes,
+            $"the part was cut to {partAtSave} bytes before the one-stream checkpoint of {saved.CompletedBytes} was saved");
+        Assert.True(Interlocked.Read(ref least) >= saved.CompletedBytes,
+            $"the resume went back to {Interlocked.Read(ref least)} bytes from the {saved.CompletedBytes} saved");
+    }
+
+    /// <summary>The one-stream checkpoint can't be saved after a refused split: the prefix is still good, so it is kept.</summary>
+    [Fact]
+    public async Task AFailedCheckpointSaveAfterARefusedSplitStillKeepsThePrefix()
+    {
+        const int size = 8 * Megabyte;
+        const int seed = 972;
+        var job = OddJob("raise-refused-save.bin", "closed", size, seed, 2 * Megabyte);
+        var saved = await StopOneStreamAsync(Engine(), job);
+
+        var split = false;
+        var failed = false;
+        var store = new HookedCheckpointStore(Checkpoints, checkpoint =>
+        {
+            if (checkpoint.Segments.Count > 1) split = true;
+            else if (split && !failed)
+            {
+                failed = true;
+                throw new IOException("The checkpoint folder is busy.");
+            }
+        });
+        job.RequestedConnections = 4;
+        var least = long.MaxValue;
+        var result = await Engine(store).ExecuteAsync(job, saved, new SyncProgress(p => InterlockedMin(ref least, p.ReceivedBytes)),
+            CancellationToken.None).WaitAsync(Patience);
+
+        await AssertFileAsync(result, seed, size);
+        Assert.True(failed, "the one-stream checkpoint after the refused split was never saved");
+        Assert.True(Interlocked.Read(ref least) >= saved.CompletedBytes,
+            $"the resume went back to {Interlocked.Read(ref least)} bytes from the {saved.CompletedBytes} saved: the prefix was reset");
+    }
+
+    /// <summary>A refused split stops later splits of that job only while its address is the one that refused.</summary>
+    [Fact]
+    public async Task ARefusedSplitIsForgottenWhenTheAddressChanges()
+    {
+        const int size = 8 * Megabyte;
+        const int seed = 973;
+        var engine = Engine();
+        var job = OddJob("raise-refused-refresh.bin", "closed", size, seed, Megabyte);
+        var saved = await StopOneStreamAsync(engine, job);
+
+        // The resume tries the split, the segments are refused, and the stream goes on from its prefix.
+        job.RequestedConnections = 4;
+        var bytes = 0L;
+        using (var stop = new CancellationTokenSource())
+        {
+            var second = engine.ExecuteAsync(job, saved, new SyncProgress(p => Interlocked.Exchange(ref bytes, p.ReceivedBytes)), stop.Token);
+            await UntilAsync(() => Interlocked.Read(ref bytes) > saved.CompletedBytes + 2 * Megabyte || second.IsCompleted,
+                "the stream to go on after the refused split");
+            stop.Cancel();
+            Assert.Equal(DownloadState.Cancelled, (await second.WaitAsync(Patience)).FinalState);
+        }
+
+        var single = await Checkpoints.LoadAsync(job.Id);
+        Assert.Single(single!.Segments);
+
+        // A refreshed address on a server that serves ranges splits again, on the same engine.
+        job.Url = job.Url.Replace("mode=closed", "mode=plain", StringComparison.Ordinal);
+        var connections = 0;
+        var result = await engine.ExecuteAsync(job, single, new SyncProgress(p => InterlockedMax(ref connections, p.ActiveConnections)),
+            CancellationToken.None).WaitAsync(Patience);
+        await AssertFileAsync(result, seed, size);
+        Assert.True(Volatile.Read(ref connections) >= 3, $"the new address never split (at most {connections} connections)");
+    }
+
     private static string Sha256Of(int seed, int size)
         => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(seed, size))).ToLowerInvariant();
 
@@ -368,5 +486,21 @@ public sealed class ConnectionRaiseTests(TestServerFixture fixture) : IDisposabl
     private sealed class SyncProgress(Action<TransferProgress> report) : IProgress<TransferProgress>
     {
         public void Report(TransferProgress value) => report(value);
+    }
+
+    /// <summary>A checkpoint store that shows each save to <c>beforeSave</c> first, which may throw.</summary>
+    private sealed class HookedCheckpointStore(IDownloadCheckpointStore inner, Action<DownloadCheckpoint> beforeSave) : IDownloadCheckpointStore
+    {
+        public Task<DownloadCheckpoint?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default)
+            => inner.LoadAsync(jobId, cancellationToken);
+
+        public Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default)
+        {
+            beforeSave(checkpoint);
+            return inner.SaveAsync(checkpoint, cancellationToken);
+        }
+
+        public Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default)
+            => inner.DeleteAsync(jobId, cancellationToken);
     }
 }

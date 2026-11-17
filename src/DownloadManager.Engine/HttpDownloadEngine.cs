@@ -350,6 +350,22 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
+        var result = await ExecuteCoreAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
+        if (result.Success)
+        {
+            // A finished job is never split again.
+            ForgetSplitRefusal(job.Id);
+        }
+
+        return result;
+    }
+
+    private async Task<DownloadResult> ExecuteCoreAsync(
+        DownloadJob job,
+        DownloadCheckpoint? checkpoint,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         if (!TryCreateUri(job.EffectiveUrl, out var uri, out var uriError))
         {
             return DownloadResult.Fail(DownloadState.Failed,
@@ -451,7 +467,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         state.InitializeFromDisk();
 
         var single = new SingleStreamRun(job, state, connectionsAtStart,
-            token => ProbeRunningSplitAsync(job, state, token), () => SplitRefused(job.Id));
+            token => ProbeRunningSplitAsync(job, state, token), () => SplitRefused(job));
         state.Single = single;
         lock (_runsSync)
         {
@@ -1381,10 +1397,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         if (run.Unsupported)
         {
             // The server refused a range after all: a raised count must not try to split this job again.
-            lock (_runsSync)
-            {
-                _splitRefused.Add(job.Id);
-            }
+            RefuseSplit(job);
 
             if (fromSingle)
             {
