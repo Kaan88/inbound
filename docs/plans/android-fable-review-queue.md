@@ -60,6 +60,10 @@ Fable approved 15 of 16; finding 6 second pass: 6b8a5be8 and e75fc325 (every req
 file move). Waiting for Fable's approval of finding 6.
 Owner, 2026-11-17: "update my phone and desktop apk after this fable approves": once Fable approves the fixes, install
 the release build on the S24 and replace the APK on the owner's desktop.
+Approved by that agent 2026-11-18 at b104f6eb (all 16 findings; PROGRESS "Fable approved the fixes"); S24 and desktop
+APK updated the same night. Still open from it: the CA-trusted https case, the Keystore read in OnCreate and
+InboundBackground.Evaluate's lock scope (low), `queue.action` start and `group.action` resume in `IsUserStart` once
+the phone has those controls.
 
 ## Done (Fable reviewed it)
 

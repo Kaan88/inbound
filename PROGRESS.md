@@ -2,6 +2,15 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Fable approved the fixes (2026-11-18, same agent `a77883b7d95665eea`).** First pass: 15 of 16 approved, finding 6
+  not (Resume all, queue start and a new address requeued a failed job without the name check). Second pass at b104f6eb
+  (6b8a5be8, e75fc325): approved, all 16 closed; Fable checked every path that turns a job Queued and every reader of
+  the stored part path. Fable's remaining device check, run on the S24 with the arm64 test build of b104f6eb:
+  `crash_now` gave "Unhandled exception. System.InvalidOperationException: crash_now test hook" with its stack and exit
+  reason 5 (native crash, the runtime's abort), no UnsatisfiedLinkError. Owner, 2026-11-17: "update my phone and desktop
+  apk after this fable approves": the release build of b104f6eb (TLS callback exported, checked with llvm-nm) is
+  installed on the S24 and is `Desktop\Inbound-android-b104f6eb.apk` (the 9a6ec0ef APK removed). Not yet tried: an
+  https server with a publicly trusted certificate (Fable: on the first real one).
 - **Fable review fixed (2026-11-17, 0f535a9f, d51d5e4b, 7e3f69d7; waiting for the same Fable agent's approval).** Every
   finding was checked in the code first; all 16 held. Per finding:
   1. https pairing and pin on a phone: **run** on the API 33 emulator with the x64 NativeAOT test build of 7e3f69d7 against
