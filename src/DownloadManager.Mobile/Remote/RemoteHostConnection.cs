@@ -415,6 +415,8 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         }
         catch (Exception ex)
         {
+            // Not a refused certificate this time (the network changed, or the server is down): requests wait again.
+            lock (_gate) _refused = false;
             SetState(RemoteConnectionStatus.Retrying, RemoteWords.Failure(_target.Name, ex));
             return Outcome.Retry;
         }

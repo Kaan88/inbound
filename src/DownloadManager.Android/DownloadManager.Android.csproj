@@ -111,10 +111,12 @@
     <Exec Command="&quot;$(_NdkBinDir)llvm-readelf&quot; --dyn-syms --wide &quot;$(NativeBinary)&quot;" ConsoleToMSBuild="true" StandardOutputImportance="low" EchoOff="true">
       <Output TaskParameter="ConsoleOutput" ItemName="_InboundDynSyms" />
     </Exec>
-    <PropertyGroup>
-      <_InboundDynSymsText>@(_InboundDynSyms)</_InboundDynSymsText>
-    </PropertyGroup>
-    <Error Condition="!$(_InboundDynSymsText.Contains('$(_InboundTlsJniSymbol)'))"
+    <ItemGroup>
+      <!-- Defined here, not only named: an undefined (UND) entry would still fail at the first HTTPS connection. -->
+      <_InboundTlsDefined Include="@(_InboundDynSyms)"
+                          Condition="$([System.String]::Copy('%(Identity)').Contains('$(_InboundTlsJniSymbol)')) and !$([System.String]::Copy('%(Identity)').Contains(' UND '))" />
+    </ItemGroup>
+    <Error Condition="'@(_InboundTlsDefined)' == ''"
            Text="$(NativeBinary) does not export $(_InboundTlsJniSymbol) (llvm-readelf --dyn-syms): every HTTPS connection would fail. Delete the obj folder and build again." />
     <Message Importance="normal" Text="TLS callback exported: $(_InboundTlsJniSymbol) in $(NativeBinary)" />
   </Target>
