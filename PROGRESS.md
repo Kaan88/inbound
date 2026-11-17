@@ -139,8 +139,11 @@
   can't undo it afterwards); exit records must be tied to the last run; a crash loop through the persisted job must be
   stopped; the persisted job's estimate is refreshed on each run; sections 2.2, 2.4, 2.5 rewritten.
   **Owner's answers (2026-11-17):** a download that can't resume, on mobile data with Wi-Fi only on: "warn about
-  stopping" (read as: it goes on, and the notification warns that stopping it starts over, with a Stop action; to
-  confirm with the owner). Settings > Force stop: "Yes, same as Stop" (any user stop, ApplicationExitInfo reason 10,
+  stopping", then clarified: "if it's possible, continue and warn if it's a delibarate switch and/or the phone is
+  unlocked. otherwise stop immediadately." Built as: decided when the rule starts to hold; phone unlocked -> it goes on
+  with the warning and a Stop action; locked -> stopped at once, starting over on a network that isn't metered. A job
+  allowed to go on stays allowed until it ends or the rule lets go. Whether a switch was deliberate can't be read on
+  Android, so unlocked stands for it. Settings > Force stop: "Yes, same as Stop" (any user stop, ApplicationExitInfo reason 10,
   leaves downloads paused).
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.

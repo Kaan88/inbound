@@ -199,8 +199,10 @@ again with `NOT_METERED` (to be tried: whether a running job may do that from it
 broadcast action could), and the system starts it when such a network comes; on 31 to 33 the FGS stops and a network
 callback registered while the app runs (best effort when the process is gone) starts it again. "Use data" is a
 broadcast action (works from the background on API 37; `ResumeActivity` is the fallback where `schedule` fails). A
-job that can't resume keeps running and the notification warns that stopping it starts over, with Stop (owner: "warn
-about stopping").
+job that can't resume: when the rule starts to hold with the phone unlocked, it keeps running and the notification
+warns that stopping it starts over, with Stop; with the phone locked it is stopped at once
+(`StopNonResumableOnMetered`) and starts over on a network that isn't metered (owner: "continue and warn if it's a
+delibarate switch and/or the phone is unlocked. otherwise stop immediadately").
 
 **Stops.** `onStopJob`: cancelled-by-app (our own reschedule) is ignored; every other reason is a system stop:
 nothing is marked, the Host keeps its state, return true. A user stop (Task Manager Stop or Settings Force stop) gives
