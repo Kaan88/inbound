@@ -649,12 +649,16 @@ whether rclone is a Setup component that can be unticked.
   the remaining measurements are taken on the real app. Build plan: `docs/plans/android-build-plan.md`.
   **Deferred to the real app** (build plan section 6): idle CPU and wake-ups with the screen off, one hour of
   downloading with the screen off, warm start, cold start on the real app, rate at 1 and 8 connections as a check,
-  boot to resumed, janky frames. Not done in the trial: picked folders (an engine change, its own item), Chrome
-  (owner: "ignore chrome, edge is enough").
+  boot to resumed, janky frames, memory of the service (idle and downloading), installed size. Not done in the
+  trial: how long a service may run (android-app.md section 6 point 2: the rules were not re-read; step 2 reads them
+  before choosing), picked folders (an engine change, its own item), Chrome (owner: "ignore chrome, edge is enough").
   Owner's answers (2026-11-16): application ID `app.inbound.android`, name "Inbound"; default destination the
   shared `Download/` folder by path; test builds may go down to Android 11 (API 30) so the Mi 8 Lite stays the slow
-  phone, release stays at 12; the 2 s cold mark is held on the S24 FE and the Mi 8 Lite, "but only within reason"
-  on the Mi 8 Lite.
+  phone, release stays at 12; the 2 s cold mark: "S24 FE + Mi 8 Lite, but only within reason." (my reading: the
+  "within reason" is for the Mi 8 Lite, the older phone).
+  - [x] Build plan step 1, the NativeAOT gate (2026-11-17, branch `android-app`): passed on the S24 FE and the
+    Mi 8 Lite (200 jobs drawn under 2 s, a 256 MiB download with equal hash, resume after a kill proven from the
+    server's byte count). Evidence in PROGRESS "Android app, step 1".
 - [ ] ANDROID.3 Host on the phone (service, storage, notifications, network rules, reboot resume).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).

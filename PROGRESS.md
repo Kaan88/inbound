@@ -121,18 +121,21 @@
   0a59ae3: `src/DownloadManager.Android` (one Downloads screen and the Add sheet, Release/NativeAOT/arm64,
   `app.inbound.android`), `src/DownloadManager.Mobile` (UI-agnostic model), the Host core in process through an
   in-process session on the real dispatcher. Gate: `tools/AndroidApp/run-gate.sh`; raw output in
-  `artifacts/android-app/step1/` (git-ignored). Final runs on the committed code, test build (adb hooks), 17,847,428 bytes:
+  `artifacts/android-app/step1/` (git-ignored). Runs on the code of 0a59ae3, test build (adb hooks), 17,847,428 bytes.
+  Fable's review fixes (aaaced8) change the model, the connection and the host start after these runs: **the gate is to
+  be run again on aaaced8** (both phones were off adb when it was pushed).
 
   | | S24 FE (API 37) `gate-s24fe-final` | Mi 8 Lite (API 30, test min) `gate-mi8lite-final` |
   |---|---|---|
-  | cold start to drawn list, 200 jobs | 211-229 ms (651 ms on the first start after install) | 398-443 ms |
+  | cold start to drawn list, 200 jobs | 211-229 ms (651 ms on the first timed start, the second process start after install) | 398-443 ms |
   | memory after the starts (PSS / RSS) | 91.4 / 184.2 MB | 49.5 / 101.2 MB |
   | 256 MiB download, hash equal | about 3 s | about 9 s |
   | killed after 20 s, reopened | resumed: 83.4 MB sent before, 188.1 MB after | resumed: 82.8 MB before, 207.0 MB after |
 
   Resume is proven from the test server's own byte count (`--log`): after reopening it sent less than the file, and with
   what it sent before the kill it covers the file; then the SHA-256 is equal. The 2 s mark is met on both phones.
-  Release APK (no hooks), before the review fixes: 17,704,068 bytes.
+  Release APK (no hooks, API 31) of aaaced8: 18,139,558 bytes; test APK of aaaced8: 18,176,422 bytes. Sizes of
+  near-identical code have differed by about 330 KB between builds (17.85 against 18.18 MB); not explained.
   - **Rotation with the Add sheet open (S24 FE, `rotation-s24fe`):** the sheet survives the activity being rebuilt, same
     process, no crash. Done with the owner's yes ("Yes, set it back"): auto-rotate and rotation were read first, set to
     landscape, and put back (log: restored 1 and 0). **Defect:** in landscape the sheet opens part-way, so the Link field
@@ -141,16 +144,31 @@
     (no keyguard, so the lock check passed; `am start -W` printed no TotalTime). Awake: 391-424 ms. The gate now wakes
     the phone and refuses to time a start that is not awake. Earlier Mi 8 Lite runs 1, 2, 3 and 5 may have the same fault.
   - **Warnings:** no C# warning in the new code. 68 IL2026/IL3050, all reflection `System.Text.Json` (Runtime 28,
-    Persistence 25, Contracts 15): every path they mark ran on both phones (settings written on first run, 200 jobs
-    stored and read back at each cold start, snapshot and events, checkpoints for resume). Source-generated JSON is a
-    `src/` change for its own review, not made. IL3053: Mono.Android's own. XA1040: Microsoft marks NativeAOT on Android
+    Persistence 25, Contracts 15). The types step 1 uses ran on both phones (settings written on first run, 200 jobs
+    stored and read back at each cold start, the snapshot, job events, add, checkpoints for resume). **Not exercised
+    on NativeAOT** (Fable, 2026-11-17): the changelog, update manifest and install journal, the torrent store, the web
+    settings rules, Sites scopes, remote jobs, picked-folder memory, and every payload type of later screens behind the
+    one generic `IpcMessage.GetPayload<T>`. Each later step must run its own types on the phone, or source-generated
+    JSON (a `src/` change for its own review, not made) must come first. IL3053: Mono.Android's own. XA1040: Microsoft marks NativeAOT on Android
     experimental. XA1006/XA4211: targetSdk 35 against compile SDK 36.
   - **Reviews:** Fable reviewed the step-1 code twice (2026-11-16); its findings were fixed or recorded. Then Fable was
     unavailable (owner, 2026-11-17: "fable can't be used. make a note for later."), so Opus reviewed the changes since;
     findings and handling are in `docs/plans/android-fable-review-queue.md` (removed rows coming back and a screen
     closed before it opened: both held and fixed with tests; four gate holes fixed; one finding not held). Owner,
-    2026-11-17: "resume, fable is available for reviews": the open queue entry goes to Fable now.
-  - **Tests:** Mobile 61 and in-process connection 17 pass; the in-process suite passed 5 of 5 runs.
+    2026-11-17: "resume, fable is available for reviews"; asked whether earlier steps needed Fable: "together", so
+    Fable reviewed step 0 and step 1 at once. Its findings (queue file, Done) were checked in the code and fixed in
+    aaaced8 and the docs: a stale progress frame undoing "paused" or "completed"; a progress frame for a job removed
+    before the snapshot adding a ghost row; the default folder never set if the first start died half-way; the lock
+    check failing open; a command after dispose reaching the Host; recycled rows still watched; this entry's warning
+    and test claims; and step 0's docs (deferred list, the Rust decision's conditions, the owner's words, stale text).
+    Fable found no way left for a frame to reach a closed screen or for a removed row to come back within a session.
+  - **Tests (aaaced8):** Mobile 65 and in-process connection 18 pass; the in-process suite passed 5 of 5 runs.
+    Output saved: `mobile-tests.txt`, `inprocess-tests.txt`, `inprocess-tests-repeat.txt`.
+  - **Not checked:** the release (hook-less, API 31) APK was built but not installed or run; the gate's new NativeAOT
+    check was seen to pass on a NativeAOT APK, not seen to fail on a Mono one; the return to portrait in the rotation
+    check is in the log only (its screenshot is unreadable); dark mode was not compared with a light mockup and light
+    mode was not walked (deferred, owner); warm start, idle, screen-off downloading, service memory and installed size
+    are owed (build plan section 6); the default-folder fix (AndroidHost) has no automated test, it is Android-only code.
   - **Against the mockup (`artifacts/android-app/pairs/a1-downloads.png`):** far from A1 by design: step 1 is the gate's
     plain list. A1 (speed card, filters, icons, progress, bottom bar) is ANDROID.4.
   - **Redesign R1 note:** the Sites rework adds Contracts and Runtime fields. When `android-app` meets it, rerun both

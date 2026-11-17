@@ -17,13 +17,15 @@ found out first, and the order of work. ROADMAP section "Android app" tracks the
 
 Decided after the trial (owner, 2026-11-16; evidence in PROGRESS "Android first trial (ANDROID.2)"):
 
-- **No Rust port.** The .NET engine met the marks it was measured against (rate, battery against the phone's
-  browser, cold start of a native screen).
+- **No Rust port, unless a deferred mark is missed.** The .NET engine met the marks it was measured against
+  (battery against the phone's browser, cold start of a native screen; rate too, though 1 connection was at the edge
+  of 10% on the Mi 8 Lite). Idle CPU and wake-ups, and warm start, are not measured yet (build plan section 6); a miss
+  there reopens the question, and section 5 says what a port would then cover.
 - **NativeAOT**, arm64, with `DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=1`. The default (Mono) build is the
   fallback and the build for day-to-day work on the emulator.
 - **Native Android views with Material 3** (`Xamarin.Google.Android.Material`), not MAUI, Uno or Avalonia.
 - **Application ID `app.inbound.android`, name "Inbound".** Default destination: the shared `Download/` folder by
-  path. Test builds may target Android 11 (API 30) for the slow phone; release builds stay at 12.
+  path. Test builds ("Test builds min API 30": `-p:InboundTestBuild=true`, Release/NativeAOT) go down to Android 11 (API 30) for the slow phone; release builds stay at 12.
 
 ## 2. The mockup
 
@@ -126,7 +128,8 @@ prevention. `docs/new-frontend-guide.md` section 3 is the checklist the app is h
 ## 5. The performance question (.NET or Rust)
 
 **Answered (ANDROID.2, 2026-11-16): .NET stays, on NativeAOT.** The battery mark is met (better than Jelly on the
-Mi 8 Lite, equal to Edge on the S24 FE); a native screen draws a 200-job list 0.8 s after a cold start on the S24 FE.
+Mi 8 Lite, equal to Edge on the S24 FE); a native screen draws a 200-job list 0.8 s after a cold start on the S24 FE
+(the default Mono build; the NativeAOT app does 0.21 to 0.23 s there, build plan step 1).
 The measurements still owed are taken on the real app (build plan, section 6). The text below is the plan as written
 before the trial.
 
@@ -156,7 +159,7 @@ alone is rewritten behind its present interfaces and the file formats stay; if t
 
 ## 6. Things Android does differently (to find out first)
 
-Each of these can change the design. None is checked yet.
+Each of these can change the design. Point 1 was checked in the trial (by path, below); the others are not checked yet.
 
 1. **Files by path.** `HttpDownloadEngine` opens the part file with `FileStream` and a path. A folder the user picks
    with the system picker is a content address, not a path. The rule that the part file lives in the destination

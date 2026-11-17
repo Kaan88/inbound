@@ -23,7 +23,7 @@ Read first, in this order: `CLAUDE.md`, this file, `docs/plans/android-app.md`, 
 **No strong argument against NativeAOT was found**, but one thing is unproven and is the first gate (step 1): the
 Material 3 screens have only run on the default (Mono) build, and the engine has only run on NativeAOT with a
 text-log screen. They have not run together. NativeAOT for Android is marked experimental in .NET 10. The default
-build is the fallback: on the S24 FE it draws a 200-job list 0.8 s after a cold start, and it is the build to use on
+build is the fallback: on the S24 FE it draws a 200-job list 0.8 s after a cold start (the default Mono build), and it is the build to use on
 the emulator and for day-to-day work anyway, because NativeAOT builds are slow.
 
 **Answered by the owner in step 0 (2026-11-16):**
@@ -32,8 +32,8 @@ the emulator and for day-to-day work anyway, because NativeAOT builds are slow.
 | --- | --- |
 | Application ID and name under the icon | `app.inbound.android`, "Inbound" |
 | Default destination | The shared `Download/` folder by path, directly (no subfolder) |
-| The Mi 8 Lite is Android 11, below the minimum | Test (Debug) builds go down to API 30 so it stays the slow phone; release builds stay at 31 |
-| Which phone the 2 s cold mark is held to | S24 FE and Mi 8 Lite, "but only within reason" on the Mi 8 Lite |
+| The Mi 8 Lite is Android 11, below the minimum | "Test builds min API 30": test builds (`-p:InboundTestBuild=true`, Release/NativeAOT with the adb hooks) go down to API 30 so it stays the slow phone; release builds stay at 31 |
+| Which phone the 2 s cold mark is held to | "S24 FE + Mi 8 Lite, but only within reason." (My reading: "within reason" is for the Mi 8 Lite.) |
 
 **Still to ask when it comes up:** anything a mockup leaves open (long-press, what a finished row does when tapped,
 empty states, errors). Ask, do not skip and do not invent. The known faults of the mockup are listed in
@@ -43,7 +43,8 @@ empty states, errors). Ask, do not skip and do not invent. The known faults of t
 
 - **Where:** worktree `C:\Users\kaank\Downloads\idm-android-trial`. Never work in or switch the branch of
   `C:\Users\kaank\Downloads\idm`; other sessions share it. Start a branch `android-app` from `android-trial` once
-  step 0 is done. No push and no merge to main unless the owner asks.
+  step 0 is done. Push each commit to `origin android-app` (owner, 2026-11-16 and 2026-11-17: "push as you go"); no
+  merge to main unless the owner asks.
 - **Who builds:** the owner's method. A Sonnet agent builds each slice from a tight brief with a time limit; you
   (Opus) review the code critically and rewrite what falls short yourself, not by sending it back; you decide what
   is accepted and you re-run the checks yourself before recording a figure. After every major change or decision,
@@ -111,8 +112,8 @@ screen (Downloads, as in the toolkit trial) fed by the real in-process host, bui
 Pass: installs and starts on the S24 FE and one other phone; lists 200 seeded jobs; one real download completes
 with the hash equal; kill and resume works; no trimming or AOT warning is left unexplained (the trial's NativeAOT build had 172 trim
 warnings from reflection JSON and still ran; go through them by group, and source-generated JSON for Contracts and
-settings is a change under `src/` that needs its own review); cold start to a drawn list is under 2 s on both phones, unlocked (which year of "mid-range" phone the 2 s mark
-is held to is still an open question for the owner; ask it in step 0). Record APK
+settings is a change under `src/` that needs its own review); cold start to a drawn list is under 2 s on both phones, unlocked (held to the S24 FE and the Mi 8 Lite, answered in
+step 0). Record APK
 size and memory. **If it does not pass within about a day of effort, stop and bring the owner the evidence**; the
 fallback is the default build, which already passes on the S24 FE. Do not start step 2 on an unproven build type.
 
@@ -182,6 +183,11 @@ record it against the owner's four marks.
 | Rate at 1 and 8 connections against the link, once, as a check that the real app matches the trial (1 connection was at the edge of 10% on the Mi 8 Lite) | within 10% | End of step 2 |
 | Boot to resumed downloads | note the figure | End of step 2 |
 | Janky frames while scrolling with downloads running | note the figure | End of step 3 |
+| Memory of the service, idle and while downloading (android-app.md section 5) | note the figure | End of step 2 |
+| Size of the installed app (android-app.md section 5) | note the figure | End of step 3 |
+
+Also owed from the trial: android-app.md section 6 point 2 (how long a service may run) was never re-read or run;
+step 2 reads the current rules before it chooses.
 
 Known from the trial, so not owed again unless the transfer path changes: CPU per GB and battery on NativeAOT (Mi 8
 Lite and S24 FE; the method is in PROGRESS and `tools/AndroidTrial/run-battery.sh`), storage by path in shared

@@ -12,6 +12,24 @@ Fable should look at.
 
 ## Open
 
+None.
+
+## Done (Fable reviewed it)
+
+- **2026-11-17, step 0 and step 1 final, reviewed together by Fable** (owner: "together"). Fable read the code first,
+  then the Opus entry below. It agreed with Opus on 1 to 7 and 9 and with rejecting 8 (adding that after a start that
+  failed post-initialize, shutdown gives up on a runner after 10 s without throwing, so "never a second writer" is not
+  strict; very unlikely on a first run). Its own findings, checked in the code and fixed in aaaced8 unless said: stale
+  progress undoing a newer state (fixed: `UpdatedAt` per row, 5 s window for a clock set back); a ghost row from a
+  progress frame for a job removed before the snapshot (fixed: progress never adds a row); the default folder after a
+  half-done first start (fixed: decided by the setting); the gate's lock check failing open (fixed); no NativeAOT or
+  commit check in the gate (fixed); a command after dispose reaching the Host, a failed open leaving a session, recycled
+  rows still watched (fixed); events deserialized on the Host's thread before coalescing (kept: cheap per event; a later
+  step can coalesce raw frames); PROGRESS overclaims on warnings and tests (reworded, outputs saved); step 0 docs:
+  deferred list, the Rust decision's conditions, the owner's words, stale text, no ROADMAP line for step 1 (fixed).
+  Judgement asked of Fable: no interleaving left delivers a frame to a closed screen or leaves a session registered;
+  a removed row cannot come back within a session.
+
 - **2026-11-17, step 1 final (the step-1 commit on `android-app`).** Owner, 2026-11-17: "fable can't be used. make a
   note for later." So the final step-1 review is Opus's. Fable already reviewed the code twice before this (see Done);
   since its second review these changed, and Fable has not seen them:
@@ -49,8 +67,6 @@ Fable should look at.
   Found by me while running the final gates (not by the review): the gate timed the Mi 8 Lite's cold starts with the
   screen dozing (no keyguard, so the lock check passed): 588-657 ms, against 391-424 ms awake. The gate now wakes the
   phone and refuses to time a start unless it is awake. Fable: check these fixes, and whether 1 and 2 are now airtight.
-
-## Done (Fable reviewed it)
 
 - **2026-11-16, step 1 (uncommitted, before the first step-1 commit).** Fable reviewed the step-1 code itself (no
   Opus stand-in). Findings and what was done are in PROGRESS, "Android app, step 1".
