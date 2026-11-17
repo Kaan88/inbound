@@ -1,5 +1,6 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -88,6 +89,8 @@ internal sealed class SettingsWindow : Window
         _ok.Click += async (_, _) => { if (await RunSaveAsync()) Close(); };
         _apply.Click += async (_, _) => await RunSaveAsync();
         _cancel.Click += (_, _) => Close();
+        // A page's inputs are noted before the user can change them: focus goes into the page first.
+        _page.GettingFocus += (_, _) => NoteBaseline();
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
         Closed += (_, _) => _closed.TrySetResult();
@@ -96,6 +99,69 @@ internal sealed class SettingsWindow : Window
     }
 
     public Task WaitClosedAsync() => _closed.Task;
+
+    // What each input of a page held when the keyboard or the pointer first went into that page (or at the last save):
+    // Options has changes OK or Apply would save while one of them holds something else. Inputs that act at once (the
+    // Remote files page) are left out.
+    private readonly Dictionary<DependencyObject, object?> _baseline = [];
+    private readonly HashSet<UIElement> _appliesAtOnce = [];
+    private bool _changedRows;
+
+    /// <summary>
+    /// True while an input holds something other than when it was last saved (or first gone into), or a row was added,
+    /// removed or moved since the last save (<see cref="NoteChange"/>).
+    /// </summary>
+    public bool HasUnsavedChanges => _changedRows || _baseline.Any(pair => !Equals(pair.Value, ValueOf(pair.Key)));
+
+    /// <summary>A page added, removed or moved a row (a per-site limit, a login, a favorite): OK has that to save.</summary>
+    public void NoteChange() => _changedRows = true;
+
+    /// <summary>These controls (and what is in them) take effect at once, so changing them leaves nothing unsaved.</summary>
+    public void AppliesAtOnce(IEnumerable<UIElement> controls)
+    {
+        foreach (var control in controls) _appliesAtOnce.Add(control);
+    }
+
+    private void NoteBaseline()
+    {
+        if (_page.Content is DependencyObject page) Walk(page);
+    }
+
+    private void Walk(DependencyObject node)
+    {
+        if (node is UIElement element && _appliesAtOnce.Contains(element)) return;
+        // An expander's header is a toggle that only shows or hides; what is in it counts once it is shown.
+        if (node is Expander expander)
+        {
+            if (expander.Content is DependencyObject content && VisualTreeHelper.GetParent(content) is not null) Walk(content);
+            return;
+        }
+
+        if (IsInput(node))
+        {
+            // Its insides (a NumberBox's text box) are its own.
+            _baseline.TryAdd(node, ValueOf(node));
+            return;
+        }
+
+        for (var at = 0; at < VisualTreeHelper.GetChildrenCount(node); at++) Walk(VisualTreeHelper.GetChild(node, at));
+    }
+
+    private static bool IsInput(DependencyObject node) =>
+        node is TextBox or PasswordBox or NumberBox or ComboBox or ToggleSwitch or ToggleButton or Slider or AutoSuggestBox;
+
+    private static object? ValueOf(DependencyObject control) => control switch
+    {
+        TextBox box => box.Text,
+        PasswordBox box => box.Password,
+        NumberBox box => box.Value,
+        ComboBox box => box.SelectedIndex,
+        ToggleSwitch toggle => toggle.IsOn,
+        ToggleButton button => button.IsChecked,
+        Slider slider => slider.Value,
+        AutoSuggestBox box => box.Text,
+        _ => null,
+    };
 
     private readonly List<string> _titles = [];
     private string? _wantedTitle;
@@ -213,7 +279,14 @@ internal sealed class SettingsWindow : Window
         try
         {
             var (error, page) = await Save();
-            if (error is null) return true;
+            if (error is null)
+            {
+                // Saved: what the inputs hold now is what is saved.
+                foreach (var control in _baseline.Keys.ToList()) _baseline[control] = ValueOf(control);
+                _changedRows = false;
+                return true;
+            }
+
             _error.Say(error, isProblem: true);
             ShowPage(page);
             return false;

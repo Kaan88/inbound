@@ -124,6 +124,8 @@ internal sealed partial class SitesOptionsPage
             _manage,
         ]);
         Controls = controls.ToArray();
+        // The switch, auto-update and the rclone path are the Host's state and take effect at once: OK has nothing to save.
+        window.AppliesAtOnce(Controls);
 
         _client.SitesChanged += OnChanged;
         _ = LoadAsync();
@@ -131,7 +133,10 @@ internal sealed partial class SitesOptionsPage
 
     public UIElement[] Controls { get; }
 
-    /// <summary>Takes the user to the All remotes page, where the remotes are listed, added, edited and removed.</summary>
+    /// <summary>
+    /// Takes the user to the All remotes page, where the remotes are listed, added, edited and removed. Options closes
+    /// (without saving) unless it has changes that are not saved; then it stays open, in front.
+    /// </summary>
     public Action? ManageRemotes { get; set; }
 
     public void Close()

@@ -3881,6 +3881,7 @@ public sealed partial class MainWindow : Window
                 ShowSiteLimitEmpty();
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     siteLimitRows.Remove(entry);
                     siteLimitPanel.Children.Remove(row);
                     ShowSiteLimitEmpty();
@@ -3890,7 +3891,11 @@ public sealed partial class MainWindow : Window
             foreach (var profile in settings.ConnectionProfiles) AddSiteLimitRow(profile.Pattern, profile.MaxConnections);
             ShowSiteLimitEmpty();
             var addSiteLimit = new Button { Content = "Add per-site limit" };
-            addSiteLimit.Click += (_, _) => AddSiteLimitRow(string.Empty, null);
+            addSiteLimit.Click += (_, _) =>
+            {
+                window.NoteChange();
+                AddSiteLimitRow(string.Empty, null);
+            };
             var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Add links I copy to the download list, without asking", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Accept downloads sent from your browser", IsChecked = settings.BrowserIntegrationEnabled };
@@ -4035,6 +4040,7 @@ public sealed partial class MainWindow : Window
                 ShowLoginEmpty();
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     password.Password = string.Empty;
                     loginRows.Remove(entry);
                     loginPanel.Children.Remove(border);
@@ -4044,7 +4050,11 @@ public sealed partial class MainWindow : Window
             foreach (var login in settings.SiteLogins) AddLoginRow(login);
             ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
-            addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
+            addLogin.Click += (_, _) =>
+            {
+                window.NoteChange();
+                AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
+            };
             var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching downloads. Re-enter the password when changing a saved site's address or user name. " +
                 "A login without http:// is sent over https only. Write *.example.com to include its subdomains.");
 
@@ -4097,19 +4107,20 @@ public sealed partial class MainWindow : Window
                     var at = favoriteRows.IndexOf(entry);
                     var to = at + by;
                     if (at < 0 || to < 0 || to >= favoriteRows.Count) return;
+                    window.NoteChange();
                     favoriteRows.RemoveAt(at);
                     favoriteRows.Insert(to, entry);
                     ShowFavoriteRows();
                 }
                 up.Click += (_, _) => Move(-1);
                 down.Click += (_, _) => Move(1);
-                remove.Click += (_, _) => { favoriteRows.Remove(entry); ShowFavoriteRows(); };
+                remove.Click += (_, _) => { window.NoteChange(); favoriteRows.Remove(entry); ShowFavoriteRows(); };
                 favoriteRows.Add(entry);
             }
             foreach (var favorite in settings.FavoriteFolders) AddFavoriteRow(favorite.Name, favorite.Path);
             ShowFavoriteRows();
             var addFavorite = new Button { Content = "Add favorite" };
-            addFavorite.Click += (_, _) => { AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
+            addFavorite.Click += (_, _) => { window.NoteChange(); AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
 
             var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
             var customCategoryControls = new List<UIElement>();
@@ -4130,6 +4141,7 @@ public sealed partial class MainWindow : Window
                     HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 remove.Click += (_, _) =>
                 {
+                    window.NoteChange();
                     if (!stagedCategoryRemovals.Add(category.Id))
                     {
                         stagedCategoryRemovals.Remove(category.Id);

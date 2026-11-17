@@ -131,14 +131,26 @@ public sealed partial class MainWindow
         StatusText.Text = SitesHomeRules.FooterText(_sites.Count);
     }
 
-    /// <summary>The page is asked for from Options: the sidebar entry takes the view.</summary>
+    /// <summary>
+    /// The page is asked for from Options (Manage remotes in All remotes): the sidebar entry takes the view. Options closes
+    /// the way Cancel does, never saving; with changes that are not saved it stays open and in front, the page behind it.
+    /// </summary>
     private void ShowRemotesPage()
     {
-        // Options asked for it and stays in front: the main window comes up behind it, showing the page.
-        Activate();
         if (SitesOffered)
             CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == SitesHomeTag);
-        _settingsWindow?.Activate();
+        var options = _settingsWindow;
+        if (options is { HasUnsavedChanges: true })
+        {
+            Activate();
+            options.Activate();
+            return;
+        }
+
+        options?.Close();
+        Activate();
+        // Once Options has gone, so Windows hands the foreground to this window rather than to whatever was behind.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Activate());
     }
 
     private void OpenSiteFromHome(string siteId)
