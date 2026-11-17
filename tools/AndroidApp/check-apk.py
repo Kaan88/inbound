@@ -1,0 +1,22 @@
+# Checks an Inbound APK before it goes to a phone or the owner (2026-11-18: a release APK from a stale obj folder had no
+# net.dot.jni.nativeaot.NativeAotRuntimeProvider and crashed at start).
+#   python -I tools/AndroidApp/check-apk.py <apk> [--release]
+# Fails unless: the runtime provider class and our activity are in the dex; the native library exports the TLS trust
+# callback; the launcher icon is there; with --release, the test hooks are not in the native library.
+import sys, zipfile
+apk = sys.argv[1]; release = "--release" in sys.argv
+z = zipfile.ZipFile(apk); names = z.namelist()
+dex = b"".join(z.read(n) for n in names if n.endswith(".dex"))
+so = z.read("lib/arm64-v8a/libDownloadManager.Android.so") if "lib/arm64-v8a/libDownloadManager.Android.so" in names \
+    else z.read(next(n for n in names if n.endswith("libDownloadManager.Android.so")))
+checks = {
+    "runtime provider in dex": b"net/dot/jni/nativeaot/NativeAotRuntimeProvider" in dex,
+    "TLS callback in the library": b"Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate" in so,
+    "launcher icon": any("ic_launcher_foreground" in n for n in names) or b"ic_launcher" in z.read("resources.arsc"),
+}
+if release:
+    hooks = [w for w in ("probe_url", "crash_now") if w.encode("utf-16-le") in so or w.encode() in so]
+    checks["no test hooks"] = not hooks
+bad = [k for k, ok in checks.items() if not ok]
+for k, ok in checks.items(): print(("ok   " if ok else "FAIL ") + k)
+sys.exit(1 if bad else 0)

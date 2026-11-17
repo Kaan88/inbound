@@ -2,6 +2,20 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Release APK crashed at start; launcher icon (2026-11-18).** The release build of b104f6eb installed on the S24 crashed
+  at every start (owner: "I can't check, app crashes"): `ClassNotFoundException: net.dot.jni.nativeaot.NativeAotRuntimeProvider`.
+  The `obj\Release` folder was stale: its generated Java sources lacked `NativeAotRuntimeProvider.java`, which the
+  test build's `obj\Release-test` had. The S24 went back to the test build at once (it started, no crash) and the
+  broken APK was taken off the desktop. Clean rebuild (obj and bin of Release deleted) fixed it. The first usable APK
+  (9a6ec0ef, release) was never installed on a phone, so it may have had the same fault. New
+  `tools/AndroidApp/check-apk.py <apk> [--release]` fails an APK without the runtime provider, the TLS export or the
+  launcher icon, or (release) with test hooks; it flags the broken APK and passes the new ones. Run it on every APK
+  before it goes to a phone or the owner.
+  Owner: "also could you put our icon too now and from now on?" The app had no icon (Android's default). Now an adaptive
+  icon from `assets/inbound-icon.png` (`tools/AndroidApp/make-launcher-icon.py`: foreground and monochrome layers per
+  density, artwork 52 of 108 dp, background #1C1C1C like the web app's maskable icon), in the manifest as `icon` and
+  `roundIcon`; it is part of every build from now on. The clean release build with the icon is on the S24 (started, no
+  crash) and on the desktop as `Inbound-android-<commit>-icon.apk`.
 - **Fable approved the fixes (2026-11-18, same agent `a77883b7d95665eea`).** First pass: 15 of 16 approved, finding 6
   not (Resume all, queue start and a new address requeued a failed job without the name check). Second pass at b104f6eb
   (6b8a5be8, e75fc325): approved, all 16 closed; Fable checked every path that turns a job Queued and every reader of

@@ -64,6 +64,8 @@ Approved by that agent 2026-11-18 at b104f6eb (all 16 findings; PROGRESS "Fable 
 APK updated the same night. Still open from it: the CA-trusted https case, the Keystore read in OnCreate and
 InboundBackground.Evaluate's lock scope (low), `queue.action` start and `group.action` resume in `IsUserStart` once
 the phone has those controls.
+After the approval (2026-11-18): the launcher icon and `tools/AndroidApp/check-apk.py` (stale-obj crash of the release
+APK, PROGRESS "Release APK crashed at start"); Fable has not seen them.
 
 ## Done (Fable reviewed it)
 
