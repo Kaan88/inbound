@@ -204,7 +204,7 @@ export function draftTestText(result: SiteResult & { itemCount?: number | null; 
     case problems.certificateNotTrusted:
       if (result.certificate?.cannotTrust) return `The server's certificate can't be used. ${result.certificate.cannotTrust}`;
       return result.certificate
-        ? "The server's certificate isn't signed by an authority this PC trusts. Trust it only if it is your own server's; it is trusted when you save."
+        ? "The server's certificate isn't signed by an authority this PC trusts. Trust it only if it is your own server's, then press Trust."
         : "The server's certificate isn't trusted yet: press Save, and Inbound shows it to you.";
     case problems.signInNeeded: return 'Not signed in yet: press Save, and your browser opens to sign in.';
     default: return result.message?.trim() ? result.message : 'The test failed.';

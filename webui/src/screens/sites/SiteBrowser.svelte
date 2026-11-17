@@ -17,7 +17,7 @@
   } from '../../lib/sites';
   import type { FolderBrowseResult } from '../../lib/types';
   import {
-    actionable, activation, addressesOf, pathsOf, autoRetryAllowed, commandKey, deleteText, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
+    actionable, activation, allShownSelected, toggleAllSelection, addressesOf, pathsOf, autoRetryAllowed, commandKey, deleteText, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
     filterMatches, fixButtonText, fixable, footerText, hereTone, isCantReach, keptSelection, kindChip, lastListedText, linkedLine, nextSort,
     notRetryingText, onRowControl, pathFromText, remoteMenu, retryAtText, retryDelaySeconds, rowKeys, rowsOf, serverDownload, serverFolder,
     serverUpload, sizeText, sortRows, troubleTitle, troubleWhy, uploadSourceProblem,
@@ -26,7 +26,7 @@
   import { startedText } from '../../lib/sitesTransfers';
   import { applyHere, hereNames, needsPassword, phoneActions, phoneRowLine } from '../../lib/sitesHome';
   import {
-    betweenCopy, betweenProblem, canPreview, finishedSince, previewImageSrc, previewNote, previewText, planShown, planSummary, rememberFolder,
+    betweenCopy, betweenProblem, canPreview, finishedSince, openSyncState, scheduleAction, scheduleReplaceNote, sourceValue, syncKey, previewImageSrc, previewNote, previewText, planShown, planSummary, rememberFolder,
     rememberSort, saveSource, savedSource, sortFromSite, sourceFromValue, startFolder, syncDirectionLabel, syncNote, syncRequest, touches,
     type SyncDirection,
   } from '../../lib/sitesExtras';
@@ -68,6 +68,15 @@
   let leftRemotePath = $state('/');
   let leftPicked = $state<SiteItem[]>([]);
   let leftRefresh = $state(0);
+  // A phone shows one pane: the left one is not mounted there, so it asks nothing of the server or the other remote.
+  let phone = $state(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches);
+  $effect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 767px)');
+    const changed = () => (phone = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
   const leftSource = $derived(sourceFromValue(leftChoice, store.model.sites));
   const leftSite = $derived(leftSource.kind === 'remote' ? (store.model.sites.find((item) => item.id === leftSource.siteId) ?? null) : null);
   function chooseLeft(value: string) {
@@ -332,7 +341,7 @@
   }
 
   function toggleAll() {
-    selected = selected.size === shown.length ? new Set() : new Set(shown.map((row) => row.key));
+    selected = toggleAllSelection(shown, selected);
   }
 
   /** A row's element, found by its place in the list (the rows are drawn in `shown` order), not by a selector. */
@@ -544,9 +553,9 @@
 
   // ---- Sync a linked folder (SITES.13 #6): the plan first, then Start ----
 
-  let syncBox = $state<{ direction: SyncDirection; remoteFolder: string; localFolder: string; plan: SiteSyncPlan | null; planning: boolean; wait: boolean; every: boolean; error: string } | null>(null);
+  let syncBox = $state<{ direction: SyncDirection; remoteFolder: string; localFolder: string; plan: SiteSyncPlan | null; planKey: string; planning: boolean; wait: boolean; every: boolean; error: string } | null>(null);
   function openSync() {
-    syncBox = { direction: 'download', remoteFolder: path, localFolder: site.scheduledSync?.localFolder || site.localFolder || '', plan: null, planning: false, wait: false, every: !!site.scheduledSync, error: '' };
+    syncBox = { ...openSyncState(site, path), plan: null, planKey: '', planning: false, wait: false, error: '' };
   }
   async function planSync(box: NonNullable<typeof syncBox>) {
     if (!box.localFolder.trim()) { box.error = `Choose a folder on ${hostName}.`; return; }
@@ -557,7 +566,7 @@
       const plan = await store.ask<SiteSyncPlan>('sites.sync.plan', syncRequest(site, box.direction, box.remoteFolder, box.localFolder));
       if (syncBox !== box) return;
       if (!plan.ok) box.error = plan.message ?? 'The folders could not be compared.';
-      else box.plan = plan;
+      else { box.plan = plan; box.planKey = syncKey(box); }
     } catch (failure) {
       box.error = failure instanceof Error ? failure.message : String(failure);
     } finally {
@@ -569,9 +578,17 @@
     box.error = '';
     try {
       const request = syncRequest(site, box.direction, box.remoteFolder, box.localFolder);
-      if (box.every !== !!site.scheduledSync || box.every) {
-        const scheduled = await store.ask<SiteResult>('sites.sync.schedule', { ...request, enabled: box.every });
+      const action = scheduleAction(site.scheduledSync, request, box.every);
+      if (action !== 'none') {
+        // Removing sends the saved sync with enabled false; saving sends the one in the dialog.
+        const target = action === 'remove' && site.scheduledSync ? { ...site.scheduledSync } : request;
+        const scheduled = await store.ask<SiteResult>('sites.sync.schedule', { ...target, enabled: action === 'save' });
         if (!scheduled.ok) { box.error = scheduled.message ?? 'The schedule was not saved.'; return; }
+      }
+      if (!box.plan || box.planKey !== syncKey(box) || box.plan.count === 0) {
+        store.toast(action === 'save' ? 'The sync will run at the start of every schedule.' : 'The scheduled sync was removed.');
+        syncBox = null;
+        return;
       }
       const result = await store.ask<{ ok: boolean; message?: string; transfer?: SiteTransfer | null }>('sites.sync.run', { ...request, waitForSchedule: box.wait });
       if (!result.ok) { box.error = result.message ?? 'The sync did not start.'; return; }
@@ -840,10 +857,10 @@
   {/if}
 
   <div class="flex items-stretch gap-3">
-    {#if view === 'two'}
-      <div class="contents max-md:hidden">
+    {#if view === 'two' && !phone}
+      <div class="contents">
       {#if leftSite}
-        <RemoteColumn site={leftSite} bind:path={leftRemotePath} bind:picked={leftPicked} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft}
+        <RemoteColumn site={leftSite} bind:path={leftRemotePath} bind:picked={leftPicked} refresh={leftRefresh} source={sourceValue(leftSource)} onsource={chooseLeft}
           oncopy={(list) => copyBetween(leftSite.id, leftRemotePath, site.id, path, list)} onpreview={(item, folder) => void openPreview(item, { id: leftSite.id, folder })}
           copyProblem={(list) => betweenProblem(leftSite.id, leftRemotePath, site.id, path, list)} />
         <div class="flex flex-col justify-center gap-2" role="group" aria-label="Copy between the panes">
@@ -853,7 +870,7 @@
             disabled={!leftPicked.length || !!copyInProblem} onclick={() => copyBetween(leftSite.id, leftRemotePath, site.id, path, leftPicked)}><Icon name="chevron-right" size={16} /></button>
         </div>
       {:else}
-        <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:file={leftFile} bind:roots={serverRoots} initial={defaultFolder} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft}
+        <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:file={leftFile} bind:roots={serverRoots} initial={defaultFolder} refresh={leftRefresh} source={sourceValue(leftSource)} onsource={chooseLeft}
           onupload={(from, isFolder) => void uploadFromLeft(from, isFolder)} uploadProblem={(from, isFolder) => uploadSourceProblem(from, serverRoots, isFolder)} />
         <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
           <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
@@ -915,14 +932,14 @@
         {/if}
         <!-- A phone has no column heads: Select all and the filter live in this one line. -->
         <div class="flex items-center gap-3 border-b border-divider px-3 py-1.5 text-[13px] md:hidden">
-          <label class="flex min-h-11 items-center gap-2"><input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} /> Select all</label>
+          <label class="flex min-h-11 items-center gap-2"><input type="checkbox" aria-label="Select all" checked={allShownSelected(shown, selected)} onchange={toggleAll} /> Select all</label>
           <label class="flex min-h-11 min-w-0 flex-1 items-center gap-1 rounded border border-control-stroke px-2">
             <Icon name="search" size={14} class="text-muted" />
             <input class="min-w-0 flex-1 bg-transparent py-1 outline-none" type="search" placeholder="Filter" aria-label="Filter the files in this folder" bind:value={filter} />
           </label>
         </div>
         <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted max-md:hidden" role="presentation">
-          <input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} />
+          <input type="checkbox" aria-label="Select all" checked={allShownSelected(shown, selected)} onchange={toggleAll} />
           <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
           <button class="col-wide hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
           <button class="col-wide hidden w-40 text-left @xl:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
@@ -1102,6 +1119,10 @@
   </Dialog>
 {:else if syncBox}
   {@const box = syncBox}
+  {@const plan = box.plan && box.planKey === syncKey(box) ? box.plan : null}
+  {@const now = syncRequest(site, box.direction, box.remoteFolder, box.localFolder)}
+  {@const action = scheduleAction(site.scheduledSync, now, box.every)}
+  {@const replaceNote = scheduleReplaceNote(site.scheduledSync, now, box.every, site.name)}
   <Dialog title="Sync {site.name}" onclose={() => (syncBox = null)} wide sheet>
     <div class="space-y-3 text-[13px]">
       <div class="segmented w-full" role="group" aria-label="Direction">
@@ -1115,26 +1136,27 @@
       </div>
       <FolderField id="sync-local" label="Folder on {hostName}" bind:value={syncBox.localFolder} hint={site.localFolder ? undefined : 'Not linked to a folder yet; Edit remote can link one.'} />
       <p class="text-[12px] text-muted">{syncNote}</p>
-      {#if box.plan}
-        <p role="status">{planSummary(box.plan, bytes)}</p>
-        {#if box.plan.files.length}
+      {#if plan}
+        <p role="status">{planSummary(plan, bytes)}</p>
+        {#if plan.files.length}
           <ul class="max-h-48 divide-y divide-divider overflow-auto rounded border border-divider text-[12.5px]" aria-label="Files to copy">
-            {#each box.plan.files.slice(0, planShown) as file (file.path)}
+            {#each plan.files.slice(0, planShown) as file (file.path)}
               <li class="flex items-center gap-2 px-2 py-1"><span class="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
                 <span class="tabular shrink-0 text-muted">{file.size >= 0 ? bytes(file.size) : ''}</span>
                 <span class="shrink-0 rounded-full border border-divider px-2 text-[11.5px] text-muted">{file.reason === 'new' ? 'New' : 'Changed'}</span></li>
             {/each}
           </ul>
-          {#if box.plan.count > Math.min(box.plan.files.length, planShown)}<p class="text-[12px] text-muted">The first {Math.min(box.plan.files.length, planShown).toLocaleString('en-US')} of {box.plan.count.toLocaleString('en-US')} are listed.</p>{/if}
+          {#if plan.count > Math.min(plan.files.length, planShown)}<p class="text-[12px] text-muted">The first {Math.min(plan.files.length, planShown).toLocaleString('en-US')} of {plan.count.toLocaleString('en-US')} are listed.</p>{/if}
         {/if}
       {/if}
       <label class="flex items-start gap-2"><input type="checkbox" bind:checked={syncBox.wait} /><span>Wait for a schedule to start it</span></label>
       <label class="flex items-start gap-2"><input type="checkbox" bind:checked={syncBox.every} /><span>Sync this folder again at the start of every schedule</span></label>
+      {#if replaceNote}<p class="text-[12px] text-muted" role="status">{replaceNote}</p>{/if}
       {#if box.error}<p class="text-[12.5px] text-error" role="alert">{box.error}</p>{/if}
     </div>
     {#snippet footer()}
-      <button class="btn-primary" disabled={busy || box.planning || !box.plan || box.plan.count === 0} onclick={() => syncBox && runSync(syncBox)}>Start</button>
-      <button class="btn" disabled={box.planning} onclick={() => syncBox && planSync(syncBox)}>{box.planning ? 'Comparing…' : box.plan ? 'Compare again' : 'Compare'}</button>
+      <button class="btn-primary" disabled={busy || box.planning || (!(plan && plan.count > 0) && action === 'none')} onclick={() => syncBox && runSync(syncBox)}>{plan && plan.count > 0 ? 'Start' : 'Save'}</button>
+      <button class="btn" disabled={box.planning} onclick={() => syncBox && planSync(syncBox)}>{box.planning ? 'Comparing…' : plan ? 'Compare again' : 'Compare'}</button>
       <button class="btn" onclick={() => (syncBox = null)}>Cancel</button>
     {/snippet}
   </Dialog>

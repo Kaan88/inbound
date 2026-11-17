@@ -492,4 +492,25 @@ export function deleteText(
   return `${what} will be deleted on the server. This can't be undone.${count ? '' : ' Counting what is in it…'}`;
 }
 
+/**
+ * The breadcrumbs of a folder on the server, from one split so each name and its path line up: '/downloads/isos' gives
+ * downloads -> '/downloads/' and isos -> '/downloads/isos'; 'D:\Downloads' gives 'D:' -> 'D:\' and Downloads -> 'D:\Downloads'.
+ * A leading separator (the POSIX root, a UNC start) belongs to the first part.
+ */
+export function folderCrumbs(path: string): { name: string; path: string }[] {
+  const parts = path.split(/(?<=[\\/])/).filter(Boolean);
+  while (parts.length > 1 && /^[\\/]+$/.test(parts[0])) parts.splice(0, 2, parts[0] + parts[1]);
+  return parts.map((part, index) => ({ name: part.replace(/^[\\/]+(?=.)/, '').replace(/[\\/]+$/, '') || part, path: parts.slice(0, index + 1).join('') }));
+}
+
+/** Select all: ticked only when every shown row is selected (selected keys of rows a filter hides do not count). */
+export function allShownSelected(shown: readonly { key: string }[], selected: ReadonlySet<string>): boolean {
+  return shown.length > 0 && shown.every((row) => selected.has(row.key));
+}
+
+/** What Select all does: clears the selection when every shown row is selected, else selects exactly the shown rows. */
+export function toggleAllSelection(shown: readonly { key: string }[], selected: ReadonlySet<string>): Set<string> {
+  return allShownSelected(shown, selected) ? new Set() : new Set(shown.map((row) => row.key));
+}
+
 export { crumbs, hereText, parentPath };

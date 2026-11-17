@@ -1,7 +1,7 @@
 // Remote files extras (SITES.13/14) in the web UI: remember the folder and sort, preview, the left pane of Two panes,
 // copy between remotes, sync and schedules. The Host's words are in docs/ipc-protocol.md "Remote files extras".
 // No UI, so the tests call it directly.
-import { joinPath, type Site, type SiteItem, type SitePreview, type SiteSyncPlan, type SiteTransfer } from './sites';
+import { joinPath, type Site, type SiteSyncRequest, type SiteItem, type SitePreview, type SiteSyncPlan, type SiteTransfer } from './sites';
 import type { SortKey, TransferStart } from './sitesBrowse';
 
 // ---- Remember the last folder and the sort ----------------------------------------------------------------------------
@@ -161,6 +161,34 @@ export function syncRequest(site: Pick<Site, 'id'>, direction: SyncDirection, re
 }
 
 export const planShown = 200;
+
+/** What the sync dialog opens with: the remote's scheduled sync when it has one (so Start never swaps it for something else unseen), else a download of this folder. */
+export function openSyncState(site: Pick<Site, 'scheduledSync' | 'localFolder'>, folder: string) {
+  const saved = site.scheduledSync;
+  return {
+    direction: saved?.direction ?? ('download' as SyncDirection),
+    remoteFolder: saved?.remoteFolder ?? folder,
+    localFolder: saved?.localFolder || site.localFolder || '',
+    every: !!saved,
+  };
+}
+
+const sameSync = (a: Pick<SiteSyncRequest, 'direction' | 'remoteFolder' | 'localFolder'>, b: Pick<SiteSyncRequest, 'direction' | 'remoteFolder' | 'localFolder'>) =>
+  a.direction === b.direction && a.remoteFolder === b.remoteFolder && (a.localFolder ?? '').trim() === (b.localFolder ?? '').trim();
+
+/** What the dialog's "again at every schedule" box asks for: nothing, to save the schedule (new or changed), or to remove the saved one. */
+export function scheduleAction(saved: SiteSyncRequest | null | undefined, now: Pick<SiteSyncRequest, 'direction' | 'remoteFolder' | 'localFolder'>, every: boolean): 'none' | 'save' | 'remove' {
+  if (every) return !saved || !sameSync(saved, now) ? 'save' : 'none';
+  return saved ? 'remove' : 'none';
+}
+
+/** The words under the box when ticking it would replace the schedule the remote already has. */
+export function scheduleReplaceNote(saved: SiteSyncRequest | null | undefined, now: Pick<SiteSyncRequest, 'direction' | 'remoteFolder' | 'localFolder'>, every: boolean, remote: string): string | null {
+  return every && saved && !sameSync(saved, now) ? `This replaces the scheduled sync of ${remote} (${saved.direction === 'upload' ? 'upload' : 'download'} of ${saved.remoteFolder}).` : null;
+}
+
+/** The compared list counts only for the folders and direction it was made for. */
+export const syncKey = (box: { direction: SyncDirection; remoteFolder: string; localFolder: string }): string => `${box.direction}|${box.remoteFolder}|${box.localFolder.trim()}`;
 
 // ---- Schedules --------------------------------------------------------------------------------------------------------
 

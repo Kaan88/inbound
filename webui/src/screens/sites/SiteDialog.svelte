@@ -4,7 +4,7 @@
   import FolderField from '../../components/FolderField.svelte';
   import Icon from '../../components/Icon.svelte';
   import { store } from '../../lib/store.svelte';
-  import { limitProblem, newForm, saveRequest, type Site, type SiteHostKey, type SiteKind, type SiteResult } from '../../lib/sites';
+  import { limitProblem, newForm, saveRequest, type Site, type SiteCertificate, type SiteHostKey, type SiteKind, type SiteResult } from '../../lib/sites';
   import { advancedLabel, draftTestText, formName, formSignature, needsTestBeforeSave, saveButtonText, hostLacks, kindOfTile, methodLabel, switchableKinds, tileOf, tilesFor, type Tile } from '../../lib/sitesHome';
 
   // Add a remote (SITES.11 R6b, `add-tiles` then `add-fields`): kind tiles first, then the short form for the kind with
@@ -53,7 +53,9 @@
   }
 
   // ---- Test: tries the form as it stands, without saving ----
-  let test = $state<{ text: string; ok: boolean; keys?: SiteHostKey[]; certificate?: boolean } | null>(null);
+  let test = $state<{ text: string; ok: boolean; keys?: SiteHostKey[]; certificate?: SiteCertificate } | null>(null);
+  // The fingerprint of a certificate the user pressed Trust on: kept for the remote when it is saved (sites.trust).
+  let trustedCertificate = $state<string | null>(null);
   let testing = $state(false);
   let trustedKeys = $state<string[]>([]);
 
@@ -79,6 +81,7 @@
   async function runTest() {
     testing = true;
     problem = '';
+    trustedCertificate = null;
     const started = performance.now();
     try {
       const result = await store.ask<SiteResult>('sites.testDraft', { site: request(), hostKeys: trustedKeys });
@@ -88,7 +91,7 @@
       test = {
         text: draftTestText(result, signs, seconds), ok: result.ok,
         keys: !result.ok && result.problem === 'hostKeyNotAccepted' ? (result.offeredKeys ?? []) : undefined,
-        certificate: !result.ok && result.problem === 'certificateNotTrusted',
+        certificate: !result.ok && result.problem === 'certificateNotTrusted' && result.certificate && !result.certificate.cannotTrust ? result.certificate : undefined,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -104,6 +107,13 @@
     if (!test?.keys?.length) return;
     trustedKeys = test.keys.map((key) => key.entry);
     void runTest();
+  }
+
+  function trustCertificate() {
+    if (!test?.certificate) return;
+    trustedCertificate = test.certificate.fingerprint;
+    testFailed = false;
+    test = { text: 'The certificate is trusted when you save, and the remote is tried then.', ok: true };
   }
 
   async function save() {
@@ -126,6 +136,10 @@
       if (trustedKeys.length && form.kind === 'sftp') {
         const trusted = await store.ask<SiteResult>('sites.trust', { id: result.site.id, entries: trustedKeys });
         if (!trusted.ok) store.toast(trusted.message ?? "The server's key wasn't kept; Test asks for it again.", 'error');
+      }
+      if (trustedCertificate) {
+        const trusted = await store.ask<SiteResult>('sites.trust', { id: result.site.id, entries: [], certificateFingerprint: trustedCertificate });
+        if (!trusted.ok) store.toast(trusted.message ?? "The server's certificate wasn't kept; Test asks for it again.", 'error');
       }
       onsaved(result.site);
     } catch (error) {
@@ -269,9 +283,11 @@
           <Icon name={test.ok ? 'check' : 'alert'} size={16} class="shrink-0 {test.ok ? 'tone-done' : ''}" />
           <span class="notice-text">
             {test.text}
+            {#if test.certificate}<span class="mt-1 block break-all font-mono text-[11.5px]">{test.certificate.subject} · {test.certificate.fingerprint}</span>{/if}
             {#each test.keys ?? [] as key (key.entry)}<span class="mt-1 block break-all font-mono text-[11.5px]">{key.type} {key.fingerprint}</span>{/each}
           </span>
           {#if test.keys?.length}<button class="btn" onclick={trust}>Trust</button>{/if}
+          {#if test.certificate}<button class="btn" onclick={trustCertificate}>Trust</button>{/if}
         </div>
       {/if}
     </div>
