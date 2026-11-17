@@ -1,6 +1,6 @@
 // EXT.R14: the toolbar ring is thicker and easier to see, and a finished download from this browser leaves a mark on
 // the icon (a full green ring when idle, and the count as badge text) until the popup is opened, where the finished ones are on top.
-// EXT.R15: the "open the popup on a finish" switch exists only in the separate test build.
+// EXT.R15: "Open the popup" on a finish (Options > When a download finishes; off by default).
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
@@ -235,53 +235,98 @@ test('EXT.R14: a restarted worker still shows what finished (session storage)', 
   });
 });
 
-// ---- EXT.R15: the test build ----------------------------------------------------------------------------------
+// ---- EXT.R15: "Open the popup" on finish (a store setting, off by default) ---------------------------------------
 
-const SWITCH = 'testOpenPopupOnFinish';
+const rules = loadTs('capture-rules.ts');
 
-test('EXT.R15: the switch is in the test build only, not in the Chrome or Firefox store builds', () => {
+test('EXT.R15: the popup is off by default (On finish defaults to flash), and the test-build switch is gone', () => {
+  assert.equal(rules.DEFAULT_SETTINGS.onFinish, 'flash');
+  assert.equal(rules.migrateSettings({}).settings.onFinish, 'flash');
   const root = path.join(__dirname, '..');
-  const build = path.join(root, 'scripts', 'build.mjs');
+  assert.equal(fs.existsSync(path.join(root, 'src', 'test-popup.ts')), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts['build:test-popup'], undefined);
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'inbound-r15-'));
   try {
-    const dirs = { chrome: [], firefox: ['--target', 'firefox'], test: ['--test-popup'] };
-    for (const [name, args] of Object.entries(dirs)) {
-      execFileSync(process.execPath, [build, ...args, '--outdir', path.join(out, name)], { cwd: root, stdio: 'pipe' });
+    for (const [name, args] of [['chrome', []], ['firefox', ['--target', 'firefox']]]) {
+      execFileSync(process.execPath, [path.join(root, 'scripts', 'build.mjs'), ...args, '--outdir', path.join(out, name)], { cwd: root, stdio: 'pipe' });
+      const text = ['background.js', 'options.js'].map((file) => fs.readFileSync(path.join(out, name, file), 'utf8')).join(' ');
+      assert.equal(text.includes('testOpenPopupOnFinish'), false, name);
+      assert.equal(text.includes('__TEST_POPUP__'), false, name);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(out, name, 'manifest.json'), 'utf8')).name.includes('popup test'), false);
     }
-    const bundle = (name) => ['background.js', 'options.js', 'popup.js'].map((file) => fs.readFileSync(path.join(out, name, file), 'utf8')).join('\n');
-    for (const store of ['chrome', 'firefox']) {
-      const text = bundle(store);
-      assert.equal(text.includes(SWITCH), false, `${store}: the option's key`);
-      assert.equal(text.includes('Open the popup when a download from this browser finishes'), false, `${store}: the option's text`);
-      assert.equal(text.includes('openPopupForTest'), false, `${store}: the code path`);
-      assert.equal(JSON.parse(fs.readFileSync(path.join(out, store, 'manifest.json'), 'utf8')).name.includes('popup test'), false);
-    }
-    const test = bundle('test');
-    assert.ok(test.includes(SWITCH));
-    assert.ok(test.includes('Open the popup when a download from this browser finishes'));
-    assert.match(JSON.parse(fs.readFileSync(path.join(out, 'test', 'manifest.json'), 'utf8')).name, /\(popup test\)$/);
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
 
-test('EXT.R15: the test switch opens the popup only when it is on, a window is focused and the ask popup is not up', async () => {
-  const testPopup = loadTs('test-popup.ts');
-  const old = global.chrome;
+/** One finish with "Open the popup" chosen; tweak configures the harness first and may return a hook run before the finish. */
+async function finishWithPopupChoice(tweak, onFinish = 'popup') {
+  global.__inboundFlashMs = 1;
   try {
-    const opened = [];
-    const values = {};
-    global.chrome = {
-      storage: { local: { async get(key) { return { [key]: values[key] }; }, async set(update) { Object.assign(values, update); } } },
-      action: { async openPopup(options) { opened.push(options); } },
-    };
-    const deps = (over = {}) => ({ focusedWindow: async () => ({ id: 7 }), askPopupBusy: () => false, ...over });
-    assert.equal(await testPopup.openPopupForTest(deps()), false, 'off by default');
-    values[SWITCH] = true;
-    assert.equal(await testPopup.openPopupForTest(deps({ askPopupBusy: () => true })), false, 'the ask popup is up');
-    assert.equal(await testPopup.openPopupForTest(deps({ focusedWindow: async () => undefined })), false, 'no focused window');
-    assert.deepEqual(opened, []);
-    assert.equal(await testPopup.openPopupForTest(deps()), true);
-    assert.deepEqual(opened, [{ windowId: 7 }]);
-    global.chrome.action.openPopup = async () => { throw new Error('Not allowed.'); };
-    assert.equal(await testPopup.openPopupForTest(deps()), false, 'a refusal falls back silently');
-  } finally { global.chrome = old; }
+    let result;
+    await withCanvas(async () => {
+      const made = iconChrome({ ...catching, onFinish });
+      const popups = [];
+      made.harness.chrome.action.openPopup = async (options) => { popups.push(options); };
+      const beforeFinish = tweak?.(made.harness, popups);
+      await withBackground(made.harness, async () => {
+        await sendOne(made.harness);
+        emit(made.harness, { eventType: 'progress', job: job() });
+        await settle(() => made.icons.length > 0 && made.icons.at(-1).imageData);
+        const before = made.icons.length;
+        beforeFinish?.();
+        emit(made.harness, { eventType: 'completed', job: job({ state: 'completed' }) });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        for (let waited = 0; waited < 2000 && made.icons.length - before < 2 && made.icons.at(-1)?.imageData === undefined; waited += 20) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        result = { popups, badge: made.log.badge.at(-1), flashed: made.icons.length - before > 1 };
+      });
+    });
+    return result;
+  } finally { delete global.__inboundFlashMs; }
+}
+
+test('EXT.R15: "Open the popup" opens it in the focused window and does not flash', async () => {
+  const { popups, flashed } = await finishWithPopupChoice();
+  assert.deepEqual(popups, [{ windowId: 7 }]);
+  assert.equal(flashed, false);
+});
+
+test('EXT.R15: "Flash the icon" (the default) never opens the popup', async () => {
+  const { popups, flashed } = await finishWithPopupChoice(undefined, 'flash');
+  assert.deepEqual(popups, []);
+  assert.equal(flashed, true);
+});
+
+test('EXT.R15: no focused normal window: the popup is not opened; the finished mark and the flash stand in', async () => {
+  const { popups, badge, flashed } = await finishWithPopupChoice((harness) => {
+    harness.chrome.windows.getAll = async () => [{ id: 7, type: 'normal', focused: false }, { id: 8, type: 'popup', focused: true }];
+  });
+  assert.deepEqual(popups, []);
+  assert.equal(badge, '1', 'the finished mark is kept');
+  assert.equal(flashed, true);
+});
+
+test('EXT.R15: where openPopup is missing (older Chrome, Firefox) or throws, the mark and the flash stand in, without an error', async () => {
+  const missing = await finishWithPopupChoice((harness) => { delete harness.chrome.action.openPopup; });
+  assert.equal(missing.badge, '1');
+  assert.equal(missing.flashed, true);
+  const refused = await finishWithPopupChoice((harness, popups) => {
+    harness.chrome.action.openPopup = async (options) => { popups.push(options); throw new Error('Not allowed without a click.'); };
+  });
+  assert.equal(refused.popups.length, 1);
+  assert.equal(refused.badge, '1');
+  assert.equal(refused.flashed, true);
+});
+
+test('EXT.R15: never over the ask-where-to-save popup: while it is open, no second openPopup; the mark and the flash stand in', async () => {
+  const { popups, badge, flashed } = await finishWithPopupChoice((harness) => () => {
+    const noop = { addListener() {}, removeListener() {}, hasListener: () => false };
+    const port = { name: 'dm.ask', sender: { id: 'test-extension', url: 'chrome-extension://test/popup.html' },
+      onMessage: noop, onDisconnect: noop, postMessage() {}, disconnect() {} };
+    for (const listener of harness.runtimeOnConnect.listeners) listener(port);
+  });
+  assert.deepEqual(popups, []);
+  assert.equal(badge, '1');
+  assert.equal(flashed, true);
 });

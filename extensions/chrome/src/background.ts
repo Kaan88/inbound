@@ -14,7 +14,6 @@ import {
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
 import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, offTitle, parseFinished } from "./toolbar-status";
-import { openPopupForTest } from "./test-popup";
 import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages, type Ring } from "./toolbar-icon";
 import {
   NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
@@ -1574,11 +1573,6 @@ async function downloadFinished(jobId: string): Promise<void> {
     if (settings.onFinish === "nothing") return;
     // EXT.R14: remembered first, so the icon's mark and the popup's top row are there whichever way it goes on.
     await recordFinished(jobId);
-    // EXT.R15: test build only; the define is false in store builds and this line is removed.
-    if (typeof __TEST_POPUP__ !== "undefined" && __TEST_POPUP__ && await openPopupForTest({
-      focusedWindow: focusedNormalWindow,
-      askPopupBusy: () => askPorts.size > 0 || popupOpening !== null || askQueue.length > 0,
-    })) return;
     if (settings.onFinish === "popup" && await openPopupForFinish()) return;
     await flashIcon();
   } finally {
@@ -1625,12 +1619,13 @@ async function takeFinished(): Promise<string[]> {
 }
 
 /**
- * Opens the toolbar popup, where the finished download is at the top. Chrome and Edge allow it from 127 without a
- * click; Firefox and older Chrome refuse it, and the icon flashes instead. Never while the popup is open or opening.
+ * EXT.R15: opens the toolbar popup, where the finished download is at the top. Only when a normal browser window is
+ * focused and the ask-where-to-save popup is neither open, opening nor holding downloads. Chrome and Edge allow it from
+ * 127 without a click; Firefox (feature-detected) and older Chrome refuse it. False means "use the finished mark and
+ * flash instead"; failures are silent.
  */
 async function openPopupForFinish(): Promise<boolean> {
-  if (askPorts.size > 0) return true;
-  if (popupOpening) return false;
+  if (askPorts.size > 0 || popupOpening !== null || askQueue.length > 0) return false;
   const action = (chrome as { action?: typeof chrome.action }).action;
   if (typeof action?.openPopup !== "function") return false;
   try {
