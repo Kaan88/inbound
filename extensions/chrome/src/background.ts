@@ -401,11 +401,13 @@ function updateBadge(): void {
         // The badge says OFF while sending is off or paused, so the tooltip says that first and the finished ones after.
         : offTitle(off, paused, finished)
         ? offTitle(off, paused, finished)!
+        // The badge shows a red "!" while the server is down, so the tooltip explains that before the finished ones.
+        : serverDown
+        ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser" +
+          (finished > 0 ? ` (${finished === 1 ? "1 download" : `${finished} downloads`} finished)` : "")
         : finishedTitle(finished, newestFinishedName())
         ? finishedTitle(finished, newestFinishedName())!
-          : serverDown
-            ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser"
-            : "Inbound Download Manager: sending downloads",
+        : "Inbound Download Manager: sending downloads",
     })?.catch?.(() => undefined);
   } catch { /* the badge is a convenience */ }
   if (paused && badgeTimer === undefined) {
@@ -1532,7 +1534,11 @@ function followJob(job: JobSummary | undefined, eventType?: string): void {
       finishing = true;
       void downloadFinished(job);
     } else {
-      void recordFinished(job.id, job.fileName);
+      // A second download finishing while the first is still being handled: the mark is recorded, and a notification
+      // (which neither flashes nor opens the popup) is shown too, so it is not lost.
+      void recordFinished(job.id, job.fileName).then(() => {
+        if (settings.onFinish === "notify") showFinishedNotification(job);
+      });
     }
   }
   showDownloadState();
@@ -2216,7 +2222,9 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       let justFinished: string[] = [];
       if (fromPage(sender, "popup.html")) {
         watch.acknowledge();
-        justFinished = await takeFinished();
+        // Only when this PC answered: with the app unreachable the popup shows no list, so the mark stays for the
+        // next successful open.
+        if (localAnswered(answer)) justFinished = await takeFinished();
       }
       showDownloadState();
       return justFinished.length > 0 ? { ...(answer as object), justFinished } : answer;
@@ -2295,6 +2303,13 @@ let jobsInFlight: Promise<unknown> | null = null;
  * newest POPUP_JOB_LIMIT only, so a long list can't make a reply over the browser's 1 MB native-message limit; an
  * older Host sends them all and latestJobs picks.
  */
+/** Whether this PC's part of a jobs answer was a real list (the popup then shows what finished). */
+function localAnswered(answer: unknown): boolean {
+  const reply = answer as { ok?: boolean; groups?: Array<{ target: string; ok: boolean }> } | undefined;
+  const local = reply?.groups?.find((group) => group.target === "local");
+  return local ? local.ok : reply?.ok !== false;
+}
+
 async function jobsAnswer(): Promise<unknown> {
   const query = { limit: POPUP_JOB_LIMIT };
   const local = (async (): Promise<JobsAnswer> => {

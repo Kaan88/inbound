@@ -435,3 +435,80 @@ test('EXT.R16: "Flash the icon" shows no notification', async () => {
   const made = await finishWithNotice({ onFinish: 'flash' });
   assert.equal(made.notes.length, 0);
 });
+
+test('release review: two downloads finishing together both get a notification', async () => {
+  global.__inboundFlashMs = 1;
+  const SECOND = '1a2b3c4d-0000-4000-8000-000000000002';
+  try {
+    await withCanvas(async () => {
+      const made = iconChrome({ ...catching, onFinish: 'notify' });
+      const notes = [];
+      made.harness.chrome.notifications.create = (id, options) => { if (typeof id === 'string') notes.push({ id, options }); };
+      await withBackground(made.harness, async () => {
+        await sendOne(made.harness);
+        emit(made.harness, { eventType: 'progress', job: job() });
+        emit(made.harness, { eventType: 'progress', job: job({ id: SECOND, fileName: 'b.zip' }) });
+        emit(made.harness, { eventType: 'completed', job: job({ state: 'completed' }) });
+        emit(made.harness, { eventType: 'completed', job: job({ id: SECOND, fileName: 'b.zip', state: 'completed' }) });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.deepEqual(notes.map((note) => note.id).sort(), [`inbound-finished:${JOB}`, `inbound-finished:${SECOND}`].sort());
+      });
+    });
+  } finally { delete global.__inboundFlashMs; }
+});
+
+test('release review: opening the popup while the app does not answer keeps the finished mark for the next open', async () => {
+  global.__inboundFlashMs = 1;
+  try {
+    await withCanvas(async () => {
+      const { harness, log } = iconChrome(catching);
+      await withBackground(harness, async () => {
+        await sendOne(harness);
+        emit(harness, { eventType: 'progress', job: job() });
+        emit(harness, { eventType: 'completed', job: job({ state: 'completed' }) });
+        await settle(() => log.badge.at(-1) === '1');
+        const reply = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+        let request;
+        for (let i = 0; i < 400 && !request; i++) {
+          request = harness.nativeMessages.find((message) => message.type === 'jobs.query' && !message.answered);
+          if (!request) await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        request.answered = true;
+        for (const listener of harness.nativeOnMessage.listeners) listener({ type: 'handoff.error', replyTo: request.id, payload: { error: 'The app is not running.' } });
+        const answer = await reply;
+        assert.equal(answer.justFinished, undefined);
+        assert.deepEqual(harness.session.finishedIds, [JOB]);
+        assert.equal(log.badge.at(-1), '1');
+      });
+    });
+  } finally { delete global.__inboundFlashMs; }
+});
+
+test('release review: after "Clear finished" empties the list the popup says they are hidden, and can show them again', async () => {
+  const { installDom, flush } = require('./dom-harness.cjs');
+  const finished = [{ id: 'a', target: 'local', fileName: 'a.zip', state: 'completed', receivedBytes: 10, totalBytes: 10 }];
+  const statusReply = { ok: true, enabled: true, autoIntercept: true, automaticSending: true, connected: true, lastError: '', localMissing: false,
+    server: null, automaticTarget: 'local', pauseUntil: 0, settings: { autoIntercept: true }, leftInBrowser: [], jobs: finished };
+  const page = installDom('popup.html', { handlers: {
+    'dm.status': async () => statusReply,
+    'dm.jobs': async () => ({ ok: true, jobs: finished }),
+    'dm.askQueue': async () => ({ ok: true, items: [] }),
+  } });
+  try {
+    page.load('popup.ts');
+    await page.ready();
+    await flush(12);
+    const doc = page.document;
+    assert.equal(doc.getElementById('emptyState').classList.contains('hidden'), true);
+    doc.getElementById('clearFinished').click();
+    await flush(4);
+    const empty = doc.getElementById('emptyState');
+    assert.equal(empty.classList.contains('hidden'), false);
+    assert.match(empty.textContent, /Finished downloads are hidden from this list/);
+    assert.doesNotMatch(empty.textContent, /No downloads yet/);
+    [...empty.querySelectorAll('button')].find((button) => button.textContent === 'Show them').click();
+    await flush(4);
+    assert.equal(doc.getElementById('emptyState').classList.contains('hidden'), true);
+    assert.match(doc.getElementById('jobs').textContent, /a\.zip/);
+  } finally { page.restore(); }
+});
