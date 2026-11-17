@@ -681,7 +681,9 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
-- [ ] ANDROID.7 Other hosts (pairing, host switcher).
+- [ ] ANDROID.7 Other hosts (pairing, host switcher). Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
+  use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
+  asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it

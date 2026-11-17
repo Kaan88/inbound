@@ -40,7 +40,10 @@
   `HostChoice.Hosts(ctx).Capabilities` to hide phone-only actions; New download's folder field on a remote host (a
   server folder chooser via `folders.browse`, not the phone's picker). Device checks: cleartext http to a LAN server from
   the NativeAOT build, Keystore on both phones, the strip in light and dark, TalkBack on the sheets.
-- **Questions for the owner (step 6):**
+- **Questions for the owner (step 6):** Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
+  use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
+  asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
+  The questions as asked:
   1. The How it works board says the remote is reached "over HTTPS, paired once, as the browser extension pairs". The
      server pairs apps by its password (as the desktop window does); the extension's code pairing only makes
      extension tokens. Built with the password. Should a code (shown in the web UI) pair the phone instead? That needs a
