@@ -117,6 +117,48 @@
 - **Owner (2026-11-16): "let's leave some of the measurements to after app is made, nativeaot it is unless you have a strong argument. we are ready for the actual app, right? make a plan for opus to follow."** Build type is NativeAOT; I found no strong argument against it, only that the Material 3 screens and NativeAOT have not run together yet, which is the first gate of the plan. The remaining measurements (idle and wake-ups on a phone, warm start, the hour with the screen off) move to the real app. Plan: `docs/plans/android-build-plan.md`. **Not done yet:** ANDROID.2 is not ticked and `android-phone` is not merged; both are step 0 of the plan.
 - **Step 0 of the build plan done (2026-11-16):** `android-phone` merged into `android-trial` (merge commit, 18 files, all under `tools/`; nothing under `src/`). ANDROID.2 ticked in ROADMAP with the decisions and the list deferred to the real app. `android-app.md` sections 1, 4 and 5 brought up to the decisions.
 - **Owner (2026-11-17): "btw, if you haven't, push as you go. also implement auto update feature if it's not in the roadmap. it should download itself and present an install option."** Updates were already in the roadmap (ANDROID.10, "a signed APK on the releases page with an update check"), so nothing is built ahead of that step; the spec is now there: the app downloads the new APK itself and offers Install through the system installer. Step 1 work is committed and pushed as it goes from here.
+- **Android app, step 1 (NativeAOT gate), branch `android-app` (2026-11-17): PASS on both phones.** Code in commit
+  0a59ae3: `src/DownloadManager.Android` (one Downloads screen and the Add sheet, Release/NativeAOT/arm64,
+  `app.inbound.android`), `src/DownloadManager.Mobile` (UI-agnostic model), the Host core in process through an
+  in-process session on the real dispatcher. Gate: `tools/AndroidApp/run-gate.sh`; raw output in
+  `artifacts/android-app/step1/` (git-ignored). Final runs on the committed code, test build (adb hooks), 17,847,428 bytes:
+
+  | | S24 FE (API 37) `gate-s24fe-final` | Mi 8 Lite (API 30, test min) `gate-mi8lite-final` |
+  |---|---|---|
+  | cold start to drawn list, 200 jobs | 211-229 ms (651 ms on the first start after install) | 398-443 ms |
+  | memory after the starts (PSS / RSS) | 91.4 / 184.2 MB | 49.5 / 101.2 MB |
+  | 256 MiB download, hash equal | about 3 s | about 9 s |
+  | killed after 20 s, reopened | resumed: 83.4 MB sent before, 188.1 MB after | resumed: 82.8 MB before, 207.0 MB after |
+
+  Resume is proven from the test server's own byte count (`--log`): after reopening it sent less than the file, and with
+  what it sent before the kill it covers the file; then the SHA-256 is equal. The 2 s mark is met on both phones.
+  Release APK (no hooks), before the review fixes: 17,704,068 bytes.
+  - **Rotation with the Add sheet open (S24 FE, `rotation-s24fe`):** the sheet survives the activity being rebuilt, same
+    process, no crash. Done with the owner's yes ("Yes, set it back"): auto-rotate and rotation were read first, set to
+    landscape, and put back (log: restored 1 and 0). **Defect:** in landscape the sheet opens part-way, so the Link field
+    is cut and Add is off screen; it must open expanded. For ANDROID.4, where the sheet is rebuilt to the mockup.
+  - **Gate bug found and fixed:** the Mi 8 Lite's first final run timed cold starts at 588-657 ms with the screen dozing
+    (no keyguard, so the lock check passed; `am start -W` printed no TotalTime). Awake: 391-424 ms. The gate now wakes
+    the phone and refuses to time a start that is not awake. Earlier Mi 8 Lite runs 1, 2, 3 and 5 may have the same fault.
+  - **Warnings:** no C# warning in the new code. 68 IL2026/IL3050, all reflection `System.Text.Json` (Runtime 28,
+    Persistence 25, Contracts 15): every path they mark ran on both phones (settings written on first run, 200 jobs
+    stored and read back at each cold start, snapshot and events, checkpoints for resume). Source-generated JSON is a
+    `src/` change for its own review, not made. IL3053: Mono.Android's own. XA1040: Microsoft marks NativeAOT on Android
+    experimental. XA1006/XA4211: targetSdk 35 against compile SDK 36.
+  - **Reviews:** Fable reviewed the step-1 code twice (2026-11-16); its findings were fixed or recorded. Then Fable was
+    unavailable (owner, 2026-11-17: "fable can't be used. make a note for later."), so Opus reviewed the changes since;
+    findings and handling are in `docs/plans/android-fable-review-queue.md` (removed rows coming back and a screen
+    closed before it opened: both held and fixed with tests; four gate holes fixed; one finding not held). Owner,
+    2026-11-17: "resume, fable is available for reviews": the open queue entry goes to Fable now.
+  - **Tests:** Mobile 61 and in-process connection 17 pass; the in-process suite passed 5 of 5 runs.
+  - **Against the mockup (`artifacts/android-app/pairs/a1-downloads.png`):** far from A1 by design: step 1 is the gate's
+    plain list. A1 (speed card, filters, icons, progress, bottom bar) is ANDROID.4.
+  - **Redesign R1 note:** the Sites rework adds Contracts and Runtime fields. When `android-app` meets it, rerun both
+    suites and recount the trim warnings.
+  - **Questions for the owner:** (1) the Downloads list has no empty-state design: what should a first start show?
+    (2) May a release build fetch plain `http://` addresses (cleartext is allowed now, as the desktop allows it)?
+    (3) targetSdk 35 or 36 for the first release (36 brings Android 16's behaviour rules)? (4) XA1040: Microsoft calls
+    NativeAOT on Android experimental; the gate passed, but it is the owner's call to ship on it.
 - **Owner's answers (2026-11-16), to the step 0 questions:** application ID and name: "app.inbound.android / Inbound"; default destination: "Download/ directly"; the Mi 8 Lite: "Test builds min API 30" (release stays at 31); the 2 s cold mark: "S24 FE + Mi 8 Lite, but only within reason."
 
 ### Android app design in Figma (2026-11-15)
