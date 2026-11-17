@@ -1,6 +1,6 @@
 # Android step 2 (ANDROID.3): the Host keeps downloading in the background
 
-Status: design, for Fable's review before any code (owner, 2026-11-17: milestones are reviewed by Fable). Rules:
+Status: design, revised after Fable's review (2026-11-17, section 6); waits on three owner questions before code. Rules:
 `android-app.md` section 6 point 2 (read 2026-11-17 from the official pages, the load-bearing facts re-checked).
 Owner's choices (PROGRESS, 2026-11-17): a user-initiated data transfer (UIDT) job on Android 14+, a dataSync
 foreground service (FGS) on 12 and 13; after a reboot a notification with Resume; Wi-Fi only means "not metered".
@@ -110,3 +110,46 @@ notification actions work; nothing but metadata is written to the state folder. 
 behaviour with battery restricted and unrestricted; on the S24 (API 37) what a swipe does to the UIDT job and
 whether a persisted UIDT job runs after a reboot. The 6-hour FGS cap cannot be hit on 31 to 33 (none there); the
 Mi 8 Lite (API 30, test builds only) runs the FGS path.
+
+## 6. Revision after Fable's review (2026-11-17)
+
+Fable's findings, checked in the code where they are code claims (1, 2, 8 confirmed: `Schedule()` starts and
+requeues jobs by itself and is gated only by `_updateQuiescing`, `DownloadManagerService.cs:4358`; `PauseAsync` and
+`PauseAllAsync` set `PausedByUser`; restart behaviour depends on state, `PausedByExit`, `AutoResumeAfterRestart` and
+`AutoResumeUnfinishedOnStartup`). What changes:
+
+- **Wi-Fi only moves into the Host (replaces section 2.4).** A pause from the phone side comes after the Host has
+  started a job on mobile data, and it looks like a user pause, so a waiting set could undo a user pause or lose a job.
+  New slice **S0, a `src/` change with its own review**: an `AppSettings` flag (not-metered only) shown only where a
+  new `PlatformCapabilities` flag says the platform can tell metered networks apart (the phone; the desktop does not
+  show it); the platform tells the service whether the network is metered; while the rule holds, `Schedule()` starts
+  nothing, and running jobs are stopped back to Queued (not user-paused, no new mark), so they start again by
+  themselves when the network is not metered. No waiting set, no per-job mark. "Use data" lifts the rule for the
+  session until the next not-metered network (session-wide, as A7 shows it: "3 downloads will resume · Use data").
+  Desktop suites must stay green; the Sites rework on main also edits this file, so the merge is noted.
+- **Wake lock on both paths.** An `ISleepPrevention` with a partial wake lock (and a Wi-Fi lock) for Android. The
+  Runtime only calls it when `PreventSleepWhileDownloading` is on; the Android first run sets it on (C7 lists "sleep
+  prevention" under Background and battery, so it stays a user setting). Screen-off checks run unplugged.
+- **The session job against the system's stops.** `updateEstimatedNetworkBytes`/`updateTransferredNetworkBytes` as
+  the session changes; every stop reason other than the network and the user's own is held as a system stop
+  (nothing marked, return true); "runnable" includes every timed wait (`RetryWaiting`, `QueueRetryAt`). On a network
+  stop with the rule on, nothing needs pausing (S0 does it); return true.
+- **One constraint per job.** Toggling the rule or "Use data" reschedules id 1, which stops the running one with
+  "cancelled by app": that reason is ignored (no pause). The session job keeps "any network" and S0 decides what
+  runs, so mixed sessions need no second job; the job only ends when nothing is runnable or waiting.
+- **Notification actions** all go through a direct activity `PendingIntent` to `ResumeActivity` (a plain `Activity`,
+  translucent theme), which schedules or starts `KeepAlive` before `finish()`, after the Host has started. After
+  Pause all, the ongoing notification becomes "N downloads paused · Resume".
+- **Boot count (section 2.5)** uses one pure function in Runtime, "would this job resume at the next start", shared
+  with reconcile and unit tested; the receiver reads the job store and writes nothing.
+- **Spike first (S-1)**, on the S24 FE (API 37), before S2: what a swipe does to a running UIDT job; whether a
+  persisted UIDT job runs after a reboot; what a Task Manager stop does; whether scheduling from a notification
+  action works. The results may change sections 2.2 and 2.5 and go to Fable.
+- **Pass list additions:** a Wi-Fi-only check ("waits, it does not fail"); the build plan's section 6 measurements
+  owed at the end of step 2 (idle CPU and wake-ups, an hour with the screen off, rate at 1 and 8 connections).
+
+Order: S-1 spike, S0 (Host network rule), S1 `ActivityState`, S2 `KeepAlive` and notifications, S3 the phone's
+network signal and "Use data", S4 finished notifications and open/reveal, S5 boot and Resume.
+
+**Owner questions** (PROGRESS): what a Task Manager Stop should mean; how to test Android 12 and 13 with no such
+phone; whether a phone's Wi-Fi may be marked metered for the Wi-Fi-only check and put back.
