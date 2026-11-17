@@ -125,6 +125,10 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to
+  its questions: Task Manager Stop: "Stay paused" (treated as the user's own pause, even when the app is opened);
+  Android 12 and 13: "Emulator now" (an Android 13 emulator for the service path during this step); the Wi-Fi-only
+  check: "Yes, set it back" (mark the home Wi-Fi metered on one test phone for the test, read first and restored).
 - **Owner's step 2 choices (2026-11-17):** mechanism: "Transfer job + service" (a UIDT job on Android 14+, a dataSync
   foreground service on 12 and 13, where there is no cap); after a reboot: "Notify with Resume" (a notification after
   boot, "N downloads paused · Resume"; I also try whether a silent resume is allowed and report it); Wi-Fi only:

@@ -151,5 +151,7 @@ requeues jobs by itself and is gated only by `_updateQuiescing`, `DownloadManage
 Order: S-1 spike, S0 (Host network rule), S1 `ActivityState`, S2 `KeepAlive` and notifications, S3 the phone's
 network signal and "Use data", S4 finished notifications and open/reveal, S5 boot and Resume.
 
-**Owner questions** (PROGRESS): what a Task Manager Stop should mean; how to test Android 12 and 13 with no such
-phone; whether a phone's Wi-Fi may be marked metered for the Wi-Fi-only check and put back.
+**Owner's answers (2026-11-17):** a Task Manager Stop is the user's own pause ("Stay paused"): at the next start,
+`ApplicationExitInfo` (reason user-requested) marks the jobs that were running as paused by the user. Android 12 and
+13: an Android 13 emulator now ("Emulator now"). The Wi-Fi-only check may mark the home Wi-Fi metered on one test
+phone, read first and restored ("Yes, set it back").
