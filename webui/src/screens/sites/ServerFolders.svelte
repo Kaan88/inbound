@@ -7,7 +7,7 @@
   import { latest } from '../../lib/latest';
   import { LongPress } from '../../lib/longpress';
   import { isMenuKey, paneMenuItems, serverPaneMenu, type PaneCommand } from '../../lib/sitesPaneMenu';
-  import { foldersFooter } from '../../lib/sitesBrowse';
+  import { folderCrumbs, foldersFooter } from '../../lib/sitesBrowse';
   import { store } from '../../lib/store.svelte';
   import type { FolderBrowseResult } from '../../lib/types';
   import PaneSwitch from './PaneSwitch.svelte';
@@ -114,12 +114,7 @@
 
   const folders = $derived(listing?.path ? listing.folders : (listing?.roots ?? []).map((root) => ({ name: root, path: root })));
   const files = $derived(listing?.path ? (listing.files ?? []) : []);
-  const crumbs = $derived((listing?.path ?? '').split(/[\\/]/).filter(Boolean));
-  function crumbPath(index: number): string {
-    const full = listing?.path ?? '';
-    const parts = full.split(/(?<=[\\/])/);
-    return parts.slice(0, index + 1).join('');
-  }
+  const crumbs = $derived(folderCrumbs(listing?.path ?? ''));
   const footer = $derived(file ? `${file} selected` : selected ? `${selected} selected` : `${foldersFooter(folders.length)}${files.length ? ` · ${files.length === 1 ? '1 file' : `${files.length.toLocaleString('en-US')} files`}` : ''}${listing?.truncated ? ' (not all shown)' : ''}`);
 </script>
 
@@ -133,7 +128,7 @@
     <button class="btn-icon" title="Up one folder" aria-label="Up one folder" disabled={!listing?.path || loading} onclick={() => browse(listing?.parent ?? null)}><Icon name="up" size={16} /></button>
     {#each crumbs as crumb, index (index)}
       {#if index > 0}<span class="text-muted">/</span>{/if}
-      <button class="link max-w-[10rem] truncate" onclick={() => browse(crumbPath(index))}>{crumb}</button>
+      <button class="link max-w-[10rem] truncate" onclick={() => browse(crumb.path)}>{crumb.name}</button>
     {/each}
     <button class="btn-icon ml-auto" title="List again" aria-label="List {store.texts.hostName}'s folder again" disabled={loading} onclick={() => browse(listing?.path ?? null, true)}><Icon name="refresh" size={16} /></button>
   </nav>
