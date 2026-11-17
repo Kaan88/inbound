@@ -332,6 +332,7 @@ public sealed partial class SitesPanel : UserControl
         _atStart = path is null;
         _askHereAgain = true;
         _selectAfter = select;
+        _keepPlace = null;
         _ = LoadAsync(path, refresh: false, append: false, byUser: byUser);
     }
 
@@ -378,13 +379,33 @@ public sealed partial class SitesPanel : UserControl
         if (SitesBrowseRules.Parent(_path) is { } parent) OpenFolder(parent, selectName: SitesBrowseRules.LeafName(_path));
     }
 
-    internal void Reload() => _ = LoadAsync(ReopenPath, refresh: true, append: false);
+    /// <summary>The folder shown is read again (after a delete, a rename, a new folder): the list keeps its place.</summary>
+    internal void Reload()
+    {
+        KeepPlace();
+        _ = LoadAsync(ReopenPath, refresh: true, append: false, limit: SitesBrowseRules.ReloadLimit(_rows.Count));
+    }
 
-    /// <summary>F5 and Refresh: the folder and its "On this PC" answers are read again.</summary>
+    /// <summary>F5 and Refresh: the folder and its "On this PC" answers are read again; the list keeps its place.</summary>
     internal void Refresh()
     {
         _askHereAgain = true;
-        _ = LoadAsync(ReopenPath, refresh: true, append: false, byUser: true);
+        KeepPlace();
+        _ = LoadAsync(ReopenPath, refresh: true, append: false, byUser: true, limit: SitesBrowseRules.ReloadLimit(_rows.Count));
+    }
+
+    // The same folder read again: where the list was scrolled, what it showed and what was selected, so the refilled list
+    // goes back there and selects what took the place of deleted lines (Explorer does both).
+    private sealed record KeptPlace(string SiteId, string Path, double Offset, List<string> Names, List<string> Selected);
+
+    private KeptPlace? _keepPlace;
+
+    private void KeepPlace()
+    {
+        // Loading or failed, nothing is shown to keep; a place noted for that load (a delete during it) still holds.
+        if (_loading || _site is not { } site || _rows.Count == 0 || ItemsList.Visibility != Visibility.Visible) return;
+        _keepPlace = new KeptPlace(site.Id, _path, PaneScroll.Offset(ItemsList), [.. _view.Where(row => !row.IsParent).Select(row => row.Name)],
+            [.. _selectedNames]);
     }
 
     /// <summary>Retry now: a new spell of automatic tries starts if this one fails too.</summary>
@@ -483,10 +504,11 @@ public sealed partial class SitesPanel : UserControl
         _atStart = false;
         _path = SitesBrowseRules.Normalize(path);
         _selectAfter = selectName;
+        _keepPlace = null;
         _ = LoadAsync(_path, refresh: false, append: false, byUser: true);
     }
 
-    private async Task LoadAsync(string? path, bool refresh, bool append, bool byUser = false)
+    private async Task LoadAsync(string? path, bool refresh, bool append, bool byUser = false, int limit = SitesBrowseRules.PageSize)
     {
         if (_site is not { } site || Browse is null) return;
         _cts?.Cancel();
@@ -536,7 +558,7 @@ public sealed partial class SitesPanel : UserControl
                 Id = site.Id,
                 Path = path,
                 Offset = offset,
-                Limit = SitesBrowseRules.PageSize,
+                Limit = append ? SitesBrowseRules.PageSize : limit,
                 Refresh = refresh,
                 Listing = append ? _listing : null,
             }, byUser, wait.Token);
@@ -846,6 +868,9 @@ public sealed partial class SitesPanel : UserControl
     {
         var say = _sayIfMissing;
         _sayIfMissing = false;
+        var place = _keepPlace;
+        _keepPlace = null;
+        if (place is not null && (place.SiteId != _site?.Id || place.Path != _path)) place = null;
         if (_rows.Count == 0)
         {
             if (say && _selectAfter is { } gone) SelectMissing?.Invoke(gone);
@@ -857,8 +882,32 @@ public sealed partial class SitesPanel : UserControl
         _selectAfter = null;
         var found = wanted is null ? null : _rows.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, wanted, StringComparison.Ordinal));
         if (say && wanted is not null && found is null) SelectMissing?.Invoke(wanted);
-        var row = (wanted is null ? null : _view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, wanted, StringComparison.Ordinal)))
-            ?? _view.FirstOrDefault(item => !item.IsParent) ?? _view.FirstOrDefault();
+        var named = wanted is null ? null : _view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, wanted, StringComparison.Ordinal));
+        if (place is not null && (named is not null || place.Selected.Count > 0))
+        {
+            // The same folder read again: the list goes back to where it was. The named line (a rename, a new folder), or
+            // the lines still there that were selected, or the one that took the place of the deleted ones.
+            List<SiteItemRow> rows = named is not null ? [named] : [];
+            if (rows.Count == 0)
+            {
+                foreach (var name in SitesBrowseRules.SelectAfterReload(place.Names, place.Selected, [.. _view.Where(item => !item.IsParent).Select(item => item.Name)],
+                             StringComparer.Ordinal))
+                {
+                    if (_view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, name, StringComparison.Ordinal)) is { } kept) rows.Add(kept);
+                }
+            }
+
+            if (rows.Count > 0)
+            {
+                if (rows.Count == 1) ItemsList.SelectedItem = rows[0];
+                else foreach (var kept in rows) ItemsList.SelectedItems.Add(kept);
+                var generation = _generation;
+                PaneScroll.Restore(ItemsList, place.Offset, rows[0], () => generation == _generation, () => FocusListWhenReady(generation, tries: 5));
+                return;
+            }
+        }
+
+        var row = named ?? _view.FirstOrDefault(item => !item.IsParent) ?? _view.FirstOrDefault();
         if (row is null) return;
         ItemsList.SelectedItem = row;
         ItemsList.ScrollIntoView(row);

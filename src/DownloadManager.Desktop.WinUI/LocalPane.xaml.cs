@@ -244,8 +244,14 @@ public sealed partial class LocalPane : UserControl
             return;
         }
 
-        // Another folder starts with nothing selected; the same folder read again (sort, F5, after a delete) keeps it.
+        // Another folder starts with nothing selected; the same folder read again (sort, F5, after a delete) keeps it,
+        // and keeps its scroll: what was shown and selected is noted before the list is emptied.
         var sameFolder = string.Equals(folder, _path, StringComparison.OrdinalIgnoreCase);
+        var keep = sameFolder && _view.Count > 0;
+        var offset = keep ? PaneScroll.Offset(ItemsList) : 0;
+        List<string> namesBefore = keep ? [.. _view.Where(item => !item.IsParent).Select(item => item.Name)] : [];
+        List<string> selectedBefore = keep ? [.. SelectedRows.Select(item => item.Name)] : [];
+        var hadKeyboard = keep && XamlRoot is not null && FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused && IsInside(focused, ItemsList);
         // A note kept for after the read (an error of a rename or a delete) shows now; other folders start without one.
         _footerNote = _pendingNote;
         _pendingNote = null;
@@ -259,13 +265,36 @@ public sealed partial class LocalPane : UserControl
         else MessageText.Visibility = Visibility.Collapsed;
         RebuildView(keepSelection: sameFolder);
         var row = select is null ? null : _view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, select, StringComparison.OrdinalIgnoreCase));
-        if (row is not null)
+        if (row is not null) ItemsList.SelectedItem = row;
+        else if (keep && ItemsList.SelectedItems.Count == 0)
         {
-            ItemsList.SelectedItem = row;
+            // What was selected is gone (deleted): the line that took its place is selected, as in Explorer.
+            var next = SitesBrowseRules.SelectAfterReload(namesBefore, selectedBefore, [.. _view.Where(item => !item.IsParent).Select(item => item.Name)],
+                StringComparer.OrdinalIgnoreCase);
+            row = next.Count == 0 ? null : _view.FirstOrDefault(item => !item.IsParent && string.Equals(item.Name, next[0], StringComparison.OrdinalIgnoreCase));
+            if (row is not null) ItemsList.SelectedItem = row;
+        }
+
+        if (keep)
+        {
+            PaneScroll.Restore(ItemsList, offset, row, () => generation == _openGeneration, hadKeyboard ? FocusList : null);
+        }
+        else if (row is not null)
+        {
             ItemsList.ScrollIntoView(row);
         }
 
         StateChanged?.Invoke();
+    }
+
+    private static bool IsInside(DependencyObject element, DependencyObject container)
+    {
+        for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, container)) return true;
+        }
+
+        return false;
     }
 
     internal void FocusList()

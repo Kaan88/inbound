@@ -411,4 +411,37 @@ public sealed class SitesBrowseRulesTests
         Assert.False(cache.TryGet("s", "/media", "isos", now, out _));
         Assert.True(cache.TryGet("s", "/other", "isos", now, out _));
     }
+
+    [Theory]
+    [InlineData(0, 500)]
+    [InlineData(120, 500)]
+    [InlineData(1200, 1200)]
+    [InlineData(9000, 2000)]
+    public void ReloadLimit(int loaded, int expected) => Assert.Equal(expected, SitesBrowseRules.ReloadLimit(loaded));
+
+    private static List<string> AfterReload(string before, string selected, string after) =>
+        SitesBrowseRules.SelectAfterReload(Split(before), Split(selected), Split(after), StringComparer.Ordinal);
+
+    private static List<string> Split(string names) => [.. names.Split(',', StringSplitOptions.RemoveEmptyEntries)];
+
+    [Theory]
+    // Explorer: the line after the deleted one takes its place.
+    [InlineData("a,b,c,d", "b", "a,c,d", "c")]
+    // Several deleted: the first line after the first of them that stayed.
+    [InlineData("a,b,c,d,e", "b,c", "a,d,e", "d")]
+    [InlineData("a,b,c,d,e", "b,d", "a,c,e", "c")]
+    // The last line deleted: the one before it.
+    [InlineData("a,b,c", "c", "a,b", "b")]
+    [InlineData("a,b,c", "b,c", "a", "a")]
+    // Still there (F5, a delete that failed): they stay selected, in the new order.
+    [InlineData("a,b,c", "c,a", "a,b,c", "a,c")]
+    [InlineData("a,b,c", "b,c", "a,c", "c")]
+    // Nothing selected, or nothing left.
+    [InlineData("a,b,c", "", "a,b,c", "")]
+    [InlineData("a", "a", "", "")]
+    // Nothing that was shown is left: the line now at that place.
+    [InlineData("a,b,c", "b", "x,y", "y")]
+    [InlineData("a,b,c", "c", "x", "x")]
+    public void SelectAfterReload(string before, string selected, string after, string expected) =>
+        Assert.Equal(Split(expected), AfterReload(before, selected, after));
 }

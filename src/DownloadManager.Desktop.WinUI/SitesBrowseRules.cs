@@ -131,6 +131,52 @@ internal static class SitesBrowseRules
     /// <summary>Where the next page starts, which is also how many are already here.</summary>
     public static int NextOffset(int offset, int loaded) => offset + loaded;
 
+    /// <summary>The most one request may ask for (the Host's maximum page).</summary>
+    public const int MaxPageSize = 2000;
+
+    /// <summary>
+    /// The folder shown is read again (a delete, a rename, F5): as many lines as were loaded come back in one request, so
+    /// the list can stay where it was; at least a page, at most what the Host gives at once.
+    /// </summary>
+    public static int ReloadLimit(int loaded) => Math.Clamp(loaded, PageSize, MaxPageSize);
+
+    /// <summary>
+    /// The same folder read again, as in Explorer: the selected lines that are still there stay selected; when none is
+    /// left (they were deleted), the line that took the place of the first of them is selected: the next line that stayed,
+    /// or the one before when nothing after it stayed. <paramref name="before"/> and <paramref name="after"/> are the
+    /// names shown, in order, without the ".." line. Empty when nothing was selected or nothing is left.
+    /// </summary>
+    public static List<string> SelectAfterReload(IReadOnlyList<string> before, IReadOnlyCollection<string> selected, IReadOnlyList<string> after,
+        StringComparer comparer)
+    {
+        if (selected.Count == 0 || after.Count == 0) return [];
+        var chosen = new HashSet<string>(selected, comparer);
+        var stayed = after.Where(chosen.Contains).ToList();
+        if (stayed.Count > 0) return stayed;
+        var left = new HashSet<string>(after, comparer);
+        var first = -1;
+        for (var at = 0; at < before.Count; at++)
+        {
+            if (!chosen.Contains(before[at])) continue;
+            first = at;
+            break;
+        }
+
+        if (first < 0) return [];
+        for (var at = first + 1; at < before.Count; at++)
+        {
+            if (!chosen.Contains(before[at]) && left.Contains(before[at])) return [before[at]];
+        }
+
+        for (var at = first - 1; at >= 0; at--)
+        {
+            if (left.Contains(before[at])) return [before[at]];
+        }
+
+        // Nothing that was shown is left (all of it changed): the line now at that place.
+        return [after[Math.Min(first, after.Count - 1)]];
+    }
+
     public static string CountText(long shown, long total)
     {
         if (total <= 0 && shown <= 0) return "Empty folder";
