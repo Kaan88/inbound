@@ -16,6 +16,11 @@
   density, artwork 52 of 108 dp, background #1C1C1C like the web app's maskable icon), in the manifest as `icon` and
   `roundIcon`; it is part of every build from now on. The clean release build with the icon is on the S24 (started, no
   crash) and on the desktop as `Inbound-android-<commit>-icon.apk`.
+  Owner, then: "could you make it transparent background, that's how it is on windows." A transparent adaptive
+  background still showed a black backdrop on the S24 ("Still a backdrop", "black"; the owner uninstalled and it was
+  reinstalled, so the app's data on the S24 started fresh). Now a plain, not adaptive, transparent icon (48 dp,
+  artwork 46 dp; no themed icon on Android 13+). Samsung's launcher shows it on its white icon frame; owner: "white
+  backdrop, love it." Release build checked with check-apk.py, on the S24 (starts, no crash) and on the desktop.
 - **Fable approved the fixes (2026-11-18, same agent `a77883b7d95665eea`).** First pass: 15 of 16 approved, finding 6
   not (Resume all, queue start and a new address requeued a failed job without the name check). Second pass at b104f6eb
   (6b8a5be8, e75fc325): approved, all 16 closed; Fable checked every path that turns a job Queued and every reader of

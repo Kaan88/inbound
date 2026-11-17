@@ -12,7 +12,7 @@ so = z.read("lib/arm64-v8a/libDownloadManager.Android.so") if "lib/arm64-v8a/lib
 checks = {
     "runtime provider in dex": b"net/dot/jni/nativeaot/NativeAotRuntimeProvider" in dex,
     "TLS callback in the library": b"Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate" in so,
-    "launcher icon": any("ic_launcher_foreground" in n for n in names) or b"ic_launcher" in z.read("resources.arsc"),
+    "launcher icon": any(n.endswith("ic_launcher.png") for n in names) or b"ic_launcher" in z.read("resources.arsc"),
 }
 if release:
     hooks = [w for w in ("probe_url", "crash_now") if w.encode("utf-16-le") in so or w.encode() in so]
