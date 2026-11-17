@@ -450,7 +450,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         };
         state.InitializeFromDisk();
 
-        var single = new SingleStreamRun(job, state);
+        var single = new SingleStreamRun(job, state, connectionsAtStart,
+            token => ProbeRunningSplitAsync(job, state, token), () => SplitRefused(job.Id));
         state.Single = single;
         lock (_runsSync)
         {
@@ -779,7 +780,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         if (status == 206 || response.Headers.AcceptRanges.Contains("bytes")) job.ResumeSupported = true;
         else if (response.Headers.AcceptRanges.Contains("none")) job.ResumeSupported = false;
         await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
-        // A raise that came before the size and range support were known takes effect now.
+        // A raise that came before the size was known takes effect now, if bytes are already saved; else at the
+        // first checkpoint below.
         state.Single?.SplitIfWanted();
 
         var contentLength = response.Content.Headers.ContentLength;
@@ -855,6 +857,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
                     lastCheckpointAt = now;
                     checkpointBytes = state.Bytes;
+                    // CONN.2: a raise that came before any durable byte splits at the first ones.
+                    state.Single?.SplitIfWanted();
                 }
             }
 
@@ -1147,13 +1151,24 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         DownloadJob job,
         DownloadCheckpoint? checkpoint,
         IProgress<TransferProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SegmentedPlan? probedPlan = null)
     {
         // CONN.2: a one-stream checkpoint (one range from byte 0, written in order) being split. Until the part is
         // grown and the split checkpoint saved, every way out leaves the bytes and checkpoint as they were, for the
-        // one stream to go on with.
+        // one stream to go on with. A running stream's split comes with the plan its probe already got.
         var fromSingle = checkpoint is { Segments.Count: 1 };
-        var probe = await ProbeSegmentedAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
+        SegmentedProbe probe;
+        if (probedPlan is not null)
+        {
+            job.ResumeSupported = true;
+            probe = new SegmentedProbe { Plan = probedPlan };
+        }
+        else
+        {
+            probe = await ProbeSegmentedAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
+        }
+
         if (fromSingle && (probe.Failure is not null || probe.Plan is not { } singlePlan ||
                            !CanSplitSingleStream(job, checkpoint!, singlePlan)))
         {
@@ -1371,7 +1386,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 _splitRefused.Add(job.Id);
             }
 
-            await ResetSegmentedAsync(job).ConfigureAwait(false);
+            if (fromSingle)
+            {
+                // The stream's prefix is still good: it goes on from there, not from zero.
+                await KeepSingleStreamPrefixAsync(job, checkpoint!).ConfigureAwait(false);
+            }
+            else
+            {
+                await ResetSegmentedAsync(job).ConfigureAwait(false);
+            }
+
             return null;
         }
 
@@ -1425,8 +1449,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         {
             var probe = await ProbeSegmentedOnceAsync(job, checkpoint is not null, cancellationToken).ConfigureAwait(false);
 
-            // Without saved progress the single-stream path takes over and does its own retrying.
-            if (probe.Failure is null || !probe.IsRetryable || checkpoint is null || attempt >= _options.MaxAttempts)
+            // Without saved segmented progress the single-stream path takes over and does its own retrying, also
+            // for a one-stream checkpoint a raised count would have split (CONN.2).
+            if (probe.Failure is null || !probe.IsRetryable || checkpoint is not { Segments.Count: > 1 } ||
+                attempt >= _options.MaxAttempts)
             {
                 return probe;
             }
@@ -1446,7 +1472,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
-    private async Task<SegmentedProbe> ProbeSegmentedOnceAsync(DownloadJob job, bool hasLocalData, CancellationToken cancellationToken)
+    /// <param name="recordRangeSupport">False for a probe beside a running stream, whose answer must not change what
+    /// the job knows about range support.</param>
+    private async Task<SegmentedProbe> ProbeSegmentedOnceAsync(
+        DownloadJob job,
+        bool hasLocalData,
+        CancellationToken cancellationToken,
+        bool recordRangeSupport = true)
     {
         try
         {
@@ -1490,7 +1522,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
             if (status != 206)
             {
-                job.ResumeSupported = false;
+                if (recordRangeSupport) job.ResumeSupported = false;
                 return new SegmentedProbe();
             }
 
@@ -1500,7 +1532,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 return new SegmentedProbe();
             }
 
-            job.ResumeSupported = true;
+            if (recordRangeSupport) job.ResumeSupported = true;
             if (!hasLocalData) AdoptServerName(job, response);
             return new SegmentedProbe
             {

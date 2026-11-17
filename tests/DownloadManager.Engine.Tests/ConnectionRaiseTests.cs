@@ -195,6 +195,141 @@ public sealed class ConnectionRaiseTests(TestServerFixture fixture) : IDisposabl
         Assert.True(Interlocked.Read(ref least) >= split.CompletedBytes);
     }
 
+    private DownloadJob OddJob(string name, string mode, int size, int seed, int bps)
+    {
+        var final = Path.Combine(Destination, name);
+        return new DownloadJob
+        {
+            Url = $"{_server.BaseAddress}/oddrange/{name}?mode={mode}&size={size}&seed={seed}&bps={bps}",
+            FileName = name,
+            DestinationDirectory = Destination,
+            FinalFilePath = final,
+            PartFilePath = final + $".{Guid.NewGuid():N}.part",
+            RequestedConnections = 1,
+        };
+    }
+
+    /// <summary>
+    /// A raise probes while the stream runs, and a probe that can't prove the split leaves the stream alone: a server
+    /// that says Accept-Ranges but ignores Range (ignore), and a link that takes no new request (once). Stopping the
+    /// stream first cost the first one a restart from zero and failed the second.
+    /// </summary>
+    [Theory]
+    [InlineData("ignore", 931)]
+    [InlineData("once", 932)]
+    public async Task ARaiseThatCannotSplitLeavesTheRunningStreamAlone(string mode, int seed)
+    {
+        const int size = 6 * Megabyte;
+        var name = $"raise-probe-{mode}.bin";
+        var engine = Engine();
+        var job = OddJob(name, mode, size, seed, Megabyte);
+        var bytes = 0L;
+        var least = long.MaxValue;
+        var raised = false;
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p =>
+        {
+            Interlocked.Exchange(ref bytes, p.ReceivedBytes);
+            if (Volatile.Read(ref raised)) InterlockedMin(ref least, p.ReceivedBytes);
+        }), CancellationToken.None);
+        await UntilAsync(() => Interlocked.Read(ref bytes) > Megabyte, "the single stream to be under way");
+
+        var atRaise = Interlocked.Read(ref bytes);
+        Volatile.Write(ref raised, true);
+        job.RequestedConnections = 4;
+        engine.ConnectionsChanged(job.Id);
+
+        await AssertFileAsync(await run.WaitAsync(Patience), seed, size);
+        Assert.True(Interlocked.Read(ref least) >= atRaise,
+            $"the transfer went back to {Interlocked.Read(ref least)} bytes from {atRaise}: the stream was stopped");
+        Assert.Equal(2, _server.OddRangeRequests(name));
+    }
+
+    /// <summary>
+    /// The server answers the probe with 206 but a segment with 200, after the split began. The stream's prefix is
+    /// kept, and a later change no longer touches the stream.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedSplitKeepsThePrefixAndLaterChangesLeaveTheStreamAlone()
+    {
+        const int size = 8 * Megabyte;
+        const int seed = 941;
+        const string name = "raise-refused.bin";
+        var engine = Engine();
+        var job = OddJob(name, "closed", size, seed, Megabyte);
+        var bytes = 0L;
+        var least = long.MaxValue;
+        var raised = false;
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p =>
+        {
+            Interlocked.Exchange(ref bytes, p.ReceivedBytes);
+            if (Volatile.Read(ref raised)) InterlockedMin(ref least, p.ReceivedBytes);
+        }), CancellationToken.None);
+        await UntilAsync(() => Interlocked.Read(ref bytes) > Megabyte, "the single stream to be under way");
+
+        var atRaise = Interlocked.Read(ref bytes);
+        Volatile.Write(ref raised, true);
+        job.RequestedConnections = 4;
+        engine.ConnectionsChanged(job.Id);
+
+        // The segments wrote nothing, so bytes this far past the raise come from the stream going on after the refusal.
+        await UntilAsync(() => Interlocked.Read(ref bytes) > atRaise + 2 * Megabyte || run.IsCompleted, "the stream to go on");
+        Assert.False(run.IsCompleted, "the download ended before the second change could be tried");
+        var requests = _server.OddRangeRequests(name);
+        job.RequestedConnections = 8;
+        engine.ConnectionsChanged(job.Id);
+        await Task.Delay(500);
+        Assert.Equal(requests, _server.OddRangeRequests(name));
+
+        await AssertFileAsync(await run.WaitAsync(Patience), seed, size);
+        Assert.True(Interlocked.Read(ref least) >= atRaise,
+            $"the transfer went back to {Interlocked.Read(ref least)} bytes from {atRaise}: the refused split cost the prefix");
+    }
+
+    /// <summary>A raise before the first response: the stream splits at its first saved bytes rather than never.</summary>
+    [Fact]
+    public async Task ARaiseBeforeTheFirstResponseSplitsAtTheFirstSavedBytes()
+    {
+        const int size = 8 * Megabyte;
+        const int seed = 951;
+        var engine = Engine();
+        var job = Job("raise-early.bin", size, seed, 512 * 1024, provider: false);
+        var connections = 0;
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p => InterlockedMax(ref connections, p.ActiveConnections)),
+            CancellationToken.None);
+        job.RequestedConnections = 4;
+        engine.ConnectionsChanged(job.Id);
+
+        await AssertFileAsync(await run.WaitAsync(Patience), seed, size);
+        Assert.True(Volatile.Read(ref connections) >= 3, $"the early raise was lost (at most {connections} connections)");
+    }
+
+    /// <summary>A stopped one-stream job resumed with a raised count from a busy server: one probe, then the stream's own retries.</summary>
+    [Fact]
+    public async Task AFailedSplitProbeOnResumeIsTriedOnce()
+    {
+        const int size = 8 * Megabyte;
+        const string name = "raise-busy.bin";
+        var engine = Engine();
+        var job = OddJob(name, "busy", size, 961, 512 * 1024);
+        var bytes = 0L;
+        using (var stop = new CancellationTokenSource())
+        {
+            var first = engine.ExecuteAsync(job, null, new SyncProgress(p => Interlocked.Exchange(ref bytes, p.ReceivedBytes)), stop.Token);
+            await UntilAsync(() => Interlocked.Read(ref bytes) > Megabyte, "the single stream to be under way");
+            stop.Cancel();
+            Assert.Equal(DownloadState.Cancelled, (await first.WaitAsync(Patience)).FinalState);
+        }
+
+        var checkpoint = await Checkpoints.LoadAsync(job.Id);
+        Assert.Single(checkpoint!.Segments);
+        job.RequestedConnections = 4;
+        var result = await engine.ExecuteAsync(job, checkpoint, null, CancellationToken.None).WaitAsync(Patience);
+
+        Assert.Equal(DownloadState.Failed, result.FinalState);
+        // The first run's request, one probe, and the stream's MaxAttempts (3).
+        Assert.Equal(1 + 1 + 3, _server.OddRangeRequests(name));
+    }
+
     private static string Sha256Of(int seed, int size)
         => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(seed, size))).ToLowerInvariant();
 
