@@ -247,9 +247,11 @@ else {
     $env:WEB_EXT_API_SECRET = $keys.secret
     Push-Location $extension
     try {
-        # Unlisted versions are signed automatically, usually within minutes. A listed one is submitted for review and
-        # no file comes back (web-ext does not wait for it).
-        & npx --no-install web-ext sign @webExtArgs --source-dir $stageSource --artifacts-dir $stageOut --approval-timeout 900000
+        # Unlisted versions are signed automatically, usually within minutes, and web-ext waits up to 15 minutes for the
+        # file. A listed one is submitted for review: an approval timeout of 0 makes web-ext return after the upload and
+        # the source code (with any other value it polls until approval and fails when the time runs out).
+        $approvalTimeout = if ($Channel -eq "listed") { "0" } else { "900000" }
+        & npx --no-install web-ext sign @webExtArgs --source-dir $stageSource --artifacts-dir $stageOut --approval-timeout $approvalTimeout
         $signExit = $LASTEXITCODE
     }
     finally {

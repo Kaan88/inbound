@@ -17,6 +17,7 @@
             { "text": "Inbound remembers the last folder and sort of each remote, and takes PuTTY .ppk keys for SFTP.", "tags": ["all"] },
             { "text": "The web UI has the same Remote files pages, made for a phone too: tick boxes, an action bar, bottom sheets, Select all and a filter. Downloads go to the server; \"To this device\" is a choice in the Download dialog.", "tags": ["webui", "server"] },
             { "text": "dm sites rclone downloads rclone for Remote files from the command line.", "tags": ["all"] },
+            { "text": "Connections per server is in Options > Connection and the Downloads menu; it caps all downloads from one server, and the menu says when it is lower than Connections per download.", "tags": ["all"] },
             { "text": "The browser extension's toolbar ring is easier to see, and a count marks downloads that finished since the popup was last opened.", "tags": ["extension"] },
             { "text": "The extension can show a \"Download finished\" notification with Open and Show in folder, or open its popup when a download finishes. Choose in its options.", "tags": ["extension"] },
             { "text": "The extension's popup has a \"Finished just now\" divider and a Clear finished button, and its tooltip names the newest finished file.", "tags": ["extension"] }

@@ -284,7 +284,14 @@ public sealed partial class MainWindow
         if (!inLocal && _leftRemote is { Visibility: Visibility.Visible } && FocusIsIn(_leftRemote))
         {
             // The left remote pane is read-only here: its keys never act on the right pane.
-            if (e.Key is VirtualKey.Enter or VirtualKey.U or VirtualKey.N or VirtualKey.D or VirtualKey.C && !(e.Key == VirtualKey.Enter && shift))
+            // Only the keys the switch below acts on, so Ctrl+N (Add URL) and the other window keys still work.
+            var paneKey = e.Key switch
+            {
+                VirtualKey.Enter or VirtualKey.U or VirtualKey.D => !shift,
+                VirtualKey.N or VirtualKey.C => shift,
+                _ => false,
+            };
+            if (paneKey)
             {
                 if (e.Key is VirtualKey.U or VirtualKey.N) SetSitesStatus(LeftChangeNote);
                 e.Handled = true;

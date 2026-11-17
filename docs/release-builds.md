@@ -259,12 +259,15 @@ everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign
    since no earlier release has that file. Otherwise the workflow takes it from the newest earlier release that has
    it. Either way it is checked against the hash in `extensions/firefox-updates.json`.
    If addons.mozilla.org hasn't approved the listed Firefox version yet, there is no XPI to attach and the build would
-   fail at that step. Instead run Windows build by hand (Actions, Windows build, Run workflow) with the tag and
-   `no_firefox_xpi` ticked (do not push the tag for this): the Firefox add-on step is skipped, Setup is built with
-   `-NoFirefoxXpi` (it then just links the AMO listing), and the draft release gets five files (no XPI;
-   `SHA256SUMS` lists only what is there). After AMO approves the version, add its entry (for example 0.7.0) to
+   fail at that step. Instead push the tag alone first (`git push origin vX.Y.Z`; the by-hand run checks out the tag
+   and `gh release create --verify-tag` needs it on GitHub). The Windows build that the push starts fails at "Signed
+   Firefox add-on" (no entry for the extension version in `extensions/firefox-updates.json`), before anything is
+   signed or released; that is expected. Then run Windows build by hand (Actions, Windows build, Run workflow) with
+   the tag and `no_firefox_xpi` ticked: the Firefox add-on step is skipped, Setup is built with `-NoFirefoxXpi` (its
+   finish page then links the AMO listing), and the draft release gets five files (no XPI; `SHA256SUMS` lists only
+   what is there). Skip step 3 in this case. After AMO approves the version, add its entry (for example 0.7.0) to
    `extensions/firefox-updates.json`, pointing at the AMO file with its hash, so unlisted 0.6.x installs move over to
-   the listed add-on, and push `main`. A pushed tag always requires the XPI.
+   the listed add-on, and push `main`. A run started by a pushed tag always requires the XPI.
 3. Push the tag alone (`git push origin vX.Y.Z`). The Windows build runs: Setup, the zip, `manifest.json` signed with
    the `UPDATE_SIGNING_KEY` secret (and refused unless its `public.pem` equals the latest release's), `SHA256SUMS`, all
    six files in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
