@@ -29,6 +29,7 @@
   - Tests after the merge: Core 2574, Sites 260 (+32 skipped), Integration Site/Cli 211 and dispatcher 309 (one test
     updated for "all"), Server 202, webui 819, extension 360; solution 0 errors.
   - Test copy republished to `artifacts\app-r8` (r7's was in use); the launcher points there.
+- **Owner, 2026-11-17, on app-r8:** web UI left pane items have no context menu; the desktop window crashes as soon as a remote is chosen in the left pane (0xc000027b, stowed exception). Fixing (SITES.14).
 - **Waiting for the owner:**
   1. **Walk the test copy** (R7): `artifacts\r7\Start Inbound test.cmd` starts `artifacts\app-r7` (published
      2026-11-17 from main, Medium label) with its own Host and data in `artifacts\r7\data`. Not started by me.
