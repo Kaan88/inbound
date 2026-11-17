@@ -6,8 +6,8 @@
   SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
   effort checks each major addition, Fable reviews once at the end.
 - **Waiting for the owner:**
-  1. **Walk the test copy** (R7): `artifacts7\Start Inbound test.cmd` starts `artifactspp-r7` (published
-     2026-11-17 from main, Medium label) with its own Host and data in `artifacts7\data`. Not started by me.
+  1. **Walk the test copy** (R7): `artifacts\r7\Start Inbound test.cmd` starts `artifacts\app-r7` (published
+     2026-11-17 from main, Medium label) with its own Host and data in `artifacts\r7\data`. Not started by me.
   2. **EXT.R15 decided** (owner: "I like the popup. put it in store versions, off by default."): done; one setting,
      "When a download finishes", default Flash the icon; the test-only build removed. Extension 355 tests pass.
   3. **Pick from the ideas** in ROADMAP SITES.13 and EXT.R16 (shown to the owner in plain words 2026-11-17).
