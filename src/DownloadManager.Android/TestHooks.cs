@@ -14,6 +14,9 @@ namespace Inbound.App;
 ///       seeds <c>seed</c> jobs: seed-real idle ones (added with "later", they never run) and <c>real</c> throttled downloads from the test server.
 ///   am start -n app.inbound.android/.MainActivity --es add_url http://127.0.0.1:8765/bench.bin?size=1048576
 ///       adds one download by URL and starts it now (the default folder, so it lands in Download/).
+///   am start -n app.inbound.android/.MainActivity --ez log_state true
+///       logs one "InboundTest keepalive=true|false why=hook running=... active=... paused=..." line (the keep-alive and ActivitySummary
+///       state); the same line is also logged on every keep-alive flip (why=flip).
 /// Logs "InboundTest" lines ("seeded=...", "added accepted=...") for the script to wait on.
 /// </summary>
 internal static class TestHooks
@@ -23,6 +26,12 @@ internal static class TestHooks
     public static void Run(DownloadsModel model, Intent? intent)
     {
         if (intent is null) return;
+        if (intent.GetBooleanExtra("log_state", false))
+        {
+            intent.RemoveExtra("log_state");
+            Inbound.App.Background.InboundBackground.LogState("hook");
+        }
+
         var seed = intent.GetIntExtra("seed", 0);
         var real = intent.GetIntExtra("real", 3);
         var server = intent.GetStringExtra("server") ?? "http://127.0.0.1:8765";

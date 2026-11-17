@@ -1,0 +1,136 @@
+using DownloadManager.Contracts;
+
+namespace DownloadManager.Mobile;
+
+/// <summary>What the ongoing notification says, as plain values (the Android side only puts them into a Notification).</summary>
+/// <param name="Title">First line, e.g. "2 downloads · 16.1 MB/s".</param>
+/// <param name="Body">Second line (the first file and its time left); null when there is none.</param>
+/// <param name="Max">Bar range (<see cref="NotificationText.BarMax"/>).</param>
+/// <param name="Progress">Bar position within <paramref name="Max"/>; meaningless when <paramref name="Indeterminate"/>.</param>
+/// <param name="Indeterminate">The bar runs without a position (a size is not known).</param>
+public sealed record OngoingText(string Title, string? Body, int Max, int Progress, bool Indeterminate);
+
+/// <summary>The words of the phone's notifications (mockup A7). Plain .NET so they are tested without a phone.</summary>
+public static class NotificationText
+{
+    public const int BarMax = 1000;
+
+    /// <summary>The ongoing notification for a summary: "2 downloads · 16.1 MB/s", the first file and its time left, and a bar.</summary>
+    public static OngoingText Ongoing(ActivitySummary s)
+    {
+        if (s.ActiveCount <= 0)
+            return new OngoingText("Starting downloads", null, BarMax, 0, true);
+
+        var title = s.ActiveCount == 1 ? "1 download" : s.ActiveCount + " downloads";
+        if (s.BytesPerSecond >= 1) title += " · " + Fmt.Rate(s.BytesPerSecond);
+
+        string? body = null;
+        if (s.First is { } f)
+        {
+            body = f.Name;
+            if (f.TimeLeft is { } left && left > TimeSpan.Zero) body += " · " + Fmt.Eta(left.TotalSeconds);
+        }
+
+        // One file: its own bytes. Several: the combined bytes, only when every size is known.
+        long received, total;
+        if (s.ActiveCount == 1 && s.First is { } one) { received = one.ReceivedBytes; total = one.TotalBytes ?? 0; }
+        else { received = s.ActiveReceivedBytes; total = s.ActiveTotalBytes ?? 0; }
+        if (total <= 0) return new OngoingText(title, body, BarMax, 0, true);
+        var pos = (int)Math.Clamp(received * (double)BarMax / total, 0, BarMax);
+        return new OngoingText(title, body, BarMax, pos, false);
+    }
+
+    /// <summary>Shown after "Pause all" when only paused downloads remain.</summary>
+    public static string Paused(int count) => count == 1 ? "1 download paused" : count + " downloads paused";
+
+    /// <summary>The finished notification's second line: "Finished · 640 MB · Tap to open".</summary>
+    public static string FinishedBody(FinishedJob job) => "Finished · " + Fmt.Bytes(job.SizeBytes) + " · Tap to open";
+
+    public const string Resuming = "Resuming downloads";
+}
+
+/// <summary>What the user-initiated data transfer job is told about the bytes it is expected to move.</summary>
+public static class SessionBytes
+{
+    /// <summary>Used when a size is not known: a transfer of unknown size is guessed rather than declared empty.</summary>
+    public const long UnknownEstimate = 500_000_000;
+
+    private const long MinEstimate = 1_000_000;
+    private const long NotableAbsolute = 50_000_000;
+
+    /// <summary>The estimate: what is left across the active downloads, or a fixed guess when any size is unknown.</summary>
+    public static long Estimate(ActivitySummary s) =>
+        s.ActiveTotalBytes is { } total ? Math.Max(MinEstimate, total - s.ActiveReceivedBytes) : UnknownEstimate;
+
+    /// <summary>Whether a new estimate differs enough from the last one sent to be worth another call (a quarter, and at least 50 MB).</summary>
+    public static bool NotableChange(long last, long next) =>
+        Math.Abs(next - last) >= Math.Max(NotableAbsolute, last / 4);
+}
+
+/// <summary>
+/// Turns "bytes received across the active downloads" (which drops when a download leaves the active set) into a growing total of bytes
+/// transferred this session, and says when it is worth reporting (the system is told at most every few seconds and megabytes).
+/// </summary>
+public sealed class TransferMeter(long minStepBytes = 2_000_000, TimeSpan? minInterval = null)
+{
+    private readonly TimeSpan _interval = minInterval ?? TimeSpan.FromSeconds(5);
+    private long _last;
+    private long _total;
+    private long _reported;
+    private DateTimeOffset _reportedAt = DateTimeOffset.MinValue;
+
+    /// <summary>Bytes counted so far.</summary>
+    public long Total => _total;
+
+    /// <summary>Starts a new session: nothing counted, the next observation is the basis.</summary>
+    public void Reset()
+    {
+        _last = 0; _total = 0; _reported = 0; _reportedAt = DateTimeOffset.MinValue;
+    }
+
+    /// <summary>One observation. Returns the total to report, or null when it is too soon or too little.</summary>
+    public long? Observe(long receivedAcrossActive, DateTimeOffset now)
+    {
+        // A drop means a download left the set (its bytes were counted while it grew): rebase, add nothing.
+        if (receivedAcrossActive > _last) _total += receivedAcrossActive - _last;
+        _last = receivedAcrossActive;
+        if (_total - _reported < minStepBytes || now - _reportedAt < _interval) return null;
+        _reported = _total;
+        _reportedAt = now;
+        return _total;
+    }
+}
+
+/// <summary>One historical process exit, as the platform reports it: the state summary the process saved, the reason code and the time.</summary>
+public sealed record ExitRecord(byte[]? StateSummary, int Reason, long TimestampMs);
+
+/// <summary>The decision and the words for the log line.</summary>
+public sealed record UserStopDecision(bool StoppedByUser, string Why);
+
+/// <summary>
+/// Whether the previous run of the app was stopped by the user (Task Manager "Stop", Settings "Force stop"): the platform gives no callback for
+/// it, but the next start can read the exit records. Every run saves a fresh id as its process state summary, and the next run looks for the
+/// newest record that carries the id of the run before it, so a record is used once (the id changes with every start) and an unrelated exit
+/// is never taken for it. A reboot leaves no record for that run.
+/// </summary>
+public static class UserStopDetector
+{
+    /// <summary>ApplicationExitInfo.REASON_USER_REQUESTED.</summary>
+    public const int ReasonUserRequested = 10;
+
+    public static UserStopDecision Decide(byte[]? previousRunId, IEnumerable<ExitRecord> records)
+    {
+        if (previousRunId is null || previousRunId.Length == 0) return new UserStopDecision(false, "no previous run id saved (first start)");
+        ExitRecord? newest = null;
+        foreach (var r in records)
+        {
+            if (r.StateSummary is null || !r.StateSummary.AsSpan().SequenceEqual(previousRunId)) continue;
+            if (newest is null || r.TimestampMs > newest.TimestampMs) newest = r;
+        }
+
+        if (newest is null) return new UserStopDecision(false, "no exit record for the previous run (reboot, or it is still listed as running)");
+        return newest.Reason == ReasonUserRequested
+            ? new UserStopDecision(true, "the previous run ended with reason 10 (stopped by the user)")
+            : new UserStopDecision(false, "the previous run ended with reason " + newest.Reason + " (not the user)");
+    }
+}

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The download folder AndroidHost.SharedDownloadFolder (/storage/emulated/0/Download): what a "Finished" notification opens. -->
+<paths>
+  <external-path name="downloads" path="Download/" />
+</paths>

@@ -1,12 +1,13 @@
 using Android.App;
 using Android.Runtime;
+using Inbound.App.Background;
 using Inbound.App.Host;
 
 namespace Inbound.App;
 
 /// <summary>
-/// Owns the in-process Host: it is started once per process, on first need, and lives as long as the process (step 2 moves it into a
-/// foreground service). Also sets the runtime environment of a release build.
+/// Owns the in-process Host: it is started once per process, on first need, and lives as long as the process (the keep-alive in
+/// Background/ holds the process while downloads can transfer). Also sets the runtime environment of a release build.
 /// </summary>
 [Application(Name = "app.inbound.android.InboundApplication")]
 public sealed class InboundApplication : Application
@@ -21,6 +22,9 @@ public sealed class InboundApplication : Application
     public override void OnCreate()
     {
         base.OnCreate();
+        // Every process start, whatever started it (the app, a job, a notification action): this run's id, and the previous run's kept for the Host start.
+        RunTracker.Begin(this);
+        InboundBackground.Init(this);
 #if INBOUND_RELEASE_ENV
         // The sockets read this switch once, at first use (before the Host starts). The project also lists it as an AndroidEnvironment
         // file; this makes sure it is set when that file is not applied (NativeAOT).
@@ -45,8 +49,14 @@ public sealed class InboundApplication : Application
             if (_host is { IsCanceled: true } ||
                 (_host is { IsFaulted: true } && _host.Exception?.InnerException is not HostLeftRunningException)) _host = null;
             var root = StateRoot(c);
-            return _host ??= Task.Run(() => AndroidHost.StartAsync(root, AndroidHost.SharedDownloadFolder,
-                m => Android.Util.Log.Info(Tag, m), CancellationToken.None));
+            var app = c.ApplicationContext!;
+            return _host ??= Task.Run(async () =>
+            {
+                var host = await AndroidHost.StartAsync(root, AndroidHost.SharedDownloadFolder, new AndroidSleepPrevention(app),
+                    RunTracker.LastRunStoppedByUser(app), m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
+                InboundBackground.OnHostStarted(app, host);
+                return host;
+            });
         }
     }
 }

@@ -1,5 +1,6 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Mobile;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;
@@ -59,13 +60,25 @@ internal sealed class AndroidHost : IAsyncDisposable
     private readonly HttpDownloadEngine _engine;
     private readonly Action<string> _say;
 
-    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, Action<string> say)
+    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, ActivityState activity,
+        ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, Action<string> say)
     {
         Service = service;
         Dispatcher = dispatcher;
         _engine = engine;
+        Activity = activity;
+        _sleep = sleep;
+        _onJob = onJob;
+        _onWait = onWait;
         _say = say;
     }
+
+    private readonly ISleepPrevention _sleep;
+    private readonly EventHandler<JobChangeEventArgs> _onJob;
+    private readonly EventHandler<bool> _onWait;
+
+    /// <summary>What the keep-alive and the notifications read: fed by the service's job events, snapshot first.</summary>
+    public ActivityState Activity { get; }
 
     public DownloadManagerService Service { get; }
 
@@ -73,7 +86,10 @@ internal sealed class AndroidHost : IAsyncDisposable
 
     /// <param name="stateRoot">The app's private folder for settings, job list and checkpoints (metadata only).</param>
     /// <param name="defaultDownloadFolder">Becomes the default download folder while that setting is still the built-in default (nobody set one).</param>
-    public static async Task<AndroidHost> StartAsync(string stateRoot, string defaultDownloadFolder, Action<string> say, CancellationToken ct)
+    /// <param name="sleep">Held by the Runtime while downloads run and the setting is on (wake lock, Wi-Fi lock).</param>
+    /// <param name="lastRunStoppedByUser">The previous run was stopped by the user: downloads that were running start Paused.</param>
+    public static async Task<AndroidHost> StartAsync(string stateRoot, string defaultDownloadFolder, ISleepPrevention sleep,
+        bool lastRunStoppedByUser, Action<string> say, CancellationToken ct)
     {
         var paths = new StoragePaths(stateRoot);
         paths.EnsureCreated();
@@ -100,7 +116,7 @@ internal sealed class AndroidHost : IAsyncDisposable
         DownloadManagerService service;
         try
         {
-            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info);
+            service = new DownloadManagerService(paths, jobStore, checkpointStore, settingsStore, engine, log.Info, sleepPrevention: sleep);
         }
         catch
         {
@@ -108,9 +124,15 @@ internal sealed class AndroidHost : IAsyncDisposable
             throw;
         }
 
+        // Subscribe first, then take the snapshot (ActivityState ignores events that come before its snapshot).
+        var activity = new ActivityState();
+        EventHandler<JobChangeEventArgs> onJob = (_, e) => activity.OnJobChanged(e.Job, e.ChangeType);
+        EventHandler<bool> onWait = (_, waiting) => activity.SetNetworkWait(waiting);
+        service.JobChanged += onJob;
+        service.MeteredWaitChanged += onWait;
         try
         {
-            await service.InitializeAsync(ct).ConfigureAwait(false);
+            await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);
             service.TrayAvailable = false;
 
             // Default destination while none was ever set: the shared Download folder, directly (owner, 2026-11-16: no
@@ -122,16 +144,24 @@ internal sealed class AndroidHost : IAsyncDisposable
                 var settings = service.GetSettings();
                 settings.DefaultDownloadDirectory = defaultDownloadFolder;
                 settings.UseCategoryFolders = false;
+                // First run: keep the CPU and the radio awake while downloading (the model default is already on; this makes
+                // the first-run choice explicit, and a later change by the user is never overwritten, since it only runs here).
+                settings.PreventSleepWhileDownloading = true;
                 var result = await service.UpdateSettingsAsync(settings, ct).ConfigureAwait(false);
                 if (!result.Ok) say("[host WARN] default download folder not set: " + result.Error);
             }
 
+            var snapshot = service.GetSnapshot();
+            activity.ApplySnapshot(snapshot.Jobs, snapshot.Status, snapshot.Settings.Queues);
             var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log);
             dispatcher.Start();
-            return new AndroidHost(service, dispatcher, engine, say);
+            return new AndroidHost(service, dispatcher, engine, activity, sleep, onJob, onWait, say);
         }
         catch (Exception startError)
         {
+            service.JobChanged -= onJob;
+            service.MeteredWaitChanged -= onWait;
+            activity.Dispose();
             // Nothing half-started may keep writing to the state folder: a later start must be the only writer.
             try { await service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception ex)
@@ -150,8 +180,12 @@ internal sealed class AndroidHost : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Dispatcher.Stop();
+        Service.JobChanged -= _onJob;
+        Service.MeteredWaitChanged -= _onWait;
+        Activity.Dispose();
         try { await Service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] shutdown: " + ex.GetType().Name + ": " + ex.Message); }
         _engine.Dispose();
+        _sleep.Dispose();
     }
 }

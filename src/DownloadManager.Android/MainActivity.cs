@@ -11,6 +11,7 @@ using AndroidX.Core.View;
 using AndroidX.RecyclerView.Widget;
 using DownloadManager.Mobile;
 using Google.Android.Material.ProgressIndicator;
+using Inbound.App.Background;
 using Inbound.App.Host;
 
 namespace Inbound.App;
@@ -50,6 +51,8 @@ public sealed class MainActivity : AppCompatActivity
         list.SetAdapter(adapter);
         list.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
         fab.Click += (_, _) => ShowAddSheet();
+        AskForNotifications();
+        HandleResumeAll(Intent);
 
         var reported = false;
         _model.FirstSnapshotShown += () =>
@@ -103,21 +106,58 @@ public sealed class MainActivity : AppCompatActivity
         new Handler(Looper.MainLooper!).Post(() => Toast.MakeText(app, text, ToastLength.Long)!.Show());
     }
 
-#if INBOUND_TEST_BUILD
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
+        HandleResumeAll(intent);
+#if INBOUND_TEST_BUILD
         if (_model is not null) TestHooks.Run(_model, intent);
-        SpikeHooks.Run(this, intent);
+#endif
     }
 
-    protected override void OnResume()
+    // The app is visible between OnStart and OnStop: only then may a keep-alive session be started (a background start is refused by the system).
+    protected override void OnStart()
     {
-        base.OnResume();
-        // After the first frame, so the activity is visible when a spike schedules a UIDT job.
-        Window?.DecorView.Post(() => SpikeHooks.Run(this, Intent));
+        base.OnStart();
+        InboundBackground.SetVisible(true);
     }
-#endif
+
+    protected override void OnStop()
+    {
+        InboundBackground.SetVisible(false);
+        base.OnStop();
+    }
+
+    /// <summary>The "Resume" action of the paused notification: resume everything; the keep-alive follows by itself (the app is visible).</summary>
+    private void HandleResumeAll(Intent? intent)
+    {
+        if (intent is null || !intent.GetBooleanExtra(Notifications.ExtraResumeAll, false)) return;
+        intent.RemoveExtra(Notifications.ExtraResumeAll);
+        var app = ApplicationContext!;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var host = await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
+                await host.Service.ResumeAllAsync().ConfigureAwait(false);
+                Log.Info(InboundApplication.Tag, "resume all (notification)");
+                InboundBackground.Evaluate();
+            }
+            catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "resume all: " + ex); }
+        });
+    }
+
+    /// <summary>API 33 and up: asks once, at the first start. Denied is fine: everything still runs, there is just no notification.</summary>
+    private void AskForNotifications()
+    {
+        if (!OperatingSystem.IsAndroidVersionAtLeast(33)) return;
+        const string permission = "android.permission.POST_NOTIFICATIONS";
+        if (CheckSelfPermission(permission) == Android.Content.PM.Permission.Granted) return;
+        var prefs = GetSharedPreferences("inbound", FileCreationMode.Private)!;
+        if (prefs.GetBoolean("asked_notifications", false)) return;
+        prefs.Edit()!.PutBoolean("asked_notifications", true)!.Apply();
+        RequestPermissions([permission], 1);
+    }
 
     protected override void OnDestroy()
     {
