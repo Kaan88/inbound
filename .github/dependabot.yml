@@ -42,6 +42,11 @@ updates:
       tests:
         patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet.*"]
         update-types: ["minor", "patch"]
+      # Major versions of the test tools in one PR for every test project, not one PR per package and project
+      # (2026-11-17: 18 PRs at once).
+      tests-major:
+        patterns: ["xunit*", "Microsoft.NET.Test.Sdk", "coverlet.*"]
+        update-types: ["major"]
       other:
         patterns: ["*"]
         update-types: ["minor", "patch"]
