@@ -180,6 +180,18 @@ export function testWorks(signs: boolean, seconds: number, items?: number | null
   return `It works. ${signs ? 'Signed in' : 'Connected'} and listed the start folder${count} in ${seconds.toFixed(1)} s.`;
 }
 
+// ---- Test before save (SITES.13) ----
+
+/** What a form says to the Host, to tell whether it changed since it was last tested. */
+export const formSignature = (request: unknown): string => JSON.stringify(request);
+
+/** Save tries the form first when it changed since the last test; a sign-in remote is tried by signing in, not here. */
+export const needsTestBeforeSave = (signature: string, tested: string | null, signs: boolean): boolean => !signs && signature !== tested;
+
+/** The Save button: "Save anyway" once the test of this very form failed. */
+export const saveButtonText = (busy: boolean, testing: boolean, lastFailed: boolean): string =>
+  testing ? 'Testing…' : busy ? 'Saving…' : lastFailed ? 'Save anyway' : 'Save';
+
 /** The Test line for the Host's answer to the form's draft (sites.testDraft). */
 export function draftTestText(result: SiteResult & { itemCount?: number | null; offeredKeys?: unknown[] | null; certificate?: { cannotTrust?: string | null } | null }, signs: boolean, seconds: number): string {
   if (result.ok) return testWorks(signs, seconds, result.itemCount);

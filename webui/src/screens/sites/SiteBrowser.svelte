@@ -13,16 +13,17 @@
   import { store } from '../../lib/store.svelte';
   import {
     crumbs, deviceDownloadUrl, hereHeading, hereText, joinPath, nameProblem, parentPath, problems, starLabel, uploadToSite,
-    type Site, type SiteBrowseResult, type SiteItem, type SiteResult,
+    type Site, type SiteBrowseResult, type SiteTransfer, type SiteItem, type SiteResult,
   } from '../../lib/sites';
   import type { FolderBrowseResult } from '../../lib/types';
   import {
-    actionable, activation, addressesOf, autoRetryAllowed, commandKey, deleteText, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
+    actionable, activation, addressesOf, pathsOf, autoRetryAllowed, commandKey, deleteText, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
     filterMatches, fixButtonText, fixable, footerText, hereTone, isCantReach, keptSelection, kindChip, lastListedText, linkedLine, nextSort,
     notRetryingText, onRowControl, pathFromText, remoteMenu, retryAtText, retryDelaySeconds, rowKeys, rowsOf, serverDownload, serverFolder,
     serverUpload, sizeText, sortRows, troubleTitle, troubleWhy, uploadSourceProblem,
     type DownloadTrigger, type RemoteCommand, type Row, type SortKey,
   } from '../../lib/sitesBrowse';
+  import { startedText } from '../../lib/sitesTransfers';
   import { applyHere, hereNames, needsPassword, phoneActions, phoneRowLine } from '../../lib/sitesHome';
   import ServerFolders from './ServerFolders.svelte';
   import SiteFix from './SiteFix.svelte';
@@ -373,13 +374,15 @@
 
   /** Download means the server: into its folder, going on if this tab is closed (bug 1). */
   async function toServer(list: SiteItem[], folder: string, conflict = 'keepBoth'): Promise<boolean> {
-    const result = await store.ask<{ ok: boolean; message?: string }>('sites.transfer.start', serverDownload(site.id, path, folder, list, conflict));
+    const result = await store.ask<{ ok: boolean; message?: string; transfer?: SiteTransfer }>('sites.transfer.start', serverDownload(site.id, path, folder, list, conflict));
     if (!result.ok) {
       dialogError = result.message ?? 'The download did not start.';
       store.toast(dialogError, 'error');
       return false;
     }
-    store.toast(`Downloading to ${hostName}. Its progress is under Transfers.`);
+    store.toast(startedText(list.length === 1 ? list[0].name : `${list.length} items`), 'info', undefined, result.transfer?.id);
+    // At once, before the Host's next list: the batch shows as Preparing (counting files) in the bar and the list.
+    if (result.transfer && !store.model.siteTransfers.some((item) => item.id === result.transfer!.id)) store.model.siteTransfers = [result.transfer, ...store.model.siteTransfers];
     return true;
   }
 
@@ -500,6 +503,11 @@
     store.toast(await copyText(text) ? 'Address copied.' : 'The browser would not copy it.');
   }
 
+  async function copyPath() {
+    const text = pathsOf(path, chosen.map((item) => item.name));
+    store.toast(await copyText(text) ? 'Path copied.' : 'The browser would not copy it.');
+  }
+
   async function pasteAddress() {
     let text = '';
     try { text = await navigator.clipboard.readText(); } catch { /* not allowed here */ }
@@ -529,6 +537,7 @@
       case 'refresh': void open(path, true); break;
       case 'pasteAddress': void pasteAddress(); break;
       case 'copyAddress': void copyAddress(); break;
+      case 'copyPath': void copyPath(); break;
       case 'starFolder': if (chosen.length === 1 && chosen[0].isFolder) void toggleStar(joinPath(path, chosen[0].name), !site.stars.includes(joinPath(path, chosen[0].name))); break;
     }
   }
@@ -770,6 +779,14 @@
             {#if fixable(problem)}<button class="btn" onclick={() => (fixing = true)}>{fixButtonText(problem)}</button>{/if}
             <button class="btn" onclick={() => open(path, true)}>Retry now</button></div>
         {/if}
+        <!-- A phone has no column heads: Select all and the filter live in this one line. -->
+        <div class="flex items-center gap-3 border-b border-divider px-3 py-1.5 text-[13px] md:hidden">
+          <label class="flex min-h-11 items-center gap-2"><input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} /> Select all</label>
+          <label class="flex min-h-11 min-w-0 flex-1 items-center gap-1 rounded border border-control-stroke px-2">
+            <Icon name="search" size={14} class="text-muted" />
+            <input class="min-w-0 flex-1 bg-transparent py-1 outline-none" type="search" placeholder="Filter" aria-label="Filter the files in this folder" bind:value={filter} />
+          </label>
+        </div>
         <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted max-md:hidden" role="presentation">
           <input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} />
           <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>

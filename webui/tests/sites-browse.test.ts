@@ -251,10 +251,10 @@ describe('sorting, filter and footer', () => {
 
 describe('the context menu', () => {
   it('one file', () => {
-    expect(remoteMenu(['newFolder'], [file('a')])).toEqual([['download', 'downloadTo'], ['rename', 'delete', 'newFolder'], ['copyAddress']]);
+    expect(remoteMenu(['newFolder'], [file('a')])).toEqual([['download', 'downloadTo'], ['rename', 'delete', 'newFolder'], ['copyPath', 'copyAddress']]);
   });
   it('one folder can be starred; several cannot be renamed', () => {
-    expect(remoteMenu([], [folder('a')]).at(-1)).toEqual(['copyAddress', 'starFolder']);
+    expect(remoteMenu([], [folder('a')]).at(-1)).toEqual(['copyPath', 'copyAddress', 'starFolder']);
     expect(remoteMenu([], [file('a'), file('b')])[1]).toEqual(['delete']);
   });
   it('has nothing that only makes sense on the computer the server runs on', () => {

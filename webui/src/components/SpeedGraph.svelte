@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { speed } from '../lib/format';
+  import { graphRates, withRate } from '../lib/sitesTransfers';
   import { GraphScale } from '../lib/graphScale';
   import {
     agoText, graphIdle, hoverPoint, liveSpeed, liveUpload, ServerClock, SpeedHistory, speedGraphWindow, speedSample, torrentsRun, uploadHourOf, uploadSample,
@@ -80,9 +81,11 @@
   // Idle: connected, and nothing transfers (no download moves, no seeding torrent sends). Then no timer runs (audit 4 M11):
   // the line stops at 0, and the seconds that went by idle are added as zeros when something starts, the graph is closed
   // or the tab hidden.
-  const idle = $derived(graphIdle(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
+  // Remote files transfers count too (SITES.14): the graph moves while they do.
+  const rates = $derived(graphRates(store.model.siteTransfers));
+  const idle = $derived(graphIdle(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0) && rates.down + rates.up === 0);
   // T8: the upload line, its legend and its figure, while a torrent downloads or seeds.
-  const showUpload = $derived(torrentsRun(Object.values(store.model.jobs)));
+  const showUpload = $derived(torrentsRun(Object.values(store.model.jobs)) || rates.up > 0);
   let afterIdle = false;
   $effect(() => {
     if (!open || !visible) return;
@@ -115,8 +118,9 @@
       clock.observe(jobs, now);
       const connected = store.connection === 'open';
       const ready = store.model.snapshots > 0;
-      history.add(speedSample(jobs, connected, ready, now, clock.offsetMs));
-      upHistory.add(uploadSample(jobs, connected, ready, now, clock.offsetMs));
+      const moving = untrack(() => graphRates(store.model.siteTransfers));
+      history.add(withRate(speedSample(jobs, connected, ready, now, clock.offsetMs), moving.down));
+      upHistory.add(withRate(uploadSample(jobs, connected, ready, now, clock.offsetMs), moving.up));
       version++;
     }, 1000);
     return () => clearInterval(timer);
@@ -155,8 +159,8 @@
 
   // The figure beside the title is the one the status bar shows, worked out from the same downloads at the same moment
   // (U-WU-14); the line is drawn from the samples, one a second.
-  const now = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
-  const upNow = $derived(showUpload ? liveUpload(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0) : null);
+  const now = $derived(withRate(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0), rates.down));
+  const upNow = $derived(showUpload ? withRate(liveUpload(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0), rates.up) : null);
   // history is not reactive state; version is, so the label follows the samples as shape and ceiling do.
   const shownSeconds = $derived.by(() => {
     void version;

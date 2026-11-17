@@ -5,7 +5,7 @@
   import Icon from '../../components/Icon.svelte';
   import { store } from '../../lib/store.svelte';
   import { newForm, saveRequest, type Site, type SiteHostKey, type SiteKind, type SiteResult } from '../../lib/sites';
-  import { advancedLabel, draftTestText, formName, hostLacks, kindOfTile, methodLabel, switchableKinds, tileOf, tilesFor, type Tile } from '../../lib/sitesHome';
+  import { advancedLabel, draftTestText, formName, formSignature, needsTestBeforeSave, saveButtonText, hostLacks, kindOfTile, methodLabel, switchableKinds, tileOf, tilesFor, type Tile } from '../../lib/sitesHome';
 
   // Add a remote (SITES.11 R6b, `add-tiles` then `add-fields`): kind tiles first, then the short form for the kind with
   // "Sign in with", the folder on this PC, a closed Advanced row and a Test line that tries the form without saving it
@@ -72,6 +72,10 @@
 
   const request = () => saveRequest({ ...form, name: formName(form.name, form.kind, form.host, form.url, form.endpoint) }, kind);
 
+  // The form as last tested, and whether that test failed: Save tries a changed form first, and offers "Save anyway".
+  let testedSignature = $state<string | null>(null);
+  let testFailed = $state(false);
+
   async function runTest() {
     testing = true;
     problem = '';
@@ -79,6 +83,8 @@
     try {
       const result = await store.ask<SiteResult>('sites.testDraft', { site: request(), hostKeys: trustedKeys });
       const seconds = (performance.now() - started) / 1000;
+      testedSignature = formSignature(request());
+      testFailed = !result.ok;
       test = {
         text: draftTestText(result, signs, seconds), ok: result.ok,
         keys: !result.ok && result.problem === 'hostKeyNotAccepted' ? (result.offeredKeys ?? []) : undefined,
@@ -86,6 +92,8 @@
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      testedSignature = formSignature(request());
+      testFailed = true;
       test = { text: hostLacks(message) ? 'This server is older than the web page and cannot test a form. Save, then Test the remote.' : message, ok: false };
     } finally {
       testing = false;
@@ -99,6 +107,11 @@
   }
 
   async function save() {
+    // Not tried since it changed: try it first. A failure shows its result and the button reads "Save anyway".
+    if (needsTestBeforeSave(formSignature(request()), testedSignature, signs)) {
+      await runTest();
+      if (testFailed) return;
+    }
     busy = true;
     problem = '';
     try {
@@ -258,7 +271,7 @@
       <button class="btn-primary" disabled={!tile} onclick={next}>Next</button>
       <button class="btn" onclick={onclose}>Cancel</button>
     {:else}
-      <button class="btn-primary" disabled={busy} onclick={save}>{busy ? 'Saving…' : 'Save'}</button>
+      <button class="btn-primary" disabled={busy || testing} onclick={save}>{saveButtonText(busy, testing, testFailed && testedSignature === formSignature(request()))}</button>
       {#if existing}<button class="btn" onclick={onclose}>Cancel</button>{:else}<button class="btn" onclick={() => { step = 'tiles'; problem = ''; }}>Back</button>{/if}
       <span class="flex-1"></span>
       <button class="btn" disabled={testing || busy} onclick={runTest}><Icon name="plug" size={15} /> {testing ? 'Testing…' : 'Test'}</button>

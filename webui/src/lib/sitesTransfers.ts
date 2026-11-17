@@ -75,12 +75,16 @@ export function progress(t: SiteTransfer): number {
   return t.files > 0 ? Math.min(100, Math.max(0, (100 * (t.filesDone + t.filesSkipped)) / t.files)) : 0;
 }
 
+/** A batch just accepted whose files are not counted yet (a big folder): it says so rather than look idle. */
+export const isPreparing = (t: SiteTransfer): boolean => t.state === 'running' && !t.retryAt && t.files === 0 && t.bytesDone === 0 && (t.filesRunning ?? 0) === 0;
+
 export type StatusKind = 'active' | 'done' | 'failed' | 'waiting' | 'neutral';
 export interface TransferStatus { text: string; kind: StatusKind; percent: number | null }
 
 export function status(t: SiteTransfer): TransferStatus {
   switch (t.state) {
     case 'running': {
+      if (isPreparing(t)) return { text: 'Preparing… (counting files)', kind: 'waiting', percent: null };
       if ((t.filesRunning ?? 0) === 0) return { text: 'Waiting', kind: 'waiting', percent: null };
       const percent = progress(t);
       return { text: `${isDownload(t) ? 'Downloading' : 'Uploading'} ${percent.toFixed(1)}%`, kind: 'active', percent };
@@ -201,9 +205,10 @@ export const retryFailedTargets = (transfers: readonly SiteTransfer[]) => transf
 export function barSummary(transfers: readonly SiteTransfer[]): string {
   const active = transfers.filter((t) => t.state === 'running');
   const moving = active.filter(isStarted).length;
-  const waits = active.length - moving;
+  const preparing = active.filter(isPreparing).length;
+  const waits = active.length - moving - preparing;
   const paused = transfers.filter((t) => t.state === 'paused').length;
-  const parts = [moving ? `${moving} running` : '', waits ? `${waits} waiting` : '', paused ? `${paused} paused` : ''].filter(Boolean);
+  const parts = [moving ? `${moving} running` : '', preparing ? `${preparing} preparing` : '', waits ? `${waits} waiting` : '', paused ? `${paused} paused` : ''].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Nothing is moving';
 }
 
@@ -218,6 +223,29 @@ export function barSpeeds(transfers: readonly SiteTransfer[]): { down: number; u
   }
   return { down, up };
 }
+
+/** The rate the speed graph and the status bar add to the downloads' and torrents': what the remote transfers move now. */
+export function graphRates(transfers: readonly SiteTransfer[]): { down: number; up: number } {
+  const { down, up } = barSpeeds(transfers);
+  return { down: Number.isFinite(down) ? down : 0, up: Number.isFinite(up) ? up : 0 };
+}
+
+/** A sample of the graph plus the transfers' share; a gap (null, no connection) stays a gap. */
+export const withRate = (sample: number | null, extra: number): number | null => (sample === null ? null : sample + extra);
+
+export interface FinishNotice { id: string; text: string }
+
+/** The batches that were running or paused in `before` and are done in `after` (not those first seen done), for a toast with Show. */
+export function finishedNotices(before: readonly SiteTransfer[], after: readonly SiteTransfer[]): FinishNotice[] {
+  const was = new Map(before.map((t) => [t.id, t.state]));
+  return after
+    .filter((t) => t.state === 'done' && ['running', 'paused'].includes(was.get(t.id) ?? ''))
+    .filter((t) => (t.filesStopped ?? 0) === 0 || t.filesDone > 0 || t.filesSkipped > 0)
+    .map((t) => ({ id: t.id, text: `${title(t)} finished.` }));
+}
+
+/** The toast when a download of remote files to the server is accepted. */
+export const startedText = (what: string): string => `Downloading ${what} to the server`;
 
 export const failedCount = (transfers: readonly SiteTransfer[]) => transfers.filter((t) => t.state === 'failed').length;
 
