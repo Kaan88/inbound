@@ -140,6 +140,12 @@ checkpoint in the way agreed above; hash equal each time; the notification actio
 written to the state folder. Also record: boot to resumed, and behaviour with battery set to restricted and to
 unrestricted, and what Doze does to a scheduled start (the last one can wait for step 5).
 
+**Order and reviews changed by the owner (2026-11-17).** "put an apk on my desktop for the first usable version, by
+that I don't mean local downloads only, remote connections too." and, asked whether remote hosts move up, "Move remote
+up": the order is now step 2, step 3, **step 6 (other hosts)**, then an APK of that build on the owner's desktop, then
+steps 4, 5 and the rest. "from now on, hold fable reviews until completion. and use opus for reviews.": each slice and
+step is reviewed by an Opus agent; Fable reviews once at the end (`android-fable-review-queue.md`).
+
 **Step 3. Core screens, mockup row A (ANDROID.4).** Before starting: twelve of the mockup images are small captures
 (`android-app.md` section 2). Export them and the board at full size from Figma, or ask the owner to, and commit
 them; do not build a screen from a 236 px capture. First run, Downloads (all three states), Add, New download,

@@ -164,6 +164,11 @@
   The first Mi 8 Lite run does not count: the throttle is per connection, so it finished in 27 s, before the screen
   went off. Not yet tried: a Recents swipe and a reboot with a real download, 30 minutes with the screen off, the
   Pause all and Resume actions, Android 13 (emulator), battery restricted.
+- **Owner (2026-11-17): "put an apk on my desktop for the first usable version, by that I don't mean local downloads
+  only, remote connections too."** Asked whether remote hosts (step 6) move up: "Move remote up". New order: step 2,
+  step 3, step 6, the APK on the desktop, then steps 4 and 5. **And: "from now on, hold fable reviews until
+  completion. and use opus for reviews."** The Fable review of S2 was stopped; Opus agents review from here, Fable at
+  the end (`android-fable-review-queue.md`).
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to

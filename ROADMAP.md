@@ -674,6 +674,9 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it
   should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
+- Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,
+  remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
+  Reviews: Opus per slice and step; Fable once at the end ("hold fable reviews until completion").
 - [ ] ANDROID.11 Web UI recommends the app on a phone (owner, 2026-11-17: "when all is said and done, make a pr for webui
   that when it's opened from phone a popup recommends this android app"). After the Android app is done: a pull request
   in which the web UI, opened on an Android phone, shows a popup recommending the Inbound app (dismissable).
