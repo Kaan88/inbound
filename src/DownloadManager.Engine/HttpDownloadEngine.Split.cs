@@ -12,14 +12,45 @@ public sealed partial class HttpDownloadEngine
     // Guarded by _runsSync.
     private readonly Dictionary<Guid, SingleStreamRun> _singleRuns = new();
 
-    /// <summary>Jobs whose server refused a range once a segmented run had begun. Guarded by _runsSync.</summary>
-    private readonly HashSet<Guid> _splitRefused = new();
+    /// <summary>
+    /// Jobs whose server refused a range once a segmented run had begun, with the address that refused. A new address
+    /// (a refreshed link) may split again, and a finished job is forgotten; a job deleted unfinished keeps its entry,
+    /// one id and address, until the Host ends. Guarded by _runsSync.
+    /// </summary>
+    private readonly Dictionary<Guid, string> _splitRefused = new();
 
-    private bool SplitRefused(Guid jobId)
+    private void RefuseSplit(DownloadJob job)
     {
         lock (_runsSync)
         {
-            return _splitRefused.Contains(jobId);
+            _splitRefused[job.Id] = job.EffectiveUrl;
+        }
+    }
+
+    private bool SplitRefused(DownloadJob job)
+    {
+        lock (_runsSync)
+        {
+            if (!_splitRefused.TryGetValue(job.Id, out var address))
+            {
+                return false;
+            }
+
+            if (string.Equals(address, job.EffectiveUrl, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            _splitRefused.Remove(job.Id);
+            return false;
+        }
+    }
+
+    private void ForgetSplitRefusal(Guid jobId)
+    {
+        lock (_runsSync)
+        {
+            _splitRefused.Remove(jobId);
         }
     }
 
@@ -33,7 +64,7 @@ public sealed partial class HttpDownloadEngine
            total >= SegmentedMinimumBytes &&
            only.End == total - 1 &&
            total - only.Completed >= 2 * MinimumStealBytes &&
-           !SplitRefused(job.Id);
+           !SplitRefused(job);
 
     /// <summary>
     /// Whether the probe's answer lets a one-stream checkpoint's bytes be the start of a segmented file: the same size
@@ -118,45 +149,55 @@ public sealed partial class HttpDownloadEngine
 
     /// <summary>
     /// A segmented run from a one-stream checkpoint found the server refusing a range. The prefix the stream wrote
-    /// was never touched by a segment, so the part is cut back to it and the one-stream checkpoint saved again, for
-    /// the stream to go on from there rather than from zero.
+    /// was never touched by a segment, so the one-stream checkpoint is saved again and the part cut back to it, for
+    /// the stream to go on from there rather than from zero. The checkpoint goes first: a one-stream checkpoint beside
+    /// a longer part resumes from the checkpoint, but a split one beside a cut part would start over.
     /// </summary>
     private async Task KeepSingleStreamPrefixAsync(DownloadJob job, DownloadCheckpoint checkpoint)
     {
         var prefix = checkpoint.CompletedBytes;
-        try
+        if (!SingleStreamDataHolds(job, prefix))
         {
-            using (var part = new FileStream(job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
-            {
-                if (part.Length < prefix)
-                {
-                    throw new IOException("The part file is shorter than the bytes the stream wrote.");
-                }
+            // The bytes the stream wrote are gone: nothing to keep.
+            await ResetSegmentedAsync(job).ConfigureAwait(false);
+            return;
+        }
 
-                part.SetLength(prefix);
-                part.Flush(flushToDisk: true);
-            }
-
-            if (_checkpoints is not null)
+        if (_checkpoints is not null)
+        {
+            var single = new DownloadCheckpoint
             {
-                var single = new DownloadCheckpoint
-                {
-                    JobId = job.Id,
-                    Url = job.Url,
-                    FinalUrl = job.FinalUrl,
-                    ETag = checkpoint.ETag,
-                    LastModified = checkpoint.LastModified,
-                    TotalBytes = checkpoint.TotalBytes,
-                    ContentType = checkpoint.ContentType,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                };
-                single.Segments.Add(new SegmentCheckpoint { Start = 0, End = checkpoint.Segments[0].End, Completed = prefix });
+                JobId = job.Id,
+                Url = job.Url,
+                FinalUrl = job.FinalUrl,
+                ETag = checkpoint.ETag,
+                LastModified = checkpoint.LastModified,
+                TotalBytes = checkpoint.TotalBytes,
+                ContentType = checkpoint.ContentType,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            single.Segments.Add(new SegmentCheckpoint { Start = 0, End = checkpoint.Segments[0].End, Completed = prefix });
+            try
+            {
                 await _checkpoints.SaveAsync(single, CancellationToken.None).ConfigureAwait(false);
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The split checkpoint stands beside the part as it is, which still resumes; the stream's next save
+                // replaces it. The part is left uncut, so that checkpoint keeps matching it.
+                return;
+            }
+        }
+
+        try
+        {
+            using var part = new FileStream(job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            part.SetLength(prefix);
+            part.Flush(flushToDisk: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            await ResetSegmentedAsync(job).ConfigureAwait(false);
+            // The one-stream checkpoint is saved: bytes past it are ignored, and the stream writes over them.
         }
     }
 
@@ -226,6 +267,13 @@ public sealed partial class HttpDownloadEngine
         {
             // The prefix could not be kept after the server refused a range, and the part was reset.
             state.RestartFromZero();
+        }
+        else
+        {
+            // The split began at the bytes counted, which can be fewer than the stream wrote when the flush before it
+            // failed, and a refused range may have cut the part to them: the stream goes on from there.
+            state.Bytes = completed;
+            state.RecordedBytes = completed;
         }
 
         lock (_runsSync)
