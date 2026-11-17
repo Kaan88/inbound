@@ -40,6 +40,17 @@ public sealed class HostDirectoryTests
     }
 
     [Fact]
+    public async Task APairingWithoutANameTakesTheServersOwnNameElseTheAddress()
+    {
+        var (hosts, _, _, pairing) = Make();
+        pairing.Result = new RemotePairResult { Token = Token, TokenId = "t1", HostKind = HostKinds.Server, ServerName = "Home NAS" };
+        Assert.Equal("Home NAS", (await hosts.PairAsync(new PairRequest("127.0.0.1:9000", "pw", null, false))).Host!.Name);
+        var (second, _, _, plain) = Make();
+        plain.Result = new RemotePairResult { Token = Token, TokenId = "t2", HostKind = HostKinds.Server };
+        Assert.Equal("127.0.0.1", (await second.PairAsync(new PairRequest("127.0.0.1:9000", "pw", null, false))).Host!.Name);
+    }
+
+    [Fact]
     public void AtFirstOnlyThisPhoneIsListedAndShown()
     {
         var (hosts, _, _, _) = Make();

@@ -54,6 +54,9 @@ public static class NotificationText
     /// <summary>The finished notification's second line: "Finished · 640 MB · Tap to open".</summary>
     public static string FinishedBody(FinishedJob job) => "Finished · " + Fmt.Bytes(job.SizeBytes) + " · Tap to open";
 
+    /// <summary>The summary over several finished notices: "3 downloads finished".</summary>
+    public static string FinishedSummary(int count) => count == 1 ? "1 download finished" : count + " downloads finished";
+
     public const string Resuming = "Resuming downloads";
 
     /// <summary>The boot notice's second line (API 31 to 33): opening the app resumes what was running.</summary>

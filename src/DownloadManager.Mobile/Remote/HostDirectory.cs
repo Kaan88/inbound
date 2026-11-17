@@ -168,7 +168,7 @@ public sealed class HostDirectory
             var existing = _data.Servers.FirstOrDefault(s => s.Address == address.AbsoluteUri);
             if (existing is not null) replaced = TargetFor(existing);
             entry = existing?.Copy() ?? new HostEntry { Id = Guid.NewGuid().ToString("N") };
-            entry.Name = string.IsNullOrWhiteSpace(request.Name) ? existing?.Name ?? address.Host : request.Name.Trim();
+            entry.Name = HostNaming.Choose(request.Name, existing?.Name, paired.ServerName, address.Host);
             entry.Address = address.AbsoluteUri;
             entry.PlainHttpConfirmed = request.PlainHttpConfirmed && needsConfirmation;
             entry.HostKind = paired.HostKind ?? existing?.HostKind;

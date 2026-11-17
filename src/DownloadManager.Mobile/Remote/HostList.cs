@@ -232,3 +232,16 @@ public sealed record HostFigures(int Active, int Queued, double BytesPerSecond)
         return new HostFigures(active, queued, speed);
     }
 }
+
+/// <summary>What a paired server is called in the list.</summary>
+public static class HostNaming
+{
+    /// <summary>The name typed, else the one kept from an earlier pairing (when that was a real name), else the name the server gave itself, else its address.</summary>
+    public static string Choose(string? typed, string? earlier, string? serverName, string addressHost)
+    {
+        if (!string.IsNullOrWhiteSpace(typed)) return typed.Trim();
+        if (!string.IsNullOrWhiteSpace(earlier) && earlier != addressHost) return earlier;
+        if (!string.IsNullOrWhiteSpace(serverName)) return serverName.Trim();
+        return addressHost;
+    }
+}

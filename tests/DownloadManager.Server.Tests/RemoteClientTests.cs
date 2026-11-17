@@ -596,6 +596,18 @@ public sealed class RemoteClientTests
         Assert.DoesNotContain(socket.Received, message => message.Type == MessageTypes.JobsSnapshot);
     }
 
+    // ---- 8. the server's own name for a desktop or phone app --------------------------------------------------
+
+    [Fact]
+    public async Task ThePasswordPairAnswerGivesTheServersName()
+    {
+        await using var server = await AuthServer.StartAsync(change: options => options with { ServerName = " Home NAS " });
+        using var user = await AuthServer.SetUpAsync(server);
+        var (status, body) = await PairWithPasswordAsync(server, AuthServer.Password);
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("Home NAS", body.GetProperty("serverName").GetString());
+    }
+
     // ---- 7. hostKind -----------------------------------------------------------------------------------------
 
     [Fact]

@@ -17,6 +17,8 @@ internal static class Notifications
     public const int WaitingId = 1003;
     public const int BootId = 1004;
     public const int GuardId = 1005;
+    public const int FinishedSummaryId = 1006;
+    public const string FinishedGroup = "app.inbound.android.FINISHED";
 
     /// <summary>Test build only: MainActivity's <c>--ez resume_all true</c> runs what the notifications' Resume does.</summary>
     public const string ExtraResumeAll = "resume_all";
@@ -91,6 +93,8 @@ internal static class Notifications
         pauseIntent.SetAction(PauseAllAction);
         var pause = PendingIntent.GetBroadcast(c, 12, pauseIntent, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         b.AddAction(new Notification.Action.Builder(null, "Pause all", pause).Build());
+        // Owner, 2026-11-17: "Open" beside Pause all (mockup A7); the body opens the app too.
+        b.AddAction(new Notification.Action.Builder(null, "Open", OpenApp(c, false)).Build());
         if (t.Warning is not null)
         {
             // Downloads that can't resume are running on mobile data: say so (the line replaces the file line when collapsed) and offer Stop.
@@ -181,9 +185,39 @@ internal static class Notifications
         b.SetAutoCancel(true);
         b.SetCategory(Notification.CategoryStatus);
         var id = 20000 + (job.Id.GetHashCode() & 0x0FFFFFFF);
+        b.SetGroup(FinishedGroup);
         var open = OpenFile(c, job, id);
-        if (open is not null) b.SetContentIntent(open);
+        if (open is not null)
+        {
+            b.SetContentIntent(open);
+            // Phone host only (this is the only place a finished notice is made): the file is on this phone. "Open" does what the tap does.
+            b.AddAction(new Notification.Action.Builder(null, "Open", open).Build());
+        }
+
         Notify(c, id, b.Build()!);
+        PostFinishedSummary(c);
+    }
+
+    /// <summary>One summary over the finished notices ("3 downloads finished"); with a single notice the system shows that one alone.</summary>
+    private static void PostFinishedSummary(Context c)
+    {
+        try
+        {
+            var count = Manager(c).GetActiveNotifications()!.Count(n => n.Notification?.Group == FinishedGroup && n.Id != FinishedSummaryId);
+            if (count == 0) return;
+            var b = Builder(c, FinishedChannel, NotificationText.FinishedSummary(count), null);
+            b.SetSmallIcon(Android.Resource.Drawable.StatSysDownloadDone);
+            b.SetGroup(FinishedGroup);
+            b.SetGroupSummary(true);
+            b.SetGroupAlertBehavior(NotificationGroupAlertBehavior.Children);
+            b.SetAutoCancel(true);
+            b.SetContentIntent(OpenApp(c, false));
+            Notify(c, FinishedSummaryId, b.Build()!);
+        }
+        catch (System.Exception ex)
+        {
+            Log.Warn(InboundApplication.Tag, "finished summary: " + ex.Message);
+        }
     }
 
     private static PendingIntent? OpenFile(Context c, FinishedJob job, int requestCode)

@@ -63,6 +63,9 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>The Host's settings as the snapshot (and later settings.changed frames) carried them; defaults until the snapshot is shown.</summary>
     public SettingsDto Settings { get; private set; } = new();
 
+    /// <summary>The Host's last hello (its kind and what it offers, such as folder browsing); null until it has said.</summary>
+    public HostHelloDto? Hello { get; private set; }
+
     /// <summary>Raised on the UI thread once, after the snapshot's rows are in <see cref="Rows"/> (also for an empty snapshot).</summary>
     public event Action? FirstSnapshotShown;
 
@@ -83,7 +86,8 @@ public sealed class DownloadsModel : IDisposable
     {
         // A screen that went away ignores whatever the Host still sends it.
         if (Disposed) return;
-        if (m.Type == MessageTypes.JobsSnapshot && !_gotSnapshot)
+        if (m.Type == MessageTypes.ServerHello) { try { Hello = m.GetPayload<HostHelloDto>(); } catch (System.IO.InvalidDataException) { } }
+        else if (m.Type == MessageTypes.JobsSnapshot && !_gotSnapshot)
         {
             _gotSnapshot = true;
             var snap = m.GetPayload<SnapshotDto>();
@@ -271,6 +275,20 @@ public sealed class DownloadsModel : IDisposable
             return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Error ?? "The Host refused.");
         }
         catch (Exception e) { return CommandResult.Fail(e.Message); }
+    }
+
+    /// <summary>Command folders.browse: the folders inside <paramref name="path"/> on the Host's disk (the roots for null). Never throws; the result says.</summary>
+    public async Task<FolderBrowseResult> BrowseFoldersAsync(string? path, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.FoldersBrowse, new FolderBrowseRequest { Path = path }), cancellationToken).ConfigureAwait(false);
+            return reply.Type == MessageTypes.FoldersBrowseResult
+                ? reply.GetPayload<FolderBrowseResult>()
+                : new FolderBrowseResult { Ok = false, Error = "The Host answered with " + reply.Type + "." };
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) { return new FolderBrowseResult { Ok = false, Error = e.Message }; }
     }
 
     /// <summary>Command job.segments: the connections' progress of one running download (empty when none).</summary>

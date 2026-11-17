@@ -53,9 +53,7 @@ internal sealed class NewDownloadScreen
         _shaLayout = Root.FindViewById<TextInputLayout>(Resource.Id.sha_layout)!;
         _download = Root.FindViewById<MaterialButton>(Resource.Id.new_download_btn)!;
 
-        Root.FindViewById<TextInputEditText>(Resource.Id.save_to)!.Text = SaveToText(_model.SaveTo);
-        // Another Inbound saves into its own default folder; the field says which machine (no folder chooser yet, ANDROID.7).
-        if (activity.Capabilities.IsRemote) Root.FindViewById<TextInputLayout>(Resource.Id.save_layout)!.Hint = "Save to, on " + activity.HostName;
+        SetUpSaveTo(host);
         if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
         else
         {
@@ -104,10 +102,45 @@ internal sealed class NewDownloadScreen
         _ui.PostDelayed(() => imm.ShowSoftInput(_address, 0), 350);
     }
 
-    private static string SaveToText(string path)
+    // The phone saves into its own folder (the field only shows it). A server's folders are the server's: the field opens a chooser that
+    // browses them through the connection, when the server offers that; otherwise it shows the server's default folder as before.
+    private void SetUpSaveTo(DownloadsModel host)
     {
-        const string root = "/storage/emulated/0/";
-        return path.StartsWith(root, StringComparison.Ordinal) ? path[root.Length..] : path;
+        var field = Root.FindViewById<TextInputEditText>(Resource.Id.save_to)!;
+        var layout = Root.FindViewById<TextInputLayout>(Resource.Id.save_layout)!;
+        var remote = _activity.Capabilities.IsRemote;
+        if (remote) layout.Hint = "Save to, on " + _activity.HostName;
+        void Show()
+        {
+            var path = _model.SaveTo;
+            var full = SavePathWords.ForField(path);
+            // An EditText never cuts its text with an ellipsis, so the field is measured and cut in the middle here; TalkBack reads all of it.
+            void Fit()
+            {
+                var room = field.Width - field.PaddingLeft - field.PaddingRight - Motion.Dp(_activity, 16);
+                if (room <= 0) { field.Text = full; return; }
+                var paint = field.Paint!;
+                var cut = MiddleEllipsis.Cut(full, s => paint.MeasureText(s) <= room);
+                if (field.Text != cut) field.Text = cut;
+            }
+
+            field.Text = full;
+            field.ContentDescription = SavePathWords.Label(remote ? _activity.HostName : null, path);
+            field.Post(Fit);
+        }
+
+        Show();
+        if (!remote || !FolderPicker.Offered(host)) return;
+        field.Enabled = true;
+        field.Focusable = false;
+        field.Clickable = true;
+        field.LongClickable = false;
+        layout.EndIconMode = TextInputLayout.EndIconCustom;
+        layout.SetEndIconDrawable(Resource.Drawable.ic_folder);
+        layout.EndIconContentDescription = "Choose a folder on " + _activity.HostName;
+        void Choose() => FolderSheet.Show(_activity, host, _model.SaveTo, folder => { _model.Destination = folder; Show(); });
+        field.Click += (_, _) => Choose();
+        layout.SetEndIconOnClickListener(new ClickListener(Choose));
     }
 
     private void OnAddress()

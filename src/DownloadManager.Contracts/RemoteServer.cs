@@ -410,6 +410,9 @@ public sealed class RemotePairResult
     /// <summary>The server's <c>hostKind</c> (<see cref="HostKinds"/>), when its sign-in status said.</summary>
     public string? HostKind { get; init; }
 
+    /// <summary>The name the server gives itself (its configured name, else its machine's); null when it gives none, and from an older server.</summary>
+    public string? ServerName { get; init; }
+
     public override string ToString() => Ok ? $"paired ({TokenId})" : $"failed: {Error}";
 }
 
@@ -461,7 +464,7 @@ public static class RemoteServerHttp
 
                 // On a short deadline of its own: not knowing the server's kind never fails a pairing that worked.
                 var hostKind = await HostKindAsync(address, certificatePin, cancellationToken).ConfigureAwait(false);
-                var result = new RemotePairResult { Token = issued, TokenId = Text(ok, "id"), HostKind = hostKind };
+                var result = new RemotePairResult { Token = issued, TokenId = Text(ok, "id"), HostKind = hostKind, ServerName = Text(ok, "serverName") };
                 issued = null;
                 return result;
             }

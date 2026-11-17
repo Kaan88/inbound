@@ -1,5 +1,31 @@
 # Progress — session handoff
 
+### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
+
+- **Failure reason (owner: "short reason in row, full in Details"):** the row says "Failed · <short>" from `FailureWords.Short`
+  (a pure function in `DownloadManager.Mobile`: the job's `Failure.Kind` and HTTP status become words such as "server refused
+  (403)", "address not found", "no space left"; otherwise the first clause of the message, at most 40 characters; a .NET
+  resource key such as `net_http_client_execution_error` is never shown). Details shows the whole message (`FailureWords.Full`).
+- **Notifications:** "Open" beside "Pause all" on the progress notification (opens the app). Each finished file posts its own
+  notice with "Open" (the system chooser through the FileProvider, as the tap does), all in one group with a summary
+  ("N downloads finished", id 1006). Ids 1001-1005, Pause all and Resume are unchanged. Only the phone host posts finished
+  notices at all (the app keeps no background session to another Inbound), so a remote host has no notice and no file action.
+- **New download on a server:** "Save to" opens a bottom sheet that browses the server's folders with `folders.browse`
+  (`FolderPicker`; offered when the hello lists `folders`; Up, folder rows, "Save here"; roots at the top; a start folder the
+  server refuses falls back to the roots). The chosen folder goes out as `DestinationDirectory`. The phone keeps its read-only field.
+- **Server name:** the password pairing answer (`POST /api/pair`, remoteClient) now carries `serverName` (the configured name,
+  else the machine's); a phone paired without a name uses it, else the address (`HostNaming.Choose`).
+  Server test added in `RemoteClientTests`.
+- **Long paths:** the field cuts the path in the middle (`MiddleEllipsis.Cut`, measured on the phone) and TalkBack reads the full
+  path ("Save to <path> on <host>").
+- **Checked on the Android 13 emulator (emulator-5554, x64 NativeAOT test build), not a phone:** a failed download read
+  "Failed · not the file expected" with the full sentence in Details; two finished files grouped, "Open" on each opened the system
+  chooser; a real `DownloadManager.Server` on this PC (named "Home NAS", temp state under `artifacts/`, made-up password, stopped and
+  deleted afterwards) paired without a name and showed "Home NAS"; the chooser walked its folders and a download added with a chosen
+  folder showed "Saved to Movies". **Not seen:** the progress notification's Open (code only); TalkBack reading. **Known:** the
+  last character of a cut path in the field is still clipped by about one letter.
+- Tests: Mobile.Tests 319, Server.Tests 208, all pass. x64 test build: 82 warnings, the same as `step6/build-merge2-x64-test.txt`.
+
 ### Android steps 3 and 6 together (ANDROID.4 + ANDROID.7), branch `android-app` (2026-11-17)
 
 - **Merge:** `origin/android-s6` into `android-app` (after step 3). Conflicts: this file (both entries kept), `MainActivity.cs`

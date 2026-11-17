@@ -28,7 +28,7 @@ public static class DetailsInfo
     {
         var j = row.Job;
         if (row.Group == RowGroup.Finished) return Fmt.Bytes(j.TotalBytes ?? j.ReceivedBytes) + (j.CompletedAt is { } d ? " · " + Fmt.When(d, now) : "");
-        if (row.Group == RowGroup.Failed) return string.IsNullOrEmpty(j.StatusNote) ? Fmt.Bytes(j.ReceivedBytes) + " saved" : j.StatusNote;
+        if (row.Group == RowGroup.Failed) return FailureWords.Full(j) ?? Fmt.Bytes(j.ReceivedBytes) + " saved";
         var text = j.TotalBytes is > 0 ? $"{Fmt.Bytes(j.ReceivedBytes)} of {Fmt.Bytes(j.TotalBytes.Value)}" : Fmt.Bytes(j.ReceivedBytes);
         if (row.Group == RowGroup.Active && j.BytesPerSecond is > 0 && j.TotalBytes > j.ReceivedBytes)
             text += " · " + Fmt.Eta((j.TotalBytes.Value - j.ReceivedBytes) / j.BytesPerSecond.Value);

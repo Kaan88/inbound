@@ -109,7 +109,7 @@ public sealed class JobRow : INotifyPropertyChanged
             case "failed":
             case "cancelled":
                 Kind = StatusKind.Failed; Group = RowGroup.Failed; Action = RowAction.Retry; ShowBar = false; Indeterminate = false;
-                Subtitle = (state == "failed" ? "Failed" : "Cancelled") + (string.IsNullOrEmpty(j.StatusNote) ? "" : " · " + j.StatusNote);
+                Subtitle = (state == "failed" ? "Failed" : "Cancelled") + (FailureWords.Short(j) is { } why ? " · " + why : "");
                 break;
             case "retrywaiting":
                 Kind = StatusKind.Waiting; Group = RowGroup.Queued; Action = RowAction.Pause; ShowBar = false; Indeterminate = false; Subtitle = "Waiting to retry";

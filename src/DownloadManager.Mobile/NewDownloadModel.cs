@@ -27,8 +27,11 @@ public sealed class NewDownloadModel
         Connections = Math.Clamp(host.Settings.DefaultConnections, 1, MaxConnections);
     }
 
-    /// <summary>The Host's folder for new downloads (shown, not editable: the phone has no folder picker yet).</summary>
-    public string SaveTo => _host.DefaultDownloadDirectory;
+    /// <summary>The folder chosen on a server (<see cref="FolderPicker"/>); null keeps the Host's own folder for new downloads.</summary>
+    public string? Destination { get; set; }
+
+    /// <summary>Where the download will go: the chosen folder, else the Host's folder for new downloads.</summary>
+    public string SaveTo => Destination ?? _host.DefaultDownloadDirectory;
 
     /// <summary>The most connections one download may have, from the Host's settings (at least 1).</summary>
     public int MaxConnections => Math.Max(1, _host.Settings.MaxConnectionsPerHost);
@@ -161,6 +164,7 @@ public sealed class NewDownloadModel
             list.Add(new AddJobRequest
             {
                 Url = u,
+                DestinationDirectory = string.IsNullOrWhiteSpace(Destination) ? null : Destination,
                 FileName = Urls.Count == 1 && !string.IsNullOrWhiteSpace(_fileName) ? _fileName.Trim() : null,
                 StartMode = StartLater ? StartModes.Later : StartModes.StartNow,
                 Connections = Connections,

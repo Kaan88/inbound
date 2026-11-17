@@ -649,7 +649,7 @@ public sealed class ServerAuth
 
         Limiter.Succeeded(address);
         _log.Info($"A desktop app was paired: {paired.Record.Name} ({paired.Record.Id}).");
-        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role });
+        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role, serverName = _options.DisplayName }, OmitNulls);
     }
 
     private IResult WrongPairingPassword(string address, TimeSpan ifWrong)
