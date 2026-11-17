@@ -689,6 +689,88 @@ await capture(`${at++}-menu-open`, signedIn, async (p, v) => {
 });
 await capture(`${at++}-empty-view`, signedIn, (p) => app(p, '#/failed'));
 
+// ---- Remote files (SITES.11 R6b) -----------------------------------------------------------------------------------
+// Needs a WebDAV server with a folder of files, and rclone: `rclone serve webdav <folder> --addr 127.0.0.1:28090`.
+//   INBOUND_SITES_DAV     its address, e.g. http://127.0.0.1:28090/media/isos
+//                         The Host needs an rclone: next to the Server as tools/rclone/rclone.exe, or it downloads one.
+// Walks All remotes, Add a remote (tiles, then the form), a remote's files, its Transfers bar and list, at 1360 and 390 px.
+const davAddress = process.env.INBOUND_SITES_DAV ?? '';
+if (davAddress) {
+  const remoteName = 'nas.home.lan';
+  await step('remote files: switch on and add a WebDAV remote through Add a remote', async () => {
+    await page.goto(`${base}/#/all`);
+    await page.waitForSelector('main');
+    // The switch, as a person turns it on (the Host uses the rclone next to it, or downloads one).
+    await app(page, '#/sites');
+    // The switch sits in the closed options below the list once it is on.
+    if (!(await page.getByRole('button', { name: 'Add a remote' }).count())) await page.getByRole('checkbox', { name: 'Use remote files' }).check();
+    await page.getByRole('button', { name: 'Add a remote' }).waitFor();
+    if (await page.locator('main').getByText(remoteName, { exact: true }).count()) return; // a run before this one added it
+    await page.getByRole('button', { name: 'Add a remote' }).click();
+    await dialog(page).getByRole('radio', { name: /WebDAV/ }).click();
+    await dialog(page).getByRole('button', { name: 'Next' }).click();
+    await page.fill('#site-url', davAddress);
+    await page.getByRole('button', { name: /^Advanced/ }).click();
+    await page.fill('#site-name', remoteName);
+    if (downloads) await page.fill('#site-local', downloads);
+    await dialog(page).getByRole('button', { name: 'Test' }).click();
+    await page.getByText(/It works\./).waitFor({ timeout: 30000 });
+    await dialog(page).getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('row', { name: new RegExp(remoteName) }).first().waitFor({ timeout: 15000 });
+  });
+  // The remote's own entry in the page (not the sidebar's, which is a drawer on a phone).
+  // The page draws it twice, a table for a desktop and a list for a phone; only one is visible.
+  const remoteEntry = (p) => p.locator('main').getByText(remoteName, { exact: true }).locator('visible=true').first();
+  const remoteHash = async (p) => {
+    await app(p, '#/sites');
+    await remoteEntry(p).waitFor();
+  };
+  await capture(`${at++}-remote-files-all-remotes`, signedIn, remoteHash);
+  await capture(`${at++}-remote-files-add-tiles`, signedIn, async (p, v) => {
+    await remoteHash(p);
+    await p.getByRole('button', { name: 'Add a remote' }).click();
+    await dialog(p).getByRole('radio', { name: /SFTP/ }).waitFor();
+  });
+  await capture(`${at++}-remote-files-add-form`, signedIn, async (p) => {
+    await remoteHash(p);
+    await p.getByRole('button', { name: 'Add a remote' }).click();
+    await dialog(p).getByRole('button', { name: 'Next' }).click();
+    await p.fill('#site-host', 'nas.home.lan');
+    await p.fill('#site-user', 'kaan');
+  });
+  const openRemote = async (p, v) => {
+    await remoteHash(p);
+    // A double click opens it on a desktop; a tap on a phone.
+    if (v?.hasTouch) await remoteEntry(p).click();
+    else await remoteEntry(p).dblclick();
+    await p.getByRole('listbox', { name: /Files in/ }).waitFor({ timeout: 20000 });
+  };
+  await capture(`${at++}-remote-files-browse`, signedIn, openRemote);
+  await capture(`${at++}-remote-files-browse-ticked`, signedIn, async (p, v) => {
+    await openRemote(p, v);
+    await p.getByRole('checkbox', { name: /Select ubuntu/ }).check();
+  });
+  await capture(`${at++}-remote-files-delete-sheet`, signedIn, async (p, v) => {
+    await openRemote(p, v);
+    await p.getByRole('checkbox', { name: /Select backups/ }).check();
+    await p.getByRole('button', { name: /Delete on server/ }).last().click();
+    await dialog(p).waitFor();
+  });
+  // One download to the server, so the Transfers list has a row to show.
+  await step('remote files: a download to the server lands in the Transfers list', async () => {
+    await openRemote(page);
+    await page.getByRole('checkbox', { name: /Select ubuntu/ }).check();
+    await page.getByRole('toolbar', { name: 'Remote files' }).getByRole('button', { name: 'Download', exact: true }).click();
+    await page.getByRole('button', { name: /^Transfers/ }).click();
+    await page.getByText(/Download ubuntu\.iso/).first().waitFor({ timeout: 30000 });
+  });
+  await capture(`${at++}-remote-files-transfers`, signedIn, async (p, v) => {
+    await openRemote(p, v);
+    await p.getByRole('button', { name: /^Transfers/ }).click();
+    await p.getByRole('button', { name: /^Done/ }).click();
+  });
+}
+
 // ---- End to end: actions that change the server, after every capture that needs the state before them -----------
 
 // The test archive's password: it was made for this walk (webui/README.md), not a real one.

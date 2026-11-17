@@ -125,7 +125,7 @@
   }
 </script>
 
-<Dialog {title} {onclose} wide={step === 'form'}>
+<Dialog {title} {onclose} wide>
   {#if step === 'tiles'}
     <p class="mb-3 text-[13px] font-semibold">What kind of place is it?</p>
     <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Kind of remote">
@@ -180,7 +180,7 @@
           <span class="label" id="site-auth-label">Sign in with</span>
           <div class="segmented w-full" role="group" aria-labelledby="site-auth-label">
             {#each kind?.authMethods ?? [] as method (method)}
-              <button class="flex-1" aria-pressed={form.authMethod === method} onclick={() => { form.authMethod = method; test = null; }}>{methodLabel(method)}</button>
+              <button class="flex-1 text-center" aria-pressed={form.authMethod === method} onclick={() => { form.authMethod = method; test = null; }}>{methodLabel(method)}</button>
             {/each}
           </div>
         </div>

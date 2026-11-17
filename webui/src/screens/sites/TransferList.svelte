@@ -147,6 +147,7 @@
   .tl-row:hover .tl-menu, .tl-row:focus-within .tl-menu, .tl-menu:focus-visible { opacity: 1; }
   /* A phone: each transfer is lines, as in the mockup: name and size, then status with rate and time, then where. */
   @media (max-width: 767px) {
+    .tl-grid { display: none; }
     .tl-row { grid-template-columns: 44px 1fr auto; grid-template-areas: 'check name size' 'check status status' 'check desc desc'; row-gap: 2px; padding-top: 8px; padding-bottom: 8px; }
     .tl-check { grid-area: check; }
     .tl-name { grid-area: name; font-size: 14px; }
