@@ -34,10 +34,9 @@ Figma account's drafts; the link opened in a browser that was not signed in, so 
 Press Present for the three animated flows:
 1 Download on the phone, 2 Catch a link from a browser, 3 Queues, sites and hosts.
 
-The images below are exports of the Figma screens, in `docs/plans/android-mockups/`. Ten are full size. Twelve are
-smaller captures (nine taken while building, three taken from the Figma page in a browser), because Figma's call
-limit on the free plan ran out during export. The "How it works" board has only a small overview; read it in Figma.
-**Left:** export the twelve and the board at full size when the limit resets.
+The images below are exports of the Figma screens, in `docs/plans/android-mockups/`: all 22 at 3x (1236 x 2676, the
+412 x 892 frames), rendered from the owner's full SVG export of the board (2026-11-17), and the "How it works" board in
+full (`how-it-works.png`, 2x).
 
 ### A. Downloading on the phone
 
@@ -67,7 +66,7 @@ limit on the free plan ran out during export. The "How it works" board has only 
 
 ### How it works (overview of the Figma board)
 
-<img src="android-mockups/how-it-works-overview.png" width="900">
+<img src="android-mockups/how-it-works.png" width="900">
 
 Its content is sections 3, 4 and 7 of this plan.
 
