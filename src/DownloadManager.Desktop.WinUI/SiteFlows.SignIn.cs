@@ -10,24 +10,24 @@ namespace DownloadManager.Desktop.WinUI;
 /// address it gives in the browser and waits, with Cancel, until the Host says the sign-in ended. A browser on another
 /// computer uses the paste flow: <c>rclone authorize</c> there, and its token pasted here.
 /// </summary>
-internal sealed partial class SitesOptionsPage
+internal sealed partial class SiteFlows
 {
     private static readonly TimeSpan SignInPoll = TimeSpan.FromSeconds(1.5);
 
     /// <summary>Signs the site in; then tests it. False when it was cancelled or failed (the result line says why).</summary>
-    private async Task<bool> SignInAsync(SiteDto site)
+    public async Task<bool> SignInAsync(SiteDto site)
     {
         SiteSignInResultDto? started = null;
         await RunAsync(async () =>
         {
-            _siteResult.Say($"Starting the sign-in of {site.Name}…");
-            started = await _client.SignInSiteAsync(site.Id, cancellationToken: _closing.Token);
+            Say($"Starting the sign-in of {site.Name}…");
+            started = await _client.SignInSiteAsync(site.Id, cancellationToken: _closing);
         });
         if (started is null) return false;
         if (!started.Ok || started.Url is null)
         {
             // rclone could not listen for the answer (or is missing): the paste flow still works.
-            _siteResult.Say(started.Message ?? $"{site.Name} could not be signed in.", isProblem: true);
+            Say(started.Message ?? $"{site.Name} could not be signed in.", isProblem: true);
             return await PasteTokenAsync(site, started.AuthorizeCommand, started.Message);
         }
 
@@ -51,7 +51,7 @@ internal sealed partial class SitesOptionsPage
         if (ended == SignInEnd.Cancelled)
         {
             await CancelOnHostAsync(site.Id);
-            _siteResult.Say($"The sign-in of {site.Name} was cancelled.");
+            Say($"The sign-in of {site.Name} was cancelled.");
             return false;
         }
 
@@ -111,7 +111,7 @@ internal sealed partial class SitesOptionsPage
         };
 
         var ended = false;
-        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token);
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(_closing);
         var watch = Task.Run(async () =>
         {
             try
@@ -169,13 +169,13 @@ internal sealed partial class SitesOptionsPage
         SiteSignInResultDto? result = null;
         await RunAsync(async () =>
         {
-            _siteResult.Say($"Signing in to {site.Name}…");
-            result = await _client.SignInSiteAsync(site.Id, pasted, _closing.Token);
+            Say($"Signing in to {site.Name}…");
+            result = await _client.SignInSiteAsync(site.Id, pasted, _closing);
         });
         if (result is null) return false;
         if (!result.Ok)
         {
-            _siteResult.Say(result.Message ?? $"{site.Name} could not be signed in.", isProblem: true);
+            Say(result.Message ?? $"{site.Name} could not be signed in.", isProblem: true);
             return false;
         }
 
@@ -185,13 +185,19 @@ internal sealed partial class SitesOptionsPage
     /// <summary>Reads the site again and, when it holds a token now, tests it.</summary>
     private async Task<bool> AfterSignInAsync(string id)
     {
-        var list = await _client.ListSitesAsync(_closing.Token);
-        if (list.Value is { } sites) _sites = [.. sites.Sites];
+        var list = await _client.ListSitesAsync(_closing);
+        if (list.Value is { } sites)
+        {
+            // In place: the owner's list is this one, and a new list here would leave it behind.
+            Sites.Clear();
+            Sites.AddRange(sites.Sites);
+        }
+
         Render();
-        if (_sites.FirstOrDefault(s => s.Id == id) is not { } site) return false;
+        if (Sites.FirstOrDefault(s => s.Id == id) is not { } site) return false;
         if (!site.SignedIn)
         {
-            _siteResult.Say($"{site.Name} is not signed in: the browser sign-in ended without access.", isProblem: true);
+            Say($"{site.Name} is not signed in: the browser sign-in ended without access.", isProblem: true);
             return false;
         }
 

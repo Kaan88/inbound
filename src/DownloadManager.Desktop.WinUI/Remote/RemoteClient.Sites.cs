@@ -43,6 +43,10 @@ internal sealed partial class RemoteClient
     public async Task<SiteResultDto> SaveSiteAsync(SiteSaveRequest request, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteSaveRequest, SiteResultDto>(SitesMessageTypes.Save, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>SITES.11 R4: opens an address once (an unsaved remote the Host holds in memory); the password goes in this one message.</summary>
+    public async Task<SiteResultDto> OpenSiteOnceAsync(SiteOpenOnceRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesSlowAsync<SiteOpenOnceRequest, SiteResultDto>(SitesMessageTypes.OpenOnce, request, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));
+
     public async Task<SiteResultDto> RemoveSiteAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Remove, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
@@ -74,6 +78,25 @@ internal sealed partial class RemoteClient
 
     public async Task<SiteResultDto> CancelSiteSignInAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// SITES.11 R4: tries the form as it would be saved, without saving it (<c>sites.testDraft</c>); the secrets go in this
+    /// one message. Null when the Host is older and has no such request: the caller then saves first and tests the saved remote.
+    /// </summary>
+    public async Task<SiteResultDto?> TestSiteDraftAsync(SiteSaveRequest site, IReadOnlyList<string> hostKeys, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteTestDraftRequest, SiteResultDto>(SitesMessageTypes.TestDraft,
+            new SiteTestDraftRequest { Site = site, HostKeys = [.. hostKeys] }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false);
+        return SitesHomeRules.HostLacks(reply.Value?.Message, reply.Error, RemoteText.HostDoesNotOffer) ? null : SiteResult(reply);
+    }
+
+    /// <summary>SITES.11: forgets an address opened once (<c>sites.close</c>); refused for a saved remote.</summary>
+    public async Task<SiteResultDto> CloseSiteAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Close, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.11: "Remember", which saves an address opened once (<c>sites.keep</c>).</summary>
+    public async Task<SiteResultDto> KeepSiteAsync(string id, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteKeepRequest, SiteResultDto>(SitesMessageTypes.Keep, new SiteKeepRequest { Id = id }, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
 
     public async Task<SiteResultDto> TestSiteAsync(string id, CancellationToken cancellationToken = default)
         => SiteResult(await SitesSlowAsync<SiteIdRequest, SiteResultDto>(SitesMessageTypes.Test, new SiteIdRequest { Id = id }, SitesMessageTypes.Result, SitesTestTime, cancellationToken).ConfigureAwait(false));

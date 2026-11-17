@@ -203,6 +203,7 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(SiteSaveRequest))]
 [JsonSerializable(typeof(SiteIdRequest))]
 [JsonSerializable(typeof(SiteOpenOnceRequest))]
+[JsonSerializable(typeof(SiteTestDraftRequest))]
 [JsonSerializable(typeof(SiteKeepRequest))]
 [JsonSerializable(typeof(SiteHereRequest))]
 [JsonSerializable(typeof(SiteHereResultDto))]

@@ -197,7 +197,8 @@ public sealed partial class SitesPanel : UserControl
     }
 
     /// <summary>Reads one page of a folder from the Host.</summary>
-    internal Func<SiteBrowseRequest, CancellationToken, Task<SiteBrowseResultDto>>? Browse { get; set; }
+    /// <remarks>The flag is true for a load the user started (open, a folder, Retry, Refresh, Load more), false for the panel's own.</remarks>
+    internal Func<SiteBrowseRequest, bool, CancellationToken, Task<SiteBrowseResultDto>>? Browse { get; set; }
 
     /// <summary>Stars or unstars a folder at the Host.</summary>
     internal Func<SiteStarRequest, Task<SiteResultDto>>? Star { get; set; }
@@ -210,6 +211,15 @@ public sealed partial class SitesPanel : UserControl
     /// dialogs built there (host-key trust, Add a site) can replace it later.
     /// </summary>
     internal Action? OpenSitesOptions { get; set; }
+
+    /// <summary>
+    /// SITES.11 R4: the button beside a problem the user fixes (<see cref="SitesBrowseRules.FixButtonText"/>), with the remote
+    /// and the problem. Without it the button opens Options > Sites.
+    /// </summary>
+    internal Action<SiteDto, string?>? FixSite { get; set; }
+
+    // The problem the fix button was shown for.
+    private string? _fixProblem;
 
     /// <summary>"Edit site" in the trouble state: the window opens the site's edit dialog.</summary>
     internal event Action<SiteDto>? EditSiteRequested;
@@ -278,7 +288,8 @@ public sealed partial class SitesPanel : UserControl
     /// Shows a site, at <paramref name="path"/> or, with null, at the folder the site starts in; <paramref name="select"/> is the
     /// name to select in it once listed.
     /// </summary>
-    internal void Open(SiteDto site, string? path = null, string? select = null, bool sayIfMissing = false)
+    /// <param name="byUser">False when the panel opens the site again itself (its start changed).</param>
+    internal void Open(SiteDto site, string? path = null, string? select = null, bool sayIfMissing = false, bool byUser = true)
     {
         _sayIfMissing = sayIfMissing && select is not null;
         if (_site?.Id != site.Id)
@@ -295,7 +306,7 @@ public sealed partial class SitesPanel : UserControl
         _atStart = path is null;
         _askHereAgain = true;
         _selectAfter = select;
-        _ = LoadAsync(path, refresh: false, append: false);
+        _ = LoadAsync(path, refresh: false, append: false, byUser: byUser);
     }
 
     /// <summary>The site's saved data changed (renamed, stars): the name and the starred list follow, the folder stays.</summary>
@@ -305,7 +316,7 @@ public sealed partial class SitesPanel : UserControl
         // Another server, user or start folder: the folder shown may not be there, so the view starts again.
         if (StartOf(site) != _openedAs)
         {
-            Open(site);
+            Open(site, byUser: false);
             StateChanged?.Invoke();
             return;
         }
@@ -347,7 +358,7 @@ public sealed partial class SitesPanel : UserControl
     internal void Refresh()
     {
         _askHereAgain = true;
-        Reload();
+        _ = LoadAsync(ReopenPath, refresh: true, append: false, byUser: true);
     }
 
     /// <summary>Retry now: a new spell of automatic tries starts if this one fails too.</summary>
@@ -355,7 +366,7 @@ public sealed partial class SitesPanel : UserControl
     {
         _autoTries = 0;
         _troubleSince = null;
-        Reload();
+        _ = LoadAsync(ReopenPath, refresh: true, append: false, byUser: true);
     }
 
     private void CancelHere()
@@ -446,10 +457,10 @@ public sealed partial class SitesPanel : UserControl
         _atStart = false;
         _path = SitesBrowseRules.Normalize(path);
         _selectAfter = selectName;
-        _ = LoadAsync(_path, refresh: false, append: false);
+        _ = LoadAsync(_path, refresh: false, append: false, byUser: true);
     }
 
-    private async Task LoadAsync(string? path, bool refresh, bool append)
+    private async Task LoadAsync(string? path, bool refresh, bool append, bool byUser = false)
     {
         if (_site is not { } site || Browse is null) return;
         _cts?.Cancel();
@@ -502,7 +513,7 @@ public sealed partial class SitesPanel : UserControl
                 Limit = SitesBrowseRules.PageSize,
                 Refresh = refresh,
                 Listing = append ? _listing : null,
-            }, wait.Token);
+            }, byUser, wait.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -551,6 +562,8 @@ public sealed partial class SitesPanel : UserControl
             else
             {
                 var words = SitesBrowseRules.ProblemText(result.Problem, result.Message, result.OfferedFingerprint, result.AcceptedFingerprints);
+                _fixProblem = result.Problem;
+                OptionsButton.Content = SitesBrowseRules.FixButtonText(result.Problem);
                 ShowMessage(words, busy: false, retry: true, options: SitesBrowseRules.PointsToOptions(result.Problem));
             }
 
@@ -969,6 +982,10 @@ public sealed partial class SitesPanel : UserControl
         RetryButton.Content = "Retry now";
         RetryButton.Visibility = Visibility.Visible;
         EditSiteButton.Visibility = Visibility.Visible;
+        // An address opened once is not edited; its password is asked by the fix button instead.
+        EditSiteButton.IsEnabled = SitesHomeRules.CanEdit(site);
+        _fixProblem = result.Problem;
+        OptionsButton.Content = SitesBrowseRules.FixButtonText(result.Problem);
         OptionsButton.Visibility = SitesBrowseRules.PointsToOptions(result.Problem) ? Visibility.Visible : Visibility.Collapsed;
         LiveRegion.Announce(TitleText);
         if (SitesBrowseRules.IsCantReach(result.Problem)) StartRetry();
@@ -1309,14 +1326,18 @@ public sealed partial class SitesPanel : UserControl
         if (_site is { } site) EditSiteRequested?.Invoke(site);
     }
 
-    private void OptionsButton_Click(object sender, RoutedEventArgs e) => OpenSitesOptions?.Invoke();
+    private void OptionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_site is { } site && FixSite is { } fix) fix(site, _fixProblem);
+        else OpenSitesOptions?.Invoke();
+    }
 
     private async void MoreButton_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             var generation = _generation + 1;
-            await LoadAsync(_path, refresh: false, append: true);
+            await LoadAsync(_path, refresh: false, append: true, byUser: true);
             // Another folder or site was opened meanwhile: its rows are not the ones this page added.
             if (generation != _generation) return;
             // More is left and the panel held the keyboard for the load: back to Load more, for the next page.

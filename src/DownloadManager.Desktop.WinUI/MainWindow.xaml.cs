@@ -908,6 +908,7 @@ public sealed partial class MainWindow : Window
         // connecting says so, rather than "Not connected".
         if (_connection.IsRemote && !_banner.Connected)
             StatusText.Text = _banner.Status ?? $"Not connected to {_connection.Target.Name}";
+        if (_homeShown && SitesOffered) StatusText.Text = SitesHomeRules.FooterText(_sites.Count);
         if (_graphConnected)
         {
             // UI.R37: the version says whether it is the latest, as far as the last update check knows.
@@ -1308,6 +1309,13 @@ public sealed partial class MainWindow : Window
             {
                 LeaveSites(selectCategory: false);
                 _ = ShowQueuesSafelyAsync();
+                return;
+            }
+
+            if (tag == SitesHomeTag)
+            {
+                // SITES.11 R4: All remotes takes the list's place.
+                ShowHome();
                 return;
             }
 
@@ -4237,7 +4245,7 @@ public sealed partial class MainWindow : Window
             window.AddPage("Web UI", "\uE7F4", webUi.Controls);
 
             // Sites is this PC's own, so its client is this PC's Host's (the window follows the shown server, which here is this PC).
-            var sites = new SitesOptionsPage(_remote, window);
+            var sites = new SitesOptionsPage(_remote, window) { ManageRemotes = ShowRemotesPage };
             window.AddPage("Sites", "\uE753", sites.Controls);
 
             window.Closed += (_, _) =>

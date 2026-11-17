@@ -107,11 +107,19 @@ public sealed class SitesBrowseRulesTests
     public void HostKeyProblemsPointToOptions()
     {
         var changed = SitesBrowseRules.ProblemText("hostKeyChanged", null, "SHA256:new", ["SHA256:old"]);
-        Assert.Contains("Options > Sites", changed);
+        // SITES.11 R4: each names the button beside it, which tests the remote and asks there; only "off" is in Options.
+        Assert.Contains("Check the key", changed);
         Assert.Contains("SHA256:new", changed);
         Assert.Contains("SHA256:old", changed);
-        Assert.Contains("Options > Sites", SitesBrowseRules.ProblemText("hostKeyNotAccepted", null, null, null));
+        Assert.Contains(SitesBrowseRules.FixButtonText("hostKeyNotAccepted"), SitesBrowseRules.ProblemText("hostKeyNotAccepted", null, null, null));
+        Assert.Contains(SitesBrowseRules.FixButtonText("certificateNotTrusted"), SitesBrowseRules.ProblemText("certificateNotTrusted", null, null, null));
+        Assert.Contains(SitesBrowseRules.FixButtonText("signInNeeded"), SitesBrowseRules.ProblemText("signInNeeded", null, null, null));
+        Assert.Contains(SitesBrowseRules.FixButtonText("passwordNeeded"), SitesBrowseRules.ProblemText("passwordNeeded", "Wrong password.", null, null));
+        foreach (var problem in new[] { "hostKeyChanged", "hostKeyNotAccepted", "certificateNotTrusted", "signInNeeded", "passwordNeeded" })
+            Assert.DoesNotContain("Options", SitesBrowseRules.ProblemText(problem, null, null, null));
         Assert.Contains("Options > Sites", SitesBrowseRules.ProblemText("off", null, null, null));
+        Assert.Equal("Open Options > Sites", SitesBrowseRules.FixButtonText("off"));
+        Assert.True(SitesBrowseRules.PointsToOptions("passwordNeeded"));
         Assert.True(SitesBrowseRules.PointsToOptions("hostKeyChanged"));
         Assert.False(SitesBrowseRules.PointsToOptions(null));
         Assert.False(SitesBrowseRules.PointsToOptions("other"));

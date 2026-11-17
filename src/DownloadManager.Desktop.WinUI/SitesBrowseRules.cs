@@ -150,7 +150,10 @@ internal static class SitesBrowseRules
     public static List<string> OrderedStars(IEnumerable<string>? stars)
         => (stars ?? []).Select(Normalize).Distinct(StringComparer.Ordinal).OrderBy(star => star, StringComparer.OrdinalIgnoreCase).ToList();
 
-    /// <summary>Wording for a failed listing. A host-key problem points to Options > Sites, where the keys are handled.</summary>
+    /// <summary>
+    /// Wording for a failed listing. A problem the user fixes names the button beside it (<see cref="FixButtonText"/>), which
+    /// tests the remote and asks its questions there (SITES.11 R4); only Sites being off points to Options > Sites.
+    /// </summary>
     public static string ProblemText(string? problem, string? message, string? offered, IReadOnlyCollection<string>? accepted)
     {
         var host = (message ?? string.Empty).Trim();
@@ -160,22 +163,37 @@ internal static class SitesBrowseRules
                 var accepted1 = accepted is { Count: > 0 } ? $" Accepted: {string.Join(", ", accepted)}." : string.Empty;
                 var offered1 = string.IsNullOrWhiteSpace(offered) ? string.Empty : $" The server now offers {offered}.";
                 return "This server's host key is not the one you accepted, so Inbound did not connect. That can mean the server was reinstalled, or that someone is intercepting the connection." +
-                    offered1 + accepted1 + " Check with the server's owner, then replace the key in Options > Sites.";
+                    offered1 + accepted1 + " Check with the server's owner, then press Check the key to replace it.";
             case "hostKeyNotAccepted":
-                return "This site's host key has not been accepted yet. Open Options > Sites to check it and accept it.";
+                return "This remote's server key has not been accepted yet. Press Check the key to see it and accept it.";
             case "off":
                 return "Sites is off. Turn it on in Options > Sites.";
             case "certificateNotTrusted":
-                return "This server's certificate is not signed by an authority this PC trusts, so Inbound did not connect. If it is your own server, open Options > Sites and Test the site to see the certificate and choose whether to trust it.";
+                return "This server's certificate is not signed by an authority this PC trusts, so Inbound did not connect. If it is your own server, press Check the certificate to see it and choose whether to trust it.";
             case "signInNeeded":
-                return "This site is not signed in, or the service no longer accepts its sign-in. Open Options > Sites and choose Sign in.";
+                return "This remote is not signed in, or the service no longer accepts its sign-in. Press Sign in.";
+            case "passwordNeeded":
+                return host.Length > 0 ? host + " Press Type the password to try again." : "This server needs a password. Press Type the password.";
             default:
                 return host.Length > 0 ? host : "The folder could not be read.";
         }
     }
 
-    /// <summary>A problem the user fixes in Options > Sites, so the view offers to open it.</summary>
-    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "certificateNotTrusted" or "signInNeeded" or "off";
+    /// <summary>A problem the user fixes with the button beside it (<see cref="FixButtonText"/>), so the view offers it.</summary>
+    public static bool PointsToOptions(string? problem) => problem is "hostKeyChanged" or "hostKeyNotAccepted" or "certificateNotTrusted" or "signInNeeded" or "off" or "passwordNeeded";
+
+    /// <summary>
+    /// The words of that button. All but "off" test the remote with its questions (key, certificate, sign-in) or ask for the
+    /// password of an address opened once; "off" opens Options > Sites, where the switch is.
+    /// </summary>
+    public static string FixButtonText(string? problem) => problem switch
+    {
+        "hostKeyChanged" or "hostKeyNotAccepted" => "Check the key",
+        "certificateNotTrusted" => "Check the certificate",
+        "signInNeeded" => "Sign in",
+        "passwordNeeded" => "Type the password",
+        _ => "Open Options > Sites",
+    };
 
     // ---- R2a: the pane's chip, sorting, filter, footers and the trouble state ----------------------------
 

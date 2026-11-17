@@ -328,6 +328,9 @@ Status 2026-11-17: built, reviewed (Opus, Fable) and walked on the final build; 
 
 ### R4. Desktop: sites themselves (`home`, `add-tiles`, `add-fields`, sidebar)
 
+Status 2026-11-17: built, reviewed (Fable) and walked on the final build; pairs in `compare/`; see PROGRESS "Sites
+rework R4" for what is not as drawn.
+
 - "All sites" in the sidebar and its page: rows, last used, activity, "Open an address once", "Add a site".
 - Add a site: tiles, then the short form for that kind, Advanced closed, Test with the result line. Edit site opens
   the same form. Options > Sites keeps the switch, rclone and updates, and links to All sites for the list.

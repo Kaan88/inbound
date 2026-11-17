@@ -117,45 +117,16 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(SitesChip, text);
     }
 
-    /// <summary>Each sidebar site shows arrows with counts while files move there, and a clock while a batch waits.</summary>
+    /// <summary>Each remote's sidebar entry follows its state and what runs on it (arrows, clock, progress line); so does the All remotes page.</summary>
     private void SyncSiteMarks()
     {
         foreach (var item in CategoryList.Items.OfType<ListBoxItem>())
         {
-            if (item.Tag is not string tag || !tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal) || item.Content is not StackPanel content) continue;
-            var siteId = tag[SiteTagPrefix.Length..];
-            var site = _sites.FirstOrDefault(s => s.Id == siteId);
-            var mark = SiteTransferRules.SiteMark(_siteTransfers, siteId);
-            var markBlock = content.Children.OfType<TextBlock>().FirstOrDefault(block => block.Tag as string == "mark");
-            if (markBlock is null)
-            {
-                markBlock = new TextBlock { Tag = "mark", FontSize = 11, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center };
-                content.Children.Add(markBlock);
-            }
-
-            if (markBlock.Text != (mark ?? "")) markBlock.Text = mark ?? "";
-            var progress = SiteTransferRules.SiteProgress(_siteTransfers, siteId);
-            var line = content.Children.OfType<ProgressBar>().FirstOrDefault(bar => bar.Tag as string == "progress");
-            if (line is null && progress is not null)
-            {
-                line = new ProgressBar
-                {
-                    Tag = "progress", Width = 36, MinHeight = 0, Height = 3, Maximum = 100, VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(4, 0, 0, 0), IsTabStop = false,
-                };
-                AutomationProperties.SetAccessibilityView(line, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-                content.Children.Add(line);
-            }
-
-            if (line is not null)
-            {
-                var visibility = progress is null ? Visibility.Collapsed : Visibility.Visible;
-                if (line.Visibility != visibility) line.Visibility = visibility;
-                if (progress is { } value) line.Value = value;
-            }
-            var words = SiteTransferRules.SiteMarkName(_siteTransfers, siteId);
-            AutomationProperties.SetName(item, words is null ? $"Site {site?.Name}" : $"Site {site?.Name}, {words}");
+            if (item.Tag is not string tag || !tag.StartsWith(SiteTagPrefix, StringComparison.Ordinal)) continue;
+            if (_sites.FirstOrDefault(s => s.Id == tag[SiteTagPrefix.Length..]) is { } site) UpdateSiteEntry(item, site);
         }
+
+        RefreshHome();
     }
 
     // ---- Download and Upload ----------------------------------------------------------------------------
@@ -309,10 +280,16 @@ public sealed partial class MainWindow
             var reply = await _remote.StartSiteTransferAsync(request);
             if (!reply.Ok)
             {
-                await ShowSitesMessageAsync(request.Direction == "download" ? "Download" : "Upload",
-                    SitesBrowseRules.PointsToOptions(reply.Problem)
-                        ? (reply.Message ?? "The remote needs attention.") + " Check it in Options > Sites."
-                        : reply.Message ?? "The transfer could not start.");
+                // SITES.11 R4: a key, certificate, sign-in or password to see to is asked here, by testing the remote, rather
+                // than sending the user to Options; the transfer is started again by the user once it works.
+                if (SitesBrowseRules.PointsToOptions(reply.Problem) && reply.Problem != SiteProblems.Off && FindSite(request.SiteId) is { } site)
+                {
+                    SetSitesStatus($"{site.Name} needs attention before the {(request.Direction == "download" ? "download" : "upload")} can start. {reply.Message}".TrimEnd());
+                    await FixSiteAsync(site, reply.Problem);
+                    return null;
+                }
+
+                await ShowSitesMessageAsync(request.Direction == "download" ? "Download" : "Upload", reply.Message ?? "The transfer could not start.");
                 return null;
             }
 

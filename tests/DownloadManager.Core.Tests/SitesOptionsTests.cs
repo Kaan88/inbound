@@ -335,7 +335,7 @@ public sealed class SitesOptionsTests
         Assert.Null(SitesRules.TrustedCertificateLine(new SiteDto()));
         Assert.StartsWith("Trusts its server's own certificate", SitesRules.TrustedCertificateLine(new SiteDto { TrustedCertificates = [new SiteTrustedCertificateDto()] }));
         Assert.True(SitesBrowseRules.PointsToOptions(SiteProblems.CertificateNotTrusted));
-        Assert.Contains("Test the site", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
+        Assert.Contains("Check the certificate", SitesBrowseRules.ProblemText(SiteProblems.CertificateNotTrusted, null, null, null));
     }
 
     [Fact]

@@ -173,7 +173,7 @@ public sealed partial class HostCommandDispatcher
     /// lifetime that ends when their client goes away (<see cref="IpcOperationLifetime"/>). The rest are quick.
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
-        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
+        || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.TestDraft or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
         || type is SitesMessageTypes.TransferStart
         // SITES.6b: both read a server's certificate first.
         || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust

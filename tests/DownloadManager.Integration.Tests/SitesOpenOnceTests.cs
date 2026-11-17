@@ -291,6 +291,139 @@ public sealed class SitesOpenOnceTests : IAsyncLifetime
         Assert.Empty(SiteFiles());
     }
 
+    // ---- SITES.11 R4: sites.testDraft with no rclone ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ADraftOfANewSftpServerOnlyReadsItsKeysAndWritesNothing()
+    {
+        var commands = await OnAsync();
+        var reply = await Send(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+        {
+            Site = new SiteSaveRequest { Name = "New", Kind = SiteKinds.Sftp, Host = "nas.home.lan", Port = 22, User = "me", Password = Secret, RemoteFolder = "/" },
+        });
+        Assert.Equal(SitesMessageTypes.Result, reply.Type);
+        var result = reply.GetPayload<SiteResultDto>();
+        Assert.Equal(SiteProblems.HostKeyNotAccepted, result.Problem);
+        var offered = Assert.Single(result.OfferedKeys!);
+        Assert.Equal((_key.Fingerprint, _key.HostKeysEntry), (offered.Fingerprint, offered.Entry));
+        Assert.DoesNotContain(Secret, reply.Payload!.Value.GetRawText());
+        Assert.Empty(SiteFiles());
+        Assert.Empty((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites);
+    }
+
+    [Fact]
+    public async Task ADraftIsCheckedAsASaveIsWithTheWebSessionsSftpRule()
+    {
+        var commands = await OnAsync();
+        // A web session's SFTP remote must hold its own password or key (the dispatcher sets OwnSignInOnly).
+        var refused = await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+        {
+            Site = new SiteSaveRequest { Name = "Web", Kind = SiteKinds.Sftp, Host = "nas.home.lan", Port = 22, User = "me", OwnSignInOnly = true },
+            HostKeys = [_key.HostKeysEntry],
+        });
+        Assert.False(refused.Ok);
+        Assert.Contains("can't sign in with the server PC's own SSH keys", refused.Message);
+        Assert.Null(refused.Problem);
+
+        // The save's other checks hold too: a key only for SFTP, a usable kind.
+        Assert.Contains("Only SFTP sites sign in with a key", (await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+        {
+            Site = new SiteSaveRequest { Name = "F", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = SiteTlsModes.None, AuthMethod = SiteAuthMethods.Key },
+        })).Message);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest { Site = new SiteSaveRequest { Kind = "smb" } })).Ok);
+        // A key entry that would add a second key to rclone's list is refused.
+        Assert.Equal("That is not a server key.", (await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+        {
+            Site = new SiteSaveRequest { Name = "K", Kind = SiteKinds.Sftp, Host = "nas.home.lan", Port = 22, User = "me", Password = Secret },
+            HostKeys = [_key.HostKeysEntry + ",ssh-ed25519 AAAA"],
+        })).Message);
+        Assert.Empty(SiteFiles());
+    }
+
+    [Fact]
+    public async Task AnEditsDraftNeverTakesTheSavedPasswordToAnotherServerOrUser()
+    {
+        var commands = await OnAsync();
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "Box", Kind = SiteKinds.Sftp, Host = "nas.home.lan", Port = 22, User = "me", Password = Secret, RemoteFolder = "/",
+        });
+        Assert.True(saved.Ok, saved.Message);
+        var before = File.ReadAllText(Assert.Single(SiteFiles()));
+        foreach (var (host, port, user) in new[] { ("other.example", 22, "me"), ("nas.home.lan", 2222, "me"), ("nas.home.lan", 22, "root") })
+        {
+            var draft = await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+            {
+                Site = new SiteSaveRequest { Id = saved.Site!.Id, Name = "Box", Kind = SiteKinds.Sftp, Host = host, Port = port, User = user, RemoteFolder = "/" },
+                HostKeys = [_key.HostKeysEntry],
+            });
+            Assert.False(draft.Ok);
+            Assert.Contains("type the password again", draft.Message);
+        }
+
+        Assert.Equal(before, File.ReadAllText(Assert.Single(SiteFiles())));
+    }
+
+    [Fact]
+    public async Task ASavedPasswordIsNotSentWhenTheEncryptionIsSwitchedOff()
+    {
+        var commands = await OnAsync();
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "Files", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = SiteTlsModes.Explicit, User = "me", Password = Secret, RemoteFolder = "/",
+        });
+        Assert.True(saved.Ok, saved.Message);
+        var before = File.ReadAllText(Assert.Single(SiteFiles()));
+        SiteSaveRequest Plain() => new()
+        {
+            Id = saved.Site!.Id, Name = "Files", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = SiteTlsModes.None, User = "me", RemoteFolder = "/",
+        };
+
+        var draft = await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest { Site = Plain() });
+        Assert.False(draft.Ok);
+        Assert.Contains("encryption changed", draft.Message);
+        var save = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Plain());
+        Assert.False(save.Ok);
+        Assert.Contains("encryption changed", save.Message);
+        Assert.Equal(before, File.ReadAllText(Assert.Single(SiteFiles())));
+
+        // Typed again, it is the user's choice.
+        var typed = Plain();
+        typed.Password = Secret;
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, typed)).Ok);
+    }
+
+    [Fact]
+    public async Task AnFtpRecordWithNoEncryptionSetIsReadAsExplicit()
+    {
+        var first = await OnAsync();
+        var saved = await Call<SiteResultDto>(first, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Name = "Old", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = SiteTlsModes.Explicit, User = "me", Password = Secret, RemoteFolder = "/",
+        });
+        Assert.True(saved.Ok, saved.Message);
+        // A save refuses a missing Tls, but a file from before the choice existed (or edited by hand) has none: the Host
+        // reads it as it is.
+        var file = Assert.Single(SiteFiles());
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+        var tlsKey = json.Select(pair => pair.Key).Single(key => key.Equals("tls", StringComparison.OrdinalIgnoreCase));
+        json.Remove(tlsKey);
+        File.WriteAllText(file, json.ToJsonString());
+        var commands = await OnAsync();
+        SiteSaveRequest Edit(string? tls) => new()
+        {
+            Id = saved.Site!.Id, Name = "Renamed", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = tls, User = "me", RemoteFolder = "/",
+        };
+
+        // The window sends explicit for it: the saved password stays, for a draft and a save alike. Off is still a change.
+        var draft = await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest { Site = Edit(SiteTlsModes.Explicit) });
+        Assert.DoesNotContain("encryption changed", draft.Message ?? "");
+        Assert.Contains("encryption changed", (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Edit(SiteTlsModes.None))).Message);
+        var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Edit(SiteTlsModes.Explicit));
+        Assert.True(edited.Ok, edited.Message);
+        Assert.True(edited.Site!.HasPassword);
+    }
+
     // ---- Helpers -----------------------------------------------------------------------------------------------------
 
     private IEnumerable<string> SiteFiles() => Directory.Exists(SitesFolder)

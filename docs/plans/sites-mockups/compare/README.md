@@ -15,6 +15,11 @@ All are dark mode; light mode comes at the end (R7).
 - Test sites: `rclone serve` on 127.0.0.1 (SFTP throttled with `--bwlimit 150k`, WebDAV, FTP, a read-only WebDAV and a
   closed port), with folders seeded to match the mockup's rows.
 
+## R4 (2026-11-17)
+
+`home-built.png` (All remotes), `add-tiles-built.png` (taken after Back from the form) and `add-fields-built.png` are
+R4, 1600 x 1000, not cropped.
+
 ## R3 (2026-11-17)
 
 `transfers-built.png`, `failed-built.png` and `downloads-built.png` are the R3 transfers list, taken on the final build

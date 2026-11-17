@@ -209,6 +209,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 return Result(request, await SignInCancelAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "").ConfigureAwait(false));
             case SitesMessageTypes.Test:
                 return Result(request, await TestAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.TestDraft:
+                return Result(request, await TestDraftAsync(request.GetPayload<SiteTestDraftRequest>() ?? new SiteTestDraftRequest(), cancellationToken).ConfigureAwait(false));
             case SitesMessageTypes.Browse:
                 return IpcMessage.Create(SitesMessageTypes.BrowseResult,
                     await BrowseAsync(request.GetPayload<SiteBrowseRequest>() ?? new SiteBrowseRequest(), cancellationToken).ConfigureAwait(false), request.Id);
@@ -574,103 +576,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 if (existing is null) return Fail("That site no longer exists.");
             }
 
-            if (SiteKindCatalog.Find(request.Kind) is null) return Fail("Choose what kind of site it is.");
-            if (existing is not null && existing.Kind != request.Kind) return Fail("A site's kind can't be changed; add a new site instead.");
-            var signsIn = SiteKindCatalog.SignsIn(request.Kind);
-            // SITES.6c: a sign-in kind has no password or key of its own; its access comes from sites.signIn.
-            if (signsIn)
-            {
-                if (!string.IsNullOrEmpty(request.Password) || !string.IsNullOrEmpty(request.PrivateKey) || !string.IsNullOrEmpty(request.KeyPassphrase))
-                    return Fail("This kind of site signs in through the browser, not with a password or key.");
-                request.AuthMethod = SiteAuthMethods.SignIn;
-                request.Password = null;
-            }
-            else if (!string.IsNullOrEmpty(request.ClientId) || !string.IsNullOrEmpty(request.ClientSecret))
-                return Fail("Only a site that signs in through the browser has a client ID.");
-            if (!signsIn && request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
-                return Fail("Only SFTP sites sign in with a key.");
-            if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
-                return Fail("Choose a password or a key file to sign in with.");
-            if (KindAddress(request) is { Problem: { } addressProblem }) return Fail(addressProblem);
-            // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
-            if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
-                return Fail(keyProblem);
-
-            var (host, port, _) = KindAddress(request);
-            var now = DateTimeOffset.UtcNow;
-            // Another server is another key: a changed host or port forgets the accepted ones, and the window asks again.
-            // For an address kind the address is the server: another one forgets the stars too.
-            var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == port
-                && string.Equals(existing.Url, Trimmed(request.Url), StringComparison.Ordinal)
-                && string.Equals(existing.Endpoint, Trimmed(request.Endpoint), StringComparison.Ordinal);
-            // Audit 2026-11-15: a saved password is sent only to the server it was saved for. Pointing a site at another
-            // server keeps the saved key (signing in with a key gives the server nothing of it) but not the password,
-            // which rclone would send there: it has to be typed again.
-            if (existing is not null && !sameServer && existing.SealedPassword is not null && request.Password is null
-                && request.AuthMethod == SiteAuthMethods.Password)
-                return Fail("The server changed, so type the password again: a saved password is only sent to the server it was saved for.");
             try
             {
-                saved = new SiteRecord
-                {
-                    Id = existing?.Id ?? SiteStore.NewId(),
-                    Name = request.Name.Trim(),
-                    Kind = request.Kind,
-                    Host = host,
-                    Port = port,
-                    User = request.User.Trim(),
-                    Tls = request.Kind == SiteKinds.Ftp ? request.Tls : null,
-                    Url = request.Kind == SiteKinds.WebDav ? Trimmed(request.Url) : null,
-                    Vendor = request.Kind == SiteKinds.WebDav ? request.Vendor ?? "other" : null,
-                    Provider = request.Kind == SiteKinds.S3 ? request.Provider : null,
-                    Endpoint = request.Kind == SiteKinds.S3 ? Trimmed(request.Endpoint) : null,
-                    Region = request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null,
-                    AuthMethod = request.AuthMethod,
-                    // Audit 2026-11-15: never carried to another server, whatever the sign-in method, so a site moved
-                    // with key sign-in and switched back to a password can't take the old server's password along.
-                    SealedPassword = Seal(request.Password, sameServer ? existing?.SealedPassword : null),
-                    // SITES.11 review: from a web session the key stays with its server too, or an edit could sign in
-                    // anywhere with this PC's stored key.
-                    SealedPrivateKey = Seal(request.PrivateKey, sameServer || !request.OwnSignInOnly ? existing?.SealedPrivateKey : null),
-                    SealedKeyPassphrase = Seal(request.KeyPassphrase, sameServer || !request.OwnSignInOnly ? existing?.SealedKeyPassphrase : null),
-                    HostKeys = sameServer ? existing!.HostKeys : [],
-                    // SITES.6b: a trusted certificate belongs to one server and one kind of encryption.
-                    TrustedCertificates = sameServer && existing!.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
-                        && SiteKindCatalog.Encrypted(request.Kind, request.Tls, Trimmed(request.Url), Trimmed(request.Endpoint))
-                        ? existing.TrustedCertificates : [],
-                    RemoteFolder = request.RemoteFolder.Trim(),
-                    LocalFolder = string.IsNullOrWhiteSpace(request.LocalFolder) ? null : request.LocalFolder.Trim(),
-                    // Stars are folders on the same server; another server forgets them with its keys.
-                    Stars = sameServer ? existing!.Stars : [],
-                    CreatedAt = existing?.CreatedAt ?? now,
-                    LastUsedAt = existing?.LastUsedAt,
-                    // SITES.11: an edit of an address opened once keeps it unsaved (the store holds it in memory).
-                    Unsaved = existing?.Unsaved ?? false,
-                    ModifiedAt = now,
-                };
-                if (signsIn)
-                {
-                    var clientId = Trimmed(request.ClientId);
-                    saved = saved with
-                    {
-                        ClientId = clientId,
-                        // A secret belongs to its client ID: a new ID without one has none.
-                        SealedClientSecret = clientId is null ? null
-                            : Seal(request.ClientSecret, existing?.ClientId == clientId ? existing.SealedClientSecret : null),
-                        // Another app registration is another grant: the site signs in again.
-                        SealedSignIn = existing is not null && existing.ClientId == clientId ? existing.SealedSignIn : null,
-                    };
-                }
-
+                var built = BuildRecord(request, existing, draftKeys: null);
+                if (built.Failure is not null) return built.Failure;
+                saved = built.Record!;
                 droppedCertificates = existing is { TrustedCertificates.Count: > 0 } && saved.TrustedCertificates.Count == 0;
-                if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
-                    return Fail("Choose the private key to sign in with.");
-                if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
-                    return Fail("An S3 site needs its access key ID and secret access key.");
-                if (saved.Kind == SiteKinds.B2 && (saved.User.Length == 0 || saved.SealedPassword is null))
-                    return Fail("A B2 site needs its application key ID and application key.");
-                if (request.OwnSignInOnly && saved is { Kind: SiteKinds.Sftp, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
-                    return Fail("Type the password, or choose a key: a site saved here can't sign in with the server PC's own SSH keys.");
                 await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
             }
             catch (SiteStoreException e)
@@ -693,6 +604,127 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (droppedCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true, Site = ToDto(saved) };
+    }
+
+    /// <summary>
+    /// The record a <c>sites.save</c> would store, checked as the save checks it, or the reason it can't be (SITES.11 R4: shared
+    /// with <c>sites.testDraft</c>). With <paramref name="draftKeys"/> (a draft, never stored) a saved secret is carried only
+    /// while server, port and user are unchanged, and the given server keys are added for this test. Throws
+    /// <see cref="InvalidOperationException"/> when no secret protector exists, as <see cref="Seal"/> does.
+    /// </summary>
+    private static (SiteRecord? Record, SiteResultDto? Failure) BuildRecord(SiteSaveRequest request, SiteRecord? existing, IReadOnlyList<string>? draftKeys)
+    {
+        if (SiteKindCatalog.Find(request.Kind) is null) return (null, Fail("Choose what kind of site it is."));
+        if (existing is not null && existing.Kind != request.Kind) return (null, Fail("A site's kind can't be changed; add a new site instead."));
+        var signsIn = SiteKindCatalog.SignsIn(request.Kind);
+        // SITES.6c: a sign-in kind has no password or key of its own; its access comes from sites.signIn.
+        if (signsIn)
+        {
+            if (!string.IsNullOrEmpty(request.Password) || !string.IsNullOrEmpty(request.PrivateKey) || !string.IsNullOrEmpty(request.KeyPassphrase))
+                return (null, Fail("This kind of site signs in through the browser, not with a password or key."));
+            request.AuthMethod = SiteAuthMethods.SignIn;
+            request.Password = null;
+        }
+        else if (!string.IsNullOrEmpty(request.ClientId) || !string.IsNullOrEmpty(request.ClientSecret))
+            return (null, Fail("Only a site that signs in through the browser has a client ID."));
+        if (!signsIn && request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
+            return (null, Fail("Only SFTP sites sign in with a key."));
+        if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
+            return (null, Fail("Choose a password or a key file to sign in with."));
+        if (KindAddress(request) is { Problem: { } addressProblem }) return (null, Fail(addressProblem));
+        // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
+        if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
+            return (null, Fail(keyProblem));
+
+        var draft = draftKeys is not null;
+        var (host, port, _) = KindAddress(request);
+        var now = DateTimeOffset.UtcNow;
+        // Another server is another key: a changed host or port forgets the accepted ones, and the window asks again.
+        // For an address kind the address is the server: another one forgets the stars too.
+        var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == port
+            && string.Equals(existing.Url, Trimmed(request.Url), StringComparison.Ordinal)
+            && string.Equals(existing.Endpoint, Trimmed(request.Endpoint), StringComparison.Ordinal);
+        // SITES.11 R4 review: a saved password is sent only with the encryption it was saved with, so switching FTP's
+        // encryption off can't send it in clear (save and draft alike).
+        // An FTP record from before the choice existed has no Tls; the window shows it as explicit, as rclone treats it.
+        var sameTls = existing is null || request.Kind != SiteKinds.Ftp
+            || (existing.Tls ?? SiteTlsModes.Explicit) == (request.Tls ?? SiteTlsModes.Explicit);
+        // SITES.11 R4: a draft (sites.testDraft) takes a saved secret only while server, port and user are all unchanged,
+        // so a test of a newly typed server or user never sends it a stored password or key.
+        var keepPassword = (draft ? sameServer && string.Equals(existing!.User, request.User.Trim(), StringComparison.Ordinal) : sameServer) && sameTls;
+        var keepKey = draft ? keepPassword : sameServer || !request.OwnSignInOnly;
+        // Audit 2026-11-15: a saved password is sent only to the server it was saved for. Pointing a site at another
+        // server keeps the saved key (signing in with a key gives the server nothing of it) but not the password,
+        // which rclone would send there: it has to be typed again.
+        if (existing is not null && !keepPassword && existing.SealedPassword is not null && request.Password is null
+            && request.AuthMethod == SiteAuthMethods.Password)
+            return (null, Fail(!sameServer
+                ? "The server changed, so type the password again: a saved password is only sent to the server it was saved for."
+                : !sameTls
+                    ? "The encryption changed, so type the password again: a saved password is only sent with the encryption it was saved with."
+                    : "The user changed, so type the password again to test it: a saved password is only tried for the user it was saved for."));
+        var saved = new SiteRecord
+        {
+            Id = existing?.Id ?? SiteStore.NewId(),
+            Name = request.Name.Trim(),
+            Kind = request.Kind,
+            Host = host,
+            Port = port,
+            User = request.User.Trim(),
+            Tls = request.Kind == SiteKinds.Ftp ? request.Tls : null,
+            Url = request.Kind == SiteKinds.WebDav ? Trimmed(request.Url) : null,
+            Vendor = request.Kind == SiteKinds.WebDav ? request.Vendor ?? "other" : null,
+            Provider = request.Kind == SiteKinds.S3 ? request.Provider : null,
+            Endpoint = request.Kind == SiteKinds.S3 ? Trimmed(request.Endpoint) : null,
+            Region = request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null,
+            AuthMethod = request.AuthMethod,
+            // Audit 2026-11-15: never carried to another server, whatever the sign-in method, so a site moved
+            // with key sign-in and switched back to a password can't take the old server's password along.
+            SealedPassword = Seal(request.Password, keepPassword ? existing?.SealedPassword : null),
+            // SITES.11 review: from a web session the key stays with its server too, or an edit could sign in
+            // anywhere with this PC's stored key.
+            SealedPrivateKey = Seal(request.PrivateKey, keepKey ? existing?.SealedPrivateKey : null),
+            SealedKeyPassphrase = Seal(request.KeyPassphrase, keepKey ? existing?.SealedKeyPassphrase : null),
+            // A draft's accepted keys only stand in for keys the remote does not have: a remote with trusted keys keeps
+            // them, so a changed key comes back as hostKeyChanged, as sites.test says it.
+            HostKeys = sameServer && existing!.HostKeys.Count > 0 ? existing.HostKeys : [.. (draftKeys ?? []).Distinct(StringComparer.Ordinal)],
+            // SITES.6b: a trusted certificate belongs to one server and one kind of encryption.
+            TrustedCertificates = sameServer && existing!.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
+                && SiteKindCatalog.Encrypted(request.Kind, request.Tls, Trimmed(request.Url), Trimmed(request.Endpoint))
+                ? existing.TrustedCertificates : [],
+            RemoteFolder = request.RemoteFolder.Trim(),
+            LocalFolder = string.IsNullOrWhiteSpace(request.LocalFolder) ? null : request.LocalFolder.Trim(),
+            // Stars are folders on the same server; another server forgets them with its keys.
+            Stars = sameServer ? existing!.Stars : [],
+            CreatedAt = existing?.CreatedAt ?? now,
+            LastUsedAt = existing?.LastUsedAt,
+            // SITES.11: an edit of an address opened once keeps it unsaved (the store holds it in memory).
+            Unsaved = existing?.Unsaved ?? false,
+            ModifiedAt = now,
+        };
+        if (signsIn)
+        {
+            var clientId = Trimmed(request.ClientId);
+            saved = saved with
+            {
+                ClientId = clientId,
+                // A secret belongs to its client ID: a new ID without one has none.
+                SealedClientSecret = clientId is null ? null
+                    : Seal(request.ClientSecret, existing?.ClientId == clientId ? existing.SealedClientSecret : null),
+                // Another app registration is another grant: the site signs in again.
+                SealedSignIn = existing is not null && existing.ClientId == clientId ? existing.SealedSignIn : null,
+            };
+        }
+
+        if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
+            return (null, Fail("Choose the private key to sign in with."));
+        if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
+            return (null, Fail("An S3 site needs its access key ID and secret access key."));
+        if (saved.Kind == SiteKinds.B2 && (saved.User.Length == 0 || saved.SealedPassword is null))
+            return (null, Fail("A B2 site needs its application key ID and application key."));
+        if (request.OwnSignInOnly && saved is { Kind: SiteKinds.Sftp, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
+            return (null, Fail("Type the password, or choose a key: a site saved here can't sign in with the server PC's own SSH keys."));
+        return (saved, null);
     }
 
     /// <param name="unsavedOnly">SITES.11 <c>sites.close</c>: refused, inside the gate, when the site is (by now) a saved one.</param>
@@ -793,6 +825,95 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (failure is not null) return failure;
         var count = items!.Count;
         return new SiteResultDto { Ok = true, Message = $"Connected. The folder holds {count} item{(count == 1 ? "" : "s")}." };
+    }
+
+    /// <summary>
+    /// SITES.11 R4, <c>sites.testDraft</c>: the form as it would be saved (<see cref="BuildRecord"/>, the same checks), built in
+    /// memory and its start folder listed, as <see cref="TestAsync"/> does (no gate, the same time limit). Nothing is
+    /// written, broadcast or remembered: no store write, no reach, no last-used time. An SFTP server whose key is not
+    /// accepted yet is only asked for its keys (no login, nothing of the remote sent); an untrusted certificate is read
+    /// and returned to be trusted after the save.
+    /// </summary>
+    private async Task<SiteResultDto> TestDraftAsync(SiteTestDraftRequest request, CancellationToken cancellationToken)
+    {
+        var form = request.Site ?? new SiteSaveRequest();
+        var keys = request.HostKeys ?? [];
+        if (keys.Count > 16) return Fail("Accept between 1 and 16 of the server's keys.");
+        // One key per entry: rclone takes the list joined with commas.
+        if (keys.Any(k => string.IsNullOrWhiteSpace(k) || k.Contains(',', StringComparison.Ordinal) || k.Contains('\n', StringComparison.Ordinal) || k.Contains('\r', StringComparison.Ordinal)))
+            return Fail("That is not a server key.");
+
+        SiteRecord? existing = null;
+        if (!string.IsNullOrEmpty(form.Id))
+        {
+            if (!SiteStore.IsId(form.Id)) return Fail("That is not a site id.");
+            existing = await _sites.GetAsync(form.Id, cancellationToken).ConfigureAwait(false);
+            if (existing is null) return Fail("That site no longer exists.");
+        }
+
+        SiteRecord draft;
+        try
+        {
+            var built = BuildRecord(form, existing, keys);
+            if (built.Failure is not null) return built.Failure;
+            draft = built.Record!;
+        }
+        catch (Exception e) when (e is InvalidOperationException or SiteStoreException)
+        {
+            return Fail(e.Message);
+        }
+        finally
+        {
+            form.Password = null;
+            form.PrivateKey = null;
+            form.KeyPassphrase = null;
+            form.ClientSecret = null;
+        }
+
+        var path = SitePaths.Normalize(draft.RemoteFolder);
+        if (path is null) return Fail("The starting folder is not a usable path.");
+
+        if (draft.NeedsHostKey)
+        {
+            // Read with no login: the server learns nothing of the remote.
+            try
+            {
+                var offered = await _probe(draft.Host, draft.Port, cancellationToken).ConfigureAwait(false);
+                return new SiteResultDto
+                {
+                    Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet.",
+                    OfferedKeys = [.. offered.Select(ToDto)],
+                };
+            }
+            catch (SshProbeException e)
+            {
+                return Fail(e.Message);
+            }
+        }
+
+        if (SiteKindCatalog.SignsIn(draft.Kind) && draft.SealedSignIn is null)
+            return new SiteResultDto { Ok = false, Problem = SiteProblems.SignInNeeded, Message = "Save the remote, and your browser opens to sign in." };
+
+        var (items, failure) = await ListFolderAsync(draft, path, cancellationToken, draft: true).ConfigureAwait(false);
+        if (failure is not null)
+        {
+            if (failure.Problem == SiteProblems.CertificateNotTrusted && CertificateProblem(draft) is null)
+            {
+                try
+                {
+                    failure.Certificate = ToDto(await _certificateProbe(draft, cancellationToken).ConfigureAwait(false));
+                }
+                catch (TlsProbeException)
+                {
+                    // The failure's own words stand; the certificate is read again after the save.
+                }
+            }
+
+            return failure;
+        }
+
+        var count = items!.Count;
+        return new SiteResultDto { Ok = true, ItemCount = count, Message = $"Connected. The folder holds {count} item{(count == 1 ? "" : "s")}." };
     }
 
     /// <summary>
@@ -928,7 +1049,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     }
 
     /// <summary>Lists one folder through rclone: the items sorted, or the failure as <c>sites.test</c> reports it.</summary>
-    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken)
+    /// <param name="draft">SITES.11 R4: a <c>sites.testDraft</c> record, which is never stored: its reach is not recorded.</param>
+    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderAsync(SiteRecord site, string path, CancellationToken cancellationToken, bool draft = false)
     {
         if (site.NeedsHostKey)
             return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = "The server's key has not been accepted yet." });
@@ -936,16 +1058,23 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (site is { Unsaved: true, Kind: SiteKinds.Sftp, SealedPassword: null })
             return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.PasswordNeeded, Message = "Type the password for this server." });
 
-        var result = await ListFolderOnceAsync(site, path, cancellationToken).ConfigureAwait(false);
-        if (result.Items is not null) SetReach(site.Id, SiteReach.Ok);
+        var result = await ListFolderOnceAsync(site, path, cancellationToken, draft).ConfigureAwait(false);
+        if (result.Items is not null && !draft) SetReach(site.Id, SiteReach.Ok);
         return result;
     }
 
     /// <summary>The longest one folder's listing may take before the browse gives up (tests shorten it).</summary>
     internal static TimeSpan ListTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
-    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderOnceAsync(SiteRecord site, string path, CancellationToken cancellationToken)
+    private async Task<(IReadOnlyList<SiteItemDto>? Items, SiteResultDto? Failure)> ListFolderOnceAsync(SiteRecord site, string path, CancellationToken cancellationToken,
+        bool draft = false)
     {
+        // A draft's reach is not recorded: it is not a remote yet, or not as saved.
+        void Trouble()
+        {
+            if (!draft) SetReach(site.Id, SiteReach.Trouble);
+        }
+
         RcloneLease lease;
         try
         {
@@ -978,12 +1107,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 // Not cantReach: it may have connected and signed in before going quiet, so the client does not retry on its own.
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, Fail($"The server did not answer within {ListTimeout.TotalSeconds:0} seconds."));
             }
             catch (RcloneCallException e) when (SshHostKeyProblem.Parse(e.Message) is { } problem)
             {
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, new SiteResultDto
                 {
                     Ok = false,
@@ -997,12 +1126,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
             catch (SiteSignInNeededException e)
             {
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.SignInNeeded, Message = e.Message });
             }
             catch (RcloneCallException e) when (SiteErrorText.IsSignInRefused(e.Message))
             {
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, new SiteResultDto
                 {
                     Ok = false, Problem = SiteProblems.SignInNeeded,
@@ -1011,13 +1140,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             }
             catch (RcloneCallException e) when (SiteErrorText.IsUntrustedCertificate(e.Message))
             {
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.CertificateNotTrusted, Message = SiteErrorText.Friendly(e.Message) });
             }
             catch (RcloneCallException e) when (site.Unsaved && SiteErrorText.RefusesTheSite(e.Message))
             {
                 // An address opened once: the server wants a password, or another one.
-                SetReach(site.Id, SiteReach.Trouble);
+                Trouble();
                 return (null, new SiteResultDto { Ok = false, Problem = SiteProblems.PasswordNeeded, Message = SiteErrorText.Friendly(e.Message) });
             }
             catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException)
@@ -1025,7 +1154,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 // Only a connection-class failure says the site is in trouble; rclone not running here does not.
                 var call = e as RcloneCallException;
                 if (call is not null && (SiteErrorText.CantReach(call.Message) || SiteErrorText.RefusesTheSite(call.Message)))
-                    SetReach(site.Id, SiteReach.Trouble);
+                    Trouble();
                 // RcloneClient has already redacted the text.
                 var failure = Fail(SiteErrorText.Friendly(e.Message));
                 // Only a server that did not answer may be retried by a client on its own: a refused sign-in retried would

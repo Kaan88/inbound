@@ -1,5 +1,39 @@
 # Progress — session handoff
 
+### Sites rework R4: All remotes, Add a remote, sidebar, SITES.11 (2026-11-17)
+
+- **Owner:** "start next, look perfect" (R3 accepted by look). Built (Sonnet), reviewed by Fable three times, fixed
+  (Opus), walked twice on the hidden desktop by me (the first walk found a bug), accepted.
+- **Built:** an "All remotes" page (address box "Open an address once", Open, "+ Add a remote"; list of remotes with
+  dot, Kind chip, folder on this PC, Last used, activity; double click or Enter opens; menu Open, Edit remote, Test,
+  Remove, Remember (opened-once), Forget the certificate; F2, Delete, Shift+F10); "Add a remote" as tiles (SFTP, FTP,
+  WebDAV, Google Drive, OneDrive, Dropbox, S3 or B2), then the short form for the kind ("Sign in with" segmented,
+  folder on this PC, Advanced closed, Test with its line, Back and Save); Edit remote opens the same form; Options >
+  Sites keeps the switch, rclone and updates and links to All remotes; sidebar "Remote files" with "All remotes" and
+  entries with dot, ↓n ↑n, an orange clock with the waiting count, the kind when idle, a thin progress line.
+  Flows moved from `SitesOptionsPage` into `SiteFlows` (save, remove, test, host key, certificate, sign-in).
+- **Host (additive): `sites.testDraft`** tests the form without saving: nothing written or broadcast, no reach or
+  last-used change; a stored password, key or token is used only for the same host, port, url, endpoint, user and
+  (FTP) encryption; an SFTP server whose key is not accepted is only probed (fingerprints shown, Trust inline);
+  draft keys never stand in for a remote's own trusted keys; returns the item count ("It works. … listed 6 items").
+  Save also asks for the password again when FTP's encryption changes (a missing value counts as Explicit). Against an
+  older Host, adding still saves first (Back and Cancel remove it) and Test in Edit is off.
+- **Open once:** sent without a password first; asks only on the Host's "password needed" and only for loads the user
+  started; at most the Host's limit is kept (the oldest idle one is closed; never one with running or paused
+  transfers: "Close an opened address first."); Remember keeps one.
+- **Not as drawn:** no "Ask each time" and no "More…" tile (no Host support); Name and port are in Advanced; no
+  per-remote "transfers at once" or "connections per file" (not per remote); Test sits just above the button row;
+  Next and Save are on the left as in every other dialog of the app; the page's "Today 09:14" is redrawn at midnight
+  only while shown.
+- **Walk:** the first walk found Back in Add a remote throwing ("Element is already the child of another element")
+  and leaving the dialog half-switched, the waiting clock as a colour emoji and no progress line; all fixed and walked
+  again (trace on, no exception). Pairs: `home-built.png`, `add-tiles-built.png` (after Back), `add-fields-built.png`.
+- **Also:** `AnHttpsSiteWithItsOwnCertificateIsTrustedOnlyAfterTheUserSaysSo` failed 1 run in 256 (its "wrong"
+  fingerprint forced the first byte to 00); fixed.
+- **Tests:** Core 2553, Sites 264 (+20 Linux-only), Integration Site* 150 (+6), Server 202 pass. Solution and Uno
+  builds 0 errors, no warning in a changed file. **Not checked by hand:** a real save, Test with Trust, browser
+  sign-in from the new form, keys on the page.
+
 ### Sites rework R3: the transfers list, SITES.11 (2026-11-17); Fable catch-up review of R2
 
 - **Owner:** "start" (R3), later "resume, fable is available for reviews". Built (Sonnet), reviewed by Opus, then by

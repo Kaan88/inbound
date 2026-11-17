@@ -84,6 +84,22 @@ public sealed partial class HostCommandDispatcher
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(save, IpcJson.Options) };
                 return null;
             }
+            case SitesMessageTypes.TestDraft:
+            {
+                // SITES.11 R4: a draft is checked as a save is, so it is held to the same rules.
+                var draft = message.GetPayload<SiteTestDraftRequest>();
+                if (draft is null) return null;
+                draft.Site ??= new SiteSaveRequest();
+                draft.Site.OwnSignInOnly = true;
+                if (!string.IsNullOrWhiteSpace(draft.Site.LocalFolder))
+                {
+                    if (roots.Allowed(draft.Site.LocalFolder) is not { } real) return roots.OutsideTextFor(draft.Site.LocalFolder);
+                    draft.Site.LocalFolder = real;
+                }
+
+                message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(draft, IpcJson.Options) };
+                return null;
+            }
             case SitesMessageTypes.TransferStart:
             {
                 var start = message.GetPayload<SiteTransferStartRequest>();

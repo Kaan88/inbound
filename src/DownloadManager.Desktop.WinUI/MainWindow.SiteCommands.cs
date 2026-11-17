@@ -92,8 +92,9 @@ public sealed partial class MainWindow
         SiteMenuTwoPanes.Text = TwoPanesShown ? "Server only" : "Two panes";
         SiteMenuTwoPanes.IsEnabled = TwoPanesOffered;
         SiteMenuCopyAddress.IsEnabled = site is not null;
-        SiteMenuEdit.IsEnabled = site is not null;
-        SitesEditSiteButton.IsEnabled = site is not null;
+        // An address opened once is not edited; it can be remembered from All remotes.
+        SiteMenuEdit.IsEnabled = site is not null && SitesHomeRules.CanEdit(site);
+        SitesEditSiteButton.IsEnabled = site is not null && SitesHomeRules.CanEdit(site);
         SyncStarredMenu(panel, site);
     }
 
@@ -139,10 +140,9 @@ public sealed partial class MainWindow
 
     private void SitesEditSiteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_sitesPanel?.Site is not { } site) return;
-        // The same edit dialog as the pane's Edit site button and Options > Sites.
-        SitesOptionsPage.RequestEdit(site.Id);
-        OpenSitesOptionsHook();
+        if (_sitesPanel?.Site is not { } site || !SitesHomeRules.CanEdit(site)) return;
+        // The same Edit remote form as the pane's button and the All remotes page.
+        _ = EnsureSiteFlows().SaveFormAsync(site);
     }
 
     private void SitesOptionsButton_Click(object sender, RoutedEventArgs e) => OpenSitesOptionsHook();

@@ -81,6 +81,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressOverviewText.cs" Link="WinUI\ProgressOverviewText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UiFormat.cs" Link="WinUI\UiFormat.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesBrowseRules.cs" Link="WinUI\SitesBrowseRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesHomeRules.cs" Link="WinUI\SitesHomeRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SitesCommandRules.cs" Link="WinUI\SitesCommandRules.cs" />
     <Compile Include="..\..\src\DownloadManager.Sites\SiteTransferPaths.cs" Link="WinUI\SiteTransferPaths.cs" />
     <Compile Include="..\..\src\DownloadManager.Sites\SitePaths.cs" Link="WinUI\SitePaths.cs" />

@@ -72,8 +72,10 @@ public sealed partial class MainWindow
         _sites = sites;
         SyncSiteEntryPoints();
         UpdateSitesChip();
+        if (_homeShown && !SitesOffered) LeaveSites(selectCategory: true);
+        RefreshHome();
         if (!_sitesShown) return;
-        var shown = SitesOffered ? _sites.FirstOrDefault(site => site.Id == _shownSiteId) : null;
+        var shown = SitesOffered ? FindSite(_shownSiteId) : null;
         if (shown is null) LeaveSites(selectCategory: true);
         else _sitesPanel?.UpdateSite(shown);
     }
@@ -81,7 +83,7 @@ public sealed partial class MainWindow
     /// <summary>The window now shows this PC or another server: the section follows, and the view goes if it cannot stay.</summary>
     private void SyncSitesForConnection()
     {
-        if (_sitesShown && !SitesOffered) LeaveSites(selectCategory: true);
+        if ((_sitesShown || _homeShown) && !SitesOffered) LeaveSites(selectCategory: true);
         // Two panes shows this PC's folders: it goes while another server is shown, and comes back with this PC.
         ApplyTwoPanes();
         SyncSiteEntryPoints();
@@ -94,6 +96,7 @@ public sealed partial class MainWindow
     private void SyncSiteEntryPoints()
     {
         var wanted = SitesOffered ? _sites.ToList() : [];
+        var offered = SitesOffered;
         _refreshingCategories = true;
         try
         {
@@ -110,11 +113,13 @@ public sealed partial class MainWindow
             var anchor = items.FindLastIndex(item => item.Tag is "queues" || (item.Tag is string tag && tag.StartsWith("remote:", StringComparison.Ordinal)));
             var at = anchor + 1;
 
-            // A "Sites" heading above the sites, as the walk asked; not selectable, so the arrow keys pass it.
+            // A "Remote files" heading, then All remotes, then the remotes. The heading is not selectable, so the arrow keys pass it.
             var heading = items.FirstOrDefault(item => item.Tag as string == SitesHeadingTag);
-            if (wanted.Count == 0)
+            var home = items.FirstOrDefault(item => item.Tag as string == SitesHomeTag);
+            if (!offered)
             {
                 if (heading is not null) CategoryList.Items.Remove(heading);
+                if (home is not null) CategoryList.Items.Remove(home);
             }
             else
             {
@@ -127,14 +132,22 @@ public sealed partial class MainWindow
                         IsTabStop = false,
                         Padding = new Thickness(14, 8, 8, 2),
                         MinHeight = 0,
-                        Content = new TextBlock { Text = "Sites", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                        Content = new TextBlock { Text = SitesHomeRules.Heading, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
                     };
                     AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
-                    AutomationProperties.SetName(heading, "Sites");
+                    AutomationProperties.SetName(heading, SitesHomeRules.Heading);
                     CategoryList.Items.Insert(Math.Min(at, CategoryList.Items.Count), heading);
                 }
 
                 at = CategoryList.Items.IndexOf(heading) + 1;
+                if (home is null)
+                {
+                    home = new ListBoxItem { Tag = SitesHomeTag, Padding = new Thickness(14, 2, 8, 2), Content = new TextBlock { Text = SitesHomeRules.AllRemotes } };
+                    AutomationProperties.SetName(home, SitesHomeRules.AllRemotes);
+                    CategoryList.Items.Insert(Math.Min(at, CategoryList.Items.Count), home);
+                }
+
+                at = CategoryList.Items.IndexOf(home) + 1;
             }
 
             foreach (var site in wanted)
@@ -143,20 +156,18 @@ public sealed partial class MainWindow
                 var item = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(existing => existing.Tag as string == tag);
                 if (item is null)
                 {
-                    item = new ListBoxItem { Tag = tag, Padding = new Thickness(14, 2, 8, 2) };
+                    item = new ListBoxItem { Tag = tag, Padding = new Thickness(14, 2, 8, 2), HorizontalContentAlignment = HorizontalAlignment.Stretch };
                     CategoryList.Items.Insert(Math.Min(at, CategoryList.Items.Count), item);
-                }
-
-                if ((item.Content as StackPanel)?.Children.OfType<TextBlock>().FirstOrDefault()?.Text != site.Name)
-                {
-                    item.Content = SidebarContent(site.Name, "&#xE839;");
-                    AutomationProperties.SetName(item, $"Site {site.Name}");
                 }
 
                 at = CategoryList.Items.IndexOf(item) + 1;
             }
 
-            if (_sitesShown && _shownSiteId is { } shown)
+            if (_homeShown)
+            {
+                CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(existing => existing.Tag as string == SitesHomeTag);
+            }
+            else if (_sitesShown && _shownSiteId is { } shown)
             {
                 CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(existing => existing.Tag as string == SiteTag(shown));
             }
@@ -177,17 +188,16 @@ public sealed partial class MainWindow
         var panel = new SitesPanel
         {
             // On the provider client's connections of their own: a slow listing never holds up the window's main connection.
-            Browse = (request, token) => _remote.BrowseSiteAsync(request, token),
+            // SITES.11 R4: an address opened once asks for its password here, as often as the server refuses it.
+            Browse = BrowseAskingAsync,
             Star = request => _remote.StarSiteFolderAsync(request),
             HereLookup = (request, token) => _remote.SiteHereAsync(request, token),
             OpenSitesOptions = OpenSitesOptionsHook,
+            // SITES.11 R4: the problem's button tests the remote (key, certificate, sign-in) or asks for a password here.
+            FixSite = (site, problem) => _ = FixSiteAsync(site, problem),
         };
-        panel.EditSiteRequested += site =>
-        {
-            // The same edit dialog Options > Sites uses for this site.
-            SitesOptionsPage.RequestEdit(site.Id);
-            OpenSitesOptionsHook();
-        };
+        // The same Edit remote form as the All remotes page.
+        panel.EditSiteRequested += site => _ = EnsureSiteFlows().SaveFormAsync(site);
         panel.StateChanged += UpdateSitesToolbar;
         panel.SelectMissing += name => SetSitesStatus($"{name} wasn't found on the first page of this folder.");
         panel.CommandRequested += FireSiteCommand;
@@ -223,13 +233,14 @@ public sealed partial class MainWindow
 
     private void ShowSite(string siteId)
     {
-        if (!SitesOffered || _sites.FirstOrDefault(site => site.Id == siteId) is not { } site)
+        if (!SitesOffered || FindSite(siteId) is not { } site)
         {
             SelectSidebarQuietly(_category);
             return;
         }
 
         LeaveProviderFull(selectCategory: false);
+        HideHome();
         var panel = EnsureSitesPanel();
         if (!_sitesShown) _scrollTrackBeforeSites = JobsScrollTrack.Visibility;
         // The same site again opens in the folder it was left in, unless its server, user or start folder changed since;
@@ -255,7 +266,14 @@ public sealed partial class MainWindow
     /// <summary>Back to the list and the download buttons. The panel keeps its place for the next time.</summary>
     private void LeaveSites(bool selectCategory)
     {
-        if (!_sitesShown) return;
+        var wasHome = _homeShown;
+        HideHome();
+        if (!_sitesShown)
+        {
+            if (wasHome && selectCategory) SelectSidebarQuietly(_category);
+            return;
+        }
+
         _sitesShown = false;
         _shownSiteId = null;
         _sitesPanel?.Stop();
@@ -274,8 +292,8 @@ public sealed partial class MainWindow
     /// <summary>The speed graph follows its menu item, except in the Sites view, where the Transfers bar takes its place (SITES.4).</summary>
     private void UpdateSpeedGraphVisibility()
     {
-        SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked && !_sitesShown ? Visibility.Visible : Visibility.Collapsed;
-        TransfersBar.Visibility = _sitesShown ? Visibility.Visible : Visibility.Collapsed;
+        SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked && !_sitesShown && !_homeShown ? Visibility.Visible : Visibility.Collapsed;
+        TransfersBar.Visibility = _sitesShown || _homeShown ? Visibility.Visible : Visibility.Collapsed;
         UpdateSpeedTimer();
     }
 

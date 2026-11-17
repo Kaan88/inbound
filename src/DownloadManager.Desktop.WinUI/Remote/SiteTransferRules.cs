@@ -45,13 +45,14 @@ internal static class SiteTransferRules
     }
 
     // Started (moving now, or between files) first, then paused, then waiting: not started yet, or waiting for its server.
-    private static int ActiveRank(SiteTransferDto t) => t.State switch
-    {
-        "running" when t.RetryAt is null
-            && (t.FilesRunning > 0 || t.FilesDone + t.FilesSkipped + t.FilesFailed > 0 || t.BytesDone > 0) => 0,
-        "paused" => 1,
-        _ => 2,
-    };
+    private static int ActiveRank(SiteTransferDto t) => IsStarted(t) ? 0 : t.State == "paused" ? 1 : 2;
+
+    /// <summary>
+    /// A running batch that has started (a file moving now, or files done, or bytes moved) and is not waiting to try its
+    /// server again. A running batch that is not started is waiting. Shared by the Running tab's order and the remotes' badges.
+    /// </summary>
+    public static bool IsStarted(SiteTransferDto t) => t.State == "running" && t.RetryAt is null
+        && (t.FilesRunning > 0 || t.FilesDone + t.FilesSkipped + t.FilesFailed > 0 || t.BytesDone > 0);
 
     public static string TabLabel(IEnumerable<SiteTransferDto> transfers, string tab)
     {

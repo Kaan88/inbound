@@ -140,6 +140,16 @@ public static class SitesMessageTypes
     /// <summary>SITES.11, <see cref="SiteIdRequest"/>: forgets an unsaved site, its batches canceled. Refused for a saved site.</summary>
     public const string Close = "sites.close";
 
+    /// <summary>
+    /// SITES.11 R4, <see cref="SiteTestDraftRequest"/>: tries what the Add or Edit remote form holds without saving it. It is
+    /// checked as <see cref="Save"/> checks it, built in memory, and its start folder listed; nothing is written or
+    /// broadcast. With an <c>Id</c>, an empty secret is taken from the saved remote only while its server, port and user are
+    /// unchanged. Answered with <see cref="Result"/> (<c>ItemCount</c> on success; <c>OfferedKeys</c> or <c>Certificate</c>
+    /// with <see cref="SiteProblems.HostKeyNotAccepted"/> or <see cref="SiteProblems.CertificateNotTrusted"/>). An older Host
+    /// answers it as unknown; the window then saves first and tests the saved remote.
+    /// </summary>
+    public const string TestDraft = "sites.testDraft";
+
     /// <summary>SITES.11, <see cref="SiteKeepRequest"/>: saves an unsaved site ("Remember"). Refused for a saved site.</summary>
     public const string Keep = "sites.keep";
 
@@ -197,7 +207,7 @@ public static class SitesMessageTypes
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
-            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep or Here
+            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep or Here or TestDraft
             or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
             or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
 }
@@ -724,6 +734,34 @@ public sealed class SiteResultDto
 
     /// <summary>The site after a save or a trust.</summary>
     public SiteDto? Site { get; set; }
+
+    /// <summary>SITES.11 R4, <see cref="SitesMessageTypes.TestDraft"/>: how many items the start folder holds, on success.</summary>
+    public int? ItemCount { get; set; }
+
+    /// <summary>
+    /// SITES.11 R4, <see cref="SitesMessageTypes.TestDraft"/> with <see cref="SiteProblems.HostKeyNotAccepted"/>: the keys the
+    /// server showed (read with no login), to accept in the form and send again in <see cref="SiteTestDraftRequest.HostKeys"/>.
+    /// </summary>
+    public List<SiteHostKeyDto>? OfferedKeys { get; set; }
+
+    /// <summary>
+    /// SITES.11 R4, <see cref="SitesMessageTypes.TestDraft"/> with <see cref="SiteProblems.CertificateNotTrusted"/>: the
+    /// certificate the server showed, when it could be read. It is trusted only after the remote is saved (<c>sites.trust</c>).
+    /// </summary>
+    public SiteCertificateDto? Certificate { get; set; }
+}
+
+/// <summary>SITES.11 R4: <see cref="SitesMessageTypes.TestDraft"/>.</summary>
+public sealed class SiteTestDraftRequest
+{
+    /// <summary>The form as it would be saved; <c>Id</c> set when it edits a saved (or open) remote.</summary>
+    public SiteSaveRequest Site { get; set; } = new();
+
+    /// <summary>
+    /// SFTP: server keys the user accepted in the form (<see cref="SiteHostKeyDto.Entry"/>), used for this test only, with the
+    /// remote's own when its server and port are unchanged. Nothing is stored.
+    /// </summary>
+    public List<string> HostKeys { get; set; } = [];
 }
 
 /// <summary>One kind's tile and fields, so every client draws the same Add a site dialog.</summary>

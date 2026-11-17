@@ -99,6 +99,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.OpenOnce, new SiteOpenOnceRequest { Address = "sftp://me@srv.example/pub", Password = "not logged" }),
         (SitesMessageTypes.Close, new SiteIdRequest { Id = SiteId }),
         (SitesMessageTypes.Keep, new SiteKeepRequest { Id = SiteId, Name = "Office box" }),
+        (SitesMessageTypes.TestDraft, new SiteTestDraftRequest { Site = new SiteSaveRequest { Name = "Box", Host = "srv.example" } }),
         (SitesMessageTypes.Here, new SiteHereRequest { Id = SiteId, Path = "/pub", Names = ["docs"] }),
         (SitesMessageTypes.MakeFolder, new SiteMakeFolderRequest { Id = SiteId, Path = "/pub", Name = "new" }),
         (SitesMessageTypes.Rename, new SiteRenameRequest { Id = SiteId, Path = "/pub", Name = "a.txt", NewName = "b.txt" }),
@@ -212,6 +213,19 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             Assert.True(sites.Messages[^1].GetPayload<SiteSaveRequest>().OwnSignInOnly);
             Assert.Equal(inside, sites.Messages[^2].GetPayload<SiteTransferStartRequest>().LocalFolder);
         }
+
+        // SITES.11 R4: a draft test is held to the same rules as a save.
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TestDraft,
+            new SiteTestDraftRequest { Site = new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = inside } })).Type);
+        lock (sites.Seen)
+        {
+            Assert.True(sites.Messages[^1].GetPayload<SiteTestDraftRequest>().Site.OwnSignInOnly);
+            Assert.Equal(inside, sites.Messages[^1].GetPayload<SiteTestDraftRequest>().Site.LocalFolder);
+        }
+
+        Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, SitesMessageTypes.TestDraft,
+            new SiteTestDraftRequest { Site = new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = "/srv/in" } })).Type);
+        Assert.True(HostCommandDispatcher.NeedsLifetime(SitesMessageTypes.TestDraft));
 
         // A batch the user at this PC made outside the session's folders is not set moving again from the browser; one
         // inside them is, and pausing or cancelling either moves nothing.

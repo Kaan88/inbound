@@ -46,7 +46,8 @@ public sealed partial class SiteTransfersEndToEndTests
 
         // Only the certificate the user saw is trusted.
         var wrong = await Call<SiteResultDto>(commands, SitesMessageTypes.Trust,
-            new SiteTrustRequest { Id = id, CertificateFingerprint = "00:" + seen.Fingerprint[3..] });
+            // The first byte is changed, never kept: "00:" would match a real fingerprint that starts with 00 (1 in 256).
+            new SiteTrustRequest { Id = id, CertificateFingerprint = (seen.Fingerprint.StartsWith("00:", StringComparison.Ordinal) ? "01:" : "00:") + seen.Fingerprint[3..] });
         Assert.False(wrong.Ok);
         var trusted = await Call<SiteResultDto>(commands, SitesMessageTypes.Trust, new SiteTrustRequest { Id = id, CertificateFingerprint = seen.Fingerprint });
         Assert.True(trusted.Ok, trusted.Message);
@@ -116,10 +117,11 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.NotEqual(SiteProblems.CertificateNotTrusted, after.Problem);
         Assert.True(after.Ok || after.Message!.Contains("550", StringComparison.Ordinal), after.Message);
 
-        // Explicit TLS to a server that speaks TLS from the start is not a certificate question.
+        // Explicit TLS to a server that speaks TLS from the start is not a certificate question. (Another encryption takes
+        // the password again: a saved one is sent only with the encryption it was saved with.)
         var plainProbe = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
         {
-            Id = id, Name = "FTPS", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = port, Tls = SiteTlsModes.Explicit, User = User,
+            Id = id, Name = "FTPS", Kind = SiteKinds.Ftp, Host = "127.0.0.1", Port = port, Tls = SiteTlsModes.Explicit, User = User, Password = Password,
         });
         Assert.True(plainProbe.Ok, plainProbe.Message);
         Assert.Empty(plainProbe.Site!.TrustedCertificates);
