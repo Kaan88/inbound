@@ -65,6 +65,8 @@ public sealed class InboundApplication : Application
                     userStopped || guardPaused, metered, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
                 // The Host used the "stopped by the user" decision in its start: the older runs are explained.
                 RunTracker.HostConsumed();
+                // The crash guard's Resume restarts what this start paused (not downloads the user had paused before).
+                if (guardPaused) ResumeSet.Add(app, host.Service.PausedAtStart, "crash guard start");
                 NetworkMonitor.OnHostStarted(host, metered);
                 InboundBackground.OnHostStarted(app, host);
                 return host;

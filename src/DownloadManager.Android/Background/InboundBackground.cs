@@ -27,6 +27,10 @@ internal static class InboundBackground
     private static bool _pausedShown;
     private static bool _waitingShown;
     private static int _waitingCount;
+    private static bool _waitingWifiBack;
+    // API 31 to 33: the network is not metered again but the app is not visible, so the downloads stay held (NetworkMonitor defers the report).
+    private static bool _wifiBack;
+    private static int _pausedCount;
     private static bool _holdDone;
     // A hold job the system started (it sees a network that isn't metered) while the Host still holds: the platform's own network
     // report normally lets go within moments; if it hasn't after this long, the two disagree and the job ends without a reschedule.
@@ -41,6 +45,12 @@ internal static class InboundBackground
     public static IKeepAlive KeepAlive => _keep ?? throw new InvalidOperationException("not initialised");
 
     public static bool KeepAliveRunning => _keep?.Running ?? false;
+
+    /// <summary>The downloads screen is visible (between MainActivity's OnStart and OnStop).</summary>
+    public static bool Visible
+    {
+        get { lock (Gate) return _visible; }
+    }
 
     public static ActivitySummary Summary => _host?.Activity.Summary ?? ActivitySummary.Idle;
 
@@ -83,7 +93,35 @@ internal static class InboundBackground
             if (visible) _hiddenLogged = false;
         }
 
-        if (visible) Evaluate();
+        if (visible)
+        {
+            // API 31 to 33: a "not metered" report held back while the app was hidden goes to the Host now.
+            NetworkMonitor.AppVisible();
+            Evaluate();
+        }
+    }
+
+    /// <summary>API 31 to 33: Wi-Fi is back but the report is held until the app is visible; the waiting notification says "Tap to resume".</summary>
+    public static void SetWifiBack(bool back)
+    {
+        lock (Gate)
+        {
+            if (_wifiBack == back) return;
+            _wifiBack = back;
+        }
+
+        Evaluate();
+    }
+
+    /// <summary>"Resume" of a notification ran: the paused notification goes (also one a previous process posted).</summary>
+    public static void ResumedFromNotification()
+    {
+        lock (Gate)
+        {
+            _pausedAll = false;
+            _pausedShown = false;
+            if (_app is { } app) Notifications.Cancel(app, Notifications.PausedId);
+        }
     }
 
     /// <summary>The Pause all action ran: when only paused downloads remain, say so (and offer Resume).</summary>
@@ -96,11 +134,12 @@ internal static class InboundBackground
     /// <summary>
     /// "Use data" was tapped: for a short while a session may be started with the app not visible. The tap is exempt from the background
     /// rules (a notification action; a broadcast action scheduled the UIDT job from the background on API 37). The next look that finds
-    /// something to transfer starts it; when the system refuses, the app is opened instead.
+    /// something to transfer starts it; a refusal is logged (opening the app from a broadcast is blocked from API 31: no trampoline). The
+    /// window stays within the system's allowance after a notification action (about 10 s).
     /// </summary>
     public static void StartSessionFromNotification()
     {
-        lock (Gate) _backgroundStartUntil = DateTimeOffset.UtcNow.AddSeconds(20);
+        lock (Gate) _backgroundStartUntil = DateTimeOffset.UtcNow.AddSeconds(10);
         Evaluate();
     }
 
@@ -174,7 +213,8 @@ internal static class InboundBackground
                     _shown = null;
                     var fromBackground = !_visible;
                     _backgroundStartUntil = DateTimeOffset.MinValue;
-                    if (!_keep.Start(s) && fromBackground) Notifications.OpenAppFromBackground(app);
+                    if (!_keep.Start(s) && fromBackground)
+                        Log.Warn(InboundApplication.Tag, "keep-alive refused after a notification action: downloads run while the process lives; opening the app starts it");
                 }
                 else if (!_hiddenLogged)
                 {
@@ -207,17 +247,20 @@ internal static class InboundBackground
                 }
                 if (s.ActiveCount == 0)
                 {
-                    if (!_waitingShown || _waitingCount != s.WaitingCount)
+                    if (!_waitingShown || _waitingCount != s.WaitingCount || _waitingWifiBack != _wifiBack)
                     {
                         _waitingShown = true;
                         _waitingCount = s.WaitingCount;
-                        Notifications.Notify(app, Notifications.WaitingId, Notifications.Waiting(app, s.WaitingCount));
+                        _waitingWifiBack = _wifiBack;
+                        Notifications.Notify(app, Notifications.WaitingId,
+                            _wifiBack ? Notifications.WifiBack(app, s.WaitingCount) : Notifications.Waiting(app, s.WaitingCount));
                     }
                 }
             }
             else
             {
                 _holdDone = false;
+                _wifiBack = false;
                 // Once per flip, whatever the session's state: it also cancels a job the system scheduled again after a stop of its own.
                 if (!_stopIssued) { _stopIssued = true; _keep.Stop(); }
             }
@@ -227,14 +270,18 @@ internal static class InboundBackground
                 if (_waitingShown) { Notifications.Cancel(app, Notifications.WaitingId); _waitingShown = false; }
             }
 
-            if (_pausedAll && s.ActiveCount == 0 && s.PausedCount > 0)
+            // Only what Pause all paused counts (owner, S24: "201 downloads paused" for one download).
+            var paused = _pausedAll && s.ActiveCount == 0 ? ResumeSet.StillPaused(app, _host) : 0;
+            if (paused > 0)
             {
-                Notifications.Notify(app, Notifications.PausedId, Notifications.Paused(app, s.PausedCount));
+                if (!_pausedShown || _pausedCount != paused)
+                    Notifications.Notify(app, Notifications.PausedId, Notifications.Paused(app, paused));
                 _pausedShown = true;
+                _pausedCount = paused;
             }
             else
             {
-                if (s.PausedCount == 0) _pausedAll = false;
+                if (_pausedAll && s.ActiveCount == 0) _pausedAll = false;
                 if (_pausedShown) { Notifications.Cancel(app, Notifications.PausedId); _pausedShown = false; }
             }
         }
@@ -294,6 +341,11 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
     private DateTimeOffset _requestedAt = DateTimeOffset.MinValue;
     private long _lastEstimate;
     private bool _estimateDirty;
+    // The network the job was last scheduled with, and the one the attached run started under: a run the hold job started needs a network
+    // that isn't metered, so the system would stop it on mobile data even while downloads go on there (Use data, or the warning).
+    private NetworkType _scheduledNetwork = NetworkType.Any;
+    private NetworkType _attachedNetwork = NetworkType.Any;
+    private bool _anyTried;
 
     public bool Running
     {
@@ -314,6 +366,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             .SetEstimatedNetworkBytes(estimate, 0)!
             .Build()!;
         var ok = Scheduler.Schedule(info) == JobScheduler.ResultSuccess;
+        if (ok) _scheduledNetwork = network;
         Log.Info(InboundApplication.Tag, $"{what} scheduled ({network}): " + (ok ? "success" : "failure") + " estimate=" + estimate);
         return ok;
     }
@@ -345,18 +398,21 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
         {
             _service = service;
             _params = p;
+            _attachedNetwork = _scheduledNetwork;
+            _anyTried = false;
             _attachedAt = DateTimeOffset.UtcNow;
             _estimateDirty = true; // refreshed at every run start
             _meter.Reset();
         }
     }
 
-    /// <summary>The job ended on the system's side; <paramref name="service"/> is the instance that was told.</summary>
-    public void Detach(SessionJobService service)
+    /// <summary>The job's run <paramref name="p"/> ended on the system's side (any stop reason). A stop of an older run (our own reschedule over
+    /// a running job) leaves a newer attached run alone.</summary>
+    public void Detach(SessionJobService service, JobParameters? p)
     {
         lock (_gate)
         {
-            if (!ReferenceEquals(_service, service)) return;
+            if (!ReferenceEquals(_service, service) || _params is null || p is null || !(ReferenceEquals(_params, p) || _params.Equals(p))) return;
             CrashGuardStore.SessionEnded();
             _service = null;
             _params = null;
@@ -369,6 +425,14 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
         lock (_gate)
         {
             if (_service is null || _params is null) return false;
+            if (_attachedNetwork == NetworkType.Unmetered && !_anyTried)
+            {
+                // Transferring again in a run the hold job started: the same job again with any network, over the running one (the system
+                // stops the old run as "cancelled by app" and starts the new one at once), so mobile data later does not end it.
+                _anyTried = true;
+                Schedule(NetworkType.Any, SessionBytes.Estimate(summary), "session job (any network, after the hold)");
+            }
+
             var delivered = true;
             try
             {

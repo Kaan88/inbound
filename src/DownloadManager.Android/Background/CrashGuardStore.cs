@@ -30,7 +30,12 @@ internal static class CrashGuardStore
         if (!tripped) return false;
         Log.Info(InboundApplication.Tag, "crash guard: tripped, the Host starts with interrupted downloads paused");
         // Say why, also when the app itself was opened (seen on the API 33 emulator: paused with no word of why).
-        try { Notifications.Notify(c, Notifications.GuardId, Notifications.PausedAfterErrors(c)); }
+        try
+        {
+            Notifications.Notify(c, Notifications.GuardId, Notifications.PausedAfterErrors(c));
+            // A Resume tap that reset the guard while this was posted: the notice must not stay up (review of step 2).
+            if (!Tripped) Notifications.Cancel(c, Notifications.GuardId);
+        }
         catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "crash guard notice: " + ex.Message); }
         return true;
     }

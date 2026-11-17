@@ -18,7 +18,7 @@ internal static class Notifications
     public const int BootId = 1004;
     public const int GuardId = 1005;
 
-    /// <summary>MainActivity extra of the "Resume" action: resume everything, then keep the process alive (the app is visible then).</summary>
+    /// <summary>Test build only: MainActivity's <c>--ez resume_all true</c> runs what the notifications' Resume does.</summary>
     public const string ExtraResumeAll = "resume_all";
 
     /// <summary>The FileProvider declared in the manifest.</summary>
@@ -53,14 +53,17 @@ internal static class Notifications
         catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "cancel " + id + ": " + ex.Message); }
     }
 
-    private static PendingIntent OpenApp(Context c, bool resumeAll)
+    private static PendingIntent OpenApp(Context c, bool resume)
     {
-        var i = new Intent(c, typeof(MainActivity));
+        // Resume goes through ResumeActivity (not exported): it resumes what the notification is about and opens the app.
+        var i = new Intent(c, resume ? typeof(ResumeActivity) : typeof(MainActivity));
         i.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
-        if (resumeAll) i.PutExtra(ExtraResumeAll, true);
-        // Different request codes: a PendingIntent is keyed by its intent without extras, and the two must stay apart.
-        return PendingIntent.GetActivity(c, resumeAll ? 11 : 10, i, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
+        return PendingIntent.GetActivity(c, resume ? 11 : 10, i, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
     }
+
+    // The system's download icon animates: only the ongoing notification (a transfer) uses it; the others get a still icon (owner, S24:
+    // "icon also keeps animating in paused mode").
+    private static readonly int StillIcon = Android.Resource.Drawable.IcMediaPause;
 
     private static Notification.Builder Builder(Context c, string channel, string title, string? body)
     {
@@ -110,6 +113,7 @@ internal static class Notifications
     public static Notification Waiting(Context c, int count)
     {
         var b = Builder(c, OngoingChannel, NotificationText.WaitingTitle, NotificationText.WaitingBody(count));
+        b.SetSmallIcon(StillIcon);
         b.SetOnlyAlertOnce(true);
         b.SetCategory(Notification.CategoryStatus);
         b.SetContentIntent(OpenApp(c, false));
@@ -117,27 +121,29 @@ internal static class Notifications
         return b.Build()!;
     }
 
-    /// <summary>The app's own screen, from a notification action whose receiver could not start a session (best effort: the system may refuse).</summary>
-    public static void OpenAppFromBackground(Context c)
+    /// <summary>
+    /// API 31 to 33: Wi-Fi came back with the app not visible. A foreground service can't start from here, so the downloads stay held and
+    /// the tap opens the app (which reports the network and starts the service).
+    /// </summary>
+    public static Notification WifiBack(Context c, int count)
     {
-        try
-        {
-            var i = new Intent(c, typeof(MainActivity));
-            i.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
-            c.StartActivity(i);
-            Log.Info(InboundApplication.Tag, "session could not be started from the background: opening the app");
-        }
-        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "open app from background: " + ex.Message); }
+        var b = Builder(c, OngoingChannel, NotificationText.WifiBackTitle, NotificationText.WifiBackBody(count));
+        b.SetSmallIcon(StillIcon);
+        b.SetOnlyAlertOnce(true);
+        b.SetCategory(Notification.CategoryStatus);
+        b.SetContentIntent(OpenApp(c, false));
+        return b.Build()!;
     }
 
     /// <summary>The plain notification a session starts with, before the Host has said what is running.</summary>
     public static Notification Resuming(Context c) =>
         Ongoing(c, new OngoingText(NotificationText.Resuming, null, NotificationText.BarMax, 0, true));
 
-    /// <summary>"N downloads paused" with Resume, which opens the app (a direct activity intent) and resumes there.</summary>
+    /// <summary>"N downloads paused" with Resume, which resumes what Pause all paused (only those) and opens the app.</summary>
     public static Notification Paused(Context c, int count)
     {
         var b = Builder(c, OngoingChannel, NotificationText.Paused(count), null);
+        b.SetSmallIcon(StillIcon);
         b.SetOnlyAlertOnce(true);
         b.SetAutoCancel(true);
         b.SetContentIntent(OpenApp(c, false));
@@ -149,15 +155,17 @@ internal static class Notifications
     public static Notification BootNotice(Context c, int count)
     {
         var b = Builder(c, OngoingChannel, NotificationText.Paused(count), NotificationText.BootBody);
+        b.SetSmallIcon(StillIcon);
         b.SetAutoCancel(true);
         b.SetContentIntent(OpenApp(c, false));
         return b.Build()!;
     }
 
-    /// <summary>The crash-loop guard: downloads stay paused until the user resumes. "Resume" (and the tap) open the app with the resume-all extra.</summary>
+    /// <summary>The crash-loop guard: downloads stay paused until the user resumes. "Resume" (and the tap) resume what the guard paused.</summary>
     public static Notification PausedAfterErrors(Context c)
     {
         var b = Builder(c, OngoingChannel, NotificationText.PausedAfterErrors, null);
+        b.SetSmallIcon(Android.Resource.Drawable.StatNotifyError);
         b.SetOnlyAlertOnce(true);
         b.SetAutoCancel(true);
         b.SetContentIntent(OpenApp(c, true));

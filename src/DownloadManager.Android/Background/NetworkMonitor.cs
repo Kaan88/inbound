@@ -110,6 +110,24 @@ internal static class NetworkMonitor
     }
 #endif
 
+    private static bool _deferred;
+
+    /// <summary>
+    /// Below API 34 a "not metered" report is held back while the Host holds downloads for Wi-Fi and nothing could keep them alive: the app is
+    /// not visible and no foreground service runs. The service can only start while the app is visible (review of step 2: the Host resumed
+    /// the transfers in the background with no service). API 34+ has the hold job, which the system starts on such a network.
+    /// </summary>
+    private static bool HoldBackNotMetered(AndroidHost host, bool metered, bool visible, bool keepAlive) =>
+        !metered && !OperatingSystem.IsAndroidVersionAtLeast(34) && !visible && !keepAlive && host.Service.WaitingForMeteredNetwork;
+
+    /// <summary>The app became visible: a report held back is delivered now (the Host resumes, and the keep-alive can start).</summary>
+    public static void AppVisible()
+    {
+        bool deferred;
+        lock (Gate) deferred = _deferred;
+        if (deferred) Deliver();
+    }
+
     // One delivery loop at a time, always the latest value: two callbacks can't reach the Host out of order.
     private static void Deliver()
     {
@@ -127,14 +145,37 @@ internal static class NetworkMonitor
                 {
                     AndroidHost host;
                     bool metered;
+                    bool defer = false, wasDeferred, done = false;
+                    // Read before Gate: InboundBackground reads this class under its own lock (lock order).
+                    var visible = InboundBackground.Visible;
+                    var keepAlive = InboundBackground.KeepAliveRunning;
                     lock (Gate)
                     {
                         if (_host is null) { _pumping = false; return; }
                         host = _host;
                         metered = Current;
-                        if (_sent == metered) { _pumping = false; return; }
-                        _sent = metered;
+                        wasDeferred = _deferred;
+                        if (_sent == metered) { _pumping = false; _deferred = false; done = true; }
+                        else if (HoldBackNotMetered(host, metered, visible, keepAlive))
+                        {
+                            // API 31 to 33, app not visible: the Host would resume the held downloads with no foreground service (one can't
+                            // start from the background). They stay held; the waiting notification says "Wi-Fi is back · Tap to resume", and
+                            // the report goes when the app is visible (AppVisible).
+                            _pumping = false;
+                            _deferred = defer = true;
+                        }
+                        else { _sent = metered; _deferred = false; }
                     }
+
+                    if (defer)
+                    {
+                        if (!wasDeferred) Log.Info(InboundApplication.Tag, "network not metered again with the app hidden (API < 34): held until the app is opened");
+                        InboundBackground.SetWifiBack(true);
+                        return;
+                    }
+
+                    if (wasDeferred) InboundBackground.SetWifiBack(false);
+                    if (done) return;
 
                     await host.Service.SetNetworkMeteredAsync(metered).ConfigureAwait(false);
                     Log.Info(InboundApplication.Tag, "network reported to the Host: metered=" + metered);
@@ -160,7 +201,8 @@ internal static class NetworkMonitor
                 Context? app;
                 lock (Gate) { host = _host; app = _app; }
                 if (host is null || app is null) return;
-                var locked = ((KeyguardManager)app.GetSystemService(Context.KeyguardService)!).IsDeviceLocked;
+                // The lock screen is showing (also without a secure lock, or one Smart Lock keeps open): nobody is using the phone.
+                var locked = ((KeyguardManager)app.GetSystemService(Context.KeyguardService)!).IsKeyguardLocked;
                 var interactive = ((PowerManager)app.GetSystemService(Context.PowerService)!).IsInteractive;
                 var stop = MeteredPolicy.StopNonResumableAtOnce(locked, interactive);
                 Log.Info(InboundApplication.Tag, $"wi-fi only now holds: locked={locked} interactive={interactive} -> " +

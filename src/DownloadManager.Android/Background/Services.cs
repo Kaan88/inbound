@@ -62,16 +62,19 @@ internal sealed class SessionJobService : JobService
     public override bool OnStopJob(JobParameters? p)
     {
         var reason = p?.StopReason;
-        // Our own reschedule (a new Schedule over a running job): the new run follows at once; nothing to do.
+        // This run is over whatever the reason: it is detached (a cancel that raced the start would otherwise leave a dead run attached and
+        // Running true). Detach acts on this run only, so the new run of our own reschedule stays attached.
+        (InboundBackground.KeepAlive as UidtKeepAlive)?.Detach(this, p);
+        // Our own reschedule or cancel: nothing to reschedule (a reschedule's new run follows at once).
         if (reason == (int)StopReason.CancelledByApp)
         {
-            Log.Info(InboundApplication.Tag, "session job stop: cancelled by app (own reschedule)");
+            Log.Info(InboundApplication.Tag, "session job stop: cancelled by app");
+            InboundBackground.Evaluate();
             return false;
         }
 
         // Any other reason is the system's stop: nothing is marked, the Host keeps its state, and the job is rescheduled by the system.
         Log.Info(InboundApplication.Tag, $"session job stop: reason={reason} pid={Process.MyPid()}");
-        (InboundBackground.KeepAlive as UidtKeepAlive)?.Detach(this);
         return true;
     }
 }
@@ -124,7 +127,9 @@ internal sealed class PauseAllReceiver : BroadcastReceiver
             try
             {
                 var host = await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
-                await host.Service.PauseAllAsync().ConfigureAwait(false);
+                var paused = await host.Service.PauseAllAsync().ConfigureAwait(false);
+                // Resume restarts these, and only these.
+                ResumeSet.Add(app, paused, "pause all");
                 // After the pause: the news is "paused" only once it has happened.
                 InboundBackground.MarkPauseAll();
                 Log.Info(InboundApplication.Tag, "pause all (notification)");

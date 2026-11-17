@@ -52,8 +52,10 @@ public sealed class MainActivity : AppCompatActivity
         list.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
         fab.Click += (_, _) => ShowAddSheet();
         AskForNotifications();
-        // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume everything twice.
+#if INBOUND_TEST_BUILD
+        // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
         HandleResumeAll(Intent, redelivered: savedInstanceState is not null || (Intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
+#endif
 
         var reported = false;
         _model.FirstSnapshotShown += () =>
@@ -110,8 +112,8 @@ public sealed class MainActivity : AppCompatActivity
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
-        HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
 #if INBOUND_TEST_BUILD
+        HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
         if (_model is not null) TestHooks.Run(_model, intent);
 #endif
     }
@@ -129,27 +131,19 @@ public sealed class MainActivity : AppCompatActivity
         base.OnStop();
     }
 
-    /// <summary>The "Resume" action of the paused notification: resume everything; the keep-alive follows by itself (the app is visible).</summary>
+#if INBOUND_TEST_BUILD
+    /// <summary>
+    /// Test build only: <c>--ez resume_all true</c> does what the notifications' Resume does (ResumeActivity, which is not exported). The
+    /// release build has no way for another app to ask MainActivity to resume anything (review of step 2).
+    /// </summary>
     private void HandleResumeAll(Intent? intent, bool redelivered)
     {
         if (intent is null || !intent.GetBooleanExtra(Notifications.ExtraResumeAll, false)) return;
         intent.RemoveExtra(Notifications.ExtraResumeAll);
         if (redelivered) return;
-        // The user chose to resume (also after the crash-loop guard paused things): the guard starts over.
-        Inbound.App.Background.CrashGuardStore.Reset("Resume in the notification");
-        var app = ApplicationContext!;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var host = await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
-                await host.Service.ResumeAllAsync().ConfigureAwait(false);
-                Log.Info(InboundApplication.Tag, "resume all (notification)");
-                InboundBackground.Evaluate();
-            }
-            catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "resume all: " + ex); }
-        });
+        ResumeSet.ResumeFromNotification(ApplicationContext!, "test hook");
     }
+#endif
 
     /// <summary>API 33 and up: asks once, at the first start. Denied is fine: everything still runs, there is just no notification.</summary>
     private void AskForNotifications()

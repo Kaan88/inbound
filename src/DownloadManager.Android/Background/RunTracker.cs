@@ -80,7 +80,10 @@ internal static class RunTracker
                 var records = new List<ExitRecord>();
                 foreach (var e in am.GetHistoricalProcessExitReasons(c.PackageName, 0, 0) ?? [])
                     records.Add(new ExitRecord(e.GetProcessStateSummary(), (int)e.Reason, e.Timestamp));
-                d = UserStopDetector.DecideAny(_previous, records);
+                long? updated = null;
+                try { updated = c.PackageManager!.GetPackageInfo(c.PackageName!, 0)!.LastUpdateTime; }
+                catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "package update time: " + ex.Message); }
+                d = UserStopDetector.DecideAny(_previous, records, updated);
             }
             catch (System.Exception ex) { d = new UserStopDecision(false, "exit records unreadable: " + ex.Message); }
 
