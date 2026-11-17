@@ -14,11 +14,13 @@
     crumbs, deviceDownloadUrl, hereText, joinPath, nameProblem, parentPath, problems, starLabel, uploadToSite,
     type Site, type SiteBrowseResult, type SiteItem, type SiteResult,
   } from '../../lib/sites';
+  import type { FolderBrowseResult } from '../../lib/types';
   import {
-    activation, addressesOf, autoRetryAllowed, commandKey, commandLabel, connectionKey, deviceDownloadAllowed, filterMatches, fixButtonText,
-    fixable, footerText, hereTone, isCantReach, kindChip, lastListedText, linkedLine, nextSort, notRetryingText, pathFromText, remoteMenu,
-    retryAtText, retryDelaySeconds, rowsOf, serverDownload, serverFolder, serverUpload, sizeText, sortRows, troubleTitle, troubleWhy,
-    type RemoteCommand, type Row, type SortKey,
+    actionable, activation, addressesOf, autoRetryAllowed, commandKey, commandLabel, connectionKey, deviceDownloadAllowed, downloadTarget, downloadWhere,
+    filterMatches, fixButtonText, fixable, footerText, hereTone, isCantReach, keptSelection, kindChip, lastListedText, linkedLine, nextSort,
+    notRetryingText, onRowControl, pathFromText, remoteMenu, retryAtText, retryDelaySeconds, rowKeys, rowsOf, serverDownload, serverFolder,
+    serverUpload, sizeText, sortRows, troubleTitle, troubleWhy, uploadSourceProblem,
+    type DownloadTrigger, type RemoteCommand, type Row, type SortKey,
   } from '../../lib/sitesBrowse';
   import ServerFolders from './ServerFolders.svelte';
   import SiteFix from './SiteFix.svelte';
@@ -47,7 +49,9 @@
   let filter = $state('');
   let view = $state<'two' | 'server'>(readView());
   let leftPath = $state('');
-  let leftPane: ServerFolders | undefined = $state();
+  let leftSelected = $state<string | null>(null);
+  let serverRoots = $state<string[]>([]);
+  let listEl: HTMLElement | undefined = $state();
 
   function readView(): 'two' | 'server' {
     try { return localStorage.getItem('inbound.sites.view') === 'two' ? 'two' : 'server'; } catch { return 'server'; }
@@ -65,10 +69,17 @@
   const starred = $derived(site.stars.includes(path));
   const canMakeFolder = $derived(site.capabilities.includes('newFolder'));
   const defaultFolder = $derived(serverFolder(site, store.model.settings?.defaultDownloadDirectory));
+  // The one folder every download control uses, and the footer names (sitesBrowse.downloadTarget).
+  const target = $derived(downloadTarget({
+    view, leftSelected, leftShown: leftPath, linkedFolder: site.localFolder, defaultDownloadDirectory: store.model.settings?.defaultDownloadDirectory,
+  }));
+  // What the arrow from the left pane uploads: the folder chosen there, else the one it shows.
+  const uploadFrom = $derived(leftSelected || leftPath || '');
+  const uploadFromProblem = $derived(uploadSourceProblem(uploadFrom, serverRoots));
   const hostName = $derived(store.texts.hostName);
   const footer = $derived(footerText({
     shown: shown.length, total: Math.max(total, items.length), selected: chosen.length, selectedBytes: chosen.reduce((sum, item) => sum + (item.isFolder || item.size < 0 ? 0 : item.size), 0),
-    same: items.filter((item) => item.here === 'same').length, linked: showsHere, where: (view === 'two' && leftPath) || defaultFolder || null, hostName, format: bytes,
+    same: items.filter((item) => item.here === 'same').length, linked: showsHere, where: target || null, hostName, format: bytes,
   }));
   let starring = $state(false);
 
@@ -113,7 +124,7 @@
     retryTimer = setTimeout(() => void open(path, true), seconds * 1000);
   }
 
-  async function open(next: string, refresh = false, more = false) {
+  async function open(next: string, refresh = false, more = false, retried = false) {
     if (more && next !== path) return;
     const mine = ++round;
     stopRetry();
@@ -126,7 +137,8 @@
       if (!result.ok) {
         error = result.message ?? 'The folder could not be read.';
         problem = result.problem ?? null;
-        if (problem === problems.listingChanged) return open(next, true);
+        // The listing changed while more of it was read: read it afresh, once.
+        if (problem === problems.listingChanged && !retried) return open(next, true, false, true);
         failures++;
         scheduleRetry();
         return;
@@ -135,13 +147,21 @@
       problem = null;
       failures = 0;
       spellStart = 0;
+      const sameFolder = result.path === path;
       path = result.path;
       items = more ? [...items, ...result.items] : result.items;
       total = result.total;
       listing = result.listing ?? null;
       listedAt = Date.now();
       everListed = true;
-      if (!more) { selected = new Set(); focusKey = null; anchorKey = null; filter = ''; }
+      if (!more) {
+        // A refresh of the same folder keeps the filter and the rows still there; another folder starts afresh.
+        const keys = rowKeys(items);
+        selected = keptSelection(selected, keys, sameFolder);
+        if (!sameFolder) filter = '';
+        if (!sameFolder || (focusKey !== null && !keys.includes(focusKey))) focusKey = null;
+        if (!sameFolder || (anchorKey !== null && !keys.includes(anchorKey))) anchorKey = null;
+      }
     } catch (failure) {
       if (mine === round) {
         error = failure instanceof Error ? failure.message : String(failure);
@@ -229,8 +249,10 @@
     selected = selected.size === shown.length ? new Set() : new Set(shown.map((row) => row.key));
   }
 
+  /** A row's element, found by its place in the list (the rows are drawn in `shown` order), not by a selector. */
   function rowEl(key: string | null): HTMLElement | null {
-    return key === null ? null : (document.querySelector(`[data-rowkey="${CSS.escape(key)}"]`) as HTMLElement | null);
+    const at = key === null ? -1 : shown.findIndex((row) => row.key === key);
+    return at < 0 ? null : (listEl?.querySelectorAll<HTMLElement>('[role="option"]')[at] ?? null);
   }
 
   function names(list: SiteItem[]) {
@@ -320,30 +342,33 @@
     return true;
   }
 
-  async function download(list: SiteItem[]) {
-    if (!list.length) return;
-    const folder = view === 'two' && leftPath ? leftPath : defaultFolder;
+  /** Download, Enter, a double click, the menu and the arrow: always to the server, into `target` (bug 1). */
+  async function download(list: SiteItem[], trigger: DownloadTrigger) {
+    if (!list.length || downloadWhere(trigger, list) !== 'server') return;
     // No folder to name: ask, so the choice and the folder are in front of the person.
-    if (!folder) return downloadTo(list);
-    await toServer(list, folder);
+    if (!target) return downloadTo(list);
+    try {
+      await toServer(list, target);
+    } catch (failure) {
+      store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
+    }
   }
 
   function downloadTo(list: SiteItem[]) {
     if (!list.length) return;
     dialogError = '';
-    downloadBox = { items: list, where: 'server', folder: view === 'two' && leftPath ? leftPath : defaultFolder, conflict: 'keepBoth' };
+    downloadBox = { items: list, where: 'server', folder: target, conflict: 'keepBoth' };
   }
 
   function confirmDownload(current: NonNullable<typeof downloadBox>) {
     if (current.where === 'device') {
-      // One file, through this browser: it stops when the tab is closed, which the dialog said.
-      const item = current.items[0];
-      const link = document.createElement('a');
-      link.href = deviceDownloadUrl(site.id, joinPath(path, item.name));
-      link.download = item.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      // Checked again here: only one file goes to this device, through this browser.
+      if (downloadWhere('dialog', current.items, current.where) !== 'device') {
+        dialogError = 'Only one file at a time goes to this device.';
+        return;
+      }
+      // It stops when the tab is closed, which the dialog said. The server sends it as an attachment, so the page stays.
+      window.location.assign(deviceDownloadUrl(site.id, joinPath(path, actionable(current.items)[0].name)));
       closeDialogs();
       return;
     }
@@ -353,6 +378,31 @@
   function openUpload() {
     dialogError = '';
     uploadBox = { where: 'device', files: [], serverFolder: '', dropping: false };
+    if (!serverRoots.length) void loadRoots();
+  }
+
+  /** The folders the server may use: one of them cannot go up itself, so the dialog says so before asking the Host. */
+  async function loadRoots() {
+    try {
+      const result = await store.ask<FolderBrowseResult>('folders.browse', { path: null });
+      if (result.roots?.length) serverRoots = result.roots;
+    } catch { /* the Host still refuses a wrong folder, and its words are shown */ }
+  }
+
+  /** A server folder up into this remote folder: the dialog and the arrow between the panes both come here. */
+  async function startUpload(serverPath: string): Promise<boolean> {
+    const start = serverUpload(site.id, path, serverPath, 'keepBoth', serverRoots);
+    if (!start) {
+      dialogError = uploadSourceProblem(serverPath, serverRoots) ?? 'Choose a folder on the server.';
+      return false;
+    }
+    const result = await store.ask<{ ok: boolean; message?: string }>('sites.transfer.start', start);
+    if (!result.ok) {
+      dialogError = result.message ?? 'The upload did not start.';
+      return false;
+    }
+    store.toast(`Uploading from ${hostName}. Its progress is under Transfers.`);
+    return true;
   }
 
   function confirmUpload(current: NonNullable<typeof uploadBox>) {
@@ -361,20 +411,17 @@
       closeDialogs();
       return;
     }
-    const start = serverUpload(site.id, path, current.serverFolder);
-    if (!start) {
-      dialogError = 'Choose a folder on the server.';
-      return;
+    void run(() => startUpload(current.serverFolder));
+  }
+
+  /** The arrow has no dialog to show a refusal in, so it says it in a toast. */
+  async function uploadFromLeft() {
+    dialogError = '';
+    try {
+      if (!(await startUpload(uploadFrom))) store.toast(dialogError || 'The upload did not start.', 'error');
+    } catch (failure) {
+      store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
     }
-    void run(async () => {
-      const result = await store.ask<{ ok: boolean; message?: string }>('sites.transfer.start', start);
-      if (!result.ok) {
-        dialogError = result.message ?? 'The upload did not start.';
-        return false;
-      }
-      store.toast(`Uploading from ${hostName}. Its progress is under Transfers.`);
-      return true;
-    });
   }
 
   function send(file: File, replace = false, folder = path) {
@@ -431,7 +478,7 @@
 
   function command(which: RemoteCommand) {
     switch (which) {
-      case 'download': void download(chosen); break;
+      case 'download': void download(chosen, 'menu'); break;
       case 'downloadTo': downloadTo(chosen); break;
       case 'rename': if (chosen.length === 1) rename(chosen[0]); break;
       case 'delete': if (chosen.length) void askDelete(chosen); break;
@@ -444,10 +491,10 @@
     }
   }
 
-  function activate() {
+  function activate(trigger: 'enter' | 'doubleClick') {
     const what = activation(chosen);
     if (what === 'openFolder') void open(joinPath(path, chosen[0].name));
-    else if (what === 'download') void download(chosen);
+    else if (what === 'download') void download(chosen, trigger);
   }
 
   // ---- The menu: right click, long press, the "..." button and Shift+F10 (as My TorBox's list) ----
@@ -511,8 +558,9 @@
   }
 
   function listKey(event: KeyboardEvent) {
-    const typing = (event.target as HTMLElement | null)?.closest('input, select, textarea');
-    if (typing) return;
+    // A key on a control inside a row (its checkbox, its "…" button) is that control's: Enter on "…" opens the menu and
+    // does not download, and Space on it does not toggle the row.
+    if (onRowControl(event.target as HTMLElement | null)) return;
     const ctrl = event.ctrlKey || event.metaKey;
     const current = shown.find((row) => row.key === focusKey) ?? null;
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
@@ -523,7 +571,7 @@
     else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1, event.shiftKey); }
     else if (event.key === 'Home') { event.preventDefault(); move(-shown.length, event.shiftKey); }
     else if (event.key === 'End') { event.preventDefault(); move(shown.length, event.shiftKey); }
-    else if (event.key === 'Enter') { event.preventDefault(); activate(); }
+    else if (event.key === 'Enter') { event.preventDefault(); activate('enter'); }
     else if (event.key === ' ' && current) { event.preventDefault(); toggleBox(current); }
     else if (ctrl && event.key.toLowerCase() === 'a') { event.preventDefault(); toggleAll(); }
     else if (event.key === 'F2' && chosen.length === 1) { event.preventDefault(); rename(chosen[0]); }
@@ -532,8 +580,6 @@
     else if (event.key === 'Backspace' && path !== '/') { event.preventDefault(); void open(parentPath(path)); }
     else if (ctrl && event.shiftKey && event.key.toLowerCase() === 's') { event.preventDefault(); downloadTo(chosen); }
     else if (ctrl && event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); newFolder(); }
-    else if (ctrl && event.shiftKey && event.key.toLowerCase() === 'c') { event.preventDefault(); void copyAddress(); }
-    else if (ctrl && event.key.toLowerCase() === 'u') { event.preventDefault(); openUpload(); }
   }
 
   function sortBy(key: SortKey) {
@@ -548,7 +594,7 @@
 <div class="space-y-3">
   <!-- The toolbar: the same commands as the window's, minus those that need this PC. -->
   <div class="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Remote files">
-    <button class="btn" disabled={!chosen.length} onclick={() => download(chosen)}><Icon name="download" size={15} /> Download</button>
+    <button class="btn" disabled={!chosen.length} onclick={() => download(chosen, 'button')}><Icon name="download" size={15} /> Download</button>
     <button class="btn" onclick={openUpload}><Icon name="upload" size={15} /> Upload</button>
     <span class="mx-1 h-5 w-px bg-divider" aria-hidden="true"></span>
     {#if canMakeFolder}<button class="btn" onclick={newFolder}><Icon name="folder-plus" size={15} /> New folder</button>{/if}
@@ -602,12 +648,12 @@
 
   <div class="flex items-stretch gap-3">
     {#if view === 'two'}
-      <ServerFolders bind:this={leftPane} bind:path={leftPath} initial={defaultFolder} />
+      <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:roots={serverRoots} initial={defaultFolder} />
       <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
-        <button class="btn-icon" title="Download the selection into the folder on the left" aria-label="Download the selection into the folder on the left"
-          disabled={!chosen.length || !leftPane?.target()} onclick={() => { const folder = leftPane?.target(); if (folder) void toServer(chosen, folder); }}><Icon name="chevron-left" size={16} /></button>
-        <button class="btn-icon" title="Upload the folder selected on the left into this folder" aria-label="Upload the folder selected on the left into this folder"
-          disabled={!leftPane?.target()} onclick={() => { const folder = leftPane?.target(); const start = folder ? serverUpload(site.id, path, folder) : null; if (start) void store.ask('sites.transfer.start', start).then(() => store.toast(`Uploading from ${hostName}. Its progress is under Transfers.`)); }}><Icon name="chevron-right" size={16} /></button>
+        <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
+          disabled={!chosen.length} onclick={() => download(chosen, 'arrow')}><Icon name="chevron-left" size={16} /></button>
+        <button class="btn-icon" title={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`} aria-label={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`}
+          disabled={!!uploadFromProblem} onclick={uploadFromLeft}><Icon name="chevron-right" size={16} /></button>
       </div>
     {/if}
 
@@ -662,7 +708,7 @@
           <span class="w-9"></span>
         </div>
         {#if path !== '/'}
-          <button class="flex w-full items-center gap-2 border-b border-divider px-3 py-1.5 text-left text-[13px] hover:bg-hover" aria-label="Up one folder, .." ondblclick={() => open(parentPath(path))} onclick={() => open(parentPath(path))}>
+          <button class="flex w-full items-center gap-2 border-b border-divider px-3 py-1.5 text-left text-[13px] hover:bg-hover" aria-label="Up one folder, .." onclick={() => open(parentPath(path))}>
             <span class="w-4"></span><Icon name="folder" size={16} class="shrink-0 text-muted" /><span>..</span>
           </button>
         {/if}
@@ -671,14 +717,14 @@
         {:else if !shown.length && !error}
           <p class="px-3 py-4 text-[13px] text-muted">{filter.trim() ? 'Nothing here matches the filter.' : 'This folder is empty.'}</p>
         {/if}
-        <ul class="min-h-[6rem] divide-y divide-divider text-[13px]" role="listbox" aria-multiselectable="true" aria-label="Files in {path}" tabindex="-1" onkeydown={listKey} oncontextmenu={(event) => { if (event.target === event.currentTarget) contextmenu(null, event); }}>
+        <ul bind:this={listEl} class="min-h-[6rem] divide-y divide-divider text-[13px]" role="listbox" aria-multiselectable="true" aria-label="Files in {path}" tabindex="-1" onkeydown={listKey} oncontextmenu={(event) => { if (event.target === event.currentTarget) contextmenu(null, event); }}>
           {#each shown as row (row.key)}
             {@const item = row.item}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <li data-rowkey={row.key} role="option" aria-selected={selected.has(row.key)} tabindex={focusKey === row.key || (focusKey === null && row === shown[0]) ? 0 : -1}
+            <li role="option" aria-selected={selected.has(row.key)} tabindex={focusKey === row.key || (focusKey === null && row === shown[0]) ? 0 : -1}
               class="item-row flex items-center gap-2 px-3 py-1.5 {selected.has(row.key) ? 'bg-selected' : 'hover:bg-hover'}"
               onclick={(event) => rowClick(row, event)}
-              ondblclick={() => { select(row); activate(); }}
+              ondblclick={(event) => { if (onRowControl(event.target as HTMLElement | null)) return; select(row); activate('doubleClick'); }}
               oncontextmenu={(event) => contextmenu(row, event)}
               onpointerdown={(event) => pointerdown(row, event)}
               onpointermove={(event) => longPress.move(event.clientX, event.clientY)}
@@ -787,12 +833,13 @@
           <span class="min-w-0 flex-1 truncate rounded border border-control-stroke px-2 py-1.5">{box.serverFolder || 'No folder chosen'}</span>
           <button class="btn" onclick={() => (pickingServerFolder = true)}>Choose a folder…</button>
         </div>
+        {#if box.serverFolder && uploadSourceProblem(box.serverFolder, serverRoots)}<p class="text-[12.5px] text-error" role="alert">{uploadSourceProblem(box.serverFolder, serverRoots)}</p>{/if}
         <p class="text-[12px] text-muted">The server lists its folders, not their files, so a whole folder goes up. It keeps going if you close this tab.</p>
       {/if}
       {#if dialogError}<p class="text-[12.5px] text-error" role="alert">{dialogError}</p>{/if}
     </div>
     {#snippet footer()}
-      <button class="btn-primary" disabled={busy || (box.where === 'device' ? !box.files.length : !box.serverFolder)} onclick={() => uploadBox && confirmUpload(uploadBox)}><Icon name="upload" size={15} /> Upload</button>
+      <button class="btn-primary" disabled={busy || (box.where === 'device' ? !box.files.length : !!uploadSourceProblem(box.serverFolder, serverRoots))} onclick={() => uploadBox && confirmUpload(uploadBox)}><Icon name="upload" size={15} /> Upload</button>
       <button class="btn" onclick={closeDialogs}>Cancel</button>
     {/snippet}
   </Dialog>

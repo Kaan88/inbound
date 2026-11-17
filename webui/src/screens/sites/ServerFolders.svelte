@@ -8,18 +8,15 @@
 
   // The left pane of "Two panes" (web-two): the server's own folders, under its allowed roots only. The server lists
   // folders here, not files (folders.browse), so this pane is where a download goes and where an upload comes from.
-  let { path = $bindable(''), initial = '' }: { path?: string; initial?: string } = $props();
+  // `path` is the folder the pane shows ('' for its list of roots), `selected` the folder chosen in it, `roots` the
+  // folders the server may use. SiteBrowser turns them into the one download target (sitesBrowse.downloadTarget).
+  let { path = $bindable(''), selected = $bindable(null), roots = $bindable([]), initial = '' }:
+    { path?: string; selected?: string | null; roots?: string[]; initial?: string } = $props();
 
   let listing = $state<FolderBrowseResult | null>(null);
   let error = $state('');
   let loading = $state(false);
-  let picked = $state<string | null>(null);
   const requests = latest();
-
-  /** The folder the pane has selected, else the one it shows: what the arrows move files to or from. */
-  export function target(): string | null {
-    return picked ?? (listing?.path || null);
-  }
 
   async function browse(next: string | null) {
     const current = requests.begin();
@@ -30,7 +27,8 @@
       if (!current()) return;
       listing = result;
       path = result.path ?? '';
-      picked = null;
+      if (result.roots?.length) roots = result.roots;
+      selected = null;
     } catch (failure) {
       if (current()) error = failure instanceof Error ? failure.message : String(failure);
     } finally {
@@ -69,12 +67,12 @@
     {/if}
     {#each lines as line (line.path)}
       <li>
-        <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover {picked === line.path ? 'bg-selected' : ''}" aria-pressed={picked === line.path}
-          onclick={() => (picked = picked === line.path ? null : line.path)} ondblclick={() => browse(line.path)}>
+        <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover {selected === line.path ? 'bg-selected' : ''}" aria-pressed={selected === line.path}
+          onclick={() => (selected = selected === line.path ? null : line.path)} ondblclick={() => browse(line.path)}>
           <Icon name="folder" size={16} class="shrink-0 text-muted" /><span class="truncate">{line.name}</span>
         </button>
       </li>
     {/each}
   </ul>
-  <footer class="border-t border-divider px-3 py-1.5 text-[12px] text-muted">{picked ? `${picked} selected` : foldersFooter(lines.length)}</footer>
+  <footer class="border-t border-divider px-3 py-1.5 text-[12px] text-muted">{selected ? `${selected} selected` : foldersFooter(lines.length)}</footer>
 </section>

@@ -5,21 +5,33 @@ import { crumbs, hereText, joinPath, parentPath, problems, type Site, type SiteI
 // ---- Keys: a list is keyed and selected by a key that is never the name alone ---------------------------------------
 
 /**
- * One key per row. Google Drive allows two items of one name in a folder, so a name is not a key. The key is the name
- * and how many items of that name came before it, which stays the same when the list is sorted or filtered.
+ * One key per row. Google Drive allows two items of one name in a folder, so a name is not a key. The key is how many
+ * items of that name came before it and the name, which stays the same when the list is sorted or filtered. The two are
+ * joined by "/", which no name in a listing holds, and never by a control character: CSS.escape turns U+0000 into
+ * U+FFFD, so a key with one could not be found again in the page.
  */
 export function rowKeys(items: readonly { name: string }[]): string[] {
   const seen = new Map<string, number>();
   return items.map((item) => {
     const before = seen.get(item.name) ?? 0;
     seen.set(item.name, before + 1);
-    return `${before}\u0000${item.name}`;
+    return `${before}/${item.name}`;
   });
 }
 
 export interface Row {
   key: string;
   item: SiteItem;
+}
+
+/**
+ * After a listing of the same folder is read again (Refresh, an upload finishing), the selected rows that are still
+ * there stay selected. A listing of another folder starts with nothing selected.
+ */
+export function keptSelection(selected: ReadonlySet<string>, keys: readonly string[], sameFolder: boolean): Set<string> {
+  if (!sameFolder) return new Set();
+  const now = new Set(keys);
+  return new Set([...selected].filter((key) => now.has(key)));
 }
 
 export function rowsOf(items: readonly SiteItem[]): Row[] {
@@ -173,6 +185,10 @@ export function commandLabel(command: RemoteCommand): string {
   }
 }
 
+/**
+ * The key shown beside a menu item. Only keys the list itself answers: Ctrl+U (view source) and Ctrl+Shift+C (the
+ * browser's inspector) are left to the browser, as the plan names neither.
+ */
 export function commandKey(command: RemoteCommand): string {
   switch (command) {
     case 'download': return 'Enter';
@@ -180,11 +196,14 @@ export function commandKey(command: RemoteCommand): string {
     case 'rename': return 'F2';
     case 'delete': return 'Delete';
     case 'newFolder': return 'Ctrl+Shift+N';
-    case 'upload': return 'Ctrl+U';
     case 'refresh': return 'F5';
-    case 'copyAddress': return 'Ctrl+Shift+C';
     default: return '';
   }
+}
+
+/** A key or a double click on a control inside a row (its checkbox, its "…" button, a link) belongs to that control. */
+export function onRowControl(target: { closest?: (selector: string) => unknown } | null | undefined): boolean {
+  return !!target?.closest?.('button, input, select, textarea, a');
 }
 
 /** The ".." line and a "." or ".." name are never items to act on. */
@@ -224,6 +243,32 @@ export function serverFolder(site: Pick<Site, 'localFolder'>, defaultDownloadDir
   return site.localFolder?.trim() || defaultDownloadDirectory?.trim() || '';
 }
 
+/**
+ * The one folder on the server every download control uses (Download, Enter, a double click, the menu, the arrow between
+ * the panes, the dialog's first folder) and the footer names: the folder selected in the left pane; else the folder the
+ * left pane shows (Two panes only, and not its list of roots); else the remote's linked folder; else the server's
+ * download folder. Empty when there is none, and then the Download dialog asks.
+ */
+export function downloadTarget(opts: {
+  view: 'two' | 'server'; leftSelected?: string | null; leftShown?: string | null;
+  linkedFolder?: string | null; defaultDownloadDirectory?: string | null;
+}): string {
+  const two = opts.view === 'two';
+  return (two && opts.leftSelected?.trim()) || (two && opts.leftShown?.trim()) || opts.linkedFolder?.trim()
+    || opts.defaultDownloadDirectory?.trim() || '';
+}
+
+/** How a download was asked for. Only the dialog has a choice of where. */
+export type DownloadTrigger = 'button' | 'enter' | 'doubleClick' | 'menu' | 'arrow' | 'dialog';
+
+/**
+ * Where a download goes (bug 1): always the server, unless it came from the Download dialog with "To this device"
+ * picked, and then only for what the device choice allows (one file).
+ */
+export function downloadWhere(trigger: DownloadTrigger, selected: readonly SiteItem[], dialogChoice?: DownloadWhere): DownloadWhere {
+  return trigger === 'dialog' && dialogChoice === 'device' && deviceDownloadAllowed(selected) ? 'device' : 'server';
+}
+
 export interface TransferStart {
   siteId: string;
   direction: 'download' | 'upload';
@@ -255,7 +300,28 @@ export function splitServerFolder(path: string): { parent: string; name: string 
   return { parent: parent.length > 1 && !/^[A-Za-z]:[\\/]$/.test(parent) ? parent.replace(/[\\/]+$/, '') : parent, name };
 }
 
-export function serverUpload(siteId: string, remoteFolder: string, serverPath: string, conflict = 'keepBoth'): TransferStart | null {
+const samePath = (a: string, b: string) => {
+  const norm = (value: string) => value.trim().replace(/[\\/]+$/, '').replace(/\\/g, '/');
+  const x = norm(a), y = norm(b);
+  return /^[A-Za-z]:/.test(x) || /^[A-Za-z]:/.test(y) ? x.toLowerCase() === y.toLowerCase() : x === y;
+};
+
+/**
+ * Why a server folder cannot be uploaded, or null when it can. The Host reads an upload as a name in its parent folder,
+ * and the parent of an allowed folder (D:\Downloads gives D:\) is outside what it may use, so an allowed folder itself
+ * cannot go up; one inside it can.
+ */
+export function uploadSourceProblem(serverPath: string | null | undefined, roots: readonly string[]): string | null {
+  const path = (serverPath ?? '').trim();
+  if (!path) return 'Choose a folder on the server.';
+  const root = roots.find((item) => samePath(item, path));
+  if (root) return `Choose a folder inside ${root}.`;
+  if (!splitServerFolder(path)) return 'Choose a folder on the server.';
+  return null;
+}
+
+export function serverUpload(siteId: string, remoteFolder: string, serverPath: string, conflict = 'keepBoth', roots: readonly string[] = []): TransferStart | null {
+  if (uploadSourceProblem(serverPath, roots)) return null;
   const split = splitServerFolder(serverPath);
   if (!split) return null;
   return { siteId, direction: 'upload', remoteFolder, localFolder: split.parent, names: [{ name: split.name, isFolder: true }], conflict };
