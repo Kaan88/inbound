@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { apply, emptyModel } from '../src/lib/model';
 import {
-  crumbs, deviceDownloadUrl, deviceUploadUrl, hereText, joinPath, nameProblem, newForm, parentPath, rcloneLine, rcloneOffer, saveRequest, siteSummary, starLabel,
+  crumbs, deviceDownloadUrl, deviceUploadUrl, hereHeading, hereText, joinPath, nameProblem, newForm, parentPath, rcloneLine, rcloneOffer, saveRequest, siteSummary, starLabel,
   transferFraction, transferLine, uploadToSite, type Site, type SiteKind, type SiteTransfer, type UploadLike,
 } from '../src/lib/sites';
 
@@ -112,7 +112,7 @@ describe('Sites in the web UI (SITES.7)', () => {
     expect(rcloneLine({ ...status, rcloneInstalling: true })).toBe('Downloading rclone…');
     expect(rcloneLine({ ...status, rclone: 'running', rcloneVersion: 'v1.76.0' })).toBe('rclone v1.76.0 is running.');
     expect(rcloneLine({ ...status, rclone: 'stopping' })).toBe('rclone is stopping.');
-    expect(rcloneLine({ ...status, rclone: 'off' })).toBe('rclone starts when a site is used.');
+    expect(rcloneLine({ ...status, rclone: 'off' })).toBe('rclone starts when a remote is used.');
   });
 
   it('offers a newer rclone in the words of Options › Sites', () => {
@@ -131,7 +131,10 @@ describe('Sites in the web UI (SITES.7)', () => {
   });
 
   it('names the "On this PC" marks and the starred folders as the desktop does', () => {
-    expect(hereText('same')).toBe('Same');
+    expect(hereText('same')).toBe('Yes');
+    expect(hereText('notHere')).toBe('No');
+    expect(hereText('folderHere')).toBe('');
+    expect(hereHeading('the server')).toBe('Already on the server');
     expect(hereText('someOfIt')).toBe('Some of it');
     expect(hereText(undefined)).toBe('');
     expect(starLabel('/a/pub', ['/a/pub', '/b'])).toBe('pub');

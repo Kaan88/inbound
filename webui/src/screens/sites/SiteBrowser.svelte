@@ -12,7 +12,7 @@
   import { LongPress } from '../../lib/longpress';
   import { store } from '../../lib/store.svelte';
   import {
-    crumbs, deviceDownloadUrl, hereText, joinPath, nameProblem, parentPath, problems, starLabel, uploadToSite,
+    crumbs, deviceDownloadUrl, hereHeading, hereText, joinPath, nameProblem, parentPath, problems, starLabel, uploadToSite,
     type Site, type SiteBrowseResult, type SiteItem, type SiteResult,
   } from '../../lib/sites';
   import type { FolderBrowseResult } from '../../lib/types';
@@ -775,7 +775,7 @@
           <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
           <button class="col-wide hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
           <button class="col-wide hidden w-40 text-left @xl:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
-          {#if showsHere}<button class="col-wide hidden w-28 text-left @xs:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>On {hostName}{arrow('here')}</button>{/if}
+          {#if showsHere}<button class="col-wide hidden w-36 text-left @xs:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>{hereHeading(hostName)}{arrow('here')}</button>{/if}
           <span class="w-9"></span>
         </div>
         {#if path !== '/'}
@@ -812,7 +812,7 @@
               </span>
               <span class="col-wide tabular hidden w-24 text-right text-muted @xs:block">{sizeText(item, bytes)}</span>
               <span class="col-wide hidden w-40 text-muted @xl:block">{item.modified ? dateTime(item.modified) : ''}</span>
-              {#if showsHere}<span class="col-wide hidden w-28 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
+              {#if showsHere}<span class="col-wide hidden w-36 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
               <span class="row-menu-cell flex w-9 shrink-0 justify-end">
                 <button class="row-menu" aria-label="Actions for {item.name}" aria-haspopup="menu" title="More actions" onclick={(event) => moreButton(row, event)}><Icon name="more" size={16} /></button>
               </span>

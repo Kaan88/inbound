@@ -36,6 +36,8 @@ if (-not $NoBuild) {
     if (-not $?) { throw "The Firefox package failed." }
 }
 $manifest = [IO.File]::ReadAllText((Join-Path $dist "manifest.json")) | ConvertFrom-Json
+# The popup test build (EXT.R15) is never signed for users, even with -NoBuild.
+if ($manifest.name -like '*(popup test)*') { throw "This is the popup test build ('$($manifest.name)'); build with npm run build:firefox." }
 $version = $manifest.version
 $updateUrl = $manifest.browser_specific_settings.gecko.update_url
 if (-not $updateUrl -or -not $updateUrl.StartsWith("https://")) { throw "The Firefox manifest has no https update_url." }

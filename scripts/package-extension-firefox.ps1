@@ -26,6 +26,10 @@ if (-not $NoBuild) {
 
 $manifest = [IO.File]::ReadAllText((Join-Path $dist "manifest.json")) | ConvertFrom-Json
 $package = [IO.File]::ReadAllText((Join-Path $extension "package.json")) | ConvertFrom-Json
+# The popup test build (EXT.R15) never goes to a store, whatever folder it was copied to.
+if ((Split-Path -Leaf $dist) -eq 'dist-test-popup' -or $manifest.name -like '*(popup test)*') {
+    throw "This is the popup test build ('$($manifest.name)'); build the Firefox extension with npm run build:firefox."
+}
 
 $problems = [Collections.Generic.List[string]]::new()
 if ($manifest.manifest_version -ne 3) { $problems.Add("manifest_version is not 3.") }

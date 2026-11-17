@@ -140,6 +140,20 @@ export const closeOneFirst = 'Close an opened address first.';
 export const busyRemotes = (transfers: readonly SiteTransfer[]): Set<string> =>
   new Set(transfers.filter((t) => t.state === 'running' || t.state === 'paused').map((t) => t.siteId));
 
+/** How many batches on a remote are not finished (running, waiting or paused): Close on an address opened once cancels them. */
+export const unfinishedOn = (transfers: readonly SiteTransfer[], siteId: string): number =>
+  transfers.filter((t) => t.siteId === siteId && (t.state === 'running' || t.state === 'paused')).length;
+
+/** The question before an address opened once is closed while it has unfinished transfers; null when nothing would be lost. */
+export function closeQuestion(name: string, unfinished: number): { title: string; text: string } | null {
+  if (unfinished <= 0) return null;
+  const what = unfinished === 1 ? '1 transfer' : `${unfinished} transfers`;
+  return { title: `Close ${name}?`, text: `${what} will be cancelled. Inbound forgets this address; nothing on the server is deleted.` };
+}
+
+/** The toast after the oldest addresses opened once were closed to make room for another: "Closed nas.home.lan to make room." */
+export const closedToMakeRoom = (names: readonly string[]) => `Closed ${names.join(', ')} to make room.`;
+
 /**
  * The unsaved remotes to forget before another address is opened, so no more than `most` are open: the oldest first,
  * never the one shown and never one with batches that are not finished. Null when not enough can be forgotten.

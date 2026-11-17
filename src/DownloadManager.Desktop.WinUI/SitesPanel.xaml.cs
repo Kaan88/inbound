@@ -171,7 +171,7 @@ public sealed partial class SitesPanel : UserControl
             new PaneColumn(SitesBrowseRules.SortName, "Name", 0),
             new PaneColumn(SitesBrowseRules.SortSize, "Size", 70, RightAligned: true),
             new PaneColumn(SitesBrowseRules.SortModified, "Modified", 100),
-            new PaneColumn(SitesBrowseRules.SortHere, "On this PC", 100),
+            new PaneColumn(SitesBrowseRules.SortHere, "Already on this PC", 130),
         ]);
         Titles.SortRequested += key =>
         {

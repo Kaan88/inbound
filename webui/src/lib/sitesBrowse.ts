@@ -132,9 +132,9 @@ export function foldersFooter(count: number): string {
   return count === 0 ? 'No folders' : count === 1 ? '1 folder' : `${count.toLocaleString('en-US')} folders`;
 }
 
-/** "Linked folders: D:\Downloads\ISOs follows /media/isos"; null when the remote has no linked folder. */
+/** "Downloads from /media/isos go to D:\Downloads\ISOs", as on the desktop; null when the remote has no linked folder. */
 export function linkedLine(localFolder: string | null | undefined, remoteFolder: string | null | undefined): string | null {
-  return localFolder?.trim() ? `Linked folders: ${localFolder} follows ${remoteFolder || '/'}` : null;
+  return localFolder?.trim() ? `Downloads from ${remoteFolder || '/'} go to ${localFolder}` : null;
 }
 
 // ---- Menus, Enter and double click -----------------------------------------------------------------------------------
@@ -478,7 +478,8 @@ export function deleteText(
   const plural = (n: number) => `${n.toLocaleString()} item${n === 1 ? '' : 's'}`;
   let what: string;
   if (list.length === 1 && !list[0].isFolder) what = `${list[0].name}${sized}`;
-  else if (list.length === 1) what = count ? `${list[0].name} and the ${plural(items)} inside it${sized}` : `${list[0].name} and everything in it`;
+  // The Host counts each chosen folder itself in `folders` (and the files under it, not its subfolders): not "inside it".
+  else if (list.length === 1) what = count ? `${list[0].name} and the ${plural(Math.max(0, items - count.folders))} inside it${sized}` : `${list[0].name} and everything in it`;
   else what = count ? `${plural(list.length)}${items > list.length ? `, ${plural(items)} with what is inside them,` : ''}${sized}` : `${plural(list.length)}, and everything in their folders,`;
   return `${what} will be deleted on the server. This can't be undone.${count ? '' : ' Counting what is in it…'}`;
 }

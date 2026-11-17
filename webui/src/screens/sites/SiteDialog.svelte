@@ -108,7 +108,10 @@
         return;
       }
       // A server key the user trusted in the form is kept for the remote now saved.
-      if (trustedKeys.length && form.kind === 'sftp') await store.ask('sites.trust', { id: result.site.id, entries: trustedKeys });
+      if (trustedKeys.length && form.kind === 'sftp') {
+        const trusted = await store.ask<SiteResult>('sites.trust', { id: result.site.id, entries: trustedKeys });
+        if (!trusted.ok) store.toast(trusted.message ?? "The server's key wasn't kept; Test asks for it again.", 'error');
+      }
       onsaved(result.site);
     } catch (error) {
       problem = error instanceof Error ? error.message : String(error);

@@ -414,10 +414,10 @@ export function rcloneLine(status: SitesStatus): string {
     case 'failed':
       return status.error ? `rclone stopped: ${status.error}` : 'rclone stopped.';
     case 'waiting':
-      return 'rclone starts when a site is opened.';
+      return 'rclone starts when a remote is opened.';
     default:
-      // On, not started yet: it starts with the first site used.
-      return status.enabled ? 'rclone starts when a site is used.' : '';
+      // On, not started yet: it starts with the first remote used.
+      return status.enabled ? 'rclone starts when a remote is used.' : '';
   }
 }
 
@@ -449,15 +449,18 @@ export function rcloneOffer(status: SitesStatus): { line: string; version: strin
   return { line, version: update.state === 'ready' || update.state === 'needsAsk' ? version : null, lastCheck };
 }
 
-/** The "On this PC" words for an item's here value, as the desktop's column says them; empty when not compared. */
+/** The column heading for the here values: "Already on the server" ("Already on this PC" on the desktop). */
+export const hereHeading = (hostName: string) => `Already on ${hostName}`;
+
+/** The "Already on …" words for an item's here value, as the desktop's column says them; empty when not compared. */
 export function hereText(here: string | null | undefined): string {
   switch (here) {
-    case 'same': return 'Same';
-    case 'olderHere': return 'Older here';
+    case 'same': return 'Yes';
+    case 'olderHere': return 'Older copy';
     case 'someOfIt': return 'Some of it';
-    case 'notHere': return 'Not here';
-    case 'different': return 'Different here';
-    case 'folderHere': return 'Folder here';
+    case 'notHere': return 'No';
+    case 'different': return 'Different copy';
+    // A folder still to be compared shows nothing until the Host answers (sites.here), as on the desktop.
     default: return '';
   }
 }

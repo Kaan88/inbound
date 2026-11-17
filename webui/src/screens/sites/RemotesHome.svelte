@@ -5,7 +5,7 @@
   import type { Site, SiteResult, SiteTransfer } from '../../lib/sites';
   import { kindChip } from '../../lib/sitesBrowse';
   import {
-    activityText, activityWords, addRemote, arrowsText, badge, busyRemotes, canEdit, closeOneFirst, dotWords, footerText, forgetBeforeOpening, inTrouble,
+    activityText, activityWords, addRemote, arrowsText, badge, busyRemotes, canEdit, closedToMakeRoom, closeOneFirst, dotWords, footerText, forgetBeforeOpening, inTrouble,
     kindLine, lastUsedText, listed, openHint,
   } from '../../lib/sitesHome';
 
@@ -46,7 +46,14 @@
         problem = closeOneFirst;
         return;
       }
-      for (const id of forget) await store.ask('sites.close', { id });
+      const names = new Map(sites.map((site) => [site.id, site.name]));
+      const closed: string[] = [];
+      for (const id of forget) {
+        const result = await store.ask<SiteResult>('sites.close', { id });
+        if (result.ok) closed.push(names.get(id) ?? id);
+      }
+      // Said, not silent: the oldest idle address opened once was closed to make room.
+      if (closed.length) store.toast(closedToMakeRoom(closed));
       const result = await store.ask<SiteResult>('sites.openOnce', { address: text });
       if (!result.ok || !result.site) {
         problem = result.message ?? 'That address could not be opened.';

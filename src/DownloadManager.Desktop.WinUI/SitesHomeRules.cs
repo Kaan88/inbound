@@ -231,6 +231,9 @@ internal static class SitesHomeRules
     /// <summary>The Host holds at most this many addresses opened once (SiteStore.MaxUnsaved).</summary>
     public const int MostOpenOnce = 8;
 
+    /// <summary>The line after the oldest addresses opened once were closed to make room: "Closed nas.home.lan to make room."</summary>
+    public static string ClosedToMakeRoom(IReadOnlyList<string> names) => $"Closed {string.Join(", ", names)} to make room.";
+
     /// <summary>
     /// The unsaved remotes to forget before another address is opened, so no more than <paramref name="most"/> are open:
     /// the oldest first (<paramref name="open"/> is oldest first), never the one shown and never one with batches that are

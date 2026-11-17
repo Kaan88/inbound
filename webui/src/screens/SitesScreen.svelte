@@ -7,7 +7,7 @@
     problems, rcloneLine, rcloneOffer,
     type Site, type SiteKind, type SiteResult, type SitesStatus,
   } from '../lib/sites';
-  import { allRemotes, busyRemotes, phoneRemotesLine } from '../lib/sitesHome';
+  import { allRemotes, busyRemotes, closeQuestion, phoneRemotesLine, unfinishedOn } from '../lib/sitesHome';
   import type { TransferTab } from '../lib/sitesTransfers';
   import RemotesHome from './sites/RemotesHome.svelte';
   import SiteBrowser from './sites/SiteBrowser.svelte';
@@ -27,6 +27,7 @@
   let kinds = $state<SiteKind[]>([]);
   let editing = $state<Site | null | undefined>(undefined); // undefined: closed; null: a new site
   let removing = $state<Site | null>(null);
+  let closing = $state<{ site: Site; title: string; text: string } | null>(null);
   let fixing = $state<{ site: Site; problem: string } | null>(null);
   let testing = $state<string | null>(null);
   let switching = $state(false);
@@ -45,6 +46,13 @@
     const result = await store.attempt<SiteResult>('sites.close', { id: item.id });
     if (result && !result.ok) store.toast(result.message ?? 'It was not closed.', 'error');
     if (siteId === item.id) location.hash = '#/sites';
+  }
+
+  /** Close (or Delete) on an address opened once: asked first when it has transfers that would be cancelled. */
+  function askClose(item: Site) {
+    const question = closeQuestion(item.name, unfinishedOn(transfers, item.id));
+    if (question) closing = { site: item, ...question };
+    else void close(item);
   }
 
   /** "Remember": an address opened once becomes a saved remote. */
@@ -175,7 +183,7 @@
           {#if status.enabled}
             {#if kindsProblem}<p class="mb-2 text-[12.5px] text-error" role="alert">{kindsProblem}</p>{/if}
             <RemotesHome {sites} {transfers} {testing} onopen={open} onadd={() => edit(null)} onedit={(item) => edit(item)} ontest={test}
-              onremove={(item) => (item.unsaved ? void close(item) : (removing = item))} onsignin={(item) => (fixing = { site: item, problem: problems.signInNeeded })}
+              onremove={(item) => (item.unsaved ? askClose(item) : (removing = item))} onsignin={(item) => (fixing = { site: item, problem: problems.signInNeeded })}
               onforget={(item) => (forgetting = item)} onkeep={keep} />
           {/if}
 
@@ -250,6 +258,12 @@
   <AskDialog title="Remove {item.name}?" danger confirm="Remove" sheet
     text="Inbound forgets this remote and what it keeps for it (the password or sign-in). Nothing on the server is deleted."
     onconfirm={() => remove(item)} onclose={() => (removing = null)} />
+{/if}
+
+{#if closing}
+  {@const current = closing}
+  <AskDialog title={current.title} danger confirm="Close" sheet text={current.text}
+    onconfirm={() => { closing = null; void close(current.site); }} onclose={() => (closing = null)} />
 {/if}
 
 {#if forgetting}

@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { Site, SiteItem, SiteKind, SiteTransfer } from '../src/lib/sites';
 import {
   activityText, activityWords, applyHere, arrowsText, badge, busyRemotes, canEdit, defaultName, draftTestText, footerText, forgetBeforeOpening, hereNames,
-  inTrouble, kindOfTile, lastUsedText, listed, needsPassword, phoneActions, phoneRemotesLine, phoneRowLine, switchableKinds, tileOf, tiles, tilesFor, waitingCount,
+  closedToMakeRoom, closeQuestion, inTrouble, kindOfTile, lastUsedText, listed, unfinishedOn, needsPassword, phoneActions, phoneRemotesLine, phoneRowLine, switchableKinds, tileOf, tiles, tilesFor, waitingCount,
 } from '../src/lib/sitesHome';
 import {
   barSpeeds, barSummary, canCancel, canClear, canPause, canResume, canRetry, clearDoneTargets, description, inTab, menu, pauseAllAction, progress, spaceCommand,
-  phoneButton, phoneHeader, phoneRows, status, tabLabel, tabOf, title, valid,
+  phoneButton, phoneHeader, phoneRows, phoneSheet, phoneSheetLabel, status, tabLabel, tabOf, title, valid,
 } from '../src/lib/sitesTransfers';
 
 const transfer = (over: Partial<SiteTransfer> = {}): SiteTransfer => ({
@@ -238,8 +238,16 @@ describe('phone width: tick boxes and the action bar', () => {
 });
 
 // SITES.12: new visible text says "remote" and "Remote files", never "Sites" or "a site".
-const pages = import.meta.glob(['../src/screens/sites/RemotesHome.svelte', '../src/screens/sites/TransferList.svelte', '../src/screens/sites/TransfersBar.svelte', '../src/screens/sites/SiteDialog.svelte', '../src/screens/SitesScreen.svelte'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const pages = import.meta.glob(['../src/screens/sites/*.svelte', '../src/screens/SitesScreen.svelte'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const texts = import.meta.glob(['../src/lib/sites.ts', '../src/lib/sitesBrowse.ts', '../src/lib/sitesHome.ts', '../src/lib/sitesTransfers.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+// "a site" or "the site" in what Remote files shows; "site logins" (Options) is another thing and is let through.
+const aSite = /\b(?:[Aa]|[Tt]he) site\b(?!\s+logins?)/;
 describe('the words (SITES.12)', () => {
+  it('the Remote files pages and their texts never say "a site" or "the site"', () => {
+    for (const [path, source] of Object.entries({ ...pages, ...texts })) expect(withoutComments(source), path).not.toMatch(aSite);
+  });
+
   it('the new pages never say Sites, All sites, Add a site or Your sites', () => {
     for (const [path, source] of Object.entries(pages)) {
       const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
@@ -255,8 +263,8 @@ describe('a phone\'s transfer list (R7)', () => {
   const failed = transfer({ id: 'f', state: 'failed', filesFailed: 1 });
   const done = transfer({ id: 'd', state: 'done' });
 
-  it('lists what runs and waits, then what failed, and leaves finished ones off', () => {
-    expect(phoneRows([done, failed, queued, moving, paused]).map((t) => t.id)).toEqual(['m', 'p', 'q', 'f']);
+  it('lists what runs and waits, then what failed, then what is done', () => {
+    expect(phoneRows([done, failed, queued, moving, paused]).map((t) => t.id)).toEqual(['m', 'p', 'q', 'f', 'd']);
   });
 
   it('says "N running · M waiting · K failed" in place of the tabs', () => {
@@ -271,6 +279,36 @@ describe('a phone\'s transfer list (R7)', () => {
     expect(phoneButton(paused)).toBe('cancel');
     expect(phoneButton(failed)).toBe('remove');
     expect(phoneButton(transfer({ state: 'failed', filesFailed: 0, problem: 'auth' }))).toBe('cancel');
-    expect(phoneButton(done)).toBeNull();
+    expect(phoneButton(done)).toBe('remove');
+  });
+
+  it('a long press offers what the card allows, in a fixed order', () => {
+    expect(phoneSheet(moving)).toContain('stop');
+    expect(phoneSheet(moving)).not.toContain('resume');
+    expect(phoneSheet(paused)).toContain('resume');
+    expect(phoneSheet(failed)).toContain('retry');
+    expect(phoneSheet(failed).at(-1)).toBe('remove');
+    expect(phoneSheet(done)).toEqual(['remove']);
+    for (const t of [moving, queued, paused, failed, done]) expect(phoneSheet(t).every((c) => valid(c, t))).toBe(true);
+    expect(phoneSheetLabel('cancel')).toBe('Cancel');
+    expect(phoneSheetLabel('remove')).toBe('Remove from list');
+  });
+});
+
+describe('closing an address opened once (final review)', () => {
+  const on = (over: Partial<SiteTransfer>) => transfer({ siteId: 'once', ...over });
+
+  it('counts the batches Close would cancel', () => {
+    expect(unfinishedOn([on({ state: 'running' }), on({ state: 'paused' }), on({ state: 'done' }), on({ state: 'failed' }), transfer({ siteId: 'other' })], 'once')).toBe(2);
+  });
+
+  it('asks first only when transfers would be cancelled', () => {
+    expect(closeQuestion('nas', 0)).toBeNull();
+    expect(closeQuestion('nas', 1)?.text).toMatch(/^1 transfer will be cancelled\./);
+    expect(closeQuestion('nas', 3)).toEqual({ title: 'Close nas?', text: '3 transfers will be cancelled. Inbound forgets this address; nothing on the server is deleted.' });
+  });
+
+  it('names the address closed to make room', () => {
+    expect(closedToMakeRoom(['nas.home.lan'])).toBe('Closed nas.home.lan to make room.');
   });
 });

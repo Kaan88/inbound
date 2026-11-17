@@ -26,6 +26,10 @@ if (-not $NoBuild) {
 $manifestText = [IO.File]::ReadAllText((Join-Path $dist "manifest.json"))
 $manifest = $manifestText | ConvertFrom-Json
 $package = [IO.File]::ReadAllText((Join-Path $extension "package.json")) | ConvertFrom-Json
+# The popup test build (EXT.R15) never goes to a store, whatever folder it was copied to.
+if ((Split-Path -Leaf $dist) -eq 'dist-test-popup' -or $manifest.name -like '*(popup test)*') {
+    throw "This is the popup test build ('$($manifest.name)'); build the store extension with npm run build."
+}
 
 # Removed as text, so the rest of the file stays exactly as it was built.
 $stripped = [regex]::Replace($manifestText, '(?m)^[ \t]*"key"[ \t]*:[ \t]*"[^"]*",[ \t]*\r?\n', '')

@@ -39,7 +39,7 @@ test('EXT.R14: the ring is thick enough at 16 and 32 px, with a halo and a track
   const track = parseInt(icon.RING_COLORS.track.slice(1, 3), 16);
   assert.ok(track > 90 && track < 170);
   // Saturated, distinct status colours.
-  assert.equal(new Set([icon.RING_COLORS.downloading, icon.RING_COLORS.paused, icon.RING_COLORS.error]).size, 3);
+  assert.equal(new Set([icon.RING_COLORS.downloading, icon.RING_COLORS.paused, icon.RING_COLORS.error, icon.RING_COLORS.finished]).size, 4);
 });
 
 test('EXT.R14: the ring for each state, with and without the finished mark', () => {
@@ -49,7 +49,35 @@ test('EXT.R14: the ring for each state, with and without the finished mark', () 
   assert.deepEqual(icon.ringFor({ kind: 'paused', progress: null, count: 1 }, 1), { color: colors.paused, fill: 1 });
   assert.deepEqual(icon.ringFor({ kind: 'error', progress: null, count: 1 }, 1), { color: colors.error, fill: 1 });
   assert.equal(icon.ringFor(status.IDLE), null);
-  assert.deepEqual(icon.ringFor(status.IDLE, 3), { color: colors.finished, fill: 1 }, 'idle: a full green ring, no check drawn into the icon');
+  assert.deepEqual(icon.ringFor(status.IDLE, 3), { color: colors.finished, fill: 1 }, 'idle: a full blue ring, no check drawn into the icon');
+});
+
+test('final review: the finished ring is not the progress green and reads on light and dark toolbars', () => {
+  const colors = icon.RING_COLORS;
+  assert.notEqual(colors.finished, colors.downloading);
+  const lum = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+  for (const toolbar of ['#ffffff', '#f1f3f4', '#35363a', '#202124']) {
+    assert.ok(contrast(colors.finished, toolbar) >= 3, `finished on ${toolbar}: ${contrast(colors.finished, toolbar).toFixed(2)}`);
+  }
+  // Clearly apart from the progress arc: a different hue, not a shade of the same green.
+  const hue = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const max = Math.max(r, g, b); const min = Math.min(r, g, b); const d = max - min;
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  assert.ok(Math.abs(hue(colors.finished) - hue(colors.downloading)) >= 60);
+});
+
+test('final review: while sending is off or paused the tooltip says so first, then what finished', () => {
+  assert.equal(status.offTitle(false, false, 3), null);
+  assert.equal(status.offTitle(true, false, 0), 'Inbound Download Manager: automatic sending is off');
+  assert.equal(status.offTitle(true, false, 1), 'Inbound Download Manager: automatic sending is off. A download has finished. Open the popup to see it.');
+  assert.equal(status.offTitle(false, true, 3), 'Inbound Download Manager: sending is paused. 3 downloads have finished. Open the popup to see them.');
 });
 
 test('EXT.R14: the icon is drawn again when the finished count changes', () => {

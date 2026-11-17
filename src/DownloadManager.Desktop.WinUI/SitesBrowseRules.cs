@@ -94,14 +94,14 @@ internal static class SitesBrowseRules
         return $"{leaf} (in {LeafName(parent)})";
     }
 
-    /// <summary>SITES.5: the "On this PC" words for a <see cref="SiteHereStates"/> value; empty when not compared.</summary>
+    /// <summary>SITES.5: the "Already on this PC" words (the web UI says the same) for a <see cref="SiteHereStates"/> value; empty when not compared.</summary>
     public static string HereText(string? here) => here switch
     {
-        SiteHereStates.Same => "Same",
-        SiteHereStates.OlderHere => "Older here",
+        SiteHereStates.Same => "Yes",
+        SiteHereStates.OlderHere => "Older copy",
         SiteHereStates.SomeOfIt => "Some of it",
-        SiteHereStates.NotHere => "Not here",
-        SiteHereStates.Different => "Different here",
+        SiteHereStates.NotHere => "No",
+        SiteHereStates.Different => "Different copy",
         // A folder still to be compared shows nothing until the Host answers (sites.here).
         SiteHereStates.FolderHere => "",
         _ => "",
@@ -349,9 +349,9 @@ internal static class SitesBrowseRules
         return files > 0 && folders > 0 ? $"{f} and {d}" : files > 0 ? f : d;
     }
 
-    /// <summary>"Linked folders: D:\Downloads\ISOs follows /media/isos"; null when the site has no linked folder.</summary>
+    /// <summary>"Downloads from /media/isos go to D:\Downloads\ISOs" (the web UI says the same); null when the site has no linked folder.</summary>
     public static string? LinkedLine(string? localFolder, string? remoteFolder)
-        => string.IsNullOrWhiteSpace(localFolder) ? null : $"Linked folders: {localFolder} follows {Normalize(remoteFolder)}";
+        => string.IsNullOrWhiteSpace(localFolder) ? null : $"Downloads from {Normalize(remoteFolder)} go to {localFolder}";
 
     /// <summary>
     /// A listing that failed for no named reason is a server that did not answer, so the pane tries again by itself. A

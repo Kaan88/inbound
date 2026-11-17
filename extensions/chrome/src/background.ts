@@ -13,7 +13,7 @@ import {
 } from "./capture-rules";
 import { RESTART_SAVED_WEB_PAGE_TEXT, restartInterruptedText, restartSavedWebPage } from "./keep-in-browser";
 import { JOB_ACTION_MESSAGES, JOB_COMMAND_MESSAGES, POPUP_JOB_LIMIT, jobCommandOutcome, latestJobs, type JobAction, type JobCommand, type JobSummary } from "./job-list";
-import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, parseFinished } from "./toolbar-status";
+import { DownloadWatch, IDLE, addFinished, drawKey, finishedBadge, finishedTitle, iconTitle, offTitle, parseFinished } from "./toolbar-status";
 import { openPopupForTest } from "./test-popup";
 import { DEFAULT_ICON_PATHS, RING_COLORS, ringFor, ringImages, type Ring } from "./toolbar-icon";
 import {
@@ -394,12 +394,11 @@ function updateBadge(): void {
         ? `Inbound Download Manager: ${waiting === 1 ? "a download is" : `${waiting} downloads are`} waiting for a folder`
         : downloads
         ? downloads
+        // The badge says OFF while sending is off or paused, so the tooltip says that first and the finished ones after.
+        : offTitle(off, paused, finished)
+        ? offTitle(off, paused, finished)!
         : finishedTitle(finished)
         ? finishedTitle(finished)!
-        : off
-        ? "Inbound Download Manager: automatic sending is off"
-        : paused
-          ? "Inbound Download Manager: sending is paused"
           : serverDown
             ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser"
             : "Inbound Download Manager: sending downloads",

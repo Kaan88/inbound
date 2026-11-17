@@ -472,9 +472,10 @@
     </main>
   </div>
 
-  <SpeedGraph />
+  <!-- On Remote files at phone width the speed graph and the status bar give their room to the Transfers bar. -->
+  <div class={screen.kind === 'sites' ? 'contents max-md:hidden' : 'contents'}><SpeedGraph /></div>
 
-  <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-divider bg-chrome px-3 text-[12px] text-muted">
+  <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-divider bg-chrome px-3 text-[12px] text-muted {screen.kind === 'sites' ? 'max-md:hidden' : ''}">
     <span class="tabular min-w-0 truncate" title={statusText}>{statusText}</span>
     <span class="tabular shrink-0">{totalSpeed === null ? '' : speed(totalSpeed)}</span>
     <span class="flex-1"></span>

@@ -1,6 +1,6 @@
 // EXT.R12: draws the toolbar icon for a state (toolbar-status.ts): the extension's own icon, smaller, inside a ring.
 // EXT.R14: a thicker ring with a halo. Downloads finished since the popup was last opened are counted in the browser's
-// own badge text (green background); when nothing is under way the icon shows a full green ring. No check is drawn:
+// own badge text (green background); when nothing is under way the icon shows a full blue ring. No check is drawn:
 // inside the ring there is no room for one that leaves the icon visible, and the corners are the ring's and the badge's.
 // Drawn with OffscreenCanvas, which Chrome's service worker and Firefox's event page have; where it is missing the
 // icon stays as it is and only its tooltip changes.
@@ -16,7 +16,9 @@ export const RING_COLORS = {
   downloading: "#1fc052",
   paused: "#f59e0b",
   error: "#ef3b2d",
-  finished: "#1fc052",
+  // Blue, not the progress green, so a finished mark is not taken for a download still at 100% (final review).
+  // 3.7:1 on a white toolbar and above 3:1 on a dark one, with the halo outlining it there.
+  finished: "#3b82f6",
   track: "#7d8288",
   halo: "rgba(255, 255, 255, 0.95)",
 } as const;
@@ -34,7 +36,7 @@ export interface Ring {
 
 /**
  * What the ring shows: its colour and how much of it is filled. While a download is active the ring shows only its
- * progress (the finished count is the badge text); idle with unseen finished downloads, a full green ring.
+ * progress (the finished count is the badge text); idle with unseen finished downloads, a full blue ring.
  */
 export function ringFor(state: IconState, finished = 0): Ring | null {
   switch (state.kind) {

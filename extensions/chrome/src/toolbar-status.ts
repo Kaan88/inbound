@@ -108,6 +108,22 @@ export function finishedTitle(count: number): string | null {
   return `Inbound Download Manager: ${what} finished. Open the popup to see ${count === 1 ? "it" : "them"}.`;
 }
 
+/**
+ * The tooltip while automatic sending is off or paused (the badge says OFF then), with the finished downloads after it;
+ * null when sending is on.
+ */
+export function offTitle(off: boolean, paused: boolean, finished: number): string | null {
+  const base = off
+    ? "Inbound Download Manager: automatic sending is off"
+    : paused
+      ? "Inbound Download Manager: sending is paused"
+      : null;
+  if (!base) return null;
+  if (finished <= 0) return base;
+  const what = finished === 1 ? "A download has" : `${finished} downloads have`;
+  return `${base}. ${what} finished. Open the popup to see ${finished === 1 ? "it" : "them"}.`;
+}
+
 /** The icon's tooltip for a state, or null when idle (the catching status shows then). */
 export function iconTitle(state: IconState): string | null {
   const name = "Inbound Download Manager";

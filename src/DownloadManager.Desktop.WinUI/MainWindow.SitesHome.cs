@@ -192,15 +192,19 @@ public sealed partial class MainWindow
         var open = _sites.Where(site => site.Unsaved && _onceSites.All(own => own.Id != site.Id)).Concat(_onceSites).ToList();
         if (SitesHomeRules.ForgetBeforeOpening(open, _sitesShown ? _shownSiteId : null, SitesHomeRules.BusyRemotes(_siteTransfers)) is not { } forget)
             return false;
+        var names = new List<string>();
         foreach (var id in forget)
         {
             var closed = await _remote.CloseSiteAsync(id);
             if (!closed.Ok) continue; // remembered meanwhile: it is a saved remote now
+            if (open.FirstOrDefault(site => site.Id == id) is { } gone) names.Add(gone.Name);
             _onceSites.RemoveAll(site => site.Id == id);
             _sites.RemoveAll(site => site.Id == id);
         }
 
         SyncSiteEntryPoints();
+        // Said, not silent: the oldest addresses opened once were closed to make room.
+        if (names.Count > 0) SetSitesStatus(SitesHomeRules.ClosedToMakeRoom(names));
         return true;
     }
 

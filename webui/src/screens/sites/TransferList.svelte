@@ -1,12 +1,14 @@
 <script lang="ts">
   import ContextMenu, { type MenuItem } from '../../components/ContextMenu.svelte';
+  import Dialog from '../../components/Dialog.svelte';
+  import { LongPress } from '../../lib/longpress';
   import Icon from '../../components/Icon.svelte';
   import ProgressBar from '../../components/ProgressBar.svelte';
   import { store } from '../../lib/store.svelte';
   import type { SiteTransfer } from '../../lib/sites';
   import {
     canClear, clearDoneTargets, commandLabel, commandType, description, emptyMessage, fullRoute, inTab, isDownload, menu as commandMenu,
-    pauseAllAction, phoneButton, phoneHeader, phoneRows, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
+    pauseAllAction, phoneButton, phoneHeader, phoneRows, phoneSheet, phoneSheetLabel, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
     type TransferCommand, type TransferTab,
   } from '../../lib/sitesTransfers';
 
@@ -79,6 +81,21 @@
     menuAt = { items, x, y };
   }
 
+  // A phone: a long press on a card opens its actions as a bottom sheet (lib/sitesTransfers: phoneSheet).
+  const longPress = new LongPress();
+  let sheetFor = $state<SiteTransfer | null>(null);
+  const sheetRow = $derived(sheetFor ? (transfers.find((row) => row.id === sheetFor!.id) ?? null) : null);
+
+  function pointerdown(row: SiteTransfer, event: PointerEvent) {
+    if (!phone) return;
+    longPress.down(event.pointerType, event.clientX, event.clientY, () => { if (phoneSheet(row).length) sheetFor = row; });
+  }
+
+  function rowClick(row: SiteTransfer) {
+    if (longPress.takeClick()) return;
+    selected = new Set([row.id]);
+  }
+
   function keydown(event: KeyboardEvent) {
     if (event.target instanceof HTMLInputElement || event.ctrlKey || event.altKey || event.metaKey) return;
     if (event.key === ' ') {
@@ -122,8 +139,12 @@
       <!-- A row is one transfer batch: a click selects it, a long press or the "…" opens its menu (on a phone, its one button). -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
       <div class="tl-row border-b border-divider/60 text-[12.5px] {selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'}" role="row" aria-selected={selected.has(row.id)}
-        onclick={() => (selected = new Set([row.id]))}
-        oncontextmenu={(event) => { event.preventDefault(); open(row, event.clientX, event.clientY); }}>
+        onclick={() => rowClick(row)}
+        oncontextmenu={(event) => { event.preventDefault(); if (phone) { if (phoneSheet(row).length) sheetFor = row; } else open(row, event.clientX, event.clientY); }}
+        onpointerdown={(event) => pointerdown(row, event)}
+        onpointermove={(event) => longPress.move(event.clientX, event.clientY)}
+        onpointerup={() => longPress.up()}
+        onpointercancel={() => longPress.cancelled()}>
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
         <label class="tl-check flex items-center justify-center self-stretch" onclick={(event) => event.stopPropagation()}>
           <input type="checkbox" aria-label="Select {title(row)}" checked={selected.has(row.id)} onchange={() => toggle(row)} />
@@ -152,12 +173,24 @@
       </div>
     {/each}
   </div>
-  <!-- A phone: Pause transfers and Retry failed at the bottom, when they apply (`phone`). -->
-  {#if pauseAll || retryable.length}
-    <div class="flex gap-2 border-t border-divider px-3 py-2.5 md:hidden">
+  <!-- A phone: Pause transfers, Retry failed and Clear done at the bottom, when they apply (`phone`). -->
+  {#if pauseAll || retryable.length || clearable.length}
+    <div class="flex flex-wrap gap-2 border-t border-divider px-3 py-2.5 md:hidden">
       {#if pauseAll}<button class="btn touch-row" onclick={() => runAll(pauseAll.type, pauseAll.ids)}><Icon name={pauseAll.type.endsWith('pause') ? 'pause' : 'play'} size={15} /> {pauseAll.label}</button>{/if}
       {#if retryable.length}<button class="btn touch-row" onclick={() => runAll('sites.transfer.retry', retryable)}><Icon name="retry" size={15} /> Retry failed</button>{/if}
+      {#if clearable.length}<button class="btn touch-row" onclick={() => runAll('sites.transfer.clear', clearable)}><Icon name="sweep" size={15} /> Clear done</button>{/if}
     </div>
+  {/if}
+  {#if sheetRow && phone}
+    {@const row = sheetRow}
+    <Dialog title={title(row)} sheet onclose={() => (sheetFor = null)}>
+      <div class="flex flex-col py-1" role="menu" aria-label="Actions for {title(row)}">
+        {#each phoneSheet(row) as command (command)}
+          <button class="touch-row px-4 py-3 text-left text-[15px] hover:bg-hover {command === 'cancel' ? 'tone-failed' : ''}" role="menuitem"
+            onclick={() => { sheetFor = null; void run(command, [row]); }}>{phoneSheetLabel(command)}</button>
+        {/each}
+      </div>
+    </Dialog>
   {/if}
   {#if menuAt}<ContextMenu items={menuAt.items} x={menuAt.x} y={menuAt.y} label="Transfer actions" onclose={() => (menuAt = null)} />{/if}
 </div>

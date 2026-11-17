@@ -223,8 +223,8 @@ export const failedCount = (transfers: readonly SiteTransfer[]) => transfers.fil
 
 // ---- A phone (R7) --------------------------------------------------------------------------------------------------------
 
-/** A phone shows one list, no tabs: what runs and waits, then what failed. Finished batches stay off it. */
-export const phoneRows = (transfers: readonly SiteTransfer[]): SiteTransfer[] => [...inTab(transfers, 'active'), ...inTab(transfers, 'failed')];
+/** A phone shows one list, no tabs: what runs and waits, then what failed, then what is done (each with × to remove). */
+export const phoneRows = (transfers: readonly SiteTransfer[]): SiteTransfer[] => [...inTab(transfers, 'active'), ...inTab(transfers, 'failed'), ...inTab(transfers, 'done')];
 
 /** A phone's header in place of the tabs: "2 running · 1 waiting · 1 failed" (paused batches count as waiting). */
 export function phoneHeader(transfers: readonly SiteTransfer[]): string {
@@ -235,9 +235,16 @@ export function phoneHeader(transfers: readonly SiteTransfer[]): string {
   return parts.length ? parts.join(' · ') : 'Nothing is moving';
 }
 
-/** A phone card's one button: Pause on a batch that moves, × on one that waits or failed (cancel it, or take it off the list). */
+/** A phone card's one button: Pause on a batch that moves, × on one that waits, failed or is done (cancel it, or take it off the list). */
 export function phoneButton(t: SiteTransfer): TransferCommand | null {
   if (isStarted(t)) return 'stop';
-  if (t.state === 'running' || t.state === 'paused' || t.state === 'failed') return canCancel(t) ? 'cancel' : canClear(t) ? 'remove' : null;
-  return null;
+  return canCancel(t) ? 'cancel' : canClear(t) ? 'remove' : null;
 }
+
+/** A phone card's long press: its actions as a bottom sheet, in this order, only those the batch allows. */
+export function phoneSheet(t: SiteTransfer): TransferCommand[] {
+  return (['resume', 'retry', 'stop', 'cancel', 'remove'] as const).filter((command) => valid(command, t));
+}
+
+/** A phone sheet's button words: the menu's, with a shorter Cancel. */
+export const phoneSheetLabel = (command: TransferCommand): string => (command === 'cancel' ? 'Cancel' : commandLabel(command));

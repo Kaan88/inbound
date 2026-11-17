@@ -275,7 +275,7 @@ public sealed class SitesBrowseRulesTests
     [Fact]
     public void LinkedLineNamesBothFolders()
     {
-        Assert.Equal(@"Linked folders: D:\Downloads\ISOs follows /media/isos", SitesBrowseRules.LinkedLine(@"D:\Downloads\ISOs", "media/isos"));
+        Assert.Equal(@"Downloads from /media/isos go to D:\Downloads\ISOs", SitesBrowseRules.LinkedLine(@"D:\Downloads\ISOs", "media/isos"));
         Assert.Null(SitesBrowseRules.LinkedLine(null, "/media"));
         Assert.Null(SitesBrowseRules.LinkedLine("  ", "/media"));
     }
