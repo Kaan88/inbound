@@ -230,6 +230,8 @@ sent to clients that have a site open.
   (owner, 2026-11-15). In bridge mode the stream passes through the Host's pipe; that is measured first, and if it
   is too slow the stream gets a faster path (for example the Server talking to rclone's own loopback address with
   credentials the Host hands it) rather than being left out.
+- **Rework (SITES.11):** the screens above were rebuilt to the agreed mockup; `docs/plans/sites-rework.md` has the
+  stages, what is not as drawn, and the picture pairs.
 - **CLI.** `dm sites list|add|remove|test`, `dm sites ls <site>:<path>`, `dm sites get`, `dm sites put`,
   `dm sites rm`, `dm sites mv`, `dm sites mkdir`, `dm sites transfers`.
 - **Extension.** Nothing (owner, 2026-11-15): no popup line and no new native-host message.
@@ -303,6 +305,23 @@ For `changelog.json` when the version is set. No test status goes into release n
   server, all.
 - New: `dm sites` adds, tests, browses and changes sites, and starts and controls transfers. Tags: all.
 - New: Help › About links the third-party notices. Tags: windows, linux.
+
+## Release notes draft for the rework (SITES.11, SITES.12; next version)
+
+- Changed: Sites is now called Remote files. Each server or cloud account is a remote; `dm remotes` works as `dm sites`.
+  Tags: all.
+- New: All remotes, with "Open an address once", and Add a remote, which starts from the kind of remote and tests it
+  before saving. Tags: all.
+- New: browse a remote beside this PC's folder or in two panes, with right-click menus, double click to download or
+  open, drag and drop, and "Some of it" on folders partly here. Tags: windows, linux.
+- New: a transfers list like the downloads list, with stop, resume and retry for each transfer and per-file progress.
+  Tags: all.
+- New: Delete asks with the number of files; on this PC it goes to the Recycle Bin, and Shift+Delete deletes for
+  good. Overwrite asks file by file, with sizes and dates. Tags: windows.
+- New: the web UI has the same pages, made for a phone too: tick boxes, an action bar and bottom sheets. Downloads go
+  to the server; "To this device" is a choice in the Download dialog. Tags: server, all.
+- Changed: the extension's toolbar ring is easier to see, and a count shows downloads that finished since the popup
+  was last opened. Tags: extension.
 
 ## FTP: undoing part of CUT.1
 

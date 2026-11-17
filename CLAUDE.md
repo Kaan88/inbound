@@ -50,7 +50,8 @@ A Sites view (remote file browsing, uploads and downloads for FTP, SFTP, WebDAV 
 rclone child process) is in progress: SFTP sites can be browsed, changed (new folder, rename, delete) and files moved
 both ways, with an "On this PC" column and a Two panes view (SITES.0 to SITES.5, done on Windows). FTP, FTPS, WebDAV
 and S3 sites work too, a server's own certificate can be trusted, and Drive, OneDrive and Dropbox sign in through the
-browser (`rclone authorize`), with B2 by key (SITES.6a to 6c; no real cloud account tried yet). The web UI has Sites too, files go to and from the browser's device, and the headless server runs Sites (SITES.7; a signed-in browser counts as the admin). `dm sites` adds, trusts, browses and changes sites (SITES.8). `THIRD-PARTY-NOTICES.md` ships with every build (SITES.9). `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.9.
+browser (`rclone authorize`), with B2 by key (SITES.6a to 6c; no real cloud account tried yet). The web UI has Sites too, files go to and from the browser's device, and the headless server runs Sites (SITES.7; a signed-in browser counts as the admin). `dm sites` adds, trusts, browses and changes sites (SITES.8). `THIRD-PARTY-NOTICES.md` ships with every build (SITES.9). `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.12.
+The feature is shown as **Remote files** ("a remote", "All remotes", "Add a remote"; SITES.12, 2026-11-17); code, IPC (`sites.*`) and `dm sites` keep the old name (`dm remotes` is an alias). Its UI was reworked to `docs/plans/sites-mockups/4-agreed-design.html` (SITES.11 R0 to R6, desktop and web, 2026-11-16/17; R7 closing: owner walk and release pending; `docs/plans/sites-rework.md`).
 Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
 a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
