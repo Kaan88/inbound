@@ -26,6 +26,27 @@
   This PC, Windows' own question on a network share, keys and right-click menus in the window, a real save with Test
   and Trust in Add a remote, browser sign-in from the new form; Drive listing in the web UI with a real Drive account.
 
+### Extension: bolder ring and finished count (EXT.R14); test-only open-popup build (EXT.R15) (2026-11-17)
+
+- Built (Sonnet), checked by Opus (low), accepted. **Ring:** 3 px at 16 and 6 px at 32, white halo and grey track so
+  it reads on light and dark toolbars, stronger colours. **Finished:** downloads from this browser that finished since
+  the popup was last opened are counted in the badge (green, up to 99; tooltip "N downloads have finished"); idle with
+  unseen finishes shows a full green ring. No check is drawn into the icon (a first try covered the icon at 16 px and
+  hid the ring). Kept in `chrome.storage.session`; cleared when the popup opens; the popup puts them first.
+- **EXT.R15:** `npm run build:test-popup` -> `extensions/chrome/dist-test-popup` ("… (popup test)", same ID). Options
+  has "Open the popup when a download from this browser finishes" (off); opens only in a focused normal window and
+  never over the ask-where-to-save popup; otherwise the R14 mark. A test checks the store builds don't contain it.
+- **Question for the owner:** the store builds already have Options > "On finish: Flash the icon / Open the popup /
+  Do nothing" (EXT.R12). Should "Open the popup" stay in the store builds, or move to the test build only?
+- Tests: extension 349 pass; typecheck, Chrome, Firefox and test builds pass. **Not tried in a real browser.**
+
+### SITES.12 rename outside the web UI (2026-11-17)
+
+- Window, CLI (`dm remotes` alias), Host/Sites/Tray messages and docs say "remote"/"Remote files"; IPC, `dm sites`,
+  class names, settings keys, logs and "site logins" unchanged. Core 2571, Sites 252, Tray 3, Integration CLI/Sites
+  155 pass. One unfiltered Integration run failed `RuntimeServiceTests.AFailureAClientCanSeeCanBeActedOn…`
+  (unrelated; checked in the full run at R7).
+
 ### Sites rework R5: delete, overwrite, permanent delete on This PC, SITES.11 (2026-11-17)
 
 - Built (Sonnet), reviewed by Fable twice (dialogs, then the data-loss paths alone), fixed twice (Opus), walked on the
