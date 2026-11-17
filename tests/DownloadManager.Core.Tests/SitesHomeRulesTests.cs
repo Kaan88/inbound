@@ -278,6 +278,17 @@ public sealed class SitesHomeRulesTests
     }
 
     [Fact]
+    public void Save_tests_first_unless_it_was_tested_cannot_or_asked_to_save_anyway()
+    {
+        Assert.True(SitesHomeRules.NeedsTestBeforeSave(false, true, false, false));
+        Assert.False(SitesHomeRules.NeedsTestBeforeSave(true, true, false, false));
+        Assert.False(SitesHomeRules.NeedsTestBeforeSave(false, false, false, false));
+        Assert.False(SitesHomeRules.NeedsTestBeforeSave(false, true, true, false));
+        Assert.False(SitesHomeRules.NeedsTestBeforeSave(false, true, false, true));
+        Assert.Equal("Save anyway", SitesHomeRules.SaveAnyway);
+    }
+
+    [Fact]
     public void Test_line_and_labels()
     {
         Assert.Equal("It works. Signed in and listed the start folder in 0.4 s.", SitesHomeRules.TestWorks(true, TimeSpan.FromSeconds(0.4)));

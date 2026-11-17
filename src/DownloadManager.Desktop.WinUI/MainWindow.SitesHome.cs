@@ -134,9 +134,11 @@ public sealed partial class MainWindow
     /// <summary>The page is asked for from Options: the sidebar entry takes the view.</summary>
     private void ShowRemotesPage()
     {
+        // Options asked for it and stays in front: the main window comes up behind it, showing the page.
         Activate();
-        if (!SitesOffered) return;
-        CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == SitesHomeTag);
+        if (SitesOffered)
+            CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == SitesHomeTag);
+        _settingsWindow?.Activate();
     }
 
     private void OpenSiteFromHome(string siteId)

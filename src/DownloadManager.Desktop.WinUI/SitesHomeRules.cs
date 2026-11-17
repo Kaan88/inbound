@@ -31,6 +31,15 @@ internal static class SitesHomeRules
     public const string Heading = "Remote files";
     public const string AllRemotes = "All remotes";
     public const string AddRemote = "Add a remote";
+    public const string SaveAnyway = "Save anyway";
+
+    /// <summary>
+    /// SITES.13 #5: Save runs the test first when none ran since the form last changed. Not when the test is off (older Host,
+    /// one already running), when the remote signs in through the browser, or when a failed test was already shown and the
+    /// button now says Save anyway.
+    /// </summary>
+    public static bool NeedsTestBeforeSave(bool testedSinceChange, bool testAvailable, bool signsInByBrowser, bool saveAnywayAsked) =>
+        !testedSinceChange && testAvailable && !signsInByBrowser && !saveAnywayAsked;
     public const string OpenHint = "Open an address once, for example sftp://nas.home.lan/media";
 
     // Segoe Fluent glyphs: a server, a cloud.

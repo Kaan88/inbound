@@ -158,9 +158,10 @@ internal sealed class SitesHomePanel : UserControl
         page.Children.Add(_message);
         Grid.SetRow(listBox, 2);
         page.Children.Add(listBox);
-        Grid.SetRow(_empty, 2);
+        // Inside the list's box, under the headings (it used to sit over them).
+        Grid.SetRow(_empty, 1);
         _empty.VerticalAlignment = VerticalAlignment.Top;
-        page.Children.Add(_empty);
+        inner.Children.Add(_empty);
         Content = page;
 
         InboundUi.Follow(listBox, "InboundDividerBrush", brush => listBox.BorderBrush = brush);

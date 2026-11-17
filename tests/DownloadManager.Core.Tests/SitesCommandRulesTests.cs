@@ -20,7 +20,9 @@ public sealed class SitesCommandRulesTests
         Assert.Equal(3, groups.Count);
         Assert.Equal([SiteCommand.Download, SiteCommand.DownloadTo, SiteCommand.Open], groups[0]);
         Assert.Equal([SiteCommand.Rename, SiteCommand.Delete, SiteCommand.NewFolder], groups[1]);
-        Assert.Equal([SiteCommand.CopyAddress], groups[2]);
+        Assert.Equal([SiteCommand.CopyPath, SiteCommand.CopyAddress], groups[2]);
+        Assert.Equal("/d/a\n/d/b", SitesCommandRules.Paths("/d", ["a", "b"]));
+        Assert.Equal("/d", SitesCommandRules.Paths("/d", []));
     }
 
     [Fact]
@@ -63,10 +65,11 @@ public sealed class SitesCommandRulesTests
         Assert.Equal([LocalCommand.Upload, LocalCommand.Open, LocalCommand.ShowInExplorer], one[0]);
         Assert.Equal([LocalCommand.Rename, LocalCommand.Delete, LocalCommand.DeleteForGood], one[1]);
         Assert.Equal("Delete permanently…", SitesCommandRules.Label(LocalCommand.DeleteForGood));
-        Assert.Equal([LocalCommand.NewFolder], one[2]);
+        Assert.Equal([LocalCommand.CopyPath], one[2]);
+        Assert.Equal([LocalCommand.NewFolder], one[3]);
 
         var two = SitesCommandRules.LocalMenu([File("a"), File("b")], canUpload: false);
-        Assert.Equal(2, two.Count);
+        Assert.Equal(3, two.Count);
         Assert.Equal([LocalCommand.Delete, LocalCommand.DeleteForGood], two[0]);
 
         var empty = SitesCommandRules.LocalMenu([Up], canUpload: true);
