@@ -101,9 +101,34 @@ export function finishedBadge(count: number): string {
   return count > 0 ? String(Math.min(count, FINISHED_SHOWN_MAX)) : "";
 }
 
-/** The tooltip for finished downloads, or null for none. */
-export function finishedTitle(count: number): string | null {
+/** EXT.R16: the id to file-name map, only strings. */
+export function parseFinishedNames(value: unknown): Record<string, string> {
+  const names: Record<string, string> = {};
+  if (value && typeof value === "object") {
+    for (const [id, name] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof name === "string" && name.length > 0) names[id] = name;
+    }
+  }
+  return names;
+}
+
+/** EXT.R16: the names of the ids still in the list only. */
+export function keepNames(names: Readonly<Record<string, string>>, ids: readonly string[]): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const id of ids) if (names[id]) kept[id] = names[id];
+  return kept;
+}
+
+/**
+ * The tooltip for finished downloads, or null for none. With the newest one's file name (EXT.R16): "ubuntu.iso
+ * finished" or "ubuntu.iso and 2 more finished".
+ */
+export function finishedTitle(count: number, newestName?: string): string | null {
   if (count <= 0) return null;
+  if (newestName) {
+    const more = count - 1;
+    return `Inbound Download Manager: ${newestName}${more > 0 ? ` and ${more} more` : ""} finished. Open the popup to see ${count === 1 ? "it" : "them"}.`;
+  }
   const what = count === 1 ? "a download has" : `${count} downloads have`;
   return `Inbound Download Manager: ${what} finished. Open the popup to see ${count === 1 ? "it" : "them"}.`;
 }

@@ -159,7 +159,7 @@ function collect(): FormValues {
 
 function finishActionValue(): Settings["onFinish"] {
   const value = byId<HTMLSelectElement>("onFinish").value;
-  return value === "popup" || value === "nothing" ? value : "flash";
+  return value === "popup" || value === "notify" || value === "nothing" ? value : "flash";
 }
 
 function same(a: unknown, b: unknown): boolean {

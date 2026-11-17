@@ -5,7 +5,7 @@
 
 import { AskPanel } from "./ask-panel";
 import { connectionProblem, isAppMissing } from "./connection-problem";
-import { renderPopupRows, type PopupListView } from "./popup-list";
+import { renderPopupRows, withoutCleared, type PopupListView } from "./popup-list";
 import { confirmDialog, dialogOpen } from "./ui/dialog";
 import { fillIcons, icon } from "./ui/icon";
 import { menuOpen, openMenu } from "./ui/menu";
@@ -64,6 +64,9 @@ let status: Status | null = null;
 let jobs: JobSummary[] = [];
 /** EXT.R14: what finished since the popup was last opened, newest first. */
 let finishedFirst: string[] = [];
+/** EXT.R16: finished downloads cleared from the popup's list (kept for the browser session); the app's list is not touched. */
+let clearedIds = new Set<string>();
+const CLEARED_KEY = "clearedFinished";
 let groupsOk: Partial<Record<"local" | "server", boolean>> = {};
 let leftOpen = false;
 let checking = true;
@@ -224,6 +227,7 @@ function listView(): PopupListView {
   return {
     paired,
     finishedFirst,
+    hiddenIds: clearedIds,
     serverName: serverName(status?.server),
     groupsOk: {
       local: groupsOk.local ?? (status?.connected !== false),
@@ -355,7 +359,9 @@ function renderStatusBar(): void {
     switcher.replaceChildren(`Send to: ${target}`, icon("chevron-up", 12));
     switcher.title = "Where sent downloads go";
   }
-  const visible = jobs.length;
+  const shownJobs = withoutCleared(jobs, clearedIds);
+  byId<HTMLButtonElement>("clearFinished").classList.toggle("hidden", !shownJobs.some((job) => job.state === "completed"));
+  const visible = shownJobs.length;
   const active = jobs.filter((job) => ["downloading", "connecting", "verifying", "retrying"].includes(job.state)).length;
   const queued = jobs.filter((job) => job.state === "queued").length;
   counts.textContent = visible === 0 ? "" : [
@@ -589,6 +595,23 @@ function openSwitcher(): void {
   ], { upward: true });
 }
 
+/** EXT.R16: hides the finished downloads from the popup's list until another one finishes. Nothing is deleted. */
+function clearFinished(): void {
+  for (const job of jobs) if (job.state === "completed") clearedIds.add(job.id);
+  finishedFirst = finishedFirst.filter((id) => !clearedIds.has(id));
+  try { void chrome.storage.session.set({ [CLEARED_KEY]: [...clearedIds].slice(-200) }); } catch { /* kept for this popup only */ }
+  say("Finished downloads cleared from this list");
+  renderList();
+  renderStatusBar();
+}
+
+async function loadCleared(): Promise<void> {
+  try {
+    const stored = (await chrome.storage.session.get(CLEARED_KEY))[CLEARED_KEY];
+    if (Array.isArray(stored)) clearedIds = new Set(stored.filter((id): id is string => typeof id === "string"));
+  } catch { /* none cleared */ }
+}
+
 // ---- Loading --------------------------------------------------------------------------------------------------
 
 async function pollJobs(): Promise<void> {
@@ -671,7 +694,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderStatusBar();
   // Skeleton rows only if the first answer takes a while; a quick answer draws the list straight away.
   window.setTimeout(showSkeleton, 300);
-  void refresh();
+  void loadCleared().then(() => refresh());
 
   // Only while the popup is open.
   const liveTimer = window.setInterval(() => void pollJobs(), 1000);
@@ -684,5 +707,6 @@ document.addEventListener("DOMContentLoaded", () => {
   byId("options").addEventListener("click", () => void openOptions());
   byId("pauseCatching").addEventListener("click", () => void togglePause());
   byId("targetSwitch").addEventListener("click", openSwitcher);
+  byId("clearFinished").addEventListener("click", clearFinished);
   byId("errorClose").addEventListener("click", clearError);
 });

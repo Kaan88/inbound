@@ -20,7 +20,7 @@ export type AskStartsOn = "default" | "last" | "custom";
  * EXT.R12: what the toolbar icon does when a download sent from the browser finishes: open the toolbar popup (where the
  * browser allows it; otherwise the icon flashes), flash the icon a few times, or nothing.
  */
-export type FinishAction = "popup" | "flash" | "nothing";
+export type FinishAction = "popup" | "flash" | "notify" | "nothing";
 
 export interface Settings {
   enabled: boolean;
@@ -148,7 +148,7 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   settings.browserFolder = folderSetting(settings.browserFolder);
   if (settings.askStartsOn !== "last" && settings.askStartsOn !== "custom") settings.askStartsOn = "default";
   settings.askStartFolder = folderSetting(settings.askStartFolder);
-  if (settings.onFinish !== "popup" && settings.onFinish !== "nothing") settings.onFinish = "flash";
+  if (settings.onFinish !== "popup" && settings.onFinish !== "notify" && settings.onFinish !== "nothing") settings.onFinish = "flash";
   if ((stored.rulesVersion ?? 1) >= RULES_VERSION) {
     return { settings, changed: false };
   }

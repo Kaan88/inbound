@@ -162,7 +162,7 @@ test('EXT.R12: Options sets the app windows and the finish action, and sends onl
     assert.equal(doc.getElementById('openAppWindows').checked, false);
     assert.equal(doc.getElementById('onFinish').value, 'flash');
     assert.deepEqual([...doc.getElementById('onFinish').options].map((option) => option.textContent),
-      ['Flash the icon', 'Open the popup', 'Do nothing']);
+      ['Flash the icon', 'Open the popup', 'Show a notification', 'Do nothing']);
     doc.getElementById('openAppWindows').checked = true;
     doc.getElementById('openAppWindows').dispatchEvent(new page.window.Event('change', { bubbles: true }));
     doc.getElementById('onFinish').value = 'popup';
