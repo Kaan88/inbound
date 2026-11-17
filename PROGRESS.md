@@ -196,6 +196,11 @@
   ResumeActivity (not exported). Not checked on a phone yet (S24, Mi 8 Lite); the API 34+ hold-run reschedule and the
   onStopJob race not exercised on a device. No test for the verifying flag (a job can't be held in Verifying in a
   test). Tests: Integration 2038 passed, 32 skipped; Mobile 164. Builds: no new warnings (arm64 test, release, x64).
+- **Owner (2026-11-17): "begin, both step 3 and 6 at the same time if possible".** Started in parallel on branches
+  `android-s3` (worktree `..\idm-android-s3`, screens) and `android-s6` (`..\idm-android-s6`, remote hosts and pairing,
+  kept below the screens with small separate screen files), merged into `android-app` by the lead. The Figma call limit
+  ran out again, so A5, A6, C6 and C8 are still small captures: A5/A6 are built from them and marked to compare once
+  the owner exports them at full size.
 - **Step 2, S24 recheck of the fixes (2026-11-17, c72d311 test build), by the owner's hand:** two downloads added
   through the test hook both appeared at the top of the list with moving progress; Pause all said "2 downloads paused"
   with a still icon; Resume removed the paused notice and both ran again (log: "resume set: +2 (pause all)", "2 of 2
