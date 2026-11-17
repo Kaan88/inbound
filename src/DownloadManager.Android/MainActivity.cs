@@ -1,5 +1,4 @@
 using System.Collections.Specialized;
-using System.ComponentModel;
 using Android.App;
 using Android.Content;
 using Android.OS;
@@ -8,50 +7,64 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
 using AndroidX.Core.View;
-using AndroidX.RecyclerView.Widget;
 using DownloadManager.Mobile;
-using Google.Android.Material.ProgressIndicator;
 using Inbound.App.Background;
 using Inbound.App.Host;
+using Inbound.App.Screens;
 
 namespace Inbound.App;
 
-/// <summary>The Downloads screen: the list of downloads of the in-process Host, and the Add sheet.</summary>
+/// <summary>
+/// The app's one activity: Downloads and Settings behind a bottom bar, with Details and New download opening over them, the Add sheet,
+/// and the first-run screen. Talks to the Host only through <see cref="DownloadsModel"/> and its connection.
+/// </summary>
 [Activity(Name = "app.inbound.android.MainActivity", Label = "Inbound", MainLauncher = true, Exported = true,
     LaunchMode = Android.Content.PM.LaunchMode.SingleTop, WindowSoftInputMode = SoftInput.AdjustResize)]
 public sealed class MainActivity : AppCompatActivity
 {
+    private const string FirstRunKey = "first_run_done";
+
     private DownloadsModel? _model;
     private LazyInProcessConnection? _connection;
+    private DownloadsScreen? _downloads;
+    private Navigator? _nav;
+    private FirstRunScreen? _firstRun;
+    private DetailsScreen? _details;
+    private NewDownloadScreen? _newDownload;
+    private PrefsStore? _prefs;
+    private bool _onSettings;
+    private readonly Dictionary<Guid, RowGroup> _lastGroup = new();
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
         WindowCompat.SetDecorFitsSystemWindows(Window!, false); // edge to edge
         SetContentView(Resource.Layout.main);
-
-        var appbar = FindViewById<View>(Resource.Id.appbar)!;
-        var fab = FindViewById<View>(Resource.Id.fab)!;
-        var list = FindViewById<RecyclerView>(Resource.Id.list)!;
-        var baseFabMargin = ((ViewGroup.MarginLayoutParams)fab.LayoutParameters!).BottomMargin;
-        ViewCompat.SetOnApplyWindowInsetsListener(FindViewById<View>(Resource.Id.root)!, new InsetsListener((v, insets) =>
-        {
-            if (insets?.GetInsets(WindowInsetsCompat.Type.SystemBars()) is not { } bars) return insets;
-            appbar.SetPadding(bars.Left, bars.Top, bars.Right, 0);
-            ((ViewGroup.MarginLayoutParams)fab.LayoutParameters!).BottomMargin = baseFabMargin + bars.Bottom;
-            fab.RequestLayout();
-            return insets;
-        }));
+        _prefs = new PrefsStore(this);
+        var appearance = new Appearance(_prefs);
+#if INBOUND_TEST_BUILD
+        if (Intent?.GetBooleanExtra("skip_first_run", false) == true) _prefs.SetBool(FirstRunKey, true);
+#endif
 
         _connection = new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
             e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e));
         _model = new DownloadsModel(_connection, a => RunOnUiThread(a));
-        var adapter = new RowAdapter(_model, list);
-        list.SetLayoutManager(new LinearLayoutManager(this));
-        list.SetAdapter(adapter);
-        list.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
-        fab.Click += (_, _) => ShowAddSheet();
-        AskForNotifications();
+
+        var root = FindViewById<ViewGroup>(Resource.Id.root)!;
+        var downloadsRoot = FindViewById<View>(Resource.Id.downloads_root)!;
+        InsetsListener.Pad(downloadsRoot, top: true, bottom: false);
+        _downloads = new DownloadsScreen(this, downloadsRoot, _model);
+        _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance);
+        _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
+            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings), PerformBack);
+        FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
+        var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
+        bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId == Resource.Id.nav_settings); e.Handled = true; };
+        // A recreated activity (theme or dynamic colour changed) comes back on the tab it was on.
+        if (savedInstanceState?.GetBoolean("on_settings") == true) bottom.SelectedItemId = Resource.Id.nav_settings;
+        _model.Rows.CollectionChanged += OnRowsForFinished;
+        ShowFirstRunIfNeeded();
+        _nav.UpdateBack();
 #if INBOUND_TEST_BUILD
         // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
         HandleResumeAll(Intent, redelivered: savedInstanceState is not null || (Intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
@@ -60,6 +73,7 @@ public sealed class MainActivity : AppCompatActivity
         var reported = false;
         _model.FirstSnapshotShown += () =>
         {
+            foreach (var r in _model.Rows) WatchForFinish(r);
             if (reported) return;
             reported = true;
             ReportWhenDrawn(_model.Rows.Count);
@@ -82,8 +96,136 @@ public sealed class MainActivity : AppCompatActivity
         });
     }
 
+    protected override void OnSaveInstanceState(Bundle outState)
+    {
+        base.OnSaveInstanceState(outState);
+        outState.PutBoolean("on_settings", _onSettings);
+    }
+
     private static async Task<DownloadManager.Runtime.Ipc.HostCommandDispatcher> DispatcherAsync(Task<AndroidHost> host) =>
         (await host.ConfigureAwait(false)).Dispatcher;
+
+    private void ShowFirstRunIfNeeded()
+    {
+        if (!FirstRunState.ShouldShow(_prefs!.GetBool(FirstRunKey))) return;
+        var host = FindViewById<FrameLayout>(Resource.Id.first_run_host)!;
+        _firstRun = new FirstRunScreen(this, AndroidHost.SharedDownloadFolder, () =>
+        {
+            _prefs.SetBool(FirstRunKey, true);
+            host.Animate()!.Alpha(0f).SetDuration(200).WithEndAction(new Java.Lang.Runnable(() =>
+            {
+                host.Visibility = ViewStates.Gone;
+                host.RemoveAllViews();
+                _firstRun = null;
+            }))!.Start();
+        });
+        host.AddView(_firstRun.Root);
+        host.Visibility = ViewStates.Visible;
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Android.Content.PM.Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        _firstRun?.Refresh();
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        _firstRun?.Refresh(); // back from the battery dialog
+    }
+
+    private void ShowTab(bool settings)
+    {
+        if (_onSettings == settings) return;
+        _onSettings = settings;
+        // Navigation: 200 ms fade through.
+        AndroidX.Transitions.TransitionManager.BeginDelayedTransition(FindViewById<ViewGroup>(Resource.Id.pages)!,
+            Motion.Fade());
+        FindViewById<View>(Resource.Id.downloads_root)!.Visibility = settings ? ViewStates.Gone : ViewStates.Visible;
+        FindViewById<View>(Resource.Id.settings_root)!.Visibility = settings ? ViewStates.Visible : ViewStates.Gone;
+        _nav?.UpdateBack();
+    }
+
+    private void PerformBack(BackStep step)
+    {
+        switch (step)
+        {
+            case BackStep.EndSelection: _downloads?.EndSelection(); break;
+            case BackStep.CloseSearch: _downloads?.CloseSearch(); break;
+            case BackStep.BackToDownloads:
+                FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!.SelectedItemId = Resource.Id.nav_downloads;
+                break;
+        }
+    }
+
+    internal void UpdateBack() => _nav?.UpdateBack();
+
+    /// <summary>A message for the person; from any thread. Sits above the bottom bar when that is showing.</summary>
+    internal void ShowMessage(string text, string? action = null, Action? onAction = null)
+    {
+        RunOnUiThread(() =>
+        {
+            if (IsFinishing || IsDestroyed) return;
+            var bar = Google.Android.Material.Snackbar.Snackbar.Make(FindViewById<View>(Resource.Id.root)!, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
+            if (_nav?.PageOpen != true) bar.SetAnchorView(FindViewById<View>(Resource.Id.nav));
+            if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
+            bar.Show();
+        });
+    }
+
+    private void OnRowsForFinished(object? s, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems is null) return;
+        foreach (JobRow r in e.NewItems) WatchForFinish(r);
+    }
+
+    // The "finished" snackbar of A3: a download that was running and now has its file. Not for rows that arrive already finished.
+    private void WatchForFinish(JobRow row)
+    {
+        if (_lastGroup.ContainsKey(row.Id)) return;
+        _lastGroup[row.Id] = row.Group;
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(JobRow.Group)) return;
+            var before = _lastGroup.GetValueOrDefault(row.Id, row.Group);
+            _lastGroup[row.Id] = row.Group;
+            if (row.Group != RowGroup.Finished || before == RowGroup.Finished) return;
+            var path = row.Job.FinalFilePath;
+            ShowMessage(row.Name + " finished", "Open", () =>
+            {
+                if (!Outside.OpenFile(this, path)) ShowMessage("The file could not be opened.");
+            });
+        };
+    }
+
+    internal void OpenDetails(JobRow row, View card)
+    {
+        if (_nav is null || _model is null || _nav.PageOpen) return;
+        _details = new DetailsScreen(this, _model, row);
+        _nav.Open(_details.Root, card, () => _downloads?.CardOf(row), OnPageClosed);
+    }
+
+    internal void OpenNewDownload(string? link)
+    {
+        if (_nav is null || _model is null || _nav.PageOpen) return;
+        _newDownload = new NewDownloadScreen(this, _model, link);
+        _nav.Open(_newDownload.Root, null, null, OnPageClosed);
+        if (link is null) _newDownload.FocusAddress();
+    }
+
+    internal void CloseRowPage() => _nav?.Close();
+
+    internal void ConfirmDeleteFromDetails(JobRow row) => _downloads?.ConfirmDelete([row]);
+
+    private void OnPageClosed()
+    {
+        _details?.Dispose();
+        _details = null;
+        _newDownload = null;
+        var imm = (Android.Views.InputMethods.InputMethodManager)GetSystemService(InputMethodService)!;
+        imm.HideSoftInputFromWindow(FindViewById<View>(Resource.Id.root)!.WindowToken, 0);
+    }
 
     /// <summary>
     /// The Host did not start: Add is turned off (it could never work) and the message stays until the user tries again, which
@@ -100,13 +242,6 @@ public sealed class MainActivity : AppCompatActivity
             Google.Android.Material.Snackbar.Snackbar.LengthIndefinite);
         if (!stuck) bar.SetAction("Try again", _ => Recreate());
         bar.Show();
-    }
-
-    /// <summary>A message the user must see; on the application context, so it outlives this activity.</summary>
-    private void ShowError(string text)
-    {
-        var app = ApplicationContext!;
-        new Handler(Looper.MainLooper!).Post(() => Toast.MakeText(app, text, ToastLength.Long)!.Show());
     }
 
     protected override void OnNewIntent(Intent? intent)
@@ -145,21 +280,10 @@ public sealed class MainActivity : AppCompatActivity
     }
 #endif
 
-    /// <summary>API 33 and up: asks once, at the first start. Denied is fine: everything still runs, there is just no notification.</summary>
-    private void AskForNotifications()
-    {
-        if (!OperatingSystem.IsAndroidVersionAtLeast(33)) return;
-        const string permission = "android.permission.POST_NOTIFICATIONS";
-        if (CheckSelfPermission(permission) == Android.Content.PM.Permission.Granted) return;
-        var prefs = GetSharedPreferences("inbound", FileCreationMode.Private)!;
-        if (prefs.GetBoolean("asked_notifications", false)) return;
-        prefs.Edit()!.PutBoolean("asked_notifications", true)!.Apply();
-        RequestPermissions([permission], 1);
-    }
-
     protected override void OnDestroy()
     {
         base.OnDestroy();
+        _downloads?.Dispose();
         _model?.Dispose();
         if (_connection is not null) _ = _connection.DisposeAsync().AsTask();
     }
@@ -168,33 +292,6 @@ public sealed class MainActivity : AppCompatActivity
     {
         if (SupportFragmentManager.FindFragmentByTag("add") is not null) return;
         new AddSheet().Show(SupportFragmentManager, "add");
-    }
-
-    /// <summary>
-    /// From the Add sheet. Sent even when the Host is still starting (the command waits for the session); a refusal or a
-    /// failure is shown, never dropped.
-    /// </summary>
-    internal void Add(string url)
-    {
-        var model = _model;
-        if (model is null) return;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var result = await model.AddAsync(url).ConfigureAwait(false);
-                if (!result.Accepted)
-                {
-                    Log.Warn(InboundApplication.Tag, "add refused: " + result.Error);
-                    ShowError(result.Error ?? "The download was not added.");
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Log.Error(InboundApplication.Tag, "add: " + ex);
-                ShowError("The download was not added: " + ex.Message);
-            }
-        });
     }
 
     /// <summary>"Usable list": called when the snapshot's rows are in the list. Waits for two frames, then ReportFullyDrawn and a log line with the time since process start.</summary>
@@ -212,138 +309,5 @@ public sealed class MainActivity : AppCompatActivity
     private sealed class FrameCb(Action run) : Java.Lang.Object, Choreographer.IFrameCallback
     {
         public void DoFrame(long frameTimeNanos) => run();
-    }
-
-    private sealed class InsetsListener(Func<View?, WindowInsetsCompat?, WindowInsetsCompat?> f) : Java.Lang.Object, IOnApplyWindowInsetsListener
-    {
-        public WindowInsetsCompat? OnApplyWindowInsets(View? v, WindowInsetsCompat? insets) => f(v, insets);
-    }
-
-    private sealed class RowAdapter : RecyclerView.Adapter
-    {
-        private static readonly Java.Lang.String Payload = new("p");
-        private readonly DownloadsModel _model;
-        private readonly HashSet<JobRow> _dirty = new();
-        private readonly Handler _ui = new(Looper.MainLooper!);
-        private readonly RecyclerView _list;
-        private bool _flushQueued;
-        private bool _live;
-
-        public RowAdapter(DownloadsModel model, RecyclerView list)
-        {
-            _model = model;
-            _list = list;
-            model.Rows.CollectionChanged += OnRows;
-            model.FirstSnapshotShown += () => { _live = true; NotifyDataSetChanged(); };
-        }
-
-        public override int ItemCount => _model.Rows.Count;
-
-        private void OnRows(object? s, NotifyCollectionChangedEventArgs e)
-        {
-            if (!_live) return; // the snapshot is shown with one NotifyDataSetChanged
-            if (e.Action == NotifyCollectionChangedAction.Add)
-            {
-                // RecyclerView keeps the first visible row in place when rows are inserted above it; a list that is at the top stays at the top.
-                var atTop = _list.GetLayoutManager() is LinearLayoutManager lm && lm.FindFirstCompletelyVisibleItemPosition() <= 0;
-                NotifyItemInserted(e.NewStartingIndex);
-                if (atTop && e.NewStartingIndex == 0) _list.ScrollToPosition(0);
-            }
-            else if (e.Action == NotifyCollectionChangedAction.Remove) NotifyItemRemoved(e.OldStartingIndex);
-            else NotifyDataSetChanged();
-        }
-
-        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
-        {
-            var v = LayoutInflater.From(parent.Context)!.Inflate(Resource.Layout.row, parent, false)!;
-            return new Holder(v, this);
-        }
-
-        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) => ((Holder)holder).Bind(_model.Rows[position], false);
-
-        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position, IList<Java.Lang.Object> payloads) =>
-            ((Holder)holder).Bind(_model.Rows[position], payloads.Count > 0);
-
-        public override void OnViewRecycled(Java.Lang.Object holder)
-        {
-            ((Holder)holder).Unbind();
-            base.OnViewRecycled(holder);
-        }
-
-        public void Watch(JobRow row, bool on)
-        {
-            if (on) row.PropertyChanged += OnRowChanged; else row.PropertyChanged -= OnRowChanged;
-        }
-
-        private void OnRowChanged(object? s, PropertyChangedEventArgs e)
-        {
-            _dirty.Add((JobRow)s!);
-            if (_flushQueued) return;
-            _flushQueued = true;
-            _ui.Post(() =>
-            {
-                _flushQueued = false;
-                foreach (var r in _dirty) { var i = _model.Rows.IndexOf(r); if (i >= 0) NotifyItemChanged(i, Payload); }
-                _dirty.Clear();
-            });
-        }
-    }
-
-    private sealed class Holder : RecyclerView.ViewHolder
-    {
-        private readonly RowAdapter _owner;
-        private readonly TextView _name, _subtitle;
-        private readonly LinearProgressIndicator _bar;
-        private JobRow? _row;
-
-        public Holder(View v, RowAdapter owner) : base(v)
-        {
-            _owner = owner;
-            _name = v.FindViewById<TextView>(Resource.Id.name)!;
-            _subtitle = v.FindViewById<TextView>(Resource.Id.subtitle)!;
-            _bar = v.FindViewById<LinearProgressIndicator>(Resource.Id.bar)!;
-        }
-
-        /// <summary>A recycled holder stops watching its row, so a row gone from the list keeps no listener.</summary>
-        public void Unbind()
-        {
-            if (_row is not null) _owner.Watch(_row, false);
-            _row = null;
-        }
-
-        public void Bind(JobRow row, bool animate)
-        {
-            if (!ReferenceEquals(_row, row))
-            {
-                if (_row is not null) _owner.Watch(_row, false);
-                _row = row;
-                _owner.Watch(row, true);
-                animate = false;
-            }
-
-            var ctx = ItemView.Context!;
-            _name.Text = row.Name;
-            _subtitle.Text = row.Subtitle;
-            var color = row.Kind switch
-            {
-                StatusKind.Done => ctx.GetColor(Resource.Color.state_done),
-                StatusKind.Failed => ctx.GetColor(Resource.Color.state_failed),
-                StatusKind.Waiting => ctx.GetColor(Resource.Color.state_waiting),
-                _ => ResolveAttr(ctx, Resource.Attribute.colorOnSurfaceVariant),
-            };
-            _subtitle.SetTextColor(new Android.Graphics.Color(color));
-            _bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Gone;
-            if (!row.ShowBar) return;
-            if (row.Indeterminate) { if (!_bar.Indeterminate) _bar.Indeterminate = true; return; }
-            if (_bar.Indeterminate) _bar.Indeterminate = false;
-            _bar.SetProgressCompat((int)(row.Progress * 1000), animate); // animates to the new value; no jump between updates
-        }
-
-        private static int ResolveAttr(Context ctx, int attr)
-        {
-            var tv = new TypedValue();
-            ctx.Theme!.ResolveAttribute(attr, tv, true);
-            return tv.Data;
-        }
     }
 }

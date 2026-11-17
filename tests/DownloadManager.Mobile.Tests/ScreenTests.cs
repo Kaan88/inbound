@@ -418,6 +418,12 @@ public sealed class NewDownloadTests
         Assert.Equal("mine.iso", m.FileName);
     }
 
+    [Theory]
+    [InlineData("net_http_client_execution_error", "The address could not be reached.")]
+    [InlineData(null, "The address could not be reached.")]
+    [InlineData("Server answered 404", "Server answered 404")]
+    public void A_resource_key_is_not_shown_as_the_reason(string? raw, string shown) => Assert.Equal(shown, NewDownloadModel.Readable(raw));
+
     [Fact]
     public async Task A_failed_check_says_why_and_still_allows_the_add_but_a_refused_one_does_not()
     {
@@ -656,4 +662,18 @@ public sealed class AppScreenLogicTests
         Assert.Equal("x.test/a.zip", ClipboardOffer.Shorten("https://x.test/a.zip"));
         Assert.Equal(38, ClipboardOffer.Shorten("https://" + new string('a', 80)).Length);
     }
+}
+
+public sealed class FileKindTests
+{
+    [Theory]
+    [InlineData("ubuntu-26.10-desktop-amd64.iso", FileKind.Disc)]
+    [InlineData("dataset.tar.zst", FileKind.Archive)]
+    [InlineData("TALK.MP4", FileKind.Video)]
+    [InlineData("a.flac", FileKind.Audio)]
+    [InlineData("a.PNG", FileKind.Image)]
+    [InlineData("invoice.pdf", FileKind.Document)]
+    [InlineData("noextension", FileKind.Other)]
+    [InlineData(null, FileKind.Other)]
+    public void The_extension_decides_the_icon(string? name, FileKind kind) => Assert.Equal(kind, FileKinds.Of(name));
 }

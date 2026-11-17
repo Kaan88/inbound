@@ -137,11 +137,19 @@ public sealed class NewDownloadModel
         catch (Exception e) { result = new FileMetadataResult { Ok = false, Error = e.Message }; }
         if (version != _checkVersion) return;
         if (result.AddRefused) { Check = CheckState.Refused; CheckText = result.Error ?? "This address can't be added."; return; }
-        if (!result.Ok) { Check = CheckState.Failed; CheckText = result.Error ?? "The address could not be checked."; return; }
+        if (!result.Ok) { Check = CheckState.Failed; CheckText = Readable(result.Error); return; }
         Check = CheckState.Ready;
         CheckText = result.TotalBytes is > 0 ? Fmt.Bytes(result.TotalBytes.Value) : "Size not given by the server";
         if (!_fileNameEdited && !string.IsNullOrWhiteSpace(result.FileName)) _fileName = result.FileName;
     }
+
+    /// <summary>
+    /// A trimmed build can report a .NET resource key ("net_http_client_execution_error") instead of the sentence; that is no text for a person.
+    /// </summary>
+    public static string Readable(string? error) =>
+        string.IsNullOrWhiteSpace(error) || System.Text.RegularExpressions.Regex.IsMatch(error.Trim(), "^[a-z0-9_]+$")
+            ? "The address could not be reached."
+            : error;
 
     /// <summary>How many were added, how many were already there, and the first thing that went wrong, if anything.</summary>
     public sealed record SubmitResult(int Added, int Duplicates, string? Error);

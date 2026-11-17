@@ -97,3 +97,24 @@ public static class ClipboardOffer
         return shortened.Length <= max ? shortened : text[..(max - 3)] + "...";
     }
 }
+
+/// <summary>What kind of file a name is, for the icon on its row.</summary>
+public enum FileKind { Other, Disc, Archive, Video, Audio, Image, Document }
+
+public static class FileKinds
+{
+    public static FileKind Of(string? name)
+    {
+        var ext = Path.GetExtension(name ?? "").TrimStart('.').ToLowerInvariant();
+        return ext switch
+        {
+            "iso" or "img" or "dmg" or "vhd" or "vhdx" => FileKind.Disc,
+            "zip" or "rar" or "7z" or "tar" or "gz" or "tgz" or "bz2" or "xz" or "zst" or "cab" => FileKind.Archive,
+            "mp4" or "mkv" or "avi" or "mov" or "webm" or "wmv" or "flv" or "m4v" or "ts" => FileKind.Video,
+            "mp3" or "flac" or "wav" or "aac" or "ogg" or "opus" or "m4a" or "wma" => FileKind.Audio,
+            "jpg" or "jpeg" or "png" or "gif" or "webp" or "bmp" or "svg" or "heic" or "avif" => FileKind.Image,
+            "pdf" or "doc" or "docx" or "xls" or "xlsx" or "ppt" or "pptx" or "txt" or "epub" or "odt" or "csv" => FileKind.Document,
+            _ => FileKind.Other,
+        };
+    }
+}
