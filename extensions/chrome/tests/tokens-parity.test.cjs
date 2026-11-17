@@ -97,7 +97,8 @@ test('the badge colours read with white text (OFF on the waiting amber, a waitin
   assert.ok(contrast('#ffffff', '#8a5a00') >= 4.5);
   assert.ok(contrast('#ffffff', '#1f6fc5') >= 4.5);
   const background = fs.readFileSync(path.join(__dirname, '..', 'src', 'background.ts'), 'utf8');
-  assert.match(background, /"#1f6fc5" : serverDown \? "#b3261e" : "#8a5a00"/);
+  assert.match(background, /"#1f6fc5" : serverDown \? "#b3261e" : off \|\| paused \? "#8a5a00" : finished > 0 \? "#1b7a3a" : "#8a5a00"/);
+  assert.ok(contrast('#ffffff', '#1b7a3a') >= 4.5);
 });
 
 test('the notice bar uses the colours checked above: the error text and the pause glyph', () => {

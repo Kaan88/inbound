@@ -10,6 +10,7 @@ import { normalizeServerAddress } from "./transport";
 import { confirmDialog } from "./ui/dialog";
 import { fillIcons } from "./ui/icon";
 import { applyTheme } from "./ui/theme";
+import { mountTestPopupOption } from "./test-popup";
 
 interface ServerStatus {
   address: string;
@@ -519,6 +520,8 @@ function storedElsewhere(next: Settings): void {
 
 document.addEventListener("DOMContentLoaded", () => {
   fillIcons();
+  // EXT.R15: the test build's switch; not in store builds (the define is false there and this is removed).
+  if (typeof __TEST_POPUP__ !== "undefined" && __TEST_POPUP__) mountTestPopupOption(document);
   showPage(pageFromHash());
   window.addEventListener("hashchange", () => showPage(pageFromHash()));
   void load();

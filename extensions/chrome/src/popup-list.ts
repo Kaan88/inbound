@@ -15,6 +15,16 @@ export interface PopupListView {
   serverName: string;
   /** Whether each place answered the last jobs query. */
   groupsOk: Partial<Record<"local" | "server", boolean>>;
+  /** EXT.R14: downloads that finished since the popup was last opened, newest first: they come first in the list. */
+  finishedFirst?: readonly string[];
+}
+
+/** The rows with the just-finished downloads first (newest finish first); the rest keep their order. */
+export function finishedOnTop(jobs: readonly JobSummary[], finishedFirst: readonly string[] | undefined): JobSummary[] {
+  if (!finishedFirst || finishedFirst.length === 0) return [...jobs];
+  const rank = new Map(finishedFirst.map((id, index) => [id, index] as const));
+  const first = jobs.filter((job) => rank.has(job.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+  return [...first, ...jobs.filter((job) => !rank.has(job.id))];
 }
 
 export interface PopupListHandlers {
@@ -288,7 +298,7 @@ export function renderPopupRows(list: HTMLElement, jobs: readonly JobSummary[], 
   const wanted: HTMLLIElement[] = [];
   let shown = 0;
   const addJobs = (group: readonly JobSummary[]) => {
-    for (const job of latestJobs(group, POPUP_JOB_LIMIT)) {
+    for (const job of finishedOnTop(latestJobs(group, POPUP_JOB_LIMIT), view.finishedFirst)) {
       const key = keyOf(job);
       let parts = rows!.get(key) as RowParts | undefined;
       if (!parts || !(parts as RowParts).item) {

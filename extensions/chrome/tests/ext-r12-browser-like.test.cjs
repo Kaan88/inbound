@@ -82,7 +82,7 @@ test('EXT.R12: the icon is drawn again only when its state or ring step changes'
   assert.notEqual(at(25), at(30));
   assert.equal(status.RING_STEPS, 24);
   assert.notEqual(status.drawKey(status.iconState([job({ state: 'paused' })])), at(25));
-  assert.equal(status.drawKey(status.IDLE), 'idle:-');
+  assert.equal(status.drawKey(status.IDLE), 'idle:-:0');
 });
 
 test('EXT.R12: the tooltip says what the icon shows, in plain words', () => {
@@ -197,7 +197,7 @@ function withCanvas(run) {
     constructor(width) { this.width = width; }
     getContext() {
       const size = this.width;
-      return { drawImage() {}, beginPath() {}, arc() {}, stroke() {}, getImageData: () => ({ size }) };
+      return { drawImage() {}, beginPath() {}, arc() {}, stroke() {}, fill() {}, moveTo() {}, lineTo() {}, getImageData: () => ({ size }) };
     }
   };
   global.createImageBitmap = async () => ({ bitmap: true });
@@ -318,9 +318,9 @@ test('EXT.R12: a finish flashes the icon a few times and then stops', async () =
         emit(harness, { eventType: 'completed', job: job({ state: 'completed', receivedBytes: 100 }) });
         for (let i = 0; i < 200 && icons.length < before + 7; i++) await new Promise((resolve) => setTimeout(resolve, 2));
         const flash = icons.slice(before);
-        // Three blinks (ring, plain), then the state now: idle, the plain icon.
+        // Three blinks (ring, plain), then the state now: idle with a finished mark (EXT.R14), a ring.
         assert.equal(flash.length, 7);
-        assert.deepEqual(flash.map((call) => (call.path ? 'plain' : 'ring')), ['ring', 'plain', 'ring', 'plain', 'ring', 'plain', 'plain']);
+        assert.deepEqual(flash.map((call) => (call.path ? 'plain' : 'ring')), ['ring', 'plain', 'ring', 'plain', 'ring', 'plain', 'ring']);
         await new Promise((resolve) => setTimeout(resolve, 30));
         assert.equal(icons.length, before + 7, 'nothing more runs');
         assert.deepEqual(popups, []);

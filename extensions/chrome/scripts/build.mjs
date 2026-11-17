@@ -13,9 +13,12 @@ if (target !== "chrome" && target !== "firefox") {
 // Chrome and Edge share dist; Firefox gets its own folder, since its manifest differs. --outdir builds
 // elsewhere (the tests check a real build without touching dist).
 const outdirIndex = process.argv.indexOf("--outdir");
+// EXT.R15: --test-popup builds the owner's test extension (the "open the popup when a download finishes" switch)
+// into dist-test-popup; it is never part of a store build, which defines the flag false.
+const testPopup = process.argv.includes("--test-popup");
 const dist = outdirIndex >= 0
   ? path.resolve(process.argv[outdirIndex + 1])
-  : path.join(root, target === "firefox" ? "dist-firefox" : "dist");
+  : path.join(root, testPopup ? "dist-test-popup" : target === "firefox" ? "dist-firefox" : "dist");
 
 // Firefox's add-on ID. The desktop app and the Firefox native-messaging manifest name the same one
 // (BrowserBridge.FirefoxExtensionId).
@@ -100,6 +103,12 @@ async function copyStatic() {
     // Byte for byte: the store packager removes the key from this text and keeps the rest as built.
     await copyFile(path.join(root, "manifest.json"), path.join(dist, "manifest.json"));
   }
+  if (testPopup) {
+    const file = path.join(dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(file, "utf8"));
+    manifest.name = `${manifest.name} (popup test)`;
+    await writeFile(file, JSON.stringify(manifest, null, 2) + "\n");
+  }
 }
 
 // Imported by the tests for firefoxManifest: build only when run as the script.
@@ -124,6 +133,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     sourcemap: false,
     minify: false,
     logLevel: "info",
+    define: { __TEST_POPUP__: testPopup ? "true" : "false" },
   };
 
   if (watch) {

@@ -49,6 +49,8 @@ interface JobsAnswer {
   ok?: boolean;
   jobs?: JobSummary[];
   groups?: Array<{ target: "local" | "server"; ok: boolean; error?: string }>;
+  /** EXT.R14: downloads that finished since the popup was last opened, newest first (only on the first answer). */
+  justFinished?: string[];
 }
 
 const GET_APP_URL = "https://github.com/Kaan88/inbound/releases/latest";
@@ -60,6 +62,8 @@ function byId<T extends HTMLElement>(id: string): T {
 
 let status: Status | null = null;
 let jobs: JobSummary[] = [];
+/** EXT.R14: what finished since the popup was last opened, newest first. */
+let finishedFirst: string[] = [];
 let groupsOk: Partial<Record<"local" | "server", boolean>> = {};
 let leftOpen = false;
 let checking = true;
@@ -219,6 +223,7 @@ function listView(): PopupListView {
   const paired = !!status?.server && !serverOnly();
   return {
     paired,
+    finishedFirst,
     serverName: serverName(status?.server),
     groupsOk: {
       local: groupsOk.local ?? (status?.connected !== false),
@@ -592,6 +597,10 @@ async function pollJobs(): Promise<void> {
     const result = await chrome.runtime.sendMessage({ type: "dm.jobs" }) as JobsAnswer;
     if (Array.isArray(result?.jobs)) {
       jobs = result.jobs;
+      // Kept while the popup is open, so the finished ones stay on top of the list it opened with.
+      if (Array.isArray(result.justFinished) && result.justFinished.length > 0) {
+        finishedFirst = [...result.justFinished, ...finishedFirst.filter((id) => !result.justFinished!.includes(id))];
+      }
       groupsOk = Object.fromEntries((result.groups ?? []).map((group) => [group.target, group.ok]));
       renderList();
       if (!menuOpen()) renderStatusBar();
