@@ -83,6 +83,10 @@
     shown: shown.length, total: Math.max(total, items.length), selected: chosen.length, selectedBytes: chosen.reduce((sum, item) => sum + (item.isFolder || item.size < 0 ? 0 : item.size), 0),
     same: items.filter((item) => item.here === 'same').length, linked: showsHere, where: target || null, hostName, format: bytes,
   }));
+  // A phone's footer is short: the count and the size, never the long download path.
+  const phoneFooter = $derived(chosen.length
+    ? `${chosen.length} of ${shown.length} selected${chosen.some((item) => !item.isFolder && item.size > 0) ? ` · ${bytes(chosen.reduce((sum, item) => sum + (item.isFolder || item.size < 0 ? 0 : item.size), 0))}` : ''}`
+    : `${shown.length} item${shown.length === 1 ? '' : 's'}`);
   let starring = $state(false);
 
   // One dialog at a time.
@@ -643,14 +647,29 @@
     <input bind:this={picker} type="file" multiple class="hidden" onchange={(event) => { staged((event.currentTarget as HTMLInputElement).files); (event.currentTarget as HTMLInputElement).value = ''; }} />
   </div>
 
-  <!-- A phone (`phone`): one pane. Upload, New folder and Refresh stay in a short row; what the ticked rows can do is the bar at the bottom. -->
-  <div class="flex items-center gap-1.5 md:hidden" role="toolbar" aria-label="Remote files">
-    <button class="btn" onclick={openUpload}><Icon name="upload" size={15} /> Upload</button>
-    {#if canMakeFolder}<button class="btn" onclick={newFolder}><Icon name="folder-plus" size={15} /> New folder</button>{/if}
-    <button class="btn-icon ml-auto" disabled={loading} title="Refresh" aria-label="Refresh" onclick={() => open(path, true)}><Icon name="refresh" size={16} /></button>
-    {#if onedit}<button class="btn-icon" title="Edit remote" aria-label="Edit remote" onclick={onedit}><Icon name="settings" size={16} /></button>{/if}
+  <!-- A phone (`phone`): one pane. The remote's name with the folder under it; Upload, New folder and Refresh as icons;
+       what the ticked rows can do is the bar at the bottom. -->
+  <div class="flex items-center gap-1 md:hidden">
+    <div class="min-w-0 flex-1">
+      <h1 class="truncate text-[17px] font-semibold">{site.name}</h1>
+      <nav class="flex min-w-0 flex-wrap items-center gap-x-1 text-[12.5px] text-muted" aria-label="Folder">
+        {#if path === '/'}<span>Top folder</span>{:else}
+          {#each crumbs(path).slice(1) as crumb, index (crumb.path)}
+            {#if index > 0}<span aria-hidden="true">›</span>{/if}
+            <button class="max-w-[10rem] truncate hover:underline" onclick={() => open(crumb.path)}>{crumb.name}</button>
+          {/each}
+        {/if}
+      </nav>
+    </div>
+    <div class="flex shrink-0 items-center" role="toolbar" aria-label="Remote files">
+      {#if path !== '/'}<button class="btn-icon" title="Up one folder" aria-label="Up one folder" disabled={loading} onclick={() => open(parentPath(path))}><Icon name="up" size={16} /></button>{/if}
+      <button class="btn-icon" title="Upload" aria-label="Upload" onclick={openUpload}><Icon name="upload" size={16} /></button>
+      {#if canMakeFolder}<button class="btn-icon" title="New folder" aria-label="New folder" onclick={newFolder}><Icon name="folder-plus" size={16} /></button>{/if}
+      <button class="btn-icon" disabled={loading} title="Refresh" aria-label="Refresh" onclick={() => open(path, true)}><Icon name="refresh" size={16} /></button>
+      {#if onedit}<button class="btn-icon" title="Edit remote" aria-label="Edit remote" onclick={onedit}><Icon name="settings" size={16} /></button>{/if}
+    </div>
   </div>
-  <div class="flex flex-wrap items-center gap-3">
+  <div class="flex flex-wrap items-center gap-3 max-md:hidden">
     <div class="segmented max-md:hidden" role="group" aria-label="View">
       <button aria-pressed={view === 'two'} onclick={() => setView('two')}>Two panes</button>
       <button aria-pressed={view === 'server'} onclick={() => setView('server')}>Remote only</button>
@@ -704,13 +723,13 @@
     {/if}
 
     <section class="card @container flex min-w-0 flex-1 flex-col overflow-hidden" aria-label="Files on {site.name}">
-      <header class="flex items-center gap-2 border-b border-divider px-3 py-2 text-[13px]">
+      <header class="flex items-center gap-2 border-b max-md:hidden border-divider px-3 py-2 text-[13px]">
         <Icon name={site.kind === 'sftp' || site.kind === 'ftp' ? 'server' : 'cloud'} size={16} class="text-muted" />
         <span class="min-w-0 truncate font-semibold">{site.name}</span>
         {#if kindChip(site.kind)}<span class="rounded-full border border-divider px-2 text-[11.5px] text-muted">{kindChip(site.kind)}</span>{/if}
       </header>
 
-      <nav class="flex flex-wrap items-center gap-1 border-b border-divider px-2 py-1.5 text-[13px]" aria-label="Folder">
+      <nav class="flex flex-wrap items-center gap-1 border-b border-divider px-2 py-1.5 text-[13px] max-md:hidden" aria-label="Folder">
         <button class="btn-icon" title="Up one folder" aria-label="Up one folder" disabled={path === '/' || loading} onclick={() => open(parentPath(path))}><Icon name="up" size={16} /></button>
         <span class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           {#each crumbs(path) as crumb, index (crumb.path)}
@@ -751,7 +770,7 @@
             {#if fixable(problem)}<button class="btn" onclick={() => (fixing = true)}>{fixButtonText(problem)}</button>{/if}
             <button class="btn" onclick={() => open(path, true)}>Retry now</button></div>
         {/if}
-        <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted" role="presentation">
+        <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted max-md:hidden" role="presentation">
           <input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} />
           <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
           <button class="col-wide hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
@@ -760,7 +779,7 @@
           <span class="w-9"></span>
         </div>
         {#if path !== '/'}
-          <button class="flex w-full items-center gap-2 border-b border-divider px-3 py-1.5 text-left text-[13px] hover:bg-hover" aria-label="Up one folder, .." onclick={() => open(parentPath(path))}>
+          <button class="flex w-full items-center gap-2 border-b border-divider px-3 py-1.5 text-left text-[13px] hover:bg-hover max-md:hidden" aria-label="Up one folder, .." onclick={() => open(parentPath(path))}>
             <span class="w-4"></span><Icon name="folder" size={16} class="shrink-0 text-muted" /><span>..</span>
           </button>
         {/if}
@@ -788,13 +807,13 @@
                 <span class="min-w-0 flex-1">
                   <span class="block truncate">{item.name}</span>
                   <!-- A narrow pane or a phone: the size and how it compares sit under the name (`phone`). -->
-                  <span class="phone-line truncate text-[12px] text-muted">{phoneRowLine(item, sizeText(item, bytes), showsHere ? hereText(item.here) : '')}</span>
+                  <span class="phone-line truncate text-[12px] text-muted">{phoneRowLine(item, sizeText(item, bytes), showsHere ? item.here : null, hostName)}</span>
                 </span>
               </span>
               <span class="col-wide tabular hidden w-24 text-right text-muted @xs:block">{sizeText(item, bytes)}</span>
               <span class="col-wide hidden w-40 text-muted @xl:block">{item.modified ? dateTime(item.modified) : ''}</span>
               {#if showsHere}<span class="col-wide hidden w-28 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
-              <span class="flex w-9 shrink-0 justify-end">
+              <span class="row-menu-cell flex w-9 shrink-0 justify-end">
                 <button class="row-menu" aria-label="Actions for {item.name}" aria-haspopup="menu" title="More actions" onclick={(event) => moreButton(row, event)}><Icon name="more" size={16} /></button>
               </span>
             </li>
@@ -806,7 +825,7 @@
       {/if}
 
       <footer class="border-t border-divider px-3 py-1.5 text-[12px] text-muted">
-        {#if inTrouble}{everListed ? lastListedText(listedAt, Date.now()) : 'Not listed yet'}{:else}{footer}{/if}
+        {#if inTrouble}{everListed ? lastListedText(listedAt, Date.now()) : 'Not listed yet'}{:else}<span class="max-md:hidden">{footer}</span><span class="md:hidden">{phoneFooter}</span>{/if}
       </footer>
     </section>
   </div>
@@ -927,7 +946,7 @@
   @container (min-width: 20rem) { .phone-line { display: none; } }
   @media (max-width: 767px) {
     .phone-line { display: block !important; }
-    .col-wide { display: none !important; }
+    .col-wide, .row-menu-cell { display: none !important; }
     .item-row { padding-top: 8px; padding-bottom: 8px; }
     .item-row input[type='checkbox'] { width: 20px; height: 20px; }
   }

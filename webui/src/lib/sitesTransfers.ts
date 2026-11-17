@@ -64,6 +64,9 @@ export function fullRoute(t: SiteTransfer): string {
   return isDownload(t) ? `${t.siteName} ${t.remoteFolder} to ${t.localFolder}` : `${t.localFolder} to ${t.siteName} ${t.remoteFolder}`;
 }
 
+/** The phone card's "A to B" line: the remote and the computer Inbound runs on, in the batch's direction. */
+export const routeLine = (t: SiteTransfer, hostName: string) => (isDownload(t) ? `${t.siteName} to ${hostName}` : `${hostName} to ${t.siteName}`);
+
 /** How far a batch is, 0 to 100: the bytes done of those still to move, or the files done when no size is known. */
 export function progress(t: SiteTransfer): number {
   const aside = t.bytesSetAside ?? 0;

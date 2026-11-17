@@ -215,8 +215,21 @@ export function phoneActions(ticked: number): PhoneAction[] {
   return ticked === 1 ? ['download', 'rename', 'delete'] : ['download', 'delete'];
 }
 
-/** The line a phone row says under its name: "Folder", the size, with how it compares when linked. */
-export function phoneRowLine(item: SiteItem, size: string, here: string): string {
+/**
+ * The line a phone row says under its name (`phone`): "Folder" or the size, then how it compares with the folder on the
+ * computer Inbound runs on, in words ("already on home-server", "some of it on home-server"); nothing more when it is not there.
+ */
+export function phoneRowLine(item: SiteItem, size: string, here: string | null | undefined, hostName: string): string {
   const first = item.isFolder ? 'Folder' : size;
-  return here ? `${first} · ${here}` : first;
+  const words: Record<string, string> = {
+    same: 'already on', someOfIt: 'some of it on', olderHere: 'an older copy on', different: 'a different copy on', folderHere: 'a folder of that name on',
+  };
+  const where = here ? words[here] : undefined;
+  return where ? `${first} · ${where} ${hostName}` : first;
+}
+
+/** The phone's All remotes subtitle: "5 remotes · 2 with transfers". */
+export function phoneRemotesLine(remotes: number, withTransfers: number): string {
+  const count = remotes === 1 ? '1 remote' : `${remotes} remotes`;
+  return withTransfers ? `${count} · ${withTransfers} with transfers` : count;
 }

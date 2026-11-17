@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Site, SiteItem, SiteKind, SiteTransfer } from '../src/lib/sites';
 import {
   activityText, activityWords, applyHere, arrowsText, badge, busyRemotes, canEdit, defaultName, draftTestText, footerText, forgetBeforeOpening, hereNames,
-  inTrouble, kindOfTile, lastUsedText, listed, needsPassword, phoneActions, phoneRowLine, switchableKinds, tileOf, tiles, tilesFor, waitingCount,
+  inTrouble, kindOfTile, lastUsedText, listed, needsPassword, phoneActions, phoneRemotesLine, phoneRowLine, switchableKinds, tileOf, tiles, tilesFor, waitingCount,
 } from '../src/lib/sitesHome';
 import {
   barSpeeds, barSummary, canCancel, canClear, canPause, canResume, canRetry, clearDoneTargets, description, inTab, menu, pauseAllAction, progress, spaceCommand,
@@ -228,9 +228,12 @@ describe('phone width: tick boxes and the action bar', () => {
   });
 
   it('a row says Folder or its size, then how it compares', () => {
-    expect(phoneRowLine({ name: 'backups', isFolder: true, size: -1 }, '', '')).toBe('Folder');
-    expect(phoneRowLine({ name: 'photos', isFolder: true, size: -1 }, '', 'Some of it')).toBe('Folder · Some of it');
-    expect(phoneRowLine({ name: 'a.iso', isFolder: false, size: 1 }, '5.8 GB', 'Same')).toBe('5.8 GB · Same');
+    expect(phoneRowLine({ name: 'backups', isFolder: true, size: -1 }, '', null, 'home-server')).toBe('Folder');
+    expect(phoneRowLine({ name: 'photos', isFolder: true, size: -1 }, '', 'someOfIt', 'home-server')).toBe('Folder · some of it on home-server');
+    expect(phoneRowLine({ name: 'a.iso', isFolder: false, size: 1 }, '2.1 GB', 'same', 'home-server')).toBe('2.1 GB · already on home-server');
+    expect(phoneRowLine({ name: 'b.iso', isFolder: false, size: 1 }, '5.8 GB', 'notHere', 'home-server')).toBe('5.8 GB');
+    expect(phoneRemotesLine(5, 2)).toBe('5 remotes · 2 with transfers');
+    expect(phoneRemotesLine(1, 0)).toBe('1 remote');
   });
 });
 

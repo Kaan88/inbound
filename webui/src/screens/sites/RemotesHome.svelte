@@ -99,7 +99,7 @@
     <input class="field min-w-0 flex-1" type="text" placeholder={openHint} aria-label="Open an address once" bind:value={address} autocomplete="off" spellcheck="false" />
     <button class="btn" type="submit" disabled={opening || !address.trim()}>{opening ? 'Opening…' : 'Open'}</button>
   </form>
-  <button class="btn-primary max-sm:ml-auto" onclick={onadd}><Icon name="add" size={15} /> {addRemote}</button>
+  <button class="btn-primary max-md:hidden" onclick={onadd}><Icon name="add" size={15} /> {addRemote}</button>
 </div>
 {#if problem}<p class="mt-2 text-[12.5px] text-error" role="alert">{problem}</p>{/if}
 
@@ -147,7 +147,9 @@
     {/each}
   </ul>
 {/if}
-<p class="mt-2 text-[12px] text-muted">{footerText(rows.filter((site) => !site.unsaved).length)}{rows.some((site) => site.unsaved) ? ` · ${rows.filter((site) => site.unsaved).length} opened once` : ''}</p>
+<!-- A phone: "Add a remote" under the list (`phone`). -->
+<button class="btn-primary mt-3 md:hidden" onclick={onadd}><Icon name="add" size={15} /> {addRemote}</button>
+<p class="mt-2 text-[12px] text-muted max-md:hidden">{footerText(rows.filter((site) => !site.unsaved).length)}{rows.some((site) => site.unsaved) ? ` · ${rows.filter((site) => site.unsaved).length} opened once` : ''}</p>
 
 {#if menuAt}<ContextMenu items={menuAt.items} x={menuAt.x} y={menuAt.y} label="Remote actions" onclose={() => (menuAt = null)} />{/if}
 

@@ -6,7 +6,7 @@
   import type { SiteTransfer } from '../../lib/sites';
   import {
     canClear, clearDoneTargets, commandLabel, commandType, description, emptyMessage, fullRoute, inTab, isDownload, menu as commandMenu,
-    pauseAllAction, rateText, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
+    pauseAllAction, rateText, routeLine, retryFailedTargets, sizeText, spaceCommand, status, tabLabel, tabOf, timeLeft, title, valid,
     type TransferCommand, type TransferTab,
   } from '../../lib/sitesTransfers';
 
@@ -94,9 +94,9 @@
       {/each}
     </div>
     <span class="flex-1"></span>
-    {#if pauseAll}<button class="btn" onclick={() => runAll(pauseAll.type, pauseAll.ids)}><Icon name={pauseAll.type.endsWith('pause') ? 'pause' : 'play'} size={15} /> {pauseAll.label}</button>{/if}
-    {#if retryable.length}<button class="btn" onclick={() => runAll('sites.transfer.retry', retryable)}><Icon name="retry" size={15} /> Retry failed</button>{/if}
-    <button class="btn" disabled={!clearable.length} onclick={() => runAll('sites.transfer.clear', clearable)}><Icon name="sweep" size={15} /> Clear done</button>
+    {#if pauseAll}<button class="btn max-md:hidden" onclick={() => runAll(pauseAll.type, pauseAll.ids)}><Icon name={pauseAll.type.endsWith('pause') ? 'pause' : 'play'} size={15} /> {pauseAll.label}</button>{/if}
+    {#if retryable.length}<button class="btn max-md:hidden" onclick={() => runAll('sites.transfer.retry', retryable)}><Icon name="retry" size={15} /> Retry failed</button>{/if}
+    <button class="btn max-md:ml-auto" disabled={!clearable.length} onclick={() => runAll('sites.transfer.clear', clearable)}><Icon name="sweep" size={15} /> Clear done</button>
   </div>
 
   <div class="tl-grid hidden border-y border-divider bg-chrome text-[12px] font-semibold md:grid" role="row">
@@ -124,15 +124,23 @@
         </span>
         <span class="tl-size tabular text-right">{sizeText(row)}</span>
         <span class="tl-status min-w-0">
-          <span class="block truncate tone-{st.kind}">{st.text}<span class="md:hidden">{rateText(row) ? ` · ${rateText(row)}` : ''}{timeLeft(row) ? ` · ${timeLeft(row)}` : ''}</span></span>
+          <span class="block truncate tone-{st.kind}">{st.text}<span class="md:hidden">{row.state === 'failed' && description(row) ? `: ${description(row)}` : ''}{rateText(row) ? ` · ${rateText(row)}` : ''}{timeLeft(row) ? ` · ${timeLeft(row)}` : ''}</span></span>
           {#if st.percent !== null}<span class="mt-0.5 block"><ProgressBar value={st.percent} label="Progress" /></span>{/if}
         </span>
         <span class="tl-eta tabular text-right">{timeLeft(row)}</span>
         <span class="tl-rate tabular text-right">{rateText(row)}</span>
+        <span class="tl-route truncate text-muted md:hidden">{routeLine(row, store.texts.hostName)}</span>
         <span class="tl-desc truncate {row.state === 'failed' ? 'tone-failed' : 'text-muted'}" title={description(row)}>{description(row)}</span>
       </div>
     {/each}
   </div>
+  <!-- A phone: Pause transfers and Retry failed at the bottom, when they apply (`phone`). -->
+  {#if pauseAll || retryable.length}
+    <div class="flex gap-2 border-t border-divider px-3 py-2.5 md:hidden">
+      {#if pauseAll}<button class="btn touch-row" onclick={() => runAll(pauseAll.type, pauseAll.ids)}><Icon name={pauseAll.type.endsWith('pause') ? 'pause' : 'play'} size={15} /> {pauseAll.label}</button>{/if}
+      {#if retryable.length}<button class="btn touch-row" onclick={() => runAll('sites.transfer.retry', retryable)}><Icon name="retry" size={15} /> Retry failed</button>{/if}
+    </div>
+  {/if}
   {#if menuAt}<ContextMenu items={menuAt.items} x={menuAt.x} y={menuAt.y} label="Transfer actions" onclose={() => (menuAt = null)} />{/if}
 </div>
 
@@ -148,13 +156,12 @@
   /* A phone: each transfer is lines, as in the mockup: name and size, then status with rate and time, then where. */
   @media (max-width: 767px) {
     .tl-grid { display: none; }
-    .tl-row { grid-template-columns: 44px 1fr auto; grid-template-areas: 'check name size' 'check status status' 'check desc desc'; row-gap: 2px; padding-top: 8px; padding-bottom: 8px; }
+    .tl-row { grid-template-columns: 44px 1fr; grid-template-areas: 'check name' 'check status' 'check route'; row-gap: 2px; padding-top: 8px; padding-bottom: 8px; }
     .tl-check { grid-area: check; }
     .tl-name { grid-area: name; font-size: 14px; }
-    .tl-size { grid-area: size; font-size: 11.5px; color: var(--muted); }
     .tl-status { grid-area: status; }
-    .tl-desc { grid-area: desc; font-size: 11.5px; }
-    .tl-eta, .tl-rate { display: none; }
+    .tl-route { grid-area: route; font-size: 11.5px; }
+    .tl-eta, .tl-rate, .tl-size, .tl-desc { display: none; }
     .tl-menu { opacity: 1; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; color: var(--text); }
   }
   @media (pointer: coarse) { .tl-menu { opacity: 1; } }

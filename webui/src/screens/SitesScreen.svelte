@@ -7,7 +7,7 @@
     problems, rcloneLine, rcloneOffer,
     type Site, type SiteKind, type SiteResult, type SitesStatus,
   } from '../lib/sites';
-  import { allRemotes } from '../lib/sitesHome';
+  import { allRemotes, busyRemotes, phoneRemotesLine } from '../lib/sitesHome';
   import type { TransferTab } from '../lib/sitesTransfers';
   import RemotesHome from './sites/RemotesHome.svelte';
   import SiteBrowser from './sites/SiteBrowser.svelte';
@@ -153,7 +153,7 @@
   <div class="min-h-0 flex-1 overflow-y-auto {transfersOpen && status?.enabled ? 'max-md:hidden' : ''}">
     <div class="mx-auto px-4 py-4 {siteId ? 'max-w-6xl' : 'max-w-5xl'}">
       {#if siteId}
-        <div class="mb-3 flex items-center gap-2">
+        <div class="mb-3 flex items-center gap-2 {site && status?.enabled ? 'max-md:hidden' : ''}">
           <a class="btn-icon" href="#/sites" title={allRemotes} aria-label={allRemotes}><Icon name="chevron-left" size={18} /></a>
           <h1 class="min-w-0 flex-1 truncate text-[20px] font-semibold">{site?.name ?? 'Remote'}</h1>
         </div>
@@ -166,7 +166,8 @@
         {/if}
       {:else}
         <h1 class="text-[20px] font-semibold">{allRemotes}</h1>
-        <p class="mb-3 mt-1 text-[12.5px] text-muted">Servers and cloud storage you reach through {store.texts.hostName}: SFTP, FTP, WebDAV, S3, Drive, OneDrive, Dropbox and B2.</p>
+        <p class="mb-3 mt-0.5 text-[12.5px] text-muted md:hidden">{phoneRemotesLine(sites.filter((item) => !item.unsaved).length, busyRemotes(transfers).size)}</p>
+        <p class="mb-3 mt-1 text-[12.5px] text-muted max-md:hidden">Servers and cloud storage you reach through {store.texts.hostName}: SFTP, FTP, WebDAV, S3, Drive, OneDrive, Dropbox and B2.</p>
 
         {#if !status}
           <p class="mt-4 text-[13px] text-muted">Reading…</p>
