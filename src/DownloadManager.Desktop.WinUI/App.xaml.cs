@@ -32,12 +32,30 @@ public partial class App : Application
     /// <summary><c>--server</c>: the saved server a progress or package window is for (design D9, section 5).</summary>
     private readonly string? _serverId;
 
+    [ThreadStatic] private static bool _tracingException;
+
     public App()
     {
         UiTrace.Write("App ctor begin");
         // Audit L8: a Host message this build could not read is skipped; the trace says which.
         HostConnection.Trace = UiTrace.Write;
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject);
+        // A failure inside a XAML callback can end the process (stowed exception, 0xc000027b) before either handler runs.
+        // Opt-in for diagnosis: DOWNLOADMANAGER_TRACE_EXCEPTIONS=1 writes every first-chance exception to the UI trace.
+        if (Environment.GetEnvironmentVariable("DOWNLOADMANAGER_TRACE_EXCEPTIONS") == "1")
+            AppDomain.CurrentDomain.FirstChanceException += (_, e) =>
+            {
+                if (_tracingException) return; // the trace's own failure must not recurse
+                _tracingException = true;
+                try
+                {
+                    UiTrace.Write($"First-chance {e.Exception.GetType().Name} 0x{e.Exception.HResult:X8}: {e.Exception.Message}\n{e.Exception.StackTrace}");
+                }
+                finally
+                {
+                    _tracingException = false;
+                }
+            };
         UnhandledException += (_, e) =>
         {
             LogCrash(e.Exception);

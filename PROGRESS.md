@@ -1,5 +1,19 @@
 # Progress — session handoff
 
+### R2 owner walk: crash on opening a remote, fixed (2026-11-17)
+
+- **Owner:** "it crashed when I clicked the first site". Windows logged 0xc000027b in Microsoft.UI.Xaml.dll (a stowed
+  E_POINTER): the window's own crash handlers never ran, so the UI trace had nothing.
+- **Cause:** R2c's `PaneDrag` was given `ItemsList.Parent`, which is null right after `InitializeComponent`; its
+  constructor dereferenced it the first time any remote's pane was created. No automated check builds a real pane
+  (the screenshots predate R2c; the review read the code only).
+- **Fix:** both panes name the grid around the list (`ListHost`) and pass it; `PaneDrag` refuses a null host.
+- **New diagnosis option:** `DOWNLOADMANAGER_TRACE_EXCEPTIONS=1` writes every first-chance exception with its stack
+  to `ui-trace.log` (opt-in, off by default); it found this one at once.
+- **Checked:** on a hidden desktop with the trace on, b2-media, nas.home.lan and files.example.org opened one after
+  another without a crash or an exception; WinUI and Uno build. **Lesson:** each stage's screenshot walk must run on
+  the final build of the stage, after the last fix round.
+
 ### Sites rework R2c: drag and drop, SITES.11 (2026-11-17); R2 complete
 
 - **Owner:** "Start R2c". Built (Sonnet), reviewed (Opus, 9 findings), fixed (Opus), accepted by me.

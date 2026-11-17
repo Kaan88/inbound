@@ -11,6 +11,6 @@ public sealed partial class LocalPane
     /// <summary>The pane's drag and drop: the window sets its planner and drop handler.</summary>
     internal PaneDrag? Drag => _drag;
 
-    partial void WireDrag() => _drag = new PaneDrag(ItemsList, (FrameworkElement)ItemsList.Parent, "thispc", row => (row as LocalRow)?.Line, () => (null, _path));
+    partial void WireDrag() => _drag = new PaneDrag(ItemsList, ListHost, "thispc", row => (row as LocalRow)?.Line, () => (null, _path));
 }
 #endif

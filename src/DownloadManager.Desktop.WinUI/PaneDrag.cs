@@ -37,6 +37,9 @@ internal sealed class PaneDrag
             Clear();
         };
         // The host (the list's grid) also takes a drop, so an empty folder, where the list is hidden, can be dropped on.
+        // Named by the pane (ListHost), never read from list.Parent: that is null right after InitializeComponent, and a
+        // null here ended the window on the first remote opened (R2 owner walk, 2026-11-17).
+        ArgumentNullException.ThrowIfNull(host);
         foreach (var target in new FrameworkElement[] { list, host })
         {
             target.AllowDrop = true;

@@ -11,6 +11,6 @@ public sealed partial class SitesPanel
     /// <summary>The pane's drag and drop: the window sets its planner and drop handler.</summary>
     internal PaneDrag? Drag => _drag;
 
-    partial void WireDrag() => _drag = new PaneDrag(ItemsList, (FrameworkElement)ItemsList.Parent, "server", row => (row as SiteItemRow)?.Line, () => (_site?.Id, _path));
+    partial void WireDrag() => _drag = new PaneDrag(ItemsList, ListHost, "server", row => (row as SiteItemRow)?.Line, () => (_site?.Id, _path));
 }
 #endif

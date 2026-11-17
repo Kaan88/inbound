@@ -38,7 +38,7 @@
             <local:PathBar x:Name="Bar" Grid.Row="1" />
             <local:PaneColumnHeader x:Name="Titles" Grid.Row="2" />
 
-            <Grid Grid.Row="3">
+            <Grid x:Name="ListHost" Grid.Row="3">
                 <ListView x:Name="ItemsList" SelectionMode="Extended" IsDoubleTapEnabled="True"
                           AutomationProperties.Name="Folder contents"
                           ItemContainerStyle="{StaticResource InboundListRowStyle}"
