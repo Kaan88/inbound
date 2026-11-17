@@ -35,6 +35,16 @@
   6. Failed names: **fixed** in the Runtime (0f535a9f, desktop too, ROADMAP ANDROID.3 line): only downloads that can still
      write hold a name (a failed one with a queue retry pending still does); a retry checks again, Rename/Overwrite take
      the next "(n)" and move the part file, Fail refuses. 4 Integration tests.
+     Second pass (6b8a5be8, e75fc325; Fable approved 15 of 16, not 6): Resume all, a queue start (a failed one it retries) and a new
+     address requeued a failed download with its old name unchecked, so two live downloads could share it (with Overwrite
+     the second deleted the first's finished file). All four paths now call `ClaimNameLocked`, which checks, decides and
+     sets the name in the same `_sync` lock that makes the job Queued; a refused one stays failed with the reason (Resume
+     all, queue start) or the call fails (Resume, new address). The part file is no longer moved: its path is stored in
+     the job (`<old final>.<jobId>.part`, unique by the id) and the engine, its checkpoint and the leftover scan read it
+     from there, so only FinalFilePath and FileName change and a kill before the save loses nothing. 4 more Integration
+     tests (Resume all under Rename, Overwrite and Fail; queue start); Integration 813, Mobile 340, Server 208 passed, x64 build
+     warnings unchanged (78 distinct). Also: the post-link check needs a defined (not
+     `UND`) symbol; a connection attempt that fails for any other reason clears the refused-certificate state.
   7. First OnAvailable: **fixed**, baseline is `ActiveNetwork` at start.
   8. SetQueues: **fixed**, AndroidHost forwards the service's SettingsChanged (queue start/stop goes through it).
   9. Crash guard: **fixed**, only a user command that starts downloads lifts it (through the in-process connection's hook).

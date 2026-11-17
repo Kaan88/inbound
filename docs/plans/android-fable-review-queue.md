@@ -56,6 +56,8 @@ Fable review of the Open entries started 2026-11-17 at 7573792b (worktree `idm-a
 Fixes for its 16 findings, 2026-11-17: 0f535a9f (Runtime: failed downloads free their name, owner's "Free the name"),
 d51d5e4b (TLS export target fails loudly, post-link check, gate https probe), 7e3f69d7 (the app and Mobile fixes), with
 the emulator https pass and per-finding notes in PROGRESS "Fable review fixed". Waiting for the same Fable agent's approval.
+Fable approved 15 of 16; finding 6 second pass: 6b8a5be8 and e75fc325 (every requeue path claims the name in one lock, no part
+file move). Waiting for Fable's approval of finding 6.
 Owner, 2026-11-17: "update my phone and desktop apk after this fable approves": once Fable approves the fixes, install
 the release build on the S24 and replace the APK on the owner's desktop.
 
