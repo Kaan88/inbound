@@ -103,6 +103,8 @@ public sealed partial class DownloadManagerService
     private readonly List<string> _orphanPartFiles = new();
     private bool _sleepPreventionActive;
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
+    /// <summary>Final paths chosen by adds that are not in <see cref="_jobs"/> yet. Guarded by <see cref="_sync"/>.</summary>
+    private readonly HashSet<string> _reservedFinalPaths = new(PathNames.Comparer);
     private readonly HashSet<int> _completionFiredQueues = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private readonly SemaphoreSlim _settingsUpdateGate = new(1, 1);
@@ -632,6 +634,35 @@ public sealed partial class DownloadManagerService
         Func<Guid, Task>? beforeAnnounce = null,
         CallerScope? caller = null)
     {
+        // The final path is held from when it is chosen until the job is in the list (which then holds it), or the add
+        // ends without one; another add meanwhile takes the next name.
+        var reservation = new FinalPathReservation();
+        try
+        {
+            return await AddJobReservingAsync(request, cancellationToken, remote, beforeAnnounce, caller, reservation).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (reservation.Path is { } reserved)
+            {
+                lock (_sync) _reservedFinalPaths.Remove(reserved);
+            }
+        }
+    }
+
+    private sealed class FinalPathReservation
+    {
+        public string? Path { get; set; }
+    }
+
+    private async Task<AddJobResponse> AddJobReservingAsync(
+        AddJobRequest request,
+        CancellationToken cancellationToken,
+        RemoteAddContext? remote,
+        Func<Guid, Task>? beforeAnnounce,
+        CallerScope? caller,
+        FinalPathReservation reservation)
+    {
         if (request.Priority is { } requestedPriority && !JobPriorities.IsValid(requestedPriority))
         {
             return new AddJobResponse { Accepted = false, Error = "Choose a priority of High, Normal or Low.", ErrorCode = "invalid_priority" };
@@ -756,7 +787,7 @@ public sealed partial class DownloadManagerService
         {
             // UI.B19: a provider file's path folders below its package's folder are recorded as made for it.
             madeFolders = CreateFolderRecordingMade(destination, remote?.GivenFolder);
-            finalPath = ResolveFinalPath(destination, fileName, conflictPolicy);
+            finalPath = ReserveFinalPath(destination, fileName, conflictPolicy, reservation);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -5581,6 +5612,51 @@ public sealed partial class DownloadManagerService
         }
 
         return FileNameResolver.ResolveUniquePath(directory, Path.GetFileName(candidate), policy);
+    }
+
+    /// <summary>
+    /// <see cref="ResolveFinalPath"/>, and also never a path another unfinished download will land on: a running one
+    /// is only its part file, so the disk alone says the name is free. Rename (and Overwrite, which means a file
+    /// already there, not another download's) take the next free number; Fail refuses, as for a file on disk.
+    /// </summary>
+    private string ReserveFinalPath(string directory, string fileName, ConflictPolicy policy, FinalPathReservation reservation)
+    {
+        var path = ResolveFinalPath(directory, fileName, policy);
+        lock (_sync)
+        {
+            if (FinalPathTakenLocked(path))
+            {
+                if (policy == ConflictPolicy.Fail) throw new IOException($"Another download already saves to {path}.");
+                var name = Path.GetFileName(Path.Combine(directory, FileNameResolver.Sanitize(fileName)));
+                var stem = Path.GetFileNameWithoutExtension(name);
+                var extension = Path.GetExtension(name);
+                for (var number = 1; ; number++)
+                {
+                    if (number >= 10000) throw new IOException("Could not find an available filename.");
+                    path = Path.Combine(directory, $"{stem} ({number}){extension}");
+                    if (!File.Exists(path) && !Directory.Exists(path) && !FinalPathTakenLocked(path)) break;
+                }
+            }
+
+            reservation.Path = NormalizePath(path);
+            _reservedFinalPaths.Add(reservation.Path);
+        }
+
+        return path;
+    }
+
+    private bool FinalPathTakenLocked(string path)
+    {
+        var full = NormalizePath(path);
+        if (_reservedFinalPaths.Contains(full)) return true;
+        foreach (var runtime in _jobs.Values)
+        {
+            var job = runtime.Job;
+            if (job.State == DownloadState.Completed || string.IsNullOrWhiteSpace(job.FinalFilePath)) continue;
+            if (PathNames.Comparer.Equals(NormalizePath(job.FinalFilePath), full)) return true;
+        }
+
+        return false;
     }
 
     private static bool TryValidateUrl(string? value, out Uri uri, out string error)

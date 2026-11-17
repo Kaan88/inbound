@@ -1843,6 +1843,84 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(expected, await Hashing.Sha256FileAsync(existingPath));
     }
 
+    /// <summary>
+    /// Seen on Android: two adds of bench.bin a second apart both became "bench (4).bin". The name was checked only
+    /// against files on disk, and a running download is only a part file, so the second add took the same name.
+    /// </summary>
+    [Fact]
+    public async Task SameNameAddedTwiceWhileTheFirstRunsGetsItsOwnName()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        const string name = "bench.bin";
+        const int size = 768 * 1024;
+        await File.WriteAllTextAsync(Path.Combine(ctx.Destination, name), "already here");
+        AddJobRequest Request(int seed) => new()
+        {
+            Url = $"{_server.BaseAddress}/slow/{name}?size={size}&seed={seed}&bps={256 * 1024}",
+            Connections = 1,
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "rename",
+            Source = "cli",
+        };
+
+        var first = await ctx.Service.AddJobAsync(Request(401));
+        await ctx.WaitFor(first.Job!.Id, j => j.ReceivedBytes > 0);
+        var second = await ctx.Service.AddJobAsync(Request(402));
+        Assert.True(first.Accepted, first.Error);
+        Assert.True(second.Accepted, second.Error);
+        Assert.NotEqual(first.Job.FinalFilePath, second.Job!.FinalFilePath, StringComparer.OrdinalIgnoreCase);
+
+        var firstDone = await ctx.WaitFor(first.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var secondDone = await ctx.WaitFor(second.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(first.Job.FinalFilePath, firstDone.FinalFilePath);
+        Assert.Equal(second.Job.FinalFilePath, secondDone.FinalFilePath);
+        Assert.Equal("already here", await File.ReadAllTextAsync(Path.Combine(ctx.Destination, name)));
+        Assert.Equal(Sha256Of(401, size), await Hashing.Sha256FileAsync(firstDone.FinalFilePath));
+        Assert.Equal(Sha256Of(402, size), await Hashing.Sha256FileAsync(secondDone.FinalFilePath));
+    }
+
+    /// <summary>Adds sent together, both running before either ends: each has its own final file and part file.</summary>
+    [Fact]
+    public async Task SameNameAddedTogetherNeverSharesAFinalPath()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 4);
+        const string name = "bench.bin";
+        const int size = 768 * 1024;
+        var adds = await Task.WhenAll(Enumerable.Range(0, 3).Select(i => ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/{name}?size={size}&seed={410 + i}&bps={256 * 1024}",
+            Connections = 1,
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "rename",
+            Source = "cli",
+        })));
+        Assert.All(adds, add => Assert.True(add.Accepted, add.Error));
+        foreach (var add in adds) await ctx.WaitFor(add.Job!.Id, j => j.ReceivedBytes > 0);
+        var running = adds.Select(add => ctx.Service.GetJob(add.Job!.Id)!).ToList();
+        Assert.All(running, job => Assert.NotEqual("completed", job.State));
+        Assert.Equal(3, running.Select(job => job.FinalFilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        // Fail refuses a name a running download will take, as it refuses one on disk.
+        var refused = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/{name}?size={size}&seed=413",
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "fail",
+            Source = "cli",
+        });
+        Assert.False(refused.Accepted);
+
+        for (var i = 0; i < adds.Length; i++)
+        {
+            var done = await ctx.WaitFor(adds[i].Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            Assert.Equal(running[i].FinalFilePath, done.FinalFilePath);
+            Assert.Equal(Sha256Of(410 + i, size), await Hashing.Sha256FileAsync(done.FinalFilePath));
+        }
+    }
+
     [Fact]
     public async Task ConcurrencyLimitIsObserved()
     {
