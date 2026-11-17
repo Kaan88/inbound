@@ -105,7 +105,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new RcloneUnavailableException("Sites are stopping.");
+            throw new RcloneUnavailableException("Remote files are stopping.");
         }
     }
 
@@ -118,7 +118,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         await _gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
-            if (_stopped) throw new RcloneUnavailableException("Sites are stopping.");
+            if (_stopped) throw new RcloneUnavailableException("Remote files are stopping.");
             if (_instance is not null && _instance.Exited.IsCompleted) NoteExitLocked(_instance);
             if (_state == RcloneState.Failed) throw new RcloneUnavailableException(_error ?? "rclone keeps failing.");
 
@@ -156,7 +156,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
                     // StopAsync came while this start ran: no lease on an rclone that is about to be stopped.
                     await instance.StopAsync(_options.StopGrace).ConfigureAwait(false);
                     await DisposeQuietlyAsync(instance).ConfigureAwait(false);
-                    throw new RcloneUnavailableException("Sites are stopping.");
+                    throw new RcloneUnavailableException("Remote files are stopping.");
                 }
 
                 _instance = instance;
@@ -387,7 +387,7 @@ public sealed class RcloneSupervisor : IAsyncDisposable
         {
             _state = RcloneState.Failed;
             _retryAt = null;
-            _error = $"{reason} rclone failed {_crashes} times in a row; Sites stay unavailable until they are repaired.";
+            _error = $"{reason} rclone failed {_crashes} times in a row; Remote files stay unavailable until they are repaired.";
             _log?.Invoke(_error);
             return;
         }

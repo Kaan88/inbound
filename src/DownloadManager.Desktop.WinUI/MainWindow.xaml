@@ -351,7 +351,7 @@
                         </Button>
                         <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                         <Button x:Name="SitesRefreshButton" AutomationProperties.Name="Refresh" Style="{StaticResource InboundToolButtonStyle}" Click="SitesRefreshButton_Click"
-                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the site again (F5)">
+                                AutomationProperties.AcceleratorKey="F5" ToolTipService.ToolTip="Read this folder from the remote again (F5)">
                             <StackPanel>
                                 <FontIcon Glyph="&#xE72C;" FontSize="25" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Refresh" Style="{StaticResource InboundToolLabelStyle}" />
@@ -361,7 +361,7 @@
                         <!-- Every site transfer at once; rclone has no pause, so files in flight start again at Resume. -->
                         <Button x:Name="SitesPauseAllButton" AutomationProperties.Name="Pause transfers" Style="{StaticResource InboundToolButtonStyle}"
                                 Click="SitesPauseAllButton_Click" IsEnabled="False"
-                                ToolTipService.ToolTip="Pause every site transfer; at Resume, files that were moving start again from the beginning">
+                                ToolTipService.ToolTip="Pause every remote transfer; at Resume, files that were moving start again from the beginning">
                             <StackPanel>
                                 <FontIcon x:Name="SitesPauseAllIcon" Glyph="&#xE769;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock x:Name="SitesPauseAllLabel" Text="Pause transfers" Style="{StaticResource InboundToolLabelStyle}" />
@@ -376,7 +376,7 @@
                             </StackPanel>
                         </Button>
                         <Button x:Name="SitesOptionsButton" AutomationProperties.Name="Options" Style="{StaticResource InboundToolButtonStyle}"
-                                Click="SitesOptionsButton_Click" ToolTipService.ToolTip="Open Options on the Sites page">
+                                Click="SitesOptionsButton_Click" ToolTipService.ToolTip="Open Options on the Remote files page">
                             <StackPanel>
                                 <FontIcon Glyph="&#xE713;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />

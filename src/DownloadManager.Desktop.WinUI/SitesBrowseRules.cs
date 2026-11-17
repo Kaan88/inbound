@@ -167,7 +167,7 @@ internal static class SitesBrowseRules
             case "hostKeyNotAccepted":
                 return "This remote's server key has not been accepted yet. Press Check the key to see it and accept it.";
             case "off":
-                return "Sites is off. Turn it on in Options > Sites.";
+                return "Remote files is off. Turn it on in Options > Remote files.";
             case "certificateNotTrusted":
                 return "This server's certificate is not signed by an authority this PC trusts, so Inbound did not connect. If it is your own server, press Check the certificate to see it and choose whether to trust it.";
             case "signInNeeded":
@@ -192,7 +192,7 @@ internal static class SitesBrowseRules
         "certificateNotTrusted" => "Check the certificate",
         "signInNeeded" => "Sign in",
         "passwordNeeded" => "Type the password",
-        _ => "Open Options > Sites",
+        _ => "Open Options > Remote files",
     };
 
     // ---- R2a: the pane's chip, sorting, filter, footers and the trouble state ----------------------------

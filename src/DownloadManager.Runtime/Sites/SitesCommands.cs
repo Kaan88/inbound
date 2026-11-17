@@ -16,7 +16,7 @@ namespace DownloadManager.Runtime.Sites;
 /// </summary>
 public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 {
-    private const string OffMessage = "Sites is off. Turn it on in Options › Sites.";
+    private const string OffMessage = "Remote files is off. Turn it on in Options › Remote files.";
 
     private readonly string _stateDirectory;
     private readonly SitesConfigStore _configStore;
@@ -335,7 +335,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             return WithError(Status(), "\"Use my own rclone\" needs the full path of the rclone program.");
         // Before the gate: a file being stopped may still need a lease, and leases are taken under the gate. A start or
         // resume that slips in before the switch is saved only waits: nothing runs while Sites is off.
-        if (!request.Enabled && _config.Enabled) await _transfers.PauseAllAsync("Paused when Sites was turned off.").ConfigureAwait(false);
+        if (!request.Enabled && _config.Enabled) await _transfers.PauseAllAsync("Paused when Remote files was turned off.").ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -386,9 +386,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
     private async Task<SitesStatusDto> InstallRcloneAsync(string? versionText, CancellationToken cancellationToken)
     {
-        if (_updater is null) return WithError(Status(), "This Inbound can't download rclone; choose your own rclone in Options › Sites.");
+        if (_updater is null) return WithError(Status(), "This Inbound can't download rclone; choose your own rclone in Options › Remote files.");
         if (_config.OwnRclonePath is not null)
-            return WithError(Status(), "You chose your own rclone in Options › Sites; Inbound does not download or update it.");
+            return WithError(Status(), "You chose your own rclone in Options › Remote files; Inbound does not download or update it.");
         Version? version = null;
         if (!string.IsNullOrWhiteSpace(versionText) && (!Version.TryParse(versionText, out version) || version.Build < 0 || version.Revision >= 0))
             return WithError(Status(), "That is not an rclone version (like 1.76.0).");
@@ -571,9 +571,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             SiteRecord? existing = null;
             if (!string.IsNullOrEmpty(request.Id))
             {
-                if (!SiteStore.IsId(request.Id)) return Fail("That is not a site id.");
+                if (!SiteStore.IsId(request.Id)) return Fail("That is not a remote id.");
                 existing = await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false);
-                if (existing is null) return Fail("That site no longer exists.");
+                if (existing is null) return Fail("That remote no longer exists.");
             }
 
             try
@@ -614,21 +614,21 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// </summary>
     private static (SiteRecord? Record, SiteResultDto? Failure) BuildRecord(SiteSaveRequest request, SiteRecord? existing, IReadOnlyList<string>? draftKeys)
     {
-        if (SiteKindCatalog.Find(request.Kind) is null) return (null, Fail("Choose what kind of site it is."));
-        if (existing is not null && existing.Kind != request.Kind) return (null, Fail("A site's kind can't be changed; add a new site instead."));
+        if (SiteKindCatalog.Find(request.Kind) is null) return (null, Fail("Choose what kind of remote it is."));
+        if (existing is not null && existing.Kind != request.Kind) return (null, Fail("A remote's kind can't be changed; add a new remote instead."));
         var signsIn = SiteKindCatalog.SignsIn(request.Kind);
         // SITES.6c: a sign-in kind has no password or key of its own; its access comes from sites.signIn.
         if (signsIn)
         {
             if (!string.IsNullOrEmpty(request.Password) || !string.IsNullOrEmpty(request.PrivateKey) || !string.IsNullOrEmpty(request.KeyPassphrase))
-                return (null, Fail("This kind of site signs in through the browser, not with a password or key."));
+                return (null, Fail("This kind of remote signs in through the browser, not with a password or key."));
             request.AuthMethod = SiteAuthMethods.SignIn;
             request.Password = null;
         }
         else if (!string.IsNullOrEmpty(request.ClientId) || !string.IsNullOrEmpty(request.ClientSecret))
-            return (null, Fail("Only a site that signs in through the browser has a client ID."));
+            return (null, Fail("Only a remote that signs in through the browser has a client ID."));
         if (!signsIn && request.Kind != SiteKinds.Sftp && (request.AuthMethod != SiteAuthMethods.Password || !string.IsNullOrEmpty(request.PrivateKey)))
-            return (null, Fail("Only SFTP sites sign in with a key."));
+            return (null, Fail("Only SFTP remotes sign in with a key."));
         if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
             return (null, Fail("Choose a password or a key file to sign in with."));
         if (KindAddress(request) is { Problem: { } addressProblem }) return (null, Fail(addressProblem));
@@ -719,11 +719,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (saved.AuthMethod == SiteAuthMethods.Key && saved.SealedPrivateKey is null)
             return (null, Fail("Choose the private key to sign in with."));
         if (saved.Kind == SiteKinds.S3 && (saved.User.Length == 0 || saved.SealedPassword is null))
-            return (null, Fail("An S3 site needs its access key ID and secret access key."));
+            return (null, Fail("An S3 remote needs its access key ID and secret access key."));
         if (saved.Kind == SiteKinds.B2 && (saved.User.Length == 0 || saved.SealedPassword is null))
-            return (null, Fail("A B2 site needs its application key ID and application key."));
+            return (null, Fail("A B2 remote needs its application key ID and application key."));
         if (request.OwnSignInOnly && saved is { Kind: SiteKinds.Sftp, AuthMethod: SiteAuthMethods.Password, SealedPassword: null })
-            return (null, Fail("Type the password, or choose a key: a site saved here can't sign in with the server PC's own SSH keys."));
+            return (null, Fail("Type the password, or choose a key: a remote saved here can't sign in with the server PC's own SSH keys."));
         return (saved, null);
     }
 
@@ -734,7 +734,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         var hadCertificates = false;
         if (!unsavedOnly)
         {
-            if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the site was removed.").ConfigureAwait(false);
+            if (SiteStore.IsId(id)) await _transfers.CancelSiteAsync(id, "Canceled because the remote was removed.").ConfigureAwait(false);
             CancelSignIn(id);
         }
 
@@ -745,7 +745,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             {
                 // Checked and its batches canceled under the gate, which "Remember" takes too: a site kept meanwhile
                 // stays saved, its transfers untouched.
-                if (!_sites.IsUnsaved(id)) return Fail("That site was saved meanwhile; remove it in Options › Sites.");
+                if (!_sites.IsUnsaved(id)) return Fail("That remote was saved meanwhile; remove it in Options › Remote files.");
                 await _transfers.CancelSiteAsync(id, "Canceled because the address was closed.").ConfigureAwait(false);
                 CancelSignIn(id);
             }
@@ -760,7 +760,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
 
         ForgetListings(id);
         ForgetMemory(id);
-        if (!removed) return Fail("That site no longer exists.");
+        if (!removed) return Fail("That remote no longer exists.");
         if (hadCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteResultDto { Ok = true };
@@ -792,8 +792,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         try
         {
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-                return Fail("That site no longer exists.");
-            if (site.Kind != SiteKinds.Sftp) return Fail("The site changed while it was trusted. Try again.");
+                return Fail("That remote no longer exists.");
+            if (site.Kind != SiteKinds.Sftp) return Fail("The remote changed while it was trusted. Try again.");
             if (request.Entries.Count is 0 or > 16) return Fail("Accept between 1 and 16 of the server's keys.");
             saved = site with { HostKeys = [.. request.Entries.Distinct(StringComparer.Ordinal)], ModifiedAt = DateTimeOffset.UtcNow };
             try
@@ -818,9 +818,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteResultDto> TestAsync(string id, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(id) || await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return Fail("That site no longer exists.");
+            return Fail("That remote no longer exists.");
         var path = SitePaths.Normalize(site.RemoteFolder);
-        if (path is null) return Fail("The site's remote folder is not a usable path; change it in Edit site.");
+        if (path is null) return Fail("The remote's start folder is not a usable path; change it in Edit remote.");
         var (items, failure) = await ListFolderAsync(site, path, cancellationToken).ConfigureAwait(false);
         if (failure is not null) return failure;
         var count = items!.Count;
@@ -846,9 +846,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         SiteRecord? existing = null;
         if (!string.IsNullOrEmpty(form.Id))
         {
-            if (!SiteStore.IsId(form.Id)) return Fail("That is not a site id.");
+            if (!SiteStore.IsId(form.Id)) return Fail("That is not a remote id.");
             existing = await _sites.GetAsync(form.Id, cancellationToken).ConfigureAwait(false);
-            if (existing is null) return Fail("That site no longer exists.");
+            if (existing is null) return Fail("That remote no longer exists.");
         }
 
         SiteRecord draft;
@@ -923,7 +923,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     private async Task<SiteBrowseResultDto> BrowseAsync(SiteBrowseRequest request, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteBrowseResultDto { Ok = false, Message = "That site no longer exists.", Path = request.Path ?? "" };
+            return new SiteBrowseResultDto { Ok = false, Message = "That remote no longer exists.", Path = request.Path ?? "" };
         var fromSite = string.IsNullOrEmpty(request.Path);
         var path = SitePaths.Normalize(fromSite ? site.RemoteFolder : request.Path);
         if (path is null)
@@ -932,7 +932,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             {
                 Ok = false,
                 Path = request.Path ?? "",
-                Message = fromSite ? "The site's folder on the server is not a usable path; change it in Edit site." : "That is not a folder path on the server.",
+                Message = fromSite ? "The remote's folder on the server is not a usable path; change it in Edit remote." : "That is not a folder path on the server.",
             };
         }
 
@@ -1101,7 +1101,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     ["opt"] = new JsonObject { ["noMimeType"] = true },
                 }, limit.Token).ConfigureAwait(false);
                 if (listing["list"] is JsonArray { Count: > MaxListingItems } big)
-                    return (null, Fail($"The folder holds {big.Count:N0} items, more than Sites can show ({MaxListingItems:N0})."));
+                    return (null, Fail($"The folder holds {big.Count:N0} items, more than Remote files can show ({MaxListingItems:N0})."));
                 return (SiteListing.Read(listing), null);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -1135,7 +1135,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 return (null, new SiteResultDto
                 {
                     Ok = false, Problem = SiteProblems.SignInNeeded,
-                    Message = "The service no longer accepts this site's sign-in. Sign in again in Options > Sites.",
+                    Message = "The service no longer accepts this remote's sign-in. Sign in again in Options > Remote files.",
                 });
             }
             catch (RcloneCallException e) when (SiteErrorText.IsUntrustedCertificate(e.Message))
@@ -1172,13 +1172,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         try
         {
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-                return Fail("That site no longer exists.");
+                return Fail("That remote no longer exists.");
             if (string.IsNullOrEmpty(request.Path) || SitePaths.Normalize(request.Path) is not { } path || !SitePaths.IsStarrable(path))
                 return Fail("That folder can't be starred.");
             // Starring a starred folder again keeps its place.
             var stars = site.Stars.Where(s => s != path).ToList();
             if (request.Starred) stars = site.Stars.Contains(path) ? [.. site.Stars] : [.. site.Stars, path];
-            if (stars.Count > SitePaths.MaxStars) return Fail($"A site can have at most {SitePaths.MaxStars} starred folders.");
+            if (stars.Count > SitePaths.MaxStars) return Fail($"A remote can have at most {SitePaths.MaxStars} starred folders.");
             if (stars.SequenceEqual(site.Stars)) return new SiteResultDto { Ok = true, Site = ToDto(site) };
             saved = site with { Stars = stars, ModifiedAt = DateTimeOffset.UtcNow };
             try
@@ -1221,9 +1221,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     rclone = _findRclone(_config.OwnRclonePath);
                 if (rclone is null)
                 {
-                    _rcloneProblem = _config.OwnRclonePath is not null ? "The rclone chosen in Options › Sites was not found."
-                        : _updater is not null ? "rclone is not on this PC yet. Download it in Options › Sites, or choose your own rclone."
-                        : "rclone is not on this PC yet. Choose your own rclone in Options › Sites.";
+                    _rcloneProblem = _config.OwnRclonePath is not null ? "The rclone chosen in Options › Remote files was not found."
+                        : _updater is not null ? "rclone is not on this PC yet. Download it in Options › Remote files, or choose your own rclone."
+                        : "rclone is not on this PC yet. Choose your own rclone in Options › Remote files.";
                     _rcloneMissing = true;
                     throw new RcloneUnavailableException(_rcloneProblem);
                 }

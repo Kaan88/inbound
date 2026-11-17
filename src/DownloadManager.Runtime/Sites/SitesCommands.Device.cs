@@ -76,7 +76,7 @@ public sealed partial class SitesCommands
     {
         if (_disposing) return new SiteDeviceStreamDto { Message = "Inbound is closing." };
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteDeviceStreamDto { Message = "That site no longer exists." };
+            return new SiteDeviceStreamDto { Message = "That remote no longer exists." };
         if (_streams.Count >= SiteDeviceLimits.MostStreams)
             return new SiteDeviceStreamDto { Message = "Too many files are being sent to or from devices at once. Try again when one has finished." };
 

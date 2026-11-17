@@ -49,7 +49,7 @@ public sealed class SitesRcloneUpdateTests : IAsyncLifetime
         var commands = Open();
 
         var off = await Call<SitesStatusDto>(commands, SitesMessageTypes.RcloneInstall, new SitesRcloneInstallRequest());
-        Assert.Equal("Sites is off. Turn it on in Options › Sites.", off.Error);
+        Assert.Equal("Remote files is off. Turn it on in Options › Remote files.", off.Error);
         Assert.Equal(0, _server.Requests);
 
         await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true });

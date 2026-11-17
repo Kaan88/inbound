@@ -58,7 +58,7 @@ internal static partial class Program
     {
         "doctor", "add-batch", "add", "list", "status", "profile", "update", "export", "import", "open", "reveal",
         "describe", "priority", "package", "pause", "resume", "retry", "refresh", "cancel", "remove", "pause-all",
-        "resume-all", "queue", "schedule", "site", "sites", "settings", "folders", "host", "torrent",
+        "resume-all", "queue", "schedule", "site", "sites", "remotes", "settings", "folders", "host", "torrent",
     };
 
     private static async Task<int> RunAsync(string[] args)
@@ -606,6 +606,7 @@ internal static partial class Program
             case "site":
                 return await SiteAsync(client, args, json).ConfigureAwait(false);
             case "sites":
+            case "remotes":
                 return await SitesAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
@@ -2225,11 +2226,11 @@ internal static partial class Program
               dm schedule list|add|remove|enable|disable
                           [--open] [--exit] [--site-transfers]
                           [--shutdown shutdown|restart|logoff] [--force]
-              dm sites list | transfers | get <site> <path>... --to <folder> | put <site> <folder> <path>...
+              dm sites list | transfers | get <remote> <path>... --to <folder> | put <remote> <folder> <path>...
                           | pause|resume|cancel|retry <transfer-id> | clear [<transfer-id>]
-                          | on|off|status | add <name> --kind K ... | remove|test|trust|sign-in <site>
-                          | ls <site> [<path>] | mkdir <site> <path> | mv <site> <path> <name> | rm <site> <path>... --yes
-                          (saved sites, SITES.4 and SITES.8; 'dm sites help' lists the options)
+                          | on|off|status | add <name> --kind K ... | remove|test|trust|sign-in <remote>
+                          | ls <remote> [<path>] | mkdir <remote> <path> | mv <remote> <path> <name> | rm <remote> <path>... --yes
+                          (Remote files: saved remotes; 'remotes' works as 'sites'; 'dm sites help' lists the options)
               dm site list | add <site> <username> [--password-env VAR] | remove <login-id>
                           (the password is read from standard input unless --password-env names it)
               dm settings [get] | settings set <key> <value> [<key> <value>...]

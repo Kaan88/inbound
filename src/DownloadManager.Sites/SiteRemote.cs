@@ -24,7 +24,7 @@ public static class SiteRemote
         SiteKinds.S3 => S3(site, client),
         SiteKinds.B2 => B2(site, client),
         SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox => await SignedInAsync(site, client, cancellationToken).ConfigureAwait(false),
-        _ => throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported."),
+        _ => throw new SiteStoreException($"Remotes of kind \"{site.Kind}\" are not supported."),
     };
 
     private static async Task<JsonObject> SftpAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken)
@@ -50,7 +50,7 @@ public static class SiteRemote
 
         if (site.AuthMethod == SiteAuthMethods.Key)
         {
-            if (site.SealedPrivateKey is null) throw new SiteStoreException("No private key is saved for this site; choose one in Edit site.");
+            if (site.SealedPrivateKey is null) throw new SiteStoreException("No private key is saved for this remote; choose one in Edit remote.");
             var key = Open(site.SealedPrivateKey, "private key");
             client.AddSecret(key);
             // key_pem wants its line breaks as literal \n (SITES.0 point 5).
@@ -111,7 +111,7 @@ public static class SiteRemote
     private static JsonObject S3(SiteRecord site, RcloneClient client)
     {
         var secret = site.SealedPassword is null
-            ? throw new SiteStoreException("No secret access key is saved for this site; type it in Edit site.")
+            ? throw new SiteStoreException("No secret access key is saved for this remote; type it in Edit remote.")
             : Open(site.SealedPassword, "secret access key");
         client.AddSecret(secret);
         var fs = new JsonObject
@@ -132,7 +132,7 @@ public static class SiteRemote
     private static JsonObject B2(SiteRecord site, RcloneClient client)
     {
         var key = site.SealedPassword is null
-            ? throw new SiteStoreException("No application key is saved for this site; type it in Edit site.")
+            ? throw new SiteStoreException("No application key is saved for this remote; type it in Edit remote.")
             : Open(site.SealedPassword, "application key");
         client.AddSecret(key);
         return new JsonObject { ["type"] = "b2", ["account"] = site.User, ["key"] = key, ["_root"] = "/" };
@@ -172,9 +172,9 @@ public static class SiteRemote
     /// </summary>
     private static async Task<JsonObject> SignedInAsync(SiteRecord site, RcloneClient client, CancellationToken cancellationToken)
     {
-        if (site.SealedSignIn is null) throw new SiteSignInNeededException("Sign in to this site first (Options > Sites).");
+        if (site.SealedSignIn is null) throw new SiteSignInNeededException("Sign in to this remote first (Options > Remote files).");
         var stored = ParseSignIn(Open(site.SealedSignIn, "sign-in"), client);
-        var storedToken = stored["token"]?.GetValue<string>() ?? throw new SiteSignInNeededException("The site's sign-in is incomplete; sign in again.");
+        var storedToken = stored["token"]?.GetValue<string>() ?? throw new SiteSignInNeededException("The remote's sign-in is incomplete; sign in again.");
         var name = RemoteName(site);
 
         if (client.SignedInRemotes.TryGetValue(name, out var given))
@@ -228,11 +228,11 @@ public static class SiteRemote
         JsonObject parsed;
         try
         {
-            parsed = JsonNode.Parse(json) as JsonObject ?? throw new SiteSignInNeededException("The site's sign-in can't be read; sign in again.");
+            parsed = JsonNode.Parse(json) as JsonObject ?? throw new SiteSignInNeededException("The remote's sign-in can't be read; sign in again.");
         }
         catch (System.Text.Json.JsonException)
         {
-            throw new SiteSignInNeededException("The site's sign-in can't be read; sign in again.");
+            throw new SiteSignInNeededException("The remote's sign-in can't be read; sign in again.");
         }
 
         if (parsed["token"]?.GetValue<string>() is { } token) RegisterToken(token, client);
@@ -260,5 +260,5 @@ public static class SiteRemote
 
     private static string Open(string? sealedValue, string what) =>
         SecretProtector.UnprotectSiteSecret(sealedValue)
-        ?? throw new SiteStoreException($"The site's {what} can't be opened on this PC; enter it again in Edit site.");
+        ?? throw new SiteStoreException($"The remote's {what} can't be opened on this PC; enter it again in Edit remote.");
 }

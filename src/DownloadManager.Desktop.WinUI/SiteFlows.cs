@@ -206,7 +206,7 @@ internal sealed partial class SiteFlows
         var body = new StackPanel { Spacing = 8 };
         body.Children.Add(new TextBlock
         {
-            Text = $"{site.Host}{(site.Port == 22 ? "" : ":" + site.Port)} identified itself with the key below. Inbound will connect to this site only if the server shows this key again.",
+            Text = $"{site.Host}{(site.Port == 22 ? "" : ":" + site.Port)} identified itself with the key below. Inbound will connect to this remote only if the server shows this key again.",
             TextWrapping = TextWrapping.Wrap,
         });
         AddKeys(body, probe.Keys);
@@ -236,7 +236,7 @@ internal sealed partial class SiteFlows
         if (probe is null) return false;
         if (!probe.Ok || !SitesRules.OffersFingerprint(probe.Keys, result.OfferedFingerprint))
         {
-            Say(probe.Ok ? "The server showed another key just now. Nothing was changed. Test the site again." : $"Couldn't read the key of {site.Host}. {probe.Message}", isProblem: true);
+            Say(probe.Ok ? "The server showed another key just now. Nothing was changed. Test the remote again." : $"Couldn't read the key of {site.Host}. {probe.Message}", isProblem: true);
             return false;
         }
 
@@ -309,7 +309,7 @@ internal sealed partial class SiteFlows
         foreach (var (label, value) in SitesRules.CertificateLines(certificate)) body.Children.Add(Mono(label, value));
         body.Children.Add(SettingsWindow.Hint("Compare the fingerprint with the one on the server (for example openssl x509 -noout -fingerprint -sha256 -in the certificate file)."));
         // rclone takes a trusted certificate as an authority for all of Inbound's sites (no per-site trust exists).
-        body.Children.Add(SettingsWindow.Hint("Whoever holds this certificate's key is trusted by all your Inbound sites, not only this one. Trust only a certificate of your own server."));
+        body.Children.Add(SettingsWindow.Hint("Whoever holds this certificate's key is trusted by all your Inbound remotes, not only this one. Trust only a certificate of your own server."));
         if (await AskAsync("Trust this certificate?", body, "Trust", "Cancel", defaultClose: true) != ContentDialogResult.Primary) return false;
 
         SiteResultDto? trusted = null;
@@ -342,7 +342,7 @@ internal sealed partial class SiteFlows
     {
         var body = new TextBlock
         {
-            Text = $"Stop trusting the certificate of {site.Host}? The site then can't be used until you trust its certificate again (Test asks).",
+            Text = $"Stop trusting the certificate of {site.Host}? The remote then can't be used until you trust its certificate again (Test asks).",
             TextWrapping = TextWrapping.Wrap,
         };
         if (await AskAsync("Forget the certificate?", body, "Forget", "Cancel", defaultClose: true) != ContentDialogResult.Primary) return;

@@ -73,13 +73,13 @@ internal static class SitesRules
         var problem = false;
         if (installing) line = "Downloading rclone…";
         // Off, the Host does not look for rclone, so not finding it is no problem yet.
-        else if (missing && !enabled) line = "rclone is looked for when Sites is on.";
+        else if (missing && !enabled) line = "rclone is looked for when Remote files is on.";
         else if (missing)
         {
             problem = true;
             line = ownPath
                 ? "No rclone was found at the path you chose. Pick it again, or clear it to use Inbound's own."
-                : "rclone isn't on this PC yet. Sites needs it.";
+                : "rclone isn't on this PC yet. Remote files needs it.";
         }
         else
         {
@@ -231,7 +231,7 @@ internal static class SitesRules
         var name = values.Name.Trim();
         var host = values.Host.Trim();
         var user = values.User.Trim();
-        if (name.Length == 0) { problem = "Give the site a name."; return null; }
+        if (name.Length == 0) { problem = "Give the remote a name."; return null; }
         if (values.Kind is SiteKindCatalog.WebDav or SiteKindCatalog.S3) return AddressRequest(values, existing, name, user, out problem);
         if (SiteKindCatalog.SignsIn(values.Kind)) return SignInRequest(values, existing, name, out problem);
         if (values.Kind == SiteKindCatalog.B2) return KeyRequest(values, existing, name, user, out problem);

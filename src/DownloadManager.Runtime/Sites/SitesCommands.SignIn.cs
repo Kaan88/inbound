@@ -40,8 +40,8 @@ public sealed partial class SitesCommands
     private async Task<SiteSignInResultDto> SignInAsync(SiteSignInRequest request, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteSignInResultDto { Message = "That site no longer exists." };
-        if (!SiteKindCatalog.SignsIn(site.Kind)) return new SiteSignInResultDto { Message = "This kind of site does not sign in through the browser." };
+            return new SiteSignInResultDto { Message = "That remote no longer exists." };
+        if (!SiteKindCatalog.SignsIn(site.Kind)) return new SiteSignInResultDto { Message = "This kind of remote does not sign in through the browser." };
         var command = $"rclone authorize \"{site.Kind}\"" + (site.ClientId is { } id ? $" \"{id}\" \"<your client secret>\"" : "");
 
         if (request.Token is { } pasted)
@@ -54,7 +54,7 @@ public sealed partial class SitesCommands
         }
 
         var rclone = _findRclone(_config.OwnRclonePath);
-        if (rclone is null) return new SiteSignInResultDto { Message = "rclone is not on this PC yet. Download it in Options > Sites.", AuthorizeCommand = command };
+        if (rclone is null) return new SiteSignInResultDto { Message = "rclone is not on this PC yet. Download it in Options > Remote files.", AuthorizeCommand = command };
 
         await _signInStart.WaitAsync(cancellationToken).ConfigureAwait(false);
         SignInSession session;
@@ -65,7 +65,7 @@ public sealed partial class SitesCommands
             lock (_signInLock)
             {
                 if (_signIn is { } waiting && waiting.SiteId != site.Id && !waiting.Process.HasExited)
-                    return new SiteSignInResultDto { Message = "Another site's sign-in is waiting in the browser. Finish or cancel it first.", AuthorizeCommand = command };
+                    return new SiteSignInResultDto { Message = "Another remote's sign-in is waiting in the browser. Finish or cancel it first.", AuthorizeCommand = command };
             }
 
             CancelSignIn(null);
@@ -284,7 +284,7 @@ public sealed partial class SitesCommands
     /// <summary>Seals the new token (and, for OneDrive, the drive it opens) into the site.</summary>
     private async Task<SiteResultDto> FinishSignInAsync(string siteId, string token, CancellationToken cancellationToken)
     {
-        if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That site no longer exists.");
+        if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That remote no longer exists.");
         var settings = new JsonObject { ["token"] = token };
         if (site.Kind == SiteKinds.Drive) settings["scope"] = "drive";
         if (site.Kind == SiteKinds.OneDrive)
@@ -299,7 +299,7 @@ public sealed partial class SitesCommands
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } current) return Fail("That site no longer exists.");
+            if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } current) return Fail("That remote no longer exists.");
             saved = current with { SealedSignIn = SecretProtector.ProtectSiteSecret(settings.ToJsonString()), ModifiedAt = DateTimeOffset.UtcNow };
             await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
         }

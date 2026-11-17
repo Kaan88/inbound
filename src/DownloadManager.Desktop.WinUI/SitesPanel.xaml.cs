@@ -184,7 +184,7 @@ public sealed partial class SitesPanel : UserControl
         Bar.UpClicked += () => GoUp();
         Bar.StarClicked += () => _ = ToggleStarAsync();
         Bar.FilterChanged += _ => RebuildView();
-        AutomationProperties.SetName(this, "Site browser");
+        AutomationProperties.SetName(this, "Remote browser");
         // The automatic retry counts down only while the window is shown (idle wake-ups): XamlRoot.Changed says when the
         // window is hidden or shown again.
         Loaded += (_, _) => WatchRoot();

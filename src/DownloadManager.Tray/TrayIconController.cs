@@ -25,7 +25,7 @@ public static class TrayText
     {
         var parts = new List<string>();
         if (downloads > 0) parts.Add($"{downloads} active download{(downloads == 1 ? "" : "s")}");
-        if (siteTransfers > 0) parts.Add($"{siteTransfers} site transfer{(siteTransfers == 1 ? "" : "s")}");
+        if (siteTransfers > 0) parts.Add($"{siteTransfers} remote transfer{(siteTransfers == 1 ? "" : "s")}");
         return parts.Count == 0 ? "Idle" : string.Join(", ", parts);
     }
 
@@ -34,7 +34,7 @@ public static class TrayText
     {
         var parts = new List<string>();
         if (downloads > 0) parts.Add($"{downloads} active");
-        if (siteTransfers > 0) parts.Add($"{siteTransfers} site transfer{(siteTransfers == 1 ? "" : "s")}");
+        if (siteTransfers > 0) parts.Add($"{siteTransfers} remote transfer{(siteTransfers == 1 ? "" : "s")}");
         return parts.Count == 0 ? "Inbound Download Manager" : "Inbound — " + string.Join(", ", parts);
     }
 }

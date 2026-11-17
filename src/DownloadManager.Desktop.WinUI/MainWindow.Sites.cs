@@ -223,7 +223,7 @@ public sealed partial class MainWindow
     /// </summary>
     private void OpenSitesOptionsHook()
     {
-        if (_settingsWindow is { } open) open.ShowPage("Sites");
+        if (_settingsWindow is { } open) open.ShowPage("Remote files");
         else _sitesPageWanted = true;
         _ = OpenOptionsAsync();
     }

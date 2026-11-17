@@ -121,7 +121,7 @@ public sealed class SitesSftpEndToEndTests : IAsyncLifetime
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Ok);
         var wrong = await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id });
         Assert.False(wrong.Ok);
-        Assert.Equal("The key passphrase is wrong. Enter it again in Edit site.", wrong.Message);
+        Assert.Equal("The key passphrase is wrong. Enter it again in Edit remote.", wrong.Message);
         request.KeyPassphrase = Passphrase;
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Ok);
         Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.Test, new SiteIdRequest { Id = id })).Ok);

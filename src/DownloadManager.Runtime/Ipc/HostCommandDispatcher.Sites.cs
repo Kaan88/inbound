@@ -4,9 +4,9 @@ namespace DownloadManager.Runtime.Ipc;
 
 public sealed partial class HostCommandDispatcher
 {
-    private const string SitesOnlyHere = "Sites can't be used from here.";
+    private const string SitesOnlyHere = "Remote files can't be used from here.";
     private const string OwnRcloneHere = "Your own rclone can only be chosen in the app on the computer Inbound runs on.";
-    private const string SitesUnavailable = "Sites are not available here.";
+    private const string SitesUnavailable = "Remote files are not available here.";
 
     /// <summary>
     /// Answers <c>sites.*</c> (SITES.2). Null (a Host built without Sites) refuses them. The user at this PC and, since

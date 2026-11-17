@@ -873,7 +873,7 @@ public sealed partial class MainWindow
         if (_sitesPageWanted)
         {
             _sitesPageWanted = false;
-            window.ShowPage("Sites");
+            window.ShowPage("Remote files");
         }
         window.Closed += (_, _) =>
         {
@@ -1098,7 +1098,7 @@ public sealed partial class MainWindow
              .. webUi.Controls]);
         // Sites is answered for this PC only, never through a server, so it uses the same client as the web UI above.
         var sitesPage = new SitesOptionsPage(localClient, window, serverName) { ManageRemotes = ShowRemotesPage };
-        window.AddPage("Sites on this PC", "", sitesPage.Controls);
+        window.AddPage("Remote files on this PC", "", sitesPage.Controls);
 
         window.Closed += (_, _) =>
         {

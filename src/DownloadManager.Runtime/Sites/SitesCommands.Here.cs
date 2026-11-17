@@ -17,7 +17,7 @@ public sealed partial class SitesCommands
     private async Task<SiteHereResultDto> HereAsync(SiteHereRequest request, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteHereResultDto { Ok = false, Message = "That site no longer exists.", Path = request.Path ?? "" };
+            return new SiteHereResultDto { Ok = false, Message = "That remote no longer exists.", Path = request.Path ?? "" };
         if (SitePaths.Normalize(request.Path) is not { } path)
             return new SiteHereResultDto { Ok = false, Message = "That is not a folder path on the server.", Path = request.Path ?? "" };
         var names = (request.Names ?? []).Where(IsFolderName).Distinct(StringComparer.Ordinal).ToList();

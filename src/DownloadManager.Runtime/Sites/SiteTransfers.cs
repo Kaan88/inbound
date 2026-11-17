@@ -260,7 +260,7 @@ public sealed class SiteTransfers : IAsyncDisposable
     public async Task<SiteTransferResultDto> StartAsync(SiteTransferStartRequest request, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(request.SiteId) || await _getSite(request.SiteId, cancellationToken).ConfigureAwait(false) is not { } site)
-            return Fail("That site no longer exists.");
+            return Fail("That remote no longer exists.");
         if (request.Direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload)) return Fail("Choose download or upload.");
         var conflict = string.IsNullOrEmpty(request.Conflict) ? SiteTransferConflicts.Skip : request.Conflict;
         if (!SiteTransferConflicts.IsKnown(conflict)) return Fail("Choose Skip, Replace or Keep both for files that are already there.");
@@ -362,7 +362,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         {
             // Not kept: the user was told it did not start, so it must not start by itself at the next Host start.
             await DeleteQuietlyAsync(batch).ConfigureAwait(false);
-            return Fail("Sites are stopping.");
+            return Fail("Remote files are stopping.");
         }
 
         lock (_sync)
@@ -1211,7 +1211,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             return SiteTransferItemStates.Done;
         }
 
-        var site = await _getSite(record.SiteId, token).ConfigureAwait(false) ?? throw new ItemFailure("The site no longer exists.");
+        var site = await _getSite(record.SiteId, token).ConfigureAwait(false) ?? throw new ItemFailure("The remote no longer exists.");
         using var lease = await _acquire(token).ConfigureAwait(false);
         var client = lease.Client;
         var fs = await SiteRemote.BuildAsync(site, client, token).ConfigureAwait(false);

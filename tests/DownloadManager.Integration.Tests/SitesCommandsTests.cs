@@ -429,7 +429,7 @@ public sealed class SitesCommandsTests : IAsyncLifetime
         await On(commands);
         var unknown = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = SiteStore.NewId() });
         Assert.False(unknown.Ok);
-        Assert.Equal("That site no longer exists.", unknown.Message);
+        Assert.Equal("That remote no longer exists.", unknown.Message);
 
         var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
         var dots = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = saved.Id, Path = "/pub/../etc" });

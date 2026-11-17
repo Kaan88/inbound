@@ -4246,7 +4246,7 @@ public sealed partial class MainWindow : Window
 
             // Sites is this PC's own, so its client is this PC's Host's (the window follows the shown server, which here is this PC).
             var sites = new SitesOptionsPage(_remote, window) { ManageRemotes = ShowRemotesPage };
-            window.AddPage("Sites", "\uE753", sites.Controls);
+            window.AddPage("Remote files", "\uE753", sites.Controls);
 
             window.Closed += (_, _) =>
             {

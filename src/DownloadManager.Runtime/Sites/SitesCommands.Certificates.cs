@@ -25,7 +25,7 @@ public sealed partial class SitesCommands
     private async Task<SiteCertificateResultDto> CertificateAsync(string id, CancellationToken cancellationToken)
     {
         if (!SiteStore.IsId(id) || await _sites.GetAsync(id, cancellationToken).ConfigureAwait(false) is not { } site)
-            return new SiteCertificateResultDto { Message = "That site no longer exists." };
+            return new SiteCertificateResultDto { Message = "That remote no longer exists." };
         if (CertificateProblem(site) is { } problem) return new SiteCertificateResultDto { Message = problem };
         try
         {
@@ -46,7 +46,7 @@ public sealed partial class SitesCommands
     /// <summary>Why a site has no certificate of its own to trust, or null.</summary>
     private static string? CertificateProblem(SiteRecord site) => site.Kind switch
     {
-        SiteKinds.Sftp => "An SFTP site has a server key, not a certificate.",
+        SiteKinds.Sftp => "An SFTP remote has a server key, not a certificate.",
         SiteKinds.Ftp when site.Tls == SiteTlsModes.None => "Plain FTP has no certificate: nothing is encrypted.",
         SiteKinds.WebDav when !SiteKindCatalog.Encrypted(site.Kind, null, site.Url, null) => "An http:// address has no certificate: nothing is encrypted.",
         SiteKinds.S3 when string.IsNullOrEmpty(site.Endpoint) => "Amazon S3's certificate is trusted by every PC; there is nothing to trust here.",
@@ -104,9 +104,9 @@ public sealed partial class SitesCommands
         {
             // Read again under the gate: the site may have been edited while the certificate was read.
             if (await _sites.GetAsync(site.Id, cancellationToken).ConfigureAwait(false) is not { } current)
-                return Fail("That site no longer exists.");
+                return Fail("That remote no longer exists.");
             if (current.Host != site.Host || current.Port != site.Port || current.Tls != site.Tls)
-                return Fail("The site's server changed while its certificate was read. Test it again.");
+                return Fail("The remote's server changed while its certificate was read. Test it again.");
             List<SiteCertificateRecord> list = added is null ? [] :
             [
                 // The newest first; an older one the site trusted for this server is kept (a renewal), up to the limit.
@@ -135,7 +135,7 @@ public sealed partial class SitesCommands
         {
             Ok = true,
             Site = ToDto(saved),
-            Message = now ? null : "Trusted. It is used once the site transfers that are running now have finished.",
+            Message = now ? null : "Trusted. It is used once the remote transfers that are running now have finished.",
         };
     }
 
@@ -205,7 +205,7 @@ public sealed partial class SitesCommands
         }
 
         var text = new StringBuilder();
-        text.Append("# Written by Inbound: the system's root certificates and the server certificates trusted in Sites.\n");
+        text.Append("# Written by Inbound: the system's root certificates and the server certificates trusted in Remote files.\n");
         foreach (var pem in SystemRoots()) text.Append(pem).Append('\n');
         foreach (var certificate in trusted) text.Append(certificate.Pem.Trim()).Append('\n');
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

@@ -24,9 +24,9 @@ public static class SiteKeyText
         if (at < 0) return message;
         var cause = message[(at + ParseFailed.Length)..];
         if (cause.Contains("this private key is passphrase protected", StringComparison.OrdinalIgnoreCase))
-            return "The private key has a passphrase. Enter it in Edit site.";
+            return "The private key has a passphrase. Enter it in Edit remote.";
         if (cause.Contains("decryption password incorrect", StringComparison.OrdinalIgnoreCase))
-            return "The key passphrase is wrong. Enter it again in Edit site.";
-        return "The private key could not be read. Choose the key file again in Edit site.";
+            return "The key passphrase is wrong. Enter it again in Edit remote.";
+        return "The private key could not be read. Choose the key file again in Edit remote.";
     }
 }

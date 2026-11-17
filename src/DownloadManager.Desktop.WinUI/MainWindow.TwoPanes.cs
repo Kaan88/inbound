@@ -212,7 +212,7 @@ public sealed partial class MainWindow
             IsChecked = _uiState.SitesLinked,
         };
         AutomationProperties.SetName(_linkToggle, "Linked folders");
-        ToolTipService.SetToolTip(_linkToggle, "On: this PC's folder follows the server's folder when the site has a linked folder");
+        ToolTipService.SetToolTip(_linkToggle, "On: this PC's folder follows the server's folder when the remote has a linked folder");
         _linkToggle.Click += (_, _) =>
         {
             if (_syncingLinkToggle) return;

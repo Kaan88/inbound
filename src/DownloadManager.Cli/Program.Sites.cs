@@ -14,13 +14,13 @@ internal static partial class Program
     internal const string SitesUsage = """
         usage: sites list
                sites transfers
-               sites get <site> <path on the site>... --to <folder on this PC> [--conflict skip|replace|keepBoth]
-               sites put <site> <folder on the site> <file or folder on this PC>... [--conflict skip|replace|keepBoth]
+               sites get <remote> <path on the remote>... --to <folder on this PC> [--conflict skip|replace|keepBoth]
+               sites put <remote> <folder on the remote> <file or folder on this PC>... [--conflict skip|replace|keepBoth]
                sites pause|resume|cancel|retry <transfer-id>
                sites clear [<transfer-id>]   (without an id: every finished transfer)
         """ + Newline + SitesManageUsage + """
 
-        <site> is a saved site's name or the start of its id. The paths of one command must share a folder.
+        <remote> is a saved remote's name or the start of its id. The paths of one command must share a folder.
         """;
 
     private static async Task<int> SitesAsync(CliClient client, string[] args, bool json)
@@ -44,7 +44,7 @@ internal static partial class Program
                 {
                     var list = await client.AskAsync<SiteTransfersDto>(SitesMessageTypes.TransferList, new EmptyPayload()).ConfigureAwait(false);
                     if (json) { PrintJson(list.Transfers); return 0; }
-                    if (list.Transfers.Count == 0) { Console.WriteLine("No site transfers."); return 0; }
+                    if (list.Transfers.Count == 0) { Console.WriteLine("No remote transfers."); return 0; }
                     foreach (var t in list.Transfers.OrderBy(t => t.CreatedAt)) Console.WriteLine(SiteTransferLine(t));
                     return 0;
                 }
@@ -111,7 +111,7 @@ internal static partial class Program
         if (found.Count == 0) found = [.. sites.Sites.Where(s => s.Id.StartsWith(wanted, StringComparison.OrdinalIgnoreCase))];
         if (found.Count != 1)
         {
-            Console.Error.WriteLine($"'{wanted}' did not match exactly one saved site; see 'sites list'.");
+            Console.Error.WriteLine($"'{wanted}' did not match exactly one saved remote; see 'sites list'.");
             return 1;
         }
 
@@ -124,7 +124,7 @@ internal static partial class Program
             var folders = paths.Select(p => p[..p.LastIndexOf('/')] is { Length: > 0 } parent ? parent : "/").Distinct(StringComparer.Ordinal).ToList();
             if (folders.Count != 1 || paths.Any(p => p == "/"))
             {
-                Console.Error.WriteLine("The paths of one 'sites get' must be in one folder on the site.");
+                Console.Error.WriteLine("The paths of one 'sites get' must be in one folder on the remote.");
                 return 2;
             }
 

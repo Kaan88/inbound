@@ -30,7 +30,7 @@
                 <Border x:Name="PlainChip" Visibility="Collapsed" CornerRadius="9" Padding="7,1" BorderThickness="1"
                         BorderBrush="{ThemeResource InboundErrorTextBrush}" VerticalAlignment="Center"
                         AutomationProperties.Name="Not encrypted"
-                        ToolTipService.ToolTip="This site's connection is not encrypted: the password and the files can be read on the way.">
+                        ToolTipService.ToolTip="This remote's connection is not encrypted: the password and the files can be read on the way.">
                     <TextBlock Text="Not encrypted" FontSize="11" Foreground="{ThemeResource InboundErrorTextBrush}" />
                 </Border>
             </StackPanel>
@@ -98,7 +98,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,4,0,0">
                         <Button x:Name="RetryButton" Content="Retry now" Click="RetryButton_Click" Style="{StaticResource AccentButtonStyle}" />
                         <Button x:Name="EditSiteButton" Content="Edit remote" Click="EditSiteButton_Click" />
-                        <Button x:Name="OptionsButton" Content="Open Options > Sites" Click="OptionsButton_Click" />
+                        <Button x:Name="OptionsButton" Content="Open Options > Remote files" Click="OptionsButton_Click" />
                     </StackPanel>
                 </StackPanel>
             </Grid>

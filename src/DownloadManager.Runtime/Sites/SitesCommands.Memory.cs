@@ -262,7 +262,7 @@ public sealed partial class SitesCommands
         }
         catch (Exception e) when (e is SiteStoreException or IOException or UnauthorizedAccessException)
         {
-            return Fail(e is SiteStoreException ? e.Message : "The site could not be saved.");
+            return Fail(e is SiteStoreException ? e.Message : "The remote could not be saved.");
         }
         finally
         {

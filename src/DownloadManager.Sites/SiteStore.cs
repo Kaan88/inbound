@@ -354,7 +354,7 @@ public sealed class SiteStore
     private string PathFor(string id)
     {
         // The id names a file: only our own form, so no client can reach outside the folder with "../" or a drive.
-        if (!IsId(id)) throw new SiteStoreException("That is not a site id.");
+        if (!IsId(id)) throw new SiteStoreException("That is not a remote id.");
         return Path.Combine(_folder, id + ".json");
     }
 
@@ -362,20 +362,20 @@ public sealed class SiteStore
 
     private static void Validate(SiteRecord site)
     {
-        if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A site of another version can't be saved.");
-        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Sites of kind \"{site.Kind}\" are not supported.");
-        if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A site needs a name.");
+        if (site.SchemaVersion != SiteRecord.CurrentSchemaVersion) throw new SiteStoreException("A remote of another version can't be saved.");
+        if (DownloadManager.Contracts.SiteKindCatalog.Find(site.Kind) is null) throw new SiteStoreException($"Remotes of kind \"{site.Kind}\" are not supported.");
+        if (string.IsNullOrWhiteSpace(site.Name)) throw new SiteStoreException("A remote needs a name.");
         if (string.IsNullOrWhiteSpace(site.Host) || site.Host.Any(c => char.IsWhiteSpace(c) || c is '/' or '@' or '?' or '#'))
-            throw new SiteStoreException("A site needs a server name or address, without a path, user or password in it.");
+            throw new SiteStoreException("A remote needs a server name or address, without a path, user or password in it.");
         if (site.Port is < 1 or > 65535) throw new SiteStoreException("The port must be between 1 and 65535.");
         ValidateKind(site);
         foreach (var sealedValue in new[] { site.SealedPassword, site.SealedPrivateKey, site.SealedKeyPassphrase, site.SealedClientSecret, site.SealedSignIn })
             if (sealedValue is not null && !SecretProtector.IsProtected(sealedValue))
-                throw new SiteStoreException("A site secret must be sealed before it is saved.");
+                throw new SiteStoreException("A remote secret must be sealed before it is saved.");
         foreach (var entry in site.HostKeys)
             if (!IsHostKeyEntry(entry)) throw new SiteStoreException("A host key must be \"type base64\", with the key's own type.");
         ValidateCertificates(site);
-        if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A site can have at most {SitePaths.MaxStars} starred folders.");
+        if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A remote can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
@@ -388,9 +388,9 @@ public sealed class SiteStore
         if (site.TrustedCertificates.Count == 0) return;
         if (site.Kind == SiteKinds.Sftp || !DownloadManager.Contracts.SiteKindCatalog.Encrypted(site.Kind, site.Tls, site.Url, site.Endpoint)
             || (site.Kind == SiteKinds.S3 && string.IsNullOrEmpty(site.Endpoint)))
-            throw new SiteStoreException("Only an encrypted FTP or https site can trust a server certificate.");
+            throw new SiteStoreException("Only an encrypted FTP or https remote can trust a server certificate.");
         if (site.TrustedCertificates.Count > SiteCertificateRecord.MaxPerSite)
-            throw new SiteStoreException($"A site can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
+            throw new SiteStoreException($"A remote can trust at most {SiteCertificateRecord.MaxPerSite} certificates.");
         foreach (var certificate in site.TrustedCertificates)
         {
             if (!certificate.Matches()) throw new SiteStoreException("A trusted certificate must be a certificate with its own fingerprint.");
@@ -402,7 +402,7 @@ public sealed class SiteStore
     {
         static void Unused(params string?[] values)
         {
-            if (values.Any(value => value is not null)) throw new SiteStoreException("A site has a setting its kind does not use.");
+            if (values.Any(value => value is not null)) throw new SiteStoreException("A remote has a setting its kind does not use.");
         }
 
         switch (site.Kind)
@@ -436,7 +436,7 @@ public sealed class SiteStore
                 break;
             case SiteKinds.Drive or SiteKinds.OneDrive or SiteKinds.Dropbox:
                 Unused(site.Tls, site.Url, site.Vendor, site.Provider, site.Endpoint, site.Region, site.SealedPassword);
-                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of site signs in through the browser.");
+                if (site.AuthMethod != SiteAuthMethods.SignIn) throw new SiteStoreException("This kind of remote signs in through the browser.");
                 if (site.ClientId is { } clientId && (clientId.Length is 0 or > 256 || !clientId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')))
                     throw new SiteStoreException("A client ID is letters, digits, dots, dashes and underscores.");
                 if (site.ClientId is null && site.SealedClientSecret is not null) throw new SiteStoreException("A client secret needs its client ID.");
@@ -447,12 +447,12 @@ public sealed class SiteStore
         }
 
         if (!DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.ClientId is not null || site.SealedClientSecret is not null || site.SealedSignIn is not null))
-            throw new SiteStoreException("Only a site that signs in through the browser has an app registration or a token.");
+            throw new SiteStoreException("Only a remote that signs in through the browser has an app registration or a token.");
         if (site.Kind != SiteKinds.Sftp && !DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind)
             && (site.AuthMethod != SiteAuthMethods.Password || site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
-            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+            throw new SiteStoreException("Only SFTP remotes sign in with a key.");
         if (DownloadManager.Contracts.SiteKindCatalog.SignsIn(site.Kind) && (site.SealedPrivateKey is not null || site.HostKeys.Count > 0))
-            throw new SiteStoreException("Only SFTP sites sign in with a key.");
+            throw new SiteStoreException("Only SFTP remotes sign in with a key.");
     }
 
     /// <summary>"type base64", where the blob is an SSH public key whose own type (its first string) is that type.</summary>

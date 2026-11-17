@@ -326,7 +326,7 @@ public sealed class SitesOpenOnceTests : IAsyncLifetime
         Assert.Null(refused.Problem);
 
         // The save's other checks hold too: a key only for SFTP, a usable kind.
-        Assert.Contains("Only SFTP sites sign in with a key", (await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
+        Assert.Contains("Only SFTP remotes sign in with a key", (await Call<SiteResultDto>(commands, SitesMessageTypes.TestDraft, new SiteTestDraftRequest
         {
             Site = new SiteSaveRequest { Name = "F", Kind = SiteKinds.Ftp, Host = "files.example.org", Port = 21, Tls = SiteTlsModes.None, AuthMethod = SiteAuthMethods.Key },
         })).Message);

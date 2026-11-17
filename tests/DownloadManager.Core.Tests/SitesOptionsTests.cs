@@ -89,7 +89,7 @@ public sealed class SitesOptionsTests
     {
         var view = SitesRules.Rclone(Status(s => { NoRclone(s); s.Enabled = false; s.Error = "Sites is off."; }), Now);
         Assert.False(view.LineIsProblem);
-        Assert.Equal("rclone is looked for when Sites is on.", view.Line);
+        Assert.Equal("rclone is looked for when Remote files is on.", view.Line);
         Assert.False(view.EnableAutoUpdate);
     }
 
@@ -188,7 +188,7 @@ public sealed class SitesOptionsTests
     public void ANameIsRequired()
     {
         Assert.Null(SitesRules.Request(Form(v => v with { Name = " " }), null, out var problem));
-        Assert.Equal("Give the site a name.", problem);
+        Assert.Equal("Give the remote a name.", problem);
     }
 
     [Theory]

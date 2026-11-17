@@ -271,7 +271,7 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
         var list = await Call<SiteTransfersDto>(commands, SitesMessageTypes.TransferList, new { });
         var paused = Assert.Single(list.Transfers);
         Assert.Equal(SiteTransferStates.Paused, paused.State);
-        Assert.Equal("Paused when Sites was turned off.", paused.Message);
+        Assert.Equal("Paused when Remote files was turned off.", paused.Message);
         var refused = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferResume, new SiteTransferIdRequest { Id = started.Id });
         Assert.Equal(SiteProblems.Off, refused.Problem);
 
@@ -318,7 +318,7 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
 
         var stopped = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
         Assert.Equal(SiteTransferStates.Failed, stopped.State);
-        Assert.Equal("The server did not accept the sign-in. Check the user name, and the password or key, in Edit site.", stopped.Message);
+        Assert.Equal("The server did not accept the sign-in. Check the user name, and the password or key, in Edit remote.", stopped.Message);
         var detail = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferGet, new SiteTransferIdRequest { Id = started.Id });
         var readme = detail.Items!.Single(i => i.Path == "readme.txt");
         Assert.Equal((SiteTransferItemStates.Waiting, 0), (readme.State, readme.Tries));

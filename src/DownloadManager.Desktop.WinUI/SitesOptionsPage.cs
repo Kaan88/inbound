@@ -19,7 +19,7 @@ internal sealed partial class SitesOptionsPage
     private readonly SettingsWindow _window;
     private readonly CancellationTokenSource _closing = new();
     private readonly CheckBox _enable = new() { Content = "Use remote files" };
-    private readonly StatusLine _switchResult = new("Sites switch result");
+    private readonly StatusLine _switchResult = new("Remote files switch result");
     private readonly TextBlock _rcloneLine = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly TextBlock _offerLine = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly TextBlock _checkedLine = SettingsWindow.Hint(string.Empty);
@@ -32,7 +32,7 @@ internal sealed partial class SitesOptionsPage
     private readonly Button _browseOwn = new() { Content = "Browse…", MinWidth = 92, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Button _useOwn = new() { Content = "Use this path", MinWidth = 92, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly HyperlinkButton _manage = new() { Content = "Manage remotes in All remotes", Padding = new Thickness(0) };
-    private readonly StatusLine _loadStatus = new("Sites settings");
+    private readonly StatusLine _loadStatus = new("Remote files settings");
     private readonly Button _tryAgain = new() { Content = "Try again", Visibility = Visibility.Collapsed };
     private readonly List<Control> _rcloneControls;
 
@@ -47,7 +47,7 @@ internal sealed partial class SitesOptionsPage
         _client = client;
         _window = window;
 
-        AutomationProperties.SetName(_enable, "Use Sites");
+        AutomationProperties.SetName(_enable, "Use Remote files");
         AutomationProperties.SetName(_download, "Download rclone");
         AutomationProperties.SetName(_check, "Check for a newer rclone");
         AutomationProperties.SetName(_update, "Update rclone");
@@ -56,7 +56,7 @@ internal sealed partial class SitesOptionsPage
         AutomationProperties.SetName(_browseOwn, "Browse for your own rclone");
         AutomationProperties.SetName(_useOwn, "Use this rclone path");
         AutomationProperties.SetName(_manage, "Manage remotes in All remotes");
-        AutomationProperties.SetName(_tryAgain, "Try reading the Sites settings again");
+        AutomationProperties.SetName(_tryAgain, "Try reading the Remote files settings again");
         AutomationProperties.SetName(_rcloneLine, "rclone in use");
         AutomationProperties.SetLiveSetting(_rcloneLine, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
 
@@ -101,7 +101,7 @@ internal sealed partial class SitesOptionsPage
 
         var controls = new List<UIElement>();
         if (serverName is not null)
-            controls.Add(SettingsWindow.Hint($"Sites is for this PC and is set up here, whichever server the window shows. It never changes {serverName}."));
+            controls.Add(SettingsWindow.Hint($"Remote files is for this PC and is set up here, whichever server the window shows. It never changes {serverName}."));
         controls.AddRange(
         [
             _loadStatus.Text,
@@ -145,13 +145,13 @@ internal sealed partial class SitesOptionsPage
     private async Task LoadAsync()
     {
         _tryAgain.Visibility = Visibility.Collapsed;
-        _loadStatus.Show("Reading the Sites settings…");
+        _loadStatus.Show("Reading the Remote files settings…");
         try
         {
             var status = await _client.GetSitesAsync(_closing.Token);
             if (status.Value is null)
             {
-                _loadStatus.Show($"Couldn't read the Sites settings. {RemoteText.Failure(status.Error)}", isProblem: true);
+                _loadStatus.Show($"Couldn't read the Remote files settings. {RemoteText.Failure(status.Error)}", isProblem: true);
                 _tryAgain.Visibility = Visibility.Visible;
                 return;
             }
@@ -245,7 +245,7 @@ internal sealed partial class SitesOptionsPage
     private async Task OfferDownloadAsync()
     {
         var body = new StackPanel { Spacing = 8 };
-        body.Children.Add(new TextBlock { Text = "Sites needs rclone, which isn't on this PC. Download it now? It is about 32 MB, from downloads.rclone.org, and is checked before it is used.", TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(new TextBlock { Text = "Remote files needs rclone, which isn't on this PC. Download it now? It is about 32 MB, from downloads.rclone.org, and is checked before it is used.", TextWrapping = TextWrapping.Wrap });
         if (await AskAsync("Download rclone?", body, "Download", "Not now") == ContentDialogResult.Primary) await InstallAsync(null);
     }
 

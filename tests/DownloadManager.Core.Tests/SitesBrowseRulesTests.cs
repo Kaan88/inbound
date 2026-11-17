@@ -117,8 +117,8 @@ public sealed class SitesBrowseRulesTests
         Assert.Contains(SitesBrowseRules.FixButtonText("passwordNeeded"), SitesBrowseRules.ProblemText("passwordNeeded", "Wrong password.", null, null));
         foreach (var problem in new[] { "hostKeyChanged", "hostKeyNotAccepted", "certificateNotTrusted", "signInNeeded", "passwordNeeded" })
             Assert.DoesNotContain("Options", SitesBrowseRules.ProblemText(problem, null, null, null));
-        Assert.Contains("Options > Sites", SitesBrowseRules.ProblemText("off", null, null, null));
-        Assert.Equal("Open Options > Sites", SitesBrowseRules.FixButtonText("off"));
+        Assert.Contains("Options > Remote files", SitesBrowseRules.ProblemText("off", null, null, null));
+        Assert.Equal("Open Options > Remote files", SitesBrowseRules.FixButtonText("off"));
         Assert.True(SitesBrowseRules.PointsToOptions("passwordNeeded"));
         Assert.True(SitesBrowseRules.PointsToOptions("hostKeyChanged"));
         Assert.False(SitesBrowseRules.PointsToOptions(null));
