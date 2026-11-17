@@ -697,7 +697,8 @@ whether rclone is a Setup component that can be unticked.
 - Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,
   remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
   Reviews: an Opus agent per milestone (step); Fable once after all milestones ("until completion meant all the
-  milestones, until then use opus for single mileston reviews").
+  milestones, until then use opus for single mileston reviews"). Then (2026-11-17): "after first version finishes,
+  have it review": Fable reviews the queue once the first usable APK is on the owner's desktop.
 - [ ] ANDROID.11 Web UI recommends the app on a phone (owner, 2026-11-17: "when all is said and done, make a pr for webui
   that when it's opened from phone a popup recommends this android app"). After the Android app is done: a pull request
   in which the web UI, opened on an Android phone, shows a popup recommending the Inbound app (dismissable).

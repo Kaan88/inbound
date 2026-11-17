@@ -37,6 +37,9 @@ each slice and step; Fable reviews everything below once the Android work is com
 - The Opus milestone review of steps 3 and 6 (workflow, at 425d72d1) and its fixes: pending.
 - The first usable APK (owner's desktop), then the rest of the plan.
 
+Owner, 2026-11-17: "after first version finishes, have it review." Fable reviews everything above as soon as the first
+usable APK is on the owner's desktop (not only after all milestones).
+
 ## Done (Fable reviewed it)
 
 - **2026-11-17, step 0 and step 1 final, reviewed together by Fable** (owner: "together"). Fable read the code first,
