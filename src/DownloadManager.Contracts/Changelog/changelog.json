@@ -1,20 +1,34 @@
 {
   "versions": [
     {
-      "version": "0.8.1",
+      "version": "0.9.0",
       "date": null,
       "sections": [
         {
           "title": "New",
           "items": [
-            { "text": "dm sites rclone downloads rclone for Sites from the command line.", "tags": ["all"] }
+            { "text": "Sites is now called Remote files. Each server or cloud account is a remote; dm remotes works as dm sites.", "tags": ["all"] },
+            { "text": "All remotes, with \"Open an address once\", and Add a remote, which starts from the kind of remote, tests it and can test before saving.", "tags": ["all"] },
+            { "text": "Browse a remote beside a folder on this PC or in two panes, with the same or another remote on the left, right-click menus, double click to download or open, drag and drop, and \"Some of it\" on folders that are partly here.", "tags": ["desktop"] },
+            { "text": "A transfers list like the downloads list, with stop, resume and retry for each transfer and progress for each file.", "tags": ["all"] },
+            { "text": "Delete asks with the number of files; on this PC it goes to the Recycle Bin, and Shift+Delete deletes for good. Overwrite asks file by file, with sizes and dates.", "tags": ["windows"] },
+            { "text": "Copy files from one remote to another, sync a linked folder one way with a preview, and run a sync again at every schedule.", "tags": ["all"] },
+            { "text": "Preview text and images in a remote without downloading the whole file, copy a file's path or address from its menu, and give each remote its own bandwidth limit.", "tags": ["all"] },
+            { "text": "Inbound remembers the last folder and sort of each remote, and takes PuTTY .ppk keys for SFTP.", "tags": ["all"] },
+            { "text": "The web UI has the same Remote files pages, made for a phone too: tick boxes, an action bar, bottom sheets, Select all and a filter. Downloads go to the server; \"To this device\" is a choice in the Download dialog.", "tags": ["webui", "server"] },
+            { "text": "dm sites rclone downloads rclone for Remote files from the command line.", "tags": ["all"] },
+            { "text": "The browser extension's toolbar ring is easier to see, and a count marks downloads that finished since the popup was last opened.", "tags": ["extension"] },
+            { "text": "The extension can show a \"Download finished\" notification with Open and Show in folder, or open its popup when a download finishes. Choose in its options.", "tags": ["extension"] },
+            { "text": "The extension's popup has a \"Finished just now\" divider and a Clear finished button, and its tooltip names the newest finished file.", "tags": ["extension"] }
           ]
         },
         {
           "title": "Fixes",
           "items": [
             { "text": "A window that was last left very small opens at its least size, and Options can't be made smaller than its pages.", "tags": ["desktop"] },
-            { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] }
+            { "text": "Extractions in the sidebar has its icon.", "tags": ["linux"] },
+            { "text": "Manage remotes on All remotes opens Options in front, and its empty list no longer overlaps the column headings.", "tags": ["desktop"] },
+            { "text": "Files copied to a remote through the desktop bridge show in the web UI's target folder, and a folder with many files shows that it is loading.", "tags": ["webui", "server"] }
           ]
         }
       ]
