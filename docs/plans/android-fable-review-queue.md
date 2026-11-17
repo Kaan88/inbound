@@ -34,7 +34,10 @@ each slice and step; Fable reviews everything below once the Android work is com
   requests.
 - Follow-ups after 425d72d1 (failure reasons, Open and Finished notifications, server folder chooser, server name):
   in progress; add their commits here when they land.
-- The Opus milestone review of steps 3 and 6 (workflow, at 425d72d1) and its fixes: pending.
+- The Opus milestone review of steps 3 and 6 (workflow, at 425d72d1): 28 confirmed, 7 refuted; all 28 fixed in
+  e37cbad2 (branch `android-fix36`, PROGRESS.md "milestone review fixed"). Look hardest at: Navigator (page tokens,
+  see-through overlay, accessibility hiding), RemoteHostConnection's keep-alive and reply-timeout drop, the shared
+  Contracts change (keep-alive parameters, certificate words by pin), HostEntry.ConnectionStamp and the page restore.
 - The first usable APK (owner's desktop), then the rest of the plan.
 
 Owner, 2026-11-17: "after first version finishes, have it review." Fable reviews everything above as soon as the first

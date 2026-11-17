@@ -1,5 +1,37 @@
 # Progress — session handoff
 
+### Android steps 3 and 6: milestone review fixed, branch `android-fix36` (2026-11-17)
+
+- **Review:** the Opus milestone review of steps 3 and 6 (workflow, at 425d72d1): 28 findings confirmed, 7 refuted (file.metadata
+  on the main socket, a command on a closing socket, protocol mismatch retried, certificate refusal stopping system-trust
+  hosts, device-to-device transfer, a pooled socket after the figures, "Wi-Fi only" on a remote host). Fixed in e37cbad2.
+- **Fixed, high:** 6 the phone's own Host starts whatever host is shown (`MainActivity.StartPhoneHost`); 9 a name the Host
+  found goes when the address changes, so another address is never added under it, and the field follows; 15 and 11 Details
+  stops polling on stop and destroy (`SetVisible`, `Dispose` from `OnDestroy` through `Navigator.Dispose`) and while a remote
+  host is not connected.
+- **Fixed, medium:** 0 the phone's WebSocket pings every 15 s and drops after 20 s without a pong
+  (`WebSocketIpcClient.ConnectAsync` takes optional keep-alive values; the desktop D9 client passes none, so it is unchanged),
+  and a quick command with no reply ends the session so the loop connects again; 3 and 7 a re-paired shown server rebuilds
+  the screen (`HostEntry.ConnectionStamp` in `HostBar`), and tapping the shown host whose connection stopped rebuilds it;
+  8 pairing from first run no longer marks set-up done (A0 comes back when This phone is shown); 10 and 14 the selection keeps
+  only visible rows and the bar's Pause/Resume follow selected rows (`DownloadList.SelectedRowsChanged`); 16 New download (its
+  fields) and Details (its job) come back after rotation or process death, `HiddenCard` is per activity; 17 and 20 the screen
+  under a page or first run is hidden from TalkBack and keyboard focus, pages have pane titles; 18 and 22 `Navigator.Close(page)`
+  ignores a page that is not the open one and a second close; 21 the overlay is see-through, and with animations removed
+  pages, tabs and the first-run dismissal cross-fade; 23 the chip's arrow says "Change host".
+- **Fixed, low:** 1 a cancelled caller no longer aborts the socket; 2 and 13 a reconnect's settings and `settings.changed`
+  reach New download and Details (`DownloadsModel.SettingsChanged`); 4 the old token is forgotten with the new pin; 5 the
+  desktop's pairing and connection words for an untrusted certificate no longer point to a view it lacks (only when no pin
+  was given); 12 the check's result is applied under a lock; 19 "Allow" opens the app's notification settings once the
+  dialog no longer shows; 24 48 dp row action button; 25 Details updates its info lines in place, one render per batch;
+  26 `colorControlActivated` follows `colorPrimary`; 27 inverse roles mapped from the Inbound palette.
+- **Not fixed:** none skipped. 16 restores the pages' state but keeps the overlay (not Fragments as the ANDROID.4 list said):
+  the owner may still want Fragments. The overlay is now transparent; a device pass should look at the container transform
+  and the reduced-motion cross-fades.
+- **Tests:** Mobile.Tests 301 pass (11 new in `ReviewFixTests.cs`: findings 9, 12, 10, 14, 2, 13, 0, 1, 3, 4, 7);
+  Server.Tests 207 pass (covers the desktop client). Android x64 test build compiles with the same warnings, no new
+  compiler warning. No emulator or device check in this pass.
+
 ### Android steps 3 and 6 together (ANDROID.4 + ANDROID.7), branch `android-app` (2026-11-17)
 
 - **Merge:** `origin/android-s6` into `android-app` (after step 3). Conflicts: this file (both entries kept), `MainActivity.cs`
