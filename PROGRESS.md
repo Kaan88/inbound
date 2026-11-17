@@ -5,6 +5,7 @@
 - **Done today and pushed:** SITES.11 R6b, the R7 checks and walk fixes, Fable's final review and its fix round;
   SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
   effort checks each major addition, Fable reviews once at the end.
+- **Owner, 2026-11-17 evening:** "implement all 13 items. be efficient with tokens. can be reviewed after." Plus the reports in ROADMAP SITES.14 (Manage remotes window order, All remotes empty-text overlap, Test result layout, Two panes with any remote on the left, .ppk keys, web bridge target folder not showing files, no sign of a big folder starting, still graph). Working on all of them (SITES.13, SITES.14, EXT.R16).
 - **Waiting for the owner:**
   1. **Walk the test copy** (R7): `artifacts\r7\Start Inbound test.cmd` starts `artifacts\app-r7` (published
      2026-11-17 from main, Medium label) with its own Host and data in `artifacts\r7\data`. Not started by me.
