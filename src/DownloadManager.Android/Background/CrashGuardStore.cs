@@ -24,11 +24,15 @@ internal static class CrashGuardStore
     public static bool Tripped { get { lock (Gate) return _state.Tripped; } }
 
     /// <summary>For the Host start: when tripped, interrupted downloads come back Paused (the "stopped by the user" option). Logged.</summary>
-    public static bool HostStartsPaused()
+    public static bool HostStartsPaused(Context c)
     {
         var tripped = Tripped;
-        if (tripped) Log.Info(InboundApplication.Tag, "crash guard: tripped, the Host starts with interrupted downloads paused");
-        return tripped;
+        if (!tripped) return false;
+        Log.Info(InboundApplication.Tag, "crash guard: tripped, the Host starts with interrupted downloads paused");
+        // Say why, also when the app itself was opened (seen on the API 33 emulator: paused with no word of why).
+        try { Notifications.Notify(c, Notifications.GuardId, Notifications.PausedAfterErrors(c)); }
+        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "crash guard notice: " + ex.Message); }
+        return true;
     }
 
     public static void Begin(Context c)
