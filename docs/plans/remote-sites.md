@@ -306,7 +306,9 @@ For `changelog.json` when the version is set. No test status goes into release n
 - New: `dm sites` adds, tests, browses and changes sites, and starts and controls transfers. Tags: all.
 - New: Help › About links the third-party notices. Tags: windows, linux.
 
-## Release notes draft for the rework (SITES.11, SITES.12; next version)
+## Release notes draft for the rework (SITES.11, SITES.12; used for 0.9.0, released 2026-11-18)
+
+Rework R7 is closed and the draft below was used for the 0.9.0 release notes.
 
 - Changed: Sites is now called Remote files. Each server or cloud account is a remote; `dm remotes` works as `dm sites`.
   Tags: all.

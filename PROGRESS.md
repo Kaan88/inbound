@@ -1,54 +1,74 @@
 # Progress — session handoff
 
-### Where to pick up (2026-11-17, evening)
+### Where to pick up (2026-11-18, after the 0.9.0 release)
 
-- **Done today and pushed:** SITES.11 R6b, the R7 checks and walk fixes, Fable's final review and its fix round;
-  SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
-  effort checks each major addition, Fable reviews once at the end.
-- **Owner, 2026-11-17 evening:** "implement all 13 items. be efficient with tokens. can be reviewed after." Built in one
-  workflow (Opus for the Host, Sonnet for the clients), merged, **not reviewed yet**, not tried in a running app:
-  - **Host:** `folders.browse` `files: "all"` (the web bridge's target folder now lists files: SITES.14 bug); PuTTY .ppk
-    (format 2, plain or with passphrase; format 3 without one; format 3 with a passphrase refused with the PuTTYgen
-    hint; tested with keys written from the spec, not with real PuTTYgen); `sites.remember` (last folder, sort);
-    per-remote down/up limits (a limited remote moves one file at a time); `sites.preview` (2 MiB, images by signature,
-    SVG as text); copy between remotes (`direction: "between"`); `sites.sync.plan`/`run` (one way, never deletes);
-    `waitForSchedule`, `sites.transfer.schedule`, `sites.sync.schedule` run by the scheduler. `docs/ipc-protocol.md`.
-  - **Desktop:** Options comes to the front from All remotes; empty-list text below the headings; Test result as one
-    separated block with a fingerprint card; Copy path / Copy address; Save tests first ("Save anyway" on failure;
-    not for browser sign-in kinds); Two panes with the right pane the selected remote and a source switcher on the
-    left (This PC or any remote, the same one too); preview; limits in Edit remote; Sync linked folder with the plan
-    and a schedule choice; .ppk in the key picker. Not built: "Start at…" on a single transfer; rename/delete in the
-    left remote pane; the left pane's source is not remembered between runs.
-  - **Web:** a big folder shows "Preparing…" and a toast at once; the speed graph counts Remote files transfers; a
-    toast with Show when a transfer finishes; phone Select all and filter; Copy path/address; Save tests first; the
-    target folder lists files and refreshes; remember folder and sort; Two panes left switchable; preview; limits;
-    sync. Not built: Two panes on the phone; multi-select upload from the left pane.
-  - **Extension:** "Finished just now" divider and Clear finished (hides rows in the popup; does not delete the app's
-    history); tooltip names the newest finished file; "Show a notification" choice with Open and Show in folder
-    (buttons in Chrome/Edge only).
-  - Tests after the merge: Core 2574, Sites 260 (+32 skipped), Integration Site/Cli 211 and dispatcher 309 (one test
-    updated for "all"), Server 202, webui 819, extension 360; solution 0 errors.
-  - Test copy republished to `artifacts\app-r8` (r7's was in use); the launcher points there.
-- **Owner, 2026-11-17, on app-r8:** web UI left pane items have no context menu; the desktop window crashes as soon as a remote is chosen in the left pane (0xc000027b, stowed exception). Fixed the same day (d46633a), test copy republished to app-r8. **Crash cause:** RefreshLeftSources rebuilt the left ComboBox (Items.Clear) on the first sites broadcast after a choice, replacing the selected item; the next layout threw E_UNEXPECTED inside a XAML callback. Now updated in place, never while its list is open; reproduced and checked on a hidden desktop with the trace (which now also writes the caller stack). The left remote pane has its own menu (Copy to the right, Preview, Copy path, Refresh). **Web:** left-pane rows have a context menu (right click, long press, "…", Shift+F10). Seen, not fixed: the right pane does not show a file copied in from the left until refreshed. **Incident:** the fixing agent ran one CLI call without DOWNLOADMANAGER_DATA, which started a Host of the new build on the real state folder for about 1.5 minutes (20:04 to 20:05; a read-only sites list, then a clean shutdown; the installed Host was not running at the time).
-- **Owner checklist notes, 2026-11-17** (`docs/plans/0.9.0-checklist.md`; ticked items work, others not checked): Edit remote's Up limit box is wider than Down; "Manage remotes in All remotes" in Options leaves Options behind: it should close Options unless there are unsaved changes, and never save them (owner); deleting a file in the panes jumps the list to the top, it should keep its place. Fixed (459d73c), not tried in the app; test copy now `artifacts\app-r9` (same launcher). Options had no unsaved-changes tracking; SettingsWindow now records each page's inputs on first focus and row edits, so the link closes Options (as Cancel) unless something changed, then Options stays in front. Limit boxes share a two-column grid. Both panes keep scroll and select the next row after delete, rename, new folder and F5 (PaneScroll.cs, SitesBrowseRules.SelectAfterReload). Core 2590 pass.
-- **Fable release review v0.8.0..HEAD (2026-11-17):** desktop, web, extension and other areas reviewed; **the Host-side reviewer read the owner's "stop tests" note as a stop and reviewed nothing; tests and the Uno build were not run.** Kept after two Fable refuters each: copy between remotes does not refresh the pane it lands in (desktop); web server-pane breadcrumbs open the parent folder on a Linux/Docker server; web Sync dialog: the schedule tick can only be saved through Start, Start silently replaces a scheduled sync, a changed local folder keeps the old plan; versions still 0.8.0 / extension 0.6.4 (must beat Firefox's approved 0.6.5) and no 0.9.0 changelog entry; Firefox listed-channel work (EXT.S5) not in main. Minors: left remote pane not updated on remote changes, keys in the left pane act on the right, remembered place written by both panes, three new dialogs ignore the app theme, preview requested when its dialog cannot open, web Select all with a filter, certificate test wording, extension notification/badge edge cases.
-- **Owner, 2026-11-17:** "fix everything reported. update all extension versions to something common. firefox is now public and published. edge is public and published too." Working: all review findings, the Host review, one extension version, Firefox listed channel, 0.9.0 versions and changelog, full tests.
-- **Owner report, 2026-11-17 (CONN.1):** "isn't connections per download mislabeled? it maxes all downloads connections to 8." Cause: the hidden per-server cap MaxConnectionsPerHost (default 8, shared fairly by every download from one server, FairHostConnectionLimiter) has no field in desktop Options; the web UI shows it as "Connections per site". Connections per download is clamped to it. Fix in the 0.9.0 fix round: show it on the desktop, name it "Connections per server, all downloads" in both, explain the clamp. Owner approved the plan (2026-11-17) and added: a Downloads menu item "Connections per server: N" next to "Connections per Download" (desktop and web UI list menu), not in settings only.
-- **Owner, 2026-11-17 (release order):** submit Firefox 0.7.0 to AMO first, but do not wait for approval: release 0.9.0 without the XPI ("just link it"; Setup links the AMO listing). After approval, add the 0.7.0 entry to firefox-updates.json pointing at the AMO file so unlisted 0.6.x installs move over.
-- **Owner report, 2026-11-17 (CONN.2, release blocker):** a running TorBox download raised from 1 to 4 connections: the UI accepts it and the tab says "Connections (4)", but it keeps one range (0 B to 43.7 GB) at about 31 MB/s; stop and start do not change it. Another user reported the same. Must be fixed before 0.9.0.
-- **Extension 0.7.0 submitted to all three stores (2026-11-17):** Firefox AMO listed channel with source zip (version 6724066, waiting for review; after approval run sign-extension-firefox.ps1 -ReleaseTag v0.9.0 -SignedXpi and add the firefox-updates.json entry); Chrome Web Store PENDING_REVIEW (0.6.6 published); Edge Add-ons submission 1152921505702432220 created through the new publish-extension-edge.ps1 (first real use, it worked). Fable approved the release-review fixes, CONN.1, the Edge script and the no_firefox_xpi fallback (3 rounds); CONN.2 approval running.
-- **Owner, 2026-11-17:** future request EXT.R17 (popup row menu without expanding the popup; ROADMAP). Dependabot: the TypeScript 7 rule commit made Dependabot run at once; test-tool majors came as one PR per package and test project (18). Config now groups them (tests-major). Not merged before 0.9.0: none ships in the app (test tools, TypeScript build tool); Uno.Sdk 7 (Linux window) fails CI and waits.
-- **0.9.0 released (2026-11-18, tag v0.9.0 at 90ba88d7):** Fable approved CONN.2 after one fix round (d7e3bb71); full tests green apart from two timing tests that passed alone (Server SessionDurabilityTests.AnOpenSocketKeepsItsSavedLastSeenTimeFresh, Integration RuntimeServiceTests.AScheduledRunThatEndsWithItsActionsOffLeavesNoneForALaterRunByHand). Windows build filled the draft (six files, public.pem unchanged, signed Firefox 0.7.0 from AMO attached); published, which started Linux, macOS and Docker. Left for the next release (Fable round 3 minors on CONN.2): the Connections tab can show a raised count for a server that answers the split probe without a range; a failed one-stream checkpoint save after a refused split leaves a split checkpoint a kill turns into a restart from zero; refused splits are in memory only, so one is tried again after a Host restart.
-- **Owner report, 2026-11-18 (UI.B40, next release):** speed graph regressions in 0.9.0: the collapsed graph draws its labels over the status bar; a new download makes a zero line jump for a few seconds (UI.B26 back). ROADMAP UI.B40.
-- **Waiting for the owner:**
-  1. **Walk the test copy** (R7): `artifacts\r7\Start Inbound test.cmd` starts `artifacts\app-r7` (published
-     2026-11-17 from main, Medium label) with its own Host and data in `artifacts\r7\data`. Not started by me.
-  2. **EXT.R15 decided** (owner: "I like the popup. put it in store versions, off by default."): done; one setting,
-     "When a download finishes", default Flash the icon; the test-only build removed. Extension 355 tests pass.
-  3. **Pick from the ideas** in ROADMAP SITES.13 and EXT.R16 (shown to the owner in plain words 2026-11-17).
-  4. **Release** after the walk (0.9.0 proposed, extension version bump); notes draft in `docs/plans/remote-sites.md`.
-- **Not done:** Linux Uno build (Linux deferred); a run with the extension installed against the web UI; real SFTP,
-  Trust, browser sign-in and Drive.
+- **Released:** app 0.9.0, tag v0.9.0 at 90ba88d7, published on GitHub 2026-11-18. The Windows build filled the
+  draft (six files, public.pem unchanged); publishing started the Linux, macOS and Docker builds. Extension 0.7.0
+  is the same version for Chrome, Edge and Firefox, and all three listings are public (owner, 2026-11-17).
+- **Open for the next release:**
+  - UI.B40: speed graph regressions (collapsed graph labels over the status bar; a zero line jumps when a download starts).
+  - DEP.1: Dependabot PRs #20, #21 and #24, plus the grouped tests-major PR. TypeScript 7 is held back; Uno.Sdk 7 fails CI.
+  - CI.5: Linux and macOS release builds beside Windows.
+  - EXT.R17: the popup row menu should not expand the popup.
+  - CONN.2 minors from Fable's round 3: the Connections tab can show a raised count when the server answers the
+    split probe without a range; a failed one-stream checkpoint save after a refused split leaves a split
+    checkpoint a kill turns into a restart from zero; refused splits are kept in memory only.
+  - Known issues in the release notes: a trusted certificate counts for every remote; a transfer stops after about
+    half a minute without the server.
+  - The owner walked only part of `docs/plans/0.9.0-checklist.md`; most boxes, including the three re-checks, are
+    still unticked and worth checking against the release.
+  - Extension stores: Chrome Web Store and Edge Add-ons 0.7.0 were submitted for review 2026-11-17; confirm they
+    went live.
+  - Not done: Linux Uno build (Linux deferred); a run with the extension installed against the web UI; real SFTP,
+    Trust, browser sign-in and Drive.
+- **Owner's test copy:** `artifacts/app-r9`, started by the launcher `artifacts/r7/Start Inbound test.cmd` (its own
+  Host and data in `artifacts/r7/data`).
+
+### 0.9.0 release (2026-11-17 to 2026-11-18)
+
+- **Contents:** SITES.11 R0 to R7 (Remote files rework, closed); SITES.12 (rename); SITES.13 (the 13 extras:
+  Host `folders.browse` `files: "all"`, PuTTY .ppk, `sites.remember`, per-remote limits, `sites.preview`, copy
+  between remotes, `sites.sync.plan`/`run`, scheduled transfers and sync; desktop and web clients; extension
+  "Finished just now" divider, Clear finished, notification choice); SITES.14 (owner reports and checklist fixes);
+  EXT.B10, EXT.R14, EXT.R15 (one setting "When a download finishes", default Flash the icon), EXT.R16; EXT.S5
+  (listed Firefox channel; the `firefox-listed` branch was lost and the work rebuilt in main); CONN.1 (connections
+  per server in Options and the Downloads menu, desktop and web); CONN.2 (raising a single-stream download's
+  connections splits it while it runs or on resume); all findings of the Fable release review plus the Fable Host
+  review and its fixes; the `no_firefox_xpi` fallback in `windows.yml` (not needed).
+- **Extension 0.7.0:** Firefox AMO listed channel, approved; `extensions/firefox-updates.json` points at the signed
+  listed XPI attached to v0.9.0, so unlisted 0.6.x installs move over. The signed XPI was downloaded from AMO,
+  passed to `sign-extension-firefox.ps1 -SignedXpi` and attached to a hand-made draft before the tag push. Chrome
+  Web Store and Edge Add-ons submitted 2026-11-17; Edge through the new `scripts/publish-extension-edge.ps1`
+  (submission 1152921505702432220), which worked on its first real run.
+- **Checks:** Fable approved the release-review fixes, CONN.1, the Edge script and the fallback over 3 rounds, and
+  CONN.2 after one fix round (d7e3bb71). Full tests passed apart from two timing tests that passed alone (Server
+  `SessionDurabilityTests.AnOpenSocketKeepsItsSavedLastSeenTimeFresh`, Integration
+  `RuntimeServiceTests.AScheduledRunThatEndsWithItsActionsOffLeavesNoneForALaterRunByHand`). Method (owner): Sonnet
+  builds, Opus at low effort checks each major addition, Fable reviews once at the end.
+- **Owner reports (2026-11-17):**
+  - On app-r8: web UI left pane items had no context menu; the desktop window crashed as soon as a remote was
+    chosen in the left pane (0xc000027b). Fixed (d46633a). Cause: RefreshLeftSources rebuilt the left ComboBox
+    (Items.Clear) on the first sites broadcast after a choice, replacing the selected item; the next layout threw
+    E_UNEXPECTED inside a XAML callback. Now updated in place, never while its list is open. The left remote pane
+    has its own menu; web left-pane rows have a context menu.
+  - Checklist notes: Edit remote's Up limit box wider than Down; "Manage remotes in All remotes" leaves Options
+    behind (it should close Options unless there are unsaved changes, and never save them); deleting a file in the
+    panes jumped the list to the top. Fixed (459d73c): SettingsWindow records each page's inputs on first focus and
+    row edits; limit boxes share a two-column grid; both panes keep scroll and select the next row after delete,
+    rename, new folder and F5.
+  - CONN.1: "isn't connections per download mislabeled? it maxes all downloads connections to 8." Cause: the hidden
+    per-server cap MaxConnectionsPerHost (default 8, shared by every download from one server) had no field in
+    desktop Options and clamped connections per download. Fixed in 0.9.0.
+  - CONN.2 (release blocker): a running TorBox download raised from 1 to 4 connections kept one range. Fixed.
+  - Release order: submit Firefox to AMO first; the release went out after approval, with the signed XPI attached.
+  - EXT.R17 requested (popup row menu without expanding the popup). Dependabot: the TypeScript 7 rule made it run at
+    once; test-tool majors came as one PR per package (18); config now groups them (tests-major). None merged
+    before 0.9.0 (none ships in the app).
+- **Owner report, 2026-11-18 (UI.B40, next release):** speed graph regressions in 0.9.0: the collapsed graph draws
+  its labels over the status bar; a new download makes a zero line jump for a few seconds (UI.B26 back).
+- **Incident (2026-11-17, 20:04 to 20:05):** the fixing agent ran one CLI call without DOWNLOADMANAGER_DATA, which
+  started a Host of the new build on the real state folder for about 1.5 minutes (a read-only sites list, then a
+  clean shutdown; the installed Host was not running at the time).
 
 ### Sites rework R7: checks, walk fixes, final review (SITES.11, 2026-11-17)
 

@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-17, release 0.9.0, extension 0.7.0 on all three stores)
+## Current status (2026-11-18, release 0.9.0, extension 0.7.0 on all three stores)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
@@ -36,7 +36,7 @@ scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
 Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1).
-Edge has its own Edge Add-ons listing, published (owner, 2026-11-17) and updated through the store like Chrome and Firefox, with its own extension ID (`ifoagddcenmjpbklkhghbdmgplldcdci`, trusted from 0.6.7; Setup links it; the Chrome
+Edge has its own Edge Add-ons listing, published (owner, 2026-11-17) and updated through the store like Chrome and Firefox, with its own extension ID (`ifoagddcenmjpbklkhghbdmgplldcdci`, trusted from 0.6.7; Setup links it; `scripts/publish-extension-edge.ps1` submits updates; the Chrome
 Web Store listing also works in Edge). Setup and the update zip no longer ship an unpacked extension (owner, 2026-11-11: the extensions are in the stores; Firefox's signed add-on is still offered), and Setup and the updater remove one an older install left. Setup, repair and the Host register the native host under Edge's key too. In Edge the owner checked automatic catching (2026-11-08). Firefox gets its own build and gecko ID, which the app accepts
 from 0.6.0; checked in Firefox 159 with a test profile (EXT.B3). In Firefox, downloads are caught from
 their response headers with blocking `webRequest`, before Firefox's own Save dialog (EXT.B5).
@@ -51,7 +51,7 @@ rclone child process) is in progress: SFTP sites can be browsed, changed (new fo
 both ways, with an "On this PC" column and a Two panes view (SITES.0 to SITES.5, done on Windows). FTP, FTPS, WebDAV
 and S3 sites work too, a server's own certificate can be trusted, and Drive, OneDrive and Dropbox sign in through the
 browser (`rclone authorize`), with B2 by key (SITES.6a to 6c; no real cloud account tried yet). The web UI has Sites too, files go to and from the browser's device, and the headless server runs Sites (SITES.7; a signed-in browser counts as the admin). `dm sites` adds, trusts, browses and changes sites (SITES.8). `THIRD-PARTY-NOTICES.md` ships with every build (SITES.9). `docs/plans/remote-sites.md`, ROADMAP SITES.0 to SITES.12.
-The feature is shown as **Remote files** ("a remote", "All remotes", "Add a remote"; SITES.12, 2026-11-17); code, IPC (`sites.*`) and `dm sites` keep the old name (`dm remotes` is an alias). Its UI was reworked to `docs/plans/sites-mockups/4-agreed-design.html` (SITES.11 R0 to R6, desktop and web, 2026-11-16/17; R7 closing: owner walk and release pending; `docs/plans/sites-rework.md`).
+The feature is shown as **Remote files** ("a remote", "All remotes", "Add a remote"; SITES.12, 2026-11-17); code, IPC (`sites.*`) and `dm sites` keep the old name (`dm remotes` is an alias). Its UI was reworked to `docs/plans/sites-mockups/4-agreed-design.html` (SITES.11 R0 to R6, desktop and web, 2026-11-16/17; R7 closed and released in 0.9.0 on 2026-11-18, with part of the owner's checklist still unwalked; `docs/plans/sites-rework.md`). Firefox uses the listed AMO channel; `extensions/firefox-updates.json` points at the signed XPI attached to the release.
 Old job and settings files still load (ffmpegPath is dropped at the next save; `SettingsDto.FfmpegPath` stays only as
 a pass-through for managing 0.7.1 servers). Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
