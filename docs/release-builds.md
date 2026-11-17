@@ -65,9 +65,23 @@ The store listing (screenshots, texts) is still edited in the dashboard.
 Edge has its own listing on Microsoft Edge Add-ons (Partner Center; store ID `0RDCKGXFWJ1N`). Edge assigns the
 extension its own ID (`ifoagddcenmjpbklkhghbdmgplldcdci`), which differs from Chrome's; the app trusts it
 (`BrowserBridge.EdgeStoreExtensionId`) from 0.6.7, so a release carrying that ID must be out before a listing goes live.
-Submit the zip from `scripts/package-extension-store.ps1` in Partner Center. There is no publish script for Edge yet
-(Microsoft's Edge Add-ons API can only update an existing product; keep any API credentials in environment
-variables or a file outside the repository).
+`scripts/publish-extension-edge.ps1` replaces the manual Partner Center upload. It uses the Edge Add-ons API v1.1
+(updates the existing product only; the listing texts and screenshots stay in Partner Center):
+
+```powershell
+.\scripts\package-extension-store.ps1
+.\scripts\publish-extension-edge.ps1 -KeysPath <file>             # upload the draft, then submit it
+.\scripts\publish-extension-edge.ps1 -KeysPath <file> -NoSubmit   # upload the draft only
+.\scripts\publish-extension-edge.ps1 -KeysPath <file> -StatusOnly -OperationId <id> [-Kind Package|Submission]
+```
+
+The keys file is JSON with `client_id`, `api_key` and `product_id`, kept outside the repository (the default place is
+`Downloads\secrets`, like the other keys). Create the API key in Partner Center under Microsoft Edge > Publish API; it
+**expires after 72 days**, so make a new one (which replaces the old) and update the file when an upload answers 401.
+The script uploads the zip, waits for the package operation, then submits with certification notes (`-Notes`) and waits
+for the submission operation, printing the API's status and error messages (never the key). The API cannot list the
+latest submission, so `-StatusOnly` needs the operation id a run printed; otherwise look in Partner Center. Edge then
+certifies the version before it goes live.
 
 ## Changelog: What's new (UPD.N1)
 
@@ -244,6 +258,13 @@ everything anyway: `pkill -f 'Inbound.app/Contents/'`. Start Inbound when I sign
 2. For a **new** extension version only: make a draft release for the tag by hand and attach the signed XPI to it,
    since no earlier release has that file. Otherwise the workflow takes it from the newest earlier release that has
    it. Either way it is checked against the hash in `extensions/firefox-updates.json`.
+   If addons.mozilla.org hasn't approved the listed Firefox version yet, there is no XPI to attach and the build would
+   fail at that step. Instead run Windows build by hand (Actions, Windows build, Run workflow) with the tag and
+   `no_firefox_xpi` ticked (do not push the tag for this): the Firefox add-on step is skipped, Setup is built with
+   `-NoFirefoxXpi` (it then just links the AMO listing), and the draft release gets five files (no XPI;
+   `SHA256SUMS` lists only what is there). After AMO approves the version, add its entry (for example 0.7.0) to
+   `extensions/firefox-updates.json`, pointing at the AMO file with its hash, so unlisted 0.6.x installs move over to
+   the listed add-on, and push `main`. A pushed tag always requires the XPI.
 3. Push the tag alone (`git push origin vX.Y.Z`). The Windows build runs: Setup, the zip, `manifest.json` signed with
    the `UPDATE_SIGNING_KEY` secret (and refused unless its `public.pem` equals the latest release's), `SHA256SUMS`, all
    six files in a draft release. If the tag's commit did have `[skip ci]`, or to build again: Actions, Windows build,
