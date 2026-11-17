@@ -152,8 +152,8 @@ internal sealed class SettingsWindow : Window
 
     private static object? ValueOf(DependencyObject control) => control switch
     {
-        TextBox box => box.Text,
         PasswordBox box => box.Password,
+        TextBox box => box.Text,
         NumberBox box => box.Value,
         ComboBox box => box.SelectedIndex,
         ToggleSwitch toggle => toggle.IsOn,
