@@ -51,6 +51,8 @@ Owner, 2026-11-17: "after first version finishes, have it review." Fable reviews
 usable APK is on the owner's desktop (not only after all milestones).
 Owner, 2026-11-17: "from now on, have fable review fixes approved by same fable agent." The fixes for Fable's
 findings go back to the same Fable agent for approval (record its agent id here when it starts).
+Fable review of the Open entries started 2026-11-17 at 7573792b (worktree `idm-android-fable`); agent id
+`a77883b7d95665eea` (continue it with SendMessage for fix approval).
 
 ## Done (Fable reviewed it)
 
