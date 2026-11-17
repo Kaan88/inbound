@@ -176,6 +176,26 @@
   after it opened (owner: "download is running but no progress in app. normal?"); the paused notification counted 201
   for one download; its icon animates (owner: "icon also keeps animating in paused mode"); Resume restarted every
   paused download, not only what Pause all paused; the paused notification stayed after Resume.
+- **Step 2 fixes after the milestone review and the S24 hand check (2026-11-17; 46fb9bf, 05b6009, f4f65c0).** All 15
+  confirmed findings (about 10 distinct) and the owner's five reports. Runtime: sleep prevention re-evaluated while the
+  metered rule holds (test: released after the preempted run winds down); verifying or finishing jobs not flagged as
+  no-resume; PauseAllAsync returns what it paused; PausedAtStart (tests). Mobile: the list shows a download whose first
+  progress came in the same batch as "added" (the cause of "download is running but no progress in app"; test);
+  an exit at the app's update time is not a user stop below API 33 (tests); ResumeList (tests). Android: Resume goes
+  through a non-exported ResumeActivity and restarts only what Pause all or the crash-guard start paused (kept in
+  resume-set.txt), cancels the paused notice; the paused notice counts only those; still icons except the transfer;
+  on 31 to 33 Wi-Fi back with the app hidden holds the downloads with "Wi-Fi is back · Tap to resume N downloads" until
+  the app is opened (the spec's network-callback restart can't start a foreground service from the background:
+  **needs the owner's OK**); onStopJob detaches its run for any stop reason; a hold-started run is rescheduled with any
+  network; no notification trampoline; the lock screen counts as locked. **Checked on the Android 13 emulator** (x64
+  test build): two downloads added after the screen opened appear with live progress (before the fix only a queued
+  one appeared); Pause all (its receiver, sent as root) said "2 downloads paused" with a user-paused one left out,
+  ResumeActivity restarted those 2 only and removed the notice, paused icon ic_media_pause; after three crashes the
+  guard's Resume restarted the 2 interrupted downloads only; emulator Wi-Fi off and on with the app hidden held the
+  downloads with the new notice, and opening the app resumed them with the foreground service; adb shell is refused
+  ResumeActivity (not exported). Not checked on a phone yet (S24, Mi 8 Lite); the API 34+ hold-run reschedule and the
+  onStopJob race not exercised on a device. No test for the verifying flag (a job can't be held in Verifying in a
+  test). Tests: Integration 2038 passed, 32 skipped; Mobile 164. Builds: no new warnings (arm64 test, release, x64).
 - **Step 2 milestone review (Opus workflow, 2026-11-17, 62620c9..246033e).** Five area reviewers, three refuters per
   finding (68 agents): 15 confirmed (about 10 distinct after duplicates), 6 refuted. Most severe: while the metered rule
   holds, Schedule returns before UpdateSleepPrevention, so the wake lock (and the Wi-Fi lock below 34) stays held on
