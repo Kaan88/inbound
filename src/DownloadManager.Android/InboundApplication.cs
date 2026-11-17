@@ -22,6 +22,12 @@ public sealed class InboundApplication : Application
     public override void OnCreate()
     {
         base.OnCreate();
+        // Appearance first: the theme choice is the app night mode, and dynamic colour is applied to every screen made after this.
+        var appearance = new DownloadManager.Mobile.Appearance(new Screens.PrefsStore(this));
+        Screens.ThemeSupport.ApplyNightMode(appearance);
+        // The switch is read each time a screen is made, so turning it off takes effect when the screen is rebuilt.
+        Google.Android.Material.Color.DynamicColors.ApplyToActivitiesIfAvailable(this,
+            new Google.Android.Material.Color.DynamicColorsOptions.Builder().SetPrecondition(new DynamicPrecondition(appearance)).Build());
         // Every process start, whatever started it (the app, a job, a notification action): this run's id, and the previous run's kept for the Host start.
         RunTracker.Begin(this);
         // Right after: accounts for a run that ended in a crash or ANR with a session open (the crash-loop guard).
@@ -73,4 +79,9 @@ public sealed class InboundApplication : Application
             });
         }
     }
+}
+
+internal sealed class DynamicPrecondition(DownloadManager.Mobile.Appearance appearance) : Java.Lang.Object, Google.Android.Material.Color.DynamicColors.IPrecondition
+{
+    public bool ShouldApplyDynamicColors(Android.App.Activity activity, int theme) => appearance.DynamicColour;
 }

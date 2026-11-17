@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/details_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="?android:colorBackground">
+  <LinearLayout android:id="@+id/details_top" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="64dp" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="8dp" android:paddingRight="8dp">
+    <ImageButton android:id="@+id/details_back" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_arrow_back" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Back" />
+    <TextView android:id="@+id/details_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp" android:singleLine="true" android:ellipsize="end"
+        android:textAppearance="?attr/textAppearanceTitleLarge" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+    <ImageButton android:id="@+id/details_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
+  </LinearLayout>
+  <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false" android:paddingBottom="24dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp">
+      <com.google.android.material.card.MaterialCardView android:id="@+id/hero" android:layout_width="match_parent" android:layout_height="wrap_content"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSecondaryContainer">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="4dp">
+            <TextView android:id="@+id/hero_percent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="52sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="12dp" android:orientation="vertical">
+              <TextView android:id="@+id/hero_rate" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
+              <TextView android:id="@+id/hero_progress" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="?attr/colorOnSecondaryContainer" />
+            </LinearLayout>
+          </LinearLayout>
+          <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/hero_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+              android:max="1000" app:trackThickness="8dp" app:trackCornerRadius="4dp" app:trackStopIndicatorSize="0dp" app:indicatorTrackGapSize="0dp" app:trackColor="?attr/colorSurface" android:importantForAccessibility="no" />
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="horizontal" android:gravity="center_vertical">
+            <com.google.android.material.button.MaterialButton android:id="@+id/hero_main" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" app:cornerRadius="28dp" />
+            <ImageButton android:id="@+id/hero_again" android:layout_width="56dp" android:layout_height="56dp" android:layout_marginLeft="8dp" android:background="@drawable/bg_circle_surface" android:src="@drawable/ic_refresh" android:contentDescription="Download again" />
+            <ImageButton android:id="@+id/hero_delete" android:layout_width="56dp" android:layout_height="56dp" android:layout_marginLeft="8dp" android:background="@drawable/bg_circle_surface" android:src="@drawable/ic_delete" android:contentDescription="Delete" />
+          </LinearLayout>
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+
+      <com.google.android.material.card.MaterialCardView android:id="@+id/connections_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <TextView android:id="@+id/connections_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
+            <TextView android:id="@+id/connections_note" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
+          </LinearLayout>
+          <LinearLayout android:id="@+id/segments" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="vertical" />
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+
+      <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+          app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
+        <LinearLayout android:id="@+id/info_lines" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="20dp" android:paddingRight="20dp" android:paddingTop="8dp" android:paddingBottom="8dp" />
+      </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+  </ScrollView>
+</LinearLayout>

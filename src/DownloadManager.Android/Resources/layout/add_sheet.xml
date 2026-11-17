@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="24dp" android:paddingRight="24dp" android:paddingTop="8dp" android:paddingBottom="24dp">
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Add a download" android:textAppearance="?attr/textAppearanceHeadlineSmall" android:textColor="?attr/colorOnSurface" />
-  <com.google.android.material.textfield.TextInputLayout android:id="@+id/url_layout" style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
-      android:hint="Link" app:endIconMode="clear_text">
-    <com.google.android.material.textfield.TextInputEditText android:id="@+id/url" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:imeOptions="actionDone" android:singleLine="true" />
-  </com.google.android.material.textfield.TextInputLayout>
-  <com.google.android.material.button.MaterialButton android:id="@+id/add_btn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Add" android:enabled="false" />
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="8dp" android:paddingBottom="24dp">
+  <View android:layout_width="32dp" android:layout_height="4dp" android:layout_gravity="center_horizontal" android:layout_marginBottom="20dp" android:background="@drawable/bg_handle" android:importantForAccessibility="no" />
+  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:layout_marginBottom="16dp" android:text="Add a download" android:textAppearance="?attr/textAppearanceHeadlineSmall" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+  <com.google.android.material.card.MaterialCardView android:id="@+id/clip_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" app:cardCornerRadius="20dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSecondaryContainer">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="16dp" android:paddingRight="12dp" android:paddingTop="12dp" android:paddingBottom="12dp">
+      <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_paste" android:importantForAccessibility="no" app:tint="?attr/colorOnSecondaryContainer" />
+      <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:orientation="vertical">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Link on the clipboard" android:textSize="13sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
+        <TextView android:id="@+id/clip_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="middle" android:textSize="14sp" android:textColor="?attr/colorOnSecondaryContainer" />
+      </LinearLayout>
+      <com.google.android.material.button.MaterialButton android:id="@+id/clip_use" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:text="Use" android:contentDescription="Use the link on the clipboard" />
+    </LinearLayout>
+  </com.google.android.material.card.MaterialCardView>
+  <LinearLayout android:id="@+id/entry_link" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:minHeight="72dp" android:orientation="horizontal" android:gravity="center_vertical"
+      android:paddingLeft="8dp" android:paddingRight="8dp" android:background="?attr/selectableItemBackground" android:clickable="true" android:focusable="true">
+    <FrameLayout android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_link" android:importantForAccessibility="no" /></FrameLayout>
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:orientation="vertical">
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Link or several links" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Paste one or many; numbered ranges like file[01-20].zip" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
+    </LinearLayout>
+    <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_chevron_right" android:importantForAccessibility="no" />
+  </LinearLayout>
 </LinearLayout>
