@@ -342,6 +342,35 @@ rework R4" for what is not as drawn.
 - Both dialogs compared and corrected. Local delete says Recycle Bin.
 - A full pass over every desktop pair with the owner's notes from R2 to R4.
 
+Written out 2026-11-17 (owner: "looks perfect ... write and start the next one"; no notes on R2 to R4):
+
+- **Delete on server** (`delete`): a warning icon and "Delete on server?"; the name in bold and what goes with it
+  ("**backups** and the 1,842 items inside it (86.4 GB) will be deleted from **nas.home.lan**.", a file: "**notes.txt**
+  (2 KB) will be deleted from **nas.home.lan**.", several: "**3 items** and the 1,842 items inside them …"); "Inbound
+  cannot bring them back. Nothing on this PC is touched."; when a folder is in it, a tick box "I understand that
+  1,842 items will be deleted" that the delete button waits for; buttons "Delete on server" (red outline, bin icon)
+  and Cancel (the default, accent). The count is the Host's existing `sites.count`; while it counts the line says
+  so, and a count that fails or is cut short says "at least …" and still needs the tick.
+- **Delete on This PC:** the same shape: "… will be moved to the Recycle Bin." A file that can't go to the Recycle
+  Bin (network share, too big) is never deleted outright without its own question.
+- **Delete permanently on This PC** (owner, 2026-11-17: "On This PC put a permanent delete option"): Shift+Delete
+  and a menu item "Delete permanently…" under Delete, as in Explorer. The dialog has the server's shape: title "Delete
+  permanently?", "… will be deleted from this PC for good. It does not go to the Recycle Bin and can't be brought
+  back.", the count and, when a folder is in it, the "I understand" tick; a red "Delete permanently" button; Cancel
+  the default. Only on Windows, like the Recycle Bin. A file that is in use is left and named after.
+- **Overwrite, one file at a time** (`overwrite`): replaces R2b's one question per batch when a picked file is
+  already there. Title with the direction icon: "notes.txt is newer on the server" / "… is older on the server" /
+  "… is already on the server" (same date, other size); rows "On this PC" and "On the server" with size and date,
+  "(newer)" on the newer one; choices Skip, keep the server copy / Replace the server copy with the older file /
+  Keep both, upload as notes (2).txt (the name the Host would give); the safer one marked "(recommended)": Skip
+  when the target is newer or the same, Replace when the target is older; "Do this for the other 3 files" when more
+  conflict; Cancel and Continue. Downloads use the same dialog with the words turned round ("on this PC").
+  A picked folder asks once for its contents ("Files inside the folders follow the same choice.").
+  Different choices are sent as one batch per choice (no Host change, so it works with another Inbound server too).
+- **Full pass:** every desktop pair (`browse`, `remote-only`, `trouble`, `transfers`, `failed`, `downloads`, `home`,
+  `add-tiles`, `add-fields`, `delete`, `overwrite`) retaken on the final R5 build at 1376 x 808 and cropped to the
+  mockup's 1360 x 800, looked at side by side; anything off is fixed in R5.
+
 ### R6. Web UI (`web-site`, `web-two`, `web-download`, `web-upload`, `phone`, `phone-sheets`)
 
 - The two bugs first (above), each with a test that fails before the fix.

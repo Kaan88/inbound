@@ -1,5 +1,30 @@
 # Progress — session handoff
 
+### Sites rework R6a: web browse view and both web bugs, SITES.11 (2026-11-17)
+
+- Owner: "start r6 on the side". Built (Sonnet) in a worktree, reviewed (Fable), fixed (Opus), walked in Chromium
+  against a real Server and rclone WebDAV (8 checks, no console errors), fast-forwarded into main.
+- **Bug 1 fixed:** Download, double click, Enter and the menu go to the server (`sites.transfer.start`); no row link.
+  "To this device" is the dialog's second choice (one file), through `startDeviceDownload`; a failed device download
+  fails in the browser and the page stays. Walked: zero browser downloads on double click/Enter.
+- **Bug 2, likely cause fixed:** rows were keyed by name (Drive allows two items of one name); now unique keys. The
+  real Drive case is **not confirmed** (no Drive account here).
+- Browse view to `web-site`/`web-two`: pane header and chip, Up, breadcrumbs, star, Filter, On the server column,
+  footer, trouble state with Retry now / Edit remote and auto-retry, context menu (right click, long press, "…",
+  Shift+F10), keys, toolbar, Download and Upload dialogs. One download target rule for every control.
+- **Not as drawn:** Two panes' left pane lists server folders only (files would need `folders.browse` to list files);
+  upload sends a server folder, not chosen files; no Rights column; folders show no "Some of it" yet; the page still
+  sits in the old layout (sidebar entries, Transfers bar, All remotes: R6b). Ctrl+U, Ctrl+Shift+C and Ctrl+Shift+N
+  are not taken from the browser.
+- Tests: webui 752 pass (34 Sites browse rules). Pairs: `web-site`, `web-two`, `web-download`, `web-upload`-built.
+- **R6b next:** transfers list, All remotes and Add a remote tiles, sidebar entries, Transfers bar, phone width,
+  `npm run screens` with the Sites screens, `sites.here` for folders, one run with the extension installed.
+
+### Owner request 2026-11-17: permanent delete on This PC
+
+- "On This PC put a permanent delete option." Added to R5 (sites-rework.md): Shift+Delete and "Delete permanently…",
+  with the server-style dialog (count, tick for folders). Goes into R5's fix round.
+
 ### Sites rework R4: All remotes, Add a remote, sidebar, SITES.11 (2026-11-17)
 
 - **Owner:** "start next, look perfect" (R3 accepted by look). Built (Sonnet), reviewed by Fable three times, fixed
