@@ -349,6 +349,12 @@ update counts as `ready` once its `waitUntil` has passed. Neither runs with Site
 `remoteFolder` and `localFolder?`. The host is trimmed. A key login needs a private key stored. The reply is
 `sites.result`; on success its `site` is set. A refusal (an unknown site, a bad id, no secret protection on this
 system, a site rule broken) comes back as `sites.result` with `ok: false` and `message`, and nothing is saved.
+`privateKey` is PEM text (OpenSSH, PKCS#1, PKCS#8) or, from SITES.14, a PuTTY key file's text (`.ppk` format 2 or 3;
+RSA, Ed25519, ECDSA). The Host turns a `.ppk` into OpenSSH text with no passphrase of its own, after checking the
+file's MAC, and stores that sealed; `keyPassphrase` then only opens the `.ppk` and is not kept (`hasKeyPassphrase`
+false). A format 3 key with a passphrase (Argon2) is refused with "Convert it with PuTTYgen › Conversions › Export
+OpenSSH key"; so is DSA. A wrong passphrase is refused with "The key passphrase is wrong." `sites.testDraft` converts
+the same way. A Host from before SITES.14 refuses any `.ppk` with its own words.
 
 Secrets: they go in on save and never come back out. A `SiteDto` (in `sites.listResult`, `sites.result` and
 `sites.changed`) has only `hasPassword`, `hasPrivateKey` and `hasKeyPassphrase`. In `SiteSaveRequest`, a secret field

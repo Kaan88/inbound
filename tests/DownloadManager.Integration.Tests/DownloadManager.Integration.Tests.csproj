@@ -81,6 +81,7 @@
   <ItemGroup>
     <Compile Include="..\Shared\TestPaths.cs" Link="Shared\TestPaths.cs" />
     <Compile Include="..\Shared\JsonSampleFiller.cs" Link="Shared\JsonSampleFiller.cs" />
+    <Compile Include="..\Shared\PpkWriter.cs" Link="Shared\PpkWriter.cs" />
   </ItemGroup>
 
 </Project>

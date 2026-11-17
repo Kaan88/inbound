@@ -234,6 +234,32 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task APuttyKeyIsSavedAsAnOpenSshKeyAndItsPassphraseIsNotKept()
+    {
+        var commands = Open();
+        await On(commands);
+
+        var keySite = Site(password: null);
+        keySite.AuthMethod = SiteAuthMethods.Key;
+        keySite.PrivateKey = DownloadManager.Tests.Shared.PpkWriter.TestEd25519(passphrase: "ppk pass");
+        keySite.KeyPassphrase = "wrong";
+        var wrong = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+        Assert.False(wrong.Ok);
+        Assert.Contains("passphrase is wrong", wrong.Message);
+
+        keySite.KeyPassphrase = "ppk pass";
+        var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, keySite);
+
+        Assert.True(saved.Ok, saved.Message);
+        Assert.True(saved.Site!.HasPrivateKey);
+        Assert.False(saved.Site.HasKeyPassphrase);
+        var record = await new SiteStore(State).GetAsync(saved.Site.Id);
+        var text = DownloadManager.Persistence.SecretProtector.UnprotectSiteSecret(record!.SealedPrivateKey);
+        Assert.StartsWith("-----BEGIN OPENSSH PRIVATE KEY-----", text);
+        Assert.Null(record.SealedKeyPassphrase);
+    }
+
+    [Fact]
     public async Task ARemovedSiteIsGoneAndRemovingItAgainIsRefused()
     {
         var commands = Open();

@@ -35,4 +35,8 @@
     <ProjectReference Include="..\..\tools\RcloneProbe\RcloneProbe.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\PpkWriter.cs" Link="Shared\PpkWriter.cs" />
+  </ItemGroup>
+
 </Project>

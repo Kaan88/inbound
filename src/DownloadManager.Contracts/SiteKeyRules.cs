@@ -9,13 +9,14 @@ public static class SiteKeyRules
     /// <summary>Why <paramref name="key"/> is not a private key file's text, or null when it looks like one.</summary>
     /// <remarks>
     /// rclone's key_pem takes PEM text: OpenSSH, PKCS#1 or PKCS#8, each between a <c>-----BEGIN ... PRIVATE KEY-----</c>
-    /// line and its END line. A public key, a PuTTY key or a few pasted lines would only fail later, at a test.
+    /// line and its END line. A public key or a few pasted lines would only fail later, at a test. A PuTTY key (.ppk) passes: a Host from
+    /// SITES.14 on converts it (an older one refuses it with its own words).
     /// </remarks>
     public static string? Problem(string key)
     {
         var text = key.Trim();
-        if (text.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal))
-            return "PuTTY keys (.ppk) can't be used. Save the key in OpenSSH format with PuTTYgen (Conversions › Export OpenSSH key) and choose that file.";
+        // SITES.14: a PuTTY key (.ppk) is turned into OpenSSH text by the Host (PuttyKey), which checks it there.
+        if (text.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal)) return null;
         var begin = text.IndexOf("-----BEGIN ", StringComparison.Ordinal);
         if (begin < 0 || text.IndexOf("PRIVATE KEY-----", begin, StringComparison.Ordinal) < 0
             || text.IndexOf("-----END ", begin, StringComparison.Ordinal) < 0)

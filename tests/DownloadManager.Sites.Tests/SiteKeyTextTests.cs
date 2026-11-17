@@ -9,12 +9,13 @@ public sealed class SiteKeyTextTests
     [InlineData("  \r\n-----BEGIN RSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nMIIE\r\n-----END RSA PRIVATE KEY-----")]
     [InlineData("-----BEGIN PRIVATE KEY-----\nMC4C\n-----END PRIVATE KEY-----")]
     [InlineData("-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIF\n-----END ENCRYPTED PRIVATE KEY-----")]
+    // SITES.14: a PuTTY key passes the text rule; the Host converts and checks it (PuttyKey).
+    [InlineData("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none")]
     public void PemPrivateKeysPass(string key) => Assert.Null(SiteKeyText.Problem(key));
 
     [Theory]
     [InlineData("ssh-ed25519 AAAAC3Nza me@pc", "public key")]
     [InlineData("ecdsa-sha2-nistp256 AAAAE2Vj me@pc", "public key")]
-    [InlineData("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none", "PuTTY")]
     [InlineData("-----BEGIN SSH2 PUBLIC KEY-----\nAAAA\n-----END SSH2 PUBLIC KEY-----", "not a private key")]
     [InlineData("-----BEGIN OPENSSH PRIVATE KEY-----\nb3Bl", "not a private key")]
     [InlineData("b3BlbnNzaC1rZXktdjE", "not a private key")]

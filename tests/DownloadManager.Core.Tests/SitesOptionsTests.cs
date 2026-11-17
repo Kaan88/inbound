@@ -230,8 +230,8 @@ public sealed class SitesOptionsTests
         // The window says what the Host would: a .pub or .ppk text gets its own words (one rule, SiteKeyRules).
         Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "ssh-ed25519 AAAAC3Nza me@pc" }), null, out problem));
         Assert.Contains("public key", problem);
-        Assert.Null(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "PuTTY-User-Key-File-3: ssh-ed25519" }), null, out problem));
-        Assert.Contains("PuTTY", problem);
+        // SITES.14: a .ppk is sent on; the Host converts it, or says why it can't.
+        Assert.NotNull(SitesRules.Request(Form(v => v with { AuthMethod = "key", PrivateKey = "PuTTY-User-Key-File-3: ssh-ed25519" }), null, out problem));
     }
 
     [Fact]

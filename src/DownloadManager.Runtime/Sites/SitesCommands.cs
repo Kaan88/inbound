@@ -632,6 +632,16 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
             return (null, Fail("Choose a password or a key file to sign in with."));
         if (KindAddress(request) is { Problem: { } addressProblem }) return (null, Fail(addressProblem));
+        // SITES.14: a PuTTY key becomes OpenSSH text with no passphrase of its own (sealed like any key); its passphrase,
+        // needed only to open it, is not kept.
+        if (PuttyKey.IsPutty(request.PrivateKey))
+        {
+            var (openSsh, puttyProblem) = PuttyKey.ToOpenSsh(request.PrivateKey!, request.KeyPassphrase);
+            if (openSsh is null) return (null, Fail(puttyProblem!));
+            request.PrivateKey = openSsh;
+            request.KeyPassphrase = "";
+        }
+
         // A key that rclone could not read would be sealed and only fail at the next test; it is refused here instead.
         if (!string.IsNullOrEmpty(request.PrivateKey) && SiteKeyText.Problem(request.PrivateKey) is { } keyProblem)
             return (null, Fail(keyProblem));
