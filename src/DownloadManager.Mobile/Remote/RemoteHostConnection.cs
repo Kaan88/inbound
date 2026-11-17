@@ -18,7 +18,7 @@ public enum RemoteConnectionStatus
     /// <summary>The screen is not shown: the socket is closed on purpose and nothing is tried.</summary>
     Paused,
 
-    /// <summary>Trying again can't help (the pairing ended, or plain http may not be used): nothing more is tried.</summary>
+    /// <summary>Trying again can't help (the pairing ended, plain http may not be used, or the certificate is not the trusted one): nothing more is tried.</summary>
     Stopped,
 }
 
@@ -328,7 +328,7 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         {
             return Outcome.Asked;
         }
-        catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
+        catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException or ServerCertificateRefusedException)
         {
             lock (_gate) _stopped = true;
             SetState(RemoteConnectionStatus.Stopped, RemoteWords.Failure(_target.Name, ex));
@@ -504,6 +504,7 @@ public static class RemoteWords
     public static string Failure(string name, Exception ex) => ex switch
     {
         RemotePairingEndedException => $"{name} no longer accepts this phone. Remove it from the host list and connect to it again.",
+        ServerCertificateRefusedException => $"{name} showed a certificate that isn't the one this phone trusts for it. If it has a new certificate, remove it from the host list and connect to it again.",
         PlainHttpNotConfirmedException => $"{name}'s address starts with http://, and sending its sign-in unencrypted wasn't allowed. Connect to it again to allow that.",
         ProtocolMismatchException => $"{name} runs a version of Inbound this app can't talk to. Update both to the same release.",
         RemoteServerException => ex.Message.Contains("again", StringComparison.Ordinal) ? ex.Message : ex.Message + " Trying again shortly.",

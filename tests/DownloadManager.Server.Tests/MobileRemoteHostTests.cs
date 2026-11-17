@@ -81,6 +81,10 @@ public sealed class MobileRemoteHostTests
             var id = added.Job!.Id;
             JobRow Row() { lock (gate) return model.Rows.Single(r => r.Id == id); }
             await Until(() => { lock (gate) return model.Rows.Any(r => r.Id == id); }, "the row from the added event");
+            // C5's one-shot figures: one jobs.query with the paired token, on its own connection.
+            var figures = await hosts.FiguresAsync(hosts.Current);
+            Assert.NotNull(figures);
+            Assert.Equal(1, figures.Active + figures.Queued);
 
             var paused = await connection.RequestAsync(IpcMessage.Create(MessageTypes.JobPause, new JobActionRequest { JobId = id }), CancellationToken.None);
             Assert.Equal(MessageTypes.JobActionResult, paused.Type);

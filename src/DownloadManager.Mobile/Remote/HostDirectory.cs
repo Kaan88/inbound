@@ -3,10 +3,15 @@ using DownloadManager.Contracts;
 namespace DownloadManager.Mobile.Remote;
 
 /// <summary>What the pairing screen sends.</summary>
-public sealed record PairRequest(string AddressText, string Password, string? Name, bool PlainHttpConfirmed);
+/// <param name="TrustedFingerprint">https: the SHA-256 of the certificate the user chose to trust after seeing it
+/// (<see cref="PairOutcome.Certificate"/>); null to rely on what the phone trusts.</param>
+public sealed record PairRequest(string AddressText, string Password, string? Name, bool PlainHttpConfirmed, string? TrustedFingerprint = null);
 
 /// <summary>What pairing gave: the host added (or paired again), or an error in words.</summary>
-public sealed record PairOutcome(HostEntry? Host, string? Error, bool NeedsPlainHttpConfirmation = false)
+/// <param name="Certificate">https: the server's certificate when this phone doesn't trust it, to show the user.</param>
+/// <param name="NeedsCertificateTrust">The user may trust <paramref name="Certificate"/> and send the request again with its fingerprint.</param>
+public sealed record PairOutcome(HostEntry? Host, string? Error, bool NeedsPlainHttpConfirmation = false,
+    ServerCertificateInfo? Certificate = null, bool NeedsCertificateTrust = false)
 {
     public bool Ok => Host is not null;
 }
@@ -19,7 +24,13 @@ public sealed record PairOutcome(HostEntry? Host, string? Error, bool NeedsPlain
 /// </summary>
 public sealed class HostDirectory
 {
-    public delegate Task<RemotePairResult> PairCall(Uri address, string password, string clientName, bool plainHttpConfirmed, CancellationToken cancellationToken);
+    public delegate Task<RemotePairResult> PairCall(Uri address, string password, string clientName, bool plainHttpConfirmed, string? certificatePin, CancellationToken cancellationToken);
+
+    /// <summary>Reads an https server's certificate without sending anything (<see cref="ServerCertificates.ProbeAsync"/>).</summary>
+    public delegate Task<ServerCertificateInfo> ProbeCall(Uri address, CancellationToken cancellationToken);
+
+    /// <summary>One request on a connection of its own, for the host list's figures (<see cref="ServerConnector.SendOnceAsync"/>).</summary>
+    public delegate Task<IpcMessage> AskCall(ServerTarget target, IpcMessage request, CancellationToken cancellationToken);
 
     public delegate Task<bool> UnpairCall(ServerTarget target, CancellationToken cancellationToken);
 
@@ -30,19 +41,23 @@ public sealed class HostDirectory
     private readonly string _clientName;
     private readonly TimeProvider _time;
     private readonly PairCall _pair;
+    private readonly ProbeCall _probe;
+    private readonly AskCall _ask;
     private readonly UnpairCall _unpair;
     private readonly HostEntry _phone = new();
     private HostListData _data;
 
     /// <param name="clientName">The name the server lists this phone under, such as "Inbound on Galaxy S24 FE".</param>
     public HostDirectory(IHostListStore store, ISecretStore secrets, string clientName, TimeProvider? time = null,
-        PairCall? pair = null, UnpairCall? unpair = null)
+        PairCall? pair = null, UnpairCall? unpair = null, ProbeCall? probe = null, AskCall? ask = null)
     {
         _store = store;
         _secrets = secrets;
         _clientName = clientName;
         _time = time ?? TimeProvider.System;
-        _pair = pair ?? ((address, password, name, confirmed, ct) => RemoteServerHttp.PairAsync(address, password, name, confirmed, ct));
+        _pair = pair ?? ((address, password, name, confirmed, pin, ct) => RemoteServerHttp.PairAsync(address, password, name, confirmed, ct, pin));
+        _probe = probe ?? ServerCertificates.ProbeAsync;
+        _ask = ask ?? RemoteServerHttp.SendIpcAsync;
         _unpair = unpair ?? RemoteServerHttp.UnpairAsync;
         _data = store.Load();
         _data.Servers.RemoveAll(s => string.IsNullOrEmpty(s.Id) || s.IsPhone || s.AddressUri is null);
@@ -99,7 +114,7 @@ public sealed class HostDirectory
         string? token;
         try { token = _secrets.Read(SecretPrefix + host.Id); }
         catch (Exception e) when (e is not OutOfMemoryException) { token = null; }
-        return string.IsNullOrEmpty(token) ? null : ServerTarget.Remote(host.Id, host.Name, address, token, host.PlainHttpConfirmed);
+        return string.IsNullOrEmpty(token) ? null : ServerTarget.Remote(host.Id, host.Name, address, token, host.PlainHttpConfirmed, host.CertificatePin);
     }
 
     /// <summary>
@@ -126,7 +141,24 @@ public sealed class HostDirectory
                 NeedsPlainHttpConfirmation: true);
         if (string.IsNullOrEmpty(request.Password)) return new PairOutcome(null, "Type the server's password.");
 
-        var paired = await _pair(address, request.Password, _clientName, request.PlainHttpConfirmed, cancellationToken).ConfigureAwait(false);
+        string? pin = null;
+        if (address.Scheme == Uri.UriSchemeHttps)
+        {
+            if (ServerCertificates.NormalizePin(request.TrustedFingerprint) is { } trusted) pin = trusted;
+            else
+            {
+                ServerCertificateInfo seen;
+                try { seen = await _probe(address, cancellationToken).ConfigureAwait(false); }
+                catch (RemoteServerException e) { return new PairOutcome(null, e.Message); }
+                if (!seen.TrustedBySystem)
+                    return seen.CannotTrust is { } why
+                        ? new PairOutcome(null, why, Certificate: seen)
+                        : new PairOutcome(null, "This phone doesn't trust the server's certificate (a certificate the server made itself, for example). Check that the fingerprint below is the server's, then trust it to go on.",
+                            Certificate: seen, NeedsCertificateTrust: true);
+            }
+        }
+
+        var paired = await _pair(address, request.Password, _clientName, request.PlainHttpConfirmed, pin, cancellationToken).ConfigureAwait(false);
         if (!paired.Ok || string.IsNullOrEmpty(paired.Token)) return new PairOutcome(null, paired.Error ?? "The server refused the pairing.");
 
         HostEntry entry;
@@ -141,6 +173,7 @@ public sealed class HostDirectory
             entry.PlainHttpConfirmed = request.PlainHttpConfirmed && needsConfirmation;
             entry.HostKind = paired.HostKind ?? existing?.HostKind;
             entry.TokenId = paired.TokenId;
+            entry.CertificatePin = pin;
             entry.PairedAt = _time.GetUtcNow();
             entry.LastSeenAt = _time.GetUtcNow();
             try
@@ -171,7 +204,7 @@ public sealed class HostDirectory
                     catch (Exception again) when (again is not OutOfMemoryException) { /* no entry reads it */ }
                 }
 
-                _ = ForgetAsync(new ServerTarget[] { ServerTarget.Remote(entry.Id, entry.Name, address, paired.Token, request.PlainHttpConfirmed) });
+                _ = ForgetAsync(new ServerTarget[] { ServerTarget.Remote(entry.Id, entry.Name, address, paired.Token, request.PlainHttpConfirmed, pin) });
                 return new PairOutcome(null, "The pairing worked, but this phone couldn't store it safely, so it was undone. Try again.");
             }
         }
@@ -206,6 +239,33 @@ public sealed class HostDirectory
         if (target is null) return false;
         try { return await _unpair(target, cancellationToken).ConfigureAwait(false); }
         catch (Exception e) when (e is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>How long the host list waits for one server's figures.</summary>
+    public static readonly TimeSpan FiguresTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// A server's figures for the host list (C5): one <c>jobs.query</c> on a connection of its own, with a short deadline and
+    /// no retry; null when it can't be asked or doesn't answer, and for this phone (its own Host gives those). Nothing stays
+    /// open afterwards.
+    /// </summary>
+    public async Task<HostFigures?> FiguresAsync(HostEntry host, CancellationToken cancellationToken = default)
+    {
+        if (TargetFor(host) is not { } target) return null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(FiguresTimeout);
+        try
+        {
+            var reply = await _ask(target, IpcMessage.Create(MessageTypes.JobsQuery, new EmptyPayload()), deadline.Token).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.JobsSnapshot) return null;
+            var figures = HostFigures.From(reply.GetPayload<SnapshotDto>());
+            Seen(host.Id, null);
+            return figures;
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            return null;
+        }
     }
 
     /// <summary>A connection to a server got its snapshot: notes when, and the kind the server says it is.</summary>

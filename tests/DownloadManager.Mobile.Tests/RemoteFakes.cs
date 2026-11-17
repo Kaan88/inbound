@@ -210,7 +210,7 @@ internal sealed class MemoryHostList : IHostListStore
         Servers = d.Servers.Select(s => new HostEntry
         {
             Id = s.Id, Name = s.Name, Address = s.Address, PlainHttpConfirmed = s.PlainHttpConfirmed, HostKind = s.HostKind,
-            TokenId = s.TokenId, PairedAt = s.PairedAt, LastSeenAt = s.LastSeenAt,
+            TokenId = s.TokenId, PairedAt = s.PairedAt, LastSeenAt = s.LastSeenAt, CertificatePin = s.CertificatePin,
         }).ToList(),
     };
 }

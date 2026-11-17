@@ -3,6 +3,7 @@ using Android.Runtime;
 using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
+using DownloadManager.Contracts;
 using DownloadManager.Mobile.Remote;
 using Google.Android.Material.BottomSheet;
 using Google.Android.Material.Button;
@@ -44,7 +45,12 @@ public sealed class PairingSheet : BottomSheetDialogFragment
         var error = v.FindViewById<TextView>(Resource.Id.pair_error)!;
         var progress = v.FindViewById<View>(Resource.Id.pair_progress)!;
         var connect = v.FindViewById<MaterialButton>(Resource.Id.pair_btn)!;
+        var certText = v.FindViewById<TextView>(Resource.Id.pair_cert)!;
+        var trustCert = v.FindViewById<MaterialCheckBox>(Resource.Id.pair_trust_cert)!;
         var busy = false;
+        // The certificate shown for the address as it was typed then; typing another address forgets it.
+        ServerCertificateInfo? certificate = null;
+        string? certificateFor = null;
 
         void Update()
         {
@@ -52,7 +58,19 @@ public sealed class PairingSheet : BottomSheetDialogFragment
             var valid = HostDirectory.CheckAddress(text, out _, out var problem, out var needsConfirmation);
             addressLayout.Error = text.Length > 0 && !valid ? problem : null;
             plainHttp.Visibility = valid && needsConfirmation ? ViewStates.Visible : ViewStates.Gone;
-            connect.Enabled = !busy && valid && !string.IsNullOrEmpty(password.Text) && (!needsConfirmation || plainHttp.Checked);
+            if (certificate is not null && certificateFor != text) ShowCertificate(null, null);
+            connect.Enabled = !busy && valid && !string.IsNullOrEmpty(password.Text) && (!needsConfirmation || plainHttp.Checked)
+                && (certificate is null || trustCert.Checked);
+        }
+
+        void ShowCertificate(ServerCertificateInfo? seen, string? forAddress)
+        {
+            certificate = seen;
+            certificateFor = forAddress;
+            trustCert.Checked = false;
+            certText.Text = seen is null ? null
+                : $"For: {seen.Subject}\nValid until: {seen.NotAfter:d MMMM yyyy}\nSHA-256: {seen.Fingerprint}";
+            certText.Visibility = trustCert.Visibility = seen is null ? ViewStates.Gone : ViewStates.Visible;
         }
 
         void ShowError(string? words)
@@ -68,7 +86,8 @@ public sealed class PairingSheet : BottomSheetDialogFragment
             Update();
             ShowError(null);
             progress.Visibility = ViewStates.Visible;
-            var request = new PairRequest(address.Text?.Trim() ?? "", password.Text ?? "", name.Text?.Trim(), plainHttp.Checked);
+            var request = new PairRequest(address.Text?.Trim() ?? "", password.Text ?? "", name.Text?.Trim(), plainHttp.Checked,
+                certificate is not null && trustCert.Checked ? certificate.Fingerprint : null);
             var hosts = HostChoice.Hosts(RequireContext());
             _pairing?.Cancel();
             var cancel = _pairing = new CancellationTokenSource();
@@ -98,6 +117,8 @@ public sealed class PairingSheet : BottomSheetDialogFragment
                     }
 
                     ShowError(outcome.Error);
+                    // An https server whose certificate the phone doesn't trust: show it, and let the user trust exactly that one.
+                    if (outcome.NeedsCertificateTrust && outcome.Certificate is { } seen) ShowCertificate(seen, request.AddressText);
                     Update();
                 });
             });
@@ -106,6 +127,7 @@ public sealed class PairingSheet : BottomSheetDialogFragment
         address.TextChanged += (_, _) => Update();
         password.TextChanged += (_, _) => Update();
         plainHttp.CheckedChange += (_, _) => Update();
+        trustCert.CheckedChange += (_, _) => Update();
         connect.Click += (_, _) => Submit();
         name.EditorAction += (_, e) =>
         {

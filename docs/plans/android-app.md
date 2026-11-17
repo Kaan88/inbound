@@ -88,6 +88,15 @@ One app, two roles.
 2. **Remote for another Inbound.** The host switcher in the search bar points every screen at the Windows app (with
    its web UI on) or a headless server. Files are then saved there. A strip on the screen says so.
 
+**Pairing (ANDROID.7; owner, 2026-11-17).** The phone pairs with another Inbound the way the desktop window does (design
+D9): its address and its password, once, for a `remoteClient` token (`POST /api/pair`). The password is not kept; the
+token is kept encrypted under an Android Keystore key. The browser extension's pairing code is not used: a code only
+ever makes an extension token, which can hand a link over but can't manage downloads. A code for the phone would need a
+server change, and the owner doubts it is worth it ("not sure pair has any use at all"), so none is planned. Over
+https, a certificate the phone doesn't trust is shown at pairing (subject, expiry, SHA-256) and can be trusted as that
+exact certificate; from then on that server is accepted only with a certificate the system trusts or with that one.
+Plain http to another machine needs one tick per server, as on the desktop.
+
 Desktop features and where they are on the phone:
 
 | Desktop | Phone |

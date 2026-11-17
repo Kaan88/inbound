@@ -58,6 +58,26 @@
      Want one-shot figures while the sheet is open?
   5. C5 calls the headless server "Docker"; the server only says `server`, which may also be an AppImage. Shown as
      "Server". Fine?
+- **Step 6, the owner's answers built (2026-11-17):**
+  - **Pin at pairing.** New `Contracts/ServerCertificates.cs`, shared by the desktop's and the phone's client: a
+    certificate is accepted when the system trusts it, or when its SHA-256 equals the pin and it is in its dates; nothing
+    else. Fingerprint in the Sites form (`AB:CD:…`). One HTTP stack per pin (no redirect, no proxy, no cookie as before);
+    without a pin there is no callback at all, so the desktop window behaves as before. `ServerTarget` carries the pin;
+    the WebSocket, `/api/ipc`, pairing, unpairing and uploads all use it; a refused certificate is
+    `ServerCertificateRefusedException` (stops the phone's connection, words say to remove and connect again).
+    At pairing over https `ServerCertificates.ProbeAsync` reads the certificate with a bare TLS handshake (nothing sent);
+    if the system doesn't trust it the pairing screen shows subject, expiry and SHA-256 with a "Trust this certificate"
+    tick, and pairing is then sent with that pin only. The pin is kept in `hosts.json` with the host (not secret).
+  - **One-shot figures.** When C5 opens, each paired host gets one `jobs.query` on its own connection (`POST /api/ipc`),
+    5 s deadline, no retry, cancelled when the sheet closes; the phone's figures are one snapshot of its own Host on a
+    session closed right after. Rows read "Windows · 5 active · 32.0 MB/s", "Server · 12 queued", or "· not reached now".
+  - **Pairing note:** `docs/plans/android-app.md` section 3, "Pairing".
+  - **Tests:** Mobile.Tests 213 pass (`CertificatePinTests`: system-trusted accepted, pinned accepted, another certificate
+    and no pin refused, expired pin refused, the pairing flow; `HostFiguresTests`). Server.Tests: new
+    `MobileCertificatePinTests` run real TLS handshakes against a loopback https endpoint with a self-signed
+    certificate (pinned accepted on `/api/ipc` and the WebSocket; another pin or none refused, pairing refused before any
+    password is sent; probe, trust, pair, connect); `MobileRemoteHostTests` also reads the figures from the real server.
+    `IpcJsonContextTests` pass (`ServerCertificateInfo` listed as never sent over IPC).
 
 ### Android first trial (ANDROID.2), branch `android-trial` (2026-11-15)
 

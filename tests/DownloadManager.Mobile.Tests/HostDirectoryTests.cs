@@ -15,9 +15,12 @@ public sealed class HostDirectoryTests
         public RemotePairResult Result { get; set; } = new() { Token = Token, TokenId = "t1", HostKind = HostKinds.Windows };
         public bool UnpairWorks { get; set; } = true;
 
-        public Task<RemotePairResult> Pair(Uri address, string password, string name, bool confirmed, CancellationToken ct)
+        public List<string?> Pins { get; } = new();
+
+        public Task<RemotePairResult> Pair(Uri address, string password, string name, bool confirmed, string? pin, CancellationToken ct)
         {
             Pairs.Add((address, password, name, confirmed));
+            Pins.Add(pin);
             return Task.FromResult(Result);
         }
 

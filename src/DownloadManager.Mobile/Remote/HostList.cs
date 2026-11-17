@@ -29,6 +29,12 @@ public sealed class HostEntry
     /// <summary>The server's id for the token (for the server's own list of paired apps). Not the token.</summary>
     public string? TokenId { get; set; }
 
+    /// <summary>
+    /// https: the SHA-256 (<c>AB:CD:…</c>) of the certificate the user trusted at pairing, accepted besides what the phone
+    /// trusts (owner, 2026-11-17: "pin at pairing"). Public data, not a secret; null for system trust only.
+    /// </summary>
+    public string? CertificatePin { get; set; }
+
     public DateTimeOffset? PairedAt { get; set; }
 
     /// <summary>When a connection to it last got the snapshot.</summary>
@@ -181,4 +187,48 @@ public static class HostWords
 
     /// <summary>The strip on every screen while another host is shown (C6).</summary>
     public static string SavedOn(string name) => $"Files are saved on {name}";
+
+    /// <summary>
+    /// A row of C5 with the figures read when the sheet opened: "Windows · 5 active · 32 MB/s", "Server · 12 queued",
+    /// "2 active · 14.6 MB/s" for the phone. Without figures (not reached), <see cref="Subtitle"/>.
+    /// </summary>
+    public static string WithFigures(HostEntry host, HostFigures? figures, DateTimeOffset now)
+    {
+        if (figures is null) return Subtitle(host, now) + (host.IsPhone ? "" : " · not reached now");
+        var parts = new List<string>();
+        if (!host.IsPhone && Kind(host.HostKind) is { } kind) parts.Add(kind);
+        if (figures.Active > 0)
+        {
+            parts.Add($"{figures.Active} active");
+            if (figures.BytesPerSecond > 0) parts.Add(Fmt.Rate(figures.BytesPerSecond));
+        }
+        if (figures.Queued > 0) parts.Add($"{figures.Queued} queued");
+        if (figures.Active == 0 && figures.Queued == 0) parts.Add("nothing running");
+        return string.Join(" · ", parts);
+    }
+}
+
+/// <summary>A host's figures for the host list: downloads running, waiting, and their speed together.</summary>
+public sealed record HostFigures(int Active, int Queued, double BytesPerSecond)
+{
+    public static HostFigures From(SnapshotDto snapshot)
+    {
+        int active = 0, queued = 0;
+        double speed = 0;
+        foreach (var job in snapshot.Jobs)
+        {
+            switch ((job.State ?? "").ToLowerInvariant())
+            {
+                case "downloading" or "connecting" or "verifying":
+                    active++;
+                    speed += Math.Max(0, job.BytesPerSecond ?? 0);
+                    break;
+                case "queued":
+                    queued++;
+                    break;
+            }
+        }
+
+        return new HostFigures(active, queued, speed);
+    }
 }

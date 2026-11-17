@@ -43,12 +43,17 @@ public sealed class ServerTarget
     /// <summary>The Host on this PC, over the named pipe.</summary>
     public static ServerTarget Local { get; } = new(null, "This PC", null, null, plainHttpConfirmed: false);
 
-    public static ServerTarget Remote(string id, string name, Uri address, string token, bool plainHttpConfirmed)
+    /// <param name="certificatePin">https only: the SHA-256 (<c>AB:CD:…</c>) of a certificate the user trusted at pairing,
+    /// accepted besides what the system trusts (<see cref="ServerCertificates.Accept"/>). Null: system trust only.</param>
+    public static ServerTarget Remote(string id, string name, Uri address, string token, bool plainHttpConfirmed, string? certificatePin = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrEmpty(token);
-        return new ServerTarget(id, name, address, token, plainHttpConfirmed);
+        return new ServerTarget(id, name, address, token, plainHttpConfirmed) { CertificatePin = ServerCertificates.NormalizePin(certificatePin) };
     }
+
+    /// <summary>The pinned certificate's SHA-256, or null (system trust only). Not a secret.</summary>
+    public string? CertificatePin { get; private init; }
 
     /// <summary>Null for this PC.</summary>
     public string? Id { get; }
@@ -274,17 +279,9 @@ public sealed class WebSocketIpcClient : IIpcConnection
 
     public bool SnapshotFollowsHello { get; }
 
-    /// <summary>
-    /// The HTTP stack every upgrade goes through. A redirect is never followed, so the token goes only to the address the
-    /// user typed, and no proxy is used: a proxy (or one found by WPAD) would see the token over plain http.
-    /// </summary>
-    private static readonly Lazy<HttpMessageInvoker> Upgrades = new(() => new HttpMessageInvoker(new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        UseProxy = false,
-        UseCookies = false,
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-    }));
+    // The HTTP stack every upgrade goes through (ServerCertificates.Upgrades): a redirect is never followed, so the token
+    // goes only to the address the user typed, and no proxy is used: a proxy (or one found by WPAD) would see the token
+    // over plain http. Over https the certificate is the system's choice or the target's pin.
 
     public static async Task<WebSocketIpcClient> ConnectAsync(ServerTarget target, ClientHelloDto hello, TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
@@ -297,12 +294,13 @@ public sealed class WebSocketIpcClient : IIpcConnection
         deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(10));
         try
         {
-            await socket.ConnectAsync(ServerAddress.WebSocketAddress(target.Address!), Upgrades.Value, deadline.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(ServerAddress.WebSocketAddress(target.Address!), ServerCertificates.Upgrades(target.CertificatePin), deadline.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is WebSocketException or HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             var status = socket.HttpStatusCode;
             socket.Dispose();
+            if (ServerCertificates.IsCertificateFailure(ex)) throw new ServerCertificateRefusedException(target.Name);
             throw RemoteServerHttp.Describe(status, ex is OperationCanceledException);
         }
         catch
@@ -425,26 +423,16 @@ public static class RemoteServerHttp
     /// <summary>The token role a desktop app asks for and must get back.</summary>
     public const string RemoteClientRole = "remoteClient";
 
-    private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient(new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        UseProxy = false,
-        UseCookies = false,
-        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-    })
-    {
-        Timeout = Timeout.InfiniteTimeSpan,
-    });
-
-    private static HttpClient Http => Shared.Value;
+    // Every call goes through ServerCertificates.Client: no redirect, no proxy, no cookie, as before, and over https
+    // the system's trust or the target's pinned certificate.
 
     /// <summary>
     /// <c>POST /api/pair</c> with <c>{password, name, role: "remoteClient"}</c> and no <c>Origin</c>. Answers with the token
     /// only when the server says it made a <c>remoteClient</c> one; anything else is an error in words.
     /// </summary>
+    /// <param name="certificatePin">https: the certificate the user trusted for this server (<see cref="ServerCertificates"/>).</param>
     public static async Task<RemotePairResult> PairAsync(Uri address, string password, string name, bool plainHttpConfirmed,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? certificatePin = null)
     {
         if (!ServerAddress.MaySend(address, plainHttpConfirmed)) return new RemotePairResult { Error = new PlainHttpNotConfirmedException().Message };
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -456,7 +444,7 @@ public static class RemoteServerHttp
             {
                 Content = JsonContent(new PairForm { Password = password, Name = name, Role = RemoteClientRole }),
             };
-            using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
+            using var response = await ServerCertificates.Client(certificatePin).SendAsync(request, deadline.Token).ConfigureAwait(false);
             var body = await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.OK && body is { } ok)
             {
@@ -467,12 +455,12 @@ public static class RemoteServerHttp
                     // An older server may have made another kind of token. It is of no use here, so the server forgets it.
                     var unwanted = issued;
                     issued = null;
-                    await ForgetTokenAsync(address, unwanted, plainHttpConfirmed).ConfigureAwait(false);
+                    await ForgetTokenAsync(address, unwanted, plainHttpConfirmed, certificatePin).ConfigureAwait(false);
                     return new RemotePairResult { Error = "The server didn't give this PC the access it asked for, so nothing was saved. Update the server and try again." };
                 }
 
                 // On a short deadline of its own: not knowing the server's kind never fails a pairing that worked.
-                var hostKind = await HostKindAsync(address, cancellationToken).ConfigureAwait(false);
+                var hostKind = await HostKindAsync(address, certificatePin, cancellationToken).ConfigureAwait(false);
                 var result = new RemotePairResult { Token = issued, TokenId = Text(ok, "id"), HostKind = hostKind };
                 issued = null;
                 return result;
@@ -484,6 +472,10 @@ public static class RemoteServerHttp
         {
             return new RemotePairResult { Error = $"The server at {address} didn't answer in time." };
         }
+        catch (HttpRequestException ex) when (ServerCertificates.IsCertificateFailure(ex))
+        {
+            return new RemotePairResult { Error = $"The server at {address} showed a certificate that isn't trusted. Check the address, then connect again to see the certificate." };
+        }
         catch (HttpRequestException)
         {
             return new RemotePairResult { Error = $"Couldn't reach a server at {address}. Check the address and that the server is running." };
@@ -491,7 +483,7 @@ public static class RemoteServerHttp
         finally
         {
             // A token made but never handed back (cancelled, or failed on the way) mustn't stay valid on the server.
-            if (issued is not null) _ = ForgetTokenAsync(address, issued, plainHttpConfirmed);
+            if (issued is not null) _ = ForgetTokenAsync(address, issued, plainHttpConfirmed, certificatePin);
         }
     }
 
@@ -499,10 +491,10 @@ public static class RemoteServerHttp
     /// Best effort: the server forgets a token this PC won't keep (a pairing it couldn't save, or a token it didn't ask
     /// for). True when the server forgot it, or already had.
     /// </summary>
-    public static Task<bool> ForgetTokenAsync(Uri address, string? token, bool plainHttpConfirmed) =>
+    public static Task<bool> ForgetTokenAsync(Uri address, string? token, bool plainHttpConfirmed, string? certificatePin = null) =>
         string.IsNullOrEmpty(token)
             ? Task.FromResult(true)
-            : UnpairAsync(ServerTarget.Remote("pairing", "server", address, token, plainHttpConfirmed), CancellationToken.None);
+            : UnpairAsync(ServerTarget.Remote("pairing", "server", address, token, plainHttpConfirmed, certificatePin), CancellationToken.None);
 
     private static string PairingError(HttpResponseMessage response, JsonElement? body)
     {
@@ -524,13 +516,13 @@ public static class RemoteServerHttp
     }
 
     /// <summary>The <c>hostKind</c> in the server's public sign-in status, or null, within five seconds.</summary>
-    private static async Task<string?> HostKindAsync(Uri address, CancellationToken cancellationToken)
+    private static async Task<string?> HostKindAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
-            using var response = await Http.GetAsync(ServerAddress.Endpoint(address, "/api/auth/status"), deadline.Token).ConfigureAwait(false);
+            using var response = await ServerCertificates.Client(certificatePin).GetAsync(ServerAddress.Endpoint(address, "/api/auth/status"), deadline.Token).ConfigureAwait(false);
             return await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false) is { } body ? Text(body, "hostKind") : null;
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
@@ -552,7 +544,7 @@ public static class RemoteServerHttp
             deadline.CancelAfter(TimeSpan.FromSeconds(15));
             using var request = new HttpRequestMessage(HttpMethod.Delete, ServerAddress.Endpoint(target.Address!, "/api/pair/self"));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", target.Token);
-            using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
+            using var response = await ServerCertificates.Client(target.CertificatePin).SendAsync(request, deadline.Token).ConfigureAwait(false);
             return response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.OK or HttpStatusCode.Unauthorized;
         }
         catch (Exception ex) when (ex is HttpRequestException or RemoteServerException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
@@ -574,7 +566,11 @@ public static class RemoteServerHttp
         HttpResponseMessage response;
         try
         {
-            response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            response = await ServerCertificates.Client(target.CertificatePin).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ServerCertificates.IsCertificateFailure(ex))
+        {
+            throw new ServerCertificateRefusedException(target.Name);
         }
         catch (HttpRequestException ex)
         {
@@ -632,7 +628,7 @@ public static class RemoteServerHttp
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", target.Token);
             // Percent-encoded, as the web UI sends it (encodeURIComponent), so any name fits in a header.
             if (fileName is not null) request.Headers.Add("X-File-Name", Uri.EscapeDataString(fileName));
-            using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
+            using var response = await ServerCertificates.Client(target.CertificatePin).SendAsync(request, deadline.Token).ConfigureAwait(false);
             var body = await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.OK && body is { } ok && Text(ok, "upload") is { } reference) return (reference, null);
             // A server from before the uploads took a paired app's token answers with its sign-in gate ("Sign in
