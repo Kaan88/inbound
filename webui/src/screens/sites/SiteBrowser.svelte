@@ -504,10 +504,10 @@
   }
 
   /** The arrow has no dialog to show a refusal in, so it says it in a toast. */
-  async function uploadFromLeft() {
+  async function uploadFromLeft(from = uploadFrom, isFolder = !leftFile) {
     dialogError = '';
     try {
-      if (!(await startUpload(uploadFrom, !leftFile))) store.toast(dialogError || 'The upload did not start.', 'error');
+      if (!(await startUpload(from, isFolder))) store.toast(dialogError || 'The upload did not start.', 'error');
     } catch (failure) {
       store.toast(failure instanceof Error ? failure.message : String(failure), 'error');
     }
@@ -531,11 +531,11 @@
   // ---- Preview (SITES.13 #9): the first 2 MiB of a text or image file, in a dialog ----
 
   let previewBox = $state<{ name: string; loading: boolean; result: SitePreview | null; error: string } | null>(null);
-  async function openPreview(item: SiteItem) {
+  async function openPreview(item: SiteItem, from: { id: string; folder: string } = { id: site.id, folder: path }) {
     const box = { name: item.name, loading: true, result: null as SitePreview | null, error: '' };
     previewBox = box;
     try {
-      const result = await store.ask<SitePreview>('sites.preview', { id: site.id, path: joinPath(path, item.name) });
+      const result = await store.ask<SitePreview>('sites.preview', { id: from.id, path: joinPath(from.folder, item.name) });
       if (previewBox === box) previewBox = { ...box, loading: false, result };
     } catch (failure) {
       if (previewBox === box) previewBox = { ...box, loading: false, error: failure instanceof Error ? failure.message : String(failure) };
@@ -843,7 +843,9 @@
     {#if view === 'two'}
       <div class="contents max-md:hidden">
       {#if leftSite}
-        <RemoteColumn site={leftSite} bind:path={leftRemotePath} bind:picked={leftPicked} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft} />
+        <RemoteColumn site={leftSite} bind:path={leftRemotePath} bind:picked={leftPicked} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft}
+          oncopy={(list) => copyBetween(leftSite.id, leftRemotePath, site.id, path, list)} onpreview={(item, folder) => void openPreview(item, { id: leftSite.id, folder })}
+          copyProblem={(list) => betweenProblem(leftSite.id, leftRemotePath, site.id, path, list)} />
         <div class="flex flex-col justify-center gap-2" role="group" aria-label="Copy between the panes">
           <button class="btn-icon" title={copyOutProblem ?? `Copy the selection into ${leftSite.name} ${leftRemotePath}`} aria-label={copyOutProblem ?? `Copy the selection into ${leftSite.name} ${leftRemotePath}`}
             disabled={!chosen.length || !!copyOutProblem} onclick={() => copyBetween(site.id, path, leftSite.id, leftRemotePath, chosen)}><Icon name="chevron-left" size={16} /></button>
@@ -851,12 +853,13 @@
             disabled={!leftPicked.length || !!copyInProblem} onclick={() => copyBetween(leftSite.id, leftRemotePath, site.id, path, leftPicked)}><Icon name="chevron-right" size={16} /></button>
         </div>
       {:else}
-        <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:file={leftFile} bind:roots={serverRoots} initial={defaultFolder} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft} />
+        <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:file={leftFile} bind:roots={serverRoots} initial={defaultFolder} refresh={leftRefresh} source={leftChoice} onsource={chooseLeft}
+          onupload={(from, isFolder) => void uploadFromLeft(from, isFolder)} uploadProblem={(from, isFolder) => uploadSourceProblem(from, serverRoots, isFolder)} />
         <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
           <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
             disabled={!chosen.length} onclick={() => download(chosen, 'arrow')}><Icon name="chevron-left" size={16} /></button>
           <button class="btn-icon" title={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`} aria-label={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`}
-            disabled={!!uploadFromProblem} onclick={uploadFromLeft}><Icon name="chevron-right" size={16} /></button>
+            disabled={!!uploadFromProblem} onclick={() => uploadFromLeft()}><Icon name="chevron-right" size={16} /></button>
         </div>
       {/if}
       </div>
