@@ -63,6 +63,75 @@ public sealed partial class RuntimeServiceTests
         await rig.AssertNoLinkOrKeyLeakedAsync();
     }
 
+    /// <summary>
+    /// CONN.2 (owner report, 2026-11-17): a TorBox download started on one connection runs on one stream. Raised to 4,
+    /// it must split while it runs, and a stop and start must keep the split, not go back to one range "0 B – total".
+    /// </summary>
+    [Fact]
+    public async Task ATorBoxDownloadStartedOnOneConnectionSplitsWhenRaisedWhileRunning()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 1);
+        await SetConnectionsAsync(rig.Ctx, 1, perHost: 32);
+        const int size = 16 * Mb;
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Live/one-to-four.bin", size, seed: 968);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Live", [file]);
+        rig.Mock.CdnBytesPerSecond = 256 * 1024;
+
+        var added = await rig.AddAsync(item, file, maxConnections: 32);
+        var running = await rig.Ctx.WaitFor(added.Id, j => j.State == "downloading" && j.ReceivedBytes > 512 * 1024, TimeSpan.FromSeconds(30));
+        Assert.Equal(1, running.RequestedConnections);
+        Assert.True(running.ActiveConnections <= 1, $"{running.ActiveConnections} connections on one");
+
+        await SetConnectionsAsync(rig.Ctx, 4);
+        Assert.Equal(4, rig.Ctx.Service.GetJob(added.Id)!.RequestedConnections);
+        var split = await rig.Ctx.WaitFor(added.Id, j => j.ActiveConnections >= 3 || j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.NotEqual("completed", split.State);
+        Assert.True(split.ReceivedBytes >= running.ReceivedBytes, "the split started over");
+
+        Assert.True((await rig.Ctx.Service.PauseAsync(added.Id)).Ok);
+        await rig.Ctx.WaitFor(added.Id, j => j.State == "paused", TimeSpan.FromSeconds(30));
+        Assert.True((await rig.Ctx.Service.ResumeAsync(added.Id)).Ok);
+        var resumed = await rig.Ctx.WaitFor(added.Id, j => j.ActiveConnections >= 3 || j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.NotEqual("completed", resumed.State);
+
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(90));
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.True(rig.Mock.PeakCdnConnections >= 3, $"CDN peak {rig.Mock.PeakCdnConnections}");
+        await rig.AssertNoLinkOrKeyLeakedAsync();
+    }
+
+    /// <summary>CONN.2: stopped on one connection, raised to 4 while stopped, and started again: the resume splits.</summary>
+    [Fact]
+    public async Task ATorBoxDownloadStoppedOnOneConnectionSplitsWhenStartedWithMore()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 1);
+        await SetConnectionsAsync(rig.Ctx, 1, perHost: 32);
+        const int size = 16 * Mb;
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Live/stop-raise.bin", size, seed: 969);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Live", [file]);
+        rig.Mock.CdnBytesPerSecond = 256 * 1024;
+
+        var added = await rig.AddAsync(item, file, maxConnections: 32);
+        await rig.Ctx.WaitFor(added.Id, j => j.State == "downloading" && j.ReceivedBytes > 512 * 1024, TimeSpan.FromSeconds(30));
+        Assert.True((await rig.Ctx.Service.PauseAsync(added.Id)).Ok);
+        var paused = await rig.Ctx.WaitFor(added.Id, j => j.State == "paused", TimeSpan.FromSeconds(30));
+        Assert.True(paused.ReceivedBytes > 0);
+
+        await SetConnectionsAsync(rig.Ctx, 4);
+        rig.Mock.ResetCdnPeak();
+        Assert.True((await rig.Ctx.Service.ResumeAsync(added.Id)).Ok);
+        var resumed = await rig.Ctx.WaitFor(added.Id, j => j.ActiveConnections >= 3 || j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.NotEqual("completed", resumed.State);
+        Assert.Equal(4, resumed.RequestedConnections);
+        Assert.True(resumed.ReceivedBytes >= paused.ReceivedBytes, "the resume started over");
+
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(90));
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.True(rig.Mock.PeakCdnConnections >= 3, $"CDN peak {rig.Mock.PeakCdnConnections}");
+    }
+
     [Fact]
     public async Task ARaisedCountOnARunningTorBoxDownloadStaysWithinThePerHostLimit()
     {

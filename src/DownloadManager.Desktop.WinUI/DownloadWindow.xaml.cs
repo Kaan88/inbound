@@ -751,7 +751,9 @@ public sealed partial class DownloadWindow : Window
             bar.Foreground = InboundTheme.Brush(tone ?? "InboundProgressFillBrush", Root);
             words.Text = line;
         }
-        ConnectionsTab.Text = job.RequestedConnections > 0 ? $"Connections ({job.RequestedConnections})" : "Connections";
+        // CONN.2: a server that won't send ranges gets one stream, whatever count is asked for, so the tab says 1.
+        var usableConnections = job.ResumeSupported == false ? Math.Min(1, job.RequestedConnections) : job.RequestedConnections;
+        ConnectionsTab.Text = usableConnections > 0 ? $"Connections ({usableConnections})" : "Connections";
         ConnectionsNote.Visibility = job.IsTerminal ? Visibility.Visible : Visibility.Collapsed;
         ConnectionsNote.Text = "Connections are listed while the download runs or is stopped.";
 
