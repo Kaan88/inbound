@@ -121,7 +121,7 @@
         </ul>
       {:else if busy}<p class="text-muted">Asking the server for its key…</p>{/if}
     {:else if problem === problems.certificateNotTrusted}
-      <p>The server's certificate is not vouched for by an authority {store.texts.hostName} trusts. Trust it for this site only if you know it is the server's own.</p>
+      <p>The server's certificate is not vouched for by an authority {store.texts.hostName} trusts. Trust it for this remote only if you know it is the server's own.</p>
       {#if certificate}
         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <dt class="text-muted">Issued to</dt><dd class="break-all">{certificate.subject}</dd>
