@@ -133,6 +133,15 @@
   minutes. The S24 was rebooted once (owner allowed it); no phone setting was changed.
   **Owner's answer (2026-11-17): after a reboot, "Resume silently"** on Android 14+ (the persisted job resumes what
   the Host would resume; user pauses and a Task Manager Stop stay paused); 12 and 13 keep the Resume notification.
+- **Fable's review of S0 and the spike (2026-11-17):** S0 needs: the platform's report before `InitializeAsync` plus an
+  announce at its end; a `meteredNetworkRule` hello capability; ordered `network.wait` announcements; "Use data" only
+  while the rule holds; tests for those. Design: "stay paused" must be a start option that reconcile uses (the platform
+  can't undo it afterwards); exit records must be tied to the last run; a crash loop through the persisted job must be
+  stopped; the persisted job's estimate is refreshed on each run; sections 2.2, 2.4, 2.5 rewritten.
+  **Owner's answers (2026-11-17):** a download that can't resume, on mobile data with Wi-Fi only on: "warn about
+  stopping" (read as: it goes on, and the notification warns that stopping it starts over, with a Stop action; to
+  confirm with the owner). Settings > Force stop: "Yes, same as Stop" (any user stop, ApplicationExitInfo reason 10,
+  leaves downloads paused).
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to
