@@ -1,7 +1,7 @@
 // @ts-ignore: the project has no Node types; vitest runs on Node.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { chromeStoreUrl, edgeStoreUrl, extensionLinks, extensionLinksHint, firefoxReleaseUrl, pairedExtensionsLine } from '../src/lib/extensionLinks';
+import { chromeStoreUrl, edgeStoreUrl, extensionLinks, extensionLinksHint, firefoxAddonsUrl, pairedExtensionsLine } from '../src/lib/extensionLinks';
 
 // UI.R41: the web UI links where the desktop does (BrowserBridge.cs), to the real store pages only.
 describe('extension links', () => {
@@ -11,7 +11,7 @@ describe('extension links', () => {
   it('uses the IDs and addresses the desktop uses', () => {
     expect(chromeStoreUrl).toBe(`https://chromewebstore.google.com/detail/${constant('StoreExtensionId')}`);
     expect(edgeStoreUrl).toBe(`https://microsoftedge.microsoft.com/addons/detail/${constant('EdgeStoreExtensionId')}`);
-    expect(firefoxReleaseUrl).toBe(constant('FirefoxReleaseUrl'));
+    expect(firefoxAddonsUrl).toBe(constant('FirefoxAddonsUrl'));
   });
 
   it('offers the three browsers in the desktop order, each over https', () => {

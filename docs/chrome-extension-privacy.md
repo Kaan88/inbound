@@ -94,6 +94,14 @@ sends the default download folder and your favorite folders. The app's other set
 cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
 else.
 
+**When a download finishes:** for a download you sent from this browser, the extension learns from the app that it
+finished. Under "When a download finishes" in Options it then flashes the toolbar icon (the default), opens the popup,
+shows a notification with the file's name and Open and Show in folder buttons, or does nothing. Until you open the
+popup, the extension keeps the finished download's id and file name in Chrome's session storage (which Chrome clears
+when it closes) so the icon can show a finished mark and the popup can put it on top; "Clear finished" in the popup
+keeps the ids of the downloads you hid, in the same place. The Open and Show in folder buttons, and the popup's, tell the
+app on this computer to open that file or show it in its folder. None of this is sent anywhere else.
+
 **Asking for a folder:** if you choose "Ask each time" in Options, a download waits, paused, in
 Chrome while its window is open. Its address, page address, referrer, user agent, file name, size and type
 are kept in Chrome's session storage until you choose Download or Keep in browser, or close the window.

@@ -74,7 +74,7 @@ internal static class ExtensionPromoRules
         [
             Link(ExtensionBrowsers.Chrome, "Chrome", "Chrome Web Store", BrowserBridge.ChromeStoreUrl),
             Link(ExtensionBrowsers.Edge, "Edge", "Microsoft Edge Add-ons", BrowserBridge.EdgeStoreUrl),
-            Link(ExtensionBrowsers.Firefox, "Firefox", "The latest release on GitHub: drag the .xpi file onto Firefox", BrowserBridge.FirefoxReleaseUrl),
+            Link(ExtensionBrowsers.Firefox, "Firefox", "Firefox Add-ons", BrowserBridge.FirefoxAddonsUrl),
         ];
 
         ExtensionLink Link(string browser, string name, string from, string url)

@@ -28,8 +28,9 @@
 #define FirefoxExtensionId "inbound-bridge@kaan88"
 #define ChromeStoreUrl "https://chromewebstore.google.com/detail/" + StoreExtensionId
 #define EdgeStoreUrl "https://microsoftedge.microsoft.com/addons/detail/" + EdgeStoreExtensionId
-; EXT.S4: the Firefox add-on is self-distributed. build-installer.ps1 passes /DFirefoxXpi=<signed XPI>; Setup
-; installs it as {app}\firefox\{#FirefoxXpiName}, and Firefox updates it from the manifest's update_url.
+; EXT.S4/S5: the Firefox add-on is signed by addons.mozilla.org and listed there (from extension 0.7.0 the XPI is the
+; listed version, with no update_url, so Firefox updates it from AMO). build-installer.ps1 passes /DFirefoxXpi=<signed
+; XPI>; Setup installs it as {app}\firefox\{#FirefoxXpiName}.
 #define FirefoxXpiName "inbound-bridge.xpi"
 ; The first extension version with an update_url (an older copy never updates and has to be added again).
 #define FirefoxSelfUpdateSince "0.5.3"
