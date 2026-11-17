@@ -117,6 +117,17 @@
 - **Owner (2026-11-16): "let's leave some of the measurements to after app is made, nativeaot it is unless you have a strong argument. we are ready for the actual app, right? make a plan for opus to follow."** Build type is NativeAOT; I found no strong argument against it, only that the Material 3 screens and NativeAOT have not run together yet, which is the first gate of the plan. The remaining measurements (idle and wake-ups on a phone, warm start, the hour with the screen off) move to the real app. Plan: `docs/plans/android-build-plan.md`. **Not done yet:** ANDROID.2 is not ticked and `android-phone` is not merged; both are step 0 of the plan.
 - **Step 0 of the build plan done (2026-11-16):** `android-phone` merged into `android-trial` (merge commit, 18 files, all under `tools/`; nothing under `src/`). ANDROID.2 ticked in ROADMAP with the decisions and the list deferred to the real app. `android-app.md` sections 1, 4 and 5 brought up to the decisions.
 - **Owner (2026-11-17): "btw, if you haven't, push as you go. also implement auto update feature if it's not in the roadmap. it should download itself and present an install option."** Updates were already in the roadmap (ANDROID.10, "a signed APK on the releases page with an update check"), so nothing is built ahead of that step; the spec is now there: the app downloads the new APK itself and offers Install through the system installer. Step 1 work is committed and pushed as it goes from here.
+- **Owner's answers to the step 1 questions (2026-11-17):** (1) empty Downloads list: "nothing in mockups that you are
+  supposed to follow to the letter?" No: A0 is the first-start set-up screen, and A1 to A3 all show downloads; no
+  mockup shows the list with none. A proposal goes to the owner when ANDROID.4 builds the list (plan section 1: ask,
+  do not invent). Also seen: A0 says "Downloads/Inbound", but the owner chose `Download/` directly, so A0's folder line
+  will say "Download". (2) plain `http://` in release: "yeah" (cleartext stays allowed). (3) targetSdk: "15, unless you
+  have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
+  rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
+  experimental: "Yes".
+- **Owner (2026-11-17): "have milestones reviewed by fable, and commit and push as you go along."** Each step of the
+  build plan, and each major change inside one, goes to the same Fable reviewer before the step is called done; commits
+  are pushed to `origin android-app` as they are made.
 - **Android app, step 1 (NativeAOT gate), branch `android-app` (2026-11-17): PASS on both phones.** Code in commit
   0a59ae3: `src/DownloadManager.Android` (one Downloads screen and the Add sheet, Release/NativeAOT/arm64,
   `app.inbound.android`), `src/DownloadManager.Mobile` (UI-agnostic model), the Host core in process through an

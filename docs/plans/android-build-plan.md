@@ -35,8 +35,13 @@ the emulator and for day-to-day work anyway, because NativeAOT builds are slow.
 | The Mi 8 Lite is Android 11, below the minimum | "Test builds min API 30": test builds (`-p:InboundTestBuild=true`, Release/NativeAOT with the adb hooks) go down to API 30 so it stays the slow phone; release builds stay at 31 |
 | Which phone the 2 s cold mark is held to | "S24 FE + Mi 8 Lite, but only within reason." (My reading: "within reason" is for the Mi 8 Lite.) |
 
-**Still to ask when it comes up:** anything a mockup leaves open (long-press, what a finished row does when tapped,
-empty states, errors). Ask, do not skip and do not invent. The known faults of the mockup are listed in
+Answered 2026-11-17: plain `http://` stays allowed in release ("yeah"); targetSdk 35 ("15, unless you have a good
+reason"); ship on NativeAOT ("Yes"). Milestones are reviewed by Fable, and commits are pushed as they are made.
+
+**Still to ask when it comes up:** anything a mockup leaves open: long-press, what a finished row does when tapped,
+empty states (no mockup shows the Downloads list with no downloads; propose one in ANDROID.4), errors. Ask, do not
+skip and do not invent. Where a mockup contradicts an owner decision, the decision wins: A0's folder line says
+"Downloads/Inbound", but the owner chose `Download/` directly. The known faults of the mockup are listed in
 `android-app.md` section 2.
 
 ## 2. Rules for this work
