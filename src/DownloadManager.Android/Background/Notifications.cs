@@ -14,6 +14,7 @@ internal static class Notifications
     public const string FinishedChannel = "finished";
     public const int OngoingId = 1001;
     public const int PausedId = 1002;
+    public const int WaitingId = 1003;
 
     /// <summary>MainActivity extra of the "Resume" action: resume everything, then keep the process alive (the app is visible then).</summary>
     public const string ExtraResumeAll = "resume_all";
@@ -22,6 +23,8 @@ internal static class Notifications
     public const string FileProviderAuthority = "app.inbound.android.fileprovider";
 
     public const string PauseAllAction = "app.inbound.android.PAUSE_ALL";
+    public const string UseDataAction = "app.inbound.android.USE_DATA";
+    public const string StopNoResumeAction = "app.inbound.android.STOP_NO_RESUME";
 
     private static bool _channels;
 
@@ -76,14 +79,53 @@ internal static class Notifications
         b.SetOngoing(true);
         b.SetOnlyAlertOnce(true);
         b.SetCategory(Notification.CategoryProgress);
-        b.SetForegroundServiceBehavior((int)NotificationForegroundService.Immediate);
+        if (OperatingSystem.IsAndroidVersionAtLeast(31)) b.SetForegroundServiceBehavior((int)NotificationForegroundService.Immediate);
         b.SetProgress(t.Max, t.Progress, t.Indeterminate);
         b.SetContentIntent(OpenApp(c, false));
         var pauseIntent = new Intent(c, typeof(PauseAllReceiver));
         pauseIntent.SetAction(PauseAllAction);
         var pause = PendingIntent.GetBroadcast(c, 12, pauseIntent, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         b.AddAction(new Notification.Action.Builder(null, "Pause all", pause).Build());
+        if (t.Warning is not null)
+        {
+            // Downloads that can't resume are running on mobile data: say so (the line replaces the file line when collapsed) and offer Stop.
+            b.SetContentText(t.Warning);
+            b.SetStyle(new Notification.BigTextStyle().BigText(string.IsNullOrEmpty(t.Body) ? t.Warning : t.Body + "\n" + t.Warning));
+            b.AddAction(new Notification.Action.Builder(null, "Stop", Broadcast(c, typeof(StopNoResumeReceiver), StopNoResumeAction, 14)).Build());
+        }
+
         return b.Build()!;
+    }
+
+    private static PendingIntent Broadcast(Context c, Type receiver, string action, int requestCode)
+    {
+        var i = new Intent(c, receiver);
+        i.SetAction(action);
+        return PendingIntent.GetBroadcast(c, requestCode, i, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
+    }
+
+    /// <summary>"Waiting for Wi-Fi" / "N downloads will resume", with Use data (a broadcast, so it works with the app not visible).</summary>
+    public static Notification Waiting(Context c, int count)
+    {
+        var b = Builder(c, OngoingChannel, NotificationText.WaitingTitle, NotificationText.WaitingBody(count));
+        b.SetOnlyAlertOnce(true);
+        b.SetCategory(Notification.CategoryStatus);
+        b.SetContentIntent(OpenApp(c, false));
+        b.AddAction(new Notification.Action.Builder(null, "Use data", Broadcast(c, typeof(UseDataReceiver), UseDataAction, 13)).Build());
+        return b.Build()!;
+    }
+
+    /// <summary>The app's own screen, from a notification action whose receiver could not start a session (best effort: the system may refuse).</summary>
+    public static void OpenAppFromBackground(Context c)
+    {
+        try
+        {
+            var i = new Intent(c, typeof(MainActivity));
+            i.AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop);
+            c.StartActivity(i);
+            Log.Info(InboundApplication.Tag, "session could not be started from the background: opening the app");
+        }
+        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "open app from background: " + ex.Message); }
     }
 
     /// <summary>The plain notification a session starts with, before the Host has said what is running.</summary>

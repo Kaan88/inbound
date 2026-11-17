@@ -14,11 +14,10 @@ namespace Inbound.App.Background;
 /// </summary>
 internal sealed class AndroidSleepPrevention(Context app) : ISleepPrevention
 {
-    // WifiManager.WIFI_MODE_FULL_HIGH_PERF (3) is deprecated from API 34 in favour of WIFI_MODE_FULL_LOW_LATENCY (4). The number is used so
-    // a deprecated constant is not named in the build; the low-latency mode holds only while the app is visible, the high-performance
-    // one is what keeps the radio up with the screen off where it is still honoured.
+    // WifiManager.WIFI_MODE_FULL_HIGH_PERF (3): keeps the radio up with the screen off below API 34 (the number is used so a deprecated
+    // constant is not named in the build). From API 34 it does nothing, and WIFI_MODE_FULL_LOW_LATENCY (4) only acts while the app is
+    // visible and the screen on, so no Wi-Fi lock is taken there; the user-initiated job and the wake lock keep the transfer going.
     private const int FullHighPerf = 3;
-    private const int FullLowLatency = 4;
 
     private readonly object _gate = new();
     private PowerManager.WakeLock? _cpu;
@@ -58,8 +57,9 @@ internal sealed class AndroidSleepPrevention(Context app) : ISleepPrevention
     private WifiManager.WifiLock? CreateWifi()
     {
         var wm = (WifiManager?)app.GetSystemService(Context.WifiService);
-        var mode = (WifiMode)(OperatingSystem.IsAndroidVersionAtLeast(34) ? FullLowLatency : FullHighPerf);
-        var l = wm?.CreateWifiLock(mode, "Inbound:downloading");
+        // From API 34 no Wi-Fi lock is taken (see FullHighPerf).
+        if (OperatingSystem.IsAndroidVersionAtLeast(34)) return null;
+        var l = wm?.CreateWifiLock((WifiMode)FullHighPerf, "Inbound:downloading");
         l?.SetReferenceCounted(false);
         return l;
     }

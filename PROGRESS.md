@@ -164,6 +164,22 @@
   The first Mi 8 Lite run does not count: the throttle is per connection, so it finished in 27 s, before the screen
   went off. Not yet tried: a Recents swipe and a reboot with a real download, 30 minutes with the screen off, the
   Pause all and Resume actions, Android 13 (emulator), battery restricted.
+- **Step 2, S3 (2026-11-17): Wi-Fi only on the phone, and the Opus review's eight S2 fixes.** The phone reports the
+  network before the Host starts and on every change (`NetworkMonitor`); "Waiting for Wi-Fi · N will resume" with
+  "Use data"; a download that can't resume goes on with a warning and Stop when the phone is unlocked, and is stopped at
+  once when locked; a flagged job whose server then says it can resume is held like the others (Runtime, with a test).
+  S2 fixes: a service stop before its start no longer crashes (API 30-33); per-start generations; the Resume extra is
+  not replayed after process death; the user-stop record survives process starts that never start the Host (run ids
+  kept until the Host consumes them, at most 16); an asked-for job is always cancelled when not needed; Pause all then
+  shows "N downloads paused"; no Wi-Fi lock on API 34+; smaller ones. Added by the lead after the S24 run: a hold job
+  the system starts while the Host still sees a metered network ends after 30 s (Android and the app disagreeing).
+  **Checks** (`tools/AndroidApp/run-wifi-only.sh`; the test build fakes the metered network, no phone setting changed):
+  on both phones a download added on the "metered" network waits (no bytes sent, keep-alive off, Waiting notification)
+  and finishes on the not-metered one with an equal hash; on the S24 with a 50 s hold the stray hold job ended after
+  the grace and no ongoing notification stayed up. Tests: Integration 2033 passed, 32 skipped (8 m 52 s; an earlier
+  run hung 40 min with no output while the phone scripts built the test server at the same time, and was stopped);
+  Mobile 141. Not tried: "Use data" and the no-resume Stop on a phone (the receivers aren't reachable from adb), a real
+  metered network, the service path on 31 to 33.
 - **Owner (2026-11-17): "put an apk on my desktop for the first usable version, by that I don't mean local downloads
   only, remote connections too."** Asked whether remote hosts (step 6) move up: "Move remote up". New order: step 2,
   step 3, step 6, the APK on the desktop, then steps 4 and 5. **And: "from now on, hold fable reviews until

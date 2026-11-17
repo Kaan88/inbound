@@ -188,11 +188,29 @@ public sealed partial class DownloadManagerService
                        !runtime.PauseRequested && !runtime.CancelRequested && WhyNotPreemptable(runtime) is not null;
             if (runtime.Job.RunningOnMeteredWithoutResume == want) continue;
             runtime.Job.RunningOnMeteredWithoutResume = want;
+            runtime.ResumeKnownChecked = false;
             runtime.Job.Touch();
             changed.Add(runtime);
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// A running job's server has just said whether it can resume while the held rule keeps the job running (flagged): applies the
+    /// rule again, so a job that can resume goes back to the queue like any other, and one that can't stays flagged.
+    /// </summary>
+    private async Task RecheckMeteredAfterResumeKnownAsync()
+    {
+        try
+        {
+            await RequeueExcessAsync(CancellationToken.None).ConfigureAwait(false);
+            Schedule();
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Re-applying the metered rule failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <summary>Raised, outside the lock, when <see cref="WaitingForMeteredNetwork"/> changes.</summary>

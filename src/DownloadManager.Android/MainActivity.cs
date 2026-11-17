@@ -52,7 +52,8 @@ public sealed class MainActivity : AppCompatActivity
         list.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
         fab.Click += (_, _) => ShowAddSheet();
         AskForNotifications();
-        HandleResumeAll(Intent);
+        // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume everything twice.
+        HandleResumeAll(Intent, redelivered: savedInstanceState is not null || (Intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
 
         var reported = false;
         _model.FirstSnapshotShown += () =>
@@ -109,7 +110,7 @@ public sealed class MainActivity : AppCompatActivity
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
-        HandleResumeAll(intent);
+        HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
 #if INBOUND_TEST_BUILD
         if (_model is not null) TestHooks.Run(_model, intent);
 #endif
@@ -129,10 +130,11 @@ public sealed class MainActivity : AppCompatActivity
     }
 
     /// <summary>The "Resume" action of the paused notification: resume everything; the keep-alive follows by itself (the app is visible).</summary>
-    private void HandleResumeAll(Intent? intent)
+    private void HandleResumeAll(Intent? intent, bool redelivered)
     {
         if (intent is null || !intent.GetBooleanExtra(Notifications.ExtraResumeAll, false)) return;
         intent.RemoveExtra(Notifications.ExtraResumeAll);
+        if (redelivered) return;
         var app = ApplicationContext!;
         _ = Task.Run(async () =>
         {

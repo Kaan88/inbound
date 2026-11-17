@@ -4594,6 +4594,7 @@ public sealed partial class DownloadManagerService
         {
             JobDto? dto = null;
             var quotaReached = false;
+            var resumeKnown = false;
             DateTimeOffset now;
             lock (_sync)
             {
@@ -4612,6 +4613,14 @@ public sealed partial class DownloadManagerService
                 if (p.TotalBytes is not null)
                 {
                     job.TotalBytes = p.TotalBytes;
+                }
+
+                // Kept running on a metered network only because the server had not said whether it can resume: now it has,
+                // so the held rule is applied to it again, once (the flag is only ever set while the rule holds).
+                if (job.RunningOnMeteredWithoutResume && job.ResumeSupported is not null && !runtime.ResumeKnownChecked)
+                {
+                    runtime.ResumeKnownChecked = true;
+                    resumeKnown = true;
                 }
 
                 // A transfer a lower limit sent back to the queue is already shown, and maybe saved, as Queued
@@ -4658,6 +4667,8 @@ public sealed partial class DownloadManagerService
                 _log?.Invoke($"Queue {job.QueueId} reached its download quota; pausing.");
                 _ = SaveSettingsQuietlyAsync();
             }
+
+            if (resumeKnown) _ = RecheckMeteredAfterResumeKnownAsync();
 
             if (dto is not null)
             {
@@ -6017,6 +6028,8 @@ public sealed partial class DownloadManagerService
         public bool Preempted { get; set; }
         /// <summary>The engine's last phase, so a limit change leaves a job alone while it verifies or muxes.</summary>
         public string? LastPhase { get; set; }
+        /// <summary>The held metered rule was re-applied once the server said whether this job can resume; reset when the flag clears. Under <c>_sync</c>.</summary>
+        public bool ResumeKnownChecked { get; set; }
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
         /// <summary>The limited caller (D8) whose cancel deleted the data, so the folders it then removes stay in its folders.</summary>

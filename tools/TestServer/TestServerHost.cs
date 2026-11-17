@@ -223,6 +223,12 @@ public sealed partial class TestServerHost : IAsyncDisposable
 
             try
             {
+                // rangedelay=<ms>: a ranged request (a resume) gets its headers late, so a client can be mid-connect while something changes.
+                if (isRange && QueryInt(context, "rangedelay", 0) is > 0 and var headerDelay)
+                {
+                    await Task.Delay(headerDelay, context.RequestAborted).ConfigureAwait(false);
+                }
+
                 await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
                     throttleBytesPerSecond: QueryInt(context, "bps", 0),
                     unknownLength: false).ConfigureAwait(false);

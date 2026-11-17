@@ -21,6 +21,7 @@ internal sealed class AndroidPlatform : IHostPlatform
         SupportsFolderBrowse = false,
         SupportsCompletionActions = false,
         SupportsReveal = false,
+        SupportsMeteredNetworkRule = true,
         HostKind = HostKinds.Server,
     };
 
@@ -55,7 +56,8 @@ internal sealed class HostLeftRunningException(Exception startError, Exception s
 internal sealed class AndroidHost : IAsyncDisposable
 {
     /// <summary>The shared Download folder, by path (owner's decision for the default destination).</summary>
-    public const string SharedDownloadFolder = "/storage/emulated/0/Download";
+    public static string SharedDownloadFolder { get; } =
+        Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath ?? "/storage/emulated/0/Download";
 
     private readonly HttpDownloadEngine _engine;
     private readonly Action<string> _say;
@@ -88,8 +90,9 @@ internal sealed class AndroidHost : IAsyncDisposable
     /// <param name="defaultDownloadFolder">Becomes the default download folder while that setting is still the built-in default (nobody set one).</param>
     /// <param name="sleep">Held by the Runtime while downloads run and the setting is on (wake lock, Wi-Fi lock).</param>
     /// <param name="lastRunStoppedByUser">The previous run was stopped by the user: downloads that were running start Paused.</param>
+    /// <param name="networkMetered">The network as it is now, reported to the Runtime before InitializeAsync.</param>
     public static async Task<AndroidHost> StartAsync(string stateRoot, string defaultDownloadFolder, ISleepPrevention sleep,
-        bool lastRunStoppedByUser, Action<string> say, CancellationToken ct)
+        bool lastRunStoppedByUser, bool networkMetered, Action<string> say, CancellationToken ct)
     {
         var paths = new StoragePaths(stateRoot);
         paths.EnsureCreated();
@@ -132,6 +135,8 @@ internal sealed class AndroidHost : IAsyncDisposable
         service.MeteredWaitChanged += onWait;
         try
         {
+            // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
+            await service.SetNetworkMeteredAsync(networkMetered, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);
             service.TrayAvailable = false;
 

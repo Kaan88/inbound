@@ -25,6 +25,8 @@ public sealed class InboundApplication : Application
         // Every process start, whatever started it (the app, a job, a notification action): this run's id, and the previous run's kept for the Host start.
         RunTracker.Begin(this);
         InboundBackground.Init(this);
+        // Before any Host: its first report of the network comes from here.
+        NetworkMonitor.Init(this);
 #if INBOUND_RELEASE_ENV
         // The sockets read this switch once, at first use (before the Host starts). The project also lists it as an AndroidEnvironment
         // file; this makes sure it is set when that file is not applied (NativeAOT).
@@ -52,8 +54,13 @@ public sealed class InboundApplication : Application
             var app = c.ApplicationContext!;
             return _host ??= Task.Run(async () =>
             {
+                // The network is read here and reported before the Host's InitializeAsync (its first Schedule is already held).
+                var metered = NetworkMonitor.Current;
                 var host = await AndroidHost.StartAsync(root, AndroidHost.SharedDownloadFolder, new AndroidSleepPrevention(app),
-                    RunTracker.LastRunStoppedByUser(app), m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
+                    RunTracker.LastRunStoppedByUser(app), metered, m => Android.Util.Log.Info(Tag, m), CancellationToken.None).ConfigureAwait(false);
+                // The Host used the "stopped by the user" decision in its start: the older runs are explained.
+                RunTracker.HostConsumed();
+                NetworkMonitor.OnHostStarted(host, metered);
                 InboundBackground.OnHostStarted(app, host);
                 return host;
             });

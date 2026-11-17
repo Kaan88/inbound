@@ -88,12 +88,12 @@ public class BackgroundLogicTests
     {
         var m = new TransferMeter(1000, TimeSpan.FromSeconds(5));
         var t0 = new DateTimeOffset(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
-        Assert.Equal(5000, m.Observe(5000, t0));
-        Assert.Null(m.Observe(9000, t0.AddSeconds(1)));            // too soon
-        Assert.Equal(9000, m.Observe(9000, t0.AddSeconds(6)));
-        Assert.Null(m.Observe(9500, t0.AddSeconds(12)));           // too little
-        Assert.Null(m.Observe(2000, t0.AddSeconds(13)));           // a download left: rebase, nothing added
-        Assert.Equal(11_000, m.Observe(3500, t0.AddSeconds(20)));
+        Assert.Null(m.Observe(5000, t0));                          // the first observation is the basis, earlier bytes are not counted
+        Assert.Equal(4000, m.Observe(9000, t0.AddSeconds(1)));
+        Assert.Null(m.Observe(9500, t0.AddSeconds(2)));            // too soon
+        Assert.Null(m.Observe(9600, t0.AddSeconds(7)));            // too little
+        Assert.Null(m.Observe(2000, t0.AddSeconds(8)));            // a download left: rebase, nothing added
+        Assert.Equal(6100, m.Observe(3500, t0.AddSeconds(14)));
     }
 
     [Fact]
@@ -102,9 +102,11 @@ public class BackgroundLogicTests
         var m = new TransferMeter(1, TimeSpan.Zero);
         var t = DateTimeOffset.UnixEpoch;
         m.Observe(100, t);
+        Assert.Equal(40, m.Observe(140, t.AddSeconds(1)));
         m.Reset();
         Assert.Equal(0, m.Total);
-        Assert.Equal(50, m.Observe(50, t.AddSeconds(1)));
+        Assert.Null(m.Observe(50, t.AddSeconds(2)));
+        Assert.Equal(30, m.Observe(80, t.AddSeconds(3)));
     }
 
     private static readonly byte[] RunA = [1, 2, 3, 4];
@@ -140,4 +142,75 @@ public class BackgroundLogicTests
         Assert.False(UserStopDetector.Decide(null, [new ExitRecord(RunA, 10, 1)]).StoppedByUser);
         Assert.False(UserStopDetector.Decide([], [new ExitRecord([], 10, 1)]).StoppedByUser);
     }
+
+    private static byte[] Id(byte b) => Enumerable.Repeat(b, RunIdList.IdLength).ToArray();
+
+    [Fact]
+    public void A_process_that_never_started_the_Host_does_not_lose_a_user_stop()
+    {
+        // Run A started the Host and consumed the decision: the file holds A only.
+        var file = RunIdList.OnHostConsumed(Id(1));
+        // Run B (a FileProvider query, no Host) starts: the file holds A and B, and B is stopped by the user.
+        file = RunIdList.OnProcessStart(RunIdList.Parse(file), Id(2));
+        Assert.Equal(2, RunIdList.Parse(file).Count);
+        // Run C starts its Host: B's user stop counts, although B was not the run before it in the Host's history.
+        var records = new[] { new ExitRecord(Id(1), 5, 100), new ExitRecord(Id(2), 10, 200) };
+        Assert.True(UserStopDetector.DecideAny(RunIdList.Parse(file), records).StoppedByUser);
+        // C consumed it: the file holds C only, and the same records no longer count at the next start.
+        file = RunIdList.OnHostConsumed(Id(3));
+        file = RunIdList.OnProcessStart(RunIdList.Parse(file), Id(4));
+        Assert.False(UserStopDetector.DecideAny(RunIdList.Parse(file), records).StoppedByUser);
+    }
+
+    [Fact]
+    public void Run_ids_keep_the_newest_sixteen_and_drop_a_torn_tail()
+    {
+        var ids = Enumerable.Range(1, 20).Select(i => Id((byte)i)).ToList();
+        var parsed = RunIdList.Parse(RunIdList.Serialize(ids));
+        Assert.Equal(RunIdList.MaxIds, parsed.Count);
+        Assert.Equal(Id(5), parsed[0]);
+        Assert.Equal(Id(20), parsed[^1]);
+        Assert.Single(RunIdList.Parse([.. Id(7), 1, 2, 3]));
+        Assert.Empty(RunIdList.Parse(null));
+        Assert.False(UserStopDetector.DecideAny([], [new ExitRecord(Id(1), 10, 1)]).StoppedByUser);
+    }
+
+    [Theory]
+    [InlineData(1, "1 download will resume")]
+    [InlineData(3, "3 downloads will resume")]
+    public void Waiting_body_counts_the_downloads(int count, string expected)
+    {
+        Assert.Equal("Waiting for Wi-Fi", NotificationText.WaitingTitle);
+        Assert.Equal(expected, NotificationText.WaitingBody(count));
+    }
+
+    [Fact]
+    public void Ongoing_carries_the_no_resume_warning_only_while_some_download_can_not_resume()
+    {
+        var first = new ActiveFile(Guid.NewGuid(), "a.zip", 10, 100, null);
+        var plain = Sum(2, 1_000_000, first, 10, 100);
+        Assert.Null(NotificationText.Ongoing(plain).Warning);
+        var one = NotificationText.Ongoing(plain with { NoResumeOnMeteredCount = 1 });
+        Assert.Equal("1 download can't wait for Wi-Fi: stopping it starts over", one.Warning);
+        Assert.Equal("2 downloads · 1.0 MB/s", one.Title);
+        Assert.Equal("2 downloads can't wait for Wi-Fi: stopping them starts over", NotificationText.Ongoing(plain with { NoResumeOnMeteredCount = 2 }).Warning);
+        // The warning is part of the value, so a change of it replaces the notification.
+        Assert.NotEqual(NotificationText.Ongoing(plain), one);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    public void Metered_unless_the_network_says_it_is_not_metered_even_for_a_while(bool notMetered, bool temporarily, bool expected) =>
+        Assert.Equal(expected, MeteredPolicy.IsMetered(notMetered, temporarily));
+
+    [Theory]
+    [InlineData(false, true, false)]  // unlocked and the screen on: the user is there, keep going and warn
+    [InlineData(true, true, true)]    // locked, screen on: stop at once
+    [InlineData(true, false, true)]   // locked, screen off
+    [InlineData(false, false, true)]  // screen off before the lock took effect: nobody looks at the warning
+    public void Non_resumable_downloads_stop_at_once_unless_the_user_is_using_the_phone(bool locked, bool interactive, bool stop) =>
+        Assert.Equal(stop, MeteredPolicy.StopNonResumableAtOnce(locked, interactive));
 }

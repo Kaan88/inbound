@@ -11,11 +11,11 @@ namespace DownloadManager.Integration.Tests;
 public sealed partial class RuntimeServiceTests
 {
 
-    private async Task<JobDto> AddSlowAsync(ServiceContext ctx, string name, int size, int seed, int bps, int connections, string route = "file")
+    private async Task<JobDto> AddSlowAsync(ServiceContext ctx, string name, int size, int seed, int bps, int connections, string route = "file", string extraQuery = "")
     {
         var response = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"{_server.BaseAddress}/{route}/{name}?size={size}&seed={seed}&bps={bps}",
+            Url = $"{_server.BaseAddress}/{route}/{name}?size={size}&seed={seed}&bps={bps}{extraQuery}",
             DestinationDirectory = ctx.Destination,
             FileName = name,
             Connections = connections,

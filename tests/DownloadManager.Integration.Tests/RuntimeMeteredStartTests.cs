@@ -57,11 +57,11 @@ public sealed partial class RuntimeServiceTests
     /// A paused job with data on disk in a first service (kept alive by the caller), rewritten on disk by <paramref name="shape"/> as
     /// a crash or an exit would have left it.
     /// </summary>
-    private async Task<(ServiceContext Ctx, Guid Id, long Bytes)> OnDiskJobAsync(Action<DownloadJob> shape, bool wifiOnly, string name, int seed)
+    private async Task<(ServiceContext Ctx, Guid Id, long Bytes)> OnDiskJobAsync(Action<DownloadJob> shape, bool wifiOnly, string name, int seed, string extraQuery = "")
     {
         var ctx = await ServiceContext.CreateAsync(_server);
         if (wifiOnly) await WifiOnlyAsync(ctx);
-        var job = await AddSlowAsync(ctx, name, 3 * Mb, seed, 512 * 1024, 1);
+        var job = await AddSlowAsync(ctx, name, 3 * Mb, seed, 512 * 1024, 1, extraQuery: extraQuery);
         await ctx.WaitFor(job.Id, j => j.State == "downloading" && j.ReceivedBytes > 128 * 1024, TimeSpan.FromSeconds(30));
         Assert.True((await ctx.Service.PauseAsync(job.Id)).Ok);
         await ctx.WaitFor(job.Id, j => j.State == "paused", TimeSpan.FromSeconds(30));
@@ -266,6 +266,37 @@ public sealed partial class RuntimeServiceTests
         var done = await ctx.WaitFor(job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(60));
         Assert.Equal("completed", done.State);
         Assert.Equal(Sha256Of(968, 3 * Mb), await Hashing.Sha256FileAsync(done.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task AJobKeptRunningBecauseTheServerHadNotSaidWhetherItResumesIsStoppedOnceTheServerSaysYes()
+    {
+        // On disk: a paused job with data whose server's answer about resuming is not known. The resume's headers come 3 s late.
+        var (ctx, id, _) = await OnDiskJobAsync(job => { Interrupted(job); job.ResumeSupported = null; }, wifiOnly: true,
+            "resume-known.bin", 969, extraQuery: "&rangedelay=3000");
+        await using var _ = ctx;
+        await using var b = new Booted(ctx.Paths);
+        await b.Service.InitializeAsync();
+        await b.UntilAsync(() => b.Job(id) is { State: "starting" or "connecting" or "downloading" } && b.Job(id).ReceivedBytes > 0, "the resume to start");
+        Assert.Null(b.Job(id).ResumeSupported);
+
+        await b.Service.SetNetworkMeteredAsync(true);
+        Assert.True(b.Job(id).RunningOnMeteredWithoutResume);
+        Assert.NotEqual("queued", b.Job(id).State);
+
+        // The server answers 206: the job is applied the held rule like any resumable one.
+        await b.UntilAsync(() => b.Job(id).State == "queued", "the job to go back to the queue", seconds: 20);
+        var queued = b.Job(id);
+        Assert.False(queued.RunningOnMeteredWithoutResume);
+        Assert.False(queued.PausedByUser);
+        Assert.True(queued.ResumeSupported);
+        await Task.Delay(500);
+        Assert.Equal("queued", b.Job(id).State);
+
+        await b.Service.SetNetworkMeteredAsync(false);
+        await b.UntilAsync(() => b.Job(id).State is "completed" or "failed", "the job to finish");
+        Assert.Equal("completed", b.Job(id).State);
+        Assert.Equal(Sha256Of(969, 3 * Mb), await Hashing.Sha256FileAsync(b.Job(id).FinalFilePath));
     }
 
     // ----- part 1, item 6: a queue retry coming due while held -----
