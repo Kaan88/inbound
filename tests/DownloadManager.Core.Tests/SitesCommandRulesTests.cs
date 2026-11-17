@@ -18,11 +18,29 @@ public sealed class SitesCommandRulesTests
         var groups = SitesCommandRules.ServerMenu(All, [File("a.iso")]);
 
         Assert.Equal(3, groups.Count);
-        Assert.Equal([SiteCommand.Download, SiteCommand.DownloadTo, SiteCommand.Open], groups[0]);
+        Assert.Equal([SiteCommand.Download, SiteCommand.DownloadTo, SiteCommand.Open, SiteCommand.Preview], groups[0]);
         Assert.Equal([SiteCommand.Rename, SiteCommand.Delete, SiteCommand.NewFolder], groups[1]);
         Assert.Equal([SiteCommand.CopyPath, SiteCommand.CopyAddress], groups[2]);
         Assert.Equal("/d/a\n/d/b", SitesCommandRules.Paths("/d", ["a", "b"]));
         Assert.Equal("/d", SitesCommandRules.Paths("/d", []));
+    }
+
+    [Fact]
+    public void PreviewIsOfferedForOneFileOnly()
+    {
+        Assert.Contains(SiteCommand.Preview, SitesCommandRules.ServerMenu(All, [File("a.txt")]).SelectMany(g => g));
+        Assert.DoesNotContain(SiteCommand.Preview, SitesCommandRules.ServerMenu(All, [Folder("x")]).SelectMany(g => g));
+        Assert.DoesNotContain(SiteCommand.Preview, SitesCommandRules.ServerMenu(All, [File("a"), File("b")]).SelectMany(g => g));
+        Assert.Equal("Space", SitesCommandRules.KeyText(SiteCommand.Preview));
+    }
+
+    [Fact]
+    public void ACopyBetweenRemotesIsDescribedWithBothNames()
+    {
+        var batch = new SiteTransferDto { Direction = "between", SiteName = "NAS", TargetSiteName = "Drive", RemoteFolder = "/a", TargetFolder = "/b" };
+        Assert.Equal("Copy from NAS to Drive", SiteTransferRules.Title(batch));
+        Assert.Equal("NAS to Drive", SiteTransferRules.Route(batch));
+        Assert.Equal("NAS /a to Drive /b", SiteTransferRules.FullRoute(batch));
     }
 
     [Fact]

@@ -70,6 +70,7 @@ public sealed partial class MainWindow
     {
         _sitesStatus = status;
         _sites = sites;
+        RefreshLeftSources();
         SyncSiteEntryPoints();
         UpdateSitesChip();
         if (_homeShown && !SitesOffered) LeaveSites(selectCategory: true);
@@ -205,6 +206,7 @@ public sealed partial class MainWindow
         InitSiteMenu();
         WireSiteChanges(panel);
         panel.StateChanged += FollowServerFolder;
+        panel.StateChanged += () => RememberPlace(panel);
         panel.SiteUpdated += updated =>
         {
             var at = _sites.FindIndex(site => site.Id == updated.Id);
@@ -257,8 +259,12 @@ public sealed partial class MainWindow
         SiteMenu.Visibility = Visibility.Visible;
         UpdateSpeedGraphVisibility();
         SyncTorrentInfo();
-        panel.Open(site, keepPlace ? panel.ReopenPath : null);
+        // SITES.13: a remote not shown before opens where it was left.
+        panel.Open(site, keepPlace ? panel.ReopenPath : site.LastFolder is { Length: > 0 } last ? last : null);
         ApplyTwoPanes();
+        // The left pane, when it shows a remote, was stopped when Sites was left: it opens again where it was.
+        if (_leftSiteId is not null && _leftRemote is { } leftPanel && FindSite(_leftSiteId) is { } leftSite)
+            leftPanel.Open(leftSite, leftPanel.ShowsSameStart(leftSite) ? leftPanel.ReopenPath : leftSite.LastFolder is { Length: > 0 } leftLast ? leftLast : null);
         UpdateSitesToolbar();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, panel.FocusList);
     }
@@ -277,6 +283,7 @@ public sealed partial class MainWindow
         _sitesShown = false;
         _shownSiteId = null;
         _sitesPanel?.Stop();
+        _leftRemote?.Stop();
         SitesHost.Visibility = Visibility.Collapsed;
         DownloadListViewport.Visibility = Visibility.Visible;
         JobsScrollTrack.Visibility = _scrollTrackBeforeSites;

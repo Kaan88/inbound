@@ -7,7 +7,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>What a command of the server pane (menu, toolbar, keys, context menu) is. Shared by the Site menu and the menus.</summary>
 internal enum SiteCommand
 {
-    Download, DownloadTo, Open, Rename, Delete, NewFolder, Upload, UploadFolder, Refresh, PasteAddress, CopyAddress, CopyPath, StarFolder,
+    Download, DownloadTo, Open, Rename, Delete, NewFolder, Upload, UploadFolder, Refresh, PasteAddress, CopyAddress, CopyPath, StarFolder, Preview, Sync,
 }
 
 /// <summary>What a command of the This PC pane is.</summary>
@@ -72,7 +72,11 @@ internal static class SitesCommandRules
         }
 
         var one = picked.Count == 1;
-        groups.Add(one ? [SiteCommand.Download, SiteCommand.DownloadTo, SiteCommand.Open] : [SiteCommand.Download, SiteCommand.DownloadTo]);
+        var getGroup = new List<SiteCommand> { SiteCommand.Download, SiteCommand.DownloadTo };
+        if (one) getGroup.Add(SiteCommand.Open);
+        // SITES.13: a file can be previewed (text or image).
+        if (one && !picked[0].IsFolder) getGroup.Add(SiteCommand.Preview);
+        groups.Add(getGroup);
         var change = new List<SiteCommand>();
         if (one) change.Add(SiteCommand.Rename);
         change.Add(SiteCommand.Delete);
@@ -125,6 +129,8 @@ internal static class SitesCommandRules
         SiteCommand.CopyAddress => "Copy address",
         SiteCommand.CopyPath => "Copy path",
         SiteCommand.StarFolder => "Star this folder",
+        SiteCommand.Preview => "Preview",
+        SiteCommand.Sync => "Sync linked folder…",
         _ => command.ToString(),
     };
 
@@ -154,6 +160,7 @@ internal static class SitesCommandRules
         SiteCommand.Upload => "Ctrl+U",
         SiteCommand.Refresh => "F5",
         SiteCommand.CopyAddress => "Ctrl+Shift+C",
+        SiteCommand.Preview => "Space",
         _ => "",
     };
 

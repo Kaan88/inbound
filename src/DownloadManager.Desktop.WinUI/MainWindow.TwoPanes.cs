@@ -28,6 +28,12 @@ public sealed partial class MainWindow
     private Button? _downloadArrow;
     private ToggleButton? _linkToggle;
     private bool _syncingLinkToggle;
+    // SITES.14: the left pane is This PC (a null id) or any remote, the same one as on the right included.
+    private ComboBox? _leftSource;
+    private SitesPanel? _leftRemote;
+    private string? _leftSiteId;
+    private bool _syncingLeftSource;
+    private string? _leftSourceSignature;
     private string? _followedSiteId;
     private string? _followedServerPath;
 
@@ -50,6 +56,8 @@ public sealed partial class MainWindow
             Grid.SetRow(_switchRow, 0);
             SitesHost.Children.Add(_switchRow);
             _panesGrid = new Grid { Margin = new Thickness(12, 0, 12, 12) };
+            _panesGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            _panesGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             _panesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
             _panesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             _panesGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -58,6 +66,7 @@ public sealed partial class MainWindow
         }
 
         Grid.SetColumn(panel, 2);
+        Grid.SetRow(panel, 1);
         _panesGrid.Children.Add(panel);
     }
 
@@ -174,7 +183,9 @@ public sealed partial class MainWindow
         if (_panesGrid is { ColumnDefinitions.Count: 3 } grid)
             grid.ColumnDefinitions[0].Width = shown ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
 
-        if (_localPane is { } local) local.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        if (_localPane is { } local) local.Visibility = shown && _leftSiteId is null ? Visibility.Visible : Visibility.Collapsed;
+        if (_leftRemote is { } leftRemote) leftRemote.Visibility = shown && _leftSiteId is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (_leftSource is { } leftSource) leftSource.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         if (_paneArrows is { } arrows) arrows.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         panel.ServerOnly = !shown;
         if (shown && panel.Site is { } site) FollowSite(site, panel.Path);
@@ -199,8 +210,17 @@ public sealed partial class MainWindow
         local.CanUpload = () => _sitesPanel is { IsLoading: false, SiteId: not null };
         WireLocalDrag(local);
         Grid.SetColumn(local, 0);
+        Grid.SetRow(local, 1);
         grid.Children.Add(local);
         _localPane = local;
+
+        _leftSource = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 6) };
+        AutomationProperties.SetName(_leftSource, "Left pane shows");
+        ToolTipService.SetToolTip(_leftSource, "What the left pane shows: a folder of this PC or any remote");
+        _leftSource.SelectionChanged += (_, _) => OnLeftSourceChanged();
+        Grid.SetColumn(_leftSource, 0);
+        grid.Children.Add(_leftSource);
+        RefreshLeftSources();
 
         _uploadArrow = GutterButton("", "Upload to the server", "Upload the items selected on this PC into the server folder on the right", "InboundUploadBrush");
         _uploadArrow.Click += (_, _) => _ = UploadFromPaneAsync();
@@ -229,6 +249,7 @@ public sealed partial class MainWindow
         _paneArrows.Children.Add(_downloadArrow);
         _paneArrows.Children.Add(_linkToggle);
         Grid.SetColumn(_paneArrows, 1);
+        Grid.SetRow(_paneArrows, 1);
         grid.Children.Add(_paneArrows);
         local.SyncBar();
     }
@@ -266,6 +287,20 @@ public sealed partial class MainWindow
         }
 
         if (_uploadArrow is null || _downloadArrow is null || _sitesPanel is not { } panel || _localPane is not { } local) return;
+        if (_leftSiteId is not null && _leftRemote is { } leftRemote)
+        {
+            // Remote on both sides: a copy between them, either way.
+            var both = TwoPanesShown && !panel.IsLoading && panel.SiteId is not null && !leftRemote.IsLoading && leftRemote.SiteId is not null;
+            _uploadArrow.IsEnabled = both && leftRemote.SelectedNames.Count > 0;
+            _downloadArrow.IsEnabled = both && panel.SelectedNames.Count > 0;
+            ToolTipService.SetToolTip(_uploadArrow, "Copy what is selected on the left into the folder on the right");
+            ToolTipService.SetToolTip(_downloadArrow, "Copy what is selected on the right into the folder on the left");
+            SyncDeleteForGoodMenu();
+            return;
+        }
+
+        ToolTipService.SetToolTip(_uploadArrow, "Upload the items selected on this PC into the server folder on the right");
+        ToolTipService.SetToolTip(_downloadArrow, "Download the items selected on the server into the folder on the left");
         var ready = TwoPanesShown && !panel.IsLoading && panel.SiteId is not null && local.Path.Length > 0;
         _uploadArrow.IsEnabled = ready && local.Selected.Count > 0;
         _downloadArrow.IsEnabled = ready && panel.SelectedNames.Count > 0;
@@ -321,8 +356,114 @@ public sealed partial class MainWindow
         if (start is not null && (local.TargetPath.Length == 0 || newSite && site.LocalFolder is { Length: > 0 })) local.Open(start);
     }
 
+    // ---- The left pane's source (SITES.14) --------------------------------------------------------------
+
+    /// <summary>"This PC" and every remote, with the choice kept; called when the remotes change.</summary>
+    private void RefreshLeftSources()
+    {
+        if (_leftSource is not { } box) return;
+        var signature = string.Join(';', _sites.Select(site => site.Id + "|" + site.Name)) + ";" + _leftSiteId;
+        if (signature == _leftSourceSignature && box.Items.Count > 0) return;
+        _leftSourceSignature = signature;
+        _syncingLeftSource = true;
+        try
+        {
+            box.Items.Clear();
+            box.Items.Add(new ComboBoxItem { Content = "This PC", Tag = null });
+            var selected = 0;
+            foreach (var site in _sites)
+            {
+                box.Items.Add(new ComboBoxItem { Content = site.Name, Tag = site.Id });
+                if (site.Id == _leftSiteId) selected = box.Items.Count - 1;
+            }
+
+            // The remote on the left was removed: the pane goes back to This PC.
+            if (_leftSiteId is not null && selected == 0) _leftSiteId = null;
+            box.SelectedIndex = selected;
+        }
+        finally
+        {
+            _syncingLeftSource = false;
+        }
+
+        ApplyTwoPanes();
+    }
+
+    private void OnLeftSourceChanged()
+    {
+        if (_syncingLeftSource || _leftSource?.SelectedItem is not ComboBoxItem item) return;
+        var id = item.Tag as string;
+        if (id == _leftSiteId) return;
+        _leftSiteId = id;
+        if (id is not null && FindSite(id) is { } site)
+        {
+            var panel = EnsureLeftRemote();
+            panel.Open(site, site.LastFolder is { Length: > 0 } last ? last : null);
+        }
+        else _leftRemote?.Stop();
+
+        ApplyTwoPanes();
+        UpdateTwoPanesArrows();
+    }
+
+    /// <summary>The left pane as a remote: the same browser as the right one, wired for browsing and for the arrows.</summary>
+    private SitesPanel EnsureLeftRemote()
+    {
+        if (_leftRemote is { } existing) return existing;
+        var panel = new SitesPanel
+        {
+            Browse = BrowseAskingAsync,
+            Star = request => _remote.StarSiteFolderAsync(request),
+            HereLookup = (request, token) => _remote.SiteHereAsync(request, token),
+            OpenSitesOptions = OpenSitesOptionsHook,
+            FixSite = (site, problem) => _ = FixSiteAsync(site, problem),
+            Visibility = Visibility.Collapsed,
+        };
+        panel.EditSiteRequested += site => _ = EnsureSiteFlows().SaveFormAsync(site);
+        panel.StateChanged += UpdateTwoPanesArrows;
+        panel.StateChanged += () => RememberPlace(panel);
+        panel.SiteUpdated += updated =>
+        {
+            var at = _sites.FindIndex(site => site.Id == updated.Id);
+            if (at >= 0) _sites[at] = updated;
+        };
+        panel.CommandRequested += command =>
+        {
+            switch (command)
+            {
+                case SiteCommand.Download when _sitesPanel is { } right:
+                    _ = CopyBetweenAsync(panel, right);
+                    break;
+                case SiteCommand.Refresh:
+                    panel.Refresh();
+                    break;
+                case SiteCommand.Preview:
+                    SetSitesStatus("Preview works in the right pane.");
+                    break;
+                case SiteCommand.CopyPath:
+                    CopyText(SitesCommandRules.Paths(panel.Path, [.. panel.SelectedNames.Select(name => name.Name)]), "Path copied");
+                    break;
+                default:
+                    SetSitesStatus("Rename, delete and the other changes are done in the right pane. Choose the remote there.");
+                    break;
+            }
+        };
+        panel.ServerOnly = false;
+        Grid.SetColumn(panel, 0);
+        Grid.SetRow(panel, 1);
+        _panesGrid?.Children.Add(panel);
+        _leftRemote = panel;
+        return panel;
+    }
+
     private async Task UploadFromPaneAsync()
     {
+        if (_leftSiteId is not null && _leftRemote is { } leftRemote && _sitesPanel is { } rightPanel)
+        {
+            await CopyBetweenAsync(leftRemote, rightPanel);
+            return;
+        }
+
         if (_sitesPanel is not { Site: { } site } panel || _localPane is not { } local) return;
         var names = local.Selected.Select(entry => new SiteTransferNameDto { Name = entry.Name, IsFolder = entry.IsFolder }).ToList();
         if (names.Count == 0 || local.Path.Length == 0) return;
@@ -333,6 +474,12 @@ public sealed partial class MainWindow
 
     private async Task DownloadToPaneCoreAsync()
     {
+        if (_leftSiteId is not null && _leftRemote is { } leftRemote && _sitesPanel is { } rightPanel)
+        {
+            await CopyBetweenCoreAsync(rightPanel, leftRemote);
+            return;
+        }
+
         if (_sitesPanel is not { Site: { } site } panel || _localPane is not { } local) return;
         var names = panel.SelectedNames;
         if (names.Count == 0 || local.Path.Length == 0) return;

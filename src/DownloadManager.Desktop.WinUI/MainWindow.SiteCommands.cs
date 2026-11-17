@@ -94,6 +94,8 @@ public sealed partial class MainWindow
         SiteMenuTwoPanes.Text = TwoPanesShown ? "Remote only" : "Two panes";
         SiteMenuTwoPanes.IsEnabled = TwoPanesOffered;
         SiteMenuCopyAddress.IsEnabled = site is not null;
+        SiteMenuPreview.IsEnabled = ready && one && panel.SelectedFileName is not null;
+        SiteMenuSync.IsEnabled = ready && thisPc && site is { LocalFolder.Length: > 0 };
         // An address opened once is not edited; it can be remembered from All remotes.
         SiteMenuEdit.IsEnabled = site is not null && SitesHomeRules.CanEdit(site);
         SitesEditSiteButton.IsEnabled = site is not null && SitesHomeRules.CanEdit(site);
@@ -203,6 +205,12 @@ public sealed partial class MainWindow
                 break;
             case SiteCommand.StarFolder:
                 await panel.ToggleStarAsync();
+                break;
+            case SiteCommand.Preview:
+                await PreviewSelectedAsync();
+                break;
+            case SiteCommand.Sync:
+                await SyncLinkedFolderAsync();
                 break;
         }
     }

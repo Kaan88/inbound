@@ -117,6 +117,7 @@
                 <MenuFlyoutItem x:Name="SiteMenuDownload" Text="Download" AccessKey="D" Tag="Download" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuDownloadTo" Text="Download to…" AccessKey="T" Tag="DownloadTo" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuOpen" Text="Open" AccessKey="O" Tag="Open" Click="SiteMenuItem_Click" />
+                <MenuFlyoutItem x:Name="SiteMenuPreview" Text="Preview" AccessKey="W" Tag="Preview" Click="SiteMenuItem_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="SiteMenuUpload" Text="Upload files…" AccessKey="U" Tag="Upload" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuUploadFolder" Text="Upload a folder…" AccessKey="F" Tag="UploadFolder" Click="SiteMenuItem_Click" />
@@ -126,6 +127,7 @@
                 <MenuFlyoutItem x:Name="SiteMenuDelete" Text="Delete on server…" AccessKey="V" Tag="Delete" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuDeleteForGood" Text="Delete permanently on This PC…" AccessKey="M" Tag="DeleteForGood" Click="SiteMenuItem_Click" Visibility="Collapsed" />
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="SiteMenuSync" Text="Sync linked folder…" AccessKey="Z" Tag="Sync" Click="SiteMenuItem_Click" />
                 <MenuFlyoutItem x:Name="SiteMenuRefresh" Text="Refresh" AccessKey="H" Tag="Refresh" Click="SiteMenuItem_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="SiteMenuStar" Text="Star this folder" AccessKey="S" Tag="StarFolder" Click="SiteMenuItem_Click" />

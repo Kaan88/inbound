@@ -57,9 +57,12 @@ internal sealed class SiteDialog
     private readonly TextBox _host = new() { Header = "Server", PlaceholderText = "files.example.com" };
     private readonly TextBox _port = new() { Header = "Port", Width = 96, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBox _user = new() { Header = "User" };
+    // SITES.13: a speed limit per remote, in KB/s; 0 is no limit. Under Advanced.
+    private readonly NumberBox _downLimit = new() { Header = "Download limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 190 };
+    private readonly NumberBox _upLimit = new() { Header = "Upload limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 190 };
     private readonly SegmentedChoice _auth = new("Sign in with");
     private readonly PasswordBox _password = new() { Header = "Password", PasswordRevealMode = PasswordRevealMode.Hidden };
-    private readonly TextBox _keyPath = new() { Header = "Key file", PlaceholderText = @"C:\Users\you\.ssh\id_ed25519" };
+    private readonly TextBox _keyPath = new() { Header = "Key file (OpenSSH or PuTTY .ppk)", PlaceholderText = @"C:\Users\you\.ssh\id_ed25519" };
     private readonly Button _chooseKey = new() { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom, MinWidth = 92 };
     private readonly Grid _keyRow = new() { ColumnSpacing = 8 };
     private readonly PasswordBox _passphrase = new() { Header = "Key passphrase (if it has one)", PasswordRevealMode = PasswordRevealMode.Hidden };
@@ -99,6 +102,8 @@ internal sealed class SiteDialog
         _host.Text = existing?.Host ?? string.Empty;
         _port.Text = (existing?.Port is > 0 ? existing.Port : kind.DefaultPort > 0 ? kind.DefaultPort : 22).ToString(System.Globalization.CultureInfo.InvariantCulture);
         _user.Text = existing?.User ?? string.Empty;
+        _downLimit.Value = existing?.DownLimit ?? 0;
+        _upLimit.Value = existing?.UpLimit ?? 0;
         _clientId.Text = existing?.ClientId ?? string.Empty;
         if (existing?.HasClientSecret == true) _clientSecret.PlaceholderText = "Saved; type to replace";
         _url.Text = existing?.Url ?? string.Empty;
@@ -305,6 +310,10 @@ internal sealed class SiteDialog
         _advancedBody.Children.Add(_name);
         _advancedBody.Children.Add(_port);
         _advancedBody.Children.Add(_remoteFolder);
+        var limits = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        limits.Children.Add(_downLimit);
+        limits.Children.Add(_upLimit);
+        _advancedBody.Children.Add(limits);
         _advancedBody.Children.Add(_keyHint);
         _advanced.Content = _advancedBody;
 
@@ -739,6 +748,8 @@ internal sealed class SiteDialog
 
     // ---- Save and Test ---------------------------------------------------------------------------------
 
+    private static int Limit(NumberBox box) => double.IsNaN(box.Value) ? 0 : (int)Math.Clamp(Math.Round(box.Value), 0, 10_000_000);
+
     private async Task<SiteSaveRequest?> BuildRequestAsync()
     {
         var keyText = string.Empty;
@@ -770,6 +781,12 @@ internal sealed class SiteDialog
             Shows(SiteFields.SignIn) ? _clientId.Text : string.Empty, Shows(SiteFields.SignIn) ? _clientSecret.Password : string.Empty);
         var request = SitesRules.Request(values, _existing, out var problem);
         if (request is null) ShowError(problem!);
+        else
+        {
+            request.DownLimit = Limit(_downLimit);
+            request.UpLimit = Limit(_upLimit);
+        }
+
         return request;
     }
 

@@ -287,6 +287,28 @@ public sealed partial class SitesPanel : UserControl
 
     internal bool IsLoading => _loading;
 
+    /// <summary>The folder shown was read (not loading, not failed): what a remembered place may be taken from.</summary>
+    internal bool IsListed => !_loading && !_failed && _site is not null;
+
+    /// <summary>SITES.13: the sort column (a <see cref="SitesBrowseRules"/> key) and its direction, remembered with the remote.</summary>
+    internal string SortKey => _sortKey;
+
+    internal bool SortAscending => _sortAscending;
+
+    /// <summary>The remote's remembered sort (<see cref="SiteSortKeys"/>), taken when a remote is opened.</summary>
+    private void TakeSavedSort(SiteDto site)
+    {
+        var key = site.Sort switch
+        {
+            SiteSortKeys.Size => SitesBrowseRules.SortSize,
+            SiteSortKeys.Modified => SitesBrowseRules.SortModified,
+            _ => SitesBrowseRules.SortName,
+        };
+        _sortKey = key;
+        _sortAscending = !site.SortDescending;
+        Titles.SetSort(_sortKey, _sortAscending);
+    }
+
     /// <summary>
     /// Shows a site, at <paramref name="path"/> or, with null, at the folder the site starts in; <paramref name="select"/> is the
     /// name to select in it once listed.
@@ -297,6 +319,7 @@ public sealed partial class SitesPanel : UserControl
         _sayIfMissing = sayIfMissing && select is not null;
         if (_site?.Id != site.Id)
         {
+            TakeSavedSort(site);
             _lastListedAt = null;
             _autoTries = 0;
             _troubleSince = null;
@@ -1206,6 +1229,12 @@ public sealed partial class SitesPanel : UserControl
                 DeleteRequested?.Invoke();
                 e.Handled = true;
                 break;
+            // SITES.13: Space previews the one file selected (text or image).
+            case VirtualKey.Space when count == 1 && ItemsList.SelectedItems.OfType<SiteItemRow>().FirstOrDefault() is { IsFolder: false, IsParent: false }
+                && !InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
+                CommandRequested?.Invoke(SiteCommand.Preview);
+                e.Handled = true;
+                break;
             // Ctrl+Enter is Open (the window's); a plain Enter opens a folder or downloads at once, with no dialog.
             case VirtualKey.Enter when ItemsList.SelectedItems.Count > 0 && !InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down):
                 ActivateSelection();
@@ -1227,6 +1256,10 @@ public sealed partial class SitesPanel : UserControl
 
     /// <summary>Goes to <paramref name="path"/> of this site ("Paste address", an open request).</summary>
     internal void GoTo(string path) => OpenFolder(SitesBrowseRules.Normalize(path));
+
+    /// <summary>The name of the one file selected, or null (nothing, a folder or several): what Preview shows.</summary>
+    internal string? SelectedFileName =>
+        ItemsList.SelectedItems is { Count: 1 } && ItemsList.SelectedItems[0] is SiteItemRow { IsFolder: false, IsParent: false } row ? row.Name : null;
 
     /// <summary>The folder row that is selected alone, or null: what "Open" opens in the pane.</summary>
     internal string? SelectedFolderPath =>

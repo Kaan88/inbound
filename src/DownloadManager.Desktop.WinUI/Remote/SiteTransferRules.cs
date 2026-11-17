@@ -63,14 +63,20 @@ internal static class SiteTransferRules
 
     public static bool IsDownload(SiteTransferDto t) => t.Direction == "download";
 
+    /// <summary>SITES.13: a copy from one remote to another (<c>between</c>).</summary>
+    public static bool IsBetween(SiteTransferDto t) => t.Direction == "between";
+
     /// <summary>
     /// The File Name column of a batch row: "Download ubuntu.iso", "Download photos (1,204 files)", "Upload 2 files". A batch
     /// from before the Host named what was picked reads "Download from Home NAS".
     /// </summary>
     public static string Title(SiteTransferDto t)
     {
-        var verb = IsDownload(t) ? "Download" : "Upload";
-        if (t.PickedCount <= 0 || t.Picked.Count == 0) return IsDownload(t) ? $"Download from {t.SiteName}" : $"Upload to {t.SiteName}";
+        // SITES.13: a copy from one remote to another.
+        var between = IsBetween(t);
+        var verb = between ? "Copy" : IsDownload(t) ? "Download" : "Upload";
+        if (t.PickedCount <= 0 || t.Picked.Count == 0)
+            return between ? $"Copy from {t.SiteName} to {t.TargetSiteName}" : IsDownload(t) ? $"Download from {t.SiteName}" : $"Upload to {t.SiteName}";
         if (t.PickedCount == 1)
             return t.Files > 1 || t.Folders > 0 ? $"{verb} {t.Picked[0]} ({Count(t)})" : $"{verb} {t.Picked[0]}";
         return t.Folders == 0 && t.Files == t.PickedCount ? $"{verb} {t.PickedCount} files" : $"{verb} {t.PickedCount} items";
@@ -78,11 +84,11 @@ internal static class SiteTransferRules
 
     /// <summary>The Description column when nothing else needs saying: where from and to, as the mockup draws it.</summary>
     public static string Route(SiteTransferDto t) =>
-        IsDownload(t) ? $"{t.SiteName} to {t.LocalFolder}" : $"{t.LocalFolder} to {t.SiteName} {t.RemoteFolder}";
+        IsBetween(t) ? $"{t.SiteName} to {t.TargetSiteName}" : IsDownload(t) ? $"{t.SiteName} to {t.LocalFolder}" : $"{t.LocalFolder} to {t.SiteName} {t.RemoteFolder}";
 
     /// <summary>The whole route, with the folder on the remote, for the row's tool tip.</summary>
     public static string FullRoute(SiteTransferDto t) =>
-        IsDownload(t) ? $"{t.SiteName} {t.RemoteFolder} to {t.LocalFolder}" : $"{t.LocalFolder} to {t.SiteName} {t.RemoteFolder}";
+        IsBetween(t) ? $"{t.SiteName} {t.RemoteFolder} to {t.TargetSiteName} {t.TargetFolder}" : IsDownload(t) ? $"{t.SiteName} {t.RemoteFolder} to {t.LocalFolder}" : $"{t.LocalFolder} to {t.SiteName} {t.RemoteFolder}";
 
     /// <summary>"10 files"; "items" when empty folders are among them, since those are counted too.</summary>
     public static string Count(SiteTransferDto t) =>

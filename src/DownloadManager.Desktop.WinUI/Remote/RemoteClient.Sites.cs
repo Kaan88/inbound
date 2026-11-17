@@ -183,6 +183,40 @@ internal sealed partial class RemoteClient
             SitesMessageTypes.TransferResult, SitesTestTime, cancellationToken).ConfigureAwait(false));
     }
 
+    /// <summary>SITES.13: keeps the last folder and the sort of a remote with it. Quiet: a failure only means it is not kept.</summary>
+    public async Task<SiteResultDto> RememberSiteAsync(SiteRememberRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteRememberRequest, SiteResultDto>(SitesMessageTypes.Remember, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.13: the first bytes of a file for the preview dialog.</summary>
+    public async Task<SitePreviewDto> PreviewSiteFileAsync(SitePreviewRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SitePreviewRequest, SitePreviewDto>(SitesMessageTypes.Preview, request,
+            SitesMessageTypes.PreviewResult, SitesBrowseTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SitePreviewDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>SITES.13: what a sync of a linked folder would copy.</summary>
+    public async Task<SiteSyncPlanDto> PlanSiteSyncAsync(SiteSyncRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await SitesSlowAsync<SiteSyncRequest, SiteSyncPlanDto>(SitesMessageTypes.SyncPlan, request,
+            SitesMessageTypes.SyncPlanResult, SitesInstallTime, cancellationToken).ConfigureAwait(false);
+        return reply.Value ?? new SiteSyncPlanDto { Ok = false, Message = RemoteText.Failure(reply.Error) };
+    }
+
+    /// <summary>SITES.13: starts the sync as one batch (answered like a transfer start; no batch when the folders match).</summary>
+    public async Task<SiteTransferResultDto> RunSiteSyncAsync(SiteSyncRequest request, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesSlowAsync<SiteSyncRequest, SiteTransferResultDto>(SitesMessageTypes.SyncRun, request,
+            SitesMessageTypes.TransferResult, SitesInstallTime, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.13: keeps (or forgets) the sync a schedule's start runs.</summary>
+    public async Task<SiteResultDto> ScheduleSiteSyncAsync(SiteSyncScheduleRequest request, CancellationToken cancellationToken = default)
+        => SiteResult(await SitesQuickAsync<SiteSyncScheduleRequest, SiteResultDto>(SitesMessageTypes.SyncSchedule, request, SitesMessageTypes.Result, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>SITES.13: a batch waits for a schedule's start (paused) or no longer does.</summary>
+    public async Task<SiteTransferResultDto> ScheduleSiteTransferAsync(string id, bool wait, CancellationToken cancellationToken = default)
+        => TransferResult(await SitesQuickAsync<SiteTransferScheduleRequest, SiteTransferResultDto>(SitesMessageTypes.TransferSchedule,
+            new SiteTransferScheduleRequest { Id = id, Wait = wait }, SitesMessageTypes.TransferResult, cancellationToken).ConfigureAwait(false));
+
     /// <summary>One batch with its files.</summary>
     public async Task<SiteTransferResultDto> GetSiteTransferAsync(string id, CancellationToken cancellationToken = default)
         => TransferResult(await SitesQuickAsync<SiteTransferIdRequest, SiteTransferResultDto>(SitesMessageTypes.TransferGet,
