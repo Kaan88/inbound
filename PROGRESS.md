@@ -2,6 +2,13 @@
 
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
+- **Steps 3 and 6 on the S24 against the owner's desktop Inbound (2026-11-17, 8f6c327b plus the rate fix).** The owner
+  paired the phone with the Windows app's web UI (0.8.0, http://192.168.1.115:8080, plain http with the tick, the owner
+  typed the password): the desktop's downloads showed, a download added on the phone "apperaed and instantly started
+  downloading", switching back to This phone worked. Owner's report: "the big progress bubbles numbers change from one
+  value to another by very quickly counting up and down, it's weird." Cause: the summary card's rate glided (250 ms
+  animator) to every update, several a second. Fixed: the figure is shown as it is, at most once a second; owner on the
+  S24: "Good now". Build: arm64 test build, no compiler warnings.
 - **Failure reason (owner: "short reason in row, full in Details"):** the row says "Failed · <short>" from `FailureWords.Short`
   (a pure function in `DownloadManager.Mobile`: the job's `Failure.Kind` and HTTP status become words such as "server refused
   (403)", "address not found", "no space left"; otherwise the first clause of the message, at most 40 characters; a .NET

@@ -33,7 +33,7 @@ internal sealed class DownloadsScreen
     private readonly Dictionary<DownloadFilter, Chip> _chipFor = new();
     private double _shownRate;
     private bool _toggleIsPause = true;
-    private ValueAnimator? _rateAnimation;
+    private long _rateShownAt;
 
     public DownloadsScreen(MainActivity activity, View page, DownloadsModel model)
     {
@@ -140,18 +140,12 @@ internal sealed class DownloadsScreen
         var s = _list.Summary;
         _details.Text = s.Details;
         _graph.SetData(s.History);
-        // The figure glides to the new rate instead of jumping (progress keeps moving with animations removed: the animator then ends at once).
-        _rateAnimation?.Cancel();
+        // The figure is shown as it is, at most once a second while downloads run: a glide between updates that arrive several
+        // times a second made it count up and down (owner, S24, 2026-11-17: "very quickly counting up and down, it's weird").
+        var now = System.Environment.TickCount64;
+        var wasActive = _shownRate > 0;
         if (s.Active == 0) { _shownRate = 0; _rate.Text = s.Headline; }
-        else if (_shownRate <= 0) { _shownRate = s.Rate; _rate.Text = s.Headline; }
-        else
-        {
-            var a = ValueAnimator.OfFloat((float)_shownRate, (float)s.Rate)!;
-            a.SetDuration(250);
-            a.Update += (_, e) => { _shownRate = (float)e.Animation.AnimatedValue!; _rate.Text = Fmt.Rate(_shownRate); };
-            _rateAnimation = a;
-            a.Start();
-        }
+        else if (!wasActive || now - _rateShownAt >= 1000) { _shownRate = s.Rate; _rateShownAt = now; _rate.Text = s.Headline; }
 
         var canResume = s.Active == 0 && _model.Rows.Any(r => r.Group is RowGroup.Paused or RowGroup.Queued);
         _toggle.Visibility = s.Active > 0 || canResume ? ViewStates.Visible : ViewStates.Invisible;
