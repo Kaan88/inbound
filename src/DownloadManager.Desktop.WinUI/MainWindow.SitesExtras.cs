@@ -64,10 +64,17 @@ public sealed partial class MainWindow
         body.Children.Add(busy);
         var dialog = new ContentDialog
         {
-            XamlRoot = Content?.XamlRoot, Title = name, Content = body, CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content?.XamlRoot, RequestedTheme = RootGrid.ActualTheme, Title = name, Content = body, CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close,
         };
         dialog.Closed += (_, _) => cancel.Cancel();
         var shown = DialogGuard.ShowAsync(dialog);
+        if (shown.IsCompleted)
+        {
+            // Another dialog is open: nothing was shown, so the Host is not asked to read the file.
+            SetSitesStatus("Another dialog is open; close it and try again.");
+            return;
+        }
+
         UIElement content;
         try
         {
@@ -193,7 +200,7 @@ public sealed partial class MainWindow
         body.Children.Add(scheduleNote);
         var dialog = new ContentDialog
         {
-            XamlRoot = Content?.XamlRoot, Title = "Sync linked folder", Content = body,
+            XamlRoot = Content?.XamlRoot, RequestedTheme = RootGrid.ActualTheme, Title = "Sync linked folder", Content = body,
             PrimaryButtonText = "Start", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false,
             SecondaryButtonText = scheduled is null ? string.Empty : "Stop the scheduled sync",
         };

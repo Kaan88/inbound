@@ -79,6 +79,7 @@ public sealed partial class MainWindow
         var shown = SitesOffered ? FindSite(_shownSiteId) : null;
         if (shown is null) LeaveSites(selectCategory: true);
         else _sitesPanel?.UpdateSite(shown);
+        if (_leftSiteId is not null && FindSite(_leftSiteId) is { } leftSite) _leftRemote?.UpdateSite(leftSite);
     }
 
     /// <summary>The window now shows this PC or another server: the section follows, and the view goes if it cannot stay.</summary>

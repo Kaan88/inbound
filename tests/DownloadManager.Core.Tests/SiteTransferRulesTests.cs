@@ -461,6 +461,24 @@ public sealed class SiteTransferRulesTests
     }
 
     [Fact]
+    public void ACopyBetweenRemotesRefreshesTheTargetFolderNotTheSource()
+    {
+        var running = Batch("running", "between", done: 0);
+        running.TargetSiteId = "s2";
+        running.TargetFolder = "/in/";
+        var done = Batch("done", "between", done: 1);
+        done.Id = running.Id;
+        done.TargetSiteId = "s2";
+        done.TargetFolder = "/in/";
+        Assert.True(SiteTransferRules.CopyLanded([running], [done], "s2", "/in"));
+        Assert.False(SiteTransferRules.CopyLanded([done], [done], "s2", "/in"));
+        Assert.False(SiteTransferRules.CopyLanded([running], [done], "s1", "/pub"));
+        Assert.False(SiteTransferRules.CopyLanded([running], [done], "s2", "/other"));
+        // The source side is not refreshed by an upload test either.
+        Assert.False(SiteTransferRules.UploadLanded([running], [done], "s1", "/pub"));
+    }
+
+    [Fact]
     public void PauseTransfersPausesWhatRunsAndResumesWhenAllArePaused()
     {
         var running = Batch("running");

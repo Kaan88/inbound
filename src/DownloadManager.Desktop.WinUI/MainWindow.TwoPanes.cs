@@ -31,6 +31,8 @@ public sealed partial class MainWindow
     // SITES.14: the left pane is This PC (a null id) or any remote, the same one as on the right included.
     private ComboBox? _leftSource;
     private SitesPanel? _leftRemote;
+
+    private const string LeftChangeNote = "Rename, delete and the other changes are done in the right pane. Choose the remote there.";
     private string? _leftSiteId;
     private bool _syncingLeftSource;
     private string? _leftSourceSignature;
@@ -463,12 +465,14 @@ public sealed partial class MainWindow
         };
         panel.EditSiteRequested += site => _ = EnsureSiteFlows().SaveFormAsync(site);
         panel.StateChanged += UpdateTwoPanesArrows;
-        panel.StateChanged += () => RememberPlace(panel);
+        // The remembered place comes from the right pane only: the same remote on both sides would otherwise overwrite each other.
         panel.SiteUpdated += updated =>
         {
             var at = _sites.FindIndex(site => site.Id == updated.Id);
             if (at >= 0) _sites[at] = updated;
         };
+        panel.RenameRequested += () => SetSitesStatus(LeftChangeNote);
+        panel.DeleteRequested += () => SetSitesStatus(LeftChangeNote);
         panel.CommandRequested += command =>
         {
             switch (command)
@@ -487,7 +491,7 @@ public sealed partial class MainWindow
                     break;
                 default:
                     // F2 or Delete on the keyboard: the left pane's own menu offers no change.
-                    SetSitesStatus("Rename, delete and the other changes are done in the right pane. Choose the remote there.");
+                    SetSitesStatus(LeftChangeNote);
                     break;
             }
         };

@@ -57,6 +57,14 @@ public sealed partial class MainWindow
             panel.Refresh();
         }
 
+        // A copy between two remotes landed in the folder a remote pane shows (either side): list it again.
+        if (_sitesPanel is { Site: { } rightSite } right && right.Visibility == Visibility.Visible
+            && SiteTransferRules.CopyLanded(before, transfers, rightSite.Id, right.Path))
+            right.Refresh();
+        if (_leftRemote is { Site: { } leftSite } leftPanel && leftPanel.Visibility == Visibility.Visible && TwoPanesShown && _sitesShown
+            && SiteTransferRules.CopyLanded(before, transfers, leftSite.Id, leftPanel.Path))
+            leftPanel.Refresh();
+
         // A download into the folder the This PC pane shows finished: read it again.
         if (_localPane is { } local && TwoPanesShown && _sitesShown && local.Path.Length > 0
             && SiteTransferRules.DownloadLanded(before, transfers, local.Path))

@@ -281,6 +281,18 @@ public sealed partial class MainWindow
         if (!_sitesShown || e.OriginalSource is TextBox or PasswordBox or RichEditBox || !IsDown(VirtualKey.Control) || IsDown(VirtualKey.Menu)) return;
         var shift = IsDown(VirtualKey.Shift);
         var inLocal = FocusInLocalPane;
+        if (!inLocal && _leftRemote is { Visibility: Visibility.Visible } && FocusIsIn(_leftRemote))
+        {
+            // The left remote pane is read-only here: its keys never act on the right pane.
+            if (e.Key is VirtualKey.Enter or VirtualKey.U or VirtualKey.N or VirtualKey.D or VirtualKey.C && !(e.Key == VirtualKey.Enter && shift))
+            {
+                if (e.Key is VirtualKey.U or VirtualKey.N) SetSitesStatus(LeftChangeNote);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
         switch (e.Key)
         {
             case VirtualKey.Enter when !shift:
@@ -565,6 +577,7 @@ public sealed partial class MainWindow
         var dialog = new ContentDialog
         {
             XamlRoot = Content?.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = title,
             Content = new TextBlock { Text = question, TextWrapping = TextWrapping.Wrap },
             PrimaryButtonText = "Show in folder",

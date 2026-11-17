@@ -907,6 +907,14 @@ public sealed partial class SitesPanel : UserControl
             }
         }
 
+        if (place is not null && named is null && place.Selected.Count == 0)
+        {
+            // Read again with nothing selected (F5): the list goes back to where it was, and nothing gets selected.
+            var generation = _generation;
+            PaneScroll.Restore(ItemsList, place.Offset, null, () => generation == _generation);
+            return;
+        }
+
         var row = named ?? _view.FirstOrDefault(item => !item.IsParent) ?? _view.FirstOrDefault();
         if (row is null) return;
         ItemsList.SelectedItem = row;

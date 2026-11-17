@@ -106,8 +106,27 @@ internal static class SiteTransferRules
         var shown = Clean(folder);
         foreach (var t in now)
         {
-            if (IsDownload(t) || t.SiteId != siteId || t.FilesDone == 0 || t.State is "running" or "paused") continue;
+            if (IsDownload(t) || IsBetween(t) || t.SiteId != siteId || t.FilesDone == 0 || t.State is "running" or "paused") continue;
             if (Clean(t.RemoteFolder) != shown) continue;
+            var earlier = before.FirstOrDefault(b => b.Id == t.Id);
+            if (earlier is null || earlier.State is "running" or "paused") return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when a copy between two remotes into <paramref name="folder"/> of the target site finished since
+    /// <paramref name="before"/> with something copied, so a view of that target folder is out of date.
+    /// </summary>
+    public static bool CopyLanded(IReadOnlyList<SiteTransferDto> before, IReadOnlyList<SiteTransferDto> now, string siteId, string folder)
+    {
+        static string Clean(string path) => path.Length > 1 ? path.TrimEnd('/') : path;
+        var shown = Clean(folder);
+        foreach (var t in now)
+        {
+            if (!IsBetween(t) || t.TargetSiteId != siteId || t.FilesDone == 0 || t.State is "running" or "paused") continue;
+            if (Clean(t.TargetFolder ?? "/") != shown) continue;
             var earlier = before.FirstOrDefault(b => b.Id == t.Id);
             if (earlier is null || earlier.State is "running" or "paused") return true;
         }
