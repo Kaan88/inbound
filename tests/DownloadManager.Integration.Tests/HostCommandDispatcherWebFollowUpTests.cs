@@ -299,10 +299,19 @@ public sealed partial class HostCommandDispatcherTests
         var unc = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.FoldersBrowse,
             new FolderBrowseRequest { Path = @"\\attacker.invalid\share", Files = FolderBrowseFiles.Archives })).GetPayload<FolderBrowseResult>();
         Assert.False(unc.Ok);
+        // SITES.14: "all" lists every file inside the folders, with its date; anything else is refused.
+        var all = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.FoldersBrowse,
+            new FolderBrowseRequest { Path = Inside, Files = FolderBrowseFiles.All })).GetPayload<FolderBrowseResult>();
+        Assert.True(all.Ok, all.Error);
+        Assert.Contains(all.Files, f => f.Name == "notes.txt" && f.Modified is not null);
+        var allOutside = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.FoldersBrowse,
+            new FolderBrowseRequest { Path = Outside, Files = FolderBrowseFiles.All })).GetPayload<FolderBrowseResult>();
+        Assert.False(allOutside.Ok);
+        Assert.Empty(allOutside.Files);
         var other = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.FoldersBrowse,
-            new FolderBrowseRequest { Path = Inside, Files = "all" })).GetPayload<FolderBrowseResult>();
+            new FolderBrowseRequest { Path = Inside, Files = "everything" })).GetPayload<FolderBrowseResult>();
         Assert.False(other.Ok);
-        Assert.Equal("Only archive files can be listed.", other.Error);
+        Assert.Equal("Only archive files or all files can be listed.", other.Error);
     }
 
     [Fact]
