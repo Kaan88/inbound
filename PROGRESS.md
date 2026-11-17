@@ -125,6 +125,11 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Step 2 started (2026-11-17): Android's background rules read.** A Sonnet agent read the official pages; a second
+  agent re-read the five facts the choice rests on, all confirmed (6 h per 24 h cap on dataSync services for targetSdk
+  35+, reset by opening the app; no dataSync start from BOOT_COMPLETED for targetSdk 35+; UIDT jobs on API 34+ need
+  `RUN_USER_INITIATED_JOBS` and must be scheduled while the app is visible; they can require an unmetered network and
+  run when it is there). Summary and the open points in `android-app.md` section 6 point 2. Choice put to the owner.
 - **Owner (2026-11-17), empty Downloads list: "empty list can remain as is like the desktop version. same ui with just no links."** The list screen with no downloads is A1's layout with no rows, as the desktop shows an empty list; no extra empty-state art or text. Also: "start next step" (step 2, ANDROID.3).
 - **Owner (2026-11-17): "have milestones reviewed by fable, and commit and push as you go along."** Each step of the
   build plan, and each major change inside one, goes to the same Fable reviewer before the step is called done; commits

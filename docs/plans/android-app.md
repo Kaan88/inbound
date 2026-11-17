@@ -172,6 +172,19 @@ Each of these can change the design. Point 1 was checked in the trial (by path, 
 2. **How long a background service may run.** Recent Android versions limit data-sync foreground services to a few
    hours a day and offer a separate "user-initiated data transfer" job for long downloads. Read the current rules and
    choose; the mockup's note on A7 says "foreground service" and may need changing.
+   **Read 2026-11-17 (official pages; the five load-bearing facts re-read by a second agent and confirmed):**
+   - dataSync foreground service: for apps targeting API 35+ on Android 15+, 6 hours in 24 in total, then
+     `onTimeout` and a few seconds to stop or the app crashes; the budget resets when the user brings the app to the
+     foreground (developer.android.com/develop/background-work/services/fgs/timeout). No cap on API 31 to 34.
+   - Apps targeting API 35+ may not start a dataSync service from `BOOT_COMPLETED` (about/versions/15/behavior-changes-15).
+   - User-initiated data transfer (UIDT) jobs, API 34+: `RUN_USER_INITIATED_JOBS`; "must be scheduled while the
+     application is visible to the user" (or under the background-activity-launch exemptions, such as a notification
+     tap; boot is not one); a required network, e.g. not metered, and the job runs when it is met; no quota and no
+     standby-bucket limits; a notification while it runs (background-tasks/uidt).
+   - Not found on any page, to be tried on the phones: what a swipe from Recents does to a UIDT job; whether a
+     persisted UIDT job runs after a reboot without the app; UIDT in Doze; exactly what force-stop cancels.
+   - API 36 makes ordinary jobs that run beside a foreground service obey the job runtime quota (behavior-changes-16).
+   - The A7 mockup's wording fits either mechanism: it shows the notifications, not the mechanism.
 3. **Catching links.** Share works for any app. Whether "Open with" can be offered for ordinary web links needs
    checking (Android 12 and later restrict it). The clipboard can only be read while the app is in front, which
    matches the design: the link is offered when the Add sheet opens.
