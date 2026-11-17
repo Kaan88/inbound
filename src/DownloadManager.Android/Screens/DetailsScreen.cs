@@ -110,7 +110,8 @@ internal sealed class DetailsScreen
         };
         _main.Text = text;
         _main.SetIconResource(icon);
-        _main.Visibility = finished && _row.Action == RowAction.None ? ViewStates.Gone : ViewStates.Visible;
+        // A finished file on another Inbound is on that machine: no Open here (ANDROID.7).
+        _main.Visibility = finished && (_row.Action == RowAction.None || !_activity.Capabilities.CanOpenFiles) ? ViewStates.Gone : ViewStates.Visible;
         _again.Visibility = _row.Group is RowGroup.Finished or RowGroup.Failed ? ViewStates.Visible : ViewStates.Gone;
 
         var running = _row.Group is RowGroup.Active or RowGroup.Paused;
@@ -197,6 +198,7 @@ internal sealed class DetailsScreen
             case RowGroup.Active: Fire(_model.PauseAsync(_row.Id), null); break;
             case RowGroup.Failed: Fire(_model.RetryAsync(_row.Id), null); break;
             case RowGroup.Finished:
+                if (!_activity.Capabilities.CanOpenFiles) break;
                 if (!Outside.OpenFile(_activity, _row.Job.FinalFilePath)) _activity.ShowMessage("The file could not be opened. It may have been moved or deleted.");
                 break;
             default: Fire(_model.ResumeAsync(_row.Id), null); break;
@@ -215,7 +217,7 @@ internal sealed class DetailsScreen
     {
         var menu = new PopupMenu(_activity, anchor);
         if (!_row.Job.AddressHidden) menu.Menu!.Add(0, 1, 0, "Copy address");
-        if (_row.Group == RowGroup.Finished) menu.Menu!.Add(0, 2, 1, "Show in folder");
+        if (_row.Group == RowGroup.Finished && _activity.Capabilities.CanShowInFolder) menu.Menu!.Add(0, 2, 1, "Show in folder");
         if (menu.Menu!.Size() == 0) return;
         menu.MenuItemClick += (_, e) =>
         {

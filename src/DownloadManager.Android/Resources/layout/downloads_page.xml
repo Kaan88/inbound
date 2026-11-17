@@ -10,8 +10,8 @@
             android:textSize="16sp" android:textColor="?attr/colorOnSurface" android:textColorHint="?attr/colorOnSurfaceVariant" />
         <ImageButton android:id="@+id/search_clear" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_close" android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Clear search" android:visibility="gone" />
-        <!-- Step 6 puts the host chip ("This phone") here, at the right end of the search bar (HostBar.CreateChip). Empty: zero width. -->
-        <FrameLayout android:id="@+id/host_chip_slot" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginRight="8dp" android:paddingTop="8dp" android:paddingBottom="8dp" />
+        <!-- The host chip ("This phone", A1; C6), at the right end of the search bar (HostBar.Place). -->
+        <FrameLayout android:id="@+id/host_chip_slot" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginRight="4dp" />
       </LinearLayout>
       <LinearLayout android:id="@+id/selection_bar" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
         <ImageButton android:id="@+id/sel_close" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_close" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Cancel selection" />
@@ -23,7 +23,7 @@
         <ImageButton android:id="@+id/sel_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
       </LinearLayout>
     </FrameLayout>
-    <!-- Step 6 puts the "Files are saved on ..." strip here, under the search bar (HostBar.CreateStrip). Empty: zero height. -->
+    <!-- The "Files are saved on ..." strip of C6, under the search bar, for another Inbound only (HostBar.Place). Empty: zero height. -->
     <FrameLayout android:id="@+id/host_strip_slot" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="16dp" android:layout_marginRight="16dp" />
 
     <com.google.android.material.card.MaterialCardView android:id="@+id/summary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="16dp" android:layout_marginRight="16dp" android:layout_marginTop="12dp"

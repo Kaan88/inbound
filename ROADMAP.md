@@ -678,10 +678,17 @@ whether rclone is a Setup component that can be unticked.
     list, Pause all and Resume fixes passed (owner's hand, 2026-11-17).
   - Owner, 2026-11-17, on Android 12 and 13 when Wi-Fi comes back while the app is hidden: "Tap to resume" (downloads
     stay held; the notification says "Wi-Fi is back · Tap to resume N downloads"; opening the app resumes them).
-- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect).
+- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). Owner's answers to the step 3
+  questions (2026-11-17): selection starts with "Long-press"; tapping a finished row: "Open Details"; Stop in Details:
+  "No Stop, Pause only" (these three match what is built); failures: "Short reason in row, full in Details";
+  notifications: "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped);
+  while selecting: "Hide them" (summary card and chips). To do after the step 6 integration: the failure reason, the two
+  notifications, and hiding the summary card and chips while selecting with a filter on.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
 - [ ] ANDROID.6 Queues, scheduler and settings.
-- [ ] ANDROID.7 Other hosts (pairing, host switcher).
+- [ ] ANDROID.7 Other hosts (pairing, host switcher). Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
+  use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
+  asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it

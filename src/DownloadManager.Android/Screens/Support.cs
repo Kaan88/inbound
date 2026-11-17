@@ -173,13 +173,14 @@ internal static class Outside
 /// <summary>Delete with the file choice, as the desktop asks: remove the download only, or the file as well.</summary>
 internal static class DeleteFlow
 {
-    public static void Confirm(Context c, IReadOnlyList<JobRow> rows, Action<bool> remove)
+    /// <param name="canDeleteFiles">False for a host that can't delete its files; then only the list entry goes.</param>
+    public static void Confirm(Context c, IReadOnlyList<JobRow> rows, bool canDeleteFiles, Action<bool> remove)
     {
         var plan = DownloadList.PlanDelete(rows);
         var b = new MaterialAlertDialogBuilder(c).SetTitle(plan.Title)!;
-        if (!plan.HasFiles)
+        if (!plan.HasFiles || !canDeleteFiles)
         {
-            b.SetMessage(plan.Message)!.SetPositiveButton("Delete", (_, _) => remove(false))!.SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null);
+            b.SetMessage(plan.HasFiles ? "Only the list entry goes; the files stay where they are." : plan.Message)!.SetPositiveButton("Delete", (_, _) => remove(false))!.SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null);
         }
         else
         {

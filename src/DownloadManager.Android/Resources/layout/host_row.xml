@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One host in C5: its icon in a circle, its name, kind and state, a tick on the one shown. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/host_row" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:minHeight="72dp"
+    android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="12dp" android:paddingBottom="12dp"
+    android:clickable="true" android:focusable="true">
+  <FrameLayout android:id="@+id/host_icon_bg" android:layout_width="40dp" android:layout_height="40dp">
+    <ImageView android:id="@+id/host_icon" android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:importantForAccessibility="no" />
+  </FrameLayout>
+  <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:orientation="vertical">
+    <TextView android:id="@+id/host_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/host_detail" android:layout_width="match_parent" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" android:maxLines="2" android:ellipsize="end" />
+  </LinearLayout>
+  <ImageView android:id="@+id/host_tick" android:layout_width="24dp" android:layout_height="24dp" android:layout_marginStart="12dp" android:src="@drawable/ic_check" android:importantForAccessibility="no" />
+</LinearLayout>

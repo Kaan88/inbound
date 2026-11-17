@@ -54,6 +54,8 @@ internal sealed class NewDownloadScreen
         _download = Root.FindViewById<MaterialButton>(Resource.Id.new_download_btn)!;
 
         Root.FindViewById<TextInputEditText>(Resource.Id.save_to)!.Text = SaveToText(_model.SaveTo);
+        // Another Inbound saves into its own default folder; the field says which machine (no folder chooser yet, ANDROID.7).
+        if (activity.Capabilities.IsRemote) Root.FindViewById<TextInputLayout>(Resource.Id.save_layout)!.Hint = "Save to, on " + activity.HostName;
         if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
         else
         {

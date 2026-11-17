@@ -25,7 +25,7 @@ public sealed class MainActivity : AppCompatActivity
     private const string FirstRunKey = "first_run_done";
 
     private DownloadsModel? _model;
-    private LazyInProcessConnection? _connection;
+    private IHostConnection? _connection; // step 6: the shown host's, not always the in-process one
     private DownloadsScreen? _downloads;
     private Navigator? _nav;
     private FirstRunScreen? _firstRun;
@@ -46,8 +46,15 @@ public sealed class MainActivity : AppCompatActivity
         if (Intent?.GetBooleanExtra("skip_first_run", false) == true) _prefs.SetBool(FirstRunKey, true);
 #endif
 
-        _connection = new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
-            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e));
+        // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
+        // chip and the "Files are saved on ..." strip go in the search bar's slots. Hosts/HostChoice.cs, Hosts/HostBar.cs. ---
+        _connection = Hosts.HostChoice.Connect(this, () => new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
+            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e)));
+        var hosts = Hosts.HostChoice.Hosts(this);
+        Capabilities = hosts.Capabilities;
+        HostName = hosts.Current.Name;
+        Hosts.HostBar.Place(this, FindViewById<ViewGroup>(Resource.Id.host_chip_slot)!, FindViewById<ViewGroup>(Resource.Id.host_strip_slot)!, _connection);
+        // --- end of the step 6 hook ---
         _model = new DownloadsModel(_connection, a => RunOnUiThread(a));
 
         var root = FindViewById<ViewGroup>(Resource.Id.root)!;
@@ -96,6 +103,12 @@ public sealed class MainActivity : AppCompatActivity
         });
     }
 
+    /// <summary>What the shown host can do here: a remote host has no phone file to open or folder to show (ANDROID.7).</summary>
+    internal DownloadManager.Mobile.Remote.HostCapabilities Capabilities { get; private set; } = DownloadManager.Mobile.Remote.HostCapabilities.Phone;
+
+    /// <summary>The shown host's name ("This phone", or a paired Inbound's).</summary>
+    internal string HostName { get; private set; } = "This phone";
+
     protected override void OnSaveInstanceState(Bundle outState)
     {
         base.OnSaveInstanceState(outState);
@@ -108,8 +121,10 @@ public sealed class MainActivity : AppCompatActivity
     private void ShowFirstRunIfNeeded()
     {
         if (!FirstRunState.ShouldShow(_prefs!.GetBool(FirstRunKey))) return;
+        // Connected to another Inbound from the first-run screen: the switch rebuilt this activity on that host, set-up is done.
+        if (Capabilities.IsRemote) { _prefs.SetBool(FirstRunKey, true); return; }
         var host = FindViewById<FrameLayout>(Resource.Id.first_run_host)!;
-        _firstRun = new FirstRunScreen(this, AndroidHost.SharedDownloadFolder, () =>
+        _firstRun = new FirstRunScreen(this, AndroidHost.SharedDownloadFolder, () => Hosts.PairingSheet.Show(this), () =>
         {
             _prefs.SetBool(FirstRunKey, true);
             host.Animate()!.Alpha(0f).SetDuration(200).WithEndAction(new Java.Lang.Runnable(() =>
@@ -192,6 +207,8 @@ public sealed class MainActivity : AppCompatActivity
             _lastGroup[row.Id] = row.Group;
             if (row.Group != RowGroup.Finished || before == RowGroup.Finished) return;
             var path = row.Job.FinalFilePath;
+            // A server's file is on the server: nothing on this phone to open.
+            if (!Capabilities.CanOpenFiles) { ShowMessage(row.Name + " finished"); return; }
             ShowMessage(row.Name + " finished", "Open", () =>
             {
                 if (!Outside.OpenFile(this, path)) ShowMessage("The file could not be opened.");

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Connect to another Inbound: its address, its password (the server's pairing for apps, as the desktop window pairs, D9), an optional name. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="wrap_content">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="24dp" android:paddingRight="24dp" android:paddingTop="8dp" android:paddingBottom="24dp">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Connect to another Inbound"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall" android:textColor="?attr/colorOnSurface" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+        android:text="The Windows app with its web UI on, or an Inbound server. Its password is used once and not kept."
+        android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
+    <com.google.android.material.textfield.TextInputLayout android:id="@+id/pair_address_layout" style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+        android:hint="Address" app:placeholderText="homeserver:8080">
+      <com.google.android.material.textfield.TextInputEditText android:id="@+id/pair_address" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:imeOptions="actionNext" android:singleLine="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+    <com.google.android.material.textfield.TextInputLayout android:id="@+id/pair_password_layout" style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:hint="Password of that Inbound" app:endIconMode="password_toggle">
+      <com.google.android.material.textfield.TextInputEditText android:id="@+id/pair_password" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:imeOptions="actionNext" android:singleLine="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+    <com.google.android.material.textfield.TextInputLayout android:id="@+id/pair_name_layout" style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:hint="Name on this phone (optional)" app:placeholderText="Home server">
+      <com.google.android.material.textfield.TextInputEditText android:id="@+id/pair_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textCapWords" android:imeOptions="actionDone" android:singleLine="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+    <com.google.android.material.checkbox.MaterialCheckBox android:id="@+id/pair_plain_http" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:visibility="gone"
+        android:text="This address starts with http://. Send the password and the sign-in to it unencrypted." />
+    <!-- https with a certificate the phone doesn't trust: what it is, and a tick to trust exactly that one (owner: pin at pairing). -->
+    <TextView android:id="@+id/pair_cert" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:visibility="gone"
+        android:padding="12dp" android:background="?attr/colorSurfaceVariant" android:textIsSelectable="true"
+        android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?attr/colorOnSurfaceVariant" android:fontFamily="monospace" />
+    <com.google.android.material.checkbox.MaterialCheckBox android:id="@+id/pair_trust_cert" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:visibility="gone"
+        android:text="Trust this certificate for this server" />
+    <TextView android:id="@+id/pair_error" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:visibility="gone"
+        android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorError" android:accessibilityLiveRegion="polite" />
+    <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/pair_progress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:indeterminate="true" android:visibility="gone" />
+    <com.google.android.material.button.MaterialButton android:id="@+id/pair_btn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Connect" android:enabled="false" />
+  </LinearLayout>
+</ScrollView>

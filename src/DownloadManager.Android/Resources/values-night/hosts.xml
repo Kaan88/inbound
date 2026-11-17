@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ANDROID.7 (C6), dark: the mockup's amber strip (tertiary #F0A35E on a dark amber container). -->
+<resources>
+  <color name="host_strip_bg">#4A3117</color>
+  <color name="host_strip_fg">#F6CFA6</color>
+</resources>

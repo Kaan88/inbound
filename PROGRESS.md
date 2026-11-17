@@ -1,5 +1,115 @@
 # Progress — session handoff
 
+### Android steps 3 and 6 together (ANDROID.4 + ANDROID.7), branch `android-app` (2026-11-17)
+
+- **Merge:** `origin/android-s6` into `android-app` (after step 3). Conflicts: this file (both entries kept), `MainActivity.cs`
+  (step 3's activity kept; the step 6 hook moved into it, its comment kept), `drawable/ic_check.xml` (the same path on both
+  sides; step 6's file with the licence comment kept, used by step 3's first run, New download check and step 6's switcher).
+- **Wired:** the connection comes from `Hosts.HostChoice.Connect`; `HostBar.Place` puts the chip at the right end of the
+  search bar (`host_chip_slot`, A1 "This phone", filled pill, icon in the primary colour) and the C6 strip under it
+  (`host_strip_slot`). `HostBar.Install` (the old toolbar hook) is gone. `MainActivity.Capabilities` (from
+  `HostChoice.Hosts(ctx).Capabilities`) hides, on another Inbound: Open in Details and in the "finished" snackbar, Show in
+  folder in Details' menu and the folder button on finished rows. Delete with the file stays (the server deletes its own file).
+  A0 has "Connect to another Inbound" (opens the pairing sheet) and the mockup's subtitle; pairing from A0 ends set-up.
+- **New download on another Inbound:** "Save to" shows the server's default folder as text, labelled "Save to, on <name>",
+  with no chooser (the field was already read-only; there is no phone folder picker in step 3 to hide). A chooser of the
+  server's folders over `folders.browse` is **not built** (to do). There are no phone-only background notes on the step 3
+  screens to hide (first run only shows while the phone is the host).
+- **Checked on the Android 13 emulator (emulator-5554, x64 NativeAOT test build), not on a phone.** Screenshots in
+  `artifacts/android-app/step6/s*.png` (not in git). A real `DownloadManager.Server` on this PC (127.0.0.1, temporary state
+  under `artifacts/`, made-up password from a file, sign-in on, `DOWNLOADMANAGER_HOSTS=10.0.2.2`), reached at
+  `http://10.0.2.2:18765` with the plain-http tick: the chip shows "This phone"; the switcher opens with one-shot figures
+  ("This phone · 2 queued", later "Test server · Server · nothing running"); pairing switched the screen to the server
+  (chip "Test server", strip "Files are saved on Test server", empty list); a link added from the phone's New download
+  ran on the server (the check came from the server, the file landed in the server's folder, SHA-256 equal), the row shows
+  no folder button, Details has no Open and no Show in folder; delete with the file removed it on the server; switching
+  back showed the phone's list with its folder buttons. After clearing the app's data: A0 shows the link, pairing from it
+  opens the server's downloads and first run does not come back. Server and file server stopped, state deleted.
+- **Seen, not changed:** a host paired without a name is named by its address ("10.0.2.2"), not by the server's own name;
+  the server's full Windows path in "Save to" is cut at the right.
+- **Build:** x64 test build, logs `artifacts/android-app/step6/build-merge*-x64-test.txt`; same warnings as step 6's last
+  build (IL2026 39, IL3050 41, IL3053, XA1006, XA1040, XA4211), no compiler warning. Tests: Mobile.Tests 290 pass,
+  Server.Tests 207 pass.
+
+### Android step 6: other hosts (ANDROID.7), branch `android-s6` (2026-11-17)
+
+- **Built (not yet on a device; no emulator or phone was used, the step 3 agent had the emulator):** the phone shows
+  either its own Host or another Inbound (the Windows app with its web UI on, or the headless server).
+  - **Server API and sign-in, reused as they are:** the desktop window's D9 client in `Contracts/RemoteServer.cs`:
+    `POST /api/pair` with the server's password and role `remoteClient` (the password is not kept), then the WebSocket
+    `/api/ws?hello=1` with `Authorization: Bearer` (snapshot, then events, commands on it) and one `POST /api/ipc` for
+    the calls that wait on the network (the protocol doc's list). No new auth scheme, no server change. The
+    extension's code pairing was not used: a code only ever makes an extension-role token, which can't manage downloads.
+  - **`src/DownloadManager.Mobile/Remote/`:** `RemoteHostConnection` (an `IHostConnection`, so the screens and
+    `DownloadsModel` work unchanged): reconnects 2 s doubling to about a minute; after a reconnect it compares the new
+    snapshot with what the screens were shown and sends the difference as job events (`removed`, `added`, `resync`),
+    because a model takes one snapshot; stops for good on a refused token or unconfirmed plain http; closes the socket
+    while the activity is stopped and connects again at once when it starts (no polling, no socket in the background);
+    a command sent while it connects waits up to 10 s, then fails with words. `HostDirectory` (this phone plus the paired
+    servers, which one is shown, pair, re-pair at the same address, remove with unpair on the server, last seen and kind),
+    `HostListFile` (`hosts.json` in the app's files, atomic write, no token), `HostCapabilities` (a remote host hides open,
+    show in folder, the phone's folder picker and the phone's background notes), `HostConnections.ForCurrent`.
+  - **`src/DownloadManager.Android/Hosts/`:** `KeystoreSecretStore` (AES-256-GCM, key in the Android Keystore, only IV and
+    ciphertext in private preferences; unreadable means "pair again"), `HostChoice` (the process's host list; the
+    connection follows the activity's start and stop and the default network), `HostBar` (the host chip and the C6 strip
+    "Files are saved on ..." or why the host can't be reached), `HostSwitcherSheet` (C5), `PairingSheet` (address,
+    password, optional name, the plain-http tick). Resources `host_*.xml`, `ic_host_*`, `ic_check`, `ic_expand_more`.
+  - **MainActivity:** one marked hook (connection from `HostChoice.Connect`, `HostBar.Install` into the app bar). A host
+    switch recreates the activity on the new host's connection.
+  - **Contracts:** the pairing form now serialises from a small generated context (no reflection under NativeAOT); the
+    JSON is the same, and Contracts has one IL2026/IL3050 pair less.
+- **Tested:** `tests/DownloadManager.Mobile.Tests` 197 pass (new: `RemoteHostConnectionTests` over a fake socket,
+  `HostDirectoryTests`); `tests/DownloadManager.Server.Tests` 204 pass, with two new `MobileRemoteHostTests` against a
+  real server on loopback (state under `artifacts/test-work`): pairing, then add, pause, resume (file bytes equal),
+  delete with the file, through `DownloadsModel`; and a pairing removed on the server stopping the phone, remove on the
+  phone unpairing. `IpcJsonContextTests` pass.
+- **Build:** x64 test build, logs `artifacts/android-app/step6/build*-x64-test.txt`. No new compiler warning. New only as
+  ILC reachability: IL2026/IL3050 on `WebSocketIpcClient` send/read, `RemoteServerHttp.SendIpcAsync` and `IpcFraming`,
+  all serialising `IpcMessage` with `IpcJson.Options` (registered in `IpcJsonContext`), the same group as the existing ones.
+- **Left for after the step 3 merge:** the chip goes in step 3's search bar and the strip under it (`HostBar.CreateChip`,
+  `CreateStrip` instead of `Install`); the hook moves to step 3's MainActivity; Details, New download and multiselect use
+  `HostChoice.Hosts(ctx).Capabilities` to hide phone-only actions; New download's folder field on a remote host (a
+  server folder chooser via `folders.browse`, not the phone's picker). Device checks: cleartext http to a LAN server from
+  the NativeAOT build, Keystore on both phones, the strip in light and dark, TalkBack on the sheets.
+- **Questions for the owner (step 6):** Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
+  use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
+  asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
+  The questions as asked:
+  1. The How it works board says the remote is reached "over HTTPS, paired once, as the browser extension pairs". The
+     server pairs apps by its password (as the desktop window does); the extension's code pairing only makes
+     extension tokens. Built with the password. Should a code (shown in the web UI) pair the phone instead? That needs a
+     server change (a code that makes a `remoteClient` token).
+  2. HTTPS with a self-signed certificate: the desktop window and the extension trust only certificates the system
+     trusts; pinning one at pairing is a "later step" in D9. The phone does the same (system trust only, nothing else
+     accepted). Build pinning (show the fingerprint at pairing, trust only that), or leave it?
+  3. Plain `http://` to another machine: allowed, after one tick in the pairing screen per server (the desktop's rule).
+     Drop the tick?
+  4. C5 shows live figures for every host ("Windows · 5 active · 32 MB/s", "12 queued"). Getting them for hosts not on
+     screen needs a connection to each while the sheet is open. Built: kind and "last seen" only, no extra connections.
+     Want one-shot figures while the sheet is open?
+  5. C5 calls the headless server "Docker"; the server only says `server`, which may also be an AppImage. Shown as
+     "Server". Fine?
+- **Step 6, the owner's answers built (2026-11-17):**
+  - **Pin at pairing.** New `Contracts/ServerCertificates.cs`, shared by the desktop's and the phone's client: a
+    certificate is accepted when the system trusts it, or when its SHA-256 equals the pin and it is in its dates; nothing
+    else. Fingerprint in the Sites form (`AB:CD:…`). One HTTP stack per pin (no redirect, no proxy, no cookie as before);
+    without a pin there is no callback at all, so the desktop window behaves as before. `ServerTarget` carries the pin;
+    the WebSocket, `/api/ipc`, pairing, unpairing and uploads all use it; a refused certificate is
+    `ServerCertificateRefusedException` (stops the phone's connection, words say to remove and connect again).
+    At pairing over https `ServerCertificates.ProbeAsync` reads the certificate with a bare TLS handshake (nothing sent);
+    if the system doesn't trust it the pairing screen shows subject, expiry and SHA-256 with a "Trust this certificate"
+    tick, and pairing is then sent with that pin only. The pin is kept in `hosts.json` with the host (not secret).
+  - **One-shot figures.** When C5 opens, each paired host gets one `jobs.query` on its own connection (`POST /api/ipc`),
+    5 s deadline, no retry, cancelled when the sheet closes; the phone's figures are one snapshot of its own Host on a
+    session closed right after. Rows read "Windows · 5 active · 32.0 MB/s", "Server · 12 queued", or "· not reached now".
+  - **Pairing note:** `docs/plans/android-app.md` section 3, "Pairing".
+  - **Tests:** Mobile.Tests 213 pass (`CertificatePinTests`: system-trusted accepted, pinned accepted, another certificate
+    and no pin refused, expired pin refused, the pairing flow; `HostFiguresTests`). Server.Tests: new
+    `MobileCertificatePinTests` run real TLS handshakes against a loopback https endpoint with a self-signed
+    certificate (pinned accepted on `/api/ipc` and the WebSocket; another pin or none refused, pairing refused before any
+    password is sent; probe, trust, pair, connect); `MobileRemoteHostTests` also reads the figures from the real server.
+    `IpcJsonContextTests` pass (`ServerCertificateInfo` listed as never sent over IPC).
+
 ### Android step 3 (ANDROID.4, core screens, mockup row A), branch `android-s3` (2026-11-17)
 
 - **Built:** first run (A0), Downloads in the three states (A1 to A3; an empty list is the A1 layout with no rows), the Add sheet (A4), New download (A5), Details (A6), multiselect with delete (list only, or with its file), Settings with Theme (system, light, dark) and Dynamic colour (off by default, works both ways), dark and light themes, container-transform motion with "Remove animations" respected, back gesture (predictive back; the app steps in only while something is open, selected or searched), TalkBack labels. Screen logic is in `src/DownloadManager.Mobile` (`Screens.cs`, `DownloadsModel`, `DownloadList`, `NewDownloadModel`, `DetailsInfo`; no Android types, 241 tests pass); views are in `src/DownloadManager.Android` (`Screens/`, layouts, themes). Screens talk to the Host only through `IHostConnection`. Step 6 places: `host_chip_slot` (right end of the search bar, where A1 shows "This phone") and `host_strip_slot` (under it) in `downloads_page.xml`.
@@ -7,6 +117,7 @@
 - **Faults found on the emulator and fixed:** a page opened over Downloads ignored the status bar (insets were not re-applied after it was added); the New download check showed a .NET resource key ("net_http_client_execution_error") as the reason; a recreated activity (theme or dynamic colour changed) showed Downloads under a Settings tab; turning Dynamic colour off did not take effect until the process restarted; the Add sheet had no drag handle; selection kept the summary card and chips on screen (B5 shows only the list); rows were thinner than the mockup.
 - **Differences left, on purpose:** the bottom bar has Downloads and Settings only (Queues and Sites come with their own steps; no button that does nothing); the Add sheet lists only "Link or several links" (torrent, site, TorBox, import are not built); New download has no category chip, no "Night queue" choice and no More options block; A0 has no "Connect to another Inbound" link and its subtitle has no host sentence (step 6); icons are the filled set, the mockup draws thin outlines; Details shows Pause/Resume/Retry/Open, redownload (finished or failed) and delete, not the mockup's Stop button; A7 is the step 2 notification as Android draws it (it has "Pause all", no "Open" action, and no "Waiting for Wi-Fi" or "Finished" notification in this run).
 - **Questions for the owner (step 3), not decided by me:** (1) Long-press: it starts selection now (the mockups show no long-press). Keep? (2) Tapping a finished row opens Details (the Open button is there); the mockups don't say whether a tap should open the file instead. (3) Details for a running download: the mockup has a Stop button and a Redownload button next to Pause. Is Stop different from Pause on the phone (pause keeps the part file; what would stop do)? Redownload of a running job looks wrong, so it is shown for finished and failed only. (4) Errors: a failed row says only "Failed". Should the row, or Details, show the reason (and in which words)? The New download check says "The address could not be reached." for unreadable errors. (5) A7 shows an "Open" action on the progress notification and a "Finished" notification per file; step 2 has neither. Wanted? (6) The A1 summary card is replaced by selection mode in B5 (hidden with the chips); fine for filters too?
+- **Owner's answers (step 3), 2026-11-17:** (1) "Long-press"; (2) "Open Details"; (3) "No Stop, Pause only" (these three match what is built). (4) "Short reason in row, full in Details"; (5) "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped); (6) "Hide them" (summary card and chips while selecting). **To do** after the step 6 integration: (4), (5) and (6).
 - **Build:** x64 test build, 0 new warnings (same IL2026, IL3050, IL3053, XA1006, XA1040, XA4211 as step 2, fewer of the IL ones). arm64 build once at the end.
 
 ### Android first trial (ANDROID.2), branch `android-trial` (2026-11-15)

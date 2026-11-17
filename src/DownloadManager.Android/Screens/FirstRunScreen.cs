@@ -8,7 +8,10 @@ using Google.Android.Material.Button;
 
 namespace Inbound.App.Screens;
 
-/// <summary>First run (A0): where downloads go, and the two permissions worth asking for. "Start downloading" is always available.</summary>
+/// <summary>
+/// First run (A0): where downloads go, and the two permissions worth asking for. "Start downloading" is always available;
+/// "Connect to another Inbound" opens the pairing sheet instead.
+/// </summary>
 internal sealed class FirstRunScreen
 {
     private readonly MainActivity _activity;
@@ -17,7 +20,7 @@ internal sealed class FirstRunScreen
     private readonly ImageView _notifIcon, _battIcon;
     private readonly View _notifTile, _battTile;
 
-    public FirstRunScreen(MainActivity activity, string folder, Action start)
+    public FirstRunScreen(MainActivity activity, string folder, Action connect, Action start)
     {
         _activity = activity;
         _folder = folder;
@@ -32,6 +35,7 @@ internal sealed class FirstRunScreen
         _notif.Click += (_, _) => AskNotifications();
         _batt.Click += (_, _) => AskBattery();
         Root.FindViewById<View>(Resource.Id.fr_start)!.Click += (_, _) => start();
+        Root.FindViewById<View>(Resource.Id.fr_connect)!.Click += (_, _) => connect();
         Refresh();
     }
 

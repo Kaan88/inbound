@@ -194,7 +194,7 @@ internal sealed class DownloadsScreen
     internal void ConfirmDelete(IReadOnlyList<JobRow> rows)
     {
         if (rows.Count == 0) return;
-        DeleteFlow.Confirm(_activity, rows, deleteFile =>
+        DeleteFlow.Confirm(_activity, rows, _activity.Capabilities.CanDeleteWithFile, deleteFile =>
         {
             var ids = rows.Select(r => r.Id).ToList();
             _list.ClearSelection();
@@ -235,7 +235,7 @@ internal sealed class DownloadsScreen
             case RowAction.Pause: Fire(_model.PauseAsync(row.Id)); break;
             case RowAction.Resume: Fire(_model.ResumeAsync(row.Id)); break;
             case RowAction.Retry: Fire(_model.RetryAsync(row.Id)); break;
-            case RowAction.ShowInFolder:
+            case RowAction.ShowInFolder when _activity.Capabilities.CanShowInFolder:
                 if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
                 break;
         }
@@ -420,7 +420,7 @@ internal sealed class DownloadsScreen
                 RowAction.Pause => (Resource.Drawable.ic_pause, "Pause"),
                 RowAction.Resume => (Resource.Drawable.ic_play, "Resume"),
                 RowAction.Retry => (Resource.Drawable.ic_refresh, "Retry"),
-                RowAction.ShowInFolder => (Resource.Drawable.ic_folder, "Show in folder"),
+                RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_folder, "Show in folder"),
                 _ => (0, ""),
             };
             _action.Visibility = icon == 0 ? ViewStates.Invisible : ViewStates.Visible;

@@ -7,7 +7,7 @@
         <ImageView android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center" android:src="@drawable/ic_download" android:importantForAccessibility="no" app:tint="?attr/colorOnPrimaryContainer" />
       </FrameLayout>
       <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Set up Inbound" android:textSize="32sp" android:textStyle="bold" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
-      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Downloads run on this phone." android:textAppearance="?attr/textAppearanceBodyLarge" android:textColor="?attr/colorOnSurfaceVariant" />
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Downloads run on this phone. You can also manage another Inbound host later." android:textAppearance="?attr/textAppearanceBodyLarge" android:textColor="?attr/colorOnSurfaceVariant" />
 
       <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" app:cardCornerRadius="24dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:minHeight="72dp">
@@ -42,5 +42,8 @@
       </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
   </ScrollView>
-  <com.google.android.material.button.MaterialButton android:id="@+id/fr_start" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="16dp" android:layout_marginBottom="24dp" android:text="Start downloading" app:cornerRadius="32dp" android:textSize="16sp" />
+  <com.google.android.material.button.MaterialButton android:id="@+id/fr_start" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="16dp" android:text="Start downloading" app:cornerRadius="32dp" android:textSize="16sp" />
+  <!-- A0: pair with another Inbound instead (step 6, PairingSheet). -->
+  <com.google.android.material.button.MaterialButton android:id="@+id/fr_connect" style="@style/Widget.Material3.Button.TextButton.Icon" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="16dp"
+      android:text="Connect to another Inbound" android:textSize="16sp" app:icon="@drawable/ic_host_server" />
 </LinearLayout>
