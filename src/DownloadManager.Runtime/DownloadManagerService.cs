@@ -4352,6 +4352,9 @@ public sealed partial class DownloadManagerService
     private void Schedule()
     {
         List<JobRuntime> toStart;
+        // A queue stopped here by its quota is announced like one stopped mid-download, so clients (the phone's keep-alive)
+        // don't go on counting it as running.
+        var quotaStopped = false;
         lock (_sync)
         {
             if (!_initialized || _shuttingDown || _updateQuiescing || MeteredRuleHoldsLocked())
@@ -4407,6 +4410,7 @@ public sealed partial class DownloadManagerService
                 if (queue.QuotaEnabled && queue.QuotaBytesUsed >= queue.QuotaBytes)
                 {
                     queue.IsRunning = false;
+                    quotaStopped = true;
                     continue;
                 }
 
@@ -4436,6 +4440,7 @@ public sealed partial class DownloadManagerService
             runtime.Runner = RunJobAsync(runtime);
         }
 
+        if (quotaStopped) SettingsChanged?.Invoke(this, _settings);
         UpdateSleepPrevention();
     }
 
@@ -5703,7 +5708,7 @@ public sealed partial class DownloadManagerService
             ActiveConnections = job.ActiveConnections,
             WaitingForHost = WaitingHostShown(job),
             RunningOnMeteredWithoutResume = job.RunningOnMeteredWithoutResume &&
-                job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying,
+                job.State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting,
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
             CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),

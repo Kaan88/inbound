@@ -280,8 +280,9 @@ public sealed class ActivityState : IDisposable
     {
         if (Transferring(j)) return true;
         if (Is(j, "paused") || IsCompleted(j) || Is(j, "cancelled")) return false;
-        // The Host starts and retries only in a running queue; one we know to be stopped holds its jobs.
-        if (_queueRuns.TryGetValue(j.QueueId, out var runs) && !runs) return false;
+        // The Host starts and retries a queued job only in a running queue; one we know to be stopped holds it. A job
+        // outside the queues (IsQueued false) always runs, whatever its QueueId says.
+        if (j.IsQueued && _queueRuns.TryGetValue(j.QueueId, out var runs) && !runs) return false;
         if (j.QueueRetryAt is not null) return true;
         // Queued (and any state we do not know): runs by itself unless it was scheduled for later.
         return !Is(j, "failed") && !IsLater(j);
@@ -308,9 +309,10 @@ public sealed class ActivityState : IDisposable
             }
 
             if (Is(j, "paused")) paused++;
+            // Waiting to retry still uses mobile data when it retries, so the warning stays.
+            if (j.RunningOnMeteredWithoutResume && Transferring(j)) noResume++;
             if (!IsActive(j)) continue;
             active++;
-            if (j.RunningOnMeteredWithoutResume) noResume++;
             rate += j.BytesPerSecond ?? 0;
             received += j.ReceivedBytes;
             if (j.TotalBytes is > 0) total += j.TotalBytes.Value; else totalKnown = false;

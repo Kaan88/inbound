@@ -92,7 +92,8 @@ public sealed partial class DownloadManagerService
         {
             // Not metered only, on a metered network: everything that can stop without losing work goes back to the
             // queue (not paused by the user), and Schedule starts nothing until the rule lets go.
-            foreach (var runtime in _jobs.Values.Where(r => (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested).ToList())
+            foreach (var runtime in _jobs.Values.Where(r => (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested &&
+                         !r.Job.IsTerminal).ToList())
             {
                 if (WhyNotPreemptable(runtime) is { } why)
                 {
@@ -108,7 +109,8 @@ public sealed partial class DownloadManagerService
         }
 
         var running = _jobs.Values
-            .Where(r => (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested)
+            // A runner in its completion tail (state already Completed, runner not yet done) is never sent back to the queue.
+            .Where(r => (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested && !r.Job.IsTerminal)
             .ToList();
         var queueDefaults = _settings.Queues.FirstOrDefault(q => q.Id == _settings.DefaultQueueId) ?? _settings.Queues[0];
         int QueueKey(JobRuntime r) => r.Job.IsQueued ? (_settings.Queues.FirstOrDefault(q => q.Id == r.Job.QueueId) ?? queueDefaults).Id : -1;
@@ -182,7 +184,7 @@ public sealed partial class DownloadManagerService
         var holds = MeteredRuleHoldsLocked();
         foreach (var runtime in _jobs.Values)
         {
-            var want = holds && (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
+            var want = holds && !runtime.Job.IsTerminal && (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
                        !runtime.PauseRequested && !runtime.CancelRequested && WhyNotPreemptable(runtime) is not null;
             if (runtime.Job.RunningOnMeteredWithoutResume == want) continue;
             runtime.Job.RunningOnMeteredWithoutResume = want;
@@ -264,7 +266,7 @@ public sealed partial class DownloadManagerService
         lock (_sync)
         {
             if (!_initialized || _shuttingDown || !MeteredRuleHoldsLocked()) return 0;
-            foreach (var runtime in _jobs.Values.Where(r => r.Job.RunningOnMeteredWithoutResume &&
+            foreach (var runtime in _jobs.Values.Where(r => r.Job.RunningOnMeteredWithoutResume && !r.Job.IsTerminal &&
                          (r.Starting || r.Runner is { IsCompleted: false }) && !r.PauseRequested && !r.CancelRequested).ToList())
             {
                 var phase = runtime.LastPhase ?? string.Empty;

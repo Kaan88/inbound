@@ -40,6 +40,14 @@ public static class StartReconcile
 
             changed = true;
         }
+        else if (userStopped && state == DownloadState.Queued && mode != StartMode.Later && !byUser)
+        {
+            // Owner, 2026-11-17: stopping the app stops everything, so what waited in the queue stays paused too ("Pause
+            // them too"). A job scheduled for later keeps its schedule.
+            state = DownloadState.Paused;
+            byUser = true;
+            changed = true;
+        }
 
         // Audit 2 M11: paused only because the Host exited while it ran (tray Exit, an update, logoff), so it goes on as one
         // a kill interrupted does. A pause by the user, a queue stop or a quota is not this mark.

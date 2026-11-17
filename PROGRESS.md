@@ -145,6 +145,12 @@
   allowed to go on stays allowed until it ends or the rule lets go. Whether a switch was deliberate can't be read on
   Android, so unlocked stands for it. Settings > Force stop: "Yes, same as Stop" (any user stop, ApplicationExitInfo reason 10,
   leaves downloads paused).
+- **Fable's review of 9f02bcd (2026-11-17), fixed:** a job outside the queues is not held by a stopped queue
+  (ActivityState); a runner in its completion tail is never requeued; a quota stop made by the scheduler is announced
+  (test fails without the fix); the no-resume warning stays while the job waits to retry. Still open: a job flagged
+  before its server said it can resume stays flagged until the next enforce (S3). **Owner's answer:** after a Task
+  Manager Stop or Force stop, queued downloads stay paused too ("Pause them too"); ones scheduled for later keep
+  their schedule.
 - **Owner (2026-11-17): "when all is said and done, make a pr for webui that when it's opened from phone a popup
   recommends this android app."** ROADMAP ANDROID.11; done as a pull request after the Android app is finished.
 - **Step 2 design reviewed by Fable and revised (2026-11-17, `android-step2-design.md` section 6).** Owner's answers to

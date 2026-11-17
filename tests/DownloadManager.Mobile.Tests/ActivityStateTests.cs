@@ -213,6 +213,31 @@ public class ActivityStateTests
     }
 
     [Fact]
+    public void A_job_outside_the_queues_runs_whatever_its_queue_id_says()
+    {
+        // Fable 9f02bcd #1: the Host ignores the queue of a job that is not queued, so a stopped main queue must not
+        // make the keep-alive end while that job is about to start.
+        var direct = J("queued");
+        direct.QueueId = 0;
+        direct.IsQueued = false;
+        var s = new ActivityState(new ManualTime());
+        s.ApplySnapshot([direct], null, [Q(0, false)]);
+        Assert.True(s.Summary.KeepAlive);
+    }
+
+    [Fact]
+    public void A_flagged_job_waiting_to_retry_keeps_the_no_resume_warning()
+    {
+        // Fable 9f02bcd #5: it retries on mobile data, so the warning (and its Stop) must stay.
+        var j = J("retrywaiting");
+        j.RunningOnMeteredWithoutResume = true;
+        var s = new ActivityState(new ManualTime());
+        s.ApplySnapshot([j]);
+        Assert.Equal(1, s.Summary.NoResumeOnMeteredCount);
+        Assert.True(s.Summary.KeepAlive);
+    }
+
+    [Fact]
     public void A_job_of_an_unknown_queue_counts_and_a_snapshot_without_queues_keeps_the_known_ones()
     {
         var job = J("queued");

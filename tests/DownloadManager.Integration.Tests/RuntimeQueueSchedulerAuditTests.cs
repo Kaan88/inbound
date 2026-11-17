@@ -602,6 +602,48 @@ public sealed partial class RuntimeServiceTests
         await ctx.DisposeAsync();
     }
 
+    // ----- Fable 9f02bcd #4: a quota stop made by the scheduler is announced -----
+
+    [Fact]
+    public async Task AQueueStartedOverItsQuotaIsStoppedAndThatIsAnnounced()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var queue = settings.Queues.Single(q => q.Id == 0);
+        queue.QuotaEnabled = true;
+        queue.QuotaBytes = 64 * 1024;
+        queue.QuotaWindowHours = 24;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/quota-over.bin?size=524288&seed=842",
+            DestinationDirectory = ctx.Destination, FileName = "quota-over.bin", Source = "cli",
+        });
+        await ctx.WaitFor(first.Job!.Id, j => j.State is "completed" or "paused", TimeSpan.FromSeconds(30));
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (ctx.Service.GetSettings().Queues.Single(q => q.Id == 0).IsRunning && DateTime.UtcNow < deadline) await Task.Delay(50);
+        Assert.False(ctx.Service.GetSettings().Queues.Single(q => q.Id == 0).IsRunning);
+
+        // Queued work waits; then the user starts the queue again with its quota still used up. The scheduler stops it
+        // at once, and that stop must reach listeners (the phone's keep-alive counts a running queue's jobs).
+        await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/quota-next.bin?size=65536&seed=843",
+            DestinationDirectory = ctx.Destination, FileName = "quota-next.bin", Source = "cli",
+        });
+        var stoppedAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = false;
+        ctx.Service.SettingsChanged += (_, s) =>
+        {
+            var q = s.Queues.Single(x => x.Id == 0);
+            if (q.IsRunning) started = true;
+            else if (started) stoppedAgain.TrySetResult();
+        };
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" })).Ok);
+        await stoppedAgain.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(ctx.Service.GetSettings().Queues.Single(q => q.Id == 0).IsRunning);
+    }
+
     // ----- audit 4 H1: a stale copy of the settings -----
 
     [Fact]

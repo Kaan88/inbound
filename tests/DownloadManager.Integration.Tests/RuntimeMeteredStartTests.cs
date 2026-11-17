@@ -346,14 +346,30 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task StoppedByTheUserAQueuedJobStaysQueuedAndRuns()
+    public async Task StoppedByTheUserAQueuedJobIsPausedTooAndResumes()
     {
+        // Owner, 2026-11-17: "Pause them too".
         var (ctx, id, _) = await OnDiskJobAsync(job => { Interrupted(job, DownloadState.Queued); job.StartMode = StartMode.Queue; }, wifiOnly: false, "stopped-queued.bin", 967);
         await using var _ = ctx;
         await using var b = new Booted(ctx.Paths);
         await b.Service.InitializeAsync(lastRunStoppedByUser: true);
-        await b.UntilAsync(() => b.Job(id).State is "completed" or "failed", "the queued job to finish");
+        await Task.Delay(300);
+        Assert.Equal("paused", b.Job(id).State);
+        Assert.True(b.Job(id).PausedByUser);
+        await b.Service.ResumeAsync(id);
+        await b.UntilAsync(() => b.Job(id).State is "completed" or "failed", "the resumed job to finish");
         Assert.Equal("completed", b.Job(id).State);
+    }
+
+    [Fact]
+    public async Task StoppedByTheUserAJobScheduledForLaterKeepsItsSchedule()
+    {
+        var (ctx, id, _) = await OnDiskJobAsync(job => { Interrupted(job, DownloadState.Queued); job.StartMode = StartMode.Later; }, wifiOnly: false, "stopped-later.bin", 968);
+        await using var _ = ctx;
+        await using var b = new Booted(ctx.Paths);
+        await b.Service.InitializeAsync(lastRunStoppedByUser: true);
+        Assert.Equal("queued", b.Job(id).State);
+        Assert.False(b.Job(id).PausedByUser);
     }
 
     /// <summary>The pure rule and the real reconcile give the same answer for each stored shape.</summary>
