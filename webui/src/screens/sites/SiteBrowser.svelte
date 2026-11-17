@@ -23,6 +23,7 @@
     serverUpload, sizeText, sortRows, troubleTitle, troubleWhy, uploadSourceProblem,
     type DownloadTrigger, type RemoteCommand, type Row, type SortKey,
   } from '../../lib/sitesBrowse';
+  import { applyHere, hereNames, needsPassword, phoneActions, phoneRowLine } from '../../lib/sitesHome';
   import ServerFolders from './ServerFolders.svelte';
   import SiteFix from './SiteFix.svelte';
 
@@ -151,6 +152,7 @@
       const sameFolder = result.path === path;
       path = result.path;
       items = more ? [...items, ...result.items] : result.items;
+      void loadHere(mine, result.path, result.items);
       total = result.total;
       listing = result.listing ?? null;
       listedAt = Date.now();
@@ -170,6 +172,40 @@
       }
     } finally {
       if (mine === round) loading = false;
+    }
+  }
+
+  /**
+   * "Some of it": the Host compares the folders it listed with the same folders under the linked folder, all the way down,
+   * on demand (sites.here). Asked once after a page came, for its folders; a folder it did not compare keeps the browse's
+   * own value. A slow answer for a folder left since is dropped.
+   */
+  async function loadHere(mine: number, folder: string, page: SiteItem[]) {
+    const names = showsHere ? hereNames(page) : [];
+    if (!names.length) return;
+    try {
+      const answer = await store.ask<{ ok?: boolean; folders?: { name: string; here?: string | null }[] }>('sites.here', { id: site.id, path: folder, names });
+      if (mine !== round || !answer.folders?.length) return;
+      items = applyHere(items, answer.folders);
+    } catch {
+      // The comparison is a bonus: the browse's own words stand.
+    }
+  }
+
+  // An address opened once whose server wants a password asks for it here and tries again.
+  let password = $state('');
+  let sendingPassword = $state(false);
+  async function sendPassword() {
+    sendingPassword = true;
+    try {
+      const result = await store.ask<SiteResult>('sites.openOnce', { id: site.id, password });
+      if (!result.ok) { error = result.message ?? 'That password was not accepted.'; return; }
+      password = '';
+      await open(path, true);
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
+      sendingPassword = false;
     }
   }
 
@@ -594,7 +630,7 @@
 
 <div class="space-y-3">
   <!-- The toolbar: the same commands as the window's, minus those that need this PC. -->
-  <div class="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Remote files">
+  <div class="flex flex-wrap items-center gap-1.5 max-md:hidden" role="toolbar" aria-label="Remote files">
     <button class="btn" disabled={!chosen.length} onclick={() => download(chosen, 'button')}><Icon name="download" size={15} /> Download</button>
     <button class="btn" onclick={openUpload}><Icon name="upload" size={15} /> Upload</button>
     <span class="mx-1 h-5 w-px bg-divider" aria-hidden="true"></span>
@@ -607,12 +643,19 @@
     <input bind:this={picker} type="file" multiple class="hidden" onchange={(event) => { staged((event.currentTarget as HTMLInputElement).files); (event.currentTarget as HTMLInputElement).value = ''; }} />
   </div>
 
+  <!-- A phone (`phone`): one pane. Upload, New folder and Refresh stay in a short row; what the ticked rows can do is the bar at the bottom. -->
+  <div class="flex items-center gap-1.5 md:hidden" role="toolbar" aria-label="Remote files">
+    <button class="btn" onclick={openUpload}><Icon name="upload" size={15} /> Upload</button>
+    {#if canMakeFolder}<button class="btn" onclick={newFolder}><Icon name="folder-plus" size={15} /> New folder</button>{/if}
+    <button class="btn-icon ml-auto" disabled={loading} title="Refresh" aria-label="Refresh" onclick={() => open(path, true)}><Icon name="refresh" size={16} /></button>
+    {#if onedit}<button class="btn-icon" title="Edit remote" aria-label="Edit remote" onclick={onedit}><Icon name="settings" size={16} /></button>{/if}
+  </div>
   <div class="flex flex-wrap items-center gap-3">
-    <div class="segmented" role="group" aria-label="View">
+    <div class="segmented max-md:hidden" role="group" aria-label="View">
       <button aria-pressed={view === 'two'} onclick={() => setView('two')}>Two panes</button>
       <button aria-pressed={view === 'server'} onclick={() => setView('server')}>Remote only</button>
     </div>
-    {#if linked}<span class="ml-auto flex min-w-0 items-center gap-1 text-[12.5px] text-muted"><Icon name="link" size={14} /><span class="truncate">{linked}</span></span>{/if}
+    {#if linked}<span class="ml-auto flex min-w-0 max-md:ml-0 items-center gap-1 text-[12.5px] text-muted"><Icon name="link" size={14} /><span class="truncate">{linked}</span></span>{/if}
   </div>
 
   {#if site.stars.length}
@@ -649,12 +692,14 @@
 
   <div class="flex items-stretch gap-3">
     {#if view === 'two'}
+      <div class="contents max-md:hidden">
       <ServerFolders bind:path={leftPath} bind:selected={leftSelected} bind:roots={serverRoots} initial={defaultFolder} />
       <div class="flex flex-col justify-center gap-2" role="group" aria-label="Move between the panes">
         <button class="btn-icon" title={target ? `Download the selection into ${target}` : 'Download the selection'} aria-label={target ? `Download the selection into ${target}` : 'Download the selection'}
           disabled={!chosen.length} onclick={() => download(chosen, 'arrow')}><Icon name="chevron-left" size={16} /></button>
         <button class="btn-icon" title={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`} aria-label={uploadFromProblem ?? `Upload ${uploadFrom} into this folder`}
           disabled={!!uploadFromProblem} onclick={uploadFromLeft}><Icon name="chevron-right" size={16} /></button>
+      </div>
       </div>
     {/if}
 
@@ -688,6 +733,12 @@
           <h2 class="text-[15px] font-semibold">{troubleTitle(problem, site.name)}</h2>
           <p class="max-w-prose text-[13px] text-muted">{troubleWhy(problem, error === 'The folder could not be read.' ? '' : error)}</p>
           <p class="text-[12.5px] text-muted">{isCantReach(problem) ? (retryAt ? retryAtText(retryAt) : notRetryingText) : ''}</p>
+          {#if needsPassword(problem, site.unsaved)}
+            <form class="flex w-full max-w-xs gap-2" onsubmit={(event) => { event.preventDefault(); void sendPassword(); }}>
+              <input class="field min-w-0 flex-1" type="password" bind:value={password} aria-label="Password for {site.name}" placeholder="Password" autocomplete="off" data-autofocus />
+              <button class="btn-primary" type="submit" disabled={sendingPassword || !password}>{sendingPassword ? 'Signing in…' : 'Sign in'}</button>
+            </form>
+          {/if}
           <div class="mt-1 flex flex-wrap justify-center gap-2">
             {#if fixable(problem)}<button class="btn-primary" onclick={() => (fixing = true)}>{fixButtonText(problem)}</button>{/if}
             <button class="btn {fixable(problem) ? '' : 'btn-primary'}" disabled={loading} onclick={() => open(path, true)}>Retry now</button>
@@ -703,9 +754,9 @@
         <div class="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-[12px] text-muted" role="presentation">
           <input type="checkbox" aria-label="Select all" checked={shown.length > 0 && selected.size === shown.length} onchange={toggleAll} />
           <button class="flex-1 whitespace-nowrap text-left" onclick={() => sortBy('name')}>Name{arrow('name')}</button>
-          <button class="hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
-          <button class="hidden w-40 text-left @xl:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
-          {#if showsHere}<button class="hidden w-28 text-left @xs:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>On {hostName}{arrow('here')}</button>{/if}
+          <button class="col-wide hidden w-24 text-right @xs:block" onclick={() => sortBy('size')}>Size{arrow('size')}</button>
+          <button class="col-wide hidden w-40 text-left @xl:block" onclick={() => sortBy('modified')}>Modified{arrow('modified')}</button>
+          {#if showsHere}<button class="col-wide hidden w-28 text-left @xs:block" title="Compared with {site.localFolder}" onclick={() => sortBy('here')}>On {hostName}{arrow('here')}</button>{/if}
           <span class="w-9"></span>
         </div>
         {#if path !== '/'}
@@ -734,12 +785,15 @@
               <input type="checkbox" tabindex="-1" aria-label="Select {item.name}" checked={selected.has(row.key)} onclick={(event) => event.stopPropagation()} onchange={() => toggleBox(row)} />
               <span class="flex min-w-0 flex-1 items-center gap-2">
                 <Icon name={item.isFolder ? 'folder' : 'file'} size={16} class="shrink-0 text-muted" />
-                <span class="truncate">{item.name}</span>
-                {#if showsHere && hereText(item.here)}<span class="shrink-0 text-[12px] text-muted @xs:hidden">· {hereText(item.here)}</span>{/if}
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate">{item.name}</span>
+                  <!-- A narrow pane or a phone: the size and how it compares sit under the name (`phone`). -->
+                  <span class="phone-line truncate text-[12px] text-muted">{phoneRowLine(item, sizeText(item, bytes), showsHere ? hereText(item.here) : '')}</span>
+                </span>
               </span>
-              <span class="tabular hidden w-24 text-right text-muted @xs:block">{sizeText(item, bytes)}</span>
-              <span class="hidden w-40 text-muted @xl:block">{item.modified ? dateTime(item.modified) : ''}</span>
-              {#if showsHere}<span class="hidden w-28 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
+              <span class="col-wide tabular hidden w-24 text-right text-muted @xs:block">{sizeText(item, bytes)}</span>
+              <span class="col-wide hidden w-40 text-muted @xl:block">{item.modified ? dateTime(item.modified) : ''}</span>
+              {#if showsHere}<span class="col-wide hidden w-28 truncate @xs:block {hereTone(item.here) === 'same' ? 'tone-done' : hereTone(item.here) === 'older' ? 'tone-waiting' : 'text-muted'}">{hereText(item.here)}</span>{/if}
               <span class="flex w-9 shrink-0 justify-end">
                 <button class="row-menu" aria-label="Actions for {item.name}" aria-haspopup="menu" title="More actions" onclick={(event) => moreButton(row, event)}><Icon name="more" size={16} /></button>
               </span>
@@ -756,6 +810,15 @@
       </footer>
     </section>
   </div>
+
+  <!-- A phone: what the ticked rows can do, in a bar that stays at the bottom (`phone`). -->
+  {#if phoneActions(chosen.length).length}
+    <div class="sticky bottom-0 z-10 -mx-4 -mb-4 flex gap-2 border-t border-divider bg-chrome px-4 py-2.5 md:hidden" role="toolbar" aria-label="Selected files">
+      <button class="btn-primary touch-row" onclick={() => download(chosen, 'button')}><Icon name="download" size={15} /> Download</button>
+      {#if phoneActions(chosen.length).includes('rename')}<button class="btn touch-row" onclick={() => rename(chosen[0])}><Icon name="document" size={15} /> Rename</button>{/if}
+      <button class="btn-danger touch-row min-w-0 truncate" onclick={() => askDelete(chosen)}><Icon name="trash" size={15} /> Delete on server</button>
+    </div>
+  {/if}
 </div>
 
 {#if menu}
@@ -767,7 +830,7 @@
 {/if}
 
 {#if nameBox}
-  <Dialog title={nameBox.title} onclose={closeDialogs}>
+  <Dialog title={nameBox.title} onclose={closeDialogs} sheet>
     <label class="label" for="site-item-name">Name</label>
     <input id="site-item-name" class="field" bind:value={nameBox.value} data-autofocus autocomplete="off"
       onkeydown={(event) => { if (event.key === 'Enter' && nameBox) nameAction(nameBox); }} />
@@ -779,7 +842,7 @@
   </Dialog>
 {:else if deleting}
   {@const list = deleting}
-  <AskDialog title="Delete on {site.name}?" danger busy={busy} confirm="Delete"
+  <AskDialog title="Delete on {site.name}?" danger busy={busy} confirm="Delete" sheet
     text={(list.length === 1 ? `${list[0].name}${list[0].isFolder ? ' and everything in it' : ''}` : `${list.length} items, and everything in their folders,`) + ` will be deleted on the server. This can't be undone.`
       + (deleteCount ? ` That is ${deleteCount.files.toLocaleString()} file${deleteCount.files === 1 ? '' : 's'}${deleteCount.sizeUnknown || !deleteCount.bytes ? '' : ` (${bytes(deleteCount.bytes)})`}.` : dialogError ? '' : ' Counting what is in it…')
       + (dialogError ? ` ${dialogError}` : '')}
@@ -787,7 +850,7 @@
 {:else if downloadBox}
   {@const box = downloadBox}
   {@const sizeSum = box.items.reduce((sum, item) => sum + (item.isFolder || item.size < 0 ? 0 : item.size), 0)}
-  <Dialog title={box.items.length === 1 ? `Download ${box.items[0].name}` : `Download ${box.items.length} items`} onclose={closeDialogs}>
+  <Dialog title={box.items.length === 1 ? `Download ${box.items[0].name}` : `Download ${box.items.length} items`} onclose={closeDialogs} sheet>
     <div class="space-y-3 text-[13px]">
       <p>{sizeSum > 0 ? `${bytes(sizeSum)} from ` : 'From '}<strong>{site.name}</strong>.</p>
       <label class="flex items-start gap-2"><input type="radio" name="download-where" value="server" bind:group={downloadBox.where} />
@@ -814,7 +877,7 @@
   </Dialog>
 {:else if uploadBox}
   {@const box = uploadBox}
-  <Dialog title="Upload to {path}" onclose={closeDialogs}>
+  <Dialog title="Upload to {path}" onclose={closeDialogs} sheet>
     <div class="space-y-3 text-[13px]">
       <label class="flex items-center gap-2"><input type="radio" name="upload-where" value="server" bind:group={uploadBox.where} />
         <span>A folder on {hostName} <span class="text-muted">(Inbound's folders)</span></span></label>
@@ -859,4 +922,13 @@
   .row-menu:hover { background: var(--hover); color: var(--text); }
   .item-row:hover .row-menu, .item-row:focus-within .row-menu, .row-menu:focus-visible { opacity: 1; }
   @media (pointer: coarse) { .row-menu { opacity: 1; padding: 8px; } }
+  /* The second line of a row: shown while the pane is narrow, and always on a phone, where the columns give way to it. */
+  .phone-line { display: block; }
+  @container (min-width: 20rem) { .phone-line { display: none; } }
+  @media (max-width: 767px) {
+    .phone-line { display: block !important; }
+    .col-wide { display: none !important; }
+    .item-row { padding-top: 8px; padding-bottom: 8px; }
+    .item-row input[type='checkbox'] { width: 20px; height: 20px; }
+  }
 </style>

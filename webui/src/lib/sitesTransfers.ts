@@ -1,0 +1,219 @@
+// The transfers between remote files and the computer Inbound runs on (SITES.11 R6b), in the desktop's words and
+// decisions: Remote/SiteTransferRules.cs. A transfer row looks like a download row of the main list but has its own view
+// model and offers only the commands a transfer supports. No UI, so the tests call it directly.
+import { bytes, duration, speed } from './format';
+import type { SiteTransfer } from './sites';
+
+export type TransferTab = 'active' | 'failed' | 'done';
+
+/** The tab a batch shows under: Running and waiting (running, paused), Failed, or Done (done, canceled). */
+export function tabOf(t: Pick<SiteTransfer, 'state'>): TransferTab {
+  return t.state === 'running' || t.state === 'paused' ? 'active' : t.state === 'failed' ? 'failed' : 'done';
+}
+
+/**
+ * A running batch that has started (a file moving now, files done, or bytes moved) and is not waiting to try its server
+ * again. A running batch that has not started is waiting.
+ */
+export function isStarted(t: SiteTransfer): boolean {
+  return t.state === 'running' && !t.retryAt && ((t.filesRunning ?? 0) > 0 || t.filesDone + t.filesSkipped + t.filesFailed > 0 || t.bytesDone > 0);
+}
+
+const created = (t: SiteTransfer) => Date.parse(t.createdAt) || 0;
+
+/** The tab's batches, newest first; Running and waiting puts what moves first, then what is paused, then what waits. */
+export function inTab(transfers: readonly SiteTransfer[], tab: TransferTab): SiteTransfer[] {
+  const shown = transfers.filter((t) => tabOf(t) === tab);
+  const rank = (t: SiteTransfer) => (isStarted(t) ? 0 : t.state === 'paused' ? 1 : 2);
+  return tab === 'active'
+    ? shown.sort((a, b) => rank(a) - rank(b) || created(b) - created(a))
+    : shown.sort((a, b) => created(b) - created(a));
+}
+
+export function tabLabel(transfers: readonly SiteTransfer[], tab: TransferTab): string {
+  const count = transfers.filter((t) => tabOf(t) === tab).length;
+  const name = tab === 'active' ? 'Running and waiting' : tab === 'failed' ? 'Failed' : 'Done';
+  return `${name} (${count})`;
+}
+
+export const isDownload = (t: Pick<SiteTransfer, 'direction'>) => t.direction === 'download';
+
+const number = (value: number) => value.toLocaleString('en-US');
+
+/** "10 files"; "items" when empty folders are among them, since those are counted too. */
+export function countText(t: SiteTransfer): string {
+  return t.folders > 0 ? (t.files === 1 ? '1 item' : `${number(t.files)} items`) : t.files === 1 ? '1 file' : `${number(t.files)} files`;
+}
+
+/** The name column: "Download ubuntu.iso", "Download photos (1,204 files)", "Upload 2 files". */
+export function title(t: SiteTransfer): string {
+  const verb = isDownload(t) ? 'Download' : 'Upload';
+  const picked = t.picked ?? [];
+  const pickedCount = t.pickedCount ?? 0;
+  if (pickedCount <= 0 || picked.length === 0) return isDownload(t) ? `Download from ${t.siteName}` : `Upload to ${t.siteName}`;
+  if (pickedCount === 1) return t.files > 1 || t.folders > 0 ? `${verb} ${picked[0]} (${countText(t)})` : `${verb} ${picked[0]}`;
+  return t.folders === 0 && t.files === pickedCount ? `${verb} ${pickedCount} files` : `${verb} ${pickedCount} items`;
+}
+
+/** Where from and to, as the mockup draws it. */
+export function route(t: SiteTransfer): string {
+  return isDownload(t) ? `${t.siteName} to ${t.localFolder}` : `${t.localFolder} to ${t.siteName} ${t.remoteFolder}`;
+}
+
+export function fullRoute(t: SiteTransfer): string {
+  return isDownload(t) ? `${t.siteName} ${t.remoteFolder} to ${t.localFolder}` : `${t.localFolder} to ${t.siteName} ${t.remoteFolder}`;
+}
+
+/** How far a batch is, 0 to 100: the bytes done of those still to move, or the files done when no size is known. */
+export function progress(t: SiteTransfer): number {
+  const aside = t.bytesSetAside ?? 0;
+  const whole = aside > 0 && aside < t.bytes ? t.bytes - aside : t.bytes;
+  if (whole > 0) return Math.min(100, Math.max(0, (100 * t.bytesDone) / whole));
+  return t.files > 0 ? Math.min(100, Math.max(0, (100 * (t.filesDone + t.filesSkipped)) / t.files)) : 0;
+}
+
+export type StatusKind = 'active' | 'done' | 'failed' | 'waiting' | 'neutral';
+export interface TransferStatus { text: string; kind: StatusKind; percent: number | null }
+
+export function status(t: SiteTransfer): TransferStatus {
+  switch (t.state) {
+    case 'running': {
+      if ((t.filesRunning ?? 0) === 0) return { text: 'Waiting', kind: 'waiting', percent: null };
+      const percent = progress(t);
+      return { text: `${isDownload(t) ? 'Downloading' : 'Uploading'} ${percent.toFixed(1)}%`, kind: 'active', percent };
+    }
+    case 'paused': return { text: 'Paused', kind: 'waiting', percent: null };
+    case 'failed': return { text: 'Failed', kind: 'failed', percent: null };
+    case 'canceled': return { text: 'Canceled', kind: 'neutral', percent: null };
+    default:
+      return (t.filesStopped ?? 0) > 0 && t.filesDone === 0 && t.filesSkipped === 0
+        ? { text: 'Stopped', kind: 'neutral', percent: null }
+        : { text: 'Completed', kind: 'done', percent: null };
+  }
+}
+
+export const sizeText = (t: SiteTransfer) => (t.bytes > 0 ? bytes(t.bytes) : '');
+export const timeLeft = (t: SiteTransfer) => (t.state === 'running' && t.secondsLeft != null ? duration(Math.max(1, t.secondsLeft)) : '');
+export const rateText = (t: SiteTransfer) => (t.state === 'running' && (t.filesRunning ?? 0) > 0 ? speed(t.speed) : '');
+
+const clock = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/**
+ * The description column. A failed batch says why; one waiting out a lost connection says for whom and until when;
+ * others say where from and to, with what was skipped, stopped or failed after it.
+ */
+export function description(t: SiteTransfer): string {
+  if (t.state === 'running' && t.retryAt) {
+    const because = t.retryReason?.trim() ? ` ${t.retryReason.trim()}` : '';
+    return `Waiting for ${t.siteName}, trying again at ${clock(t.retryAt)}.${because}`;
+  }
+  if (t.state === 'failed') {
+    if (t.message) return t.message;
+    if (t.firstFailedError) return t.files > 1 && t.firstFailedPath ? `${t.firstFailedPath}: ${t.firstFailedError}` : t.firstFailedError;
+    return `${t.filesFailed} of ${countText(t)} failed`;
+  }
+  if (t.state === 'paused' && t.message) return t.message;
+  const parts = [route(t) + (t.conflict === 'skip' ? ' · only new files' : '')];
+  if (t.filesSkipped > 0) parts.push(`${t.filesSkipped} skipped (already there)`);
+  if ((t.filesStopped ?? 0) > 0) parts.push(`${t.filesStopped} stopped`);
+  if (t.filesFailed > 0) parts.push(`${t.filesFailed} failed`);
+  return parts.join(' · ');
+}
+
+export function emptyMessage(tab: TransferTab): string {
+  return tab === 'failed' ? 'No failed transfers.' : tab === 'done' ? 'No finished transfers.' : 'Nothing is moving. Select files in a remote and choose Download, or choose Upload.';
+}
+
+// ---- Commands a row offers: only what transfers support -----------------------------------------------------------------
+
+/** Files that have not run yet, or wait for another try; a file the user stopped does not wait. */
+export function waiting(t: SiteTransfer): number {
+  return Math.max(0, t.files - t.filesDone - t.filesSkipped - t.filesFailed - (t.filesStopped ?? 0) - (t.filesRunning ?? 0));
+}
+
+export const canPause = (t: SiteTransfer) => t.state === 'running';
+/** Paused, or stopped by a problem with files still waiting. */
+export const canResume = (t: SiteTransfer) => t.state === 'paused' || (t.state === 'failed' && (waiting(t) > 0 || !!t.problem));
+export const canRetry = (t: SiteTransfer) => t.state === 'failed' && t.filesFailed > 0;
+export const canCancel = (t: SiteTransfer) => t.state === 'running' || t.state === 'paused' || canResume(t);
+export const canClear = (t: SiteTransfer) => t.state === 'done' || t.state === 'failed' || t.state === 'canceled';
+
+/** The commands the web has for a transfer: the desktop's, minus Open and Open folder (they need this PC's shell). */
+export type TransferCommand = 'stop' | 'resume' | 'retry' | 'showOnRemote' | 'cancel' | 'remove';
+
+export const commandLabel = (command: TransferCommand): string => ({
+  stop: 'Stop', resume: 'Resume', retry: 'Retry', showOnRemote: 'Show on the remote', cancel: 'Cancel transfer', remove: 'Remove from list',
+})[command];
+
+/** The Host message a command sends. */
+export const commandType = (command: TransferCommand): string | null => ({
+  stop: 'sites.transfer.pause', resume: 'sites.transfer.resume', retry: 'sites.transfer.retry', showOnRemote: null,
+  cancel: 'sites.transfer.cancel', remove: 'sites.transfer.clear',
+})[command];
+
+export function valid(command: TransferCommand, t: SiteTransfer): boolean {
+  switch (command) {
+    case 'stop': return canPause(t);
+    case 'resume': return canResume(t);
+    case 'retry': return canRetry(t);
+    case 'showOnRemote': return true;
+    case 'cancel': return canCancel(t);
+    case 'remove': return canClear(t);
+  }
+}
+
+/** The menu of the selected rows, in groups: a command shows when it is valid for any selected row; "Show on the remote" for one. */
+export function menu(selection: readonly SiteTransfer[]): TransferCommand[][] {
+  if (!selection.length) return [];
+  const layout: TransferCommand[][] = [['stop', 'resume', 'retry'], ['showOnRemote'], ['cancel', 'remove']];
+  return layout
+    .map((group) => group.filter((command) => (command === 'showOnRemote' ? selection.length === 1 : selection.some((t) => valid(command, t)))))
+    .filter((group) => group.length > 0);
+}
+
+/** Space: Stop on a running batch, Resume on a paused one, nothing otherwise. */
+export function spaceCommand(selection: readonly SiteTransfer[]): TransferCommand | null {
+  return selection.some(canPause) ? 'stop' : selection.some((t) => t.state === 'paused' || canResume(t)) ? 'resume' : null;
+}
+
+/** The finished and canceled batches "Clear done" removes, one id at a time (a failed one stays until retried or removed). */
+export const clearDoneTargets = (transfers: readonly SiteTransfer[]) => transfers.filter((t) => t.state === 'done' || t.state === 'canceled').map((t) => t.id);
+
+/** The bar's header button: "Pause transfers" when something runs, else "Resume transfers" when something is paused. */
+export function pauseAllAction(transfers: readonly SiteTransfer[]): { label: string; type: string; ids: string[] } | null {
+  const running = transfers.filter(canPause).map((t) => t.id);
+  if (running.length) return { label: 'Pause transfers', type: 'sites.transfer.pause', ids: running };
+  const paused = transfers.filter((t) => t.state === 'paused').map((t) => t.id);
+  return paused.length ? { label: 'Resume transfers', type: 'sites.transfer.resume', ids: paused } : null;
+}
+
+export const retryFailedTargets = (transfers: readonly SiteTransfer[]) => transfers.filter(canRetry).map((t) => t.id);
+
+// ---- The Transfers bar ---------------------------------------------------------------------------------------------------
+
+/** "2 running · 2 waiting", or "Nothing is moving"; the bar's words. */
+export function barSummary(transfers: readonly SiteTransfer[]): string {
+  const active = transfers.filter((t) => t.state === 'running');
+  const moving = active.filter(isStarted).length;
+  const waits = active.length - moving;
+  const paused = transfers.filter((t) => t.state === 'paused').length;
+  const parts = [moving ? `${moving} running` : '', waits ? `${waits} waiting` : '', paused ? `${paused} paused` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Nothing is moving';
+}
+
+/** The speeds of the files moving, by direction, for the bar's arrows. */
+export function barSpeeds(transfers: readonly SiteTransfer[]): { down: number; up: number } {
+  let down = 0;
+  let up = 0;
+  for (const t of transfers) {
+    if (t.state !== 'running' || (t.filesRunning ?? 0) === 0) continue;
+    if (isDownload(t)) down += t.speed;
+    else up += t.speed;
+  }
+  return { down, up };
+}
+
+export const failedCount = (transfers: readonly SiteTransfer[]) => transfers.filter((t) => t.state === 'failed').length;

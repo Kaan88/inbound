@@ -37,7 +37,7 @@ const slowTypes = new Set([
   // Sites (SITES.7): each waits on a server somewhere else, or on rclone starting.
   'sites.setEnabled', 'sites.save', 'sites.probe', 'sites.trust', 'sites.test', 'sites.certificate', 'sites.signIn',
   'sites.browse', 'sites.mkdir', 'sites.rename', 'sites.count', 'sites.delete', 'sites.rclone.install', 'sites.rclone.check',
-  'sites.transfer.start',
+  'sites.transfer.start', 'sites.testDraft', 'sites.openOnce', 'sites.close', 'sites.keep', 'sites.here',
 ]);
 
 export class Store {

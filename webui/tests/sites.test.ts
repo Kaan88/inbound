@@ -132,7 +132,7 @@ describe('Sites in the web UI (SITES.7)', () => {
 
   it('names the "On this PC" marks and the starred folders as the desktop does', () => {
     expect(hereText('same')).toBe('Same');
-    expect(hereText('someOfIt')).toBe('Partly here');
+    expect(hereText('someOfIt')).toBe('Some of it');
     expect(hereText(undefined)).toBe('');
     expect(starLabel('/a/pub', ['/a/pub', '/b'])).toBe('pub');
     expect(starLabel('/a/pub', ['/a/pub', '/b/pub'])).toBe('pub (in a)');

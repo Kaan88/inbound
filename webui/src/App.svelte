@@ -23,6 +23,8 @@
   import SettingsScreen from './screens/SettingsScreen.svelte';
   import SitesScreen from './screens/SitesScreen.svelte';
   import StatisticsScreen from './screens/StatisticsScreen.svelte';
+  import { kindChip } from './lib/sitesBrowse';
+  import { activityWords, allRemotes, arrowsText, badge as siteBadge, dotWords, heading as remoteHeading, inTrouble as siteInTrouble, listed as listedRemotes, waitingCount } from './lib/sitesHome';
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
   import TorrentAdd from './screens/TorrentAdd.svelte';
   import { chipText, hereName, jobInput, openAsTorrentStep, sidebarShows, torrentProvider, torrentsApply, torrentsOffText } from './lib/torrents';
@@ -232,8 +234,12 @@
   const current = $derived(
     screen.kind === 'list' ? screen.view
       : screen.kind === 'provider' ? `provider:${screen.provider || (providers.find((entry) => entry.showBrowse)?.provider ?? '')}`
+      : screen.kind === 'sites' ? (screen.site ? 'sites-remote' : 'sites-home')
       : screen.kind,
   );
+  // Remote files in the sidebar: shown while the switch is on; the page itself turns it on.
+  const remotesOn = $derived(!!store.model.sitesStatus?.enabled);
+  const remotes = $derived(listedRemotes(store.model.sites));
   const categories = $derived(categoryList(store.model.settings?.customCategories ?? []));
   const statusText = $derived(offline && store.model.snapshots > 0 ? connectionText[store.connection] : screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
   // The Host answers archive.list, or has no extraction to show.
@@ -335,6 +341,25 @@
   </a>
 {/snippet}
 
+{#snippet remoteEntry(site: import('./lib/sites').Site)}
+  {@const b = siteBadge(store.model.siteTransfers, site.id)}
+  {@const here = screen.kind === 'sites' && screen.site === site.id}
+  <a href="#/sites/{encodeURIComponent(site.id)}" class="touch-row relative block rounded px-3 py-1.5 text-[13px] {here ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style="padding-left: 22px" aria-current={here ? 'page' : undefined}
+    title={dotWords(site)}>
+    <span class="flex items-center gap-2">
+      <span class="inline-block size-2 shrink-0 rounded-full {siteInTrouble(site) ? 'bg-[var(--status-waiting)]' : 'bg-[var(--status-done)]'}" aria-hidden="true"></span>
+      <span class="min-w-0 flex-1 truncate">{site.name}</span>
+      {#if arrowsText(b)}<span class="tabular shrink-0 text-[12px] font-normal text-icon-info" aria-label={activityWords(b) ?? undefined}>{arrowsText(b)}</span>{/if}
+      {#if waitingCount(b)}
+        <span class="tabular inline-flex shrink-0 items-center gap-0.5 text-[12px] font-normal tone-waiting" aria-label="{b.waiting} waiting">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>{waitingCount(b)}
+        </span>
+      {:else if !arrowsText(b) && kindChip(site.kind)}<span class="shrink-0 text-[11.5px] font-normal text-muted">{site.unsaved ? 'once' : kindChip(site.kind)}</span>{/if}
+    </span>
+    {#if b.progress !== null}<span class="absolute inset-x-3 bottom-0 block h-[2px] overflow-hidden rounded-full bg-track" style="left: 22px"><span class="block h-full bg-progress" style="width: {Math.round(b.progress)}%"></span></span>{/if}
+  </a>
+{/snippet}
+
 <svelte:window onkeydown={keydown} onpaste={pasted} ondragover={dragOver} ondragleave={dragLeave} ondrop={drop} />
 
 <div class="flex h-dvh flex-col bg-surface text-text">
@@ -415,8 +440,15 @@
           {#if entry.showBrowse}{@render link(`#/provider/${encodeURIComponent(entry.provider)}`, `provider:${entry.provider}`, 'key', `My ${entry.name}`)}{/if}
         {/each}
       {/if}
+      {#if store.has('sites')}
+        <!-- SITES.11 R6b: Remote files, as the desktop's sidebar draws it: All remotes, then each remote with its dot and what runs on it. -->
+        <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">{remoteHeading}</p>
+        {@render link('#/sites', 'sites-home', 'server', remotesOn ? allRemotes : remoteHeading)}
+        {#if remotesOn}
+          {#each remotes as site (site.id)}{@render remoteEntry(site)}{/each}
+        {/if}
+      {/if}
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
-      {#if store.has('sites')}{@render link('#/sites', 'sites', 'server', 'Sites')}{/if}
       {@render link('#/statistics', 'statistics', 'chart', 'Statistics')}
       {@render link('#/settings', 'settings', 'settings', 'Options')}
     </nav>

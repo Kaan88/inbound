@@ -50,6 +50,11 @@ export interface Site {
   hasClientSecret: boolean;
   signingIn: boolean;
   trustedCertificates: { fingerprint: string; subject: string; notAfter: string }[];
+  /** SITES.11: how the Host last found the server ('trouble' when it could not be reached); absent before it was tried. */
+  reach?: string | null;
+  lastUsedAt?: string | null;
+  /** An address opened once: held in memory by the Host, not saved. */
+  unsaved?: boolean;
 }
 
 export interface SiteKind {
@@ -72,6 +77,10 @@ export interface SiteResult {
   problem?: string | null;
   offeredFingerprint?: string | null;
   acceptedFingerprints?: string[];
+  /** sites.testDraft: the items listed, and what a refused test offers to trust. */
+  itemCount?: number | null;
+  offeredKeys?: SiteHostKey[] | null;
+  certificate?: SiteCertificate | null;
   site?: Site | null;
 }
 
@@ -126,6 +135,16 @@ export interface SiteTransfer {
   speed: number;
   createdAt: string;
   finishedAt?: string | null;
+  /** SITES.11: the names picked and how many, files the user stopped, and the rest the transfers list reads. */
+  picked?: string[];
+  pickedCount?: number;
+  filesStopped?: number;
+  bytesSetAside?: number;
+  secondsLeft?: number | null;
+  retryAt?: string | null;
+  retryReason?: string | null;
+  firstFailedPath?: string | null;
+  firstFailedError?: string | null;
 }
 
 /** What the Add a site form holds; secrets are blank unless typed (a blank one keeps the saved one). */
@@ -160,6 +179,7 @@ export const problems = {
   exists: 'exists',
   off: 'off',
   listingChanged: 'listingChanged',
+  passwordNeeded: 'passwordNeeded',
 } as const;
 
 export function newForm(kind: SiteKind | undefined, existing?: Site): SiteForm {
@@ -434,7 +454,7 @@ export function hereText(here: string | null | undefined): string {
   switch (here) {
     case 'same': return 'Same';
     case 'olderHere': return 'Older here';
-    case 'someOfIt': return 'Partly here';
+    case 'someOfIt': return 'Some of it';
     case 'notHere': return 'Not here';
     case 'different': return 'Different here';
     case 'folderHere': return 'Folder here';
