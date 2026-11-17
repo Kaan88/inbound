@@ -1573,7 +1573,7 @@ async function downloadFinished(jobId: string): Promise<void> {
   try {
     await ensureSettingsLoaded();
     if (settings.onFinish === "nothing") return;
-    // EXT.R14: remembered first, so the icon'state.s mark and the popup'state.s top row are there whichever way it goes on.
+    // EXT.R14: remembered first, so the icon's mark and the popup's top row are there whichever way it goes on.
     await recordFinished(jobId);
     // EXT.R15: test build only; the define is false in store builds and this line is removed.
     if (typeof __TEST_POPUP__ !== "undefined" && __TEST_POPUP__ && await openPopupForTest({

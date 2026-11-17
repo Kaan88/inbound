@@ -1,5 +1,5 @@
 // EXT.R14: the toolbar ring is thicker and easier to see, and a finished download from this browser leaves a mark on
-// the icon (a check badge and a count) until the popup is opened, where the finished ones are on top.
+// the icon (a full green ring when idle, and the count as badge text) until the popup is opened, where the finished ones are on top.
 // EXT.R15: the "open the popup on a finish" switch exists only in the separate test build.
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -45,11 +45,11 @@ test('EXT.R14: the ring is thick enough at 16 and 32 px, with a halo and a track
 test('EXT.R14: the ring for each state, with and without the finished mark', () => {
   const colors = icon.RING_COLORS;
   assert.deepEqual(icon.ringFor({ kind: 'downloading', progress: 0.5, count: 1 }), { color: colors.downloading, fill: 0.5 });
-  assert.deepEqual(icon.ringFor({ kind: 'downloading', progress: 0.5, count: 1 }, 2), { color: colors.downloading, fill: 0.5, check: true });
-  assert.deepEqual(icon.ringFor({ kind: 'paused', progress: null, count: 1 }, 1), { color: colors.paused, fill: 1, check: true });
-  assert.deepEqual(icon.ringFor({ kind: 'error', progress: null, count: 1 }, 1), { color: colors.error, fill: 1, check: true });
+  assert.deepEqual(icon.ringFor({ kind: 'downloading', progress: 0.5, count: 1 }, 2), { color: colors.downloading, fill: 0.5 }, 'no check while active: the count is the badge text');
+  assert.deepEqual(icon.ringFor({ kind: 'paused', progress: null, count: 1 }, 1), { color: colors.paused, fill: 1 });
+  assert.deepEqual(icon.ringFor({ kind: 'error', progress: null, count: 1 }, 1), { color: colors.error, fill: 1 });
   assert.equal(icon.ringFor(status.IDLE), null);
-  assert.deepEqual(icon.ringFor(status.IDLE, 3), { color: colors.finished, fill: 1, check: true });
+  assert.deepEqual(icon.ringFor(status.IDLE, 3), { color: colors.finished, fill: 1 }, 'idle: a full green ring, no check drawn into the icon');
 });
 
 test('EXT.R14: the icon is drawn again when the finished count changes', () => {
@@ -143,7 +143,7 @@ test('EXT.R14: a finish marks the icon (check and count) until the popup opens, 
           await new Promise((resolve) => setTimeout(resolve, 4));
         }
         assert.equal(log.badge.at(-1), '1');
-        assert.ok(icons.at(-1).imageData, 'the last icon is a drawn ring with the check');
+        assert.ok(icons.at(-1).imageData, 'the last icon is the drawn full ring');
         assert.match(titles.at(-1), /a download has finished/);
         assert.deepEqual(harness.session.finishedIds, [JOB], 'kept for a worker restart');
 
@@ -202,7 +202,7 @@ test('EXT.R14: a restarted worker still shows what finished (session storage)', 
       await settle(() => log.badge.at(-1) === '2');
       assert.equal(log.badge.at(-1), '2');
       for (let i = 0; i < 100 && !icons.at(-1)?.imageData; i++) await new Promise((resolve) => setTimeout(resolve, 4));
-      assert.ok(icons.at(-1).imageData, 'the check mark is drawn again');
+      assert.ok(icons.at(-1).imageData, 'the full ring is drawn again');
     });
   });
 });
