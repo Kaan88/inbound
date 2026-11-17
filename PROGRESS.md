@@ -6,15 +6,12 @@
   SITES.12 rename everywhere people see it; EXT.R14 and EXT.R15. Method this run (owner): Sonnet builds, Opus at low
   effort checks each major addition, Fable reviews once at the end.
 - **Waiting for the owner:**
-  1. **Walk a test build** (R7): Remote files on the desktop and the web UI, phone width too; light mode pictures in
-     `docs/plans/sites-mockups/compare/light/`.
-  2. **Try the popup test extension** (EXT.R15): `extensions/chrome/dist-test-popup` (Load unpacked; same ID, so
-     remove the store copy first or use another profile). Then decide whether it ships.
-  3. **Question:** the store builds already have Options > "On finish: Flash the icon / Open the popup / Do nothing"
-     (EXT.R12). Keep "Open the popup" in the store builds, or only in the test build?
-  4. **Pick from the ideas** in ROADMAP SITES.13 (Remote files) and EXT.R16 (extension popup/tooltip).
-  5. **Release** (version 0.9.0 per `docs/plans/sites-rework.md`, extension version bump for EXT.R14); draft notes in
-     `docs/plans/remote-sites.md`.
+  1. **Walk the test copy** (R7): `artifacts7\Start Inbound test.cmd` starts `artifactspp-r7` (published
+     2026-11-17 from main, Medium label) with its own Host and data in `artifacts7\data`. Not started by me.
+  2. **EXT.R15 decided** (owner: "I like the popup. put it in store versions, off by default."): done; one setting,
+     "When a download finishes", default Flash the icon; the test-only build removed. Extension 355 tests pass.
+  3. **Pick from the ideas** in ROADMAP SITES.13 and EXT.R16 (shown to the owner in plain words 2026-11-17).
+  4. **Release** after the walk (0.9.0 proposed, extension version bump); notes draft in `docs/plans/remote-sites.md`.
 - **Not done:** Linux Uno build (Linux deferred); a run with the extension installed against the web UI; real SFTP,
   Trust, browser sign-in and Drive.
 
