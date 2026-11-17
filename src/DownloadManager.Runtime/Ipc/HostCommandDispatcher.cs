@@ -181,7 +181,9 @@ public sealed partial class HostCommandDispatcher
         || type is SitesMessageTypes.SignIn
         // SITES.7: each waits on rclone and the server for the next piece.
         || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
-        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
+        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete
+        // SITES.13: each reads files on a server.
+        || type is SitesMessageTypes.Preview or SitesMessageTypes.SyncPlan or SitesMessageTypes.SyncRun;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that

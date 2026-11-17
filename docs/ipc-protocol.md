@@ -515,6 +515,66 @@ tries, error?, isFolder}` with `state` `waiting`, `running`, `done`, `skipped` o
 each change of state and about once a second while files move, never more than once every 400 ms. Nothing is sent, and
 nothing runs, while no batch is running.
 
+#### Remote files extras (SITES.13, 2026-11-17)
+
+All additive: an older Host answers the new requests as unknown requests,
+and the new fields are left out by an older Host and ignored by an older client. With Remote files off, `sites.preview`
+gets `sites.previewResult`, `sites.sync.plan` gets `sites.sync.planResult`, `sites.sync.run` and
+`sites.transfer.schedule` get `sites.transfer.result`, and `sites.remember`/`sites.sync.schedule` get `sites.result`,
+each `{ok: false, problem: "off"}`.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `sites.remember` | `{id, lastFolder?, sort?, sortDescending?}` | `sites.result` (`site` set), then `sites.changed` |
+| `sites.preview` | `{id, path, maxBytes?}` | `sites.previewResult` `SitePreviewDto` |
+| `sites.sync.plan` | `SiteSyncRequest` `{siteId, direction, remoteFolder, localFolder?}` | `sites.sync.planResult` `SiteSyncPlanDto` |
+| `sites.sync.run` | `SiteSyncRequest` plus `waitForSchedule?` | `sites.transfer.result` |
+| `sites.sync.schedule` | `{siteId, enabled, direction, remoteFolder, localFolder}` | `sites.result` (`site` set), then `sites.changed` |
+| `sites.transfer.schedule` | `{id, wait}` | `sites.transfer.result` |
+
+- **Remembered per remote** (`sites.remember`): `lastFolder` (absolute; `""` forgets it), `sort` (`name`, `size`,
+  `modified` or `type`, `SiteSortKeys`) and `sortDescending`. A field left out is not changed. Stored in the remote's
+  file and shown to every client in `SiteDto` as `lastFolder`, `sort`, `sortDescending`; a change sends `sites.changed`
+  (nothing is written or sent when nothing changed). Pointing the remote at another server forgets `lastFolder`.
+- **Speed limit per remote**: `SiteSaveRequest.downLimit` and `upLimit` (KB/s of 1024 bytes, 0 for none, at most
+  10,000,000; null keeps the saved value, so an older client's edit keeps them), shown in `SiteDto` as `downLimit` and
+  `upLimit`. A remote with a limit moves one file at a time, at that limit (rclone's per-file `BwLimitFile` on that
+  copy); its other files wait their turn. A download uses `downLimit`, an upload `upLimit`, a copy between remotes the
+  lower of the source's `downLimit` and the target's `upLimit`. The overall limit (Options, shared with downloads) still
+  applies on top.
+- **Preview** (`sites.preview`): at most `maxBytes` (default and cap 2 MiB, `SitePreviewLimits.MaxBytes`) from the start
+  of the file. `SitePreviewDto` `{ok, message?, problem?, name, kind, mimeType?, data?, size, truncated}`: `kind` is
+  `image` (by its signature: PNG, JPEG, GIF, WebP, BMP; `mimeType` `image/…`), `text` (a known text extension or no NUL
+  byte in the first 8 KiB; `mimeType` `text/plain`; SVG counts as text and is never drawn) or `none` (no `data`). An
+  image larger than the cap has `truncated: true`, no `data` and a `message`. `data` is base64 on the wire. A web client
+  uses it through `POST /api/ipc`, so the same sign-in and origin checks hold; no new endpoint.
+- **Copy between remotes**: `sites.transfer.start` with `direction: "between"`, `targetSiteId` (any saved or unsaved
+  remote, the same one included) and `targetFolder` (absolute); `localFolder` is not used. Names are in `remoteFolder`
+  of the source remote, as for a download. Refused: an unknown target, a folder copied into itself, the same folder of
+  the same remote, a target whose server key is not accepted yet. rclone copies server to server (through this
+  computer). Conflicts, retries, pause, resume and the partial-file sweep (on the target) work as for an upload.
+  `SiteTransferDto` adds `targetSiteId`, `targetSiteName` and `targetFolder` (null for the other directions) and
+  `localFolder` is `""`. Removing either remote cancels the batch. A scoped session (web, server) has no folder to check
+  for it.
+- **One-way sync** (`sites.sync.plan`, `sites.sync.run`): `download` copies the server folder to the folder here,
+  `upload` the folder here to the server folder; `localFolder` left out is the remote's linked folder (the matching
+  folder under it, for a folder below the remote's start folder). Every file of both sides is compared, all the way
+  down (at most 20,000 a side): one missing at the target is `new`; one newer at the source (by more than two seconds),
+  or of another size when not older, is `changed`; one newer at the target is left alone and counted in `newerThere`;
+  the rest are counted in `same`. Nothing is ever deleted. `SiteSyncPlanDto` `{ok, message?, problem?, direction,
+  remoteFolder, localFolder, files: [{path, size, reason}], count, bytes, same, newerThere}` lists at most 2,000 files
+  (`count` is all of them). `sites.sync.run` works the plan out again and starts one ordinary batch of those files with
+  conflict `replace`; with nothing to copy it answers `{ok: true, message: "Nothing to copy: the folders match."}` and
+  no `transfer`. A scoped session must name `localFolder`, which is held to its folders.
+- **Scheduled transfers**: `sites.transfer.start` and `sites.sync.run` with `waitForSchedule: true` make the batch
+  paused with `message: "Waits for a schedule to start it."` (`waitsForSchedule: true` in `SiteTransferDto`).
+  `sites.transfer.schedule {id, wait: true}` does the same to a running or paused batch; `wait: false` leaves it paused
+  for the user. `sites.sync.schedule` keeps one sync per remote (`SiteDto.scheduledSync`, a `SiteSyncRequest`;
+  `enabled: false` forgets it; `localFolder` is required). At the start of a schedule with `siteTransfers: true`, the
+  batches it paused and those waiting for a schedule go on, and each remote's scheduled sync runs as `sites.sync.run`
+  would, unless a batch of that same sync is still unfinished. At its stop, running batches pause as before.
+- **Test on save**: `sites.testDraft` (SITES.11 R4) already tries a form without saving it; no new request.
+
 ### The server's transports (D1b)
 
 `DownloadManager.Server`, the headless Host for Linux and Docker, serves the same envelopes over HTTP:

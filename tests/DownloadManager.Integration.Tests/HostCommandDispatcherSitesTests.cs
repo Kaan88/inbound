@@ -113,7 +113,17 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.DeviceRead, new SiteDeviceChunkRequest { StreamId = "x" }),
         (SitesMessageTypes.DeviceWrite, new SiteDeviceChunkRequest { StreamId = "x" }),
         (SitesMessageTypes.DeviceClose, new SiteDeviceChunkRequest { StreamId = "x" }),
+        (SitesMessageTypes.Remember, new SiteRememberRequest { Id = SiteId, LastFolder = "/pub" }),
+        (SitesMessageTypes.Preview, new SitePreviewRequest { Id = SiteId, Path = "/pub/a.txt" }),
+        (SitesMessageTypes.SyncPlan, new SiteSyncRequest { SiteId = SiteId, RemoteFolder = "/pub", LocalFolder = "/srv/in" }),
+        (SitesMessageTypes.SyncRun, new SiteSyncRequest { SiteId = SiteId, RemoteFolder = "/pub", LocalFolder = "/srv/in" }),
+        (SitesMessageTypes.SyncSchedule, new SiteSyncScheduleRequest { SiteId = SiteId, RemoteFolder = "/pub", LocalFolder = "/srv/in" }),
+        (SitesMessageTypes.TransferSchedule, new SiteTransferScheduleRequest { Id = SiteId }),
     ];
+
+    /// <summary>SITES.13: refused for a web session here, since /srv/in is outside its folders.</summary>
+    private static bool OutsideForWeb(string type) =>
+        type is SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart or SitesMessageTypes.SyncPlan or SitesMessageTypes.SyncRun or SitesMessageTypes.SyncSchedule;
 
     /// <summary>The Host's own messages: replies and the push. Every other name in <see cref="SitesMessageTypes"/> is a request.</summary>
     private static readonly string[] SitesReplies =
@@ -123,6 +133,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         SitesMessageTypes.TransferResult, SitesMessageTypes.TransferListResult, SitesMessageTypes.TransferChanged,
         SitesMessageTypes.CountResult, SitesMessageTypes.ChangeResult, SitesMessageTypes.CertificateResult,
         SitesMessageTypes.SignInResult, SitesMessageTypes.DeviceStream, SitesMessageTypes.DeviceChunk, SitesMessageTypes.HereResult,
+        SitesMessageTypes.PreviewResult, SitesMessageTypes.SyncPlanResult,
     ];
 
     [Fact]
@@ -186,7 +197,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         foreach (var (type, payload) in SitesRequests)
         {
             var reply = await AskAsync(dispatcher, web, type, payload);
-            if (type is SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)
+            if (OutsideForWeb(type))
             {
                 // Use my own rclone names a program to run; /srv/in is outside the app's folders.
                 Assert.Equal(MessageTypes.HostActionResult, reply.Type);
@@ -195,7 +206,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             else Assert.Equal(SitesMessageTypes.Status, reply.Type);
         }
 
-        Assert.Equal(SitesRequests.Select(request => request.Type).Where(t => t is not (SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)), sites.Seen);
+        Assert.Equal(SitesRequests.Select(request => request.Type).Where(t => !OutsideForWeb(t)), sites.Seen);
 
         // The switch itself, and a folder inside the app's folders, go on; the folder as the Host resolved it.
         var inside = Path.Combine(profile.Roots.Roots[0], "from-site");
@@ -226,6 +237,17 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, SitesMessageTypes.TestDraft,
             new SiteTestDraftRequest { Site = new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = "/srv/in" } })).Type);
         Assert.True(HostCommandDispatcher.NeedsLifetime(SitesMessageTypes.TestDraft));
+
+        // SITES.13: a sync names its folder here; one with none is refused for a web session, one inside goes on resolved.
+        Assert.Equal(MessageTypes.HostActionResult, (await AskAsync(dispatcher, web, SitesMessageTypes.SyncPlan,
+            new SiteSyncRequest { SiteId = SiteId, RemoteFolder = "/pub" })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.SyncRun,
+            new SiteSyncRequest { SiteId = SiteId, RemoteFolder = "/pub", LocalFolder = inside })).Type);
+        lock (sites.Seen) Assert.Equal(inside, sites.Messages[^1].GetPayload<SiteSyncRequest>().LocalFolder);
+        // A copy between remotes reads and writes nothing here, so it has no folder to check.
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferStart,
+            new SiteTransferStartRequest { SiteId = SiteId, Direction = "between", TargetSiteId = SiteId, TargetFolder = "/b", Names = [new SiteTransferNameDto { Name = "a.txt" }] })).Type);
+        Assert.True(HostCommandDispatcher.NeedsLifetime(SitesMessageTypes.Preview));
 
         // A batch the user at this PC made outside the session's folders is not set moving again from the browser; one
         // inside them is, and pausing or cancelling either moves nothing.

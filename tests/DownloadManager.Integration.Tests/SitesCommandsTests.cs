@@ -260,6 +260,91 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ARemoteKeepsItsLastFolderSortAndSpeedLimitsForEveryClient()
+    {
+        var commands = Open();
+        await On(commands);
+        var request = Site();
+        request.DownLimit = 300;
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request)).Site!;
+        Assert.Equal((300, 0), (saved.DownLimit, saved.UpLimit));
+
+        var remembered = await Call<SiteResultDto>(commands, SitesMessageTypes.Remember,
+            new SiteRememberRequest { Id = saved.Id, LastFolder = "/pub/docs/", Sort = SiteSortKeys.Size, SortDescending = true });
+        Assert.True(remembered.Ok, remembered.Message);
+        var listed = (await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest)).Sites.Single();
+        Assert.Equal(("/pub/docs", SiteSortKeys.Size, true), (listed.LastFolder, listed.Sort, listed.SortDescending));
+
+        // Only the fields sent change; an edit from an older client (no limits) keeps the limits.
+        await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, LastFolder = "/pub" });
+        var edit = Site(id: saved.Id, password: null);
+        var edited = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, edit)).Site!;
+        Assert.Equal(("/pub", SiteSortKeys.Size, 300), (edited.LastFolder, edited.Sort, edited.DownLimit));
+
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, Sort = "colour" })).Ok);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.Remember, new SiteRememberRequest { Id = saved.Id, LastFolder = "/a/../b" })).Ok);
+        edit.UpLimit = -1;
+        Assert.Contains("speed limit", (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, edit)).Message);
+    }
+
+    [Fact]
+    public async Task AScheduledSyncNeedsAFullFolderHereAndCanBeForgotten()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var folder = Path.Combine(_root, "mirror");
+
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule,
+            new SiteSyncScheduleRequest { SiteId = saved.Id, RemoteFolder = "/pub" })).Ok);
+        var kept = await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule,
+            new SiteSyncScheduleRequest { SiteId = saved.Id, RemoteFolder = "/pub/", LocalFolder = folder });
+        Assert.True(kept.Ok, kept.Message);
+        Assert.Equal(("download", "/pub", folder), (kept.Site!.ScheduledSync!.Direction, kept.Site.ScheduledSync.RemoteFolder, kept.Site.ScheduledSync.LocalFolder));
+        var forgot = await Call<SiteResultDto>(commands, SitesMessageTypes.SyncSchedule, new SiteSyncScheduleRequest { SiteId = saved.Id, Enabled = false });
+        Assert.Null(forgot.Site!.ScheduledSync);
+    }
+
+    [Fact]
+    public async Task ACopyBetweenRemotesNeedsAKnownTargetAndAnotherFolder()
+    {
+        var commands = Open();
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var start = new SiteTransferStartRequest
+        {
+            SiteId = saved.Id, Direction = "between", RemoteFolder = "/pub", TargetSiteId = SiteStore.NewId(), TargetFolder = "/copy",
+            Names = [new SiteTransferNameDto { Name = "docs", IsFolder = true }],
+        };
+        Assert.Contains("no longer exists", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+        start.TargetSiteId = saved.Id;
+        start.TargetFolder = "/pub/docs/inner";
+        Assert.Contains("into itself", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+        start.TargetFolder = "/pub";
+        Assert.Contains("same folder", (await Call<SiteTransferResultDto>(commands, SitesMessageTypes.TransferStart, start)).Message);
+    }
+
+    [Fact]
+    public void APreviewIsAnImageByItsSignatureTextWithoutNulBytesAndNothingElse()
+    {
+        byte[] png = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        var image = SitesCommands.Preview("photo.dat", png, png.Length, truncated: false);
+        Assert.Equal((SitePreviewKinds.Image, "image/png"), (image.Kind, image.MimeType));
+        Assert.Equal(png, image.Data);
+        var big = SitesCommands.Preview("photo.png", png, 10_000_000, truncated: true);
+        Assert.Null(big.Data);
+        Assert.Contains("larger", big.Message);
+
+        var text = SitesCommands.Preview("notes", "hello\nthere"u8, 11, truncated: false);
+        Assert.Equal(SitePreviewKinds.Text, text.Kind);
+        var binary = SitesCommands.Preview("tool.exe", [0x4D, 0x5A, 0, 0, 3], 5, truncated: false);
+        Assert.Equal(SitePreviewKinds.None, binary.Kind);
+        Assert.Null(binary.Data);
+        var svg = SitesCommands.Preview("logo.svg", "<svg/>"u8, 6, truncated: false);
+        Assert.Equal(SitePreviewKinds.Text, svg.Kind); // shown as text, never drawn
+    }
+
+    [Fact]
     public async Task ARemovedSiteIsGoneAndRemovingItAgainIsRefused()
     {
         var commands = Open();

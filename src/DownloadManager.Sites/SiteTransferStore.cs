@@ -9,6 +9,9 @@ public static class SiteTransferDirections
 {
     public const string Download = "download";
     public const string Upload = "upload";
+
+    /// <summary>SITES.13: from one remote to another (or to another folder of the same one); no folder on this PC.</summary>
+    public const string Between = "between";
 }
 
 /// <summary>What a file does when its target is already there, chosen once for the batch.</summary>
@@ -106,6 +109,12 @@ public sealed class SiteTransferRecord
 
     public string Conflict { get; set; } = SiteTransferConflicts.Skip;
     public string State { get; set; } = SiteTransferStates.Running;
+
+    /// <summary>SITES.13, <see cref="SiteTransferDirections.Between"/>: the target remote, its name then, and its folder (absolute).</summary>
+    public string? TargetSiteId { get; set; }
+
+    public string? TargetSiteName { get; set; }
+    public string? TargetFolder { get; set; }
 
     /// <summary>A <c>SiteProblems</c> value when the batch was stopped by a problem that needs its own words (a changed host key).</summary>
     public string? Problem { get; set; }

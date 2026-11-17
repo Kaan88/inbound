@@ -116,12 +116,36 @@ public sealed record SiteRecord
     /// </summary>
     public DateTimeOffset? LastUsedAt { get; init; }
 
+    /// <summary>SITES.13: the folder last shown (<c>sites.remember</c>), absolute; null when none.</summary>
+    public string? LastFolder { get; init; }
+
+    /// <summary>SITES.13: the sort column (<c>SiteSortKeys</c>), or null for the default.</summary>
+    public string? Sort { get; init; }
+
+    public bool SortDescending { get; init; }
+
+    /// <summary>SITES.13: download and upload speed limits in KB/s (1024 bytes); 0 for none.</summary>
+    public int DownLimit { get; init; }
+
+    public int UpLimit { get; init; }
+
+    /// <summary>SITES.13: the sync each schedule with "Remote files transfers" runs at its start, or null.</summary>
+    public SiteSyncRecord? ScheduledSync { get; init; }
+
     /// <summary>
     /// SITES.11, "Open an address once": held in the Host's memory only (<see cref="SiteStore"/>), never written to a file
     /// until the user keeps it. Never part of a site file.
     /// </summary>
     [JsonIgnore]
     public bool Unsaved { get; init; }
+}
+
+/// <summary>SITES.13: a saved one-way sync: <c>download</c> or <c>upload</c> between a server folder and a folder here.</summary>
+public sealed record SiteSyncRecord
+{
+    public required string Direction { get; init; }
+    public required string RemoteFolder { get; init; }
+    public required string LocalFolder { get; init; }
 }
 
 /// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
@@ -358,6 +382,9 @@ public sealed class SiteStore
         return Path.Combine(_folder, id + ".json");
     }
 
+    /// <summary>SITES.13: the highest speed limit in KB/s (about 10 GB/s).</summary>
+    public const int MaxLimit = 10_000_000;
+
     public static bool IsId(string id) => id.Length == 32 && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void Validate(SiteRecord site)
@@ -378,6 +405,15 @@ public sealed class SiteStore
         if (site.Stars.Count > SitePaths.MaxStars) throw new SiteStoreException($"A remote can have at most {SitePaths.MaxStars} starred folders.");
         foreach (var star in site.Stars)
             if (!SitePaths.IsStarrable(star)) throw new SiteStoreException("A starred folder must be an absolute path on the server.");
+        if (site.LastFolder is not null && SitePaths.Normalize(site.LastFolder) != site.LastFolder)
+            throw new SiteStoreException("The last folder must be an absolute path on the server.");
+        if (site.ScheduledSync is { } sync && (sync.Direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload)
+                || SitePaths.Normalize(sync.RemoteFolder) != sync.RemoteFolder || !Path.IsPathFullyQualified(sync.LocalFolder)))
+            throw new SiteStoreException("A scheduled sync needs download or upload, a folder on the server and a full folder path here.");
+        if (site.Sort is not null && !DownloadManager.Contracts.SiteSortKeys.IsKnown(site.Sort))
+            throw new SiteStoreException("That sort order is not known.");
+        if (site.DownLimit is < 0 or > MaxLimit || site.UpLimit is < 0 or > MaxLimit)
+            throw new SiteStoreException($"A speed limit must be between 0 (none) and {MaxLimit:N0} KB/s.");
         if (site.RemoteFolder.Length > 0 && SitePaths.Normalize(site.RemoteFolder) is null)
             throw new SiteStoreException("The folder on the server must be a path such as /home/me/files, without . or .. in it.");
     }

@@ -193,7 +193,8 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// <summary>The folder on this computer a batch reads or writes; null when there is no such batch.</summary>
     public string? LocalFolderOf(string id)
     {
-        lock (_sync) return _batches.FirstOrDefault(b => b.Record.Id == id)?.Record.LocalFolder;
+        // SITES.13: a batch between remotes has no folder here.
+        lock (_sync) return _batches.FirstOrDefault(b => b.Record.Id == id)?.Record.LocalFolder is { Length: > 0 } folder ? folder : null;
     }
 
     /// <summary>
@@ -203,16 +204,25 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// </summary>
     public bool Uses(string siteId, string path)
     {
-        static bool Within(string candidate, string root) =>
-            root == "/" || candidate == root || candidate.StartsWith(root + "/", StringComparison.Ordinal);
-
         lock (_sync)
         {
             foreach (var batch in _batches)
             {
                 var record = batch.Record;
-                if (record.SiteId != siteId) continue;
+                if (record.SiteId != siteId && record.TargetSiteId != siteId) continue;
                 if (record.State is not (SiteTransferStates.Running or SiteTransferStates.Paused) && !StoppedLocked(batch)) continue;
+                // SITES.13: a batch between remotes writes into its target folder.
+                if (record.TargetSiteId == siteId && record.TargetFolder is { } into)
+                {
+                    if (Within(into, path)) return true;
+                    foreach (var item in record.Items)
+                    {
+                        if (NotFinished(item) && Within(SiteTransferPaths.Remote(into, item.Target ?? item.Path), path)) return true;
+                    }
+
+                    if (record.SiteId != siteId) continue;
+                }
+
                 if (Within(record.RemoteFolder, path)) return true;
                 foreach (var item in record.Items)
                 {
@@ -261,17 +271,42 @@ public sealed class SiteTransfers : IAsyncDisposable
     {
         if (!SiteStore.IsId(request.SiteId) || await _getSite(request.SiteId, cancellationToken).ConfigureAwait(false) is not { } site)
             return Fail("That remote no longer exists.");
-        if (request.Direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload)) return Fail("Choose download or upload.");
+        if (request.Direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload or SiteTransferDirections.Between))
+            return Fail("Choose download or upload.");
         var conflict = string.IsNullOrEmpty(request.Conflict) ? SiteTransferConflicts.Skip : request.Conflict;
         if (!SiteTransferConflicts.IsKnown(conflict)) return Fail("Choose Skip, Replace or Keep both for files that are already there.");
         if (SitePaths.Normalize(request.RemoteFolder) is not { } remoteFolder) return Fail("That is not a folder path on the server.");
-        var localFolder = !string.IsNullOrWhiteSpace(request.LocalFolder) ? request.LocalFolder.Trim()
+        var between = request.Direction == SiteTransferDirections.Between;
+        SiteRecord? target = null;
+        string? targetFolder = null;
+        if (between)
+        {
+            // SITES.13: remote to remote; the same remote is allowed (another folder of it).
+            if (string.IsNullOrEmpty(request.TargetSiteId) || !SiteStore.IsId(request.TargetSiteId)
+                || await _getSite(request.TargetSiteId, cancellationToken).ConfigureAwait(false) is not { } other)
+                return Fail("The remote to copy to no longer exists.");
+            target = other;
+            if (SitePaths.Normalize(request.TargetFolder) is not { } folder) return Fail("That is not a folder path on the remote to copy to.");
+            targetFolder = folder;
+            if (target.Id == site.Id && request.Names is { Count: > 0 } && request.Names.Any(n => n?.Name is { } name
+                    && Within(targetFolder, SiteTransferPaths.Remote(remoteFolder, name))))
+                return Fail("A folder can't be copied into itself.");
+            if (target.Id == site.Id && targetFolder == remoteFolder) return Fail("Choose another folder to copy to: that is the same folder.");
+            if (target.NeedsHostKey)
+                return new SiteTransferResultDto { Ok = false, Problem = SiteProblems.HostKeyNotAccepted, Message = $"The key of {target.Name}'s server has not been accepted yet." };
+        }
+
+        var localFolder = between ? "" : !string.IsNullOrWhiteSpace(request.LocalFolder) ? request.LocalFolder.Trim()
             : site.LocalFolder
             // The same guards follow as for a folder given: a full path, outside Inbound's data; made when missing.
             ?? (request.Direction == SiteTransferDirections.Download && request.Names is { Count: > 0 } picked && picked.All(n => n?.Name is not null) ? DownloadFolder?.Invoke(picked) : null);
-        if (localFolder is null || !Path.IsPathFullyQualified(localFolder)) return Fail("Choose a folder on this PC.");
-        localFolder = Path.GetFullPath(localFolder);
-        if (IsInside(localFolder, _stateDirectory)) return Fail("Files can't be placed in Inbound's own data folder; choose another folder.");
+        if (!between)
+        {
+            if (localFolder is null || !Path.IsPathFullyQualified(localFolder)) return Fail("Choose a folder on this PC.");
+            localFolder = Path.GetFullPath(localFolder);
+            if (IsInside(localFolder, _stateDirectory)) return Fail("Files can't be placed in Inbound's own data folder; choose another folder.");
+        }
+
         if (request.Names is null || request.Names.Count == 0 || request.Names.Any(n => n is null)) return Fail("Choose the files to move.");
         if (request.Names.Count > MaxItems) return Fail($"A transfer can hold at most {MaxItems:N0} files.");
         foreach (var name in request.Names)
@@ -288,9 +323,11 @@ public sealed class SiteTransfers : IAsyncDisposable
         List<SiteTransferItem> items;
         try
         {
-            items = request.Direction == SiteTransferDirections.Download
-                ? await ListDownloadAsync(site, remoteFolder, names, cancellationToken).ConfigureAwait(false)
-                : ListUpload(localFolder, names, SiteKindCatalog.Has(site.Kind, SiteCapabilities.EmptyFolders));
+            items = request.Direction == SiteTransferDirections.Upload
+                ? ListUpload(localFolder!, names, SiteKindCatalog.Has(site.Kind, SiteCapabilities.EmptyFolders))
+                : await ListDownloadAsync(site, remoteFolder, names, cancellationToken).ConfigureAwait(false);
+            // An object store can't hold an empty folder (SITES.6).
+            if (between && !SiteKindCatalog.Has(target!.Kind, SiteCapabilities.EmptyFolders)) items.RemoveAll(i => i.Folder);
         }
         catch (ItemFailure e)
         {
@@ -309,10 +346,28 @@ public sealed class SiteTransfers : IAsyncDisposable
             return Fail($"The folder on this PC could not be read: {e.Message}");
         }
 
+        return await StartListedAsync(site, request.Direction, remoteFolder, localFolder!, conflict, items, target, targetFolder, request.WaitForSchedule).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// SITES.13, a one-way sync (<c>sites.sync.run</c>): the files a plan found, as one batch that replaces changed files.
+    /// </summary>
+    public Task<SiteTransferResultDto> StartSyncAsync(SiteRecord site, string direction, string remoteFolder, string localFolder, List<SiteTransferItem> items,
+        bool waitForSchedule = false)
+    {
+        if (direction is not (SiteTransferDirections.Download or SiteTransferDirections.Upload)) return Task.FromResult(Fail("Choose download or upload."));
+        if (!Path.IsPathFullyQualified(localFolder)) return Task.FromResult(Fail("Choose a folder on this PC."));
+        if (IsInside(Path.GetFullPath(localFolder), _stateDirectory)) return Task.FromResult(Fail("Files can't be placed in Inbound's own data folder; choose another folder."));
+        return StartListedAsync(site, direction, remoteFolder, Path.GetFullPath(localFolder), SiteTransferConflicts.Replace, items, null, null, waitForSchedule);
+    }
+
+    private async Task<SiteTransferResultDto> StartListedAsync(SiteRecord site, string direction, string remoteFolder, string localFolder, string conflict,
+        List<SiteTransferItem> items, SiteRecord? target, string? targetFolder, bool waitForSchedule)
+    {
         if (items.Count == 0) return Fail("Nothing was chosen.");
         if (items.Count > MaxItems) return Fail($"That is {items.Count:N0} files; a transfer can hold at most {MaxItems:N0}.");
 
-        if (request.Direction == SiteTransferDirections.Download)
+        if (direction == SiteTransferDirections.Download)
         {
             // Windows (and macOS) can't hold two names that differ only in case: the second would write over the first.
             var seen = new HashSet<string>(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -331,11 +386,16 @@ public sealed class SiteTransfers : IAsyncDisposable
             Id = SiteTransferStore.NewId(),
             SiteId = site.Id,
             SiteName = site.Name,
-            Direction = request.Direction,
+            Direction = direction,
             RemoteFolder = remoteFolder,
             LocalFolder = localFolder,
             Conflict = conflict,
-            State = SiteTransferStates.Running,
+            TargetSiteId = target?.Id,
+            TargetSiteName = target?.Name,
+            TargetFolder = targetFolder,
+            // SITES.13: made paused, for a schedule's start.
+            State = waitForSchedule ? SiteTransferStates.Paused : SiteTransferStates.Running,
+            Message = waitForSchedule ? WaitingForScheduleMessage : null,
             Items = items,
             CreatedAt = _time.GetUtcNow(),
         };
@@ -371,7 +431,10 @@ public sealed class SiteTransfers : IAsyncDisposable
             dto = ToDto(batch);
         }
 
-        _log($"Site transfer {record.Id}: {record.Direction} of {items.Count} file(s) started.");
+        _log($"Site transfer {record.Id}: {record.Direction} of {items.Count} file(s) {(waitForSchedule ? "waits for a schedule" : "started")}.");
+        // SITES.13: the remotes' speed limits are known before the first file starts.
+        SiteLimitsChanged(site);
+        if (target is not null) SiteLimitsChanged(target);
         Pump();
         RequestBroadcast();
         return new SiteTransferResultDto { Ok = true, Transfer = dto };
@@ -597,11 +660,53 @@ public sealed class SiteTransfers : IAsyncDisposable
         lock (_sync)
         {
             if (_disposed || !_enabled()) return;
-            ids = [.. _batches.Where(b => b.Record.State == SiteTransferStates.Paused && b.Record.Message == ScheduledPauseMessage)
+            ids = [.. _batches.Where(b => b.Record.State == SiteTransferStates.Paused
+                    && b.Record.Message is ScheduledPauseMessage or WaitingForScheduleMessage)
                 .Select(b => b.Record.Id)];
         }
 
         foreach (var id in ids) await ResumeAsync(id).ConfigureAwait(false);
+    }
+
+    /// <summary>SITES.13: a batch made to wait for a schedule's start (<c>sites.transfer.schedule</c>).</summary>
+    public const string WaitingForScheduleMessage = "Waits for a schedule to start it.";
+
+    /// <summary>
+    /// SITES.13: <paramref name="wait"/> true pauses a running batch (or marks a paused one) to wait for a schedule's start;
+    /// false leaves it paused for the user.
+    /// </summary>
+    public async Task<SiteTransferResultDto> WaitForScheduleAsync(string id, bool wait)
+    {
+        Batch batch;
+        bool pause;
+        lock (_sync)
+        {
+            if (Find(id) is not { } found) return Fail("That transfer is no longer listed.");
+            batch = found;
+            pause = wait && batch.Record.State == SiteTransferStates.Running;
+            if (!pause)
+            {
+                if (batch.Record.State != SiteTransferStates.Paused) return Fail("Only a running or paused transfer can wait for a schedule.");
+                batch.Record.Message = wait ? WaitingForScheduleMessage : null;
+                batch.Record.Problem = null;
+            }
+        }
+
+        if (pause) return await StopAsync(id, SiteTransferStates.Paused, WaitingForScheduleMessage).ConfigureAwait(false);
+        await SaveQuietlyAsync(batch).ConfigureAwait(false);
+        RequestBroadcast();
+        lock (_sync) return Ok(batch);
+    }
+
+    /// <summary>SITES.13: a batch of this sync that is not finished yet, so a schedule does not start a second one.</summary>
+    public bool HasUnfinished(string siteId, string direction, string remoteFolder, string localFolder)
+    {
+        lock (_sync)
+        {
+            return _batches.Any(b => b.Record.SiteId == siteId && b.Record.Direction == direction && b.Record.RemoteFolder == remoteFolder
+                && string.Equals(b.Record.LocalFolder, localFolder, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+                && !SiteTransferStates.IsFinished(b.Record.State));
+        }
     }
 
     /// <summary>The site was removed: its batches that are not finished are canceled.</summary>
@@ -610,7 +715,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         List<string> ids;
         lock (_sync)
         {
-            ids = [.. _batches.Where(b => b.Record.SiteId == siteId && !SiteTransferStates.IsFinished(b.Record.State)).Select(b => b.Record.Id)];
+            ids = [.. _batches.Where(b => (b.Record.SiteId == siteId || b.Record.TargetSiteId == siteId) && !SiteTransferStates.IsFinished(b.Record.State)).Select(b => b.Record.Id)];
         }
 
         foreach (var id in ids) await StopAsync(id, SiteTransferStates.Canceled, message).ConfigureAwait(false);
@@ -873,6 +978,9 @@ public sealed class SiteTransfers : IAsyncDisposable
                     continue;
                 }
 
+                // SITES.13: a remote with a speed limit (or one not read yet) moves one file at a time, at that limit.
+                var oneAtATime = OneAtATimeLocked(batch.Record);
+                var onSite = oneAtATime ? RunningOnSitesLocked(batch.Record) : 0;
                 foreach (var item in batch.Record.Items)
                 {
                     if (item.State != SiteTransferItemStates.Waiting) continue;
@@ -883,6 +991,8 @@ public sealed class SiteTransfers : IAsyncDisposable
                     }
 
                     if (_running >= limit) continue;
+                    if (oneAtATime && onSite > 0) continue;
+                    onSite++;
                     item.State = SiteTransferItemStates.Running;
                     _running++;
                     var run = new Running();
@@ -908,6 +1018,43 @@ public sealed class SiteTransfers : IAsyncDisposable
 
         if (started) RequestBroadcast();
         UpdateSleep();
+    }
+
+    /// <summary>SITES.13: each remote's speed limits (KB/s) as last read; a remote not read yet is not in it.</summary>
+    private readonly Dictionary<string, (int Down, int Up)> _siteLimits = new(StringComparer.Ordinal);
+
+    /// <summary>SITES.13: a remote's speed limits changed (or were read): later files follow them.</summary>
+    public void SiteLimitsChanged(SiteRecord site)
+    {
+        bool changed;
+        lock (_sync)
+        {
+            changed = !_siteLimits.TryGetValue(site.Id, out var known) || known != (site.DownLimit, site.UpLimit);
+            _siteLimits[site.Id] = (site.DownLimit, site.UpLimit);
+        }
+
+        if (changed) Pump();
+    }
+
+    /// <summary>The per-file limit for a batch's file, in KB/s, or 0 for none: the remote's, or for a copy between remotes the lower of the two.</summary>
+    private int FileLimitLocked(SiteTransferRecord record)
+    {
+        var source = _siteLimits.GetValueOrDefault(record.SiteId);
+        var own = record.Direction == SiteTransferDirections.Upload ? source.Up : source.Down;
+        if (record.Direction != SiteTransferDirections.Between || record.TargetSiteId is null) return own;
+        var into = _siteLimits.GetValueOrDefault(record.TargetSiteId).Up;
+        return own == 0 ? into : into == 0 ? own : Math.Min(own, into);
+    }
+
+    private bool OneAtATimeLocked(SiteTransferRecord record) =>
+        !_siteLimits.ContainsKey(record.SiteId) || (record.TargetSiteId is { } into && !_siteLimits.ContainsKey(into)) || FileLimitLocked(record) > 0;
+
+    /// <summary>Files moving now in batches that share a remote with <paramref name="record"/>.</summary>
+    private int RunningOnSitesLocked(SiteTransferRecord record)
+    {
+        static bool Shares(SiteTransferRecord a, SiteTransferRecord b) =>
+            a.SiteId == b.SiteId || (a.TargetSiteId is { } t && (t == b.SiteId || t == b.TargetSiteId)) || (b.TargetSiteId is { } u && u == a.SiteId);
+        return _batches.Where(b => Shares(b.Record, record)).Sum(b => b.Active.Count);
     }
 
     /// <summary>Whether a batch runs and how fast all of them go together: their demand in the overall speed limit's split.</summary>
@@ -1212,51 +1359,76 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
 
         var site = await _getSite(record.SiteId, token).ConfigureAwait(false) ?? throw new ItemFailure("The remote no longer exists.");
+        var between = record.Direction == SiteTransferDirections.Between;
+        var target = between
+            ? await _getSite(record.TargetSiteId ?? "", token).ConfigureAwait(false) ?? throw new ItemFailure("The remote to copy to no longer exists.")
+            : null;
+        SiteLimitsChanged(site);
+        if (target is not null) SiteLimitsChanged(target);
         using var lease = await _acquire(token).ConfigureAwait(false);
         var client = lease.Client;
         var fs = await SiteRemote.BuildAsync(site, client, token).ConfigureAwait(false);
+        // SITES.13: between remotes the target side is the other remote's folder; otherwise this one's.
+        var targetFs = target is null ? fs : await SiteRemote.BuildAsync(target, client, token).ConfigureAwait(false);
+        var targetFolder = between ? record.TargetFolder ?? "/" : record.RemoteFolder;
         if (item.Folder)
         {
             // An empty folder made on the server; one that is there already is fine.
             await client.CallAsync("operations/mkdir", new JsonObject
             {
-                ["fs"] = fs.DeepClone(),
-                ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, item.Path)),
+                ["fs"] = targetFs.DeepClone(),
+                ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(targetFolder, item.Path)),
             }, token).ConfigureAwait(false);
             return SiteTransferItemStates.Done;
         }
 
         await ApplySpeedLimitAsync(lease, token).ConfigureAwait(false);
         var local = new JsonObject { ["type"] = "local", ["_root"] = record.LocalFolder };
+        int fileLimit;
+        lock (_sync) fileLimit = FileLimitLocked(record);
 
-        string? target;
-        lock (_sync) target = item.Target;
-        if (target is null)
+        string? name;
+        lock (_sync) name = item.Target;
+        if (name is null)
         {
-            if (await ExistsAsync(record, client, fs, item.Path, token).ConfigureAwait(false))
+            if (await ExistsAsync(record, client, targetFs, item.Path, token).ConfigureAwait(false))
             {
                 switch (record.Conflict)
                 {
                     case SiteTransferConflicts.Skip:
                         return SiteTransferItemStates.Skipped;
                     case SiteTransferConflicts.KeepBoth:
-                        target = await FreeNameAsync(record, client, fs, item.Path, token).ConfigureAwait(false);
-                        if (download && IsInside(SiteTransferPaths.Local(record.LocalFolder, target), _stateDirectory))
+                        name = await FreeNameAsync(record, client, targetFs, item.Path, token).ConfigureAwait(false);
+                        if (download && IsInside(SiteTransferPaths.Local(record.LocalFolder, name), _stateDirectory))
                             throw new ItemFailure("The file would land in Inbound's own data folder; it was not copied.");
                         // Kept before the copy, so a restart writes to the same new name, not a third one.
-                        lock (_sync) item.Target = target;
+                        lock (_sync) item.Target = name;
                         await SaveAsync(batch, token).ConfigureAwait(false);
                         break;
                 }
             }
         }
 
-        var to = target ?? item.Path;
-        var remote = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, download ? item.Path : to));
+        var to = name ?? item.Path;
+        var fromServer = download || between;
+        var remote = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, fromServer ? item.Path : to));
         lock (_sync)
         {
-            if (batch.Active.TryGetValue(item, out var run)) run.Source = download ? remote : item.Path;
+            if (batch.Active.TryGetValue(item, out var run)) run.Source = fromServer ? remote : item.Path;
         }
+
+        var copy = new JsonObject
+        {
+            ["srcFs"] = fromServer ? fs : local,
+            ["srcRemote"] = fromServer ? remote : item.Path,
+            ["dstFs"] = between ? targetFs.DeepClone() : download ? local.DeepClone() : fs.DeepClone(),
+            ["dstRemote"] = between ? SitePaths.ToRemote(SiteTransferPaths.Remote(targetFolder, to)) : download ? to : remote,
+            ["_async"] = true,
+            ["_group"] = batch.Group,
+        };
+        // SITES.13: the remote's speed limit, for this file (a limited remote moves one file at a time). The B suffix
+        // makes it bytes; the overall limit (core/bwlimit) still applies on top.
+        if (fileLimit > 0) copy["_config"] = new JsonObject { ["BwLimitFile"] = (fileLimit * 1024L).ToString(CultureInfo.InvariantCulture) + "B" };
 
         token.ThrowIfCancellationRequested();
         // Not on the stop token: a stop that cut this call after rclone had made the job would leave the job running with
@@ -1264,15 +1436,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         JsonObject job;
         using (var answer = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
         {
-            job = await client.CallAsync("operations/copyfile", new JsonObject
-            {
-                ["srcFs"] = download ? fs : local,
-                ["srcRemote"] = download ? remote : item.Path,
-                ["dstFs"] = download ? local.DeepClone() : fs.DeepClone(),
-                ["dstRemote"] = download ? to : remote,
-                ["_async"] = true,
-                ["_group"] = batch.Group,
-            }, answer.Token).ConfigureAwait(false);
+            job = await client.CallAsync("operations/copyfile", copy, answer.Token).ConfigureAwait(false);
         }
 
         var jobId = job["jobid"] is JsonValue id && id.TryGetValue<long>(out var value) ? value
@@ -1335,10 +1499,11 @@ public sealed class SiteTransfers : IAsyncDisposable
             return File.Exists(path) || Directory.Exists(path);
         }
 
+        var folder = record.Direction == SiteTransferDirections.Between ? record.TargetFolder ?? "/" : record.RemoteFolder;
         var stat = await client.CallAsync("operations/stat", new JsonObject
         {
             ["fs"] = fs.DeepClone(),
-            ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, relative)),
+            ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(folder, relative)),
         }, token).ConfigureAwait(false);
         return stat["item"] is JsonObject;
     }
@@ -1397,14 +1562,16 @@ public sealed class SiteTransfers : IAsyncDisposable
                     }
                 }
             }
-            else if (await _getSite(record.SiteId, CancellationToken.None).ConfigureAwait(false) is { } site)
+            else if (await _getSite(record.Direction == SiteTransferDirections.Between ? record.TargetSiteId ?? "" : record.SiteId, CancellationToken.None)
+                         .ConfigureAwait(false) is { } site)
             {
+                var into = record.Direction == SiteTransferDirections.Between ? record.TargetFolder ?? "/" : record.RemoteFolder;
                 using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(2));
                 using var lease = await _acquire(limit.Token).ConfigureAwait(false);
                 var fs = await SiteRemote.BuildAsync(site, lease.Client, limit.Token).ConfigureAwait(false);
                 foreach (var (folder, names) in folders)
                 {
-                    var parent = SitePaths.ToRemote(folder.Length == 0 ? record.RemoteFolder : SiteTransferPaths.Remote(record.RemoteFolder, folder));
+                    var parent = SitePaths.ToRemote(folder.Length == 0 ? into : SiteTransferPaths.Remote(into, folder));
                     JsonObject listing;
                     try
                     {
@@ -1465,7 +1632,7 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// </summary>
     internal static (string Error, bool Retry) FileFailure(Exception e, SiteTransferRecord record, SiteTransferItem item)
     {
-        var upload = record.Direction != SiteTransferDirections.Download;
+        var upload = record.Direction == SiteTransferDirections.Upload;
         var problem = upload && e is RcloneCallException write
             ? SiteErrorText.UploadFailure(write.Message, record.LocalFolder, item.Path, item.Target)
             : UploadProblem.None;
@@ -1751,6 +1918,10 @@ public sealed class SiteTransfers : IAsyncDisposable
             RemoteFolder = r.RemoteFolder,
             LocalFolder = r.LocalFolder,
             Conflict = r.Conflict,
+            TargetSiteId = r.TargetSiteId,
+            TargetSiteName = r.TargetSiteName,
+            TargetFolder = r.TargetFolder,
+            WaitsForSchedule = r.State == SiteTransferStates.Paused && r.Message == WaitingForScheduleMessage,
             State = r.State,
             Problem = r.Problem,
             Message = r.Message,
@@ -1813,7 +1984,11 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     private static SiteTransferResultDto Fail(string message) => new() { Ok = false, Message = message };
 
-    private static bool IsInside(string path, string folder)
+    /// <summary>Whether the server path <paramref name="candidate"/> is <paramref name="root"/> or inside it.</summary>
+    private static bool Within(string candidate, string root) =>
+        root == "/" || candidate == root || candidate.StartsWith(root + "/", StringComparison.Ordinal);
+
+    internal static bool IsInside(string path, string folder)
     {
         var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)) + Path.DirectorySeparatorChar;

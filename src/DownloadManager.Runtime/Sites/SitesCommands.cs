@@ -166,7 +166,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     new SiteCountResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
                     new SiteChangeResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
-                SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
+                SitesMessageTypes.Preview => IpcMessage.Create(SitesMessageTypes.PreviewResult,
+                    new SitePreviewDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
+                SitesMessageTypes.SyncPlan => IpcMessage.Create(SitesMessageTypes.SyncPlanResult,
+                    new SiteSyncPlanDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
+                SitesMessageTypes.SyncRun or SitesMessageTypes.TransferSchedule or SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
                     or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear or SitesMessageTypes.TransferStopFile or SitesMessageTypes.TransferStartFile => IpcMessage.Create(SitesMessageTypes.TransferResult,
                     new SiteTransferResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
@@ -247,6 +251,28 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.Here:
                 return IpcMessage.Create(SitesMessageTypes.HereResult,
                     await HereAsync(request.GetPayload<SiteHereRequest>() ?? new SiteHereRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.SyncSchedule:
+                return Result(request, await ScheduleSyncAsync(request.GetPayload<SiteSyncScheduleRequest>() ?? new SiteSyncScheduleRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.TransferSchedule:
+            {
+                var wait = request.GetPayload<SiteTransferScheduleRequest>() ?? new SiteTransferScheduleRequest();
+                return Transfer(request, await _transfers.WaitForScheduleAsync(wait.Id ?? "", wait.Wait).ConfigureAwait(false));
+            }
+            case SitesMessageTypes.Remember:
+                return Result(request, await RememberAsync(request.GetPayload<SiteRememberRequest>() ?? new SiteRememberRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.Preview:
+                return IpcMessage.Create(SitesMessageTypes.PreviewResult,
+                    await PreviewAsync(request.GetPayload<SitePreviewRequest>() ?? new SitePreviewRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.SyncPlan:
+                return IpcMessage.Create(SitesMessageTypes.SyncPlanResult,
+                    (await PlanSyncAsync(request.GetPayload<SiteSyncRequest>() ?? new SiteSyncRequest(), cancellationToken).ConfigureAwait(false)).Plan, request.Id);
+            case SitesMessageTypes.SyncRun:
+            {
+                var sync = request.GetPayload<SiteSyncRequest>() ?? new SiteSyncRequest();
+                var ran = await RunSyncAsync(sync, cancellationToken).ConfigureAwait(false);
+                if (ran.Transfer is not null) Touch(sync.SiteId);
+                return Transfer(request, ran);
+            }
             case SitesMessageTypes.TransferPause:
                 return Transfer(request, await _transfers.PauseAsync(TransferId(request)).ConfigureAwait(false));
             case SitesMessageTypes.TransferResume:
@@ -600,6 +626,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
 
         ForgetListings(saved.Id);
+        _transfers.SiteLimitsChanged(saved);
         // SITES.6b: another server no longer trusts the old one's certificate.
         if (droppedCertificates) await TrustedCertificatesChangedAsync(cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -632,6 +659,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         if (!signsIn && request.AuthMethod is not (SiteAuthMethods.Password or SiteAuthMethods.Key))
             return (null, Fail("Choose a password or a key file to sign in with."));
         if (KindAddress(request) is { Problem: { } addressProblem }) return (null, Fail(addressProblem));
+        if (request.DownLimit is < 0 or > SiteStore.MaxLimit || request.UpLimit is < 0 or > SiteStore.MaxLimit)
+            return (null, Fail($"A speed limit must be between 0 (none) and {SiteStore.MaxLimit:N0} KB/s."));
         // SITES.14: a PuTTY key becomes OpenSSH text with no passphrase of its own (sealed like any key); its passphrase,
         // needed only to open it, is not kept.
         if (PuttyKey.IsPutty(request.PrivateKey))
@@ -710,6 +739,13 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             LastUsedAt = existing?.LastUsedAt,
             // SITES.11: an edit of an address opened once keeps it unsaved (the store holds it in memory).
             Unsaved = existing?.Unsaved ?? false,
+            // SITES.13: kept with the remote; the last folder belongs to its server.
+            LastFolder = sameServer ? existing!.LastFolder : null,
+            Sort = existing?.Sort,
+            SortDescending = existing?.SortDescending ?? false,
+            DownLimit = request.DownLimit ?? existing?.DownLimit ?? 0,
+            UpLimit = request.UpLimit ?? existing?.UpLimit ?? 0,
+            ScheduledSync = sameServer ? existing!.ScheduledSync : null,
             ModifiedAt = now,
         };
         if (signsIn)
@@ -1442,6 +1478,14 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         SignedIn = site.SignedIn,
         ClientId = site.ClientId,
         HasClientSecret = site.SealedClientSecret is not null,
+        LastFolder = site.LastFolder,
+        ScheduledSync = site.ScheduledSync is { } sync
+            ? new SiteSyncRequest { SiteId = site.Id, Direction = sync.Direction, RemoteFolder = sync.RemoteFolder, LocalFolder = sync.LocalFolder }
+            : null,
+        Sort = site.Sort,
+        SortDescending = site.SortDescending,
+        DownLimit = site.DownLimit,
+        UpLimit = site.UpLimit,
     };
 
     private static SiteHostKeyDto ToDto(SshHostKey key) => new() { Type = key.KeyType, Fingerprint = key.Fingerprint, Entry = key.HostKeysEntry };

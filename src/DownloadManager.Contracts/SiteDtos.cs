@@ -162,6 +162,49 @@ public static class SitesMessageTypes
 
     public const string HereResult = "sites.hereResult";
 
+    /// <summary>
+    /// SITES.13, <see cref="SiteRememberRequest"/>: the last folder shown and the sort order of a remote, kept with it so
+    /// every client opens it the same way. Answered with <see cref="Result"/> (its <c>Site</c> set); a change is sent as
+    /// <see cref="Changed"/>. A Host from before SITES.13 answers it as an unknown request.
+    /// </summary>
+    public const string Remember = "sites.remember";
+
+    /// <summary>
+    /// SITES.13, <see cref="SitePreviewRequest"/>: the first bytes (at most <see cref="SitePreviewLimits.MaxBytes"/>) of a
+    /// file on a remote, for a text or image preview. Answered with <see cref="PreviewResult"/>.
+    /// </summary>
+    public const string Preview = "sites.preview";
+
+    public const string PreviewResult = "sites.previewResult";
+
+    /// <summary>
+    /// SITES.13, <see cref="SiteSyncRequest"/>: what a one-way sync of a linked folder would copy (new and changed files
+    /// only; it never deletes). Read-only. Answered with <see cref="SyncPlanResult"/>.
+    /// </summary>
+    public const string SyncPlan = "sites.sync.plan";
+
+    public const string SyncPlanResult = "sites.sync.planResult";
+
+    /// <summary>
+    /// SITES.13, <see cref="SiteSyncRequest"/>: works the plan out again and starts it as one transfer batch (download or
+    /// upload, conflict <c>replace</c> for changed files). Answered with <see cref="TransferResult"/>; nothing to copy is
+    /// <c>ok: true</c> with no <c>transfer</c> and the message "Nothing to copy: the folders match."
+    /// </summary>
+    public const string SyncRun = "sites.sync.run";
+
+    /// <summary>
+    /// SITES.13, <see cref="SiteSyncScheduleRequest"/>: keeps (or forgets) one sync of a remote that each schedule with
+    /// "Remote files transfers" on runs at its start, as <see cref="SyncRun"/> would. Answered with <see cref="Result"/>
+    /// (its <c>Site</c> set, <c>scheduledSync</c> showing it).
+    /// </summary>
+    public const string SyncSchedule = "sites.sync.schedule";
+
+    /// <summary>
+    /// SITES.13, <see cref="SiteTransferScheduleRequest"/>: a batch waits for a schedule's start (paused until then), or no
+    /// longer does. Answered with <see cref="TransferResult"/>.
+    /// </summary>
+    public const string TransferSchedule = "sites.transfer.schedule";
+
     /// <summary><see cref="SiteTransferIdRequest"/>: removes a finished batch from the list, or every finished batch when the id is empty.</summary>
     public const string TransferClear = "sites.transfer.clear";
 
@@ -209,7 +252,8 @@ public static class SitesMessageTypes
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
             or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet or TransferStopFile or TransferStartFile or OpenOnce or Close or Keep or Here or TestDraft
             or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
-            or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
+            or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose
+            or Remember or Preview or SyncPlan or SyncRun or SyncSchedule or TransferSchedule;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -384,6 +428,178 @@ public sealed class SiteDto
 
     /// <summary>SITES.11: opened once from an address, not saved; gone when the Host stops unless kept (<c>sites.keep</c>).</summary>
     public bool Unsaved { get; set; }
+
+    /// <summary>SITES.13: the folder last shown on this remote (<c>sites.remember</c>), absolute; null when none was kept.</summary>
+    public string? LastFolder { get; set; }
+
+    /// <summary>SITES.13: the remote's sort column, a <see cref="SiteSortKeys"/> value; null for the default (name).</summary>
+    public string? Sort { get; set; }
+
+    public bool SortDescending { get; set; }
+
+    /// <summary>SITES.13: the remote's download speed limit in KB/s (1024 bytes); 0 for none.</summary>
+    public int DownLimit { get; set; }
+
+    /// <summary>SITES.13: the remote's upload speed limit in KB/s; 0 for none.</summary>
+    public int UpLimit { get; set; }
+
+    /// <summary>SITES.13: the sync a schedule's start runs (<c>sites.sync.schedule</c>), or null.</summary>
+    public SiteSyncRequest? ScheduledSync { get; set; }
+}
+
+/// <summary>SITES.13, <c>sites.sync.schedule</c>: <see cref="Enabled"/> false forgets the remote's scheduled sync.</summary>
+public sealed class SiteSyncScheduleRequest
+{
+    public string SiteId { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+
+    /// <summary><c>download</c> or <c>upload</c>.</summary>
+    public string Direction { get; set; } = "download";
+
+    public string RemoteFolder { get; set; } = "/";
+
+    /// <summary>The folder on this PC, a full path (required: a schedule runs with nobody to ask).</summary>
+    public string? LocalFolder { get; set; }
+}
+
+/// <summary>SITES.13: the values of <see cref="SiteDto.Sort"/>.</summary>
+public static class SiteSortKeys
+{
+    public const string Name = "name";
+    public const string Size = "size";
+    public const string Modified = "modified";
+    public const string Type = "type";
+
+    public static bool IsKnown(string? key) => key is Name or Size or Modified or Type;
+}
+
+/// <summary>
+/// SITES.13, <c>sites.remember</c>. A field left null is not changed; an empty <see cref="LastFolder"/> forgets it.
+/// </summary>
+public sealed class SiteRememberRequest
+{
+    public string Id { get; set; } = "";
+    public string? LastFolder { get; set; }
+
+    /// <summary>A <see cref="SiteSortKeys"/> value.</summary>
+    public string? Sort { get; set; }
+
+    public bool? SortDescending { get; set; }
+}
+
+/// <summary>SITES.13, <c>sites.preview</c>.</summary>
+public sealed class SitePreviewRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>The file on the server, absolute.</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>How many bytes at most; 0, or more than <see cref="SitePreviewLimits.MaxBytes"/>, reads <see cref="SitePreviewLimits.MaxBytes"/>.</summary>
+    public int MaxBytes { get; set; }
+}
+
+public static class SitePreviewLimits
+{
+    /// <summary>2 MiB: an image or the start of a text, well inside a frame as base64.</summary>
+    public const int MaxBytes = 2 * 1024 * 1024;
+}
+
+/// <summary>The values of <see cref="SitePreviewDto.Kind"/>.</summary>
+public static class SitePreviewKinds
+{
+    public const string Text = "text";
+    public const string Image = "image";
+
+    /// <summary>Neither: the bytes are not sent.</summary>
+    public const string None = "none";
+}
+
+public sealed class SitePreviewDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+    public string Name { get; set; } = "";
+
+    /// <summary>A <see cref="SitePreviewKinds"/> value, from the name and the first bytes.</summary>
+    public string Kind { get; set; } = SitePreviewKinds.None;
+
+    /// <summary>For an image: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c>, <c>image/webp</c> or <c>image/bmp</c>; for text <c>text/plain</c>.</summary>
+    public string? MimeType { get; set; }
+
+    /// <summary>The first bytes of the file (base64 on the wire); null for <see cref="SitePreviewKinds.None"/>.</summary>
+    public byte[]? Data { get; set; }
+
+    /// <summary>The file's size, or -1 when the server did not say.</summary>
+    public long Size { get; set; } = -1;
+
+    /// <summary>The file goes on past <see cref="Data"/>. An image cut short can't be shown; a client says it is too large.</summary>
+    public bool Truncated { get; set; }
+}
+
+/// <summary>SITES.13, <c>sites.sync.plan</c> and <c>sites.sync.run</c>: one-way, never deleting.</summary>
+public sealed class SiteSyncRequest
+{
+    public string SiteId { get; set; } = "";
+
+    /// <summary><c>download</c> (the remote's folder to this PC) or <c>upload</c> (this PC to the remote).</summary>
+    public string Direction { get; set; } = "download";
+
+    /// <summary>The folder on the server, absolute.</summary>
+    public string RemoteFolder { get; set; } = "/";
+
+    /// <summary>The folder on this PC; null or empty for the remote's linked folder.</summary>
+    public string? LocalFolder { get; set; }
+
+    /// <summary><c>sites.sync.run</c> only: the batch is made paused, waiting for a schedule's start.</summary>
+    public bool WaitForSchedule { get; set; }
+}
+
+public static class SiteSyncReasons
+{
+    /// <summary>Not at the other side.</summary>
+    public const string New = "new";
+
+    /// <summary>There, but of another size, or older than the source.</summary>
+    public const string Changed = "changed";
+}
+
+public sealed class SiteSyncFileDto
+{
+    /// <summary>Relative to the two folders, with <c>/</c>.</summary>
+    public string Path { get; set; } = "";
+
+    public long Size { get; set; }
+
+    /// <summary>A <see cref="SiteSyncReasons"/> value.</summary>
+    public string Reason { get; set; } = SiteSyncReasons.New;
+}
+
+public sealed class SiteSyncPlanDto
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? Problem { get; set; }
+    public string Direction { get; set; } = "";
+    public string RemoteFolder { get; set; } = "";
+    public string LocalFolder { get; set; } = "";
+
+    /// <summary>The files to copy, sorted by path; at most <see cref="MaxListed"/> are listed.</summary>
+    public List<SiteSyncFileDto> Files { get; set; } = [];
+
+    /// <summary>All files to copy, also those past <see cref="MaxListed"/>.</summary>
+    public int Count { get; set; }
+
+    public long Bytes { get; set; }
+
+    /// <summary>Files that are the same on both sides.</summary>
+    public int Same { get; set; }
+
+    /// <summary>Files that are newer at the target than at the source: left alone, never written over.</summary>
+    public int NewerThere { get; set; }
+
+    public const int MaxListed = 2000;
 }
 
 public sealed class SiteHostKeyDto
@@ -449,6 +665,12 @@ public sealed class SiteSaveRequest
 
     /// <summary>SITES.6c: the secret of <see cref="ClientId"/>; null keeps the stored one, empty removes it.</summary>
     public string? ClientSecret { get; set; }
+
+    /// <summary>SITES.13: download speed limit in KB/s (0 for none); null keeps the saved one (an older client).</summary>
+    public int? DownLimit { get; set; }
+
+    /// <summary>SITES.13: upload speed limit in KB/s (0 for none); null keeps the saved one.</summary>
+    public int? UpLimit { get; set; }
 }
 
 /// <summary>

@@ -221,7 +221,7 @@ public sealed class ServerApp : IAsyncDisposable
         sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
         sites.Transfers.Measured += service.OnSiteTransfersMeasured;
         service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
-        service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
+        service.AttachSiteSchedule(sites.ScheduleAsync);
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         service.SettingsChanged += (_, _) => log.Info("Settings updated.");
         dispatcher.Start();

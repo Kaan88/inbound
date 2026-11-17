@@ -185,7 +185,7 @@ internal static class Program
         sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
         sites.Transfers.Measured += service.OnSiteTransfersMeasured;
         service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
-        service.AttachSiteSchedule(start => start ? sites.Transfers.ResumeForScheduleAsync() : sites.Transfers.PauseForScheduleAsync());
+        service.AttachSiteSchedule(sites.ScheduleAsync);
         webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         completionExecutor.ExitHost = () => _ = Task.Run(async () =>

@@ -59,6 +59,17 @@ public sealed partial class HostCommandDispatcher
     {
         switch (message.Type)
         {
+            case SitesMessageTypes.SyncSchedule:
+            {
+                // SITES.13: a scheduled sync's folder here is held to the session's folders, as a sync's is.
+                var schedule = message.GetPayload<SiteSyncScheduleRequest>();
+                if (schedule is null || !schedule.Enabled) return null;
+                if (string.IsNullOrWhiteSpace(schedule.LocalFolder)) return "Choose the folder on this computer to sync with.";
+                if (roots.Allowed(schedule.LocalFolder) is not { } real) return roots.OutsideTextFor(schedule.LocalFolder);
+                schedule.LocalFolder = real;
+                message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(schedule, IpcJson.Options) };
+                return null;
+            }
             case SitesMessageTypes.TransferResume or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferStartFile:
             {
                 // Pause, cancel, get, clear and stopFile move nothing; these start the batch's files moving again
@@ -100,10 +111,23 @@ public sealed partial class HostCommandDispatcher
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(draft, IpcJson.Options) };
                 return null;
             }
+            case SitesMessageTypes.SyncPlan or SitesMessageTypes.SyncRun:
+            {
+                // SITES.13: the folder here is named, so it can be checked; the remote's linked folder is not looked up.
+                var sync = message.GetPayload<SiteSyncRequest>();
+                if (sync is null) return null;
+                if (string.IsNullOrWhiteSpace(sync.LocalFolder)) return "Choose the folder on this computer to sync with.";
+                if (roots.Allowed(sync.LocalFolder) is not { } real) return roots.OutsideTextFor(sync.LocalFolder);
+                sync.LocalFolder = real;
+                message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(sync, IpcJson.Options) };
+                return null;
+            }
             case SitesMessageTypes.TransferStart:
             {
                 var start = message.GetPayload<SiteTransferStartRequest>();
                 if (start is null) return null;
+                // SITES.13: between remotes nothing is read or written on this computer.
+                if (start.Direction == "between") return null;
                 if (roots.Allowed(start.LocalFolder) is not { } real) return roots.OutsideTextFor(start.LocalFolder);
                 start.LocalFolder = real;
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(start, IpcJson.Options) };

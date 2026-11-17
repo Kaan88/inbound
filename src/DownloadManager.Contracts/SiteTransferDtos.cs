@@ -8,14 +8,25 @@ public sealed class SiteTransferStartRequest
 {
     public string SiteId { get; set; } = "";
 
-    /// <summary><c>download</c> or <c>upload</c>.</summary>
+    /// <summary><c>download</c>, <c>upload</c> or (SITES.13) <c>between</c>: from this remote to <see cref="TargetSiteId"/>.</summary>
     public string Direction { get; set; } = "download";
 
-    /// <summary>The folder on the server, absolute (<c>/srv/pub</c>).</summary>
+    /// <summary>The folder on the server, absolute (<c>/srv/pub</c>); for <c>between</c>, the source folder.</summary>
     public string RemoteFolder { get; set; } = "/";
 
-    /// <summary>The folder on this PC, a full path. A download creates it when missing.</summary>
+    /// <summary>The folder on this PC, a full path. A download creates it when missing. Not used for <c>between</c>.</summary>
     public string LocalFolder { get; set; } = "";
+
+    /// <summary>SITES.13, <c>between</c> only: the remote the files go to (may be the same remote, another folder).</summary>
+    public string? TargetSiteId { get; set; }
+
+    /// <summary>SITES.13, <c>between</c> only: the folder on the target remote, absolute.</summary>
+    public string? TargetFolder { get; set; }
+
+    /// <summary>
+    /// SITES.13: made paused, waiting for a schedule with "Remote files transfers" on to start it (its start time).
+    /// </summary>
+    public bool WaitForSchedule { get; set; }
 
     public List<SiteTransferNameDto> Names { get; set; } = [];
 
@@ -38,6 +49,15 @@ public sealed class SiteTransferFileRequest
     public string Path { get; set; } = "";
 }
 
+/// <summary>SITES.13, <c>sites.transfer.schedule</c>.</summary>
+public sealed class SiteTransferScheduleRequest
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>True: the batch is paused (if running) and waits for a schedule's start. False: it stays paused, waiting for the user.</summary>
+    public bool Wait { get; set; } = true;
+}
+
 public sealed class SiteTransferIdRequest
 {
     /// <summary>The batch; for <c>sites.transfer.clear</c> an empty id clears every finished batch.</summary>
@@ -54,6 +74,15 @@ public sealed class SiteTransferDto
     public string RemoteFolder { get; set; } = "";
     public string LocalFolder { get; set; } = "";
     public string Conflict { get; set; } = "";
+
+    /// <summary>SITES.13, <c>between</c>: the remote the files go to, its name, and the folder there. Null otherwise.</summary>
+    public string? TargetSiteId { get; set; }
+
+    public string? TargetSiteName { get; set; }
+    public string? TargetFolder { get; set; }
+
+    /// <summary>SITES.13: paused until a schedule with "Remote files transfers" on starts it.</summary>
+    public bool WaitsForSchedule { get; set; }
 
     /// <summary><c>running</c>, <c>paused</c>, <c>done</c>, <c>failed</c> or <c>canceled</c>.</summary>
     public string State { get; set; } = "";
