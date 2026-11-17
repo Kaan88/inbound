@@ -16,6 +16,9 @@ foreground service (FGS) on 12 and 13; after a reboot a notification with Resume
 
 ## 2. Shape
 
+> **Superseded in part.** Items 2 (stop handling), 4 and 5 below are the first draft. The current design is
+> section 8; sections 6 and 7 say why it changed.
+
 One process, as today: the Host (`AndroidHost`) runs in the app's process. Nothing new talks to the Host except
 through `DownloadManagerService`/`HostCommandDispatcher` as the screen does. New pieces, all under
 `src/DownloadManager.Android/Background/` unless noted:
@@ -181,3 +184,39 @@ What it changes:
   post the Resume notification itself, or resume). On 31 to 33 there is no such job; the receiver stays, best effort.
 - Notification actions may be broadcasts on API 37 (tested); `ResumeActivity` is only needed where an activity is
   wanted. Still to try on API 34 (no phone; emulator image not installed) and 33 (emulator).
+
+## 8. Current design (2026-11-17, after Fable's second review; supersedes 2.2's stop handling, 2.4 and 2.5)
+
+**Keep-alive.** API 34+: one persisted UIDT session job (id 1, any network, `setEstimatedNetworkBytes` from what is
+left, refreshed with `updateEstimatedNetworkBytes` at the start of every run and as the session changes). API 31 to
+33 (and the API 30 test phone): a dataSync FGS with immediate foreground behaviour. Both hold a partial wake lock and a
+Wi-Fi lock through the Android `ISleepPrevention`. They run while `ActivitySummary.KeepAlive` is true (something can
+transfer now) and end when it turns false (`jobFinished(false)` / `stopSelf`).
+
+**Wi-Fi only.** The Host's rule (S0). The platform reports the network before `InitializeAsync` and on every change.
+While the rule holds, nothing transfers, so the keep-alive ends; on API 34+ the platform schedules the session job
+again with `NOT_METERED` (to be tried: whether a running job may do that from its own process when not visible, as a
+broadcast action could), and the system starts it when such a network comes; on 31 to 33 the FGS stops and a network
+callback registered while the app runs (best effort when the process is gone) starts it again. "Use data" is a
+broadcast action (works from the background on API 37; `ResumeActivity` is the fallback where `schedule` fails). A
+job that can't resume keeps running and the notification warns that stopping it starts over, with Stop (owner: "warn
+about stopping").
+
+**Stops.** `onStopJob`: cancelled-by-app (our own reschedule) is ignored; every other reason is a system stop:
+nothing is marked, the Host keeps its state, return true. A user stop (Task Manager Stop or Settings Force stop) gives
+no callback: at the next start, the newest `ApplicationExitInfo` that belongs to the last run (matched by a run id
+saved with `setProcessStateSummary`) with reason 10 sets the Host's "stopped by the user" start option, so interrupted
+downloads start Paused as the user's (owner: "Stay paused", and Force stop the same). Each record is acted on once.
+
+**After a reboot.** API 34+: the persisted session job runs by itself (seen on the S24); `onStartJob` posts "Resuming
+downloads" at once with `setNotification`, starts the Host (network reported first), and either carries on (owner:
+"Resume silently") or calls `jobFinished(false)` when reconcile resumed nothing. API 31 to 33: a `BOOT_COMPLETED`
+receiver (best effort; it did not arrive on the Samsung) posts "N downloads paused · Resume", counted with the
+Runtime's pure "would resume at start" function, without starting the Host. Otherwise downloads resume when the app is
+opened.
+
+**Crash loop.** If the last three runs ended in a crash or ANR during a download, the session job is not rescheduled
+and the notification says downloads are paused after repeated errors, with Resume.
+
+**Still to try:** the same checks on API 33 (emulator), a held session overnight unplugged (battery, stop reasons),
+whether a persisted job survives an app update, a reschedule from the job's own process with a new constraint.
