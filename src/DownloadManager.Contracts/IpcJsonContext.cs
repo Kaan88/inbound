@@ -190,6 +190,7 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(UpdateInstallRequest))]
 [JsonSerializable(typeof(UpdateInstallResult))]
 [JsonSerializable(typeof(UpdateLatestDto))]
+[JsonSerializable(typeof(NetworkWaitDto))]
 [JsonSerializable(typeof(UpdateManifest))]
 [JsonSerializable(typeof(UpdateProgressDto))]
 [JsonSerializable(typeof(WebBridgeStartDto))]

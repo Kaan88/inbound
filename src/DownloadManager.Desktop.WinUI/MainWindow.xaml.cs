@@ -4517,6 +4517,7 @@ public sealed partial class MainWindow : Window
             ShowCompletionDialog = source.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = source.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = source.AllowLocalNetwork,
+            DownloadOnlyOnUnmeteredNetwork = source.DownloadOnlyOnUnmeteredNetwork,
             PreventSleepWhileDownloading = source.PreventSleepWhileDownloading,
             TorrentsEnabled = source.TorrentsEnabled,
             TorrentRoute = source.TorrentRoute,

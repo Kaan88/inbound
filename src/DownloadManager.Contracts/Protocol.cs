@@ -100,6 +100,8 @@ public static class MessageTypes
     /// when a check finds a different one; a client that doesn't know it ignores it.
     /// </summary>
     public const string UpdateLatest = "update.latest";
+    /// <summary>Host push: downloads started or stopped waiting for a not-metered network (<see cref="NetworkWaitDto"/>). Additive; an older client ignores it.</summary>
+    public const string NetworkWait = "network.wait";
     /// <summary>
     /// UI.R41, Host push to the sessions at this PC: a browser's extension reached this Host for the first time
     /// (<see cref="ExtensionsSeenDto"/>, the whole list), so an open window can drop its extension hint at once. Never

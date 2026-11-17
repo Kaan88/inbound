@@ -741,6 +741,14 @@ keeps three things out of a client's hands, and tells every client when the sett
   usual update checks (automatic or Check for updates). It is additive: a client that doesn't know it ignores it.
 - The desktop window holds another server to that server's own `latestVersion`; when it has none, to this PC's,
   because every Inbound build (Setup, the AppImage, the Docker image) is made from the same version tag.
+- **Not metered only (Android, ANDROID.3).** `settings.downloadOnlyOnUnmeteredNetwork` (default false) holds downloads
+  while the platform reports a metered network: nothing starts, and running ones go back to `queued` with their data
+  (not paused by the user), so they go on by themselves on a network that isn't metered. Only a platform with
+  `PlatformCapabilities.SupportsMeteredNetworkRule` (the phone) reports networks, so elsewhere the setting does nothing
+  and a frontend doesn't show it. `status.waitingForMeteredNetwork` is true while the rule holds, and **`network.wait`**
+  (Host push, payload `{ "waiting": true }`) is sent to every session that takes events when that changes. Both are
+  additive; an older Host sends neither. "Use data" on the phone lifts the rule until the network is next reported not
+  metered.
 
 ### Browser extensions seen (UI.R41)
 

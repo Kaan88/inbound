@@ -152,6 +152,7 @@ public sealed partial class HostCommandDispatcher
         _service.JobChanged += OnJobChanged;
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
         _service.LatestVersionChanged += OnLatestVersionChanged;
+        _service.MeteredWaitChanged += OnMeteredWaitChanged;
         _service.SettingsChanged += OnSettingsChanged;
         if (_remote is not null) _remote.Changed += OnRemoteChanged;
     }
@@ -162,6 +163,7 @@ public sealed partial class HostCommandDispatcher
         _service.JobChanged -= OnJobChanged;
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
         _service.LatestVersionChanged -= OnLatestVersionChanged;
+        _service.MeteredWaitChanged -= OnMeteredWaitChanged;
         _service.SettingsChanged -= OnSettingsChanged;
         if (_remote is not null) _remote.Changed -= OnRemoteChanged;
         _stopping.Cancel();
@@ -1233,6 +1235,9 @@ public sealed partial class HostCommandDispatcher
             scope => IpcMessage.Create(ArchiveMessageTypes.Changed, ArchiveForScope(change, scope)));
 
     private void OnUpdateProgressChanged(object? sender, UpdateProgressDto progress) => BroadcastUpdateProgress(progress);
+
+    private void OnMeteredWaitChanged(object? sender, bool waiting)
+        => Broadcast(IpcMessage.Create(MessageTypes.NetworkWait, new NetworkWaitDto { Waiting = waiting }));
 
     private void OnLatestVersionChanged(object? sender, string? version) => BroadcastLatestVersion(version);
 

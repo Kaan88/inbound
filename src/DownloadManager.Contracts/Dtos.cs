@@ -263,6 +263,12 @@ public sealed class SettingsDto
     public Dictionary<string, string> EventSoundFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
+
+    /// <summary>
+    /// Only on a platform that can tell metered networks apart (<c>PlatformCapabilities.SupportsMeteredNetworkRule</c>, the
+    /// phone): downloads wait, queued and not paused, while the network is metered. Others never report one, so it does nothing.
+    /// </summary>
+    public bool DownloadOnlyOnUnmeteredNetwork { get; set; }
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
     public bool TorrentsEnabled { get; set; }
@@ -375,6 +381,19 @@ public sealed class HostStatusDto
     /// whose extensions pair over the network) or one older than this field.
     /// </summary>
     public Dictionary<string, DateTimeOffset>? ExtensionsSeen { get; set; }
+
+    /// <summary>
+    /// True while downloads are held for a not-metered network ("Waiting for Wi-Fi"). Changes arrive as
+    /// <see cref="MessageTypes.NetworkWait"/>. False from a Host older than this field.
+    /// </summary>
+    public bool WaitingForMeteredNetwork { get; set; }
+}
+
+/// <summary>The payload of <see cref="MessageTypes.NetworkWait"/>.</summary>
+public sealed class NetworkWaitDto
+{
+    /// <summary>As <see cref="HostStatusDto.WaitingForMeteredNetwork"/>.</summary>
+    public bool Waiting { get; set; }
 }
 
 /// <summary>UI.R41: the payload of <see cref="MessageTypes.ExtensionsSeen"/>.</summary>

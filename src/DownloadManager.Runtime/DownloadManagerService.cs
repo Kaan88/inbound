@@ -1615,6 +1615,7 @@ public sealed partial class DownloadManagerService
             EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
+            DownloadOnlyOnUnmeteredNetwork = settings.DownloadOnlyOnUnmeteredNetwork,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             TorrentsEnabled = settings.TorrentsEnabled,
@@ -4355,7 +4356,7 @@ public sealed partial class DownloadManagerService
         List<JobRuntime> toStart;
         lock (_sync)
         {
-            if (!_initialized || _shuttingDown || _updateQuiescing)
+            if (!_initialized || _shuttingDown || _updateQuiescing || MeteredRuleHoldsLocked())
             {
                 return;
             }
@@ -5645,6 +5646,7 @@ public sealed partial class DownloadManagerService
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
             LatestVersion = CurrentLatestVersionLocked(),
             ExtensionsSeen = ExtensionSightings?.Snapshot(),
+            WaitingForMeteredNetwork = MeteredRuleHoldsLocked(),
         };
     }
 
@@ -5810,6 +5812,7 @@ public sealed partial class DownloadManagerService
             EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
+            DownloadOnlyOnUnmeteredNetwork = settings.DownloadOnlyOnUnmeteredNetwork,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             TorrentsEnabled = settings.TorrentsEnabled,

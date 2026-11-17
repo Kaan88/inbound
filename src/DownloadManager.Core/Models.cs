@@ -667,6 +667,8 @@ public sealed class AppSettings
     public Dictionary<string, string> EventSoundFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
+    /// <summary>Phone only: downloads wait, queued, while the network is metered. A file without it loads as false.</summary>
+    public bool DownloadOnlyOnUnmeteredNetwork { get; set; }
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
 

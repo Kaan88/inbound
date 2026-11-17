@@ -20,6 +20,12 @@ public sealed record PlatformCapabilities
     /// <summary><c>host.shutdown</c> ends the process. A server's lifetime belongs to its service manager.</summary>
     public bool SupportsShutdown { get; init; }
 
+    /// <summary>
+    /// The platform can tell metered networks apart and reports them (<c>DownloadManagerService.SetNetworkMeteredAsync</c>), so
+    /// <c>downloadOnlyOnUnmeteredNetwork</c> means something. Only the phone; desktop and server leave it off.
+    /// </summary>
+    public bool SupportsMeteredNetworkRule { get; init; }
+
     /// <summary><c>update.*</c> check, download and install the signed Windows installer.</summary>
     public bool SupportsUpdater { get; init; }
 
