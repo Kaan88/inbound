@@ -7,13 +7,13 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>What a command of the server pane (menu, toolbar, keys, context menu) is. Shared by the Site menu and the menus.</summary>
 internal enum SiteCommand
 {
-    Download, DownloadTo, Open, Rename, Delete, NewFolder, Upload, UploadFolder, Refresh, PasteAddress, CopyAddress, StarFolder,
+    Download, DownloadTo, Open, Rename, Delete, NewFolder, Upload, UploadFolder, Refresh, PasteAddress, CopyAddress, CopyPath, StarFolder,
 }
 
 /// <summary>What a command of the This PC pane is.</summary>
 internal enum LocalCommand
 {
-    Upload, Open, ShowInExplorer, Rename, Delete, DeleteForGood, NewFolder, Refresh,
+    Upload, Open, ShowInExplorer, Rename, Delete, DeleteForGood, NewFolder, Refresh, CopyPath,
 }
 
 /// <summary>What Enter or a double click does on the selection of the server pane.</summary>
@@ -78,7 +78,7 @@ internal static class SitesCommandRules
         change.Add(SiteCommand.Delete);
         if (canNewFolder) change.Add(SiteCommand.NewFolder);
         groups.Add(change);
-        var last = new List<SiteCommand> { SiteCommand.CopyAddress };
+        var last = new List<SiteCommand> { SiteCommand.CopyPath, SiteCommand.CopyAddress };
         if (one && picked[0].IsFolder) last.Add(SiteCommand.StarFolder);
         groups.Add(last);
         return groups;
@@ -101,9 +101,14 @@ internal static class SitesCommandRules
 
         if (first.Count > 0) groups.Add(first);
         groups.Add(one ? [LocalCommand.Rename, LocalCommand.Delete, LocalCommand.DeleteForGood] : [LocalCommand.Delete, LocalCommand.DeleteForGood]);
+        groups.Add([LocalCommand.CopyPath]);
         groups.Add([LocalCommand.NewFolder]);
         return groups;
     }
+
+    /// <summary>"Copy path": the selected items' paths on the remote, one per line, or the open folder's when nothing is selected.</summary>
+    public static string Paths(string folder, IReadOnlyCollection<string> names) =>
+        names.Count == 0 ? folder : string.Join('\n', names.Select(name => SitesBrowseRules.Join(folder, name)));
 
     public static string Label(SiteCommand command) => command switch
     {
@@ -118,6 +123,7 @@ internal static class SitesCommandRules
         SiteCommand.Refresh => "Refresh",
         SiteCommand.PasteAddress => "Paste address",
         SiteCommand.CopyAddress => "Copy address",
+        SiteCommand.CopyPath => "Copy path",
         SiteCommand.StarFolder => "Star this folder",
         _ => command.ToString(),
     };
@@ -132,6 +138,7 @@ internal static class SitesCommandRules
         LocalCommand.DeleteForGood => "Delete permanently…",
         LocalCommand.NewFolder => "New folder",
         LocalCommand.Refresh => "Refresh",
+        LocalCommand.CopyPath => "Copy path",
         _ => command.ToString(),
     };
 

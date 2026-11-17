@@ -31,8 +31,9 @@ internal sealed class SiteDialog
     private (string Host, string Port, string Url, string Endpoint, string? Tls) _trustedFor;
     private List<SiteHostKeyDto> _offeredKeys = [];
     private SiteCertificateDto? _offeredCertificate;
-    private readonly StackPanel _trustPanel = new() { Spacing = 6, Visibility = Visibility.Collapsed };
-    private readonly StackPanel _trustLines = new() { Spacing = 6 };
+    private readonly Border _trustPanel = new() { Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1), Padding = new Thickness(12), CornerRadius = new CornerRadius(4) };
+    private readonly StackPanel _trustBody = new() { Spacing = 10 };
+    private readonly StackPanel _trustLines = new() { Spacing = 10 };
     private readonly Button _trustButton = new() { Content = "Trust", MinWidth = 92 };
     private readonly IReadOnlyList<SiteKindDto> _allKinds;
     private IReadOnlyList<SiteKindDto> _kinds;
@@ -206,24 +207,63 @@ internal sealed class SiteDialog
                 _testButton.IsEnabled = !_testOff;
             }
         };
-        _testButton.Click += async (_, _) =>
-        {
-            try
-            {
-                await TestAsync();
-            }
-            catch (Exception)
-            {
-                // No exception words are shown, a secret may be in them.
-                ShowTest("The test could not run.", ok: false);
-            }
-            finally
-            {
-                _testing = false;
-                _testButton.IsEnabled = !_testOff;
-            }
-        };
+        _testButton.Click += async (_, _) => await RunTestSafelyAsync();
+        HookChanges();
         ShowAuth();
+    }
+
+    private async Task RunTestSafelyAsync()
+    {
+        try
+        {
+            await TestAsync();
+        }
+        catch (Exception)
+        {
+            // No exception words are shown, a secret may be in them.
+            ShowTest("The test could not run.", ok: false);
+        }
+        finally
+        {
+            _testing = false;
+            _testButton.IsEnabled = !_testOff;
+        }
+    }
+
+    // SITES.13 #5: Save tests first when nothing has been tested since the last change; a failed test is shown and the
+    // next Save says "Save anyway".
+    private bool _testedSinceChange;
+    private bool _lastTestOk;
+    private bool _saveAnyway;
+    private Action<string>? _setPrimaryText;
+
+    private void HookChanges()
+    {
+        foreach (var box in new[] { _name, _url, _endpoint, _region, _clientId, _host, _port, _user, _keyPath, _remoteFolder, _localFolder }) box.TextChanged += (_, _) => FormChanged();
+        foreach (var box in new[] { _password, _passphrase, _clientSecret }) box.PasswordChanged += (_, _) => FormChanged();
+        foreach (var box in new[] { _kindBox, _tls, _vendor, _provider }) box.SelectionChanged += (_, _) => FormChanged();
+        _auth.SelectionChanged += (_, _) => FormChanged();
+        _removePassphrase.Click += (_, _) => FormChanged();
+    }
+
+    private void FormChanged()
+    {
+        _testedSinceChange = false;
+        if (!_saveAnyway) return;
+        _saveAnyway = false;
+        _setPrimaryText?.Invoke("Save");
+    }
+
+    /// <summary>Runs the test a Save asks for; true when the Save goes on (it passed, could not run, or is not needed).</summary>
+    private async Task<bool> TestBeforeSaveAsync()
+    {
+        if (!SitesHomeRules.NeedsTestBeforeSave(_testedSinceChange, !_testOff && !_testing, SiteKindCatalog.SignsIn(_kind.Kind), _saveAnyway)) return true;
+        await RunTestSafelyAsync();
+        // A test that could not run (a form problem, an older Host) leaves the save to say why.
+        if (!_testedSinceChange || _lastTestOk) return true;
+        _saveAnyway = true;
+        _setPrimaryText?.Invoke(SitesHomeRules.SaveAnyway);
+        return false;
     }
 
     /// <summary>The tiles' kinds only, so "S3 or B2" offers just those two; with an edit, the one kind.</summary>
@@ -268,7 +308,14 @@ internal sealed class SiteDialog
         _advancedBody.Children.Add(_keyHint);
         _advanced.Content = _advancedBody;
 
-        var testRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        // One block under the Test button: the icon at the first line, the whole message wrapped beside it.
+        var testRow = new Grid { ColumnSpacing = 10 };
+        testRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        testRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _testIcon.VerticalAlignment = VerticalAlignment.Top;
+        _testIcon.Margin = new Thickness(0, 2, 0, 0);
+        _testText.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(_testText, 1);
         testRow.Children.Add(_testIcon);
         testRow.Children.Add(_testText);
         _testLine.Child = testRow;
@@ -294,8 +341,9 @@ internal sealed class SiteDialog
         _form.Children.Add(SettingsWindow.Hint("Passwords and keys are stored sealed on this PC and never shown again."));
         _form.Children.Add(_localRow);
         _form.Children.Add(_advanced);
-        _trustPanel.Children.Add(_trustLines);
-        _trustPanel.Children.Add(_trustButton);
+        _trustBody.Children.Add(_trustLines);
+        _trustBody.Children.Add(_trustButton);
+        _trustPanel.Child = _trustBody;
     }
 
     /// <summary>
@@ -308,21 +356,18 @@ internal sealed class SiteDialog
         host.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         host.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         host.Children.Add(DialogLayout.ScrollingContent(_form, xamlRoot));
-        var footer = new Grid { ColumnSpacing = 10, RowSpacing = 6, Padding = new Thickness(0, 0, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var footer = new Grid { RowSpacing = 10, Margin = new Thickness(0, 4, 0, 10) };
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _testButton.VerticalAlignment = VerticalAlignment.Top;
+        footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _testButton.HorizontalAlignment = HorizontalAlignment.Left;
         footer.Children.Add(_testButton);
-        Grid.SetColumn(_testLine, 1);
+        Grid.SetRow(_testLine, 1);
         footer.Children.Add(_testLine);
-        Grid.SetRow(_trustPanel, 1);
-        Grid.SetColumnSpan(_trustPanel, 2);
+        Grid.SetRow(_trustPanel, 2);
         footer.Children.Add(_trustPanel);
-        Grid.SetRow(_error, 2);
-        Grid.SetColumnSpan(_error, 2);
+        Grid.SetRow(_error, 3);
         footer.Children.Add(_error);
         Grid.SetRow(footer, 1);
         host.Children.Add(footer);
@@ -527,9 +572,11 @@ internal sealed class SiteDialog
                 }
 
                 dialog.IsPrimaryButtonEnabled = false;
+                _setPrimaryText = text => dialog.PrimaryButtonText = text;
                 SiteDto? site;
                 try
                 {
+                    if (!await TestBeforeSaveAsync()) return;
                     site = await TrySaveAsync();
                 }
                 catch (Exception)
@@ -600,6 +647,7 @@ internal sealed class SiteDialog
         _formShown = form;
         dialog.Title = !form ? SitesHomeRules.AddRemote
             : _editing ? "Edit remote" : _chosen?.FormTitle ?? SitesHomeRules.TileOf(_kind.Kind)?.FormTitle ?? "Add a remote";
+        _saveAnyway = false;
         dialog.PrimaryButtonText = form ? "Save" : "Next";
         // Drawn as Test | Back, Save; Esc cancels. An edit has no step to go back to, so it keeps Cancel.
         dialog.SecondaryButtonText = form && !_editing ? "Back" : string.Empty;
@@ -791,6 +839,13 @@ internal sealed class SiteDialog
         HideTrust();
     }
 
+    private void ShowTrustCard()
+    {
+        _trustPanel.BorderBrush = InboundTheme.Brush("InboundDividerBrush", _trustPanel);
+        _trustPanel.Background = InboundTheme.Brush("InboundCardBrush", _trustPanel);
+        _trustPanel.Visibility = Visibility.Visible;
+    }
+
     private void HideTrust()
     {
         _offeredKeys = [];
@@ -869,6 +924,8 @@ internal sealed class SiteDialog
         }
 
         ShowTest(SitesHomeRules.DraftTestText(result, SiteKindCatalog.SignsIn(_kind.Kind), clock.Elapsed), ok: result.Ok);
+        _testedSinceChange = true;
+        _lastTestOk = result.Ok;
         _trustedFor = Where();
         if (result.Problem == SiteProblems.HostKeyNotAccepted && result.OfferedKeys is { Count: > 0 } keys) ShowKeys(keys);
         else if (result.Problem == SiteProblems.CertificateNotTrusted && result.Certificate is { CannotTrust: null } certificate) ShowCertificate(certificate);
@@ -878,7 +935,7 @@ internal sealed class SiteDialog
             _trustLines.Children.Clear();
             foreach (var (label, value) in SitesRules.CertificateLines(unusable)) _trustLines.Children.Add(Mono(label, value));
             _trustButton.Visibility = Visibility.Collapsed;
-            _trustPanel.Visibility = Visibility.Visible;
+            ShowTrustCard();
         }
     }
 
@@ -902,7 +959,7 @@ internal sealed class SiteDialog
         foreach (var key in keys) _trustLines.Children.Add(Mono(key.Type, key.Fingerprint));
         _trustLines.Children.Add(SettingsWindow.Hint("Inbound connects to this remote only while the server shows this key. Compare it with ssh-keygen -lf on the server's host key file."));
         _trustButton.Visibility = Visibility.Visible;
-        _trustPanel.Visibility = Visibility.Visible;
+        ShowTrustCard();
     }
 
     private void ShowCertificate(SiteCertificateDto certificate)
@@ -914,7 +971,7 @@ internal sealed class SiteDialog
         // rclone takes a trusted certificate as an authority for all of Inbound's remotes (no per-remote trust exists).
         _trustLines.Children.Add(SettingsWindow.Hint("Whoever holds this certificate's key is trusted by all your Inbound remotes, not only this one. Trust only a certificate of your own server."));
         _trustButton.Visibility = Visibility.Visible;
-        _trustPanel.Visibility = Visibility.Visible;
+        ShowTrustCard();
     }
 
     /// <summary>Trust: keys are used for a second test at once; a certificate is trusted when the remote is saved.</summary>
@@ -935,16 +992,20 @@ internal sealed class SiteDialog
             _trustedFor = Where();
             _trustButton.Visibility = Visibility.Collapsed;
             ShowTest("The certificate is trusted when you save, and the remote is tried then.", ok: null);
+            _testedSinceChange = true;
+            _lastTestOk = true;
         }
     }
 
-    private static TextBlock Mono(string label, string value) => new()
+    /// <summary>A key type (or certificate line) in the default font over its value in monospace, wrapped.</summary>
+    private static TextBlock Mono(string label, string value)
     {
-        Text = $"{label}\n{value}",
-        TextWrapping = TextWrapping.Wrap,
-        IsTextSelectionEnabled = true,
-        FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas, Menlo, monospace"),
-    };
+        var block = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+        block.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        block.Inlines.Add(new Microsoft.UI.Xaml.Documents.LineBreak());
+        block.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = value, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas, Menlo, monospace") });
+        return block;
+    }
 
     /// <summary>
     /// An older Host tests saved remotes only, so Test saves what is typed and then tries it. What needs a question of its own
@@ -968,6 +1029,8 @@ internal sealed class SiteDialog
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var result = await _calls.Test(site.Id, CancellationToken.None);
         clock.Stop();
+        _testedSinceChange = true;
+        _lastTestOk = result.Ok;
         if (result.Ok) ShowTest(SitesHomeRules.TestWorks(SiteKindCatalog.SignsIn(site.Kind), clock.Elapsed), ok: true);
         else if (result.Problem == SiteProblems.HostKeyNotAccepted) ShowTest("Saved. The server's key isn't trusted yet: press Save, and Inbound shows it to you.", ok: false);
         else if (result.Problem == SiteProblems.HostKeyChanged) ShowTest("The server shows a different key from the one you trusted. Press Save to see it.", ok: false);

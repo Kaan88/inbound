@@ -198,6 +198,9 @@ public sealed partial class MainWindow
             case SiteCommand.CopyAddress:
                 CopySiteAddress();
                 break;
+            case SiteCommand.CopyPath:
+                CopyText(SitesCommandRules.Paths(panel.Path, [.. panel.SelectedNames.Select(name => name.Name)]), panel.SelectedNames.Count > 1 ? "Paths copied" : "Path copied");
+                break;
             case SiteCommand.StarFolder:
                 await panel.ToggleStarAsync();
                 break;
@@ -687,6 +690,9 @@ public sealed partial class MainWindow
                 break;
             case LocalCommand.Refresh:
                 local.Reload();
+                break;
+            case LocalCommand.CopyPath:
+                CopyLocalPaths();
                 break;
         }
     }
