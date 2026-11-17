@@ -58,8 +58,8 @@ internal sealed class SiteDialog
     private readonly TextBox _port = new() { Header = "Port", Width = 96, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBox _user = new() { Header = "User" };
     // SITES.13: a speed limit per remote, in KB/s; 0 is no limit. Under Advanced.
-    private readonly NumberBox _downLimit = new() { Header = "Download limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 190 };
-    private readonly NumberBox _upLimit = new() { Header = "Upload limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 190 };
+    private readonly NumberBox _downLimit = new() { Header = "Download limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly NumberBox _upLimit = new() { Header = "Upload limit (KB/s, 0 = none)", Minimum = 0, Maximum = 10_000_000, SmallChange = 100, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly SegmentedChoice _auth = new("Sign in with");
     private readonly PasswordBox _password = new() { Header = "Password", PasswordRevealMode = PasswordRevealMode.Hidden };
     private readonly TextBox _keyPath = new() { Header = "Key file (OpenSSH or PuTTY .ppk)", PlaceholderText = @"C:\Users\you\.ssh\id_ed25519" };
@@ -310,7 +310,12 @@ internal sealed class SiteDialog
         _advancedBody.Children.Add(_name);
         _advancedBody.Children.Add(_port);
         _advancedBody.Children.Add(_remoteFolder);
-        var limits = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        // Two equal columns: the boxes are the same width and line up, whatever their headers measure.
+        var limits = new Grid { ColumnSpacing = 12, MaxWidth = 480, HorizontalAlignment = HorizontalAlignment.Left };
+        limits.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        limits.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _downLimit.VerticalAlignment = _upLimit.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(_upLimit, 1);
         limits.Children.Add(_downLimit);
         limits.Children.Add(_upLimit);
         _advancedBody.Children.Add(limits);
