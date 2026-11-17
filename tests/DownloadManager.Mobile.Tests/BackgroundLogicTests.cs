@@ -119,6 +119,18 @@ public class BackgroundLogicTests
         Assert.True(d.StoppedByUser);
     }
 
+    [Theory]
+    [InlineData(1_000_000L - 5_000, false)]   // killed by the update shortly before its recorded time
+    [InlineData(1_000_000L + 3_000, false)]   // just after (clock order)
+    [InlineData(1_000_000L - 600_000, true)]  // a stop long before the update is still the user's
+    [InlineData(1_000_000L + 60_000, true)]   // and one long after it
+    public void UserStop_an_exit_at_the_app_update_is_not_a_user_stop(long exitAt, bool userStop)
+    {
+        // API 30 to 32 report an app update as reason 10, like Task Manager Stop (review of step 2).
+        var d = UserStopDetector.DecideAny([RunA], [new ExitRecord(RunA, 10, exitAt)], packageUpdatedAtMs: 1_000_000);
+        Assert.Equal(userStop, d.StoppedByUser);
+    }
+
     [Fact]
     public void UserStop_ignores_a_user_stop_of_another_run()
     {

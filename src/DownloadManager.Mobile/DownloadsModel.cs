@@ -71,6 +71,8 @@ public sealed class DownloadsModel : IDisposable
         await _host.OpenAsync(OnFrame, cancellationToken).ConfigureAwait(false);
     }
 
+    private static bool IsProgress(string type) => type.Equals("progress", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsRemoval(string type) =>
         type.Equals("removed", StringComparison.OrdinalIgnoreCase) || type.Equals("deleted", StringComparison.OrdinalIgnoreCase);
 
@@ -92,7 +94,11 @@ public sealed class DownloadsModel : IDisposable
                 if (_removed.Contains(e.Job.Id)) return;
                 if (_pending.TryGetValue(e.Job.Id, out var waiting) && IsStaleProgress(e.Job, e.EventType, waiting.Job.UpdatedAt)) return;
                 if (IsRemoval(e.EventType)) _removed.Add(e.Job.Id);
-                _pending[e.Job.Id] = (e.Job, e.EventType);
+                // A progress frame keeps the kind of change already waiting: "added" then "progress" in one batch must still add the row
+                // (the list drops progress for a job it doesn't know). Seen on the phones: a download that started at once never appeared.
+                var type = e.EventType;
+                if (IsProgress(type) && _pending.TryGetValue(e.Job.Id, out var earlier) && !IsProgress(earlier.Type)) type = earlier.Type;
+                _pending[e.Job.Id] = (e.Job, type);
                 if (_flushScheduled) return;
                 _flushScheduled = true;
             }

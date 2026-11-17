@@ -190,6 +190,28 @@ public sealed class DownloadsModelTests
     }
 
     [Fact]
+    public async Task A_new_job_whose_first_progress_comes_in_the_same_batch_is_still_added()
+    {
+        // Owner, S24 (2026-11-17): "download is running but no progress in app". "added" was overwritten by the job's first
+        // "progress" within one batch, and progress for a job the list doesn't know is dropped.
+        var host = new FakeHostConnection();
+        var posted = new List<Action>();
+        using var model = new DownloadsModel(host, a => { lock (posted) posted.Add(a); }, TimeSpan.FromMilliseconds(30));
+        await model.StartAsync(CancellationToken.None);
+        host.Snapshot("/dl", Jobs.Make("completed", "old.bin"));
+        posted[0]();
+        posted.Clear();
+        var n = Jobs.Make("connecting", "new.bin", minute: 9);
+        host.Event(n, "added");
+        host.Event(Copy(n, "downloading", 10, n.UpdatedAt.AddMilliseconds(5)), "progress");
+        for (var i = 0; i < 100 && posted.Count == 0; i++) await Task.Delay(20);
+        Assert.Single(posted);
+        posted[0]();
+        Assert.Equal(["new.bin", "old.bin"], model.Rows.Select(r => r.Name));
+        Assert.Equal(StatusKind.Active, model.Rows[0].Kind);
+    }
+
+    [Fact]
     public async Task A_batch_that_lands_after_the_removal_does_not_add_the_row_again()
     {
         // No interval: each event posts its own batch, and posts from two threads can land in either order.

@@ -65,6 +65,13 @@ public static class NotificationText
     /// <summary>Title of the notification shown while downloads wait for a network that isn't metered (mockup A7).</summary>
     public const string WaitingTitle = "Waiting for Wi-Fi";
 
+    /// <summary>API 31 to 33: Wi-Fi came back while the app was not visible. The downloads stay held (no foreground service can start from the
+    /// background) until the user opens the app; the notification says so.</summary>
+    public const string WifiBackTitle = "Wi-Fi is back";
+
+    /// <summary>"Tap to resume 3 downloads".</summary>
+    public static string WifiBackBody(int count) => count == 1 ? "Tap to resume 1 download" : "Tap to resume " + count + " downloads";
+
     /// <summary>"3 downloads will resume".</summary>
     public static string WaitingBody(int count) => count == 1 ? "1 download will resume" : count + " downloads will resume";
 
@@ -166,14 +173,16 @@ public static class UserStopDetector
     /// never started the Host (a FileProvider query, a receiver) leaves its id in the list, so a user stop of it is not lost; any of them
     /// stopped by the user leaves the interrupted downloads paused.
     /// </summary>
-    public static UserStopDecision DecideAny(IReadOnlyList<byte[]> runIds, IEnumerable<ExitRecord> records)
+    /// <param name="packageUpdatedAtMs">The app's last install or update time (PackageInfo.lastUpdateTime). Below API 33 an update ends the
+    /// running process with reason 10 like a user stop; an exit just before the update time is taken for the update.</param>
+    public static UserStopDecision DecideAny(IReadOnlyList<byte[]> runIds, IEnumerable<ExitRecord> records, long? packageUpdatedAtMs = null)
     {
         if (runIds.Count == 0) return new UserStopDecision(false, "no previous run id saved (first start)");
         var all = records as IReadOnlyCollection<ExitRecord> ?? records.ToList();
         UserStopDecision? last = null;
         foreach (var id in runIds)
         {
-            var d = Decide(id, all);
+            var d = Decide(id, all, packageUpdatedAtMs);
             if (d.StoppedByUser) return d;
             last = d;
         }
@@ -184,7 +193,11 @@ public static class UserStopDetector
     /// <summary>ApplicationExitInfo.REASON_USER_REQUESTED.</summary>
     public const int ReasonUserRequested = 10;
 
-    public static UserStopDecision Decide(byte[]? previousRunId, IEnumerable<ExitRecord> records)
+    /// <summary>How far before the recorded update time the update's kill may come (the install takes a while), and after (clock order).</summary>
+    public static readonly TimeSpan UpdateWindowBefore = TimeSpan.FromSeconds(120);
+    public static readonly TimeSpan UpdateWindowAfter = TimeSpan.FromSeconds(10);
+
+    public static UserStopDecision Decide(byte[]? previousRunId, IEnumerable<ExitRecord> records, long? packageUpdatedAtMs = null)
     {
         if (previousRunId is null || previousRunId.Length == 0) return new UserStopDecision(false, "no previous run id saved (first start)");
         ExitRecord? newest = null;
@@ -195,6 +208,10 @@ public static class UserStopDetector
         }
 
         if (newest is null) return new UserStopDecision(false, "no exit record for the previous run (reboot, or it is still listed as running)");
+        if (newest.Reason == ReasonUserRequested && packageUpdatedAtMs is { } updated &&
+            newest.TimestampMs >= updated - (long)UpdateWindowBefore.TotalMilliseconds &&
+            newest.TimestampMs <= updated + (long)UpdateWindowAfter.TotalMilliseconds)
+            return new UserStopDecision(false, "the previous run ended with reason 10 when the app was updated (not the user)");
         return newest.Reason == ReasonUserRequested
             ? new UserStopDecision(true, "the previous run ended with reason 10 (stopped by the user)")
             : new UserStopDecision(false, "the previous run ended with reason " + newest.Reason + " (not the user)");
