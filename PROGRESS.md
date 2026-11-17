@@ -125,6 +125,7 @@
   have a good reason": stays 35 (Android 15). No reason found to move: the APK is not on Google Play, so Play's target
   rule does not apply; XA1006/XA4211 stay as explained warnings. (4) ship on NativeAOT though Microsoft calls it
   experimental: "Yes".
+- **Owner (2026-11-17), empty Downloads list: "empty list can remain as is like the desktop version. same ui with just no links."** The list screen with no downloads is A1's layout with no rows, as the desktop shows an empty list; no extra empty-state art or text. Also: "start next step" (step 2, ANDROID.3).
 - **Owner (2026-11-17): "have milestones reviewed by fable, and commit and push as you go along."** Each step of the
   build plan, and each major change inside one, goes to the same Fable reviewer before the step is called done; commits
   are pushed to `origin android-app` as they are made.

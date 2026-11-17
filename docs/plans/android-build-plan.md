@@ -39,7 +39,8 @@ Answered 2026-11-17: plain `http://` stays allowed in release ("yeah"); targetSd
 reason"); ship on NativeAOT ("Yes"). Milestones are reviewed by Fable, and commits are pushed as they are made.
 
 **Still to ask when it comes up:** anything a mockup leaves open: long-press, what a finished row does when tapped,
-empty states (no mockup shows the Downloads list with no downloads; propose one in ANDROID.4), errors. Ask, do not
+empty states, errors. (The empty Downloads list is answered, 2026-11-17: "same ui with just no links", like the
+desktop: A1's layout with no rows.) Ask, do not
 skip and do not invent. Where a mockup contradicts an owner decision, the decision wins: A0's folder line says
 "Downloads/Inbound", but the owner chose `Download/` directly. The known faults of the mockup are listed in
 `android-app.md` section 2.
