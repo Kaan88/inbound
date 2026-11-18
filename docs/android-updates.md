@@ -28,8 +28,7 @@ release `android-latest` in `Kaan88/inbound`. Each manifest points to its
 versioned APK on `android-v<version>`. Publish the versioned APK and manifest on
 that versioned release, and the same signed manifest on `android-latest`. Set
 `latest=false` on both releases so they do not displace the desktop latest feed.
-Production Android update assets have **not yet been published**; no live update
-has been claimed.
+Android 0.0.2 and its feed have been published. An emulator checked the real HTTPS feed and reported it was current; a public newer-offer upgrade remains to be tested at a future release.
 
 For each release, increment the Android `ApplicationVersion` (version code) and
 set the matching version name in the Android project. For example, version 0.0.2
@@ -63,6 +62,4 @@ focused guard tests. The broader .NET rerun passed 6221 tests (61 optional skips
 Extension 339 and web 717 tests plus both typechecks passed after locked dependencies were installed.
 The release was installed on the S24 with data preserved; installed hash and launch were checked.
 
-This evidence does not establish a published production feed or a live production
-update. Record subsequent device checks and release evidence in the project
-tracking documents.
+The fixture upgrade does not establish a public newer-offer production upgrade. Record subsequent device checks and release evidence in the project tracking documents.

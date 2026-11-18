@@ -21,6 +21,8 @@ Later Fable review of Codex work is tracked separately in
 [ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md).
 Add important changes, decisions, audit results and remaining checks there as work proceeds.
 
+Owner clarification (2026-11-18): "use astra a bit less, on major milestones. this seems too much back and forth." The main agent finishes implementation and consolidated checks before a major-milestone Astra audit. Follow up only to verify confirmed fixes until PASS; do not request Astra reviews for small increments. The existing major-milestone audit requirement remains.
+
 ## What this project is
 
 A private-use Windows download manager, **Inbound Download Manager**. It is a

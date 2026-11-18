@@ -1,5 +1,29 @@
 # Progress — session handoff
 
+### ANDROID.5 0.0.3 delivered (2026-11-19)
+
+- Final permanent-key arm64 APK: `artifacts/android-app/signed-builds/0b2a487b31e743d68d7402399642a7aa/Inbound-android-release.apk`, 19,986,573 bytes, SHA-256 `e1dc3d59cbf5d5f5ccf3518ebc4a69002a6ec416cdcf5fa3e8b68fa09cf93bc7`; certificate matched the pinned permanent identity. Release preparation verified version 0.0.3/code 3 and made signed local bundle `artifacts/android-app/release-0.0.3`, not published. Desktop copy `C:/Users/kaank/Desktop/Inbound-android-0.0.3-updatable.apk` matched the hash.
+- S24 FE SM-S721B: pre-install check actually reported 0.0.1/code 1, despite earlier 0.0.2 notes; cause not established. The 1→3 `install -r` succeeded, preserving data without uninstall or settings changes. Installed APK hash matched, package reported 0.0.3/code 3, launch status ok, PID 5891, WaitTime 3033 ms. This is not a controlled performance benchmark. Evidence: `artifacts/android-app/codex-signing/android5-s24-install.txt`. GitHub release/feed remains 0.0.2; 0.0.3 is not published.
+- NativeAOT picker and caught-sheet light-mode spot checks: `android5-native-links-light.png` and `android5-native-caught-light.png`; emulator app theme restored to Follows System. These do not establish exhaustive visual, TalkBack or rotation acceptance.
+
+### ANDROID.5 audited fixture checkpoint (2026-11-19)
+
+- Source audit: Astra final PASS after the reserved-name and refresh-wakeup fixes. The auditor verified both controlled tests force the original races and read the focused 16-pass log; this was source/read-only review, not an independent device run. Fable-CODEX-3 remains OPEN.
+- NativeAOT authenticated refresh completed the existing `auth(3)` job: All 7, Finished 7, Failed 0, same fixture hash. GitHub's public sign-in form rendered in the Native WebView; no account or credentials were entered, so GitHub sign-in itself is unverified. Unknown, ambiguous or redirect-provenance downloads may need a manually supplied URL; observed POST and blob are not replayed as GET. No TLS bypass or browser-profile import.
+- Core 2373, Engine 210, Mobile 408 passed. Full Integration 2059 passed, 32 skipped, one failed before the queue fix; afterward the exact failure plus two new regressions passed 3, queue policy passed 10, and reservation-focused checks passed 16. There is no clean full Integration rerun after that fix. The final phone APK and install are recorded in the 0.0.3 delivery entry (`android5-arm64-final.txt`, `android5-s24-install.txt`).
+- ANDROID.5 source is audited and native fixture flows have evidence, but exhaustive acceptance is open: real accounts, broader light-mode, TalkBack and rotation checks. Do not mark the milestone fully accepted yet.
+
+### ANDROID.5 link intake checkpoint (2026-11-18)
+
+- Work remains in progress. The first native signed-in file download was checked with a matching hash. Mobile suite passed 408 tests (two existing xUnit analyzer warnings). An earlier set of 309 Host/IPC tests passed before the later runtime rewrite; the 13 audit-focused checks are not yet final evidence for the current state.
+- Initial Astra findings prompted fixes; verification is pending. Fable-CODEX-3 remains OPEN, including shared-runtime refresh/security/durability and browser attribution. This checkpoint is not milestone acceptance.
+
+### Android 0.0.2 published; link intake started (2026-11-18)
+
+- Owner approved publication and chose "Ask before sending cookies to the selected server": name the target and obtain consent per download before forwarding cookies. ANDROID.5 share/browser/page selection and expired-link refresh remain in progress; pure PageLinks model and nine tests were reviewed, fixed for single-URL punctuation, passed staged tests and copied into source/tests. Native UI is not integrated.
+- Android source 0.0.2 at d2e06d27 and CI guard 178fdb412196f76aa7fa3257a051cfd8f73c3a0c were committed and pushed on android-app only; main unchanged. Owner-approved prereleases [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) (APK, manifest, SHA256SUMS) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) (feed manifest) target 178fdb4, both latest=false. Public asset hashes match APK ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276 and manifest bb5510151d7a5d696cdaa0371ecad844609df9b5a3b6fcc208562762db4a40a6. Android-tag Linux/Docker jobs skipped; desktop latest v0.9.0 remained unchanged.
+- NativeAOT emulator 0.0.2 checked the real HTTPS production feed and displayed "Inbound is up to date" (emulator-public-feed-before.xml). The signed HTTP fixture established the 1→2 installer flow; an upgrade from a newer public offer remains for a future release. S24 updated to 0.0.2 with data preserved (s24-updater-install.txt). Evidence under artifacts/android-app/codex-signing/. Main stopped its loopback fixture server, reset the emulator install-source permission to default and removed its pushed fixture files. Final combined Astra PASS covers updater, preparation/helper, runner and persistence guard; Fable review remains OPEN.
+
 ### Updater 0.0.2 delivered; regression checks completed (2026-11-18)
 
 - Desktop Inbound-android-0.0.2-updatable.apk and S24 FE (data-preserving adb update)
@@ -6301,3 +6325,14 @@ Reviewed every window and dialog in both themes (isolated `uiqa` profile, captur
 - Edge 156 (separate profile, `--load-extension`): popup (light/dark), options, Download All link
   scan, and the media panel (light/dark) render and work. Edge falls back to Chrome's native-host key.
   Not exercised: an actual Edge handoff into the QA host (it would reach the installed app).
+
+### 2026-11-18 — Owner decisions after updater review
+
+- Owner chose "Ask before sending cookies to the selected server" for ANDROID.5.
+  Authenticated remote downloads must name the selected target and ask per download
+  before forwarding credentials. Update B3's old phone-only words accordingly; do
+  not imply remote cookies remain on the phone. Main owns this security-sensitive flow.
+- Owner approved "Publish Android release and update feed" for the reviewed 0.0.2
+  artifacts and android-app source. Commit/push the audited updater checkpoint and
+  publish version-specific APK/metadata/checksums plus rolling Android manifest;
+  keep desktop latest unchanged. This approval does not merge Android into main.

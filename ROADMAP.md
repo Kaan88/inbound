@@ -691,7 +691,8 @@ whether rclone is a Setup component that can be unticked.
   notifications: "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped);
   while selecting: "Hide them" (summary card and chips). To do after the step 6 integration: the failure reason, the two
   notifications, and hiding the summary card and chips while selecting with a filter on.
-- [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link).
+- [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link). Source Astra-audited; native fixture flows including authenticated refresh verified, and permanent-key 0.0.3 delivered to Desktop/S24 (PROGRESS "ANDROID.5 0.0.3 delivered"). S24 precheck reported 0.0.1 despite earlier 0.0.2 notes; cause unknown. GitHub feed stays 0.0.2. Light picker/caught-sheet spot checks passed; broader visual acceptance remains open. Real-account compatibility, TalkBack and rotation acceptance remain open; Fable review OPEN. No clean full Integration rerun after the queue fix.
+  Owner, 2026-11-18: ask before sending cookies to the selected server, per download; name the target explicitly.
 - [ ] ANDROID.6 Queues, scheduler and settings.
 - [ ] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18). https with a self-signed
   certificate passed on the emulator (trust, pin, swapped and expired certificates); open: a server with a publicly
@@ -703,6 +704,7 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.
+- **Publication update (2026-11-18):** [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) published with latest=false at 178fdb4. S24 updated with data preserved; NativeAOT emulator real-feed check reported current. Fixture 1→2 installation passed; a public newer-offer upgrade awaits a future release. Final Astra combined PASS; later Fable review OPEN. ANDROID.5 is next/in progress.
 - [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it
   should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).

@@ -1,6 +1,6 @@
 # Goal — Build a private Windows download manager
 
-Android continuation (2026-11-18, Codex): auto-update built and Astra-audited, emulator installer flow verified, and 0.0.2 updatable APK placed on Desktop. Production feed is not published; S24 remains on 0.0.1 at this checkpoint. Next ANDROID.5 link catching. Separate Codex report and later Fable queue linked from CLAUDE.md; shared tracking remains authoritative. See PROGRESS.
+Android continuation (2026-11-18, Codex): Android 0.0.2 and its update feed published; S24 updated with data preserved, and the real feed checked on an emulator. A future public newer-offer upgrade remains to verify. ANDROID.5 source has passed Astra audit, native fixture flows were verified, and 0.0.3 was delivered to Desktop and S24; the GitHub feed remains 0.0.2. S24 pre-install reported 0.0.1 despite earlier 0.0.2 notes; cause unknown. Real-account and broader light-mode, TalkBack and rotation acceptance remain open. Owner requires per-download consent before cookies go to a named remote server. Separate Codex report and later Fable queue linked from CLAUDE.md; shared tracking remains authoritative. See PROGRESS.
 
 Owner direction (2026-11-05): the owner prefers the current Inbound design; keep our own design and behavior. `implemented` still needs linked acceptance evidence.
 

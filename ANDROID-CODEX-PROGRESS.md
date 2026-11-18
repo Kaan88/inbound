@@ -38,7 +38,7 @@ alongside this report; retain the owner's decisions and acceptance requirements.
 ## Open work and acceptance gaps
 
 1. Signed release APK built, verified, reinstalled and launched on the S24 FE (2026-11-18); full UI and download acceptance remain open.
-2. Android auto-update built and emulator installer flow verified; production assets unpublished and public newer-offer acceptance open. Desktop has 0.0.2; S24 remains 0.0.1 at this checkpoint.
+2. Android 0.0.2 and feed published; S24 updated preserving data, emulator real-feed check current. Public newer-offer upgrade remains open for a future release.
 3. ANDROID.5: link catching (share sheet, built-in browser, page links, expired links).
 4. ANDROID.6: queues, scheduler and remaining settings.
 5. Complete ANDROID.10 distribution and production update acceptance;
@@ -86,7 +86,7 @@ verify again until it passes.
   if unavailable, disclose the available substitute and verify its output.
 - Keep complex implementation, architecture, concurrency, durability, security,
   IPC and service lifecycle work with the coordinating main agent.
-- At each major milestone, request a code audit from the available Astra model,
+- Finish implementation and consolidated checks first; at each major milestone, request a code audit from the available Astra model,
   currently gpt-6.2-astra (the owner explicitly requested this model role). Give
   it the milestone scope, relevant code/diff, requirements and validation evidence.
 - Verify the audit findings against the code. The main agent fixes confirmed
@@ -98,6 +98,8 @@ verify again until it passes.
   An audit pass does not replace required tests or phone/visual acceptance.
 - Do not silently substitute another model for Astra. If unavailable, report it
   and obtain the owner's direction before calling the milestone audit complete.
+
+Owner clarification (2026-11-18): "use astra a bit less, on major milestones. this seems too much back and forth." Do not request Astra reviews for small increments; after the milestone audit, follow up only to verify confirmed fixes until PASS.
 
 This is the current Codex workflow. It adapts the earlier Claude-specific
 Sonnet/Opus/Fable role instructions; previous reviews remain historical evidence.
@@ -366,6 +368,76 @@ Owner requires Android auto-update before ANDROID.5: check once daily or on each
   passed. See updater-release-prepare-final.txt. No public release/upload yet.
 - ANDROID.5 next: mockups B2/B3/B4/B6 read; official Android docs confirm generic
   web Open-with cannot be promised for arbitrary domains on API31+. Use Share and
-  the in-app browser. The owner has a pending clarification about signed-in cookies
-  when a remote host is selected. Pure link parsing/selection is staged outside
-  this worktree, not yet integrated; browser/security implementation stays main-agent work.
+  the in-app browser. The owner subsequently chose per-download consent before cookies go to the named selected server. Pure link parsing/selection was reviewed and copied into source/tests; native UI remains unintegrated. Browser/security implementation stays main-agent work.
+
+### 2026-11-18 — Owner decisions after updater review
+
+- Owner chose "Ask before sending cookies to the selected server" for ANDROID.5.
+  Authenticated remote downloads must name the selected target and ask per download
+  before forwarding credentials. Update B3's old phone-only words accordingly; do
+  not imply remote cookies remain on the phone. Main owns this security-sensitive flow.
+- Owner approved "Publish Android release and update feed" for the reviewed 0.0.2
+  artifacts and android-app source. Commit/push the audited updater checkpoint and
+  publish version-specific APK/metadata/checksums plus rolling Android manifest;
+  keep desktop latest unchanged. This approval does not merge Android into main.
+
+## 2026-11-18 — Published feed and ANDROID.5 checkpoint
+
+- Owner approved publication and chose "Ask before sending cookies to the selected server": name the target and obtain consent per download before forwarding cookies. ANDROID.5 share/browser/page selection and expired-link refresh remain in progress; pure PageLinks model and nine tests were reviewed, fixed for single-URL punctuation, passed staged tests and copied into source/tests. Native UI is not integrated.
+- Android source 0.0.2 at d2e06d27 and CI guard 178fdb412196f76aa7fa3257a051cfd8f73c3a0c were committed and pushed on android-app only; main unchanged. Owner-approved prereleases [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) (APK, manifest, SHA256SUMS) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) (feed manifest) target 178fdb4, both latest=false. Public asset hashes match APK ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276 and manifest bb5510151d7a5d696cdaa0371ecad844609df9b5a3b6fcc208562762db4a40a6. Android-tag Linux/Docker jobs skipped; desktop latest v0.9.0 remained unchanged.
+- NativeAOT emulator 0.0.2 checked the real HTTPS production feed and displayed "Inbound is up to date" (emulator-public-feed-before.xml). The signed HTTP fixture established the 1→2 installer flow; an upgrade from a newer public offer remains for a future release. S24 updated to 0.0.2 with data preserved (s24-updater-install.txt). Evidence under artifacts/android-app/codex-signing/. Main stopped its loopback fixture server, reset the emulator install-source permission to default and removed its pushed fixture files. Final combined Astra PASS covers updater, preparation/helper, runner and persistence guard; Fable review remains OPEN.
+
+
+## 2026-11-18 — ANDROID.5 in-progress checkpoint
+
+- Work remains in progress. The first native signed-in file download was checked with a matching hash. Mobile suite passed 408 tests (two existing xUnit analyzer warnings). An earlier set of 309 Host/IPC tests passed before the later runtime rewrite; the 13 audit-focused checks are not yet final evidence for the current state.
+- Initial Astra findings prompted fixes; verification is pending. Fable-CODEX-3 remains OPEN, including shared-runtime refresh/security/durability and browser attribution. This checkpoint is not milestone acceptance.
+
+
+### Signing backup verification (2026-11-18)
+
+At the owner's request, the encrypted archive in the private secrets repository (blob 18161c733eefccc296f1d5add65f658e95233f82) was decrypted entirely in memory and SHA-256 compared against local inputs: Android release keystore, password file and update signing key all matched. No extraction, remote changes or secret values disclosed.
+
+### Refresh gate correction (in progress)
+
+The initial global settings-gate wrapper around Pause/Cancel delayed urgent Cancel behind QueueAction and failed the consolidated regression. Main is replacing it with per-job AddressMutationGate: refresh takes settings then the job gate before persistence; PauseAll takes ordered job gates; urgent Cancel is not globally gated. Verification remains in progress.
+
+### ANDROID.5 native and audit checkpoint (2026-11-19)
+
+- Debug and NativeAOT x64 caught an authenticated fixture file with SHA-256 fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83. Native authenticated refresh reused the existing `auth(3)` job (total 7, Finished 7, Failed 0), with the same hash. Native picker/insets shown in `android5-native-links-final.png`.
+- Debug Archives filtering excluded PDF/image; selected a.zip and b.pdf completed after ACK. Later auth1 stayed absent until Resume, then completed. Closing the browser during six-second metadata left Main on All five without a resurrected sheet. A subframe POST was logged by WebView with no Host GET or new job. Remote cookie consent named host and origin and warned about HTTP; cancel left server jobs at zero.
+- The signed arm64 version-3 initial build matched the signing fingerprint but is stale after the latest Runtime fix: do not deliver it or treat its hash as final. Focused queue policy 10 passed; the exact old failure and two new regressions passed 3. Full Integration 2059 passed/32 skipped/1 failed was before the queue fix and is not a full green result.
+- New confirmed Astra fixes reserve candidate final paths through commit and schedule when `AddressRefreshPending` clears, including failed jobs. Two deterministic tests are running; audit is not yet PASS. Fable-CODEX-3 remains OPEN. Common real-account sign-in compatibility, TLS, renderer, rotation, TalkBack and broader visual checks are not established. The controlled loopback fixture is now `tools/AndroidApp/link-fixture/`.
+
+### ANDROID.5 audited fixture checkpoint (2026-11-19)
+
+- Source audit: Astra final PASS after the reserved-name and refresh-wakeup fixes. The auditor verified both controlled tests force the original races and read the focused 16-pass log; this was source/read-only review, not an independent device run. Fable-CODEX-3 remains OPEN.
+- NativeAOT authenticated refresh completed the existing `auth(3)` job: All 7, Finished 7, Failed 0, same fixture hash. GitHub's public sign-in form rendered in the Native WebView; no account or credentials were entered, so GitHub sign-in itself is unverified. Unknown, ambiguous or redirect-provenance downloads may need a manually supplied URL; observed POST and blob are not replayed as GET. No TLS bypass or browser-profile import.
+- Core 2373, Engine 210, Mobile 408 passed. Full Integration 2059 passed, 32 skipped, one failed before the queue fix; afterward the exact failure plus two new regressions passed 3, queue policy passed 10, and reservation-focused checks passed 16. There is no clean full Integration rerun after that fix. The final phone APK and install are recorded in the 0.0.3 delivery entry (`android5-arm64-final.txt`, `android5-s24-install.txt`).
+- ANDROID.5 source is audited and native fixture flows have evidence, but exhaustive acceptance is open: real accounts, broader light-mode, TalkBack and rotation checks. Do not mark the milestone fully accepted yet.
+
+
+### ANDROID.5 0.0.3 delivered (2026-11-19)
+
+- Final permanent-key arm64 APK: `artifacts/android-app/signed-builds/0b2a487b31e743d68d7402399642a7aa/Inbound-android-release.apk`, 19,986,573 bytes, SHA-256 `e1dc3d59cbf5d5f5ccf3518ebc4a69002a6ec416cdcf5fa3e8b68fa09cf93bc7`; certificate matched the pinned permanent identity. Release preparation verified version 0.0.3/code 3 and made signed local bundle `artifacts/android-app/release-0.0.3`, not published. Desktop copy `C:/Users/kaank/Desktop/Inbound-android-0.0.3-updatable.apk` matched the hash.
+- S24 FE SM-S721B: pre-install check actually reported 0.0.1/code 1, despite earlier 0.0.2 notes; cause not established. The 1→3 `install -r` succeeded, preserving data without uninstall or settings changes. Installed APK hash matched, package reported 0.0.3/code 3, launch status ok, PID 5891, WaitTime 3033 ms. This is not a controlled performance benchmark. Evidence: `artifacts/android-app/codex-signing/android5-s24-install.txt`. GitHub release/feed remains 0.0.2; 0.0.3 is not published.
+- NativeAOT picker and caught-sheet light-mode spot checks: `android5-native-links-light.png` and `android5-native-caught-light.png`; emulator app theme restored to Follows System. These do not establish exhaustive visual, TalkBack or rotation acceptance.
+
+### Test cleanup (2026-11-19)
+
+Stopped only the verified task-owned Python fixture and isolated Inbound server,
+removed the task's emulator UI dump files, and closed the verified inbound33 AVD.
+No test Host process remained in the Android worktree. The installed Windows Host
+was left alone. The emulator app theme had been restored to Follows System;
+no physical-phone settings were changed. Raw evidence remains under the ignored
+artifacts/android-app/codex-signing directory; reusable fixture source is tracked.
+
+### Recorded source checkpoint (2026-11-19)
+
+ANDROID.5 implementation commit: `d0816724208a0ae543cf2d84a02e4ee32f218de2` on `android-app`.
+The commit includes the shared-runtime fixes and regression tests audited with
+the milestone; no merge to main. The 0.0.3 APK and signed local bundle remain
+unpublished; public Android release/feed remain 0.0.2. Later Fable review is OPEN.
+Final model result: `artifacts/android-app/codex-signing/android5-mobile-final.txt`
+(408 passed); final controlled race checks: `android5-reservation-wakeup-tests.txt`
+(16 passed). Full-run limitations remain recorded above.
