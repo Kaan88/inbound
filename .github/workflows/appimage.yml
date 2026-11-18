@@ -32,7 +32,8 @@ concurrency:
 
 jobs:
   packages:
-    if: github.repository == 'Kaan88/inbound'
+    # Android has its own APK/feed release tags; only desktop version releases build Linux packages.
+    if: github.repository == 'Kaan88/inbound' && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
