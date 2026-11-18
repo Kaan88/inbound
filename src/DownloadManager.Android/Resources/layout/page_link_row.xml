@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="?attr/colorSurfaceContainer">
+  <CheckBox android:id="@+id/page_link_check" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingLeft="16dp" android:paddingRight="16dp" android:textAppearance="?attr/textAppearanceBodyLarge" android:textColor="?attr/colorOnSurface" />
+</LinearLayout>

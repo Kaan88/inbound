@@ -1,4 +1,4 @@
-﻿namespace DownloadManager.Contracts;
+namespace DownloadManager.Contracts;
 
 public sealed class FailureDto
 {
@@ -671,8 +671,20 @@ public sealed class JobQueueRequest
     public int QueueId { get; set; }
 }
 
+/// <summary>Transient browser context for the exact replacement URL. Persisted by the Host's existing protected job store.</summary>
+public sealed class BrowserRequestContext
+{
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? UserAgent { get; set; }
+    public string? Referrer { get; set; }
+    public string? PageUrl { get; set; }
+    public override string ToString() => "Browser request context (details hidden)";
+}
+
 public sealed class JobRefreshUrlRequest
 {
+    /// <summary>Optional, requires hello capability browserRefresh. Null preserves legacy refresh behavior.</summary>
+    public BrowserRequestContext? BrowserContext { get; set; }
     public Guid JobId { get; set; }
     public string Url { get; set; } = string.Empty;
     /// <summary>The user chose a direct request for an address nobody could classify. It doesn't excuse a known hoster link or folder link.</summary>

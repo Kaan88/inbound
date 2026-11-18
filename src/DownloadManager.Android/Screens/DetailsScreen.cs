@@ -136,6 +136,7 @@ internal sealed class DetailsScreen
             RowGroup.Failed => ("Retry", Resource.Drawable.ic_refresh),
             _ => ("Resume", Resource.Drawable.ic_play),
         };
+        if (MayRefresh && SuggestRefresh) text = "Refresh link";
         _main.Text = text;
         _main.SetIconResource(icon);
         // A finished file on another Inbound is on that machine: no Open here (ANDROID.7).
@@ -236,8 +237,13 @@ internal sealed class DetailsScreen
         Tick();
     }
 
+    private bool MayRefresh => !_row.Job.IsRemote && _row.Group is RowGroup.Failed or RowGroup.Paused or RowGroup.Queued;
+    private bool SuggestRefresh => _row.Job.Failure?.Kind.Equals("expiredUrl", StringComparison.OrdinalIgnoreCase) == true
+        || _row.Job.Failure?.HttpStatus is 401 or 403 or 410;
+
     private void OnMain()
     {
+        if (MayRefresh && SuggestRefresh) { _activity.ShowRefreshLink(_row); return; }
         switch (_row.Group)
         {
             case RowGroup.Active: Fire(_model.PauseAsync(_row.Id), null); break;
@@ -263,10 +269,12 @@ internal sealed class DetailsScreen
         var menu = new PopupMenu(_activity, anchor);
         if (!_row.Job.AddressHidden) menu.Menu!.Add(0, 1, 0, "Copy address");
         if (_row.Group == RowGroup.Finished && _activity.Capabilities.CanShowInFolder) menu.Menu!.Add(0, 2, 1, "Show in folder");
+        if (MayRefresh) menu.Menu!.Add(0, 3, 2, "Refresh link");
         if (menu.Menu!.Size() == 0) return;
         menu.MenuItemClick += (_, e) =>
         {
             if (e.Item!.ItemId == 1) { Outside.CopyText(_activity, "Address", _row.Job.Url); _activity.ShowMessage("Address copied"); }
+            else if (e.Item.ItemId == 3) _activity.ShowRefreshLink(_row);
             else if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
         };
         menu.Show();

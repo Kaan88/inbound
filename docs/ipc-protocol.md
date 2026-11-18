@@ -923,6 +923,8 @@ So does an `unsupported` one. An `undetermined` one, or one that couldn't be cla
 request for it. The same goes for an `ordinaryLink` with `checkIncomplete`. The job's current address is always accepted and an `ftp` address never is (FTP was cut in 0.7.2), and with no usable
 key nothing is classified. `dm refresh <id> <url> --direct` sets the flag.
 
+**Browser context on `job.refreshUrl` (additive):** Hosts append `browserRefresh` to the `server.hello` capability list after the existing capabilities. A client may send optional `browserContext` with `headers`, `userAgent`, `referrer` and `pageUrl` only when that capability is advertised. An older Host needs the plain URL-only request; do not silently send browser context to it. The context allows at most one header, `Cookie`, only when `pageUrl` and the replacement URL share scheme, host and port. Cookie is limited to 32,768 characters, user agent to 4,096, and page/referrer addresses to 8,192; control characters are refused. Addresses must be HTTP(S) without userinfo, and fragments are removed; an HTTPS referrer is dropped on an HTTP target. Browser headers use the Host’s existing protected request persistence. Omitted context preserves legacy behavior. Existing caller-scope and refresh validation still apply; `job.action.result` is the acknowledgment.
+
 The clipboard monitor classifies too, while a usable key exists. An ordinary or provider direct link
 is added directly. An `ordinaryLink` with `checkIncomplete` is added with `startMode: later` and no request
 to its server, not even for its name, and the tray says so. A hoster or folder link becomes a job with

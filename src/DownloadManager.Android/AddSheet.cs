@@ -29,6 +29,7 @@ public sealed class AddSheet : BottomSheetDialogFragment
         _card = v.FindViewById<View>(Resource.Id.clip_card);
         _text = v.FindViewById<TextView>(Resource.Id.clip_text);
         v.FindViewById<View>(Resource.Id.entry_link)!.Click += (_, _) => Go(null);
+        v.FindViewById<View>(Resource.Id.entry_browser)!.Click += (_, _) => { var activity = Activity as MainActivity; Dismiss(); activity?.OpenBrowser(); };
         v.FindViewById<View>(Resource.Id.clip_use)!.Click += (_, _) => Go(_link);
         // The clipboard can only be read while this window has the focus (Android 10 and later), so it is read when the focus arrives.
         v.ViewTreeObserver!.WindowFocusChange += (_, e) => { if (e.HasFocus) ReadClipboard(); };

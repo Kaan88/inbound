@@ -107,6 +107,7 @@ public sealed class ErrorPayload
 [JsonSerializable(typeof(JobEventDto))]
 [JsonSerializable(typeof(JobQueueRequest))]
 [JsonSerializable(typeof(JobRefreshUrlRequest))]
+[JsonSerializable(typeof(BrowserRequestContext))]
 [JsonSerializable(typeof(JobsQueryRequest))]
 [JsonSerializable(typeof(JobUpdateRequest))]
 [JsonSerializable(typeof(ProxyDto))]

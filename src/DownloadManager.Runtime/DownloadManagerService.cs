@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
@@ -1041,6 +1041,21 @@ public sealed partial class DownloadManagerService
 
     public async Task<JobActionResponse> PauseAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        return await WithAddressMutationAsync(id, () => PauseCoreAsync(id, cancellationToken), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<JobActionResponse> WithAddressMutationAsync(Guid id, Func<Task<JobActionResponse>> action, CancellationToken cancellationToken)
+    {
+        JobRuntime? runtime;
+        lock (_sync) _jobs.TryGetValue(id, out runtime);
+        if (runtime is null) return new JobActionResponse { Error = "Job not found." };
+        await runtime.AddressMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await action().ConfigureAwait(false); }
+        finally { runtime.AddressMutationGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> PauseCoreAsync(Guid id, CancellationToken cancellationToken)
+    {
         JobRuntime? runtime;
         lock (_sync)
         {
@@ -1177,6 +1192,12 @@ public sealed partial class DownloadManagerService
         bool onlyIfUnfinished = false,
         Guid? cancelledByPackage = null,
         CallerScope? caller = null)
+    {
+        return await WithAddressMutationAsync(id, () => CancelCoreAsync(id, deleteFile, cancellationToken, onlyIfUnfinished, cancelledByPackage, caller), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<JobActionResponse> CancelCoreAsync(Guid id, bool deleteFile, CancellationToken cancellationToken,
+        bool onlyIfUnfinished, Guid? cancelledByPackage, CallerScope? caller)
     {
         if (deleteFile && caller is not null && RefuseOutsideCaller(id, caller) is { } outside) return outside;
         JobRuntime? runtime;
@@ -1438,10 +1459,27 @@ public sealed partial class DownloadManagerService
     /// <summary>Pauses everything that can pause. Returns the ids it paused (a phone's "Resume" restarts only those).</summary>
     public async Task<IReadOnlyList<Guid>> PauseAllAsync(CancellationToken cancellationToken = default)
     {
+        List<JobRuntime> targets;
+        lock (_sync) targets = _jobs.Values.Where(r => r.Job.CanPause).OrderBy(r => r.Job.Id).ToList();
+        var held = new List<JobRuntime>();
+        try
+        {
+            foreach (var runtime in targets)
+            {
+                await runtime.AddressMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                held.Add(runtime);
+            }
+            return await PauseAllCoreAsync(targets, cancellationToken).ConfigureAwait(false);
+        }
+        finally { foreach (var runtime in held) runtime.AddressMutationGate.Release(); }
+    }
+
+    private async Task<IReadOnlyList<Guid>> PauseAllCoreAsync(IReadOnlyList<JobRuntime> targets, CancellationToken cancellationToken)
+    {
         List<JobRuntime> paused;
         lock (_sync)
         {
-            paused = _jobs.Values.Where(r => r.Job.CanPause).ToList();
+            paused = targets.Where(r => _jobs.TryGetValue(r.Job.Id, out var current) && ReferenceEquals(r, current) && r.Job.CanPause).ToList();
             foreach (var runtime in paused)
             {
                 RequestStopLocked(runtime);
@@ -3531,147 +3569,148 @@ public sealed partial class DownloadManagerService
     /// its local network, and the download then stays off those for good (<see cref="DownloadJob.PublicNetworkOnly"/>).
     /// </param>
     public async Task<JobActionResponse> RefreshUrlAsync(
-        Guid id,
-        string newUrl,
-        bool explicitDirect = false,
-        CancellationToken cancellationToken = default,
-        CallerScope? caller = null)
+        Guid id, string newUrl, bool explicitDirect = false,
+        CancellationToken cancellationToken = default, CallerScope? caller = null,
+        BrowserRequestContext? browserContext = null)
     {
-        if (!TryValidateUrl(newUrl, out var uri, out var urlError))
+        if (!TryValidateUrl(newUrl, out var uri, out var error)) return new JobActionResponse { Error = error };
+        BrowserRequestContext? browser = null;
+        if (browserContext is not null)
         {
-            return new JobActionResponse { Ok = false, Error = urlError };
+            try
+            {
+                if (uri.Scheme is not ("http" or "https")) throw new ArgumentException();
+                browser = BrowserRefreshRequest.Copy(browserContext, uri.AbsoluteUri);
+            }
+            catch (ArgumentException) { return new JobActionResponse { Error = "Browser request data is invalid." }; }
         }
-
-        if (caller is not null)
-        {
-            if (CallerScope.DescribeAddress(newUrl) is { } refused) return new JobActionResponse { Ok = false, Error = refused, Job = GetJob(id) };
-            if (RefuseOutsideCaller(id, caller) is { } outside) return outside;
-            // What the user set to happen to this file would then happen to whatever the new address sends.
-            if (GetJob(id) is { CompletionOptions: var options } job && (options.OpenFile || !string.IsNullOrWhiteSpace(options.ProgramPath)))
-                return new JobActionResponse { Ok = false, Error = CallerScope.CompletionActionsKeepAddress, Job = job };
-        }
+        if (caller is not null && CallerScope.DescribeAddress(newUrl) is { } addressError)
+            return new JobActionResponse { Error = addressError, Job = GetJob(id) };
 
         await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
-
-        // Asking may wait on the network, so never under the lock, and the job may have moved on
-        // meanwhile. So everything is looked at again afterwards, with this answer kept.
         var addressAllowed = false;
         while (true)
         {
-            JobRuntime? runtime;
             var askFirst = false;
-            var finished = false;
-            lock (_sync)
+            await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            JobRuntime? gateOwner = null;
+            var jobGateHeld = false;
+            try
             {
-                if (!_jobs.TryGetValue(id, out runtime))
+                lock (_sync) _jobs.TryGetValue(id, out gateOwner);
+                if (gateOwner is null) return new JobActionResponse { Error = "Job not found." };
+                await gateOwner.AddressMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                jobGateHeld = true;
+                await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    return new JobActionResponse { Ok = false, Error = "Job not found." };
-                }
-
-                if (runtime.Job.RemoteSource is not null)
-                {
-                    return new JobActionResponse
+                    // These gates also guard moves and completion edits. Recheck after every network/runner wait.
+                    if (caller is not null && RefuseOutsideCaller(id, caller) is { } outside) return outside;
+                    JobRuntime runtime;
+                    DownloadJob next;
+                    bool finished;
+                    string? reservedCandidate = null;
+                    lock (_sync)
                     {
-                        Ok = false,
-                        Error = "This download gets its address from its provider, so it cannot be changed here.",
-                        Job = Map(runtime.Job),
-                    };
-                }
-
-                // The refresh dialog starts from the masked address. Accepting it unchanged
-                // keeps the real one; any other masked address has nothing real behind it.
-                var keepProtected = runtime.Job.ProtectedUrl is not null && newUrl == runtime.Job.Url;
-                if (!keepProtected && ProviderLinks.IsMasked(newUrl))
-                {
-                    return new JobActionResponse
-                    {
-                        Ok = false,
-                        Error = "This address has its key hidden, so it cannot download anything. Paste the original link.",
-                        Job = Map(runtime.Job),
-                    };
-                }
-
-                finished = runtime.Job.State == DownloadState.Completed;
-                if (runtime.Starting || runtime.Runner is { IsCompleted: false })
-                {
-                    return new JobActionResponse
-                    {
-                        Ok = false,
-                        Error = "Stop the download before refreshing its address.",
-                        Job = Map(runtime.Job),
-                    };
-                }
-
-                // The address it already has stays usable, whatever it is: refusing that would strand a retry.
-                if (!addressAllowed && DirectAddresses is not null && !keepProtected && !IsSameAddress(runtime.Job.Url, uri))
-                {
-                    askFirst = true;
-                }
-                else
-                {
-                    // A failed or cancelled one held no name and is started again below, so it takes one first (as Resume does).
-                    if (!finished && ClaimNameLocked(runtime.Job) is { } nameError)
-                        return new JobActionResponse { Ok = false, Error = nameError, Job = Map(runtime.Job) };
-
-                    runtime.PauseRequested = false;
-                    runtime.CancelRequested = false;
-                    runtime.CancelledForRemoval = false;
-                    // The saved login belongs to the site it came from, and the engine trusts whatever site
-                    // the job now points at. A move to another site must leave it behind.
-                    if (!Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var previous) ||
-                        previous.GetLeftPart(UriPartial.Authority) != uri.GetLeftPart(UriPartial.Authority))
-                    {
-                        runtime.Job.RequestHeaders.Remove("Cookie");
-                        runtime.Job.RequestHeaders.Remove("Authorization");
-                        runtime.Job.RequestHeaders.Remove("Proxy-Authorization");
-                        runtime.Job.Referrer = null;
+                        if (!_jobs.TryGetValue(id, out runtime!)) return new JobActionResponse { Error = "Job not found." };
+                        if (caller is not null && (runtime.Job.CompletionOptions.OpenFile || !string.IsNullOrWhiteSpace(runtime.Job.CompletionOptions.ProgramPath)))
+                            return new JobActionResponse { Error = CallerScope.CompletionActionsKeepAddress, Job = Map(runtime.Job) };
+                        if (runtime.Job.RemoteSource is not null)
+                            return new JobActionResponse { Error = "This download gets its address from its provider, so it cannot be changed here.", Job = Map(runtime.Job) };
+                        if (_shuttingDown || runtime.CancelledForRemoval)
+                            return new JobActionResponse { Error = "The download is closing or being removed.", Job = Map(runtime.Job) };
+                        if (runtime.Starting || runtime.Runner is { IsCompleted: false })
+                            return new JobActionResponse { Error = "Stop the download before refreshing its address.", Job = Map(runtime.Job) };
+                        var keepProtected = runtime.Job.ProtectedUrl is not null && newUrl == runtime.Job.Url;
+                        if (!keepProtected && ProviderLinks.IsMasked(newUrl))
+                            return new JobActionResponse { Error = "This address has its key hidden, so it cannot download anything. Paste the original link.", Job = Map(runtime.Job) };
+                        askFirst = !addressAllowed && DirectAddresses is not null && !keepProtected && !IsSameAddress(runtime.Job.Url, uri);
+                        if (askFirst) { next = null!; finished = false; }
+                        else
+                        {
+                            next = runtime.Job.Clone();
+                            finished = next.State == DownloadState.Completed;
+                            // Only a private candidate claims the name; failed saves expose no name or request mutation.
+                            if (!finished && ClaimNameLocked(next) is { } nameError)
+                                return new JobActionResponse { Error = nameError, Job = Map(runtime.Job) };
+                            if (!Uri.TryCreate(next.Url, UriKind.Absolute, out var previous) || previous.GetLeftPart(UriPartial.Authority) != uri.GetLeftPart(UriPartial.Authority))
+                            {
+                                next.RequestHeaders.Remove("Cookie"); next.RequestHeaders.Remove("Authorization"); next.RequestHeaders.Remove("Proxy-Authorization");
+                                next.Referrer = null;
+                            }
+                            if (browser is not null)
+                            {
+                                next.RequestHeaders = new Dictionary<string, string>(browser.Headers, StringComparer.OrdinalIgnoreCase);
+                                next.UserAgent = browser.UserAgent; next.Referrer = MaskIfProviderLink(browser.Referrer); next.PageUrl = MaskIfProviderLink(browser.PageUrl);
+                            }
+                            if (!keepProtected)
+                            {
+                                var (jobUrl, _, protectedUrl) = SplitOffProviderLink(uri.AbsoluteUri, null);
+                                next.Url = jobUrl; next.ProtectedUrl = protectedUrl;
+                            }
+                            next.ResolvedUrl = null; next.FinalUrl = null;
+                            if (caller is not null) next.PublicNetworkOnly = true;
+                            if (!finished)
+                            {
+                                next.State = DownloadState.Queued; next.StartMode = StartMode.StartNow; next.Failure = null;
+                                next.CompletedAt = null; next.AutoResumeAfterRestart = true;
+                            }
+                            next.Touch();
+                            if (!finished && !string.IsNullOrWhiteSpace(next.FinalFilePath))
+                            {
+                                var path = NormalizePath(next.FinalFilePath);
+                                if (!_reservedFinalPaths.Add(path))
+                                    return new JobActionResponse { Error = "The download name is being reserved. Try again.", Job = Map(runtime.Job) };
+                                reservedCandidate = path;
+                            }
+                            runtime.AddressRefreshPending = true;
+                        }
                     }
-
-                    if (!keepProtected)
+                    if (!askFirst)
                     {
-                        var (jobUrl, _, protectedUrl) = SplitOffProviderLink(uri.AbsoluteUri, null);
-                        runtime.Job.Url = jobUrl;
-                        runtime.Job.ProtectedUrl = protectedUrl;
+                        try
+                        {
+                            // Cancellation is honored before commit. Once saving starts, finish the durable transaction.
+                            cancellationToken.ThrowIfCancellationRequested();
+                            await _jobStore.SaveAsync(next, CancellationToken.None).ConfigureAwait(false);
+                            lock (_sync)
+                            {
+                                var job = runtime.Job;
+                                job.Url = next.Url; job.ProtectedUrl = next.ProtectedUrl; job.ResolvedUrl = null; job.FinalUrl = null;
+                                job.RequestHeaders = next.RequestHeaders; job.UserAgent = next.UserAgent; job.Referrer = next.Referrer; job.PageUrl = next.PageUrl;
+                                job.FileName = next.FileName; job.FinalFilePath = next.FinalFilePath; job.PublicNetworkOnly = next.PublicNetworkOnly;
+                                job.State = next.State; job.StartMode = next.StartMode; job.Failure = next.Failure;
+                                job.CompletedAt = next.CompletedAt; job.AutoResumeAfterRestart = next.AutoResumeAfterRestart; job.UpdatedAt = next.UpdatedAt;
+                                runtime.PauseRequested = false; runtime.CancelRequested = false; runtime.CancelledForRemoval = false;
+                            }
+                        }
+                        catch (Exception saveError) when (saveError is IOException or UnauthorizedAccessException)
+                        { return new JobActionResponse { Error = "The new address could not be saved. Try again.", Job = GetJob(id) }; }
+                        finally
+                        {
+                            lock (_sync)
+                            {
+                                runtime.AddressRefreshPending = false;
+                                if (reservedCandidate is not null) _reservedFinalPaths.Remove(reservedCandidate);
+                            }
+                            // A slot may have opened while the candidate was saving. Reconsider the original job on failure too.
+                            Schedule();
+                        }
+                        Raise(runtime, finished ? "updated" : "refreshed");
+                        return new JobActionResponse { Ok = true, Job = GetJob(id) };
                     }
-
-                    runtime.Job.ResolvedUrl = null;
-                    runtime.Job.FinalUrl = null;
-                    if (caller is not null) runtime.Job.PublicNetworkOnly = true;
-                    if (!finished)
-                    {
-                        runtime.Job.State = DownloadState.Queued;
-                        runtime.Job.StartMode = StartMode.StartNow;
-                        runtime.Job.Failure = null;
-                        runtime.Job.CompletedAt = null;
-                        runtime.Job.AutoResumeAfterRestart = true;
-                    }
-
-                    runtime.Job.Touch();
                 }
+                finally { _persistGate.Release(); }
             }
-
-            if (askFirst)
+            finally
             {
-                if (await DirectAddresses!.WhyNotDirectAsync(newUrl, explicitDirect, cancellationToken).ConfigureAwait(false) is { } refusal)
-                {
-                    return new JobActionResponse { Ok = false, Error = refusal, Job = GetJob(id) };
-                }
-
-                addressAllowed = true;
-                continue;
+                if (jobGateHeld) gateOwner!.AddressMutationGate.Release();
+                _settingsUpdateGate.Release();
             }
-
-            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
-            if (finished)
-            {
-                // Still finished: the list shows the new address, and no client takes it for a restart.
-                Raise(runtime, "updated");
-                return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
-            }
-
-            Raise(runtime, "refreshed");
-            Schedule();
-            return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+            // Never hold mutation or persistence gates while consulting a provider/network policy.
+            if (await DirectAddresses!.WhyNotDirectAsync(newUrl, explicitDirect, cancellationToken).ConfigureAwait(false) is { } refusal)
+                return new JobActionResponse { Error = refusal, Job = GetJob(id) };
+            addressAllowed = true;
         }
     }
 
@@ -4486,7 +4525,7 @@ public sealed partial class DownloadManagerService
                 .GroupBy(item => (item.QueueId, item.JobId))
                 .ToDictionary(group => group.Key, group => group.First().Index);
             foreach (var runtime in _jobs.Values
-                         .Where(r => !r.AdmissionSuspended && !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
+                         .Where(r => !r.AdmissionSuspended && !r.AddressRefreshPending && !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
                                      r.Job.State == DownloadState.Queued &&
                                      r.Job.StartMode != StartMode.Later &&
                                      // A torrent waits in its queue while torrents are off.
@@ -5016,6 +5055,7 @@ public sealed partial class DownloadManagerService
         if (changeType == "completed" && job.Torrent is not null) StartSeedingAfterDownload(runtime);
 
         var lateResume = false;
+        var lateNameRefused = false;
         bool removalUnfinished;
         lock (_sync)
         {
@@ -5044,13 +5084,36 @@ public sealed partial class DownloadManagerService
                     job.Touch();
                     lateResume = true;
                 }
+                else if (job.State == DownloadState.Failed && !_shuttingDown && !runtime.CancelRequested && job.IsQueued &&
+                         _settings.Queues.FirstOrDefault(q => q.Id == job.QueueId) is { IsRunning: true } queue && QueueRetriesFailedLocked(job, queue))
+                {
+                    // A Start may arrive after failure was announced but before this runner released its slot.
+                    // Honor the same pending-retry count and name rules as the ordinary queue-start path.
+                    if (ClaimNameLocked(job) is { } nameError)
+                    {
+                        RefuseNameLocked(job, nameError);
+                        lateNameRefused = true;
+                    }
+                    else
+                    {
+                        runtime.PauseRequested = false;
+                        job.QueueProcessing = true;
+                        if (job.QueueRetryAt is null) job.QueueRetryCount++;
+                        job.QueueRetryAt = null;
+                        job.State = DownloadState.Queued;
+                        job.StartMode = StartMode.StartNow;
+                        job.Failure = null;
+                        job.Touch();
+                        lateResume = true;
+                    }
+                }
             }
         }
 
-        if (lateResume)
+        if (lateResume || lateNameRefused)
         {
             await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
-            Raise(runtime, "queued");
+            Raise(runtime, lateResume ? "queued" : "failed");
         }
         else if (removalUnfinished)
         {
@@ -6227,6 +6290,8 @@ public sealed partial class DownloadManagerService
         public Task? Runner { get; set; }
         public bool Starting { get; set; }
         public bool AdmissionSuspended { get; set; }
+        public bool AddressRefreshPending { get; set; }
+        public SemaphoreSlim AddressMutationGate { get; } = new(1, 1);
         public bool PauseRequested { get; set; }
         public bool ResumeWhenStopped { get; set; }
         /// <summary>

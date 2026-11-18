@@ -25,6 +25,7 @@ internal sealed class Navigator
     private readonly BackCallback _back;
     private Func<View?>? _returnTo;
     private Action? _closed;
+    private Func<bool>? _pageBack, _handlesBack;
     private View? _page;
     private bool _closing;
     private int _generation;
@@ -56,7 +57,7 @@ internal sealed class Navigator
     /// <param name="from">The row card to grow out of, or null.</param>
     /// <param name="returnTo">Finds the card again when the page closes (null: the row is not on screen).</param>
     /// <param name="title">The page's name, announced by TalkBack when it opens.</param>
-    public void Open(View page, View? from, Func<View?>? returnTo, Action? closed, string title)
+    public void Open(View page, View? from, Func<View?>? returnTo, Action? closed, string title, Func<bool>? back = null, Func<bool>? handlesBack = null)
     {
         if (PageOpen) return;
         _generation++;
@@ -64,6 +65,7 @@ internal sealed class Navigator
         _closing = false;
         _returnTo = returnTo;
         _closed = closed;
+        _pageBack = back; _handlesBack = handlesBack;
         _overlay.RemoveAllViews();
         _overlay.AddView(page, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
         // The overlay itself is see-through: the (opaque) page grows over the list, which stays drawn until it is covered (finding 21).
@@ -152,6 +154,7 @@ internal sealed class Navigator
     {
         _generation++;
         _page = null;
+        _pageBack = null; _handlesBack = null;
         _closing = false;
         _returnTo = null;
         _overlay.RemoveAllViews();
@@ -176,14 +179,14 @@ internal sealed class Navigator
         public override void HandleOnBackPressed()
         {
             var step = plan();
-            if (step == BackStep.ClosePage) { if (owner._page is { } page) owner.Close(page); }
+            if (step == BackStep.ClosePage) { if (!owner._closing && owner._pageBack?.Invoke() != true && owner._page is { } page) owner.Close(page); }
             else perform(step);
         }
 
         // Predictive back: the page shrinks a little and slides with the finger; cancelled, it springs back.
         public override void HandleOnBackProgressed(BackEventCompat backEvent)
         {
-            if (owner.Page is not { } p || owner._closing) return;
+            if (owner.Page is not { } p || owner._closing || owner._handlesBack?.Invoke() == true) return;
             var progress = backEvent.Progress;
             var dir = backEvent.SwipeEdge == BackEventCompat.EdgeLeft ? 1f : -1f;
             p.ScaleX = p.ScaleY = 1f - 0.1f * progress;

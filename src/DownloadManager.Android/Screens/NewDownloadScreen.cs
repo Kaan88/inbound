@@ -28,8 +28,9 @@ internal sealed class NewDownloadScreen
     private bool _busy;
 
     /// <param name="saved">What the page held before the activity was rebuilt (rotation, process death), or null.</param>
-    public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address, Bundle? saved = null)
+    public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address, Bundle? saved = null, bool transient = false)
     {
+        Transient = transient;
         _activity = activity;
         _host = host;
         _model = new NewDownloadModel(host);
@@ -55,6 +56,11 @@ internal sealed class NewDownloadScreen
         _sha = Root.FindViewById<TextInputEditText>(Resource.Id.sha)!;
         _shaLayout = Root.FindViewById<TextInputLayout>(Resource.Id.sha_layout)!;
         _download = Root.FindViewById<MaterialButton>(Resource.Id.new_download_btn)!;
+        if (Transient)
+        {
+            Root.SaveFromParentEnabled = false;
+            foreach (var input in new[] { _address, _name, _referrer, _description, _sha }) input.SaveEnabled = false;
+        }
 
         SetUpSaveTo(host);
         // The slider's label formatter is called whenever the value changes, which is the one hook the generated binding allows (its change listener cannot be implemented in C#).
@@ -124,8 +130,11 @@ internal sealed class NewDownloadScreen
     }
 
     /// <summary>What the page holds, for a rebuilt activity (finding 16). A name the Host found is not kept: the check runs again.</summary>
+    public bool Transient { get; }
+
     public void Save(Bundle state)
     {
+        if (Transient) return;
         state.PutString("address", _address.Text ?? "");
         if (_model.FileNameEdited) state.PutString("name", _model.FileName);
         state.PutString("referrer", _referrer.Text ?? "");

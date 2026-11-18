@@ -1,0 +1,53 @@
+using DownloadManager.Mobile.Links;
+
+namespace DownloadManager.Mobile.Tests;
+
+public sealed class PageLinksTests
+{
+    [Theory]
+    [InlineData("https://example.com/download?token=keep!")]
+    [InlineData("https://example.com/file.")]
+    [InlineData("https://example.com/download?token=keep;")]
+    public void ASharedSingleUrlDoesNotChangeSignedOrLiteralPunctuation(string url) => Assert.Equal(new[] { url }, SharedLinks.Extract(url));
+    [Fact] public void SharedProseExtractsAndNormalizesDistinctUrls()
+    {
+        var links = SharedLinks.Extract("See https://Example.com/a(1).zip#top, (https://example.com/b). Again https://example.com/a(1).zip#other!");
+        Assert.Equal(new[] { "https://example.com/a(1).zip", "https://example.com/b" }, links);
+    }
+    [Fact] public void RejectsCredentialsAndOtherSchemesAndMalformedAddresses()
+    {
+        var links = SharedLinks.Extract("ftp://example.com/a https://user:secret@example.com/b https:// bad http://?x=1 https://example.com/ok");
+        Assert.Equal(new[] { "https://example.com/ok" }, links);
+        var model = new PageLinks([new("https://example.com/a\u0001b", "bad"), new("file:///tmp/a", "file"), new("https://u:p@example.com/a", "credentials")]);
+        Assert.Empty(model.Visible);
+    }
+    [Fact] public void SharedTextAndUrlsAreBounded()
+    {
+        var urls = string.Join(' ', Enumerable.Range(0, 110).Select(i => $"https://example.com/{i}"));
+        Assert.Equal(100, SharedLinks.Extract(urls).Count);
+        Assert.Empty(SharedLinks.Extract("https://example.com/" + new string('x', 8200)));
+        Assert.Empty(SharedLinks.Extract(new string('x', 65536) + " https://example.com/late"));
+    }
+    [Fact] public void DistinctPathsRemainCaseSensitiveAndFragmentsDoNotCreateDuplicates()
+    {
+        var model = new PageLinks([new("https://EXAMPLE.com/A#one", " A\u0001 "), new("https://example.com/A#two", "duplicate"), new("https://example.com/a", new string('n', 250))]);
+        Assert.Equal(2, model.Visible.Count); Assert.Equal("A", model.Visible[0].Name); Assert.Equal(200, model.Visible[1].Name.Length);
+    }
+    [Fact] public void FilterAndSelectionPersistAcrossKindsAndSearchNeverReadsQuery()
+    {
+        var model = new PageLinks([new("https://files.example/a.zip?secret=needle", "Archive"), new("https://other.example/movie.MP4?x=.zip", "Clip"), new("https://files.example/p.pdf", "Paper"), new("https://files.example/data", "Data")]);
+        Assert.Equal(0, model.SelectedCount); model.Kind = PageLinkKind.Archives; Assert.Single(model.Visible); model.SetVisibleSelected(true);
+        model.Kind = PageLinkKind.Video; Assert.Single(model.Visible); model.Toggle(model.Visible[0].Url);
+        model.Kind = PageLinkKind.Documents; Assert.Single(model.Visible); model.SetVisibleSelected(true);
+        model.Kind = PageLinkKind.Other; Assert.Single(model.Visible); model.Query = "needle"; Assert.Empty(model.Visible);
+        model.Query = "FILES.EXAMPLE"; Assert.Single(model.Visible); model.Kind = PageLinkKind.All;
+        Assert.Equal(3, model.SelectedCount); Assert.Equal(new[] { "Archive", "Clip", "Paper" }, model.Selected.Select(x => x.Name));
+        model.SetVisibleSelected(false); Assert.Single(model.Selected); Assert.Equal("Clip", model.Selected[0].Name);
+    }
+    [Fact] public void InputCapCountsOnlyDistinctValidLinks()
+    {
+        var input = new[] { new PageLink("javascript:bad", "bad"), new PageLink("https://example.com/0#duplicate", "first") }
+            .Concat(Enumerable.Range(0, 2100).Select(i => new PageLink($"https://example.com/{i}", i.ToString())));
+        var model = new PageLinks(input); Assert.Equal(2000, model.Visible.Count); Assert.Equal("1999", model.Visible[^1].Name);
+    }
+}

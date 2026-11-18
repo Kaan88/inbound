@@ -22,4 +22,5 @@
     </LinearLayout>
     <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_chevron_right" android:importantForAccessibility="no" />
   </LinearLayout>
+  <com.google.android.material.button.MaterialButton android:id="@+id/entry_browser" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Browse and catch a download" android:minHeight="56dp" />
 </LinearLayout>

@@ -1107,6 +1107,8 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await run.WaitForSetAsync(set => set.Name == "away" && set.State == "completed");
         Assert.True(File.Exists(Path.Combine(chosen, "away.txt")));
         Assert.False(File.Exists(run.PathOf("away.txt")));
+        // Completed is committed before the extractor removes its staging area.
+        await WaitUntilAsync(() => !Directory.Exists(StagingArea.FolderFor(chosen, away, chosen)));
         Assert.Empty(Directory.EnumerateDirectories(chosen));
     }
 

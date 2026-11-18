@@ -20,7 +20,8 @@ namespace Inbound.App;
 /// </summary>
 [Activity(Name = "app.inbound.android.MainActivity", Label = "Inbound", MainLauncher = true, Exported = true,
     LaunchMode = Android.Content.PM.LaunchMode.SingleTop, WindowSoftInputMode = SoftInput.AdjustResize)]
-public sealed class MainActivity : AppCompatActivity
+[IntentFilter([Intent.ActionSend], Categories = [Intent.CategoryDefault], DataMimeType = "text/*")]
+public sealed partial class MainActivity : AppCompatActivity
 {
     private const string FirstRunKey = "first_run_done";
 
@@ -54,6 +55,8 @@ public sealed class MainActivity : AppCompatActivity
         var hosts = Hosts.HostChoice.Hosts(this);
         Capabilities = hosts.Capabilities;
         HostName = hosts.Current.Name;
+        _linkHostStamp = hosts.Current.ConnectionStamp;
+        _linkHosts = hosts; hosts.Changed += OnLinkHostsChanged;
         // The phone's own Host runs whatever host is shown: its downloads, their reconcile and resume, and the keep-alive of
         // step 2 must not wait until the user looks at This phone again (review of steps 3 and 6, finding 6).
         if (Capabilities.IsRemote) StartPhoneHost();
@@ -78,6 +81,7 @@ public sealed class MainActivity : AppCompatActivity
         ShowFirstRunIfNeeded();
         RestorePage(savedInstanceState);
         ShowUpdatesIfRequested(Intent);
+        ReceiveShare(Intent, savedInstanceState is not null || (Intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
         _nav.UpdateBack();
 #if INBOUND_TEST_BUILD
         // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
@@ -88,6 +92,8 @@ public sealed class MainActivity : AppCompatActivity
         _model.FirstSnapshotShown += () =>
         {
             foreach (var r in _model.Rows) WatchForFinish(r);
+            _snapshotReady = true;
+            PresentShare();
             if (reported) return;
             reported = true;
             ReportWhenDrawn(_model.Rows.Count);
@@ -123,7 +129,7 @@ public sealed class MainActivity : AppCompatActivity
         // The open page comes back after a rotation or a process death, with what was typed into it (finding 16).
         if (_nav?.PageOpen != true) return;
         if (_details is not null) outState.PutString("details_job", _details.Row.Id.ToString());
-        else if (_newDownload is not null)
+        else if (_newDownload is { Transient: false })
         {
             var page = new Bundle();
             _newDownload.Save(page);
@@ -179,6 +185,7 @@ public sealed class MainActivity : AppCompatActivity
                 host.Alpha = 1f;
                 _firstRun = null;
                 foreach (var v in behind) Reachable(v, true);
+                PresentShare();
             }
 
             // With animations removed the system's animators don't run; the fade is done by hand then (finding 21).
@@ -209,6 +216,7 @@ public sealed class MainActivity : AppCompatActivity
         base.OnResume();
         _firstRun?.Refresh(); // back from the battery dialog
         Updates.AndroidUpdates.OnResumed(this);
+        _browser?.Resume();
     }
 
     private void ShowTab(bool settings)
@@ -298,10 +306,10 @@ public sealed class MainActivity : AppCompatActivity
         _nav.Open(_details.Root, card, () => _downloads?.CardOf(row), OnPageClosed, "Details");
     }
 
-    internal void OpenNewDownload(string? link, Bundle? saved = null)
+    internal void OpenNewDownload(string? link, Bundle? saved = null, bool transient = false)
     {
         if (_nav is null || _model is null || _nav.PageOpen) return;
-        _newDownload = new NewDownloadScreen(this, _model, link, saved);
+        _newDownload = new NewDownloadScreen(this, _model, link, saved, transient);
         _nav.Open(_newDownload.Root, null, null, OnPageClosed, "New download");
         if (link is null && saved is null) _newDownload.FocusAddress();
     }
@@ -320,6 +328,16 @@ public sealed class MainActivity : AppCompatActivity
         _details = null;
         _newDownload?.Dispose();
         _newDownload = null;
+        _linkPageLifetime?.Cancel();
+        _linkPageGeneration++;
+        _browser?.Dispose();
+        _browser = null;
+        _acceptedCaptures.Clear();
+        if (!IsFinishing && !IsDestroyed && !_linkLifetime.IsCancellationRequested)
+        {
+            var after = _afterLinkPage; _afterLinkPage = null; after?.Invoke();
+            PresentShare();
+        }
         var imm = (Android.Views.InputMethods.InputMethodManager)GetSystemService(InputMethodService)!;
         imm.HideSoftInputFromWindow(FindViewById<View>(Resource.Id.root)!.WindowToken, 0);
     }
@@ -352,6 +370,7 @@ public sealed class MainActivity : AppCompatActivity
 
     protected override void OnPause()
     {
+        _browser?.Pause();
         Updates.AndroidUpdates.OnPaused(this);
         base.OnPause();
     }
@@ -360,6 +379,7 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnNewIntent(intent);
         ShowUpdatesIfRequested(intent);
+        ReceiveShare(intent, (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
 #if INBOUND_TEST_BUILD
         HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
         if (_model is not null) TestHooks.Run(_model, intent);
@@ -405,6 +425,9 @@ public sealed class MainActivity : AppCompatActivity
 
     protected override void OnDestroy()
     {
+        _linkLifetime.Cancel();
+        _linkPageLifetime?.Cancel();
+        if (_linkHosts is not null) _linkHosts.Changed -= OnLinkHostsChanged;
         base.OnDestroy();
         // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).
         _updateScreen?.Dispose();

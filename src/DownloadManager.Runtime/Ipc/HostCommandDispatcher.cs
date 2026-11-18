@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
@@ -98,6 +98,7 @@ public sealed partial class HostCommandDispatcher
     {
         var capabilities = CapabilitiesOf(rights);
         if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
+        capabilities.Add("browserRefresh");
         return capabilities;
     }
 
@@ -484,7 +485,7 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.JobRefreshUrl:
                     var refreshUrl = message.GetPayload<JobRefreshUrlRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken, caller)
+                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken, caller, refreshUrl.BrowserContext)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;

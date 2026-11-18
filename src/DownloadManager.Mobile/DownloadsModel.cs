@@ -253,10 +253,25 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>Command file.metadata: what the Host can tell about an address before it is added (name, size). Never throws for a bad address; the result says.</summary>
     public async Task<FileMetadataResult> ProbeAsync(string url, CancellationToken cancellationToken = default)
     {
-        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.FileMetadata, new FileMetadataRequest { Url = url }), cancellationToken).ConfigureAwait(false);
+        return await ProbeAsync(new FileMetadataRequest { Url = url }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<FileMetadataResult> ProbeAsync(FileMetadataRequest request, CancellationToken cancellationToken = default)
+    {
+        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.FileMetadata, request), cancellationToken).ConfigureAwait(false);
         return reply.Type == MessageTypes.FileMetadataResult
             ? reply.GetPayload<FileMetadataResult>()
             : new FileMetadataResult { Ok = false, Error = "The Host answered with " + reply.Type + "." };
+    }
+
+    public async Task<CommandResult> RefreshUrlAsync(JobRefreshUrlRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.BrowserContext is not null && Hello?.Capabilities.Contains("browserRefresh") != true)
+            return CommandResult.Fail("Update the selected Host to refresh a link with browser sign-in.");
+        var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobRefreshUrl, request), cancellationToken).ConfigureAwait(false);
+        if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host did not confirm the refresh.");
+        var result = reply.GetPayload<JobActionResponse>();
+        return result.Ok ? CommandResult.Success : CommandResult.Fail(result.Error ?? "The Host refused the refresh.");
     }
 
     private async Task<CommandResult> ActionAsync(string type, Guid id, bool deleteFile = false, CancellationToken cancellationToken = default)

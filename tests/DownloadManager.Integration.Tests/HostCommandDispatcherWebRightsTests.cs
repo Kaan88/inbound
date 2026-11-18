@@ -91,11 +91,11 @@ public sealed partial class HostCommandDispatcherTests
         var web = await WebAsync();
 
         var webHello = web.Session.Frames[0].GetPayload<HostHelloDto>();
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders"], webHello.Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders", "browserRefresh"], webHello.Capabilities);
         Assert.Equal(HostKinds.Windows, webHello.HostKind);
 
         var pipeHello = web.Pipe.Frames[0].GetPayload<HostHelloDto>();
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions"],
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions", "browserRefresh"],
             pipeHello.Capabilities);
     }
 

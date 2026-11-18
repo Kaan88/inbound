@@ -153,7 +153,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
 
         List<string> Offered(MemorySession session) => session.Frames.First(f => f.Type == MessageTypes.ServerHello).GetPayload<HostHelloDto>().Capabilities;
         Assert.Contains("sites", Offered(pipe));
-        Assert.Equal("sites", Offered(pipe)[^1]);
+        Assert.Equal(["sites", "browserRefresh"], Offered(pipe).TakeLast(2));
         Assert.Contains("sites", Offered(web));
         Assert.DoesNotContain("sites", Offered(plain));
         Assert.Contains("sites", with.Capabilities);
