@@ -5,6 +5,22 @@ Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`.
 treat them as authoritative tracking. Update them after every meaningful
 increment.
 
+## Android ownership handoff (2026-11-18)
+
+Codex (OpenAI/GPT) has taken over the Android work on the owner's instruction.
+Read [ANDROID-CODEX-PROGRESS.md](ANDROID-CODEX-PROGRESS.md) for its current
+checkpoint, checks, limitations and next actions. This is a separate session
+report; `GOAL.md`, `ROADMAP.md` and `PROGRESS.md` remain authoritative project
+tracking, and meaningful increments must still be recorded there.
+Work on `android-app` in `C:\Users\kaank\Downloads\idm-android-trial`;
+never switch the main checkout or merge Android into main without the owner's request.
+The basic app is already usable; continue from the existing implementation and
+review evidence rather than restarting the trial or screen work.
+
+Later Fable review of Codex work is tracked separately in
+[ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md).
+Add important changes, decisions, audit results and remaining checks there as work proceeds.
+
 ## What this project is
 
 A private-use Windows download manager, **Inbound Download Manager**. It is a

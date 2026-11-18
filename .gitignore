@@ -69,3 +69,11 @@ credentials*.bak
 # Bundled 7-Zip (LGPL); see third_party/7-Zip/SOURCE.md
 !third_party/7-Zip/7z.exe
 !third_party/7-Zip/7z.dll
+
+# Android signing material and generated APKs
+*.jks
+*.keystore
+*.pass
+inbound-android-release.properties
+*.apk
+*.idsig

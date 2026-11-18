@@ -1,4 +1,4 @@
-﻿# Roadmap and executable work
+# Roadmap and executable work
 
 
 Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
@@ -702,6 +702,7 @@ whether rclone is a Setup component that can be unticked.
   asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
+- **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.
 - [ ] ANDROID.10 Release (signing, distribution, updates). Updates (owner, 2026-11-17: "implement auto update feature [...] it
   should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
@@ -709,13 +710,17 @@ whether rclone is a Setup component that can be unticked.
   remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
   Done 2026-11-18: release APK of d9f45a6e (with the owner's icon) on the S24 and the desktop, after Fable's approval.
   Owner, 2026-11-18, asked whether a first signed build goes out before steps 4 and 5: "Sign now (Recommended)". So
-  next: the signing part of ANDROID.10 pulled forward (a permanent release key kept with the update key in
+  At that checkpoint: the signing part of ANDROID.10 pulled forward (a permanent release key kept with the update key in
   Downloads\secrets and in the encrypted secrets backup, never committed; the next APK signed with it; the owner
   reinstalls once, since the debug-signed app can't be updated in place), then ANDROID.5 (step 4). Key made
   2026-11-18: `Downloads\secrets\inbound-android-release.jks` (PKCS12, alias `inbound`, RSA 4096, valid to 2076, cert
   SHA-256 3746bf5a…8f0457), password in `inbound-android-release.properties` / `.pass` next to it; backed up in the
-  encrypted `inbound-release-secrets` bundle of the private secrets repo (round trip checked). Still to do: sign the
-  release build with it (build property, no password in the repo), the owner's one reinstall.
+  encrypted `inbound-release-secrets` bundle of the private secrets repo (round trip checked). At takeover, remaining: sign the
+  release APK with it and perform the owner's one reinstall (signing is now completed below).
+  Update 2026-11-18 (Codex): permanent-key release built/verified and copied to Desktop;
+  Astra audit PASS, ten regression tests and real SDK matrix pass. Evidence: PROGRESS
+  "Codex permanent Android signing"; docs/android-builds.md. Owner-authorized reinstall and startup on the S24 FE passed (PROGRESS "Codex permanent-key APK on S24 FE"); full UI/download acceptance, distribution and updater remain open. New work uses the Codex/Astra workflow
+  in ANDROID-CODEX-PROGRESS.md; later Fable review is separately queued.
   Reviews: an Opus agent per milestone (step); Fable once after all milestones ("until completion meant all the
   milestones, until then use opus for single mileston reviews"). Then (2026-11-17): "after first version finishes,
   have it review": Fable reviews the queue once the first usable APK is on the owner's desktop.

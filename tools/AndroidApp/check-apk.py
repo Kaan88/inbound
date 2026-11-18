@@ -15,7 +15,7 @@ checks = {
     "launcher icon": any(n.endswith("ic_launcher.png") for n in names) or b"ic_launcher" in z.read("resources.arsc"),
 }
 if release:
-    hooks = [w for w in ("probe_url", "crash_now") if w.encode("utf-16-le") in so or w.encode() in so]
+    hooks = [w for w in ("probe_url", "crash_now", "update_fixture") if w.encode("utf-16-le") in so or w.encode() in so]
     checks["no test hooks"] = not hooks
 bad = [k for k, ok in checks.items() if not ok]
 for k, ok in checks.items(): print(("ok   " if ok else "FAIL ") + k)

@@ -2,4 +2,5 @@
 <!-- The download folder AndroidHost.SharedDownloadFolder (/storage/emulated/0/Download): what a "Finished" notification opens. -->
 <paths>
   <external-path name="downloads" path="Download/" />
+  <files-path name="app_updates" path="updates/" />
 </paths>

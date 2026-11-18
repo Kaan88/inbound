@@ -28,6 +28,7 @@ public sealed class MainActivity : AppCompatActivity
     private IHostConnection? _connection; // step 6: the shown host's, not always the in-process one
     private DownloadsScreen? _downloads;
     private Navigator? _nav;
+    private AppUpdatesScreen? _updateScreen;
     private FirstRunScreen? _firstRun;
     private DetailsScreen? _details;
     private NewDownloadScreen? _newDownload;
@@ -65,6 +66,7 @@ public sealed class MainActivity : AppCompatActivity
         InsetsListener.Pad(downloadsRoot, top: true, bottom: false);
         _downloads = new DownloadsScreen(this, downloadsRoot, _model);
         _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance);
+        _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!);
         _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
             () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings), PerformBack);
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
@@ -75,6 +77,7 @@ public sealed class MainActivity : AppCompatActivity
         _model.Rows.CollectionChanged += OnRowsForFinished;
         ShowFirstRunIfNeeded();
         RestorePage(savedInstanceState);
+        ShowUpdatesIfRequested(Intent);
         _nav.UpdateBack();
 #if INBOUND_TEST_BUILD
         // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
@@ -205,6 +208,7 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnResume();
         _firstRun?.Refresh(); // back from the battery dialog
+        Updates.AndroidUpdates.OnResumed(this);
     }
 
     private void ShowTab(bool settings)
@@ -337,12 +341,33 @@ public sealed class MainActivity : AppCompatActivity
         bar.Show();
     }
 
+    private void ShowUpdatesIfRequested(Intent? intent)
+    {
+        if (intent?.GetBooleanExtra(Updates.AndroidUpdates.ShowUpdatesExtra, false) != true) return;
+        intent.RemoveExtra(Updates.AndroidUpdates.ShowUpdatesExtra);
+        _updateScreen?.OpenFromNotification();
+        if (_nav?.PageOpen != true)
+            FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!.SelectedItemId = Resource.Id.nav_settings;
+    }
+
+    protected override void OnPause()
+    {
+        Updates.AndroidUpdates.OnPaused(this);
+        base.OnPause();
+    }
+
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
+        ShowUpdatesIfRequested(intent);
 #if INBOUND_TEST_BUILD
         HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
         if (_model is not null) TestHooks.Run(_model, intent);
+        if (intent?.GetBooleanExtra("update_fixture", false) == true)
+        {
+            intent.RemoveExtra("update_fixture");
+            _ = Updates.AndroidUpdates.RunFixtureAsync(this);
+        }
 #endif
     }
 
@@ -351,11 +376,14 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnStart();
         InboundBackground.SetVisible(true);
+        _updateScreen?.Start();
+        Updates.AndroidUpdates.OnAppVisible();
         _details?.SetVisible(true);
     }
 
     protected override void OnStop()
     {
+        _updateScreen?.Stop();
         InboundBackground.SetVisible(false);
         _details?.SetVisible(false); // no polling while nothing is shown (findings 11, 15)
         base.OnStop();
@@ -379,6 +407,7 @@ public sealed class MainActivity : AppCompatActivity
     {
         base.OnDestroy();
         // An open page goes with the activity: Details stops polling, and no view of this activity is held on to (findings 15, 16).
+        _updateScreen?.Dispose();
         _nav?.Dispose();
         _details?.Dispose();
         _details = null;

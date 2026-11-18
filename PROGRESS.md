@@ -1,5 +1,78 @@
 # Progress — session handoff
 
+### Updater 0.0.2 delivered; regression checks completed (2026-11-18)
+
+- Desktop Inbound-android-0.0.2-updatable.apk and S24 FE (data-preserving adb update)
+  match SHA-256 ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276.
+  NativeAOT release starts on the phone and issues its cold check. Signed local
+  release bundle prepared; production GitHub feed not published yet.
+- All 10 .NET suites: 6221 pass, 61 expected optional-fixture skips; extension 339
+  and web 717 tests plus typechecks pass. Existing warnings remain. Test-only
+  persistence guard and missing-dependency runner corrections explained in the
+  Codex report. Evidence: artifacts/android-app/codex-signing/updater-project-tests-final.txt,
+  updater-frontend-tests.txt, s24-updater-install.txt. No claim of a published
+  production newer-offer update; emulator signed installer flow passed.
+
+
+### Android auto-update and desktop APK (2026-11-18)
+
+- Owner: "implement update first then continue android.5" and "and then put the updatable apk on the desktop"; schedule: "once a day or if the app is launched completely for the first time. (from being killed and opened etc.)" Auto-download and an install prompt are implemented. Next: ANDROID.5.
+- Astra code audit PASS after main-agent fixes and reverification, including release preparation; later Fable review remains OPEN. NativeAOT emulator: signed test baseline code 1 checked a signed HTTP fixture for code 2, automatically downloaded and verified metadata/RSA, size/hash, APK certificate and ABI, showed Ready; Install → Open Settings → allow → return opened the Android system update, which installed and opened code 2. Warm resume with the same PID caused no extra check; force-stop/reopen with a new PID checked again. Persisted job 4001 has a 24-hour period and two-hour flex; two forced runs completed without CTS failure.
+- Full Mobile: 373 passed (19 updater, 14 HTTP). A pre-existing HEAD persistence count guard missed the two ReadOnlyState uses of already-registered types; test-only 21→23 correction passed nine focused tests. The full project test rerun remains in progress, not a pass claim. NativeAOT diagnostic linker file locking was avoided with separate intermediates and no reusable servers.
+- Desktop: C:/Users/kaank/Desktop/Inbound-android-0.0.2-updatable.apk, 20,135,037 bytes, SHA-256 ec52f1ff71bf5ea6d29af8f8764ae32dea01058e87e312af52929cd1caf42276; copy hash matched. The signed local bundle artifacts/android-app/release-0.0.2 contains the APK, manifest-android-arm64.json and SHA256SUMS; it is not published. S24 remains on 0.0.1 at this checkpoint; app source defaults to 0.0.2.
+- Evidence under artifacts/android-app/codex-signing/: updater-arm64-release-build.txt, updater-release-prepare-final.txt, updater-system-install-opened.txt, updater-schedule-launch-tests.txt and emulator-http-ready screenshot. Test-only local HTTP transport replaced an adb-pushed external input correctly blocked by Android permissions; this was not a production updater failure. Production feed 404 handles no published release; no public newer-offer update has been tested.
+
+### Android auto-update priority (2026-11-18)
+
+- Owner now requires Android auto-update before ANDROID.5: check once daily or on each genuine fresh process launch (killed and reopened, not each Activity recreation), automatically download an available update, then prompt the user to install. This was planned at that checkpoint; see the completed updater entry above.
+- Design starting point for evaluation: trusted GitHub Android feed, signed metadata/hash and pinned APK certificate, private cache, daily OS-scheduled network job and process-start check, with installation only on user action. Throttling and metering are implementation choices still under evaluation. The order at that checkpoint was auto-update, then ANDROID.5 link catching.
+
+### Codex permanent-key APK on S24 FE (2026-11-18)
+
+- Owner authorized adb connection, installation and removal of the existing app. On the S24 FE (SM-S721B, Samsung API 37), uninstall of app.inbound.android and installation of Desktop/Inbound-android-0.0.1-release.apk succeeded. The authorized uninstall reset the old app's private state.
+- Installed APK SHA-256 matched cf8c3667622e7af6f0b73ea9203f5c9cfa345081dc3918ac31f96adc291b315d; version code 1, name 0.0.1, min API 31, target 35. Launch returned status ok; MainActivity was top resumed and PID 29872 remained alive. Cold TotalTime 377 ms, WaitTime 380 ms; app log fullyDrawn 317 ms with zero rows. These timings are not a controlled benchmark: keyguard was not checked.
+- Evidence: artifacts/android-app/codex-signing/s24-release-install.txt. No settings changed, downloads deleted, other apps touched, jobs added or real download tested. Full UI, TalkBack and download acceptance remain open. Astra code audit PASS; later Fable review OPEN. At that checkpoint the next step was ANDROID.5; the newer auto-update priority is above.
+
+### Codex permanent Android signing (2026-11-18)
+
+- Built and verified a permanent-key APK: Desktop/Inbound-android-0.0.1-release.apk,
+  20,061,237 bytes; SHA-256 cf8c3667622e7af6f0b73ea9203f5c9cfa345081dc3918ac31f96adc291b315d.
+- New ReleaseSigning build mode and release-apk.py: fresh publish, explicit non-test,
+  password-file signing after MSBuild, pinned certificate, manifest/ABI and packaging
+  checks, atomic publication. Ten regression tests and real SDK 34-37 matrix pass;
+  inherited test-build override and old-debug-signer refusal verified. Astra audit PASS
+  after two fix rounds; later Fable review OPEN in ANDROID-CODEX-FABLE-REVIEW.md.
+- Evidence: artifacts/android-app/codex-signing/build-release-final.txt and Codex report;
+  usage: docs/android-builds.md. Existing NativeAOT warnings remain. Local/uncommitted;
+  no push or public release. Main unchanged. At this signing checkpoint phone reinstall/startup
+  had not run; see the later S24 entry above. At that checkpoint ANDROID.5 was next; see the newer auto-update priority above.
+
+
+### Later Fable review of Codex work (2026-11-18)
+
+- Owner requested important new work be recorded for Fable to review later. Queue created:
+  [ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md), linked from CLAUDE and the Codex report.
+  First open scope is permanent signing, with Astra findings, main-agent fixes and pending acceptance.
+
+### Codex coordination and Astra audits (2026-11-18)
+
+- Owner: Codex coordinates, delegates simple work to lesser agents and implements complex work itself.
+  After each major milestone Astra audits the code; Codex fixes confirmed findings and Astra verifies
+  again, repeating until it passes. Current available auditor: `gpt-6.2-astra`.
+- Workflow recorded in `ANDROID-CODEX-PROGRESS.md`; prior Claude-specific review history remains evidence
+  for earlier changes. No implementation or audit performed in this documentation checkpoint.
+
+### Codex takeover of Android (2026-11-18)
+
+- Owner confirmed the existing state: "basic app functionality is in" and "you'll work on this project now."
+  Codex (OpenAI/GPT) takes over continuation of the Android app from this checkpoint.
+- Separate ongoing report: [ANDROID-CODEX-PROGRESS.md](ANDROID-CODEX-PROGRESS.md), also linked from `CLAUDE.md`.
+  This supplements, rather than replaces, GOAL, ROADMAP and this project's shared handoff history.
+- Baseline verified: `android-app` at `49f5663c`, clean worktree, equal to the live GitHub branch;
+  main checkout left unchanged. Existing device/test evidence below was read, not rerun.
+- At takeover, next recorded work was signing, then ANDROID.5; signing is completed in the newer entry above.
+  No application, APK, signing-key or phone changes in this takeover checkpoint.
+
 ### Android follow-ups to steps 3 and 6 (ANDROID.4/.7), branch `android-app` (2026-11-17)
 
 - **Android release key and cleanup (2026-11-18).** Owner: "put the signing key to my repo" with the secrets repo's

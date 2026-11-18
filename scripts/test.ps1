@@ -29,7 +29,11 @@ try {
 
     Push-Location (Join-Path $root "extensions\chrome")
     try {
-        npx tsc --noEmit
+        if (-not (Test-Path "node_modules/typescript/bin/tsc")) {
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw "Extension dependency installation failed (npm ci)." }
+        }
+        npx --no-install tsc --noEmit
         if ($LASTEXITCODE -ne 0) { throw "Extension typecheck failed." }
         # The extension's own unit tests (node:test with a mocked chrome API).
         npm test
@@ -48,7 +52,7 @@ try {
         }
         npm test
         if ($LASTEXITCODE -ne 0) { throw "Web UI tests failed." }
-        npx svelte-check
+        npx --no-install svelte-check
         if ($LASTEXITCODE -ne 0) { throw "Web UI type check failed." }
     }
     finally {

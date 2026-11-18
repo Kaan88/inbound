@@ -1,5 +1,7 @@
 # Goal — Build a private Windows download manager
 
+Android continuation (2026-11-18, Codex): auto-update built and Astra-audited, emulator installer flow verified, and 0.0.2 updatable APK placed on Desktop. Production feed is not published; S24 remains on 0.0.1 at this checkpoint. Next ANDROID.5 link catching. Separate Codex report and later Fable queue linked from CLAUDE.md; shared tracking remains authoritative. See PROGRESS.
+
 Owner direction (2026-11-05): the owner prefers the current Inbound design; keep our own design and behavior. `implemented` still needs linked acceptance evidence.
 
 Release status (2026-11-08): the last release is v0.6.0 (extension 0.5.0), published 2026-11-08. It adds the headless server, web UI and Docker image for linux/amd64 (ROADMAP D1–D4; D1 is still in progress). in Edge the owner checked automatic catching; Firefox is not checked with 0.6.0 (EXT.B3). Clean install, upgrade and uninstall passed on a fresh Windows VM (TEST.2). The older dated entries below are history. ROADMAP and PROGRESS hold the current status of each item.

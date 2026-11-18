@@ -42,6 +42,7 @@ public sealed class InboundApplication : Application
             System.Environment.SetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS", "1");
         Android.Util.Log.Info(Tag, "DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS=" + System.Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS"));
 #endif
+        Updates.AndroidUpdates.Initialize(this);
     }
 
     /// <summary>The state folder: the app's private files directory (metadata only; downloads go to the shared Download folder).</summary>

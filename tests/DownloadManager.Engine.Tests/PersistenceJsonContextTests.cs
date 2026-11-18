@@ -95,7 +95,8 @@ public sealed class PersistenceJsonContextTests : IDisposable
 
         // No other call site: the count of PersistenceJson.Options uses is fixed, so a new one makes this fail until it is reviewed.
         var uses = System.Text.RegularExpressions.Regex.Matches(text, @"PersistenceJson\.Options").Count;
-        Assert.Equal(21, uses);
+        // ReadOnlyState also reads DownloadJob and AppSettings through their generated type metadata.
+        Assert.Equal(23, uses);
     }
 
     private static string FindRepoRoot()

@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Builds the Inbound phone app (src/DownloadManager.Android). It is not part of DownloadManager.slnx.
+  Builds Inbound for Android outside the default solution build.
 .DESCRIPTION
-  -Mode emulator : Debug, default (Mono) runtime, android-x64 (dotnet build). For the emulator and day-to-day work.
-  -Mode phone    : Release, NativeAOT, android-arm64 (dotnet publish). Slow.
-  -TestBuild     : passes -p:InboundTestBuild=true: minimum Android 11 (API 30) and the adb test hooks. Never for a release.
-                   Its output goes to bin\<config>-test\, apart from release APKs.
-  -Rid           : overrides the runtime (android-x64 for a NativeAOT build on the emulator).
-  Prints the APK path and size.
+  -Mode emulator: Debug/Mono/android-x64; -Mode phone: Release/NativeAOT/android-arm64.
+  -TestBuild: API 30 and adb hooks, separate bin/obj; never a distributable release.
+  -Rid: optional runtime override (e.g. android-x64 NativeAOT for the emulator).
+  -ReleaseSigning: permanent-key phone APK in a fresh artifacts/android-app/signed-builds directory.
+    Requires -JavaSdkDirectory and existing key/password files in -SigningDirectory.
+    Only apksigner reads the password file after publishing; no secrets go to MSBuild.
 #>
 [CmdletBinding()]
 param(
@@ -17,30 +17,58 @@ param(
     [switch]$TestBuild,
     [ValidateSet("", "android-x64", "android-arm64")]
     [string]$Rid = "",
-    [string]$AndroidSdkDirectory = (Join-Path $env:LOCALAPPDATA "Android\Sdk")
+    [string]$AndroidSdkDirectory = (Join-Path $env:LOCALAPPDATA "Android\Sdk"),
+    [string]$JavaSdkDirectory = "",
+    [switch]$ReleaseSigning,
+    [string]$SigningDirectory = (Join-Path $env:USERPROFILE "Downloads\secrets")
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\DownloadManager.Android\DownloadManager.Android.csproj"
-
-# PowerShell names are case-insensitive: $Rid (the parameter) and a local $rid would be one variable.
 if ($Mode -eq "emulator") { $config = "Debug"; $runtime = "android-x64"; $verb = "build" }
 else { $config = "Release"; $runtime = "android-arm64"; $verb = "publish" }
 if ($Rid) { $runtime = $Rid }
 $outConfig = if ($TestBuild) { "$config-test" } else { $config }
-
 $msbuild = @("-c", $config, "-p:RuntimeIdentifier=$runtime", "-p:AndroidSdkDirectory=$AndroidSdkDirectory")
 if ($TestBuild) { $msbuild += "-p:InboundTestBuild=true" }
+if ($JavaSdkDirectory) { $msbuild += "-p:JavaSdkDirectory=$JavaSdkDirectory" }
+
+if ($ReleaseSigning) {
+    if ($Mode -ne "phone" -or $TestBuild -or $runtime -ne "android-arm64") {
+        throw "ReleaseSigning requires -Mode phone, arm64, and no -TestBuild."
+    }
+    if (-not $JavaSdkDirectory -or -not (Test-Path -LiteralPath (Join-Path $JavaSdkDirectory "bin/java.exe") -PathType Leaf)) {
+        throw "ReleaseSigning requires -JavaSdkDirectory with java.exe."
+    }
+    $keystore = Join-Path $SigningDirectory "inbound-android-release.jks"
+    $passwordFile = Join-Path $SigningDirectory "inbound-android-release.pass"
+    foreach ($file in @($keystore, $passwordFile)) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Release signing input missing: $file" }
+    }
+    # Never select a stale APK or inherit the test-build flag from MSBuild's environment.
+    $signedOutput = Join-Path $root ("artifacts/android-app/signed-builds/" + [Guid]::NewGuid().ToString("N"))
+    $publishDir = Join-Path $signedOutput "publish"
+    New-Item -ItemType Directory -Path $publishDir | Out-Null
+    $msbuild += @("-p:InboundTestBuild=false", "-p:AndroidKeyStore=false", "-p:PublishDir=$publishDir/")
+}
 
 Write-Host "dotnet $verb $project $($msbuild -join ' ')"
 & dotnet $verb $project @msbuild
 if ($LASTEXITCODE -ne 0) { throw "dotnet $verb failed ($LASTEXITCODE)" }
 
-# The newest APK of this configuration and runtime (an up-to-date build does not rewrite it). A publish writes it under publish\.
-$out = Join-Path $root "src\DownloadManager.Android\bin\$outConfig\net10.0-android\$runtime"
-$apk = Get-ChildItem -Path $out -Recurse -Filter "app.inbound.android-Signed.apk" |
-    Where-Object { ($verb -eq "publish") -eq ($_.DirectoryName -like "*\publish") } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $apk) { throw "No signed APK under $out" }
-"{0}  ({1:N0} bytes, {2:N1} MB)" -f $apk.FullName, $apk.Length, ($apk.Length / 1MB)
+if ($ReleaseSigning) {
+    $inputApk = Join-Path $publishDir "app.inbound.android-Signed.apk"
+    if (-not (Test-Path -LiteralPath $inputApk -PathType Leaf)) { throw "No new build APK at $inputApk" }
+    $apk = Join-Path $signedOutput "Inbound-android-release.apk"
+    & python -I (Join-Path $root "tools/AndroidApp/release-apk.py") sign $apk --input $inputApk --keystore $keystore --password-file $passwordFile --java-sdk $JavaSdkDirectory --android-sdk $AndroidSdkDirectory
+    if ($LASTEXITCODE -ne 0) { throw "Release APK signing/verification failed." }
+}
+else {
+    $out = Join-Path $root "src/DownloadManager.Android/bin/$outConfig/net10.0-android/$runtime"
+    if ($verb -eq "publish") { $out = Join-Path $out "publish" }
+    $apk = Join-Path $out "app.inbound.android-Signed.apk"
+    if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw "No signed APK at $apk" }
+}
+$apkFile = Get-Item -LiteralPath $apk
+"{0}  ({1:N0} bytes, {2:N1} MB)" -f $apkFile.FullName, $apkFile.Length, ($apkFile.Length / 1MB)
