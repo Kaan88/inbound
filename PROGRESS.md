@@ -10,7 +10,8 @@
   `b6deef9b97eb5ae5bd27e453b7f6eec4692f956837670cfd82186030b88831e2`.
   The server recorded one full payload GET. Deep idle reached
   `IDLE_PENDING`, not `IDLE`: this is not deep-Doze or one-hour acceptance.
-  The fixture listener was stopped; phone-side cleanup requires unlock.
+  Stopped the fixture and, after the owner unlocked the phone, removed
+  the test job and file and verified All 0 / Finished 0.
   Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-screenoff-30\`.
 
 - ANDROID.6 charging-only hold/release passed on the S24 FE with Wi-Fi
