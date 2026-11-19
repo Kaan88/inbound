@@ -68,6 +68,10 @@ segment's 16 KiB alignment. The binary is for a separate test package
 only (`InboundTestBuild=true`, `RuntimeIdentifier=android-arm64`,
 `InboundRcloneProbePath` pointing at the output); it is not included in
 public APKs. ELF checks don't replace execution on a 16 KiB Android device.
+When publishing the probe, pass a dedicated `IntermediateOutputPath`, such as
+`obj/arm64-rclone-probe/`, and a fresh `PublishDir`. Do not share intermediates
+with a no-rclone build of the same RID: an APK can contain the executable and
+have the probe package ID without having compiled the probe hook.
 
 Two builds with separate Go build caches on Windows produced identical
 88,586,320-byte executables (SHA-256

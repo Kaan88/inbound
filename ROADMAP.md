@@ -764,9 +764,11 @@ whether rclone is a Setup component that can be unticked.
   rclone 1.76.0, listed an HTTPS directory, answered authenticated loopback
   `rc/noop` and exited. Two pinned arm64 source builds then produced identical
   16 KiB-aligned binaries. The isolated 48.96 MB arm64 probe APK passed ELF
-  and ZIP alignment checks. Against the 20.71 MB no-rclone arm64 test build,
-  the probe adds 28.26 MB (136%); rclone accounts for 28.24 MB compressed
-  and 88.59 MB extracted. Verify arm64 execution before shipping.
+  and ZIP alignment checks. The final 49.03 MB probe ran on the S24 FE
+  (arm64, API 37, 4 KiB pages): HTTPS listing and authenticated `rc/noop`
+  passed and the child exited. It adds 28.33 MB versus the 20.71 MB test
+  baseline; rclone accounts for 28.24 MB compressed and 88.59 MB extracted.
+  16 KiB runtime and the decision to bundle remain open.
   The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.

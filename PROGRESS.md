@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 arm64 runtime passed on the S24 FE (API 37, `PAGE_SIZE=4096`).
+  The isolated build used fresh intermediates and contained both the probe
+  hook and the previously verified rclone binary. It logged Android/arm64,
+  a successful HTTPS listing, authenticated `rc/noop`, and child PID 29261
+  exiting. No rclone process remained. Removed only the probe package and
+  confirmed the regular Inbound APK path was unchanged. The tested APK
+  was 49,033,681 bytes, 28,328,008 bytes larger than the no-rclone baseline,
+  and passed `zipalign -c -P 16 -v 4`. The earlier packaging-only comparison
+  below used an APK without the compiled hook. 16 KiB runtime remains
+  unverified. Evidence: `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\s24-arm64-final.log`.
+
 - ANDROID.8 arm64: two builds from pinned rclone 1.76.0 source with separate
   Go caches produced identical 88,586,320-byte executables (SHA-256
   `a68c72a4677e2ba27f1ed7c5b388eea24b1088ad2bc389e461cc7a47c6195191`).
