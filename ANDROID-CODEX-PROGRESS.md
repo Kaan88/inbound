@@ -743,3 +743,66 @@ were removed; only the identified payload fixture on47618 was stopped. Hardware
 emulator remains running normally, non-root adb. No physical-phone reboot,
 uninstall, OS theme/network change or other app was tested. Android API:
 https://developer.android.com/reference/android/app/UiAutomation#FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES
+
+### Dark/dynamic phone checks and OS constraint acceptance (2026-11-19, Codex)
+
+Implementer: Codex. Main executed and personally checked the evidence; GPT-6.1
+Terra/high performed bounded read-only source, visual and evidence reviews. Main
+verified its conclusions, including correcting an inconsistent screenshot-preview
+observation by comparing actual PNG bytes. Application source is unchanged.
+
+Android constraint/theme acceptance (2026-11-19, Codex): signed0.0.6 S24 dark C1/C2/C7 and empty dynamic-colour Downloads were viewed beside approved references; original app appearance, adaptive brightness and timeout restored. API33 NativeAOT emulator verified actual OS Wi-Fi metering and battery-saver holds at zero bytes, then automatic hash-matched completion when each condition cleared. Corrected scheduled Doze test used SIGKILL only on the verified idle app PID: payload stayed queued/0bytes in forced idle through12:36:51 for a12:36 schedule, then completed naturally by12:37:01 after unforce (2,097,153bytes; SHA-256 `a740e0039f45586d220c77e43663196aed08648c2e38effd0fb069d026bc098c`). The first `am kill` attempt was Android reason10/user-stop and correctly stayed user-paused; it is not a background-resume failure. All four task jobs/payloads, queue and schedule removed; original emulator metering/low-power/idle-force state and recorded baseline fields restored, non-root adb; hardware emulator remains running. Main verified Terra's evidence review. No app source changes or new release; ANDROID.6/.7 remain PARTIAL for physical API37 background/network/power/reboot, full visual/accessibility flows, broader remote and later independent review. Evidence: latest ANDROID-CODEX-PROGRESS and `artifacts/android-app/android6-acceptance-0.0.5/`.
+
+Phone scope: C1 empty ready queue, C2 no-schedule editor and scrollable footer, C7
+root, and empty Downloads with wallpaper colours. Dynamic-colour checked state and
+visible palette changed; original Follows the system/off restored. Side-by-side
+pairs viewed by main under `artifacts/android-app/pairs/`:
+`c1-queues-s24-dark-0.0.6.png`, `c2-schedule-s24-dark-0.0.6.png`,
+`c7-settings-s24-dark-0.0.6.png`, `a1-downloads-s24-dark-0.0.6.png`.
+Populated states and all controls are not covered by those captures. Known
+reference/scope differences (chart/search/colour swatches/future Sites) remain
+subject to the approved flow board; no strict full-mockup-parity claim.
+
+Status observation disposition: direct C2 captures show white clock/icons, and
+scrolling exposes the entire Host/time/background-delay note. The immediate and
+two-seconds-after-dump PNGs are byte-identical (SHA-256
+`15f9cf22a8e0b042f4ccaab1e68cfd2956b44703a30c1c7957cc04502dfb46a1`),
+although one tool preview appeared incomplete. Original and settled PNG clock
+regions also contain white pixels. The preview is not evidence of an app defect;
+no status-bar fix was made. App window flags were unchanged between C1/C2.
+
+Phone restoration: `s24-status-restoration.json` confirms original appearance and
+mode/timeout restored. Numeric brightness was written back, then adjusted by the
+restored adaptive-brightness mode; do not claim a frozen numeric brightness or
+byte-identical phone settings. Test capture files removed from device. No phone
+network, power-saver, reboot or uninstall operation was performed.
+
+Emulator raw evidence: `network-os-held-result.json`,
+`network-held-fixture-snapshot.txt`, `network-os-release-result.json`,
+`doze-retry-before.json`, `doze-retry-hold-observations.json`,
+`doze-retry-result.json`, `doze-retry-exit-classification-log.txt`,
+`saver-held-result.json`, `saver-held-fixture-snapshot.txt`,
+`saver-release-result.json`, `network-doze-saver-cleanup.json`. Network/saver
+checks were visible-app condition transitions, not hidden or physical-phone
+acceptance. Saver snapshot contains prior fixture transfers; the hold asserts no
+additional requests, not zero total fixture traffic. Expected/actual payload
+hashes were compared. Corrected Doze restart log shows reason2/not-user, ordinary
+queue job start and orderly execution-session end/count0. No manual resume,
+forced JobScheduler execution or Activity launch caused that completion.
+
+QA trap: on this emulator `am kill app.inbound.android` is reported as Android
+reason10/user-requested. It intentionally makes eligible queued work user-paused
+on cold start (`doze-exit-classification-log.txt`), as the owner required. For an
+abrupt-process-death simulation, first verify exact app PID, no app services and
+no active execution lease, then use root SIGKILL only on the owned test emulator;
+never substitute this on the daily phone. Confirm the next run's exit reason.
+Doze force was released in a finally block. Initial observation is preserved as
+qualified user-stop evidence and excluded from natural-transfer acceptance.
+
+Cleanup scope: four identified test jobs, files/parts, task queue and schedule
+removed; baseline queue names/IDs/generations/running intent/rates, schedule count,
+global cap and default connections match recorded baseline. Wi-Fi policy restored
+to undefined, low_power0, idle force false, uid2000/non-root adb. Allocator/version
+metadata can change, and full historical-job equality was not checked. Only the
+identified fixture47618 was stopped; normal hardware inbound33 remains running.
+No new Astra audit or full milestone-completion claim.
