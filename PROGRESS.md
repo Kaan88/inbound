@@ -2,6 +2,20 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.7: API 33 automatically reconnected after stopping and restarting
+  only the pinned HTTPS relay. On the successful retry, Downloads showed
+  “Lost the connection … Trying again shortly,” then “Files are saved on
+  HTTPS Reconnect QA” and All 1 / Finished 1 without input or re-pairing.
+  App PID stayed 2475; Inbound Server stayed PID 67072. Independent snapshots
+  identified the same `bench.bin` job `25cfd535-fc35-4773-8b33-55f62a3ad9be`.
+  The first outage began during the transfer; the server finished the 4 MiB
+  file with matching fixture SHA-256, but the AVD stopped responding before
+  UI recovery could be observed. The successful retry used the same finished
+  job after rebooting the AVD, so it does not establish live-job UI recovery.
+  Removed the pairing, stopped listeners, deleted the fixture key/payload,
+  and restored This phone / All 15 / Finished 14. S24 untouched. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\inbound-https-reconnect-20261119\`.
+
 - ANDROID.7: API 33 `inbound33` paused and resumed a throttled 16 MiB
   remote download using the paired, pinned self-signed HTTPS control connection.
   Four independent `jobs.query` snapshots each returned exactly one job,

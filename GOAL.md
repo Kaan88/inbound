@@ -12,6 +12,7 @@ API 33 TalkBack focus and speech were sampled on Downloads, Details and multisel
 Further accessibility work is optional (ANDROID.13), not a milestone gate.
 API 33 paired self-signed HTTPS remote download passed with a matching server-side hash.
 Throttled pause/resume over the same setup preserved the job ID and resumed saved ranges; the final hash matched.
+API 33 automatically reconnected after a relay-only outage and showed the same finished job.
 Physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 
