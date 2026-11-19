@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 S24 FE/USB fixture walkthrough on signed 0.0.7: the built-in
+  browser caught `a.zip` (1.0 MB) with the no-cookie notice and caught
+  `auth.zip` after fixture sign-in with the local Host cookie notice.
+  The fixture logged cookie-bearing GET/HEAD on the authenticated route.
+  The page picker listed seven links on this loopback origin and selecting
+  Document and Image showed Download 2. Cancelled without submitting jobs;
+  verified This phone / All 0 / Finished 0, removed the reverse mapping,
+  stopped the listener and restored adaptive brightness (60) and 30-second
+  timeout. Evidence: `%LOCALAPPDATA%\Temp\opencode\inbound-s24-links-007\`.
+  This is partial phone acceptance, not real-account compatibility.
+
 - ANDROID.4 S24 FE populated walkthrough on signed 0.0.7: downloaded two
   loopback fixtures (1 and 2 MiB, matching hashes), captured finished cards
   and Details in Light and Dynamic colour, and verified “2 selected” with
