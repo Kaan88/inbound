@@ -2,6 +2,9 @@
 
 ## Current Android roadmap
 
+- **Current release:** [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8)
+  ships Remote Files with bundled rclone. The public APK and Android update
+  feed were verified; desktop latest remains v0.9.0.
 - **Done:** ANDROID.0–4 (design, engine, phone host and core screens), .7
   (host pairing), .8 (Remote Files), and .10 (signing and updates).
 - **Next:** ANDROID.9 — design the Android flows for TorBox, torrents and
@@ -796,7 +799,7 @@ whether rclone is a Setup component that can be unticked.
   by name with one failure and zero skips. Final Astra review of the
   implementation and signed arm64 release checks: **PASS**.
   Paired-Host UI and physical-device background transfer acceptance were
-  not covered by that run. No new release published.
+  not covered by that run. Remote Files shipped in Android 0.0.8.
   The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.

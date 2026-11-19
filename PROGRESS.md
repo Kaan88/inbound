@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- Android 0.0.8 (version code 8) published as an Android-only prerelease from
+  `577c442245b2dd37a09cdb53aff37fe5a63971dd`, with Remote Files and bundled rclone.
+  Public APK, manifest and checksums matched staging; verified the Android
+  update feed serves the identical manifest and desktop latest stays v0.9.0.
+  Signed arm64 APK: 49,746,533 bytes; SHA-256
+  `dd17fe33190ef3e3bdfcbc23487d1dfc27728d015f3b5c340563db1279cc22be`.
+  Manifest SHA-256: `82e369e264d83034d7b56fe4ad98e9ea9b3933c63711036a2b211f2e87bec357`.
+  Release tooling 16/16 and updater tests 21/21 passed. No device upgrade
+  to 0.0.8 was performed as part of publication.
+
 - ANDROID.8 API 33 UI smoke added a disposable WebDAV location, browsed it,
   saved the expected fixture file to shared `Download/` with matching SHA-256,
   then created a competing destination after a second transfer's GET had

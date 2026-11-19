@@ -37,8 +37,9 @@ and 16 KiB devices. The standard arm64 build now packages the verified binary
 and MIT notice. Host wiring and the Remote Files UI are implemented for
 This phone and capable paired hosts. On the API 33 emulator, a WebDAV
 download matched the fixture hash and a competing file was left unchanged.
-The process-kill recovery replay and signed arm64 APK checks passed. No release
-was published. Next: scope ANDROID.9 (TorBox, torrents, archives); its Android
+The process-kill recovery replay and signed arm64 APK checks passed. Remote
+Files shipped in the [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8);
+the public update feed was verified. Next: scope ANDROID.9 (TorBox, torrents, archives); its Android
 screens and acceptance criteria are not yet designed.
 
 The dated checkpoints below are historical; their release versions and open
