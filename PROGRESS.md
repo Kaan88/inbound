@@ -2,6 +2,30 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.4 TalkBack walkthrough on `inbound33` (API 33, 0.0.6 test APK,
+  TalkBack 14.2): captured TalkBack's **Display speech output** overlay during
+  emulator touch exploration and right-swipe navigation. No audio recording.
+  - **Downloads** (`m02`–`m06`, `z06`–`z08`, `y01`–`y05`, `n00`): Search
+    downloads → host control → another “Change host, Button” → Idle →
+    Nothing is downloading → Resume all downloads → filter radio buttons
+    (All, Active, Queued, Finished, Failed). The first finished row announced
+    filename, status, size, time and list position on touch exploration;
+    Show in folder was a separate named stop. The duplicate host stop needs review.
+  - **Details** (`r01`–`r06`, `j07`–`j13`): double-tap opened Details → Back →
+    More actions → 100% → Finished → size/time → Open → Download again →
+    Delete → From → Saved to → Queue → Added. No separate filename utterance
+    was captured in that forward traversal.
+  - **Multiselect** (`n01`–`n05`, `o01`–`o06`): double-tap-and-hold selected
+    the first row; double-tap selected a second. TalkBack announced “1 selected”
+    then “2 selected.” From the toolbar: Cancel selection → 2 selected →
+    Delete selected → More actions → “Selected” plus filename and list position.
+  - Cancelled selection; restored TalkBack off, speech overlay off, and
+    Downloads at All 15 / Finished 14. Emulator disconnected once and was
+    restarted before the walkthrough continued. No S24 interaction.
+    PNG evidence (step IDs above):
+    `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-talkback-20261119\`.
+    This is a sampled emulator walkthrough, not a full phone accessibility pass.
+
 - ANDROID.5 remote-cookie accept: `inbound33` API 33 and a fresh disposable
   Inbound Server started with 0 jobs. Using a fake path-scoped cookie and a
   loopback fixture reachable from both sides through an emulator-only ADB

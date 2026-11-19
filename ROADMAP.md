@@ -717,6 +717,9 @@ whether rclone is a Setup component that can be unticked.
   on cancel, and the ongoing notification's Open brought Inbound to the foreground during a live transfer. Earlier
   emulator evidence covers short/full failure text. A reusable API 33 smoke test now verifies grouped per-file Open:
   two hash-matched PNGs launch Photos and render their distinct expected colors. Full phone acceptance remains open.
+  API 33 TalkBack walkthrough captured real speech-overlay output for Downloads, finished Details and multiselect.
+  Follow up on duplicate Change host focus stops and the lack of a separate filename utterance in the tested
+  Details traversal; repeat on a physical phone (see PROGRESS).
   See PROGRESS “Android milestone continuation”.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link). PARTIAL (2026-11-19, Codex): source Astra-audited; NativeAOT controlled authenticated catch/refresh and payload hashes verified, with refresh reusing the existing job. Included in public signed0.0.6, whose installed S24 APK hash matches the published artifact. Latest shared-layer Integration checkpoint passed2095 with32 optional skips; see Codex progress for exact scope. Picker/keyboard/rotation and light caught-sheet spot checks have evidence; real-account compatibility, complete phone visual/accessibility flows and later independent review remain OPEN. Public Android feed is0.0.6.
   Chrome → Android's system chooser → Inbound passed on API 33 with a hash-matched loopback download (see PROGRESS).
