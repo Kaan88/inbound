@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- Published [Android 0.0.7](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.7)
+  from `652e1e53` and advanced `android-latest`. This is a version-bump
+  prerelease for testing the public 0.0.6 → 0.0.7 upgrade, not a feature release.
+  Permanent-key arm64 APK: 20,664,711 bytes, SHA-256
+  `e217fd1173f095b48e4ce2de87c29273d7c2417c06f5abc939532577d81a67f7`.
+  Public APK, signed manifest, and checksums matched staging; the update feed
+  served the same signed manifest. Desktop latest remained v0.9.0. Release-tool
+  10/10 and existing Release Mobile binaries 528/528 passed. The public update
+  has not yet been installed on the S24.
+
 - ANDROID.7 closed: the owner entered the password on the unlocked S24 FE
   and completed pairing to the authorized public HTTPS Inbound host. Normal
   desktop curl certificate verification succeeded (`ssl_verify_result=0`);
