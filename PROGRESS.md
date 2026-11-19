@@ -2,6 +2,20 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 remote-cookie accept: `inbound33` API 33 and a fresh disposable
+  Inbound Server started with 0 jobs. Using a fake path-scoped cookie and a
+  loopback fixture reachable from both sides through an emulator-only ADB
+  reverse mapping, **Links on page → Download 1** named **Consent Accept QA
+  (`http://10.0.2.2:47651`)**. Before **Send for these files**, no request went
+  to `/auth.zip`; afterward, the fixture saw cookie-bearing HEAD and GET.
+  An independent `jobs.query` verified exactly one completed `auth.zip` job.
+  The sole output, 24 bytes, matched fixture SHA-256
+  `340ac4c5935ff5859c9447a9b7012916d28d3245e8aeaf3f6897cb8916384cd7`.
+  Removed the disposable pairing, reverse mapping and test payload, restored
+  the emulator's 15 total / 14 finished local jobs, and stopped both listeners.
+  Evidence: `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-consent-accept-20261119\`.
+  No real credentials, physical device, or public endpoint used.
+
 - ANDROID.5 remote-cookie decline: API 33 emulator paired with a disposable
   loopback Inbound Server. The local fixture page set a fake, path-scoped
   sign-in cookie. In **Links on page**, selecting Authenticated archive and

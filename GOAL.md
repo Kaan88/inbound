@@ -6,7 +6,8 @@ API 33 emulator, ANDROID.4 filtered selection and ongoing/grouped completion
 notification Open passed. ANDROID.5 Chrome → Android chooser → Inbound download
 passed with matching SHA-256; the shared-page picker downloaded only two selected links
 out of eight. Declining remote cookie consent sent no authenticated-file request
-and created no job. Edge for Android extension support is future work (ANDROID.12).
+and created no job; accepting created one remote job with a hash-matched payload.
+Edge for Android extension support is future work (ANDROID.12).
 Physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 
