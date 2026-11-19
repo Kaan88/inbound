@@ -8,6 +8,10 @@
   The 48,964,049-byte isolated arm64 probe APK contained that exact binary
   (28,239,829 compressed bytes). Every ELF LOAD segment in both packaged
   native libraries aligned to 16 KiB; `zipalign -c -P 16 -v 4` passed.
+  The matched signed arm64 NativeAOT test APK without rclone was
+  20,705,673 bytes and contained no `librclone.so`. The probe APK is
+  28,258,376 bytes larger (26.95 MiB); this includes the probe code and
+  package metadata, not just the compressed binary.
   This is a build and packaging check, not execution on arm64 or on a
   16 KiB Android system. No release APK or phone was changed.
 
