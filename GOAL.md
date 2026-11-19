@@ -17,7 +17,19 @@ Fresh-boot API 33 also reconnected mid-transfer, showed advancing progress on th
 ANDROID.7 is complete: the S24 FE paired over publicly trusted HTTPS and switched back to local Downloads after cleanup.
 ANDROID.10 is complete: the public in-place upgrade from 0.0.6 to 0.0.7 passed on the S24 FE, with independent Astra PASS.
 ANDROID.4 is complete: S24 FE Light and Dynamic colour acceptance passed, with independent Astra PASS.
+ANDROID.5 remains partial: the S24 verified the system share chooser and HTTP 410
+refresh from zero bytes; the owner-run real-account attempt was refused by the
+built-in browser. A successful real-account capture has not been established.
+ANDROID.6 remains partial: the S24 passed foreground metered Wi-Fi, Battery Saver
+and charging-only holds and the 30-minute screen-off check (34:06, 128 MiB, matching
+hash). The selected remote host passed the 64 KB/s limit, disabled schedule
+persistence and manual queue start. Natural deep Doze of a scheduled queue and
+enabled remote timer firing are unverified. The separate one-hour soak is not
+the 30-minute acceptance gate.
 See PROGRESS “Android milestone continuation”.
+
+The dated checkpoints below are historical; their release versions and open
+items reflect what was known at the time.
 
 S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
 
