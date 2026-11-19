@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 all-links selection: Chrome **Share → More → Inbound** in Android's
+  system chooser sent the fixture page to `inbound33` (API 33). **Open page →
+  Links on page** listed eight links. Selecting only Document and Image and
+  tapping **Download 2** changed total jobs from 15 to 17 and finished jobs
+  from 14 to 16, with zero active after completion. Only `b (1).pdf` (renamed
+  to preserve the existing `b.pdf`) and `c.jpg` were new on disk. Both 1 MiB
+  files matched the fixture's shared SHA-256
+  `fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`.
+  Removed only the two new jobs and files, verified the original counts and
+  file list, and stopped the loopback server. Evidence:
+  `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-all-links-20261119\`.
+
 - ANDROID.5 actual browser chooser: on `inbound33` (API 33, existing 0.0.6
   test APK), long-pressed Archive in Chrome on the loopback fixture page, then
   chose **Share link → More → Inbound** in Android's system chooser. Inbound
