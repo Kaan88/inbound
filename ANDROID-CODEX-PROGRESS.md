@@ -690,3 +690,14 @@ editing saved Mon/Wed 23:58 to 23:59; the empty task queue and its schedule were
 then removed through the UI, and the remote global limit restored to None. Final
 local settings hash still matches the baseline (`native6-cleanup-result.json`).
 Hardware emulator remains visible with host GPU rendering, as requested.
+
+### Android 0.0.6 publication follow-up (2026-11-19, Codex)
+
+Android 0.0.6 published (2026-11-19, Codex): https://github.com/Kaan88/inbound/releases/tag/android-v0.0.6 from source `edd073b09472bab45c9c18adb4ae4161ad08be35`. Permanent-key NativeAOT arm64 APK:20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`; manifest SHA-256 `fdc5c2666cd8037a6255529bb5c7603f16eb8f5ba13eecd619f27d4acc005266`. Downloaded public APK/manifest/checksums match staged bytes; android-latest matches the same versionCode6/versionName0.0.6 signed manifest. Desktop latest remains v0.9.0. Main reviewed worker output and final source; NativeAOT rate checks, Mobile528 and solution build passed as scoped in the candidate checkpoint below. Queue/global KB/s correction is shipped; no new Astra milestone audit claimed. ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance and later independent review remain OPEN. Main checkout untouched; no merge to main.
+
+Live QA state: inbound33 emulator5554 remains visible in hardware mode (NVIDIA
+GeForce RTX4070TiSUPER confirmed by SurfaceFlinger), normal uid2000/non-root adb;
+This phone selected. Main viewed `hardware-native6-final.png`. Emulator launcher
+PID40268/session2498 and copied QA server PID166924/session23630 were left running;
+rediscover before use. Remote task queue/schedule removed, global cap None; final
+local settings hash unchanged. S24 remained disconnected and untouched.
