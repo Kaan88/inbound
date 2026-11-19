@@ -2,6 +2,19 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 remote-cookie decline: API 33 emulator paired with a disposable
+  loopback Inbound Server. The local fixture page set a fake, path-scoped
+  sign-in cookie. In **Links on page**, selecting Authenticated archive and
+  pressing **Download 1** prompted for sign-in cookies and named **Consent QA
+  Disposable (`http://10.0.2.2:47651`)**. Cancel returned to the picker. Fixture
+  logs showed no request to `/auth.zip` and no cookie-bearing request. A
+  separate authenticated `jobs.query` returned a `jobs.snapshot` with 0 jobs;
+  server output directory was empty. Removed both disposable pairings,
+  restored the emulator's This phone view (15 total / 14 finished), and
+  stopped both listeners. Evidence: `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-consent-20261119\`.
+- Owner added Edge for Android extension support as future work (ANDROID.12).
+  No Edge compatibility or implementation is claimed.
+
 - ANDROID.5 all-links selection: Chrome **Share → More → Inbound** in Android's
   system chooser sent the fixture page to `inbound33` (API 33). **Open page →
   Links on page** listed eight links. Selecting only Document and Image and

@@ -723,6 +723,8 @@ whether rclone is a Setup component that can be unticked.
   Sharing the fixture page and choosing Open page → Links on page also passed: only the two selected links were
   downloaded out of eight, with both job counts and hashes verified.
   Owner, 2026-11-18: ask before sending cookies to the selected server, per download; name the target explicitly.
+  API 33 remote consent decline passed: the prompt named the disposable host and its address; Cancel caused
+  no authenticated-file request or remote job (see PROGRESS).
 - [ ] ANDROID.6 Queues, scheduler and settings. PARTIAL (2026-11-19, Codex): approved C1/C2/C7 flows, shared per-queue conditions/HTTP limits, identity/CAS guards and ordinary Android jobs now ship in 0.0.6 (`edd073b0`), including the approved signed-changelog prompt and native queue picker. Main Sol personally checked worker source and artifacts; Astra SOURCE PASS. Mobile528, release-tool10 and solution0errors/53warnings passed; earlier Core2373/Engine214/Server208/Integration2095+32skip remain shared-layer consolidated checkpoints. Final NativeAOT emulator verified job stop, injected-crash/forced-restart payload hash, keyboard/rotation and dialog previews. S24 signed0.0.6 light/dark C1/C2/C7 and empty dynamic-colour Downloads spot checks, limited schedule save/reopen/selective deletion and hash-matched queue transfer now have evidence; owner confirmed basic TalkBack navigation. API33 OS-metering, battery-saver and corrected natural post-Doze transfer checks passed. Physical API37 natural locked-screen scheduling and one UIDT reboot recovery now passed (latest Codex batch). Full visual/accessibility, phone deep Doze/network/power, long-duration and broader remote acceptance remain pending. See latest Codex acceptance checkpoint. This milestone and later independent review remain OPEN.
 - [ ] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18). https with a self-signed
   certificate passed on the emulator (trust, pin, swapped and expired certificates); open: a server with a publicly
@@ -760,6 +762,11 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.11 Web UI recommends the app on a phone (owner, 2026-11-17: "when all is said and done, make a pr for webui
   that when it's opened from phone a popup recommends this android app"). After the Android app is done: a pull request
   in which the web UI, opened on an Android phone, shows a popup recommending the Inbound app (dismissable).
+- [ ] ANDROID.12 Edge for Android extension support (future; owner, 2026-11-19). Check whether the published
+  extension can install in Edge for Android and which APIs are available. The current automatic handoff uses
+  desktop Native Messaging and is not an Android integration. Evaluate an Android-supported handoff, then
+  verify it on Edge for Android, including consent for any sign-in data sent to a server. Until then, standard
+  Android sharing is the fallback; Edge itself has not been verified.
 - arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
 - Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
   signed APK on the releases page with an update check. Nothing waits for the owner.
