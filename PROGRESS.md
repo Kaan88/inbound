@@ -2,6 +2,14 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 one-hour soak retry started transferring before screen-off
+  and kept the same payload request through two harness restarts. The
+  sample log has restart gaps at 186–587 s and 815–864 s; the original
+  screen-off clock was retained. At 1,047 s the S24 was unplugged with
+  its screen off and notification progress was 265/1000. At that check
+  the fixture had no completed request and the phone had no final file;
+  no duration or SHA-256 result is claimed yet.
+
 - ANDROID.6 one-hour screen-off attempt on the S24 FE did not reach
   the duration check. The 256 MiB job was active but still at 0 B when
   the screen was turned off. At 212 s, the phone remained unplugged and
