@@ -1,5 +1,7 @@
 # Android handoff — Codex, 2026-11-19
 
+Android 0.0.6 candidate (2026-11-19, Codex): remote QA exposed binary speed inputs versus decimal rate summaries. Queue and overall KB/s inputs now use 1000 B/s; unchanged legacy raw limits are preserved. Main personally reviewed the complete diff; Terra scoped source/evidence PASS. Mobile528, Debug build0errors/36warnings, Release solution0errors/87warnings passed. NativeAOT x64 install verified 32 and256 inputs persist as32000 and256000 B/s and render accordingly. Permanent-key arm64 packaging checks passed (20,664,711 bytes, SHA-256 `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`); staged locally, not yet published. Isolated remote schedule Mon/Wed23:58–23:59 and restart persistence verified; task queue/schedule removed and global limit reset toNone, local settings hash unchanged. Hardware emulator remains visible as requested. Public feed remains0.0.5; ANDROID.6/.7 phone/TalkBack, broader remote and Doze/network/reboot acceptance remain OPEN. Evidence: `artifacts/android-app/android6-acceptance-0.0.5/`; later independent review remains OPEN.
+
 ## Current continuation after 0.0.5 publication (2026-11-19, Codex)
 
 Public prerelease: https://github.com/Kaan88/inbound/releases/tag/android-v0.0.5.

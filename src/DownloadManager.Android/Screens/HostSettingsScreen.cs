@@ -212,7 +212,7 @@ internal sealed class HostSettingsScreen : IDisposable
         if (!_activity.Capabilities.IsRemote || _downloads.Hello?.Capabilities.Contains("meteredNetworkRule") == true)
             SwitchRow(list, "Unmetered network only", "Wait on metered connections", Resource.Drawable.ic_flow_wifi, s => s.DownloadOnlyOnUnmeteredNetwork, (s, v) => s.DownloadOnlyOnUnmeteredNetwork = v);
         var value = ValueRow(list, "Overall speed limit", Resource.Drawable.ic_flow_speed, () => OpenNumberDialog("speed"));
-        _render.Add(() => value.Text = _downloads.Settings.GlobalSpeedLimitBytesPerSecond is > 0 and var bytes ? $"{bytes / 1024d:0.##} KB/s" : "None");
+        _render.Add(() => value.Text = _downloads.Settings.GlobalSpeedLimitBytesPerSecond is > 0 and var bytes ? Fmt.Rate(bytes) : "None");
         Note(body, "Queue-specific restrictions and limits are in each queue's editor.");
     }
     private void Background(LinearLayout body)
@@ -299,10 +299,12 @@ internal sealed class HostSettingsScreen : IDisposable
                 title = "Connections per host"; initial = settings.MaxConnectionsPerHost.ToString(CultureInfo.InvariantCulture); max = 32;
                 edit = value => s => s.MaxConnectionsPerHost = (int)value!.Value; break;
             case "speed" when OpenDetailId == "network":
-                title = "Speed limit"; max = long.MaxValue / 1024; allowEmpty = true;
+                title = "Speed limit"; max = long.MaxValue / Fmt.BytesPerKilobyte; allowEmpty = true;
                 var bytes = restored ? originalSpeed : settings.GlobalSpeedLimitBytesPerSecond;
-                initial = bytes is > 0 ? Math.Max(1, bytes.Value / 1024 + (bytes.Value % 1024 == 0 ? 0 : 1)).ToString(CultureInfo.InvariantCulture) : "";
-                edit = value => s => s.GlobalSpeedLimitBytesPerSecond = value is null ? null : bytes is > 0 && value.Value.ToString(CultureInfo.InvariantCulture) == initial ? bytes : value.Value * 1024;
+                initial = bytes is > 0 ? Math.Max(1, bytes.Value / Fmt.BytesPerKilobyte + (bytes.Value % Fmt.BytesPerKilobyte == 0 ? 0 : 1)).ToString(CultureInfo.InvariantCulture) : "";
+                // A rounded legacy value may be one step above the largest newly representable whole-KB value.
+                if (bytes is > 0) max = Math.Max(max, long.Parse(initial, CultureInfo.InvariantCulture));
+                edit = value => s => s.GlobalSpeedLimitBytesPerSecond = value is null ? null : bytes is > 0 && value.Value.ToString(CultureInfo.InvariantCulture) == initial ? bytes : value.Value * Fmt.BytesPerKilobyte;
                 originalSpeed = bytes; if (!restored) customSpeed = bytes is > 0; break;
             default: return;
         }

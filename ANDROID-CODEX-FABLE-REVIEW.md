@@ -412,3 +412,44 @@ Cleanup verified: task queues stopped; emulator theme restored to Follows the
 system, battery reset, font_scale absent, free rotation and non-root adbd. The
 owned fixture and emulator were stopped; S24 stayed disconnected and untouched.
 Main also viewed the final NativeAOT dark-dialog preview (`update-final-native-dark.png`).
+
+### FABLE-CODEX-4 — remote queue rate consistency checkpoint (2026-11-19)
+
+Implementer: Codex. The owner requested normal hardware/emulator operation; QA
+verified the inbound33 NVIDIA 4070 Ti Super host. An isolated copy of the server
+binaries ran against the fixture on 127.0.0.1:47616. Remote UI created queue
+`Remote-005` (ID 2, generation `80187f31-53db-4165-a33d-c0f7678e9734`) and schedule
+`Evening-005` (ID `ac4c2b12-f061-457d-849b-78911d0f15fb`, daily 23:58, all days),
+with concurrency 2. The remote edit and server restart/reconnect preserved queue,
+schedule and Host settings; the local settings SHA-256 stayed identical at
+`a0b603b23f2fc210ce9e136c76782c972397b12c89dbdcfbc948480c7d194a94`.
+
+The remote workflow exposed inconsistent speed units: old input `64` stored 65,536
+B/s but the queue card showed 65.5 KB/s. Main chose decimal KB/s input semantics for
+both queue and Host limits, matching shared rate formatting; new input `64` stores
+64,000 B/s and `128` stores 128,000 B/s. Existing raw 65,536 B/s values are preserved
+without migration. Terra gave a scoped source PASS before main added the final exact-
+long `Fmt.Rate(long)` overload to avoid lossy conversion; main reviewed that overload
+and the complete change. This checkpoint is not an Astra audit of the new rate fix.
+
+Current Mobile 528 Debug checks passed; Debug build passed with 0 errors / 36 warnings,
+and Release solution build with 0 errors / 87 warnings. Clean NativeAOT x64 packaging checks passed (21,647,750 bytes); installed candidate
+0.0.6 saved 32 KB/s as 32,000 B/s and 256 KB/s as 256,000 B/s, matching the UI.
+Permanent-key arm64 packaging checks also passed (20,664,711 bytes; SHA-256
+`30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`). Android 0.0.5 remains the public release; version 0.0.6 is local,
+uncommitted and unpublished. Artifacts are under
+`artifacts/android-app/android6-acceptance-0.0.5/`, including
+`legacy-limit-preserved.json`, `host-isolation-and-rate-result.json`,
+`server-restart-persistence.json`, `rate-fix-queue-saved.xml`,
+`remote-global-saved.xml`, `local-after-remote-edits.xml`,
+`rate-fix-mobile-final.txt` and the build logs.
+
+Broader remote workflows, physical-phone/TalkBack acceptance, Doze, network and
+reboot checks, ANDROID.6/ANDROID.7 milestone acceptance, and the later independent
+review remain OPEN. This scoped source/UI/fixture result does not close them.
+
+Main verified the final source diff and Terra scoped follow-up PASS. Remote schedule
+editing saved Mon/Wed 23:58 to 23:59; the empty task queue and its schedule were
+then removed through the UI, and the remote global limit restored to None. Final
+local settings hash still matches the baseline (`native6-cleanup-result.json`).
+Hardware emulator remains visible with host GPU rendering, as requested.

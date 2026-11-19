@@ -217,7 +217,7 @@ internal sealed class QueueEditorScreen : IDisposable
         var days = s is null ? new HashSet<string>() : Days(s);
         for (int i = 0; i < _days.Length; i++) { _days[i].Checked = days.Contains(DayNames[i]); _days[i].Enabled = !_busy && CanEditSafely && s is not null && Supported(s); }
         _concurrencyText.Text = _draft.MaxConcurrentDownloads.ToString(CultureInfo.InvariantCulture);
-        _speedText.Text = _draft.SpeedLimitBytesPerSecond is > 0 ? SpeedText(_draft.SpeedLimitBytesPerSecond.Value) + " KB/s" : "None";
+        _speedText.Text = _draft.SpeedLimitBytesPerSecond is > 0 ? Fmt.Rate(_draft.SpeedLimitBytesPerSecond.Value) : "None";
         if (_completionText is not null) _completionText.Text = _draft.NotifyWhenFinished == true ? "Notify and finish" : "Do nothing";
         foreach (var (value, row, title) in _valueRows) row.ContentDescription = title + ", " + value.Text;
         PaintDays();
@@ -246,7 +246,7 @@ internal sealed class QueueEditorScreen : IDisposable
             .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
             .SetPositiveButton("Apply", (_, _) => { if (!_closed) { _draft.NotifyWhenFinished = choice == 0; Refresh(); } })!.ShowTracked(_dialogs);
     }
-    private static string SpeedText(long bytes) => (bytes / 1024 + (bytes % 1024 == 0 ? 0 : 1)).ToString(CultureInfo.InvariantCulture);
+    private static string SpeedText(long bytes) => (bytes / Fmt.BytesPerKilobyte + (bytes % Fmt.BytesPerKilobyte == 0 ? 0 : 1)).ToString(CultureInfo.InvariantCulture);
     private void Options()
     {
         if (_busy || _closed) return;
@@ -395,9 +395,12 @@ internal sealed class QueueEditorScreen : IDisposable
             else
             {
                 var text = (input.Text ?? "").Trim();
-                if (!long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var kb) || kb < 1 || kb > long.MaxValue / 1024)
-                { error.Text = "Enter a positive whole number in KB/s."; return; }
-                if (!(current is > 0 && text == SpeedText(current.Value))) _draft.SpeedLimitBytesPerSecond = kb * 1024;
+                if (!(current is > 0 && text == SpeedText(current.Value)))
+                {
+                    if (!long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var kb) || kb < 1 || kb > long.MaxValue / Fmt.BytesPerKilobyte)
+                    { error.Text = "Enter a positive whole number in KB/s."; return; }
+                    _draft.SpeedLimitBytesPerSecond = kb * Fmt.BytesPerKilobyte;
+                }
             }
             Refresh(); dialog.Dismiss();
         };
@@ -671,7 +674,7 @@ internal sealed class QueueEditorScreen : IDisposable
         return result;
     }
     private static string QueueSummary(QueueDto q) => $"{q.Name}; {q.MaxConcurrentDownloads} at once; " +
-        (q.SpeedLimitBytesPerSecond is > 0 ? SpeedText(q.SpeedLimitBytesPerSecond.Value) + " KB/s" : "no speed limit") +
+        (q.SpeedLimitBytesPerSecond is > 0 ? Fmt.Rate(q.SpeedLimitBytesPerSecond.Value) : "no speed limit") +
         $"; unmetered {q.RequireUnmeteredNetwork == true}; charging {q.RequireCharging == true}; battery saver off {q.RequireBatterySaverOff == true}; queue summary {q.NotifyWhenFinished == true}";
     private void SyncConditions()
     {

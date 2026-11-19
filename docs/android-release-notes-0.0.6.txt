@@ -1,0 +1,2 @@
+Speed-limit inputs and summaries now use consistent KB/s units.
+Existing saved limits are preserved when their input is left unchanged.

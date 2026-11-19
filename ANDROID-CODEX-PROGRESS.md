@@ -650,3 +650,43 @@ Cleanup verified: task queues stopped; emulator theme Follows the system, batter
 reset, font_scale absent, free rotation and uid2000/non-root adbd restored. Owned
 fixture57556 and emulator5554 stopped; S24 remained disconnected and untouched.
 Main viewed the final NativeAOT dark-dialog preview as well.
+
+### ANDROID.6 remote-host rate consistency checkpoint (2026-11-19)
+
+Implementer: Codex. At the owner's direction QA used the normal inbound33 NVIDIA
+4070 Ti Super host. An isolated copy of server binaries used the loopback fixture
+127.0.0.1:47616. Remote UI created `Remote-005` (queue ID 2, generation
+`80187f31-53db-4165-a33d-c0f7678e9734`) and `Evening-005` (schedule ID
+`ac4c2b12-f061-457d-849b-78911d0f15fb`, daily 23:58/all days), concurrency 2.
+Queue/schedule IDs and limit/settings survived server restart and UI reconnect; local
+settings SHA-256 remained identical:
+`a0b603b23f2fc210ce9e136c76782c972397b12c89dbdcfbc948480c7d194a94`.
+
+The run found that old queue speed input 64 stored 65,536 B/s but rendered as
+65.5 KB/s on the card. Main chose consistent decimal KB/s input semantics for queue
+and Host speed limits, using the shared formatter; inputs 64 and 128 now store
+64,000 and 128,000 B/s. Existing saved byte limits are not migrated. Terra's scoped
+source PASS preceded main's final exact-long `Fmt.Rate(long)` overload, which avoids
+lossy conversion; main reviewed the overload and complete change. No Astra audit of
+this rate fix is claimed.
+
+Mobile 528 Debug checks passed; Debug build passed 0 errors / 36 warnings and Release
+solution build passed 0 errors / 87 warnings. Clean NativeAOT x64 packaging checks passed (21,647,750 bytes); installed 0.0.6
+verified queue 32 KB/s = 32,000 B/s and global 256 KB/s = 256,000 B/s. Signed
+arm64 packaging checks passed (20,664,711 bytes, SHA-256
+`30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`). Android 0.0.5 remains public; candidate 0.0.6
+is local/uncommitted/unpublished. Evidence is under
+`artifacts/android-app/android6-acceptance-0.0.5/` (`legacy-limit-preserved.json`,
+`host-isolation-and-rate-result.json`, `server-restart-persistence.json`,
+`rate-fix-queue-saved.xml`, `remote-global-saved.xml`, `local-after-remote-edits.xml`,
+`rate-fix-mobile-final.txt`, and build logs).
+
+Broader remote workflows, physical-phone/TalkBack, Doze, network and reboot gates,
+ANDROID.6/ANDROID.7 acceptance and the later independent review remain open. This
+is not milestone completion or a full Astra PASS.
+
+Main verified the final source diff and Terra scoped follow-up PASS. Remote schedule
+editing saved Mon/Wed 23:58 to 23:59; the empty task queue and its schedule were
+then removed through the UI, and the remote global limit restored to None. Final
+local settings hash still matches the baseline (`native6-cleanup-result.json`).
+Hardware emulator remains visible with host GPU rendering, as requested.
