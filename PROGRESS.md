@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 16 KiB runtime passed on a Samsung Remote Test Lab Galaxy A56
+  (SM-A566B, API 36, `arm64-v8a`, `aarch64`, `getconf PAGE_SIZE` = `16384`).
+  The same 49,033,681-byte probe APK used on the S24 (SHA-256
+  `706adc3dd515268f3e866c4f182c805aa62f2b00a79449d4a93637874f1e0861`)
+  logged `HTTPS listing succeeded` and `PASS: authenticated rc/noop and
+  child 18750 exited`. ADB confirmed `/proc/18750` was gone before uninstall
+  and the probe package was absent after uninstall. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\rtl-arm64-16k.log`.
+  This closes the runtime feasibility check, not the bundling decision or
+  Android Sites implementation. No release APK changed.
+
 - ANDROID.8 arm64 runtime passed on the S24 FE (API 37, `PAGE_SIZE=4096`).
   The isolated build used fresh intermediates and contained both the probe
   hook and the previously verified rclone binary. It logged Android/arm64,
