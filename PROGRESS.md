@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 Battery Saver hold/release passed on the S24 FE over the
+  real Wi-Fi LAN fixture. With Battery Saver ON (`dumpsys power`), the
+  test queue showed “Waiting for battery saver to turn off” and the
+  submitted job showed Queued / 0 B; the fixture logged zero body
+  requests. Restoring Battery Saver to OFF (`low_power=0`, sticky=0)
+  released the job without Resume. The 1 MiB phone file matched fixture
+  SHA-256 `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  Removed the job, file and queue, stopped the fixture and verified
+  All 0 / Finished 0. This was a foreground condition test, not
+  charging-only or background acceptance. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\android6-battery-s24\`.
+
 - ANDROID.5 owner-run real-account check on the S24: the built-in
   browser displayed “This browser request cannot be safely captured.”
   In-app capture did not succeed for that site. The message is shared by
