@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.4 partial S24 FE visual acceptance on signed 0.0.7: exercised
+  Light Downloads (empty), Add, and New download (empty form, cancelled);
+  inspected side-by-side C8/A4/A5 captures. Differing job/form states and
+  dark A4/A5 references prevent a full parity claim. Dynamic colour changed
+  the Downloads summary fill from RGB (220,233,247) to (225,227,235) at
+  (500,500). Restored Follows the system, Dynamic off and This phone /
+  All 0 / Finished 0; no jobs or OS settings changed. Captures and pairs:
+  `%LOCALAPPDATA%\Temp\opencode\inbound-s24-core-007\`. Still open: populated
+  phone light/dynamic walkthrough (Details, multiselect, and state colours).
+
 - ANDROID.10 public upgrade acceptance passed on the S24 FE. The installed
   0.0.6 hash matched its release; Inbound showed the signed 0.0.7 offer,
   notes and 20.7 MB size, then Android's “Update this app?” confirmation.
