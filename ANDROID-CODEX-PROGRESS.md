@@ -806,3 +806,71 @@ to undefined, low_power0, idle force false, uid2000/non-root adb. Allocator/vers
 metadata can change, and full historical-job equality was not checked. Only the
 identified fixture47618 was stopped; normal hardware inbound33 remains running.
 No new Astra audit or full milestone-completion claim.
+
+### S24 direct-LAN scheduling and reboot batch; pause boundary (2026-11-19, Codex)
+
+Implementer: Codex. Owner approved one reboot, then requested a pause after this
+step finishes. This phone test batch is complete with verified cleanup; do not
+start another step until resumed. Main personally reviewed delegated fixture code
+and actual device evidence. GPT-6.1 Terra/high performed bounded source/evidence
+reviews; no new major Astra audit is claimed.
+
+S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
+
+Scheduled case: dedicated Codex-BG-006 queue, daily12:58, 64,000B/s, one connection.
+Before Home/sleep at12:57:52: queue scheduled/stopped, no payload requests,
+ordinary4100 waiting, UIDT1 absent. Natural queue start logged12:58:53 and final
+8,388,608bytes observed13:01:04; expected/actual SHA-256 equal. All sampled
+wakefulness was Dozing (AOD/noninteractive), deep idle INACTIVE: this is not phone
+deep-Doze or a30minute/one-hour screen-off result. No forced job or Activity launch
+caused the scheduled transfer. The scheduled case's queue/schedule/job/file were
+removed before the separate reboot case.
+
+Reboot case: resume-on-launch and keep-awake preferences were already enabled and
+unchanged. New16,777,216byte fixture, 100,000B/s, one connection, Start now;
+verified1MiB part prefix, absent final file and active UIDT1 before reboot.
+Exactly one approved reboot command returned0. Wi-Fi ADB endpoint changed from
+43931 to41765 and was rediscovered; those endpoints are historical. New valid
+boot UUID differed; initial postboot Inbound foreground=false, keyguard=true.
+Owner was asked to unlock without opening Inbound and replied done. Fresh
+postboot log explicitly shows session job id1/pid6181, reboot/no-user-stop and
+guard0; Range start1,114,112 at postboot timestamp1795083324548, with same request
+id ending15,663,104bytes. Preboot late-ended response was excluded using request
+BEGIN time and new boot/uptime boundary. Final16MiB hash equal. No automated app
+launch/resume/forced job occurred until completed observation; no claim of
+continuous foreground surveillance. Actual fixture traffic proves checkpoint
+range recovery rather than just an eventual restart from zero.
+
+Fixture change: tools/AndroidTrialServer/Program.cs adds opt-in --trace-requests,
+GUID+UTC Unix-ms correlated TRACE begin/end with method/range/planned/actual
+bytes; end recorded in finally for aborted requests. Existing --log SENT format
+and default behavior preserved; no URLs, queries, headers, clients or credentials
+logged. Main read full diff, built0errors/0warnings and smoke-tested live HEAD,
+full GET, Range bytes and correlation. App source unchanged; no new APK/release
+or fresh application-suite rerun was needed/claimed.
+
+Evidence: `scheduled-result.json`, `scheduled-observations.json`,
+`schedule-before.json`, `scheduled-scoped-log.txt`, `scheduled-fixture-final.txt`,
+`reboot-before.json`, `reboot-command-result.json`, `postboot-identity.json`,
+`postboot-foreground-before-observer.json`, `postboot-foreground-after-completion.json`,
+`reboot-result.json`, `reboot-observations.json`, `reboot-scoped-log.txt`,
+`reboot-fixture-log.txt`, `fixture-trace-smoke.json`, `fixture-build.txt`,
+`background-preferences-before-reboot.xml`, `cleanup-result.json`. All under
+`artifacts/android-app/android6-s24-background/`.
+
+UI safety: phone changed foreground after an unlock and an initial coordinate
+action reached the wrong screen. Main stopped the flow and added an artifact
+helper guard checking mCurrentFocus before all captures/actions and again before
+label/coordinate taps. A negative test refused action outside Inbound (exit3).
+Cleanup used explicit Inbound launch and guarded actions; cold launch required
+-W before the foreground check. No unrelated UI content belongs in evidence.
+
+Cleanup: both named test jobs/payloads/parts, temporary queue and schedule removed;
+Main queue card and All0 match visible baseline. Display values were written back
+(original brightness76, adaptive mode1, timeout30000); observed brightness65 after
+adaptive mode resumed, so no frozen numeric/byte-identical-settings claim. No app
+appearance or resume preference changed. Phone capture files removed; no adb
+reverse was used. Only verified trace fixture47618 stopped. Normal hardware
+emulator stays running. Full milestone and later independent review stay OPEN.
+
+Pause cleanup: stopped the older copied QA server after verifying its exact worktree DLL command. Normal hardware emulator remains running.

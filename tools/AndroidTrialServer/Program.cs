@@ -24,6 +24,8 @@ var lan = args.Contains("--lan");
 // --log: one line per GET when it ends, "SENT start=<first byte> bytes=<bytes written>", so a script can tell a resume
 // (requests after a restart add up to less than the file) from a download that started again from zero.
 var logSent = args.Contains("--log");
+// --trace-requests: correlate each GET body request and its completion without logging its URL or headers.
+var traceRequests = args.Contains("--trace-requests");
 
 var builder = WebApplication.CreateBuilder();
 builder.Logging.ClearProviders();
@@ -86,6 +88,9 @@ app.MapMethods("/bench.bin", ["GET", "HEAD"], async (HttpContext context) =>
 
     var sw = Stopwatch.StartNew();
     long sent = 0;
+    var requestId = traceRequests ? Guid.NewGuid().ToString("N") : null;
+    if (traceRequests)
+        Console.WriteLine(FormattableString.Invariant($"TRACE begin id={requestId} unix_ms={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()} method=GET start={start} planned_bytes={end - start + 1}"));
     try
     {
         for (var pos = start; pos <= end;)
@@ -105,6 +110,8 @@ app.MapMethods("/bench.bin", ["GET", "HEAD"], async (HttpContext context) =>
     finally
     {
         if (logSent) Console.WriteLine(FormattableString.Invariant($"SENT start={start} bytes={sent}"));
+        if (traceRequests)
+            Console.WriteLine(FormattableString.Invariant($"TRACE end id={requestId} unix_ms={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()} method=GET start={start} actual_bytes={sent}"));
     }
 });
 
