@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.7: API 33 `inbound33` paused and resumed a throttled 16 MiB
+  remote download using the paired, pinned self-signed HTTPS control connection.
+  Four independent `jobs.query` snapshots each returned exactly one job,
+  `e6178857-a606-499e-a54a-a826f9e647ad`: downloading → paused → downloading →
+  completed. The loopback HTTP payload fixture logged eight partial reads of
+  327,680 bytes each and eight resumed requests starting at those saved offsets.
+  Server `bench.bin` (16,777,216 bytes) matched fixture SHA-256
+  `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`.
+  Unpaired, restored This phone / All 15 / Finished 14, stopped listeners, and
+  removed the fixture payload and private key. No physical device was touched.
+  Evidence: `%LOCALAPPDATA%\Temp\opencode\inbound-https-resume-20261119\`.
+
 - ANDROID.7: API 33 `inbound33` paired with disposable Inbound Server through
   the loopback HTTPS relay. The emulator displayed the same SHA-256 certificate
   fingerprint as OpenSSL before it was trusted for that host. From the paired

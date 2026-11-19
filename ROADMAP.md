@@ -735,6 +735,8 @@ whether rclone is a Setup component that can be unticked.
   trusted certificate, and https pairing on a phone. Fresh Release loopback pairing/remote work and TLS-pin tests:
   5 passed. API 33 also completed a remote job over the paired self-signed HTTPS control connection;
   the server's 1 MiB file matched the fixture SHA-256 (PROGRESS “Android milestone continuation”).
+  A throttled 16 MiB remote file also passed pause/resume on the same job ID,
+  with all eight range offsets and the final server-side SHA-256 verified.
   Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
   report on the counting rate figure fixed ("Good now"). HTTPS on the phone failed in the NativeAOT build (owner's report "secure
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
