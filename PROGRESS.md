@@ -2,6 +2,20 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 feasibility: a separate x86-64 NativeAOT probe APK
+  (`app.inbound.android.rcloneprobe`, 60,288,169 bytes in the final rerun) installed and started
+  on `inbound33` (API 33). The packaged executable matched the checked
+  rclone 1.76.0 x64 test binary SHA-256
+  `97986d233e47ddbbd6b8d8f885b82a0fcd50d4c0d273e09833994675f26cb8fd`.
+  Inbound launched it from its installed native-library directory; rclone
+  reported Android/amd64, listed an HTTPS directory, answered authenticated
+  `rc/noop` through the Sites process wrapper and exited. No rclone PID
+  remained after normal shutdown and uninstalling only the probe app. Both upstream
+  test binaries have 4 KiB ELF LOAD alignment; the build emitted XA0141.
+  This proves the x64 process path, not arm64/16 KiB support, full Sites UI
+  or force-stop of an active child. No binary was committed and the S24
+  was not used. Evidence: `%LOCALAPPDATA%\Temp\opencode\rclone-android-check`.
+
 - Owner deferred remaining ANDROID.5/.6 acceptance tests to ANDROID.14.
   The verified results stand; unobserved cases are not passes. Proceed
   with ANDROID.8 rclone feasibility without waiting on phone testing.

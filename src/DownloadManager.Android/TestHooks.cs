@@ -32,6 +32,13 @@ internal static class TestHooks
     public static void Run(DownloadsModel model, Intent? intent)
     {
         if (intent is null) return;
+#if INBOUND_RCLONE_PROBE
+        if (intent.GetBooleanExtra("rclone_probe", false))
+        {
+            intent.RemoveExtra("rclone_probe");
+            RcloneProbe.Run();
+        }
+#endif
         if (intent.HasExtra("metered_override"))
         {
             var metered = intent.GetBooleanExtra("metered_override", false);

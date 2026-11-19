@@ -24,7 +24,7 @@ internal static class Notifications
     public const string ExtraResumeAll = "resume_all";
 
     /// <summary>The FileProvider declared in the manifest.</summary>
-    public const string FileProviderAuthority = "app.inbound.android.fileprovider";
+    public static string FileProviderAuthority => Android.App.Application.Context.PackageName + ".fileprovider";
 
     public const string PauseAllAction = "app.inbound.android.PAUSE_ALL";
     public const string UseDataAction = "app.inbound.android.USE_DATA";

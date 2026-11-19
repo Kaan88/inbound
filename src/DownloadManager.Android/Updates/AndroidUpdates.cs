@@ -127,7 +127,7 @@ internal static partial class AndroidUpdates
                         })!.SetNegativeButton("Later", (IDialogInterfaceOnClickListener?)null)!.Show();
                     return;
                 }
-                var uri = FileProvider.GetUriForFile(activity, "app.inbound.android.fileprovider", new Java.IO.File(ready.Path));
+                var uri = FileProvider.GetUriForFile(activity, activity.PackageName + ".fileprovider", new Java.IO.File(ready.Path));
                 var install = new Intent(Intent.ActionView).SetDataAndType(uri, "application/vnd.android.package-archive");
                 install!.AddFlags(ActivityFlags.GrantReadUriPermission);
                 try { activity.StartActivity(install); }
