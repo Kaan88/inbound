@@ -1,5 +1,8 @@
 # Android progress — Codex
 
+Android release request (2026-11-19, Codex): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major Astra audit returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. Main Sol personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
+
+
 ## Ownership and scope
 
 Taken over on 2026-11-18 at the owner's request: "basic app functionality is in"
@@ -441,3 +444,96 @@ unpublished; public Android release/feed remain 0.0.2. Later Fable review is OPE
 Final model result: `artifacts/android-app/codex-signing/android5-mobile-final.txt`
 (408 passed); final controlled race checks: `android5-reservation-wakeup-tests.txt`
 (16 passed). Full-run limitations remain recorded above.
+
+## Review queue ownership clarification (2026-11-19)
+
+Implementer/coordinator: Codex. The owner clarified that the existing
+ANDROID-CODEX-FABLE-REVIEW.md should continue as the record for Astra to review
+Codex's implementations later. Its filename and historical entry IDs stay intact;
+new entries must identify Codex, implementation commits, important decisions,
+actual checks and remaining gaps. Earlier pending Fable assignments are superseded
+by this direction. Historical milestone PASS results remain attributed as recorded;
+the later independent Astra review stays OPEN. No new audit ran for this docs change.
+
+## Continuation handoff (2026-11-19)
+
+Codex wrote ANDROID-CODEX-HANDOFF.md and linked it from CLAUDE.md. It records the
+source/local-doc checkpoint, next ANDROID.6 scope, delegation/review rules, delivery
+state, test limitations and device/security boundaries. Documentation only; no
+new application tests, publication or device actions.
+
+## Owner direction for ANDROID.6 (2026-11-19)
+
+The owner chose per-queue Wi-Fi/unmetered-network, charging and battery-saver-off
+conditions, plus per-queue aggregate speed limits, for the C1/C2 queue and schedule
+work. ANDROID.6 is IN PROGRESS and local/uncommitted. This records scope only: no
+implementation, build, test, device check or acceptance result is claimed here.
+The later independent Astra review remains OPEN.
+
+## ANDROID.6 selected-Host queues, scheduler and settings (2026-11-19)
+
+Status: IN PROGRESS, local/uncommitted. Implementer/coordinator: Codex, with main
+Sol owning architecture, lifecycle, Runtime, IPC and final integration. Later
+independent Astra review remains OPEN; no ANDROID.6 audit or completion is claimed.
+
+The current implementation covers the selected-Host queue dashboard/editor and
+schedules; nullable shared per-queue unmetered-network, charging and
+battery-saver-off conditions; per-queue aggregate HTTP payload caps; Android phone
+power monitoring; persisted ordinary Android queue jobs with a revocable Runtime
+execution lease; compare-and-swap settings updates; and working settings subsets.
+Queue selection/admission and Details assignment are still being integrated.
+Remote torrent/rclone transfers are outside these policies. The owner asked which
+background behavior would be best; Sol recommended and adopted Android-managed
+automatic best-effort jobs that may be delayed by Doze/battery management, without
+exact-alarm permission. This is a recommendation adopted in implementation, not an
+explicit owner choice of exact scheduling behavior.
+
+Sol read and reviewed all worker code, tests and documentation before integration,
+and personally fixed the null-clear merge, stale `LastResult`, raw-action guard,
+Android bindings, stable card updates, encoded text and UI labels/touch/keyboard/
+discovery. Sol owns lifecycle, Runtime and IPC integration.
+
+Validation actually completed before the latest admission/UI/membership integration:
+Core 2373, Engine 213 and Mobile 457 passed; focused Runtime queue-condition and
+lease checks passed 8; earlier queue-cap checks passed 3. Debug Android on the
+dedicated inbound33 emulator exercised a daily 09:00 schedule, start/stop, rotation
+and restored editor draft; C7 dark captures are under `artifacts/android-app/android6/`.
+The daily S24 FE data was untouched. At this checkpoint Full Integration was still
+running and expected exact Hello capability/golden compatibility failures were
+being corrected; there is no full-suite green claim. NativeAOT, physical-phone,
+selected-remote-host, Doze/battery, TalkBack, theme and visual-pair acceptance remain
+pending. ANDROID.6 remains unchecked in ROADMAP.
+
+### ANDROID.6 mockup alignment update (2026-11-19)
+
+The owner asked whether the implementation follows the agreed mockup images. Sol acknowledged that the current C1/C2/C7 draft has deviations: extra Edit buttons, a schedule selector and expandable settings. Sol committed to restoring the pictured layouts and providing side-by-side screen pairs before calling the screens ready. C1/C2 visual correction is assigned to Terra at high reasoning with explicit source ownership; Sol owns C7 corrections and reviews the worker's code. For flows absent from the mockups, the owner directed the team to prepare additional mockups alongside the existing pictures in an HTML review board; main is preparing it. At that earlier checkpoint, implementation awaited the owner mockup review; the later approval and resumed work are recorded below. Known C1/C2 layout corrections may proceed, and no undefined dialogs will be added before the mockups are reviewed.
+
+The focused capability/golden compatibility checks passed 14, and the ServerHello check passed 1; latest Mobile 464 and Engine queue 4 checks passed. The full Integration rerun is still running, so no full-suite green result is claimed. There is no visual acceptance or ANDROID.6 completion claim; final side-by-side pairs and the later independent Astra review remain pending/open.
+
+### ANDROID.6 review-board and validation update (2026-11-19)
+
+Update to the earlier in-progress test note: Full Integration now passed 2,077, skipped 32 and failed 0 (`artifacts/android-app/android6/integration-final.txt`). After the C1 corrections and C2 safe-header change, the Android Debug build passed with 0 errors and 2 known SDK warnings (`artifacts/android-app/android6/android-layout-check.txt`). Main Sol completed browser QA on the [ANDROID.6 flow review board](docs/plans/android-mockups/android6-flow-review.html), authored by Codex; it contains 28 proposed flows with the C1/C2/C7 originals embedded unchanged. Sol reviewed the worker source and removed an unwired C2 overflow control and a static wrong title.
+
+At this earlier checkpoint, the design-first pause remained in effect; the later owner approval and resumption of implementation are recorded below. Browser QA completed for all 28 flows at 320, 390, 736, 1024 and 1440 px: no horizontal overflow, clipped dialog/content or script errors; reference zoom opens and closes. Sol inspected all rendered proposals and Terra independently reviewed the contact sheets. Embedded references were verified byte-identical to C1/C2/C7. This is artifact verification, not device/accessibility acceptance. These results do not establish visual acceptance or completion; ANDROID.6 remains IN PROGRESS and later Astra review remains OPEN. No release claim is made.
+
+### ANDROID.6 board approval and resumed implementation (2026-11-19)
+
+Owner reviewed the 28-flow board and said "looks good," approving it as design direction and resuming implementation. This is not feature acceptance. Terra owns C2 editor/dialogs and C7 grouped root/Details. Main Sol owns queue actions, shared completion behavior and integration, and personally checks worker code. Keep board-marked future capabilities pending. Queue completion note: the existing queue `NotifyWhenFinished` preference controls a transient summary only; Android releases its background execution lease once idle for either choice. The queue remains ready, and neither choice exits the app/Host or shuts down the device. Full Integration 2077 passed / 32 skipped / 0 failed; latest Debug build 0 errors / 2 known SDK warnings. Prior detailed acceptance gaps and historical checkpoints remain; ANDROID.6 stays IN PROGRESS, no visual acceptance or Astra audit is claimed.
+### ANDROID.6 approved-flow and retry-race checkpoint (2026-11-19)
+
+Main Sol personally reviewed every worker change. The current reviewed flow set covers C1 queue creation/rename/delete/move; C2 sheets, schedule times, limits and finish choice; and supported C7 grouped pages. Shared protocol work adds `NotifyWhenFinished`, `RemoveSchedules` and `ExpectedQueueId`. These are implementation checkpoints, not feature or milestone acceptance.
+
+Focused approved-flow checks passed 6 (`approved-flow-tests-final.txt`). The deterministic `StopThenStartWhileFailedRunIsSavingPreservesTheOwedRetry` cases for limits 1 and 2 failed against the old behavior, which changed expected `failed` to actual `paused` (`retry-race-before-fix.txt`). Main fixed queue stop to preserve failed/cancelled terminal states; 11 related focused checks passed (`retry-race-fixed.txt`). First consolidated suites passed Core 2,373, Engine 214 and Mobile 464 (`approved-core-full.txt`, `approved-engine-full.txt`, `approved-mobile-full.txt`). The first full Integration run had 2,081 passed, 32 skipped and one exact retry test failure: `StartingTheQueueRetriesAQueuedFailureOnlyWhileItsRetriesLast` (`approved-integration-full.txt`). A fixed full rerun is still running, session 60371; Server consolidation has not started.
+
+The approved UI/icons Debug build completed with 0 errors and 2 known Android SDK warnings (`approved-ui-final-icons-build.txt`). The latest rebuild for the Done button is still running, session 25681. On API 33, emulator QA confirmed blank-name validation, creation of stopped `Night-QA`, saving a daily 09:00 schedule, and persistence of the native 09:00 time-picker plus custom 500 speed-limit draft through both rotations; free rotation restored. Evidence: `approved-create-invalid.xml`, `approved-queues.png`, `approved-time-restored.xml`, `approved-speed-restored.xml`. The S24 FE was untouched.
+
+ANDROID.6 remains IN PROGRESS and unchecked. No clean fixed full Integration result, Server consolidation, NativeAOT/phone acceptance, Astra review or feature-completion claim yet.
+### ANDROID.6 consolidated verification and pre-audit candidate (2026-11-19)
+
+The subsequent full Integration run is green: 2,085 passed, 32 skipped, 0 failed in 10m18s (`approved-integration-final-green.txt`). Core 2,373, Engine 214, Mobile 464 and Server 208 passed. Full Release solution build completed with 0 errors and 29 warnings (`approved-solution-build.txt`). A second run had one checkpoint helper failure before its corruption test; controlled `CheckpointSettlementTests` reproduced the old helper returning the initial zero checkpoint while a nonzero save was blocked. Main replaced the two equal reads with actual Runner-idle internal test synchronization and retained checkpoint/payload-prefix assertions; focused checkpoint/retry tests passed 7 (`checkpoint-wait-before-fix.txt`, `checkpoint-retry-final.txt`).
+
+A signed NativeAOT arm64 production candidate was built with the existing permanent certificate and checked: min API 31, target 35, arm64-only, non-debuggable, all `check-apk --release` checks pass. Candidate: `artifacts/android-app/signed-builds/3e8a0b3ca7384b5d956da8e2d8e32d36/Inbound-android-release.apk`, 20,578,695 bytes, SHA-256 `d85721f7a1f7f82dc4c7d753fc58828a527184f16c4092ee431963d93b99d00d`. This is a pre-audit candidate, not a publication; a one-copy Android timing-note fix landed after the build, so a final rebuild is expected.
+
+Separate NativeAOT Release-test x64 build passed its checker and was installed with `install -r` on the owned inbound33 API 33 emulator; launch was OK at 1,401 ms, not a performance benchmark. Paired isolated remote QA created and renamed `Remote-QA` to `Remote-QA-checked`, with state persisted by the test server; phone-only power and summary rows were hidden on the remote Host. Switching back showed local `Night-QA` and `Android6-QA` intact. Evidence is under `android6/` (`android-approved-native-test-build.txt`, `native-remote-*.xml`, `approved-remote-*.xml`). S24 FE was untouched.
+
+Main's NativeAOT/background-schedule QA continues. Astra audit `android6_astra_audit` is running with requested model gpt-6.2-astra at high reasoning; main will inspect and verify any findings. ANDROID.6 remains IN PROGRESS and unchecked; no Astra PASS, public release, physical-phone acceptance or feature-completion claim. Public Android feed remains 0.0.2.

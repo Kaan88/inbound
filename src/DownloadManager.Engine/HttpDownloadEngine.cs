@@ -12,8 +12,43 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     /// 16 KB reads become a quarter as many writes, progress rounds and lock rounds; capped, every read goes on at once
     /// so the cap stays smooth. A stop refetches at most this much, as before at most one buffer.
     /// </summary>
-    private int FillTarget(TransferRateLimiter perTransfer)
-        => perTransfer.Limited || SharedRateLimiter.Limited ? 1 : Math.Max(1, _options.BufferSize / 2);
+    private int FillTarget(TransferRateLimiter perTransfer, DownloadJob job)
+        => perTransfer.Limited || SharedRateLimiter.Limited || QueueBudget(job)?.Limited == true ? 1 : Math.Max(1, _options.BufferSize / 2);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, SharedSpeedBudget> _queueBudgets = new();
+
+    // Keep budget instances alive when their cap is removed: in-flight readers must see the same live update.
+    public void UpdateQueueSpeedLimits(IReadOnlyDictionary<int, long> limits)
+    {
+        foreach (var pair in limits) _queueBudgets.GetOrAdd(pair.Key, _ => new SharedSpeedBudget()).Update(pair.Value);
+        foreach (var pair in _queueBudgets)
+            if (!limits.ContainsKey(pair.Key)) pair.Value.Update(null);
+    }
+
+    private SharedSpeedBudget? QueueBudget(DownloadJob job)
+        => job.IsQueued && _queueBudgets.TryGetValue(job.QueueId, out var budget) ? budget : null;
+
+    private async Task WaitForQueueAsync(DownloadJob job, int bytes, CancellationToken token)
+    {
+        while (QueueBudget(job) is { Limited: true } budget)
+        {
+            using var membership = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var waiting = budget.WaitAsync(bytes, membership.Token);
+            while (!waiting.IsCompleted)
+            {
+                await Task.WhenAny(waiting, Task.Delay(100, token)).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (!ReferenceEquals(QueueBudget(job), budget))
+                {
+                    membership.Cancel();
+                    try { await waiting.ConfigureAwait(false); return; }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested) { break; }
+                }
+            }
+            if (!waiting.IsCanceled) { await waiting.ConfigureAwait(false); return; }
+            token.ThrowIfCancellationRequested();
+        }
+    }
 
     private static readonly HashSet<string> RestrictedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -729,7 +764,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 int read;
                 try
                 {
-                    read = await reader.FillAsync(FillTarget(state.RateLimiter)).ConfigureAwait(false);
+                    read = await reader.FillAsync(FillTarget(state.RateLimiter, job)).ConfigureAwait(false);
                 }
                 catch (TimeoutException ex)
                 {
@@ -753,6 +788,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                 await state.RateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
                 await SharedRateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
+                await WaitForQueueAsync(job, read, cancellationToken).ConfigureAwait(false);
                 await file.WriteAsync(buffer[..read], cancellationToken).ConfigureAwait(false);
                 state.Bytes += read;
                 bytesThisResponse += read;
@@ -1854,7 +1890,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     var truncated = false;
                     while (true)
                     {
-                        var read = await reader.FillAsync(FillTarget(run.RateLimiter)).ConfigureAwait(false);
+                        var read = await reader.FillAsync(FillTarget(run.RateLimiter, run.Job)).ConfigureAwait(false);
                         if (read == 0)
                         {
                             break;
@@ -1881,6 +1917,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         // Bytes read but not yet written are simply fetched again after a yield here.
                         await run.RateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
                         await SharedRateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
+                        await WaitForQueueAsync(run.Job, allowed, token).ConfigureAwait(false);
                         localWork = true;
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,

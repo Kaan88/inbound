@@ -177,6 +177,18 @@ internal static class Notifications
         return b.Build()!;
     }
 
+    public static void PostQueueFinished(Context c, DownloadManager.Runtime.QueueFinishedEventArgs queue)
+    {
+        var body = $"{queue.Completed} completed" + (queue.Failed > 0 ? $" · {queue.Failed} failed" : "") +
+            (queue.Cancelled > 0 ? $" · {queue.Cancelled} cancelled" : "");
+        var b = Builder(c, FinishedChannel, queue.Name + " finished", body);
+        b.SetSmallIcon(Android.Resource.Drawable.StatSysDownloadDone);
+        b.SetAutoCancel(true); b.SetCategory(Notification.CategoryStatus); b.SetContentIntent(OpenApp(c, false));
+        // A separate Android notification tag avoids collisions with per-file notification IDs.
+        try { Manager(c).Notify("queue-finished", queue.QueueId, b.Build()!); }
+        catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "queue notification: " + ex.GetType().Name); }
+    }
+
     /// <summary>One notification per finished file; a tap opens the file through the FileProvider.</summary>
     public static void PostFinished(Context c, FinishedJob job)
     {

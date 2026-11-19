@@ -99,6 +99,11 @@ public sealed partial class HostCommandDispatcher
         var capabilities = CapabilitiesOf(rights);
         if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         capabilities.Add("browserRefresh");
+        capabilities.Add("queueSpeedLimit");
+        capabilities.Add("settingsCompareAndSwap");
+        capabilities.Add("queueDeleteSchedules");
+        capabilities.Add("queueConditionalMove");
+        capabilities.Add("queueIdentity");
         return capabilities;
     }
 
@@ -131,6 +136,8 @@ public sealed partial class HostCommandDispatcher
         if (rights.Torrents) capabilities.Add("torrents");
         // The platform reports metered networks, so settings.downloadOnlyOnUnmeteredNetwork means something (the phone).
         if (platform.SupportsMeteredNetworkRule) capabilities.Add("meteredNetworkRule");
+        if (platform.SupportsQueueConditions) capabilities.Add("queueConditions");
+        if (platform.SupportsQueueCompletionNotifications) capabilities.Add("queueCompletionNotification");
         return capabilities;
     }
 
@@ -476,8 +483,8 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken) :
-                            _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken))
+                        await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration) :
+                            _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration, moveToQueue.ExpectedDestinationQueueGeneration))
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -666,6 +673,16 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
+                    if (!platform.SupportsQueueCompletionNotifications && ChangesQueueFinishNotice(update.Settings.Queues, _service.GetSettings().Queues))
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = "This Host cannot show queue completion notifications.", Settings = _service.GetSettings() }).ConfigureAwait(false);
+                        break;
+                    }
+                    if (!platform.SupportsQueueConditions && ChangesQueueConditions(update.Settings.Queues, _service.GetSettings().Queues))
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = "This Host does not report queue power or network conditions.", Settings = _service.GetSettings() }).ConfigureAwait(false);
+                        break;
+                    }
                     if (caller is not null && RefuseSettingsForCaller(update) is { } settingsRefusal)
                     {
                         await Reply(client, message, MessageTypes.SettingsResult, settingsRefusal).ConfigureAwait(false);
@@ -681,7 +698,7 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     await Reply(client, message, MessageTypes.SettingsResult,
-                        await _service.UpdateSettingsAsync(update.Settings, cancellationToken, caller).ConfigureAwait(false))
+                        await _service.UpdateSettingsAsync(update.Settings, cancellationToken, caller, update.ExpectedRevision).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
@@ -700,6 +717,18 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.QueueAction:
                     var queueAction = message.GetPayload<QueueActionRequest>();
+                    if (!platform.SupportsQueueCompletionNotifications && queueAction.NotifyWhenFinished is { } requestedNotice &&
+                        (queueAction.Action.ToLowerInvariant() is "create" or "policy") &&
+                        requestedNotice != (queueAction.Action.Equals("create", StringComparison.OrdinalIgnoreCase) ? false : _service.GetSettings().Queues.FirstOrDefault(q => q.Id == queueAction.QueueId)?.NotifyWhenFinished ?? false))
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = "This Host cannot show queue completion notifications.", Settings = _service.GetSettings() }).ConfigureAwait(false);
+                        break;
+                    }
+                    if (!platform.SupportsQueueConditions && QueueActionChangesConditions(queueAction))
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = "This Host does not report queue power or network conditions.", Settings = _service.GetSettings() }).ConfigureAwait(false);
+                        break;
+                    }
                     if (caller is not null && RefuseQueueActionFor(queueAction, caller) is { } queueRefused)
                     {
                         await Reply(client, message, MessageTypes.SettingsResult, queueRefused).ConfigureAwait(false);
@@ -707,7 +736,7 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     await Reply(client, message, MessageTypes.SettingsResult,
-                        await _service.QueueActionAsync(queueAction, cancellationToken).ConfigureAwait(false))
+                        await _service.QueueActionAsync(queueAction, cancellationToken, caller).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 

@@ -166,6 +166,14 @@ public sealed class DownloadsModel : IDisposable
         SettingsChanged?.Invoke();
     }
 
+    /// <summary>Called on the UI thread after a command; failed replies also carry authoritative Host settings.</summary>
+    public void ApplySettingsResult(SettingsResult? result)
+    {
+        if (result is null || Disposed || !_shown || result.Settings.Revision < Settings.Revision) return;
+        ApplySettings(result.Settings);
+        SettingsChanged?.Invoke();
+    }
+
     private void ApplySettings(SettingsDto settings)
     {
         Settings = settings;
@@ -322,6 +330,21 @@ public sealed class DownloadsModel : IDisposable
             return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Error ?? "The Host refused.");
         }
         catch (Exception e) { return CommandResult.Fail(e.Message); }
+    }
+
+    /// <summary>Changes queue membership on the selected Host; null detaches the download from queues.</summary>
+    public async Task<CommandResult> MoveToQueueAsync(Guid id, int? queueId, CancellationToken cancellationToken = default, int? expectedQueueId = null, Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null)
+    {
+        try
+        {
+            var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobMoveToQueue,
+                new JobQueueRequest { JobId = id, QueueId = queueId ?? 0, Detach = queueId is null, ExpectedQueueId = expectedQueueId, ExpectedSourceQueueGeneration = expectedSourceQueueGeneration, ExpectedDestinationQueueGeneration = expectedDestinationQueueGeneration }), cancellationToken).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host did not confirm the queue change.");
+            var result = reply.GetPayload<JobActionResponse>();
+            return result.Ok ? CommandResult.Success : CommandResult.Fail(result.Error ?? "The queue could not be changed.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { return CommandResult.Fail(ex.Message); }
     }
 
     /// <summary>Command folders.browse: the folders inside <paramref name="path"/> on the Host's disk (the roots for null). Never throws; the result says.</summary>

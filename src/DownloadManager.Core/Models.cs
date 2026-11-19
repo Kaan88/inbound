@@ -513,6 +513,16 @@ public sealed class SegmentCheckpoint
 
 public sealed class DownloadQueue
 {
+    public Guid Generation { get; set; } = Guid.NewGuid();
+    [JsonIgnore]
+    public string? ConditionWaitReason { get; set; }
+    public bool RequireUnmeteredNetwork { get; set; }
+    public bool RequireCharging { get; set; }
+    public bool RequireBatterySaverOff { get; set; }
+    /// <summary>Aggregate HTTP download cap; zero means unlimited.</summary>
+    public long SpeedLimitBytesPerSecond { get; set; }
+    public bool NotifyWhenFinished { get; set; }
+
     public int? RetryLimit { get; set; }
     public List<Guid> JobOrder { get; set; } = new();
     public int Id { get; set; }

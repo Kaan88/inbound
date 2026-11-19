@@ -5,6 +5,7 @@
   <LinearLayout android:id="@+id/column" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
     <FrameLayout android:id="@+id/pages" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
       <include layout="@layout/downloads_page" />
+      <include layout="@layout/queues_page" />
       <include layout="@layout/settings_page" />
     </FrameLayout>
     <com.google.android.material.bottomnavigation.BottomNavigationView android:id="@+id/nav" android:layout_width="match_parent" android:layout_height="wrap_content"

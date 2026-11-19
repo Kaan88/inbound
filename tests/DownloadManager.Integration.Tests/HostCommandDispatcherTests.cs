@@ -83,17 +83,17 @@ public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
         Assert.Equal(MessageTypes.ServerHello, hello.Type);
         // The names from protocol 1 first, in their order; the ones added later only after them (D8).
         string[] machine = ["updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions"];
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", .. machine, "browserRefresh"], hello.GetPayload<HostHelloDto>().Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", .. machine, "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"], hello.GetPayload<HostHelloDto>().Capabilities);
         Assert.Equal(Protocol.Version, hello.GetPayload<HostHelloDto>().ProtocolVersion);
         Assert.Equal(HostKinds.Windows, hello.GetPayload<HostHelloDto>().HostKind);
 
         var registry = new RemoteProviderRegistry();
         await using var jobs = new RemoteJobCoordinator(registry, new JsonRemoteJobStore(_paths), service, new RemoteCoordinatorOptions { RunLoops = false });
         using var remote = new RemoteCommands(registry, jobs);
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "remote", .. machine, "browserRefresh"], Dispatcher(service, remote: remote).Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "remote", .. machine, "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"], Dispatcher(service, remote: remote).Capabilities);
 
         // Somewhere without a tray leaves it out, so the names after it move up: clients look a name up, never a position.
-        Assert.Equal(["jobs", "settings", "handoff", "status", "browserRefresh"], Dispatcher(service, new FakePlatform(new PlatformCapabilities(), _timeline)).Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "status", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"], Dispatcher(service, new FakePlatform(new PlatformCapabilities(), _timeline)).Capabilities);
     }
 
     [Fact]

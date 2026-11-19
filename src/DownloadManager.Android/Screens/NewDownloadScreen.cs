@@ -26,6 +26,11 @@ internal sealed class NewDownloadScreen
     private Java.Lang.IRunnable? _pendingCheck;
     private bool _setting;
     private bool _busy;
+    private Spinner _queuePicker = null!;
+    private TextView _queueError = null!;
+    private readonly List<(int? Id, Guid? Generation)> _queueChoices = new();
+    private bool _settingQueue;
+    private int _queueWhenId;
 
     /// <param name="saved">What the page held before the activity was rebuilt (rotation, process death), or null.</param>
     public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address, Bundle? saved = null, bool transient = false)
@@ -33,7 +38,7 @@ internal sealed class NewDownloadScreen
         Transient = transient;
         _activity = activity;
         _host = host;
-        _model = new NewDownloadModel(host);
+        _model = new NewDownloadModel(host, requireQueueIdentity: activity.Capabilities.IsRemote);
         Root = LayoutInflater.From(activity)!.Inflate(Resource.Layout.new_download, null, false)!;
         InsetsListener.Pad(Root.FindViewById<View>(Resource.Id.new_top)!, top: true, bottom: false);
         InsetsListener.Pad(Root.FindViewById<View>(Resource.Id.new_bottom)!, top: false, bottom: true);
@@ -63,6 +68,7 @@ internal sealed class NewDownloadScreen
         }
 
         SetUpSaveTo(host);
+        SetUpQueue();
         // The slider's label formatter is called whenever the value changes, which is the one hook the generated binding allows (its change listener cannot be implemented in C#).
         _slider.SetLabelFormatter(new ValueFormatter(v => { _model.Connections = (int)v; _connectionsValue.Text = ((int)v).ToString(); }));
         ShowSettings();
@@ -70,7 +76,7 @@ internal sealed class NewDownloadScreen
         _host.SettingsChanged += OnSettings;
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_now);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.Check(Resource.Id.exists_rename);
-        Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) => { if (on) _model.StartLater = id == Resource.Id.when_later; }));
+        Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) => { if (on) { _model.StartLater = id == Resource.Id.when_later; _model.WaitForQueue = id == _queueWhenId; } }));
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) =>
         {
             if (!on) return;
@@ -116,6 +122,7 @@ internal sealed class NewDownloadScreen
     private void ShowSettings()
     {
         _showSaveTo?.Invoke();
+        ShowQueues();
         _model.Connections = Math.Clamp(_restoredConnections ?? _model.Connections, 1, _model.MaxConnections);
         if (_host.SnapshotShown) _restoredConnections = null;
         if (_model.MaxConnections <= 1) _connectionsBlock.Visibility = ViewStates.Gone;
@@ -144,6 +151,9 @@ internal sealed class NewDownloadScreen
         if (_model.Destination is { } destination) state.PutString("destination", destination);
         state.PutInt("exists", (int)_model.IfExists);
         state.PutBoolean("later", _model.StartLater);
+        state.PutBoolean("wait_queue", _model.WaitForQueue);
+        if (_model.QueueId is { } queueId) state.PutInt("queue_id", queueId);
+        if (_model.QueueGeneration is { } generation) state.PutString("queue_generation", generation.ToString("D"));
         state.PutBoolean("more", _moreBody.Visibility == ViewStates.Visible);
     }
 
@@ -155,6 +165,9 @@ internal sealed class NewDownloadScreen
         _description.Text = state.GetString("description");
         _sha.Text = state.GetString("sha");
         _restoredConnections = Math.Max(1, state.GetInt("connections", _model.Connections));
+        int? restoredQueue = state.ContainsKey("queue_id") ? state.GetInt("queue_id") : null;
+        Guid? restoredGeneration = Guid.TryParse(state.GetString("queue_generation"), out var generation) ? generation : null;
+        _model.SetQueueSelection(restoredQueue, restoredGeneration);
         ShowSettings();
         if (state.GetString("destination") is { Length: > 0 } destination) { _model.Destination = destination; _showSaveTo?.Invoke(); }
         var exists = (ConflictChoice)state.GetInt("exists", (int)ConflictChoice.Rename);
@@ -165,6 +178,7 @@ internal sealed class NewDownloadScreen
             _ => Resource.Id.exists_rename,
         });
         if (state.GetBoolean("later")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_later);
+        else if (state.GetBoolean("wait_queue")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(_queueWhenId);
         if (state.GetBoolean("more")) { _moreBody.Visibility = ViewStates.Visible; _chevron.Rotation = 180f; }
     }
 
@@ -220,6 +234,62 @@ internal sealed class NewDownloadScreen
         layout.SetEndIconOnClickListener(new ClickListener(Choose));
     }
 
+    private void SetUpQueue()
+    {
+        var group = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
+        group.SaveEnabled = false; // Save/Restore below owns this choice, including the generated queue button ID.
+        var queueButton = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
+        {
+            Id = View.GenerateViewId(), Text = "Queue", ContentDescription = "Wait for queue"
+        };
+        _queueWhenId = queueButton.Id;
+        queueButton.SetMinWidth(0); queueButton.SetMinimumWidth(0);
+        group.AddView(queueButton, 1, new LinearLayout.LayoutParams(0, -2, 1));
+        var parent = (LinearLayout)group.Parent!;
+        var box = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        var label = new TextView(_activity) { Text = "Queue", TextSize = 14 };
+        label.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+        box.AddView(label);
+        _queuePicker = new Spinner(_activity) { ContentDescription = "Choose queue", SaveEnabled = false };
+        _queuePicker.SetMinimumHeight(Motion.Dp(_activity, 48));
+        box.AddView(_queuePicker, new LinearLayout.LayoutParams(-1, -2));
+        _queueError = new TextView(_activity) { AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
+        _queueError.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorError)));
+        box.AddView(_queueError);
+        var note = new TextView(_activity) { Text = "Downloads follow the queue's running state and conditions. Later waits until you resume it.", TextSize = 14 };
+        note.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+        box.AddView(note);
+        parent.AddView(box, parent.IndexOfChild(group) + 1, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Motion.Dp(_activity, 16) });
+        _queuePicker.ItemSelected += (_, e) =>
+        {
+            if (_settingQueue || e.Position != _queuePicker.SelectedItemPosition || e.Position < 0 || e.Position >= _queueChoices.Count) return;
+            var selection = _queueChoices[e.Position];
+            _model.SetQueueSelection(selection.Id, selection.Generation);
+            UpdateButton();
+        };
+    }
+
+    private void ShowQueues()
+    {
+        _settingQueue = true;
+        try
+        {
+            var queues = _host.Settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToArray();
+            var defaultName = queues.FirstOrDefault(q => q.Id == _host.Settings.DefaultQueueId)?.Name;
+            var labels = new List<string> { defaultName is null ? "Host default" : "Host default (" + defaultName + ")" };
+            _queueChoices.Clear(); _queueChoices.Add((null, null));
+            foreach (var queue in queues) { _queueChoices.Add((queue.Id, queue.Generation)); labels.Add(queue.Name); }
+            if (_model.QueueId is { } selected && !_queueChoices.Contains((selected, _model.QueueGeneration)))
+            {
+                _queueChoices.Add((selected, _model.QueueGeneration));
+                labels.Add(_host.SnapshotShown ? "Unavailable queue (" + selected + ")" : "Waiting for selected queue");
+            }
+            _queuePicker.Adapter = new ArrayAdapter<string>(_activity, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
+            var index = _queueChoices.IndexOf((_model.QueueId, _model.QueueGeneration));
+            _queuePicker.SetSelection(index < 0 ? 0 : index);
+        }
+        finally { _settingQueue = false; }
+    }
     private void OnAddress()
     {
         _model.Address = _address.Text ?? "";
@@ -294,7 +364,14 @@ internal sealed class NewDownloadScreen
         }
     }
 
-    private void UpdateButton() => _download.Enabled = _model.CanDownload && !_busy;
+    private void UpdateButton()
+    {
+        _download.Enabled = _model.CanDownload && !_busy;
+        _queueError.Text = _model.QueueError ?? "";
+        _queuePicker.Enabled = !_busy && _host.SnapshotShown;
+        var group = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
+        for (var i = 0; i < group.ChildCount; i++) group.GetChildAt(i)!.Enabled = !_busy;
+    }
 
     // The field shows the model's name unless the user typed one (then it is already what the field holds).
     private void ShowName()

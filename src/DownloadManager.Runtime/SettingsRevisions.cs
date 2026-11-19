@@ -99,7 +99,13 @@ public sealed partial class DownloadManagerService
         static DownloadQueue Copy(DownloadQueue queue) => new()
         {
             Id = queue.Id,
+            Generation = queue.Generation,
             Name = queue.Name,
+            RequireUnmeteredNetwork = queue.RequireUnmeteredNetwork,
+            RequireCharging = queue.RequireCharging,
+            RequireBatterySaverOff = queue.RequireBatterySaverOff,
+            SpeedLimitBytesPerSecond = queue.SpeedLimitBytesPerSecond,
+            NotifyWhenFinished = queue.NotifyWhenFinished,
             MaxConcurrentDownloads = queue.MaxConcurrentDownloads,
             IsRunning = queue.IsRunning,
             Order = queue.Order,
@@ -138,6 +144,12 @@ public sealed partial class DownloadManagerService
                 var queue = new DownloadQueue
                 {
                     Id = q.Id,
+                    Generation = current?.Generation ?? Guid.NewGuid(),
+                    RequireUnmeteredNetwork = q.RequireUnmeteredNetwork ?? current?.RequireUnmeteredNetwork ?? false,
+                    RequireCharging = q.RequireCharging ?? current?.RequireCharging ?? false,
+                    RequireBatterySaverOff = q.RequireBatterySaverOff ?? current?.RequireBatterySaverOff ?? false,
+                    SpeedLimitBytesPerSecond = q.SpeedLimitBytesPerSecond ?? current?.SpeedLimitBytesPerSecond ?? 0,
+                    NotifyWhenFinished = q.NotifyWhenFinished ?? current?.NotifyWhenFinished ?? false,
                     Name = string.IsNullOrWhiteSpace(q.Name) ? $"Queue {index + 1}" : q.Name.Trim(),
                     MaxConcurrentDownloads = Math.Clamp(q.MaxConcurrentDownloads, 1, 16),
                     // Run state and quota use are the Host's; a new queue starts as the client asks, with no use.

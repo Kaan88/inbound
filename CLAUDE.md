@@ -8,6 +8,7 @@ increment.
 ## Android ownership handoff (2026-11-18)
 
 Codex (OpenAI/GPT) has taken over the Android work on the owner's instruction.
+Latest continuation handoff: [ANDROID-CODEX-HANDOFF.md](ANDROID-CODEX-HANDOFF.md) (2026-11-19).
 Read [ANDROID-CODEX-PROGRESS.md](ANDROID-CODEX-PROGRESS.md) for its current
 checkpoint, checks, limitations and next actions. This is a separate session
 report; `GOAL.md`, `ROADMAP.md` and `PROGRESS.md` remain authoritative project
@@ -17,9 +18,12 @@ never switch the main checkout or merge Android into main without the owner's re
 The basic app is already usable; continue from the existing implementation and
 review evidence rather than restarting the trial or screen work.
 
-Later Fable review of Codex work is tracked separately in
-[ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md).
-Add important changes, decisions, audit results and remaining checks there as work proceeds.
+Later independent Astra review of implementations by Codex is tracked in
+[ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md). The legacy filename
+and entry IDs remain for traceability; the owner reassigned this queue from Fable
+to Astra on 2026-11-19. Mark new entries Implementer: Codex and add important
+changes, decisions, commit references, validation, audit results and remaining checks
+as work proceeds. Completed milestone audits do not close this later review queue.
 
 Owner clarification (2026-11-18): "use astra a bit less, on major milestones. this seems too much back and forth." The main agent finishes implementation and consolidated checks before a major-milestone Astra audit. Follow up only to verify confirmed fixes until PASS; do not request Astra reviews for small increments. The existing major-milestone audit requirement remains.
 
@@ -204,6 +208,15 @@ cheaper capable equivalent, or ask if none is available. Keep complex work
 (concurrency, durability, security, IPC protocol changes, architecture) in the
 main model. Give reviewers full context and treat findings as input to verify,
 not as acceptance evidence.
+
+Owner's Android continuation authorization (2026-11-19): proactively delegate
+simple bounded work to GPT-6 Luna at high reasoning, and scoped implementation,
+debugging or visual work to GPT-6.1 Terra at high reasoning. The current host
+catalog exposes exact Luna ID `gpt-6-luna`, successfully spawned in this session;
+the older Android handoff availability note is outdated. The main Sol agent owns
+architecture, cross-cutting work and final integration; it must read and check all
+subagent code and verify requirements and checks before integrating it. Record
+the requested model configuration separately from a worker's self-report.
 
 ## Known traps
 

@@ -59,6 +59,8 @@ public sealed partial class DownloadManagerService
         List<JobRuntime> flagged;
         lock (_sync)
         {
+            RefreshQueueConditionsLocked();
+            foreach (var runtime in _jobs.Values.Where(r => r.Job.ResumeSupported is null)) runtime.ResumeKnownChecked = false;
             requeued = EnforceConcurrencyLimitsLocked();
             flagged = RefreshNoResumeFlagsLocked();
         }
@@ -118,6 +120,14 @@ public sealed partial class DownloadManagerService
             ? (_settings.Queues.FirstOrDefault(q => q.Id == r.Job.QueueId) ?? queueDefaults).MaxConcurrentDownloads
             : _settings.MaxConcurrentDownloads;
 
+        foreach (var runtime in running.ToList())
+        {
+            var queue = runtime.Job.IsQueued ? _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults : null;
+            if (queue is null || QueueConditionWaitLocked(queue) is null || WhyNotPreemptable(runtime) is not null) continue;
+            PreemptLocked(runtime);
+            requeued.Add(runtime);
+            running.Remove(runtime);
+        }
         var overall = running.Count - _settings.MaxConcurrentDownloads;
         var perQueue = running.GroupBy(QueueKey).ToDictionary(group => group.Key, group => group.Count());
         var fileOrder = FileOrderLocked();
@@ -266,6 +276,7 @@ public sealed partial class DownloadManagerService
             if (!_initialized) return;
         }
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+        SettingsChanged?.Invoke(this, _settings);
         Schedule();
     }
 

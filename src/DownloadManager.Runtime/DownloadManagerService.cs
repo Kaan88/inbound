@@ -279,7 +279,7 @@ public sealed partial class DownloadManagerService
         // A crash can land between a job's final save and its package's, so this may have news.
         await AdoptUntrackedPackagesAsync(cancellationToken).ConfigureAwait(false);
         await AnnouncePackageCompletionsAsync(cancellationToken).ConfigureAwait(false);
-        lock (_sync) _initialized = true;
+        lock (_sync) { _initialized = true; RefreshQueueConditionsLocked(); }
         Schedule();
         // The loaded settings and a network reported before now decide whether downloads are held; tell listeners if so.
         AnnounceMeteredWait();
@@ -567,6 +567,9 @@ public sealed partial class DownloadManagerService
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (request.RequireQueue && !_settings.Queues.Any(q => q.Id == request.QueueId &&
+                (request.ExpectedQueueGeneration is null || q.Generation == request.ExpectedQueueGeneration)))
+                return new AddJobResponse { Error = "The selected queue was deleted or replaced. Choose a queue again.", ErrorCode = "queue_missing" };
             if (RefuseIfPackageFull(request) is { } refused) return refused;
 
             // In its package before anyone hears of it or it can start: what opens a window or tells of a
@@ -1569,11 +1572,15 @@ public sealed partial class DownloadManagerService
     public async Task<SettingsResult> UpdateSettingsAsync(
         SettingsDto settings,
         CancellationToken cancellationToken = default,
-        CallerScope? caller = null)
+        CallerScope? caller = null,
+        long? expectedRevision = null)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            lock (_sync)
+                if (expectedRevision is { } revision && revision != _settings.Revision)
+                    return new SettingsResult { Error = "Settings changed on the Host. Reopen the editor and try again.", Settings = MapSettings(_settings) };
             var result = await UpdateSettingsCoreAsync(settings, cancellationToken, caller).ConfigureAwait(false);
             // UI.R37: another channel or manifest, or updates turned off, leaves no latest version known.
             if (result.Ok) AnnounceLatestVersion();
@@ -1584,6 +1591,10 @@ public sealed partial class DownloadManagerService
 
     private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken, CallerScope? caller = null)
     {
+        lock (_sync)
+            if ((settings.Queues ?? []).Any(q => q.Generation is { } generation &&
+                _settings.Queues.FirstOrDefault(current => current.Id == q.Id) is { } current && current.Generation != generation))
+                return new SettingsResult { Error = "A queue was replaced. Refresh settings before saving.", Settings = MapSettings(_settings) };
         // T14: a client from before the torrent folders sends neither, and keeps the Host's.
         KeepUnsentTorrentFolders(settings, _settings);
         if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot))
@@ -1629,6 +1640,8 @@ public sealed partial class DownloadManagerService
         var categoryIds = new HashSet<string>(StringComparer.Ordinal);
         var categoryNames = new HashSet<string>(FileCategories.Names.Append("other"), StringComparer.OrdinalIgnoreCase);
         var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if ((settings.Queues ?? new()).Any(q => q.SpeedLimitBytesPerSecond is < 0))
+            return new SettingsResult { Error = "A queue speed limit must be zero or positive.", Settings = GetSettings() };
         if (categories.Count > 100) return new SettingsResult { Ok = false, Error = "At most 100 custom categories are supported.", Settings = MapSettings(_settings) };
         foreach (var category in categories)
         {
@@ -1836,6 +1849,7 @@ public sealed partial class DownloadManagerService
         {
             defaultQueue.MaxConcurrentDownloads = next.MaxConcurrentDownloads;
         }
+        next.Revision = _settings.Revision + 1;
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         ApplyTorrentSeedSettings(next);
@@ -1938,40 +1952,19 @@ public sealed partial class DownloadManagerService
 
     public async Task<SettingsResult> QueueActionAsync(
         QueueActionRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, CallerScope? caller = null)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (request.Action.Equals("delete", StringComparison.OrdinalIgnoreCase) && request.MoveContentsToQueueId is { } destination)
-            {
-                List<Guid> members;
-                lock (_sync)
-                {
-                    if (request.QueueId == _settings.DefaultQueueId || destination == request.QueueId ||
-                        !_settings.Queues.Any(queue => queue.Id == request.QueueId) ||
-                        !_settings.Queues.Any(queue => queue.Id == destination))
-                        return new SettingsResult { Error = "Choose another existing queue. The default queue cannot be deleted.", Settings = MapSettings(_settings) };
-                    members = _jobs.Values.Where(runtime => runtime.Job.QueueId == request.QueueId).Select(runtime => runtime.Job.Id).ToList();
-                }
-                // Persist each move before deleting its old queue. Interruption leaves a valid,
-                // partially moved queue that can be retried, never orphaned downloads.
-                try
-                {
-                    foreach (var id in members)
-                    {
-                        var moved = await MoveToQueueCoreAsync(id, destination, cancellationToken).ConfigureAwait(false);
-                        if (!moved.Ok) return new SettingsResult { Error = "Queue retained; some downloads may already have moved. " + moved.Error, Settings = MapSettings(_settings) };
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    return new SettingsResult { Error = "Queue retained because reassignment could not be saved. Some downloads may already have moved. " + ex.Message, Settings = MapSettings(_settings) };
-                }
-                lock (_sync)
-                    foreach (var schedule in _settings.Schedules.Where(schedule => schedule.QueueId == request.QueueId))
-                        schedule.QueueId = destination;
-            }
+            lock (_sync)
+                if (request.ExpectedQueueGeneration is { } generation &&
+                    _settings.Queues.FirstOrDefault(q => q.Id == request.QueueId)?.Generation != generation)
+                    return new SettingsResult { Error = "The queue was deleted or replaced. Review it again.", Settings = MapSettings(_settings) };
+            if (request.Action.Equals("create", StringComparison.OrdinalIgnoreCase))
+                return await CreateQueueDurablyAsync(request, cancellationToken).ConfigureAwait(false);
+            if (request.Action.Equals("delete", StringComparison.OrdinalIgnoreCase))
+                return await DeleteQueueDurablyAsync(request, cancellationToken, caller).ConfigureAwait(false);
             return await QueueActionCoreAsync(request, cancellationToken).ConfigureAwait(false);
         }
         finally { _settingsUpdateGate.Release(); }
@@ -2001,6 +1994,11 @@ public sealed partial class DownloadManagerService
                 queue = new DownloadQueue
                 {
                     Id = nextId, Name = request.Name!.Trim(), IsRunning = false,
+                    RequireUnmeteredNetwork = request.RequireUnmeteredNetwork ?? false,
+                    RequireCharging = request.RequireCharging ?? false,
+                    RequireBatterySaverOff = request.RequireBatterySaverOff ?? false,
+                    SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? 0,
+                    NotifyWhenFinished = request.NotifyWhenFinished ?? false,
                     Order = _settings.Queues.Count,
                     MaxConcurrentDownloads = request.MaxConcurrentDownloads,
                     QuotaEnabled = request.QuotaEnabled ?? false,
@@ -2049,6 +2047,11 @@ public sealed partial class DownloadManagerService
                         break;
                     }
                     queue.Name = request.Name!.Trim();
+                    if (request.RequireUnmeteredNetwork is { } unmetered) queue.RequireUnmeteredNetwork = unmetered;
+                    if (request.RequireCharging is { } charging) queue.RequireCharging = charging;
+                    if (request.RequireBatterySaverOff is { } saverOff) queue.RequireBatterySaverOff = saverOff;
+                    if (request.SpeedLimitBytesPerSecond is { } speed) queue.SpeedLimitBytesPerSecond = speed;
+                    if (request.NotifyWhenFinished is { } notify) queue.NotifyWhenFinished = notify;
                     queue.MaxConcurrentDownloads = request.MaxConcurrentDownloads;
                     if (request.QuotaEnabled is { } enabled) queue.QuotaEnabled = enabled;
                     if (request.QuotaBytes is { } bytes) queue.QuotaBytes = bytes;
@@ -2133,10 +2136,11 @@ public sealed partial class DownloadManagerService
                         waiting.Job.Touch();
                         renamed.Add(waiting);
                     }
-                    // A download that already finished (its runner still winding up, or a torrent about to seed) stays
-                    // completed; only its seeding stops, above.
+                    // A terminal result stays terminal while its runner saves and releases its slot. In particular,
+                    // turning a failed pending retry into Paused would lose its owed retry count on the next start.
+                    // Completed torrents only stop seeding, above.
                     paused = _jobs.Values
-                        .Where(r => r.Job.IsQueued && r.Job.QueueId == queue.Id && r.Job.State != DownloadState.Completed &&
+                        .Where(r => r.Job.IsQueued && r.Job.QueueId == queue.Id && r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled) &&
                                     (r.Starting || r.Runner is { IsCompleted: false }))
                         .ToList();
                     foreach (var runtime in paused)
@@ -2186,12 +2190,14 @@ public sealed partial class DownloadManagerService
             Raise(runtime, "queued");
         }
 
+        lock (_sync) _settings.Revision++;
         await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
         foreach (var runtime in renamed)
         {
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "updated");
         }
+        _engine.UpdateQueueSpeedLimits(_settings.Queues.ToDictionary(q => q.Id, q => q.SpeedLimitBytesPerSecond));
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
@@ -2200,7 +2206,7 @@ public sealed partial class DownloadManagerService
 
     private static bool ValidQueuePolicy(QueueActionRequest request)
         => !string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 80 &&
-           request.MaxConcurrentDownloads is >= 1 and <= 16 &&
+           request.MaxConcurrentDownloads is >= 1 and <= 16 && request.SpeedLimitBytesPerSecond is not < 0 &&
            request.QuotaBytes is not (< 1 or > 10995116277760L) &&
            request.QuotaWindowHours is not (< 1 or > 8760) &&
            (request.QuotaEnabled != true || (request.QuotaBytes is not null && request.QuotaWindowHours is not null));
@@ -3458,11 +3464,25 @@ public sealed partial class DownloadManagerService
     public async Task<JobActionResponse> MoveToQueueAsync(
         Guid id,
         int queueId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? expectedQueueId = null,
+        Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            lock (_sync)
+                if (expectedQueueId is { } source && (!_jobs.TryGetValue(id, out var current) || !current.Job.IsQueued || current.Job.QueueId != source))
+                    return new JobActionResponse { Error = "The download moved out of the source queue. Refresh before trying again.", Job = _jobs.TryGetValue(id, out var found) ? Map(found.Job) : null };
+            lock (_sync)
+            {
+                if (expectedSourceQueueGeneration is { } sourceGeneration &&
+                    (!_jobs.TryGetValue(id, out var current) || !current.Job.IsQueued ||
+                     _settings.Queues.FirstOrDefault(q => q.Id == current.Job.QueueId)?.Generation != sourceGeneration))
+                    return new JobActionResponse { Error = "The source queue was deleted or replaced. Review it again." };
+                if (expectedDestinationQueueGeneration is { } destinationGeneration &&
+                    _settings.Queues.FirstOrDefault(q => q.Id == queueId)?.Generation != destinationGeneration)
+                    return new JobActionResponse { Error = "The destination queue was deleted or replaced. Review it again." };
+            }
             var moved = await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false);
             if (!moved.Ok) return moved;
 
@@ -4496,7 +4516,7 @@ public sealed partial class DownloadManagerService
 
         lock (_sync)
         {
-            if (!_initialized || _shuttingDown || _updateQuiescing || MeteredRuleHoldsLocked())
+            if (!_initialized || _shuttingDown || _updateQuiescing || !_platformTransfersAllowed || MeteredRuleHoldsLocked())
             {
                 return;
             }
@@ -4541,7 +4561,7 @@ public sealed partial class DownloadManagerService
 
                 var queue = runtime.Job.IsQueued ? _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults
                     : new DownloadQueue { Id = -1, IsRunning = true, MaxConcurrentDownloads = _settings.MaxConcurrentDownloads };
-                if (!queue.IsRunning)
+                if (!queue.IsRunning || QueueConditionWaitLocked(queue) is not null)
                 {
                     continue;
                 }
@@ -4599,6 +4619,7 @@ public sealed partial class DownloadManagerService
 
     /// <summary>Tests only: stands in for Windows' check of a finished download (L3), which a test can't make remove a file.</summary>
     internal Func<string, string?, Task<ScanOutcome>>? ScanForTesting { get; set; }
+    internal Func<string, Task<bool>>? TorrentClassificationForTesting { get; set; }
 
     /// <summary>
     /// Audit 2 L10: decided and applied under one gate, so two callers can't apply their answers out of order and leave
@@ -4756,7 +4777,9 @@ public sealed partial class DownloadManagerService
 
                 // Kept running on a metered network only because the server had not said whether it can resume: now it has,
                 // so the held rule is applied to it again, once (the flag is only ever set while the rule holds).
-                if (job.RunningOnMeteredWithoutResume && job.ResumeSupported is not null && !runtime.ResumeKnownChecked)
+                if ((job.RunningOnMeteredWithoutResume || job.IsQueued &&
+                     _settings.Queues.FirstOrDefault(q => q.Id == job.QueueId) is { } policyQueue && QueueConditionWaitLocked(policyQueue) is not null) &&
+                    job.ResumeSupported is not null && !runtime.ResumeKnownChecked)
                 {
                     runtime.ResumeKnownChecked = true;
                     resumeKnown = true;
@@ -4870,6 +4893,23 @@ public sealed partial class DownloadManagerService
             if (scan == ScanOutcome.Removed) _log?.Invoke($"Job {job.Id}: the antivirus removed its file.");
         }
 
+        // Classify the landed file before exposing Completed. Snapshot clients must see completion
+        // and its torrent handoff eligibility together, even while a file read is slow.
+        bool torrentFileReady = false;
+        if (result.Success && scan != ScanOutcome.Removed)
+        {
+            DownloadJob classification;
+            lock (_sync)
+            {
+                classification = job.Clone();
+                classification.FinalFilePath = result.FinalFilePath ?? job.FinalFilePath;
+                classification.FileName = Path.GetFileName(classification.FinalFilePath);
+                classification.ContentType = result.ContentType ?? job.ContentType;
+            }
+            if (TorrentFileRule.LooksLikeTorrent(classification))
+                torrentFileReady = await (TorrentClassificationForTesting?.Invoke(classification.FinalFilePath)
+                    ?? Task.FromResult(TorrentFileRule.IsTorrentFile(classification.FinalFilePath))).ConfigureAwait(false);
+        }
         var deletePayload = false;
         var deleteFinal = false;
         string changeType;
@@ -4926,6 +4966,7 @@ public sealed partial class DownloadManagerService
             else if (result.Success)
             {
                 job.State = DownloadState.Completed;
+                job.TorrentFileReady = torrentFileReady;
                 job.Failure = null;
                 job.CompletedAt = DateTimeOffset.UtcNow;
                 job.CancelledByPackageId = null;
@@ -5026,12 +5067,6 @@ public sealed partial class DownloadManagerService
             // (already done by the check above when Windows ran it).
             if (job.Torrent is null) { if (scan != ScanOutcome.Passed) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log); }
             else await MarkTorrentFilesAsync(job).ConfigureAwait(false);
-            // T10: a download that looks like a torrent, and whose file reads as one, is offered as a torrent. Only such a
-            // download's file is read (TorrentFileRule); every other file is left unopened.
-            if (TorrentFileRule.LooksLikeTorrent(job) && TorrentFileRule.IsTorrentFile(job.FinalFilePath))
-            {
-                lock (_sync) job.TorrentFileReady = true;
-            }
             try
             {
                 await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
@@ -5468,6 +5503,7 @@ public sealed partial class DownloadManagerService
         }
 
         AnnounceJobChange(dto, changeType);
+        AnnounceQueueFinished(dto, changeType);
     }
 
     /// <summary>
@@ -6155,6 +6191,13 @@ public sealed partial class DownloadManagerService
             Queues = settings.Queues.Select(q => new QueueDto
             {
                 Id = q.Id,
+                Generation = q.Generation,
+                ConditionWaitReason = q.ConditionWaitReason,
+                RequireUnmeteredNetwork = q.RequireUnmeteredNetwork,
+                RequireCharging = q.RequireCharging,
+                RequireBatterySaverOff = q.RequireBatterySaverOff,
+                SpeedLimitBytesPerSecond = q.SpeedLimitBytesPerSecond,
+                NotifyWhenFinished = q.NotifyWhenFinished,
                 Name = q.Name,
                 MaxConcurrentDownloads = q.MaxConcurrentDownloads,
                 IsRunning = q.IsRunning,

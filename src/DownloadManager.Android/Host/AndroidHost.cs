@@ -22,6 +22,8 @@ internal sealed class AndroidPlatform : IHostPlatform
         SupportsCompletionActions = false,
         SupportsReveal = false,
         SupportsMeteredNetworkRule = true,
+        SupportsQueueConditions = true,
+        SupportsQueueCompletionNotifications = true,
         HostKind = HostKinds.Server,
     };
 
@@ -141,7 +143,10 @@ internal sealed class AndroidHost : IAsyncDisposable
         try
         {
             // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
+            Background.InboundBackground.RegisterStartingService(service);
             await service.SetNetworkMeteredAsync(networkMetered, ct).ConfigureAwait(false);
+            var power = Background.QueuePowerMonitor.Read(Android.App.Application.Context);
+            await service.SetQueuePowerStateAsync(power.Charging, power.BatterySaver, ct).ConfigureAwait(false);
             await service.InitializeAsync(lastRunStoppedByUser, ct).ConfigureAwait(false);
             service.TrayAvailable = false;
 
@@ -169,6 +174,7 @@ internal sealed class AndroidHost : IAsyncDisposable
         }
         catch (Exception startError)
         {
+            Background.InboundBackground.ForgetStartingService(service);
             service.JobChanged -= onJob;
             service.MeteredWaitChanged -= onWait;
             service.SettingsChanged -= onSettings;

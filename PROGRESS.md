@@ -1,5 +1,43 @@
 # Progress — session handoff
 
+Android release request (2026-11-19, Codex): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major Astra audit returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. Main Sol personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
+
+
+### ANDROID.6 board-approved implementation checkpoint (2026-11-19)
+
+The owner reviewed the [Android flow review](docs/plans/android-mockups/android6-flow-review.html) and said "looks good." This approves the proposed flows as design direction and resumes their implementation; it does not accept implementation or complete ANDROID.6. Main Sol completed board browser QA at 320, 390, 736, 1024 and 1440 px with no horizontal overflow, clipped dialog/content or script errors; reference zoom opens/closes. The embedded C1/C2/C7 originals are byte-identical to the source images. These checks validate the HTML review artifact, not device, accessibility or feature behavior. Main reviewed delegated source and removed an unwired C2 overflow control and static wrong title.
+
+Ownership now: Terra implements C2 editor/dialogs and C7 grouped root/Details flows. Main Sol implements queue actions, shared completion behavior and integration, and personally reads/checks worker code. Preserve board-marked future capabilities and selected-Host versus phone-only boundaries as pending until implemented and verified. Current selected-Host work includes queue dashboard/editor and schedules; nullable shared per-queue unmetered, charging and battery-saver-off conditions; per-queue aggregate HTTP payload caps; phone power monitoring; persisted ordinary Android queue jobs with revocable Runtime execution lease; CAS settings updates and working settings subsets. Queue selection/admission and Details assignment remain in progress. Remote torrent/rclone transfers are outside these queue policies.
+Completion behavior to verify: the existing `NotifyWhenFinished` preference controls whether the queue emits its transient summary notice once all its jobs are terminal; it does not change `Queue.IsRunning`. Android releases its background execution lease when idle for both choices. Thus “Notify and finish” means notify, then let the idle background lease end; “Do nothing” suppresses the notice while the queue remains ready. Neither choice means stopping the queue, exiting the app/Host, or shutting down the device.
+
+Checks: Full Integration 2,077 passed, 32 skipped, 0 failed (`artifacts/android-app/android6/integration-final.txt`); latest Mobile 464 passed; focused Engine queue limits 4 passed; latest Android Debug build 0 errors and 2 known SDK warnings (`artifacts/android-app/android6/android-layout-check.txt`). Earlier Core 2373, Engine 213, Mobile 457, focused Runtime 8 and queue-cap 3 results are historical pre-integration checkpoints, not substitutes for later validation. The dedicated inbound33 emulator previously exercised a daily 09:00 schedule, start/stop, rotation and restored editor draft; C7 dark captures remain in `artifacts/android-app/android6/`. These do not establish current visual acceptance.
+
+Still pending: final NativeAOT and physical-phone runs; selected remote-Host behavior; Doze/battery; TalkBack; theme and side-by-side visual acceptance; future capabilities marked in the board, including Android site-logins management, roaming policy and Android proxy editor. ANDROID.6 remains IN PROGRESS and unchecked in ROADMAP; no milestone completion, release or Astra PASS is claimed. Later independent Astra review remains OPEN.
+
+### Historical ANDROID.6 local implementation checkpoint (2026-11-19)
+
+At this earlier checkpoint, owner direction was to prepare mockups before unspecified-flow implementation; the later board review and approval are recorded above. Codex prepared [Android flow review](docs/plans/android-mockups/android6-flow-review.html) with 28 proposals and embedded unchanged C1/C2/C7 references. Undefined-flow implementation is paused until owner design review. Main Sol personally reviewed worker source, removed an unwired partial C2 overflow, wired the editor title, and inspected all mockup contact sheets; Terra independently inspected all 28 rendered proposals. Browser checks at 320, 390, 736, 1024 and 1440 px found no horizontal overflow, clipped dialogs/content or script errors; reference zoom opens/closes. This verifies the review artifact, not Android accessibility or feature acceptance.
+
+Final consolidated Integration: 2077 passed, 32 skipped, 0 failed (`artifacts/android-app/android6/integration-final.txt`). Latest Mobile: 464 passed; focused engine queue limits: 4 passed. Android Debug build after pictured C1 correction and coherent C2 header: 0 errors, 2 existing SDK target warnings (`android-layout-check.txt`). No Android.6 production release or Astra audit. Earlier results below are retained as checkpoints.
+
+ANDROID.6 is IN PROGRESS and local/uncommitted; ROADMAP remains unchecked. The current selected-Host implementation includes a queue dashboard/editor and schedules; nullable shared per-queue unmetered-network, charging and battery-saver-off policy; per-queue aggregate HTTP payload caps; phone power monitoring; persisted ordinary Android queue jobs with a revocable Runtime execution lease; compare-and-swap settings updates; and working settings subsets. Queue selection/admission and Details assignment are being integrated. Remote torrent and rclone transfers are outside these queue policies.
+
+The owner asked which background behavior would be best. Sol recommended and adopted Android-managed automatic best-effort background jobs, which may be delayed by Doze or battery management, without requesting exact-alarm permission. This is the implementation recommendation, distinct from an explicit owner-selected scheduling behavior.
+
+Sol read and reviewed all delegated code, tests and documentation before integration, and personally corrected the null-clear settings merge, stale `LastResult`, raw-action crash-guard classification, Android bindings, stable queue-card updates, encoded text, UI labels/touch/keyboard/discovery. Sol owns lifecycle, Runtime and IPC integration.
+
+Earlier consolidated results: Core 2373, Engine 213 and Mobile 457 passed; focused Runtime queue-condition/lease checks passed 8; earlier queue-cap checks passed 3. These checks precede the latest queue admission/UI/membership integration and are not final consolidated verification. Debug Android build and the dedicated inbound33 emulator exercised a daily 09:00 schedule, start/stop, rotation and restored editor draft; C7 dark captures are under `artifacts/android-app/android6/`. The daily S24 FE data was untouched. Full Integration was still running at this checkpoint; expected exact Hello capability/golden compatibility failures were being corrected. No full Integration green result or Astra audit is claimed.
+
+NativeAOT, physical-phone, selected-remote-host, Doze/battery, TalkBack, theme and visual-pair acceptance remain pending. Only the dedicated inbound33 emulator was used for this Android.6 checkpoint. Later independent Astra review remains OPEN.
+
+### Codex implementation review queue (2026-11-19)
+
+Owner clarified that the existing ANDROID-CODEX-FABLE-REVIEW.md is to record
+implementations by Codex for later independent Astra review. The legacy path/IDs
+and historical audit evidence are retained; prior pending Fable assignments in
+this Codex queue are superseded. Codex records important changes, commit references,
+validation and acceptance gaps there. Later review remains OPEN; no new audit ran.
+
 ### ANDROID.5 0.0.3 delivered (2026-11-19)
 
 - Final permanent-key arm64 APK: `artifacts/android-app/signed-builds/0b2a487b31e743d68d7402399642a7aa/Inbound-android-release.apk`, 19,986,573 bytes, SHA-256 `e1dc3d59cbf5d5f5ccf3518ebc4a69002a6ec416cdcf5fa3e8b68fa09cf93bc7`; certificate matched the pinned permanent identity. Release preparation verified version 0.0.3/code 3 and made signed local bundle `artifacts/android-app/release-0.0.3`, not published. Desktop copy `C:/Users/kaank/Desktop/Inbound-android-0.0.3-updatable.apk` matched the hash.

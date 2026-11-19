@@ -1,0 +1,190 @@
+# Android handoff — Codex, 2026-11-19
+
+## Start here
+
+Read CLAUDE.md first, then GOAL.md, ROADMAP.md and PROGRESS.md. This handoff is
+orientation; those tracking documents remain authoritative. Also read
+ANDROID-CODEX-PROGRESS.md and the current instructions at the top of
+ANDROID-CODEX-FABLE-REVIEW.md, plus docs/plans/android-build-plan.md and
+docs/new-frontend-guide.md before frontend work.
+
+Worktree: C:/Users/kaank/Downloads/idm-android-trial, branch android-app.
+Main checkout: C:/Users/kaank/Downloads/idm, branch main. Do not switch or merge
+into main without the owner's instruction.
+
+## Exact checkpoint
+
+- Implementer/coordinator: Codex (OpenAI/GPT).
+- HEAD: 50df32b8cd5a51079d054f6fe3d0bc6b14f05fe1, documentation of delivery/evidence.
+- Implementation: d0816724208a0ae543cf2d84a02e4ee32f218de2, ANDROID.5 link catching
+  plus shared Runtime refresh and queue-race fixes. Both commits were pushed to
+  origin/android-app at the delivery checkpoint; no remote fetch was run for this handoff.
+- Uncommitted work when writing: review-assignment clarification in CLAUDE.md,
+  ANDROID-CODEX-FABLE-REVIEW.md, ANDROID-CODEX-PROGRESS.md, GOAL.md and PROGRESS.md.
+  This handoff and its onboarding link are also local documentation changes.
+  Preserve them. No application source changed in this handoff session.
+
+## Next implementation
+
+Next major milestone: ANDROID.6, queues, scheduler and settings (build-plan
+step 5, mockups C1/C2/C7). Inspect existing Mobile models, Host contracts, Android
+screens and agreed mockups before dividing implementation. Every displayed setting
+must work on the phone; do not expose desktop-only options or inert controls.
+Keep shared architecture, scheduling/concurrency, durability, security and final
+integration with the main agent. Exercise local-phone and selected-remote-host
+behavior, preserving the single Host authority.
+
+After integration, finish the outstanding core-screen behavior recorded under
+ANDROID.4: short failure reason in rows/full details, progress notification Open
+and grouped per-file Finished notifications with Open, and hiding summary/chips
+while selecting with a filter. Verify existing behavior before changing it.
+
+ANDROID.5 source is implemented and milestone-audited, but acceptance remains
+partial: real-account browser sign-in compatibility, rotation, TalkBack and broader
+visual checks. Light-mode picker/caught-sheet spot checks are not full acceptance.
+Do not mark ANDROID.4/.5/.7 fully complete on implementation alone. ANDROID.7
+publicly trusted TLS and phone HTTPS pairing acceptance also remain open.
+
+ANDROID.8 remote files depends on rclone packaging feasibility; ANDROID.9 TorBox,
+torrents and archives have no agreed screens. These later scopes need their own
+go-ahead. ANDROID.10 distribution/update acceptance is partly complete. Consult
+the roadmap for subsequent web-UI recommendation work.
+
+## Delegation and review
+
+Owner explicitly authorized proactive delegation (2026-11-19). Specify each
+worker's requested model and reasoning, ownership, context and verifiable
+acceptance criteria. Luna is the preferred worker for simple bounded work, at high
+reasoning; the exact available model ID `gpt-6-luna` was discovered in the host
+catalog and successfully spawned in this session. The earlier note that Luna was
+unavailable is outdated. Record requested configuration separately from any
+worker self-report; do not infer one from the other.
+
+Use `gpt-6.1-terra`, high reasoning, for scoped implementation, debugging and
+visual work. The main Sol agent owns architecture, cross-cutting work and final
+integration. It reads and checks all subagent code and verifies requirements and
+checks before integrating delegated results. Keep complex concurrency,
+durability, security, IPC protocol and architecture work with the main agent.
+
+Astra (available gpt-6.2-astra) audits major milestones after implementation and
+consolidated checks. Owner asked for fewer audit exchanges; do not audit each
+small change. Fix confirmed findings, then verify the fixes until PASS.
+
+Continue ANDROID-CODEX-FABLE-REVIEW.md: legacy filename and FABLE-CODEX identifiers
+stay for traceability. Owner clarified on 2026-11-19 that Codex is the implementer
+and Astra reviews implementations later. Older pending Fable assignments there
+are superseded; historical verdicts retain their attribution. Record important
+changes, commits, rationale, actual checks, findings/fixes and acceptance gaps.
+Later independent review remains OPEN despite existing milestone Astra PASS.
+
+## Delivery and updater
+
+- Release 0.0.3/code 3, permanent-key arm64 NativeAOT, min API 31/target 35.
+- Desktop: C:/Users/kaank/Desktop/Inbound-android-0.0.3-updatable.apk.
+- SHA-256: e1dc3d59cbf5d5f5ccf3518ebc4a69002a6ec416cdcf5fa3e8b68fa09cf93bc7.
+- Source APK: artifacts/android-app/signed-builds/0b2a487b31e743d68d7402399642a7aa/Inbound-android-release.apk.
+- Prepared signed local bundle: artifacts/android-app/release-0.0.3; NOT published.
+- Installed on S24 FE via install -r, data preserved, installed APK hash matched,
+  launch succeeded. Pre-install package unexpectedly reported 0.0.1/code 1 despite
+  earlier 0.0.2 evidence; cause unknown. Do not invent an explanation.
+- Public Android release/feed remains 0.0.2 at the last verified checkpoint:
+  android-v0.0.2 and android-latest in Kaan88/inbound. Desktop latest is unchanged.
+  Earlier explicit publication approval named 0.0.2; obtain authorization for a
+  newer public release rather than claiming it already exists.
+- Updater checks on genuine cold process launches and daily, downloads a verified
+  signed offer automatically and prompts for Android's system installer. Fixture
+  1→2 install and real-feed current-version check passed; public newer-offer
+  upgrade acceptance remains open. System install approval is still required.
+
+## Security and shared-runtime traps
+
+Remote cookies require explicit per-download consent naming the selected server
+before metadata probes as well as admission. Changing host invalidates consent.
+Cookies are transient, same-origin only; never persist them in UI saved state or
+logs. Capture only proven GET requests; ambiguous/subframe POST/redirect provenance
+must not become a guessed authenticated GET. Missing observed Referer stays absent.
+Captured admission retries require both stable ClientRequestId and OwnerExtensionId.
+
+Refresh uses a private candidate and durable save before publishing live state;
+keep filename reservations, AddressRefreshPending, caller-policy rechecks and the
+settings → per-job address gate → persistence → sync lock order intact. Cancel
+must not wait behind the global settings gate. Once durable commit starts it
+finishes despite cancellation. Clearing the refresh guard must wake scheduling
+on success and rollback. Preserve the late failed-runner queue-retry fix.
+
+## Evidence and test scope
+
+Raw ignored evidence: artifacts/android-app/codex-signing/.
+Reusable loopback browser fixture: tools/AndroidApp/link-fixture/.
+
+- Final Mobile 408 passed (android5-mobile-final.txt), Core 2373 and Engine 210 passed.
+- Full Integration: 2059 passed, 32 skipped, one failed BEFORE the queue fix.
+  No clean full-suite rerun after that fix is claimed.
+- Afterward: exact failure plus two regressions passed 3, queue policy passed 10,
+  final refresh/reservation/wakeup/cancel checks passed 16
+  (android5-reservation-wakeup-tests.txt).
+- ANDROID.5 final Astra source audit PASS; auditor read source and recorded test
+  evidence, did not independently run the phone acceptance tests.
+- NativeAOT fixture authenticated catch and refresh matched payload hash; refresh
+  reused the existing job. Cancellation, Later, filtering/selection, subframe POST
+  refusal and remote-cookie-consent cancellation have recorded evidence.
+- GitHub sign-in form rendered; no credentials entered, so actual sign-in unverified.
+
+Run focused checks for routine changes, consolidated relevant checks at milestones.
+Shared Host/runtime tests matter to both Android and Windows. Some full integration
+tests launch isolated Windows Host processes; GUI/desktop notifications are not
+required for routine Android checks. Failure/update notices bypass the completion
+notification toggle: isolation gap is recorded for later review. Do not disturb
+installed Windows Host processes or kill by name; verify owned PID/path first.
+
+## Devices, tools and signing
+
+Read the device/runbook details in ANDROID-CODEX-PROGRESS.md before using adb.
+Start Android executables from Git Bash, pin ANDROID_SERIAL and use
+MSYS_NO_PATHCONV=1. Rediscover serials/endpoints; do not reuse stale wireless IPs.
+SDK: C:/Users/kaank/AppData/Local/Android/Sdk.
+JDK: C:/Users/kaank/tools/jdk/jdk-21.0.13+9.
+
+S24 FE SM-S721B is the daily phone. Preserve data/settings. Mi 8 Lite is Android 11;
+only designated test builds may lower min API to 30. A54 was lent for one test;
+ask before using again. inbound33 emulator and owned fixture servers were stopped
+at the previous cleanup; rediscover actual state. Emulator theme restored to
+Follows System. No physical-phone settings were changed.
+
+Signing inputs already exist; do not regenerate keys. Encrypted backup in private
+Kaan88/secrets was verified against local keystore/password/update key entirely
+in memory. Follow its README and existing runbook; never print keys or write
+plaintext exports. Sign through existing tooling using password-file references,
+not secret command arguments or MSBuild environment variables. Always validate a
+fresh production APK using the signing/build tooling and check-apk.py before
+install/delivery. Never deliver the x64 test APK or stale arm64 artifacts.
+
+## Handoff verification
+
+This session changed documentation only. Check git diff --check and inspect the
+actual diff before committing. No application tests or device actions are needed
+for this handoff. Keep tracking notes and the review queue current as work resumes.
+
+
+## ANDROID.6 board-approved implementation handoff (2026-11-19, Codex)
+
+The owner reviewed `docs/plans/android-mockups/android6-flow-review.html` and said "looks good." The board is approved as design direction and implementation has resumed. This does not accept feature behavior or complete the milestone. The earlier design-first pause is historical; it no longer blocks implementation of the reviewed flows. Preserve pending/future capability labels and local-phone versus selected-Host ownership.
+
+Ownership: Terra at high reasoning owns C2 editor/dialogs and C7 grouped root/Details implementation. Main Sol owns queue actions, shared completion behavior and integration, and personally reads/checks all worker code. Main verifies requirements and consolidated checks before integrating.
+
+Completion note: the existing `NotifyWhenFinished` preference controls whether the queue emits its transient summary when all its jobs are terminal; it does not change `Queue.IsRunning`. Android releases its background execution lease when idle for both choices. Thus “Notify and finish” means notify, then let the idle background lease end; “Do nothing” suppresses the notice while the queue remains ready. Neither choice stops the queue, exits the app/Host or shuts down the device.
+Current evidence: Full Integration 2,077 passed / 32 skipped / 0 failed; latest Mobile 464 and focused Engine queue 4 passed; latest Android Debug build 0 errors / 2 known SDK warnings. HTML-board browser QA and byte-identical C1/C2/C7 references verify the artifact only. Earlier Core/Engine/Mobile/Runtime and inbound33 results are historical checkpoints. NativeAOT, physical phone, selected remote Host, Doze/battery, TalkBack, theme/visual pairs and Astra audit remain pending. ANDROID.6 remains IN PROGRESS, local/uncommitted, ROADMAP unchecked; no feature acceptance, milestone completion, public release or Astra PASS is claimed. Public Android feed remains 0.0.2; local Debug 0.0.4 is not published.
+## ANDROID.6 flow/retry checkpoint (2026-11-19, Codex)
+
+Main Sol personally reviewed every worker change. Current reviewed flows cover C1 queue create/rename/delete/move, C2 sheets/times/limits/finish choice and supported C7 grouped pages. Shared protocol additions are `NotifyWhenFinished`, `RemoveSchedules` and `ExpectedQueueId`.
+
+Focused approved-flow checks: 6 passed. Before the retry fix, deterministic StopThenStartWhileFailedRunIsSaving cases with limits 1 and 2 both failed (`failed` became `paused`; `artifacts/android-app/android6/retry-race-before-fix.txt`). Main fixed queue stop to preserve failed/cancelled terminal state; related focused checks passed 11 (`retry-race-fixed.txt`). Consolidated Core 2373, Engine 214 and Mobile 464 passed. Initial Integration had 2081 passed, 32 skipped and the exact retry test failed. Fixed full Integration rerun remains running (session 60371); Server suite has not run. Approved UI/icons Android Debug build passed with two known SDK warnings; latest Done-button rebuild runs as session 25681.
+
+API 33 emulator verified blank-name validation, stopped Night-QA creation, daily 09:00 save, native time picker and custom 500 speed draft surviving two rotations, and free-rotation restoration. S24 FE untouched. ANDROID.6 remains IN PROGRESS, local/uncommitted and unchecked. No clean full rerun, Server consolidation, NativeAOT/phone acceptance, Astra audit or feature-completion claim.
+## ANDROID.6 consolidated-checkpoint handoff (2026-11-19, Codex)
+
+- Full Integration: 2,085 passed / 32 skipped / 0 failed. Core 2,373, Engine 214, Mobile 464 and Server 208 passed. Full Release solution build: 0 errors / 29 warnings. Evidence: `artifacts/android-app/android6/approved-integration-final-green.txt`, `approved-core-full.txt`, `approved-engine-full.txt`, `approved-mobile-full.txt`, `approved-server-full.txt`, `approved-solution-build.txt`.
+- Checkpoint fix: controlled old-helper test returned the initial zero checkpoint with a nonzero save blocked; main changed synchronization to actual Runner-idle state while retaining checkpoint/payload-prefix assertions. Focused checkpoint/retry suite passed 7 (`checkpoint-wait-before-fix.txt`, `checkpoint-retry-final.txt`).
+- Signed NativeAOT arm64 candidate passed `check-apk --release` (permanent certificate, min 31, target 35, arm64-only, non-debuggable): `artifacts/android-app/signed-builds/3e8a0b3ca7384b5d956da8e2d8e32d36/Inbound-android-release.apk`, 20,578,695 bytes, SHA-256 `d85721f7a1f7f82dc4c7d753fc58828a527184f16c4092ee431963d93b99d00d`. Pre-audit and unpublished. The one-copy Android timing-note fix was made after this build, so rebuild the final candidate.
+- Separate NativeAOT Release-test x64 checker/install/launch passed on owned inbound33 API 33 (1,401 ms; not a benchmark). Isolated remote QA persisted create/rename and preserved local queues on switch-back. S24 FE untouched. Main NativeAOT/background schedule QA is ongoing.
+- Astra audit `android6_astra_audit` is running (requested gpt-6.2-astra, high); main verifies findings. No Astra PASS, public release, physical-phone acceptance or feature-completion claim. Public feed remains 0.0.2; ANDROID.6 stays IN PROGRESS and unchecked.

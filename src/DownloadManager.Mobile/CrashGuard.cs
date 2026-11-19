@@ -70,6 +70,21 @@ public static class CrashGuard
         or DownloadManager.Contracts.MessageTypes.JobResume or DownloadManager.Contracts.MessageTypes.JobRetry
         or DownloadManager.Contracts.MessageTypes.JobRedownload or DownloadManager.Contracts.MessageTypes.JobsResumeAll;
 
+    /// <summary>Only explicit client starts lift the guard; queue policy and stop operations never do.</summary>
+    public static bool IsUserStart(DownloadManager.Contracts.IpcMessage request)
+    {
+        if (IsUserStart(request.Type)) return true;
+        if (request.Payload is not { ValueKind: System.Text.Json.JsonValueKind.Object } payload ||
+            !payload.TryGetProperty("action", out var action) || action.ValueKind != System.Text.Json.JsonValueKind.String) return false;
+        var expected = request.Type switch
+        {
+            DownloadManager.Contracts.MessageTypes.QueueAction => "start",
+            DownloadManager.Contracts.MessageTypes.GroupAction => "resume",
+            _ => null,
+        };
+        return expected is not null && string.Equals(action.GetString()?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>The user resumed: the guard starts over.</summary>
     public static CrashGuardState Reset(CrashGuardState s) => s with { Count = 0 };
 

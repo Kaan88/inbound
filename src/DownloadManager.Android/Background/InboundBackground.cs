@@ -45,6 +45,29 @@ internal static class InboundBackground
     public static IKeepAlive KeepAlive => _keep ?? throw new InvalidOperationException("not initialised");
 
     public static bool KeepAliveRunning => _keep?.Running ?? false;
+    internal static bool TransferExecutionAllowed => Visible || KeepAliveRunning || QueueWorkScheduler.Running;
+    private static readonly object PermissionGate = new();
+    private static DownloadManager.Runtime.DownloadManagerService? _permissionService;
+    internal static void RegisterStartingService(DownloadManager.Runtime.DownloadManagerService service)
+    {
+        lock (PermissionGate) _permissionService = service;
+        RefreshTransferPermission();
+    }
+    internal static void ForgetStartingService(DownloadManager.Runtime.DownloadManagerService service)
+    {
+        lock (PermissionGate) { if (ReferenceEquals(_permissionService, service)) _permissionService = null; }
+    }
+    internal static void RefreshTransferPermission()
+    {
+        lock (PermissionGate)
+        {
+            if ((_permissionService ?? _host?.Service) is not { } service) return;
+            var update = service.SetPlatformTransfersAllowedAsync(TransferExecutionAllowed);
+            _ = update.ContinueWith(t => Log.Warn(InboundApplication.Tag, "transfer permission: " + t.Exception?.GetBaseException().GetType().Name),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        }
+        QueueWorkScheduler.RequestArm();
+    }
 
     /// <summary>The downloads screen is visible (between MainActivity's OnStart and OnStop).</summary>
     public static bool Visible
@@ -72,9 +95,10 @@ internal static class InboundBackground
         {
             _app ??= app;
             if (ReferenceEquals(_host, host)) return;
-            if (_host is not null) _host.Activity.Changed -= OnChanged;
+            if (_host is not null) { _host.Activity.Changed -= OnChanged; _host.Service.QueueFinished -= OnQueueFinished; }
             _host = host;
             host.Activity.Changed += OnChanged;
+            host.Service.QueueFinished += OnQueueFinished;
         }
 
         // The boot notice (API 31 to 33) said what would resume: the Host is up now, which resumes it.
@@ -93,8 +117,10 @@ internal static class InboundBackground
             if (visible) _hiddenLogged = false;
         }
 
+        RefreshTransferPermission();
         if (visible)
         {
+            QueuePowerMonitor.AppVisible();
             // API 31 to 33: a "not metered" report held back while the app was hidden goes to the Host now.
             NetworkMonitor.AppVisible();
             Evaluate();
@@ -143,6 +169,15 @@ internal static class InboundBackground
         Evaluate();
     }
 
+    private static void OnQueueFinished(object? sender, DownloadManager.Runtime.QueueFinishedEventArgs notice)
+    {
+        Context? app;
+        lock (Gate) app = ReferenceEquals(sender, _host?.Service) ? _app : null;
+        if (app is not null) Notifications.PostQueueFinished(app, notice);
+        // Lifecycle already releases an idle session; another queue's active work keeps its own lease.
+        Evaluate();
+    }
+
     private static void OnChanged() => Evaluate();
 
     /// <summary>The user sent a command that starts downloads (through the app's own connection): a tripped guard starts over.</summary>
@@ -166,6 +201,7 @@ internal static class InboundBackground
     {
         try { EvaluateCore(); }
         catch (System.Exception ex) { Log.Error(InboundApplication.Tag, "background: " + ex); }
+        finally { RefreshTransferPermission(); }
     }
 
     private static void EvaluateCore()
@@ -176,7 +212,9 @@ internal static class InboundBackground
             var app = _app;
             var s = _host.Activity.Summary;
 
-            foreach (var f in _host.Activity.TakeFinished()) Notifications.PostFinished(app, f);
+            var finished = _host.Activity.TakeFinished();
+            if (_host.Service.GetSettings().NotifyOnCompletion)
+                foreach (var f in finished) Notifications.PostFinished(app, f);
 
 #if INBOUND_TEST_BUILD
             if (_lastKeepLogged != s.KeepAlive)

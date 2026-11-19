@@ -762,6 +762,7 @@ public sealed class JsonSettingsStore : ISettingsStore
 
             // T14: before it, "folders by category" decided for torrents too. Settings saved without the torrent switch
             // keep that choice for torrents, and (with no torrent folder in them) the same folders, so nothing moves.
+            var queueIdentitiesPending = QueuesNeedIdentityMigration(json);
             var torrentFoldersPending = !HasProperty(json, nameof(AppSettings.UseTorrentCategoryFolders));
             if (torrentFoldersPending)
             {
@@ -783,7 +784,7 @@ public sealed class JsonSettingsStore : ISettingsStore
                 // SaveAsync keeps it until a new password is set.
             }
 
-            if (heldProviderLink || closeWindowDefaultPending || torrentFoldersPending || fromNewerBuild)
+            if (heldProviderLink || closeWindowDefaultPending || torrentFoldersPending || queueIdentitiesPending || fromNewerBuild)
             {
                 await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
@@ -852,6 +853,21 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             return false;
         }
+    }
+
+    // Generate once and atomically save legacy queue identities before returning any snapshot.
+    private static bool QueuesNeedIdentityMigration(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var queues = document.RootElement.EnumerateObject().FirstOrDefault(p => p.Name.Equals(nameof(AppSettings.Queues), StringComparison.OrdinalIgnoreCase)).Value;
+        if (queues.ValueKind != JsonValueKind.Array || queues.GetArrayLength() == 0) return true;
+        foreach (var queue in queues.EnumerateArray())
+        {
+            if (queue.ValueKind != JsonValueKind.Object) return true;
+            var value = queue.EnumerateObject().FirstOrDefault(p => p.Name.Equals(nameof(DownloadQueue.Generation), StringComparison.OrdinalIgnoreCase)).Value;
+            if (value.ValueKind != JsonValueKind.String || !Guid.TryParse(value.GetString(), out var generation) || generation == Guid.Empty) return true;
+        }
+        return false;
     }
 
     private static bool IsPublicKey(string pem)
@@ -1042,6 +1058,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         for (var i = 0; i < settings.Queues.Count; i++)
         {
             var queue = settings.Queues[i];
+            if (queue.Generation == Guid.Empty) queue.Generation = Guid.NewGuid();
             if (!seenQueueIds.Add(queue.Id))
             {
                 queue.Id = seenQueueIds.Count == 0 ? 0 : seenQueueIds.Max() + 1;

@@ -41,6 +41,7 @@ public sealed partial class DownloadManagerService
     private void ApplySpeedLimitsAndRate(AppSettings settings)
     {
         ApplySpeedLimits(settings);
+        _engine.UpdateQueueSpeedLimits(settings.Queues.ToDictionary(q => q.Id, q => q.SpeedLimitBytesPerSecond));
         UpdateProgressRate();
     }
 

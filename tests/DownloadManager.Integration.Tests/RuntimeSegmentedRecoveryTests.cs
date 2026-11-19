@@ -71,18 +71,11 @@ public sealed partial class RuntimeServiceTests
     /// <summary>The checkpoint once a paused job's transfer has wound down and stopped writing it.</summary>
     private static async Task<DownloadCheckpoint> SettledCheckpointAsync(ServiceContext ctx, Guid id)
     {
-        var store = new JsonCheckpointStore(ctx.Paths);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
-        long? previous = null;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            await Task.Delay(300);
-            var checkpoint = await store.LoadAsync(id);
-            if (checkpoint is not null && checkpoint.CompletedBytes == previous) return checkpoint;
-            previous = checkpoint?.CompletedBytes;
-        }
-
-        throw new TimeoutException("The checkpoint kept changing after the job was paused.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try { await ctx.Service.WaitForTransferIdleForTestingAsync(id, timeout.Token); }
+        catch (OperationCanceledException) { throw new TimeoutException("The transfer did not finish its stopped checkpoint."); }
+        return await new JsonCheckpointStore(ctx.Paths).LoadAsync(id)
+            ?? throw new InvalidOperationException("The stopped transfer has no durable checkpoint.");
     }
 
     private static string Sha256Of(int seed, int size)

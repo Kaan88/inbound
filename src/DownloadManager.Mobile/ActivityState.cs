@@ -184,7 +184,7 @@ public sealed class ActivityState : IDisposable
     private void StoreQueues(IReadOnlyList<QueueDto> queues)
     {
         _queueRuns.Clear();
-        foreach (var q in queues) _queueRuns[q.Id] = q.IsRunning;
+        foreach (var q in queues) _queueRuns[q.Id] = q.IsRunning && q.ConditionWaitReason is null;
     }
 
     /// <summary>The <c>network.wait</c> push: downloads started or stopped waiting for a not-metered network.</summary>

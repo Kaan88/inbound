@@ -26,6 +26,12 @@ public sealed record PlatformCapabilities
     /// </summary>
     public bool SupportsMeteredNetworkRule { get; init; }
 
+    /// <summary>The platform reports charging and battery saver before initialization and on changes.</summary>
+    public bool SupportsQueueConditions { get; init; }
+
+    /// <summary>The platform consumes queue-finished notices and can show a summary notification.</summary>
+    public bool SupportsQueueCompletionNotifications { get; init; }
+
     /// <summary><c>update.*</c> check, download and install the signed Windows installer.</summary>
     public bool SupportsUpdater { get; init; }
 

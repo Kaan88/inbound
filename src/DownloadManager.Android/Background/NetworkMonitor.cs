@@ -148,7 +148,7 @@ internal static class NetworkMonitor
                     bool defer = false, wasDeferred, done = false;
                     // Read before Gate: InboundBackground reads this class under its own lock (lock order).
                     var visible = InboundBackground.Visible;
-                    var keepAlive = InboundBackground.KeepAliveRunning;
+                    var keepAlive = InboundBackground.KeepAliveRunning || QueueWorkScheduler.Running;
                     lock (Gate)
                     {
                         if (_host is null) { _pumping = false; return; }

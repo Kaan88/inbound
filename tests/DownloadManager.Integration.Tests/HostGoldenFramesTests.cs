@@ -177,6 +177,7 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
 
             text = text.Replace(host.Instance, "<instance>", StringComparison.Ordinal);
             text = text.Replace($"\"hostVersion\":\"{Protocol.HostVersion}\"", "\"hostVersion\":\"<version>\"", StringComparison.Ordinal);
+            text = QueueGenerations().Replace(text, "\"generation\":\"<generation>\"");
             text = Guids().Replace(text, match =>
             {
                 if (match.Value.Trim('-').All(c => c is '0' or '-')) return match.Value;
@@ -206,6 +207,9 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
 
     [GeneratedRegex("[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")]
     private static partial Regex Guids();
+
+    [GeneratedRegex("\"generation\":\"[0-9a-fA-F-]{36}\"")]
+    private static partial Regex QueueGenerations();
 
     [GeneratedRegex("\"browserIntegration\":\"[^\"]*\"")]
     private static partial Regex BrowserIntegration();

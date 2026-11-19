@@ -35,6 +35,10 @@ public sealed partial class MainActivity : AppCompatActivity
     private NewDownloadScreen? _newDownload;
     private PrefsStore? _prefs;
     private bool _onSettings;
+    private bool _onQueues;
+    private QueuesScreen? _queues;
+    private QueueEditorScreen? _queueEditor;
+    private HostSettingsScreen? _hostSettings;
     private readonly Dictionary<Guid, RowGroup> _lastGroup = new();
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -69,14 +73,19 @@ public sealed partial class MainActivity : AppCompatActivity
         InsetsListener.Pad(downloadsRoot, top: true, bottom: false);
         _downloads = new DownloadsScreen(this, downloadsRoot, _model);
         _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance);
+        _queues = new QueuesScreen(this, FindViewById<View>(Resource.Id.queues_root)!, _model,
+            new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), OpenQueueEditor);
+        _hostSettings = new HostSettingsScreen(this, FindViewById<View>(Resource.Id.settings_content)!, _model,
+            new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote));
         _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!);
         _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
-            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings), PerformBack);
+            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings || _onQueues), PerformBack);
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
         var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
-        bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId == Resource.Id.nav_settings); e.Handled = true; };
+        bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId); e.Handled = true; };
         // A recreated activity (theme or dynamic colour changed) comes back on the tab it was on.
         if (savedInstanceState?.GetBoolean("on_settings") == true) bottom.SelectedItemId = Resource.Id.nav_settings;
+        else if (savedInstanceState?.GetBoolean("on_queues") == true) bottom.SelectedItemId = Resource.Id.nav_queues;
         _model.Rows.CollectionChanged += OnRowsForFinished;
         ShowFirstRunIfNeeded();
         RestorePage(savedInstanceState);
@@ -126,13 +135,27 @@ public sealed partial class MainActivity : AppCompatActivity
     {
         base.OnSaveInstanceState(outState);
         outState.PutBoolean("on_settings", _onSettings);
+        outState.PutBoolean("on_queues", _onQueues);
+        var queueActions = new Bundle(); _queues?.Save(queueActions);
+        queueActions.PutString("host_stamp", _linkHostStamp); outState.PutBundle("queue_actions", queueActions);
         // The open page comes back after a rotation or a process death, with what was typed into it (finding 16).
         if (_nav?.PageOpen != true) return;
-        if (_details is not null) outState.PutString("details_job", _details.Row.Id.ToString());
+        if (_hostSettings?.OpenDetailId is { } detail)
+        {
+            outState.PutString("host_settings_detail", detail);
+            outState.PutString("host_settings_stamp", _linkHostStamp);
+            var settingsDraft = new Bundle(); _hostSettings.Save(settingsDraft); outState.PutBundle("host_settings_draft", settingsDraft);
+        }
+        else if (_queueEditor is not null)
+        {
+            var queueDraft = new Bundle(); _queueEditor.Save(queueDraft); outState.PutBundle("queue_editor", queueDraft);
+        }
+        else if (_details is not null) outState.PutString("details_job", _details.Row.Id.ToString());
         else if (_newDownload is { Transient: false })
         {
             var page = new Bundle();
             _newDownload.Save(page);
+            page.PutString("host_stamp", _linkHostStamp);
             outState.PutBundle("new_download", page);
         }
     }
@@ -140,7 +163,33 @@ public sealed partial class MainActivity : AppCompatActivity
     private void RestorePage(Bundle? saved)
     {
         if (saved is null || _model is null) return;
-        if (saved.GetBundle("new_download") is { } page) { OpenNewDownload(null, page); return; }
+        if (saved.GetBundle("queue_actions") is { } actions && actions.GetString("host_stamp") == _linkHostStamp)
+        {
+            void RestoreActions() { _model.FirstSnapshotShown -= RestoreActions; _queues?.Restore(actions); }
+            _model.FirstSnapshotShown += RestoreActions;
+        }
+        if (saved.GetString("host_settings_detail") is { } detail && saved.GetString("host_settings_stamp") == _linkHostStamp)
+        {
+            void RestoreSettings()
+            {
+                _model.FirstSnapshotShown -= RestoreSettings;
+                _hostSettings?.OpenDetail(detail);
+                if (saved.GetBundle("host_settings_draft") is { } settingsDraft) _hostSettings?.Restore(settingsDraft);
+            }
+            _model.FirstSnapshotShown += RestoreSettings;
+            return;
+        }
+        if (saved.GetBundle("queue_editor") is { } draft && draft.GetString("host_stamp") == _linkHostStamp)
+        {
+            void RestoreQueue()
+            {
+                _model.FirstSnapshotShown -= RestoreQueue;
+                OpenQueueEditorDraft(draft);
+            }
+            _model.FirstSnapshotShown += RestoreQueue;
+            return;
+        }
+        if (saved.GetBundle("new_download") is { } page && page.GetString("host_stamp") == _linkHostStamp) { OpenNewDownload(null, page); return; }
         if (!Guid.TryParse(saved.GetString("details_job"), out var id)) return;
         // Its row is known once the snapshot is shown; a download that is gone meanwhile has no page to come back to.
         var model = _model;
@@ -219,27 +268,41 @@ public sealed partial class MainActivity : AppCompatActivity
         _browser?.Resume();
     }
 
-    private void ShowTab(bool settings)
+    private void ShowTab(int tab)
     {
-        if (_onSettings == settings) return;
-        _onSettings = settings;
+        var settings = tab == Resource.Id.nav_settings;
+        var queues = tab == Resource.Id.nav_queues;
+        if (_onSettings == settings && _onQueues == queues) return;
         var downloads = FindViewById<View>(Resource.Id.downloads_root)!;
         var settingsPage = FindViewById<View>(Resource.Id.settings_root)!;
-        if (Motion.Reduced(this))
-        {
-            // With animations removed the fade through would be a cut; a cross-fade by hand instead (finding 21).
-            var (from, to) = settings ? (downloads, settingsPage) : (settingsPage, downloads);
-            Motion.CrossFade(from, to, 150, () => from.Visibility = ViewStates.Gone);
-        }
+        var queuesPage = FindViewById<View>(Resource.Id.queues_root)!;
+        var from = _onSettings ? settingsPage : _onQueues ? queuesPage : downloads;
+        var to = settings ? settingsPage : queues ? queuesPage : downloads;
+        _onSettings = settings; _onQueues = queues;
+        _queues?.SetVisible(queues);
+        if (Motion.Reduced(this)) Motion.CrossFade(from, to, 150, () => from.Visibility = ViewStates.Gone);
         else
         {
-            // Navigation: 200 ms fade through.
             AndroidX.Transitions.TransitionManager.BeginDelayedTransition(FindViewById<ViewGroup>(Resource.Id.pages)!, Motion.Fade());
-            downloads.Visibility = settings ? ViewStates.Gone : ViewStates.Visible;
-            settingsPage.Visibility = settings ? ViewStates.Visible : ViewStates.Gone;
+            from.Visibility = ViewStates.Gone; to.Visibility = ViewStates.Visible;
         }
-
         _nav?.UpdateBack();
+    }
+
+    private void OpenQueueEditor(DownloadManager.Contracts.QueueDto? queue)
+    {
+        if (_nav is null || _model is null || _connection is null || _nav.PageOpen || !_model.SnapshotShown) return;
+        _queueEditor = new QueueEditorScreen(this, _model, new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), queue);
+        _nav.Open(_queueEditor.Root, null, null, OnPageClosed, queue is null ? "New queue" : queue.Name,
+            () => { _queueEditor?.RequestClose(); return true; }, () => true);
+    }
+
+    private void OpenQueueEditorDraft(Bundle draft)
+    {
+        if (_nav is null || _model is null || _connection is null || _nav.PageOpen) return;
+        _queueEditor = new QueueEditorScreen(this, _model, new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), null, draft);
+        _nav.Open(_queueEditor.Root, null, null, OnPageClosed, "Queue and schedule",
+            () => { _queueEditor?.RequestClose(); return true; }, () => true);
     }
 
     private void PerformBack(BackStep step)
@@ -317,6 +380,21 @@ public sealed partial class MainActivity : AppCompatActivity
     /// <summary>Closes <paramref name="page"/> if it is still the open page (a late call for a page already gone does nothing).</summary>
     internal void CloseRowPage(View page) => _nav?.Close(page);
 
+    internal bool OpenHostSettingsPage(View page, string title, Action closed)
+    {
+        if (_nav is null || _nav.PageOpen || IsFinishing || IsDestroyed) return false;
+        _nav.Open(page, null, null, () => { closed(); OnPageClosed(); }, title);
+        return true;
+    }
+
+    internal void OpenBrowserFromSettings(View page)
+    {
+        if (_nav?.Page != page || IsFinishing || IsDestroyed) return;
+        _afterLinkPage = () => OpenBrowser();
+        _nav.Close(page);
+    }
+
+
     /// <summary>The row card a page is open from (kept hidden by the list until the page has closed).</summary>
     internal View? HiddenCard => _nav?.HiddenCard;
 
@@ -324,6 +402,8 @@ public sealed partial class MainActivity : AppCompatActivity
 
     private void OnPageClosed()
     {
+        _queueEditor?.Dispose();
+        _queueEditor = null;
         _details?.Dispose();
         _details = null;
         _newDownload?.Dispose();
@@ -434,6 +514,9 @@ public sealed partial class MainActivity : AppCompatActivity
         _nav?.Dispose();
         _details?.Dispose();
         _details = null;
+        _queueEditor?.Dispose();
+        _queues?.Dispose();
+        _hostSettings?.Dispose();
         _downloads?.Dispose();
         _model?.Dispose();
         if (_connection is not null) _ = _connection.DisposeAsync().AsTask();

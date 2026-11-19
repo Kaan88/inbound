@@ -11,8 +11,8 @@
     <OutputType>Exe</OutputType>
     <ApplicationId>app.inbound.android</ApplicationId>
     <ApplicationTitle>Inbound</ApplicationTitle>
-    <ApplicationVersion>3</ApplicationVersion>
-    <ApplicationDisplayVersion>0.0.3</ApplicationDisplayVersion>
+    <ApplicationVersion>4</ApplicationVersion>
+    <ApplicationDisplayVersion>0.0.4</ApplicationDisplayVersion>
     <RootNamespace>Inbound.App</RootNamespace>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>

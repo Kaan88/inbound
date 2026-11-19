@@ -35,6 +35,7 @@ public sealed class InboundApplication : Application
         InboundBackground.Init(this);
         // Before any Host: its first report of the network comes from here.
         NetworkMonitor.Init(this);
+        QueuePowerMonitor.Init(this);
 #if INBOUND_RELEASE_ENV
         // The sockets read this switch once, at first use (before the Host starts). The project also lists it as an AndroidEnvironment
         // file; this makes sure it is set when that file is not applied (NativeAOT).
@@ -75,7 +76,9 @@ public sealed class InboundApplication : Application
                 // The crash guard's Resume restarts what this start paused (not downloads the user had paused before).
                 if (guardPaused) ResumeSet.Add(app, host.Service.PausedAtStart, "crash guard start");
                 NetworkMonitor.OnHostStarted(host, metered);
+                QueuePowerMonitor.OnHostStarted(host);
                 InboundBackground.OnHostStarted(app, host);
+                QueueWorkScheduler.OnHostStarted(app, host);
                 return host;
             });
         }

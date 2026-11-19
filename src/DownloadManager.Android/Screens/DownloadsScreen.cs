@@ -159,6 +159,8 @@ internal sealed class DownloadsScreen
         var sel = _list.Selecting;
         _searchBar.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
         _selectionBar.Visibility = sel ? ViewStates.Visible : ViewStates.Gone;
+        _page.FindViewById<View>(Resource.Id.summary)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
+        _page.FindViewById<View>(Resource.Id.chips_scroll)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
         _selTitle.Text = _list.SelectionTitle;
         _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;

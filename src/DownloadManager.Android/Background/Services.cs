@@ -66,6 +66,7 @@ internal sealed class SessionJobService : JobService
         // This run is over whatever the reason: it is detached (a cancel that raced the start would otherwise leave a dead run attached and
         // Running true). Detach acts on this run only, so the new run of our own reschedule stays attached.
         (InboundBackground.KeepAlive as UidtKeepAlive)?.Detach(this, p);
+        InboundBackground.RefreshTransferPermission();
         // Our own reschedule or cancel: nothing to reschedule (a reschedule's new run follows at once).
         if (reason == (int)StopReason.CancelledByApp)
         {
@@ -110,6 +111,7 @@ internal sealed class KeepAliveService : Service
     public override void OnDestroy()
     {
         (InboundBackground.KeepAlive as ForegroundKeepAlive)?.Gone(_gen);
+        InboundBackground.RefreshTransferPermission();
         base.OnDestroy();
     }
 }

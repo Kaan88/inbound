@@ -140,7 +140,7 @@ internal sealed class InProcessSession : IClientSession
 }
 
 /// <summary><see cref="IHostConnection"/> over an <see cref="InProcessSession"/> and the in-process dispatcher.</summary>
-/// <param name="onUserStart">Told before a command of the user that starts downloads (<see cref="CrashGuard.IsUserStart"/>): it lifts a tripped crash guard.</param>
+/// <param name="onUserStart">Told before a command of the user that starts downloads (<see cref="CrashGuard.IsUserStart(DownloadManager.Contracts.IpcMessage)"/>): it lifts a tripped crash guard.</param>
 internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, Action<Exception>? onError = null, Action? onUserStart = null) : IHostConnection
 {
     private readonly InProcessSession _session = new() { OnError = onError };
@@ -169,7 +169,7 @@ internal sealed class InProcessHostConnection(HostCommandDispatcher dispatcher, 
         // A closed screen sends nothing to the Host (a command after dispose ran there before).
         ObjectDisposedException.ThrowIf(_session.Closed, this);
         // The user starting downloads is what lifts a tripped crash guard (never a queue start of its own).
-        if (onUserStart is not null && CrashGuard.IsUserStart(request.Type)) onUserStart();
+        if (onUserStart is not null && CrashGuard.IsUserStart(request)) onUserStart();
         var reply = _session.ExpectReplyAsync(request);
         try
         {

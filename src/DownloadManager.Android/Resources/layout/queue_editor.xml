@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="?android:colorBackground">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingLeft="8dp" android:paddingRight="8dp">
+    <ImageButton android:id="@+id/queue_editor_back" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_close" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Close" />
+    <TextView android:id="@+id/queue_editor_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textAppearance="?attr/textAppearanceHeadlineSmall" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" android:ellipsize="end" android:maxLines="1" />
+    <ImageButton android:id="@+id/queue_editor_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Queue and schedule options" />
+    <com.google.android.material.button.MaterialButton android:id="@+id/queue_editor_save" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Save" android:textColor="?attr/colorPrimary" />
+  </LinearLayout>
+  <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true"><LinearLayout android:id="@+id/queue_editor_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingBottom="20dp" /></ScrollView>
+</LinearLayout>

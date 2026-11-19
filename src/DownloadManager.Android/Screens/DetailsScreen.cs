@@ -6,6 +6,7 @@ using Android.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 using Google.Android.Material.Button;
+using Google.Android.Material.Dialog;
 using Google.Android.Material.ProgressIndicator;
 
 namespace Inbound.App.Screens;
@@ -28,6 +29,7 @@ internal sealed class DetailsScreen
     private bool _polling;
     private bool _visible = true;
     private bool _renderQueued;
+    private Android.App.Dialog? _queueDialog;
     private IReadOnlyList<float> _fractions = Array.Empty<float>();
 
     /// <param name="canAsk">False while the Host can't be asked (a remote host that isn't connected): no polling then.</param>
@@ -73,6 +75,7 @@ internal sealed class DetailsScreen
     public void Dispose()
     {
         _closed = true;
+        _queueDialog?.Dismiss(); _queueDialog = null;
         _ui.RemoveCallbacksAndMessages(null);
         _row.PropertyChanged -= OnRowChanged;
         _model.Rows.CollectionChanged -= OnRows;
@@ -264,17 +267,46 @@ internal sealed class DetailsScreen
             else if (okMessage is not null) _activity.ShowMessage(okMessage);
         });
 
+    private void ChooseQueue()
+    {
+        if (_closed || _queueDialog is not null) return;
+        if (_activity.Capabilities.IsRemote && _model.Hello?.Capabilities.Contains("queueIdentity") != true)
+        { _activity.ShowMessage("Update this Host before moving downloads between queues safely."); return; }
+        var queues = _model.Settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToArray();
+        var sourceId = _row.Job.IsQueued ? (int?)_row.Job.QueueId : null;
+        var sourceGeneration = queues.FirstOrDefault(q => q.Id == sourceId)?.Generation;
+        var names = new[] { "No queue" }.Concat(queues.Select(q => q.Name)).ToArray();
+        int selected = _row.Job.IsQueued ? Array.FindIndex(queues, q => q.Id == _row.Job.QueueId) + 1 : 0;
+        _queueDialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Queue on " + _activity.HostName)!
+            .SetSingleChoiceItems(names, selected, (dialog, e) =>
+            {
+                ((Android.App.Dialog)dialog!).Dismiss(); _queueDialog = null;
+                if (_closed) return;
+                var id = e.Which == 0 ? (int?)null : queues[e.Which - 1].Id;
+                var destinationGeneration = e.Which == 0 ? (Guid?)null : queues[e.Which - 1].Generation;
+                if ((sourceId is not null && (sourceGeneration is null || sourceGeneration == Guid.Empty)) ||
+                    (id is not null && (destinationGeneration is null || destinationGeneration == Guid.Empty)))
+                { _activity.ShowMessage("Queue identity is unavailable. Reopen this page after updating the Host."); return; }
+                Fire(_model.MoveToQueueAsync(_row.Id, id, expectedQueueId: sourceId,
+                    expectedSourceQueueGeneration: sourceGeneration, expectedDestinationQueueGeneration: destinationGeneration), "Queue changed");
+            })!.SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!.Create();
+        _queueDialog!.DismissEvent += (_, _) => _queueDialog = null;
+        _queueDialog.Show();
+    }
+
     private void ShowMenu(View anchor)
     {
         var menu = new PopupMenu(_activity, anchor);
         if (!_row.Job.AddressHidden) menu.Menu!.Add(0, 1, 0, "Copy address");
         if (_row.Group == RowGroup.Finished && _activity.Capabilities.CanShowInFolder) menu.Menu!.Add(0, 2, 1, "Show in folder");
         if (MayRefresh) menu.Menu!.Add(0, 3, 2, "Refresh link");
+        menu.Menu!.Add(0, 4, 3, "Move to queue");
         if (menu.Menu!.Size() == 0) return;
         menu.MenuItemClick += (_, e) =>
         {
             if (e.Item!.ItemId == 1) { Outside.CopyText(_activity, "Address", _row.Job.Url); _activity.ShowMessage("Address copied"); }
             else if (e.Item.ItemId == 3) _activity.ShowRefreshLink(_row);
+            else if (e.Item.ItemId == 4) ChooseQueue();
             else if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
         };
         menu.Show();

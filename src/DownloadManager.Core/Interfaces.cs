@@ -74,6 +74,9 @@ public interface IDownloadEngine
     {
     }
 
+    /// <summary>Replaces the aggregate HTTP speed caps by queue. Omitted queues lose their cap.</summary>
+    void UpdateQueueSpeedLimits(IReadOnlyDictionary<int, long> limits) { }
+
     /// <summary>Updates the speed cap shared by every transfer together; null or zero means none.</summary>
     void UpdateSharedSpeedLimit(long? bytesPerSecond)
     {

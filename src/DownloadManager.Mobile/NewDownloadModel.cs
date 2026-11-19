@@ -16,6 +16,9 @@ public enum ConflictChoice { Rename, Overwrite, Fail }
 public sealed class NewDownloadModel
 {
     private readonly DownloadsModel _host;
+    private readonly bool _requireQueueIdentity;
+    private int? _queueId;
+    private Guid? _queueGeneration;
     // The address, the check and a found name change together: the check's result is applied on the thread its probe ended on,
     // while the user types on the UI thread (review of steps 3 and 6, finding 12).
     private readonly object _gate = new();
@@ -24,9 +27,9 @@ public sealed class NewDownloadModel
     private string _fileName = "";
     private bool _fileNameEdited;
 
-    public NewDownloadModel(DownloadsModel host)
+    public NewDownloadModel(DownloadsModel host, bool requireQueueIdentity = false)
     {
-        _host = host;
+        _host = host; _requireQueueIdentity = requireQueueIdentity;
         Connections = Math.Clamp(host.Settings.DefaultConnections, 1, MaxConnections);
     }
 
@@ -49,7 +52,45 @@ public sealed class NewDownloadModel
 
     public ConflictChoice IfExists { get; set; } = ConflictChoice.Rename;
 
+    /// <summary>Null means the Host's default. Explicit selection captures its current immutable generation.</summary>
+    public int? QueueId
+    {
+        get => _queueId;
+        set
+        {
+            if (_queueId == value) return;
+            SetQueueSelection(value, value is null ? null : _host.Settings.Queues.FirstOrDefault(q => q.Id == value)?.Generation);
+        }
+    }
+
+    public Guid? QueueGeneration => _queueGeneration;
+
+    /// <summary>Use the exact ID and generation selected or restored, without rebinding to a replacement queue.</summary>
+    public void SetQueueSelection(int? id, Guid? generation)
+    {
+        _queueId = id;
+        _queueGeneration = id is null ? null : generation;
+    }
+
+    /// <summary>Wait for the queue's run state and schedule. StartLater takes precedence if both flags are set.</summary>
+    public bool WaitForQueue { get; set; }
+
     public bool StartLater { get; set; }
+
+    public string? QueueError => ValidateQueue(QueueId, QueueGeneration);
+
+    private string? ValidateQueue(int? id, Guid? generation)
+    {
+        if (!_host.SnapshotShown) return "Waiting for the Host's queues.";
+        if (id is null) return null;
+        if (_requireQueueIdentity && _host.Hello?.Capabilities.Contains("queueIdentity") != true)
+            return "Update the selected Host to choose a queue safely, or use its default queue.";
+        if (generation is null || generation == Guid.Empty)
+            return "The selected queue's identity is unavailable. Choose another queue.";
+        var current = _host.Settings.Queues.FirstOrDefault(q => q.Id == id.Value);
+        return current is null || current.Generation != generation
+            ? "The selected queue was deleted or replaced. Choose another queue." : null;
+    }
 
     public string Address
     {
@@ -105,7 +146,7 @@ public sealed class NewDownloadModel
     public bool ShowFileName => Urls.Count == 1;
 
     public bool CanDownload => Urls.Count > 0 && AddressError is null && Check != CheckState.Checking && Check != CheckState.Refused
-        && ChecksumError is null;
+        && ChecksumError is null && QueueError is null;
 
     public string? ChecksumError => string.IsNullOrWhiteSpace(Sha256) || IsSha256(Sha256.Trim()) ? null : "A SHA-256 checksum is 64 hexadecimal characters.";
 
@@ -186,6 +227,10 @@ public sealed class NewDownloadModel
     {
         var list = new List<AddJobRequest>();
         string fileName;
+        var selectedQueue = QueueId;
+        var selectedGeneration = QueueGeneration;
+        var resolvedQueue = selectedQueue ?? _host.Settings.DefaultQueueId;
+        var startMode = StartLater ? StartModes.Later : WaitForQueue ? StartModes.Queue : StartModes.StartNow;
         lock (_gate) fileName = _fileName;
         foreach (var u in Urls)
             list.Add(new AddJobRequest
@@ -193,7 +238,10 @@ public sealed class NewDownloadModel
                 Url = u,
                 DestinationDirectory = string.IsNullOrWhiteSpace(Destination) ? null : Destination,
                 FileName = Urls.Count == 1 && !string.IsNullOrWhiteSpace(fileName) ? fileName.Trim() : null,
-                StartMode = StartLater ? StartModes.Later : StartModes.StartNow,
+                StartMode = startMode,
+                QueueId = resolvedQueue,
+                RequireQueue = selectedQueue.HasValue,
+                ExpectedQueueGeneration = selectedGeneration,
                 Connections = Connections,
                 Referrer = string.IsNullOrWhiteSpace(Referrer) ? null : Referrer.Trim(),
                 Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(),
@@ -207,8 +255,11 @@ public sealed class NewDownloadModel
     public async Task<SubmitResult> SubmitAsync(CancellationToken cancellationToken = default)
     {
         int added = 0, duplicates = 0;
-        foreach (var request in BuildRequests())
+        if (QueueError is { } initialError) return new SubmitResult(0, 0, initialError);
+        var requests = BuildRequests();
+        foreach (var request in requests)
         {
+            if (ValidateQueue(request.RequireQueue ? request.QueueId : null, request.ExpectedQueueGeneration) is { } queueError) return new SubmitResult(added, duplicates, queueError);
             AddJobResponse r;
             try { r = await _host.AddAsync(request, cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) { throw; }

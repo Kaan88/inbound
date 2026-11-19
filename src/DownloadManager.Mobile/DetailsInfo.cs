@@ -43,7 +43,7 @@ public static class DetailsInfo
             new("From", HostOf(j)),
             new("Saved to", FolderName(j.DestinationDirectory)),
         };
-        if (settings.Queues.FirstOrDefault(q => q.Id == j.QueueId) is { } queue && !string.IsNullOrWhiteSpace(queue.Name))
+        if (j.IsQueued && settings.Queues.FirstOrDefault(q => q.Id == j.QueueId) is { } queue && !string.IsNullOrWhiteSpace(queue.Name))
             lines.Add(new("Queue", queue.Name));
         lines.Add(new("Added", AddedText(j, now)));
         if (settings.DownloadOnlyOnUnmeteredNetwork) lines.Add(new("Network", "Wi-Fi only"));

@@ -155,6 +155,19 @@ public sealed class CategoryDefinitionDto
 
 public sealed class QueueDto
 {
+    /// <summary>Host-owned persistent identity; a reused integer queue ID has a different generation.</summary>
+    public Guid? Generation { get; set; }
+    /// <summary>Host-owned transient wait reason; never accepted as policy.</summary>
+    public string? ConditionWaitReason { get; set; }
+    /// <summary>Queue-level conditions reported by the platform; old clients omit these and preserve the saved policy.</summary>
+    public bool? RequireUnmeteredNetwork { get; set; }
+    public bool? RequireCharging { get; set; }
+    public bool? RequireBatterySaverOff { get; set; }
+    /// <summary>Aggregate HTTP payload cap for this queue; zero explicitly clears it, null in an update preserves it.</summary>
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    /// <summary>Queue summary notification; null in updates preserves the saved preference.</summary>
+    public bool? NotifyWhenFinished { get; set; }
+
     public int? RetryLimit { get; set; }
     public List<Guid> JobOrder { get; set; } = new();
     public int Id { get; set; }
@@ -593,6 +606,9 @@ public sealed class AddJobRequest
     public string? ExpectedSha256 { get; set; }
     public bool? AutoResumeAfterRestart { get; set; }
     public bool? RememberDestination { get; set; }
+    /// <summary>An explicitly chosen queue must still exist; older clients retain the default fallback.</summary>
+    public bool RequireQueue { get; set; }
+    public Guid? ExpectedQueueGeneration { get; set; }
     public int QueueId { get; set; }
     /// <summary>Jobs added with the same key are shown as one package (for example one pasted batch).</summary>
     public string? PackageKey { get; set; }
@@ -653,7 +669,21 @@ public sealed class CleanOrphansResponse
 
 public sealed class QueueActionRequest
 {
+    /// <summary>Optional identity precondition, checked under the mutation gate. Requires queueIdentity.</summary>
+    public Guid? ExpectedQueueGeneration { get; set; }
+    /// <summary>Queue-level conditions reported by the platform; old clients omit these and preserve the saved policy.</summary>
+    public bool? RequireUnmeteredNetwork { get; set; }
+    public bool? RequireCharging { get; set; }
+    public bool? RequireBatterySaverOff { get; set; }
+    /// <summary>Aggregate HTTP payload cap for this queue; zero explicitly clears it, null in an update preserves it.</summary>
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    /// <summary>Queue summary notification; null in updates preserves the saved preference.</summary>
+    public bool? NotifyWhenFinished { get; set; }
+
+    /// <summary>With delete, remove this queue’s schedules rather than moving them. Requires queueDeleteSchedules.</summary>
+    public bool RemoveSchedules { get; set; }
     public int? MoveContentsToQueueId { get; set; }
+    public Guid? ExpectedDestinationQueueGeneration { get; set; }
     public List<Guid>? JobOrder { get; set; }
     public int QueueId { get; set; }
     public string Action { get; set; } = "start";
@@ -666,6 +696,10 @@ public sealed class QueueActionRequest
 
 public sealed class JobQueueRequest
 {
+    /// <summary>Optional source membership precondition. Requires queueConditionalMove.</summary>
+    public int? ExpectedQueueId { get; set; }
+    public Guid? ExpectedSourceQueueGeneration { get; set; }
+    public Guid? ExpectedDestinationQueueGeneration { get; set; }
     public bool Detach { get; set; }
     public Guid JobId { get; set; }
     public int QueueId { get; set; }
@@ -733,6 +767,8 @@ public sealed class JobEventDto
 
 public sealed class SettingsUpdateRequest
 {
+    /// <summary>Optional compare-and-swap guard; a stale edit is rejected before any settings change.</summary>
+    public long? ExpectedRevision { get; set; }
     public SettingsDto Settings { get; set; } = new();
 }
 
