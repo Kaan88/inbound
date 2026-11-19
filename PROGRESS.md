@@ -2,6 +2,15 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 arm64: two builds from pinned rclone 1.76.0 source with separate
+  Go caches produced identical 88,586,320-byte executables (SHA-256
+  `a68c72a4677e2ba27f1ed7c5b388eea24b1088ad2bc389e461cc7a47c6195191`).
+  The 48,964,049-byte isolated arm64 probe APK contained that exact binary
+  (28,239,829 compressed bytes). Every ELF LOAD segment in both packaged
+  native libraries aligned to 16 KiB; `zipalign -c -P 16 -v 4` passed.
+  This is a build and packaging check, not execution on arm64 or on a
+  16 KiB Android system. No release APK or phone was changed.
+
 - ANDROID.8 feasibility: a separate x86-64 NativeAOT probe APK
   (`app.inbound.android.rcloneprobe`, 60,288,169 bytes in the final rerun) installed and started
   on `inbound33` (API 33). The packaged executable matched the checked

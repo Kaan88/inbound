@@ -45,3 +45,31 @@ release, after the new key is checked against rclone's own page.
 1. Take the new `SHA256SUMS`, check its signature (`gpg --verify`) and that GitHub's copy is identical.
 2. Update `RclonePinned` (version and hashes), the `Dockerfile` arguments, this file and `COPYING` if it changed.
 3. Run the Sites tests with `INBOUND_RCLONE` (and `INBOUND_RCLONE_ZIP`) pointing at the new version.
+
+## Android feasibility build
+
+The Android arm64 experiment uses rclone `v1.76.0` at commit
+`e982ff36668f5130d94b4f70409babb3d964df42`, Go 1.27.3 for Windows amd64
+([archive](https://go.dev/dl/go1.27.3.windows-amd64.zip), SHA-256
+`f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff`), and
+Android NDK `28.2.13676358`. No binary is checked in.
+
+From this repository, with the pinned source checked out cleanly, run:
+
+```powershell
+./tools/AndroidApp/build-rclone-arm64.ps1 `
+  -SourceDirectory <rclone-checkout> -Go <go.exe> `
+  -NdkDirectory <android-ndk> -Output <new-path>/librclone.so
+```
+
+The script builds an Android API 31 PIE with cgo, disables self-update,
+and verifies the architecture, Android interpreter and each ELF LOAD
+segment's 16 KiB alignment. The binary is for a separate test package
+only (`InboundTestBuild=true`, `RuntimeIdentifier=android-arm64`,
+`InboundRcloneProbePath` pointing at the output); it is not included in
+public APKs. ELF checks don't replace execution on a 16 KiB Android device.
+
+Two builds with separate Go build caches on Windows produced identical
+88,586,320-byte executables (SHA-256
+`a68c72a4677e2ba27f1ed7c5b388eea24b1088ad2bc389e461cc7a47c6195191`).
+All four ELF LOAD segments had `p_align=0x4000`.

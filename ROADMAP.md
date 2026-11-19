@@ -762,9 +762,11 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.8 Sites, if rclone can ship inside the app.
   Feasibility checkpoint: the isolated API 33 x64 NativeAOT probe ran bundled
   rclone 1.76.0, listed an HTTPS directory, answered authenticated loopback
-  `rc/noop` and exited. Next: establish a reproducible arm64 build with 16 KiB
-  alignment and measure its size before deciding whether to bundle it.
-  The upstream Android test binaries have 4 KiB alignment and are not release inputs.
+  `rc/noop` and exited. Two pinned arm64 source builds then produced identical
+  16 KiB-aligned binaries. The isolated 48.96 MB arm64 probe APK passed ELF
+  and ZIP alignment checks; rclone accounts for 28.24 MB compressed. Complete
+  the matched APK comparison and verify arm64 execution before shipping.
+  The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.
 - **Publication update (2026-11-18):** [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) published with latest=false at 178fdb4. S24 updated with data preserved; NativeAOT emulator real-feed check reported current. Fixture 1→2 installation passed; a public newer-offer upgrade awaits a future release. Final Astra combined PASS; later Fable review OPEN. ANDROID.5 is next/in progress.

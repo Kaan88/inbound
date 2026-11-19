@@ -1,11 +1,12 @@
 #if INBOUND_RCLONE_PROBE
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Android.Util;
 using DownloadManager.Sites;
 
 namespace Inbound.App;
 
-// Emulator feasibility only. Uses no account, stored remote or user configuration.
+// Test-build feasibility only. Uses no account, stored remote or user configuration.
 internal static class RcloneProbe
 {
     private const string Tag = "InboundRcloneProbe";
@@ -25,7 +26,13 @@ internal static class RcloneProbe
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
                 var ct = timeout.Token;
                 var version = await Capture(binary, ct, "version");
-                if (!version.Contains("os/type: android") || !version.Contains("os/arch: amd64"))
+                var arch = RuntimeInformation.ProcessArchitecture switch
+                {
+                    Architecture.Arm64 => "arm64",
+                    Architecture.X64 => "amd64",
+                    _ => throw new PlatformNotSupportedException("Unexpected probe ABI"),
+                };
+                if (!version.Contains("os/type: android") || !version.Contains("os/arch: " + arch))
                     throw new InvalidOperationException("Unexpected rclone version output: " + version);
                 Log.Info(Tag, version);
                 var listing = await Capture(binary, ct, "lsf", ":http:", "--http-url",

@@ -36,20 +36,22 @@
     <DefineConstants>$(DefineConstants);INBOUND_RELEASE_ENV</DefineConstants>
   </PropertyGroup>
 
-  <!-- Explicit x64 emulator experiment; never include an executable in a release APK. -->
-  <PropertyGroup Condition="'$(InboundRcloneProbePath)' != '' And '$(InboundTestBuild)' == 'true' And '$(RuntimeIdentifier)' == 'android-x64'">
+  <!-- Explicit test experiment; never include an executable in a distributable APK. -->
+  <PropertyGroup Condition="'$(InboundRcloneProbePath)' != '' And '$(InboundTestBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);INBOUND_RCLONE_PROBE</DefineConstants>
     <ApplicationId>app.inbound.android.rcloneprobe</ApplicationId>
+    <_InboundRcloneProbeAbi Condition="'$(RuntimeIdentifier)' == 'android-x64'">x86_64</_InboundRcloneProbeAbi>
+    <_InboundRcloneProbeAbi Condition="'$(RuntimeIdentifier)' == 'android-arm64'">arm64-v8a</_InboundRcloneProbeAbi>
   </PropertyGroup>
-  <ItemGroup Condition="'$(InboundRcloneProbePath)' != '' And '$(InboundTestBuild)' == 'true' And '$(RuntimeIdentifier)' == 'android-x64'">
-    <AndroidNativeLibrary Include="$(InboundRcloneProbePath)" Abi="x86_64" />
+  <ItemGroup Condition="'$(_InboundRcloneProbeAbi)' != ''">
+    <AndroidNativeLibrary Include="$(InboundRcloneProbePath)" Abi="$(_InboundRcloneProbeAbi)" />
     <AndroidNativeLibraryNoJniPreload Include="librclone.so" />
   </ItemGroup>
   <Target Name="InboundCheckRcloneProbe" BeforeTargets="BeforeBuild" Condition="'$(InboundRcloneProbePath)' != ''">
-    <Error Condition="'$(InboundTestBuild)' != 'true' Or '$(RuntimeIdentifier)' != 'android-x64' Or '$(Configuration)' != 'Release'"
-           Text="The rclone probe requires a Release NativeAOT android-x64 test build." />
+    <Error Condition="'$(_InboundRcloneProbeAbi)' == '' Or '$(Configuration)' != 'Release'"
+           Text="The rclone probe requires a Release NativeAOT android-x64 or android-arm64 test build." />
     <Error Condition="!Exists('$(InboundRcloneProbePath)') Or $([System.IO.Path]::GetFileName('$(InboundRcloneProbePath)')) != 'librclone.so'"
-           Text="Supply the Android x64 executable as librclone.so." />
+           Text="Supply the Android executable for the selected ABI as librclone.so." />
   </Target>
 
   <!-- Debug (emulator): a self-contained APK that adb install can install, not the fast-deployment one. -->
