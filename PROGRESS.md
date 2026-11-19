@@ -2,6 +2,13 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- Prepared the [ANDROID.6 acceptance runbook](tools/AndroidApp/ANDROID6-ACCEPTANCE.md)
+  for the remaining phone and selected-host checks without repeating the
+  accepted locked-screen schedule/reboot. Host-only fixture preflight returned
+  HTTP 206 for `bytes 65536-131071/1048576` and the full 1 MiB download
+  matched `/sha256`. Stopped the fixture afterward; no phone acceptance
+  result is claimed.
+
 - ANDROID.5 S24 FE/USB fixture walkthrough on signed 0.0.7: the built-in
   browser caught `a.zip` (1.0 MB) with the no-cookie notice and caught
   `auth.zip` after fixture sign-in with the local Host cookie notice.
