@@ -240,17 +240,6 @@ architecture, cross-cutting work and final integration; it must read and check a
 subagent code and verify requirements and checks before integrating it. Record
 the requested model configuration separately from a worker's self-report.
 
-Temporary owner override (2026-11-19, current OpenCode session only):
-use `deepseek/deepseek-flash` with the `high` reasoning variant for all
-delegation in this session, in place of the usual worker models. If the
-delegation tool cannot select the variant, disclose that rather than claiming
-it was used. The main agent owns implementation, integration,
-and verification, and retains responsibility for complex or sensitive work.
-Astra still independently reviews completed major milestones after the main
-agent implements and verifies the delegated work. Remind the owner that this
-override exists and is still active when reporting milestone status. Do not
-carry it into a new session unless the owner renews it.
-
 ## Known traps
 
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
