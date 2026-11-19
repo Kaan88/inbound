@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 30-minute screen-off transfer passed on the S24 FE over a
+  real Wi-Fi LAN fixture. With the phone unplugged and noninteractive,
+  notification progress advanced 43 times, reaching 978/1000 at 2,000 s.
+  Completion was observed at 2,046 s (34:06); the 134,217,728-byte phone
+  file matched fixture SHA-256
+  `b6deef9b97eb5ae5bd27e453b7f6eec4692f956837670cfd82186030b88831e2`.
+  The server recorded one full payload GET. Deep idle reached
+  `IDLE_PENDING`, not `IDLE`: this is not deep-Doze or one-hour acceptance.
+  The fixture listener was stopped; phone-side cleanup requires unlock.
+  Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-screenoff-30\`.
+
 - ANDROID.6 charging-only hold/release passed on the S24 FE with Wi-Fi
   ADB and a real LAN fixture. With the cable physically unplugged, Android
   reported no external power and discharging; the running test queue showed
