@@ -29,6 +29,10 @@ Natural deep Doze of a scheduled queue is unverified. The separate one-hour soak
 the 30-minute acceptance gate.
 See PROGRESS “Android milestone continuation”.
 
+Owner decision (2026-11-19): defer the remaining ANDROID.5/.6 acceptance
+tests to ANDROID.14 rather than gating further work on them. Next active
+milestone: ANDROID.8, starting with Android rclone packaging feasibility.
+
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.
 

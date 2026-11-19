@@ -738,6 +738,10 @@ whether rclone is a Setup component that can be unticked.
   disposable remote host through IPC; the same job completed with a matching
   hash and no manual Start. This timer check did not use the phone UI. The
   one-hour measurement remains tracked separately.
+  **Owner decision (2026-11-19):** move on from ANDROID.5 and ANDROID.6
+  acceptance testing. Their remaining checks are deferred to ANDROID.14,
+  not blockers for ANDROID.8. Partial means the remaining cases were not
+  verified, not that the verified cases failed.
 - [x] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18); acceptance complete
   (2026-11-19). The S24 FE paired with an owner-authorized HTTPS server whose certificate passed normal TLS
   verification, showed its Downloads, then removed the test pairing. Self-signed HTTPS passed on the emulator
@@ -794,8 +798,14 @@ whether rclone is a Setup component that can be unticked.
   verify it on Edge for Android, including consent for any sign-in data sent to a server. Until then, standard
   Android sharing is the fallback; Edge itself has not been verified.
 - [ ] ANDROID.13 Expanded accessibility checks and polish (optional; owner, 2026-11-19). If picked up,
-  investigate the duplicate Change host stops and Details filename announcement on API 33, then sample
-  TalkBack on a physical phone. Existing evidence remains in PROGRESS; this is not a release gate.
+   investigate the duplicate Change host stops and Details filename announcement on API 33, then sample
+   TalkBack on a physical phone. Existing evidence remains in PROGRESS; this is not a release gate.
+- [ ] ANDROID.14 Deferred Android acceptance follow-ups (owner, 2026-11-19; nonblocking).
+  ANDROID.5: real-account compatibility, partial-file expired-link resume on the phone,
+  phone share and page-picker submissions, remote cookie consent and remaining visual coverage.
+  ANDROID.6: natural deep Doze for a scheduled local queue, optional one-hour soak,
+  remaining visual and remote UI coverage. Keep later independent acceptance reviews here too.
+  Preserve the existing results and limits in PROGRESS; do not rerun completed cases.
 - arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
 - Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
   signed APK on the releases page with an update check. Nothing waits for the owner.

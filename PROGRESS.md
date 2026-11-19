@@ -2,6 +2,12 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- Owner deferred remaining ANDROID.5/.6 acceptance tests to ANDROID.14.
+  The verified results stand; unobserved cases are not passes. Proceed
+  with ANDROID.8 rclone feasibility without waiting on phone testing.
+  The interrupted Doze run's disposable queue, schedule and job remain
+  cleanup work, not a reason to rerun that test.
+
 - ANDROID.6 natural deep Doze attempt interrupted before the scheduled
   minute; deep idle remains unobserved. With the approved user exemption
   temporarily removed, the S24 was locked, screen off and unplugged from
