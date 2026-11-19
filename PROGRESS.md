@@ -2,6 +2,19 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 S24 FE/USB: created a disabled daily 09:00 schedule on a
+  disposable remote queue. Independent `settings.get` snapshots before
+  and after restarting the server matched on schedule ID, disabled state,
+  timing, queue ID and generation; the phone still showed “Off: Every day
+  09:00”. A 1 MiB fixture added from the phone waited at zero bytes in
+  that stopped queue. After tapping the queue's Start button, the same
+  job completed and the server file matched fixture SHA-256
+  `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  Removed the phone pairing, reverse mapping and test payload, stopped
+  both listeners, and verified local All 0 / Finished 0. This exercised
+  manual release, not an enabled timer firing. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\android6-schedule-s24\`.
+
 - ANDROID.6 partial selected-host acceptance on S24 FE/USB: paired a
   disposable loopback server, created `Android6-QA-USB`, and saved an HTTP
   limit of 64 KB/s. Independent `settings.get` showed queue ID 1, a
