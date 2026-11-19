@@ -2,6 +2,15 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- The optional ANDROID.6 one-hour soak was stopped to move on to the
+  scheduled-queue deep Doze check. The last screen-off sample at 37:13
+  showed 554/1000 and `IDLE_PENDING`; the phone was awake at the next
+  sample. No completed file or SHA-256 was verified. Removed the test
+  job and payload, stopped the fixture, and verified All 0 / Finished 0.
+  The 30-minute pass stands. Natural Doze preflight found Inbound on the
+  S24's user power allowlist; no exemption was changed and no Doze
+  acceptance run started.
+
 - ANDROID.6 enabled remote timer passed on a disposable loopback Inbound
   Server through IPC, without phone UI or manual Start. At 18:51:56.485
   the job was still queued at 0 B and the fixture had no payload request.
