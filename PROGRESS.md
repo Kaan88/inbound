@@ -25,6 +25,31 @@
 - ANDROID.4/.7 remain partial. Next: exercise the signed app's core screens on
   the phone against the A/C8 references while keeping phone settings unchanged;
   independently set up an isolated HTTPS pairing fixture. No new Astra audit.
+- Follow-on: the full Server suite on the fresh Release binaries passed **208/208**
+  (`server-full.trx`). The S24 preflight reported API 37, 0.0.6 and keyguard
+  showing; no phone UI was captured or operated.
+- ANDROID.5: on the same API 33 emulator, a scoped `ACTION_SEND` `text/plain`
+  intent for a single fixture URL showed “Shared link”, the host and Open page / Add
+  file / Cancel. A two-URL intent went directly to New download, listed both URLs and
+  said “2 links will be added”. Cancel preserved the 15-job baseline in both
+  cases (`share-single.txt`, `share-two.txt`, `share-cancel.txt`). This checks the
+  receiving activity, not an external app's real chooser or account sign-in.
+- ANDROID.10: release-tool **10/10** passed. A fresh public GET of the
+  `android-latest` manifest matched the staged 0.0.6 manifest byte for byte
+  (SHA-256 `fdc5c2666cd8037a6255529bb5c7603f16eb8f5ba13eecd619f27d4acc005266`).
+  The public arm64 APK measured 20,664,711 bytes, SHA-256
+  `30411689649b22ab6ff24ae0f520a3b924178917fa728bf1a2715d706f722685`.
+  The release verifier confirmed the pinned sole signer, package, SDKs, arm64-only
+  ABI, non-debuggable build, TLS callback and no test hooks. No release was
+  published and no newer public offer was installed.
+- ANDROID.7: added `tools/AndroidApp/pairing-tls-fixture/`, a disposable TLS
+  relay that binds to loopback by default and does not log requests. A Node
+  smoke test verifies normal rejection of the self-signed certificate, acceptance
+  with an explicit test CA, and an HTTPS/WebSocket round trip. A separate test
+  against the fresh Release Inbound Server got health **200**, remote-client
+  pair **200** and unpair **204**; both listeners were loopback only and both
+  processes were stopped. This does not establish acceptance on a phone or on a
+  publicly trusted Inbound endpoint.
 
 S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
 
