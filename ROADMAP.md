@@ -712,14 +712,18 @@ whether rclone is a Setup component that can be unticked.
   questions (2026-11-17): selection starts with "Long-press"; tapping a finished row: "Open Details"; Stop in Details:
   "No Stop, Pause only" (these three match what is built); failures: "Short reason in row, full in Details";
   notifications: "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped);
-  while selecting: "Hide them" (summary card and chips). To do after the step 6 integration: the failure reason, the two
-  notifications, and hiding the summary card and chips while selecting with a filter on.
+  while selecting: "Hide them" (summary card and chips). These changes are in source. On the API 33 emulator with
+  the 0.0.6 test APK, Finished → long press → Select all selected 14 of 15 jobs, the summary/chips hid and returned
+  on cancel, and the ongoing notification's Open brought Inbound to the foreground during a live transfer. Earlier
+  emulator evidence covers short/full failure text and grouped per-file Open; full phone acceptance remains open.
+  See PROGRESS “Android milestone continuation”.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link). PARTIAL (2026-11-19, Codex): source Astra-audited; NativeAOT controlled authenticated catch/refresh and payload hashes verified, with refresh reusing the existing job. Included in public signed0.0.6, whose installed S24 APK hash matches the published artifact. Latest shared-layer Integration checkpoint passed2095 with32 optional skips; see Codex progress for exact scope. Picker/keyboard/rotation and light caught-sheet spot checks have evidence; real-account compatibility, complete phone visual/accessibility flows and later independent review remain OPEN. Public Android feed is0.0.6.
   Owner, 2026-11-18: ask before sending cookies to the selected server, per download; name the target explicitly.
 - [ ] ANDROID.6 Queues, scheduler and settings. PARTIAL (2026-11-19, Codex): approved C1/C2/C7 flows, shared per-queue conditions/HTTP limits, identity/CAS guards and ordinary Android jobs now ship in 0.0.6 (`edd073b0`), including the approved signed-changelog prompt and native queue picker. Main Sol personally checked worker source and artifacts; Astra SOURCE PASS. Mobile528, release-tool10 and solution0errors/53warnings passed; earlier Core2373/Engine214/Server208/Integration2095+32skip remain shared-layer consolidated checkpoints. Final NativeAOT emulator verified job stop, injected-crash/forced-restart payload hash, keyboard/rotation and dialog previews. S24 signed0.0.6 light/dark C1/C2/C7 and empty dynamic-colour Downloads spot checks, limited schedule save/reopen/selective deletion and hash-matched queue transfer now have evidence; owner confirmed basic TalkBack navigation. API33 OS-metering, battery-saver and corrected natural post-Doze transfer checks passed. Physical API37 natural locked-screen scheduling and one UIDT reboot recovery now passed (latest Codex batch). Full visual/accessibility, phone deep Doze/network/power, long-duration and broader remote acceptance remain pending. See latest Codex acceptance checkpoint. This milestone and later independent review remain OPEN.
 - [ ] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18). https with a self-signed
   certificate passed on the emulator (trust, pin, swapped and expired certificates); open: a server with a publicly
-  trusted certificate, and https pairing on a phone. Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
+  trusted certificate, and https pairing on a phone. Fresh Release loopback pairing/remote work and TLS-pin tests:
+  5 passed (PROGRESS “Android milestone continuation”). Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
   report on the counting rate figure fixed ("Good now"). HTTPS on the phone failed in the NativeAOT build (owner's report "secure
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host

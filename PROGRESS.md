@@ -1,5 +1,31 @@
 # Progress — session handoff
 
+### Android milestone continuation (2026-11-19)
+
+- The owner resumed the Android milestones at `25f1ff19`. Fresh Release builds:
+  Mobile **528 passed**; Server `MobileRemoteHostTests` + `MobileCertificatePinTests`
+  **5 passed**, including pairing, remote add/pause/resume/delete, unpairing and
+  certificate acceptance/refusal over HTTP calls and WebSocket. The earlier
+  fixture-directory/PFX blocker did not recur. This is Windows loopback
+  evidence, not public TLS or a phone pairing check.
+- ANDROID.4, `inbound33` API 33, 0.0.6 test APK: Finished → long press →
+  Select all selected 14 finished jobs but not the 15th job. The idle summary
+  and filter chips disappeared during selection and returned on cancel. Main
+  inspected the selection screenshot. Open beside Pause all on the expanded
+  ongoing notification foregrounded Inbound while the throttled job was active.
+  A separate completed 4 MiB fixture matched SHA-256
+  `7b15de9676936e59bcb225e8f9f871ea38ab210825bbb79de790e42d87326efe`.
+  The tap on its `.bin` completion notice did not visibly launch a viewer;
+  grouped completion Open evidence remains the earlier emulator chooser check.
+- Removed the two task jobs using the delete-files choice, confirmed the baseline
+  15 jobs / 14 finished / no active transfers, restored notification permission
+  to not granted and stopped the owned fixture. No app source, APK, release feed,
+  or S24 settings changed. Raw TRX, focused logs, selection PNGs and scoped emulator
+  observations: `C:\Users\kaank\AppData\Local\Temp\opencode\idm-android-resume-20261119-134123`.
+- ANDROID.4/.7 remain partial. Next: exercise the signed app's core screens on
+  the phone against the A/C8 references while keeping phone settings unchanged;
+  independently set up an isolated HTTPS pairing fixture. No new Astra audit.
+
 S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
 
 Android constraint/theme acceptance (2026-11-19, Codex): signed0.0.6 S24 dark C1/C2/C7 and empty dynamic-colour Downloads were viewed beside approved references; original app appearance, adaptive brightness and timeout restored. API33 NativeAOT emulator verified actual OS Wi-Fi metering and battery-saver holds at zero bytes, then automatic hash-matched completion when each condition cleared. Corrected scheduled Doze test used SIGKILL only on the verified idle app PID: payload stayed queued/0bytes in forced idle through12:36:51 for a12:36 schedule, then completed naturally by12:37:01 after unforce (2,097,153bytes; SHA-256 `a740e0039f45586d220c77e43663196aed08648c2e38effd0fb069d026bc098c`). The first `am kill` attempt was Android reason10/user-stop and correctly stayed user-paused; it is not a background-resume failure. All four task jobs/payloads, queue and schedule removed; original emulator metering/low-power/idle-force state and recorded baseline fields restored, non-root adb; hardware emulator remains running. Main verified Terra's evidence review. No app source changes or new release; ANDROID.6/.7 remain PARTIAL for physical API37 background/network/power/reboot, full visual/accessibility flows, broader remote and later independent review. Evidence: latest ANDROID-CODEX-PROGRESS and `artifacts/android-app/android6-acceptance-0.0.5/`.
