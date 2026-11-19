@@ -464,3 +464,45 @@ This phone selected. Main viewed `hardware-native6-final.png`. Emulator launcher
 PID40268/session2498 and copied QA server PID166924/session23630 were left running;
 rediscover before use. Remote task queue/schedule removed, global cap None; final
 local settings hash unchanged. S24 remained disconnected and untouched.
+
+### S24 Wi-Fi acceptance and emulator power/wake evidence (2026-11-19, Codex)
+
+Implementer: Codex. Main reviewed source/runbooks and personally executed device
+checks; GPT-6.1 Terra/high performed bounded read-only evidence/visual reviews
+(Luna was unavailable in the session model list). Main verified its output.
+
+Android acceptance checkpoint (2026-11-19, Codex): the owner's S24 FE was rediscovered over Wi-Fi ADB (SM-S721B/API37). Its installed 0.0.6 APK SHA-256 exactly matches the public release. Real-phone UI created two disabled schedules, saved/reopened Mon/Wed/Fri, canceled deletion once, then deleted only the second and verified the first remained. A 1 MiB task download waited in the stopped queue, completed after explicit queue start, and matched fixture SHA-256 `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`; transport was Wi-Fi ADB reverse, not direct LAN. Task queue/schedule/job/payload/reverse removed; baseline Main and empty downloads verified. Main personally viewed C1/C2/C7 phone/mockup pairs; Terra checked evidence and visual scope. Owner manually confirmed TalkBack moves between controls and reads useful labels in Downloads. Original TalkBack/accessibility, brightness and timeout values were restored and verified; this does not establish exhaustive accessibility acceptance. Emulator NativeAOT API33 additionally held a charging-only queue without payload requests, then completed with matching hash after simulated AC; a persisted Android job naturally recreated an absent process and started the queue at11:48:18 for11:47 (78seconds late). Emulator task data removed, recorded baseline queue fields restored, non-root adb; full settings hash differs after create/delete, so no byte-identical restoration claim. ANDROID.6/.7 remain PARTIAL; phone Doze/network/reboot, full visual/accessibility and broader remote gates remain OPEN.
+
+Raw evidence under `artifacts/android-app/android6-acceptance-0.0.5/`:
+`power-held-ui.xml`, `power-held-result.json`, `power-release-result.json`,
+`natural-wake-result.json`, `wake-before.json`, `power-wake-cleanup.json`,
+`s24-installed-0.0.6.apk`, `s24-schedule-result.json`,
+`s24-two-schedules-restored.xml`, `s24-one-schedule-after-delete.xml`,
+`s24-transfer-result.json`, `s24-completed-details.xml`,
+`s24-cleanup-result.json`. Main checked switch `checked=false` attributes for
+both saved schedules; this is save/reopen evidence, not process-death persistence.
+
+Viewed pairs: `artifacts/android-app/pairs/c1-queues-s24-0.0.6.png`,
+`c2-schedule-s24-0.0.6.png`, `c7-settings-s24-0.0.6.png`. They compare dark
+reference content with real-phone light states; no pixel parity or complete tap
+coverage claimed. C1 top chart icon is absent; C7 reference search/colour swatches
+and Site logins are absent from the captured viewport; pending capabilities and
+approved flow-board scope must be considered before strict parity acceptance.
+C2 bottom note continues below the viewport and needs scrolling.
+
+User explicitly authorized Wi-Fi phone testing, temporary longer screen timeout
+and minimum brightness with restoration, then temporary TalkBack with restoration.
+Original settings saved in ignored `s24-display-baseline.json` and
+`s24-accessibility-baseline.json`. TalkBack bound with touch exploration enabled;
+ordinary UIAutomator can suppress accessibility services, so a task-only Java
+probe used `UiAutomation.connect(FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)` and
+filtered nodes to Inbound/TalkBack. ADB gesture/keyboard trials left accessibility
+focus on Search downloads, an inconclusive automation result. Owner manual check
+reported "Moves and reads useful labels" in Downloads; no exhaustive screen/dialog
+TalkBack PASS or confirmed app defect. Original secure accessibility settings and
+system brightness/mode/timeout were restored exactly and re-read successfully
+(`s24-final-restoration.json`). The device probe/capture files and task reverse
+were removed; only the identified payload fixture on47618 was stopped. Hardware
+emulator remains running normally, non-root adb. No physical-phone reboot,
+uninstall, OS theme/network change or other app was tested. Android API:
+https://developer.android.com/reference/android/app/UiAutomation#FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES
