@@ -751,10 +751,12 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.
 - **Publication update (2026-11-18):** [android-v0.0.2](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.2) and [android-latest](https://github.com/Kaan88/inbound/releases/tag/android-latest) published with latest=false at 178fdb4. S24 updated with data preserved; NativeAOT emulator real-feed check reported current. Fixture 1→2 installation passed; a public newer-offer upgrade awaits a future release. Final Astra combined PASS; later Fable review OPEN. ANDROID.5 is next/in progress.
-- [ ] ANDROID.10 Release (signing, distribution, updates). PARTIAL (2026-11-19, Codex): permanent-key APK, signed feed and signed changelog published as 0.0.6 and publicly verified; final real-phone public-offer/installer acceptance remains open. Updates (owner, 2026-11-17: "implement auto update feature [...] it
+- [x] ANDROID.10 Release (signing, distribution, updates). Public upgrade acceptance and independent Astra review passed (2026-11-19). Updates (owner, 2026-11-17: "implement auto update feature [...] it
   should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
-  Public 0.0.7 and its signed feed are now live; the remaining installer check is 0.0.6 → 0.0.7 on the S24.
+  Public 0.0.7 and its signed feed are live. The S24 upgraded from 0.0.6 through
+  the in-app public offer and Android installer; APK hash, install continuity
+  and the observed Downloads/Main queue state matched expectations.
   Public 0.0.5 → 0.0.6 APK preflight passed: same pinned signer and package, version code 5 → 6,
   same arm64 ABI and SDK bounds. No actual installation in this check (see PROGRESS).
 - Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,

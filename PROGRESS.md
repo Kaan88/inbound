@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.10 public upgrade acceptance passed on the S24 FE. The installed
+  0.0.6 hash matched its release; Inbound showed the signed 0.0.7 offer,
+  notes and 20.7 MB size, then Android's “Update this app?” confirmation.
+  After owner confirmation the app launched as 0.0.7/code 7 and its installed
+  APK hash matched the published release. App ID 10545, first install time
+  and CE/DE inodes were unchanged. Local Downloads All 0 / Finished 0 and the
+  empty Main queue matched before/after. This establishes in-place continuity
+  and unchanged observed UI, not private-data byte equality or retention of
+  non-empty jobs. Evidence: `%LOCALAPPDATA%\Temp\opencode\inbound-s24-update-007\`.
+  Independent Astra milestone review: PASS.
+
 - Published [Android 0.0.7](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.7)
   from `652e1e53` and advanced `android-latest`. This is a version-bump
   prerelease for testing the public 0.0.6 → 0.0.7 upgrade, not a feature release.
