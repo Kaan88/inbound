@@ -47,7 +47,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == 'unknown': self.empty(404); return
         if route == 'auth' and not present: self.empty(403); return
-        if route == 'expired' and parse_qs(parsed.query).get('token') != ['new']: self.empty(403); return
+        if route == 'expired':
+            token = parse_qs(parsed.query).get('token')
+            if token == ['gone']: self.empty(410); return
+            if token != ['new']: self.empty(403); return
         if name == 'slow.zip' and self.command == 'HEAD': time.sleep(6)
         start, end = 0, len(PAYLOAD) - 1
         if requested:
