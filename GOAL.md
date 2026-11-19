@@ -10,6 +10,7 @@ and created no job; accepting created one remote job with a hash-matched payload
 Edge for Android extension support is future work (ANDROID.12).
 API 33 TalkBack focus and speech were sampled on Downloads, Details and multiselect.
 Further accessibility work is optional (ANDROID.13), not a milestone gate.
+API 33 paired self-signed HTTPS remote download passed with a matching server-side hash.
 Physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 

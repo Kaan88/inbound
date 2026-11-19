@@ -2,6 +2,20 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.7: API 33 `inbound33` paired with disposable Inbound Server through
+  the loopback HTTPS relay. The emulator displayed the same SHA-256 certificate
+  fingerprint as OpenSSL before it was trusted for that host. From the paired
+  host, Downloads went from All 0 to All 1 / Finished 1. Server-side
+  `bench.bin` was 1,048,576 bytes and matched the fixture SHA-256
+  `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  HTTPS carried app-to-server control; the server fetched the payload from a
+  separate loopback HTTP fixture. After an AVD restart the job was still
+  Finished. The server logged unpairing; emulator Downloads returned to
+  This phone / All 15 / Finished 14. Stopped all fixture listeners and removed
+  the disposable private key and payload. No S24 or trust-store changes.
+  Logs: `%LOCALAPPDATA%\Temp\opencode\inbound-https-download-20261119\`.
+  Public certificate trust and physical-phone HTTPS still need acceptance.
+
 - Owner moved additional accessibility work to optional ANDROID.13. The
   TalkBack observations below are retained; no fixes or retest started.
 - ANDROID.10 public upgrade preflight: freshly downloaded public 0.0.5 matched
