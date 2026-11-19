@@ -2,8 +2,8 @@
 
 Thread state (2026-11-19): owner resumed work through the Android milestones.
 Fresh Release Mobile 528/528 and ANDROID.7 loopback Server 5/5 passed. On the
-API 33 emulator, ANDROID.4 filtered selection and ongoing notification Open
-passed; physical-device and public TLS acceptance remain open. See PROGRESS
+API 33 emulator, ANDROID.4 filtered selection and ongoing/grouped completion
+notification Open passed; physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 
 S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.

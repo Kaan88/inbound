@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.4 completion Open: `tools/AndroidApp/smoke-completion-open.py` passed on
+  `inbound33` (API 33, existing 0.0.6 test APK). One batch produced two PNGs with
+  matching fixture/device SHA-256 hashes. Both titled notifications shared the
+  `app.inbound.android.FINISHED` group. Each title-scoped Open launched Photos;
+  screenshot centers matched red `(231, 32, 55)` and blue `(28, 81, 229)`.
+  Automatic cleanup dismissed both test notices, removed both jobs and files,
+  restored 15 total / 14 finished downloads and restored notification permission
+  to not granted. Evidence: `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-notice-smoke-5\`.
+  This supersedes the inconclusive `.bin` tap; no phone acceptance is claimed.
+
 - The owner resumed the Android milestones at `25f1ff19`. Fresh Release builds:
   Mobile **528 passed**; Server `MobileRemoteHostTests` + `MobileCertificatePinTests`
   **5 passed**, including pairing, remote add/pause/resume/delete, unpairing and

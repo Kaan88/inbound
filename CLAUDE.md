@@ -18,6 +18,9 @@ never switch the main checkout or merge Android into main without the owner's re
 The basic app is already usable; continue from the existing implementation and
 review evidence rather than restarting the trial or screen work.
 
+Run independent Android verification checks in parallel when practical, but keep
+UI actions on any one emulator sequential so checks cannot interfere with each other.
+
 Later independent Astra review of implementations by Codex is tracked in
 [ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md). The legacy filename
 and entry IDs remain for traceability; the owner reassigned this queue from Fable

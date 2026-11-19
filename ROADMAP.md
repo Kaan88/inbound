@@ -715,7 +715,8 @@ whether rclone is a Setup component that can be unticked.
   while selecting: "Hide them" (summary card and chips). These changes are in source. On the API 33 emulator with
   the 0.0.6 test APK, Finished → long press → Select all selected 14 of 15 jobs, the summary/chips hid and returned
   on cancel, and the ongoing notification's Open brought Inbound to the foreground during a live transfer. Earlier
-  emulator evidence covers short/full failure text and grouped per-file Open; full phone acceptance remains open.
+  emulator evidence covers short/full failure text. A reusable API 33 smoke test now verifies grouped per-file Open:
+  two hash-matched PNGs launch Photos and render their distinct expected colors. Full phone acceptance remains open.
   See PROGRESS “Android milestone continuation”.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link). PARTIAL (2026-11-19, Codex): source Astra-audited; NativeAOT controlled authenticated catch/refresh and payload hashes verified, with refresh reusing the existing job. Included in public signed0.0.6, whose installed S24 APK hash matches the published artifact. Latest shared-layer Integration checkpoint passed2095 with32 optional skips; see Codex progress for exact scope. Picker/keyboard/rotation and light caught-sheet spot checks have evidence; real-account compatibility, complete phone visual/accessibility flows and later independent review remain OPEN. Public Android feed is0.0.6.
   Owner, 2026-11-18: ask before sending cookies to the selected server, per download; name the target explicitly.
