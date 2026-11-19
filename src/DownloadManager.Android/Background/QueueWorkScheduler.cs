@@ -18,6 +18,8 @@ internal static class QueueWorkScheduler
     private static AndroidHost? _host;
     private static QueueWorkJob? _service;
     private static JobParameters? _parameters;
+    private static JobRunIdentity? _runIdentity;
+    private static object? _execution;
     private static bool _ready, _posted;
     private static string? _scheduledKey;
     private static DateTimeOffset _notBefore;
@@ -54,7 +56,7 @@ internal static class QueueWorkScheduler
             var key = $"{wake.ToUnixTimeSeconds() / 60}:{charging}:{unmetered}:{plan.OverrideConstraintsAt?.ToUnixTimeSeconds()}";
             if (key == _scheduledKey && scheduler.GetPendingJob(JobId) is not null) return;
             var builder = new JobInfo.Builder(JobId, new ComponentName(app, Java.Lang.Class.FromType(typeof(QueueWorkJob))))
-                .SetPersisted(true)!.SetMinimumLatency(Math.Max(1000, (long)(wake - now).TotalMilliseconds))!
+                .SetExtras(JobRunIdentity.NewExtras())!.SetPersisted(true)!.SetMinimumLatency(Math.Max(1000, (long)(wake - now).TotalMilliseconds))!
                 .SetRequiredNetworkType(unmetered ? NetworkType.Unmetered : NetworkType.Any)!
                 .SetRequiresCharging(charging)!;
             if (plan.OverrideConstraintsAt is { } deadline)
@@ -69,12 +71,14 @@ internal static class QueueWorkScheduler
     internal static bool Start(QueueWorkJob service, JobParameters parameters)
     {
         if (CrashGuardStore.Tripped) return false;
+        var execution = new object();
         lock (Gate)
         {
             if (_service is not null) return false;
-            _service = service; _parameters = parameters; _ready = false; _scheduledKey = null;
+            _service = service; _parameters = parameters; _runIdentity = JobRunIdentity.From(parameters); _execution = execution; _ready = false; _scheduledKey = null;
+            CrashGuardStore.SessionBegan(ExecutionLeaseKind.QueueWork);
         }
-        CrashGuardStore.SessionBegan();
+        Log.Info(InboundApplication.Tag, "queue job started");
         Notifications.Notify(service, Notifications.OngoingId, Notifications.Resuming(service));
         _ = Task.Run(async () =>
         {
@@ -82,41 +86,41 @@ internal static class QueueWorkScheduler
             {
                 var host = await InboundApplication.GetHostAsync(service.ApplicationContext!).ConfigureAwait(false);
                 // A stop while the Host initialized revokes this run; never restore its lease afterward.
-                if (!IsCurrent(service, parameters)) return;
+                if (!IsCurrent(service, execution)) return;
                 InboundBackground.RefreshTransferPermission();
                 NetworkMonitor.AppVisible(); QueuePowerMonitor.AppVisible();
                 await host.Service.EvaluateSchedulesAsync(DateTimeOffset.Now).ConfigureAwait(false);
-                Main.Post(() => { if (!IsCurrent(service, parameters)) return; _ready = true; UpdateRun(); });
+                Main.Post(() => { if (!IsCurrent(service, execution)) return; _ready = true; UpdateRun(); });
             }
             catch (Exception ex)
             {
                 Log.Warn(InboundApplication.Tag, "queue wake start: " + ex.GetType().Name);
-                Main.Post(() => Finish(service, parameters));
+                Main.Post(() => Finish(service, parameters, execution));
             }
         });
         return true;
     }
 
-    private static bool IsCurrent(QueueWorkJob service, JobParameters parameters)
+    private static bool IsCurrent(QueueWorkJob service, object execution)
     {
-        lock (Gate) return ReferenceEquals(_service, service) && _parameters?.Equals(parameters) == true;
+        lock (Gate) return _service?.Equals(service) == true && ReferenceEquals(_execution, execution);
     }
 
     private static void UpdateRun()
     {
-        QueueWorkJob? service; JobParameters? parameters;
-        lock (Gate) { if (!_ready) return; service = _service; parameters = _parameters; }
-        if (service is null || parameters is null || _host is not { } host) return;
+        QueueWorkJob? service; JobParameters? parameters; object? execution;
+        lock (Gate) { if (!_ready) return; service = _service; parameters = _parameters; execution = _execution; }
+        if (service is null || parameters is null || execution is null || _host is not { } host) return;
         var summary = host.Activity.Summary;
-        if (!summary.KeepAlive) { Finish(service, parameters); return; }
+        if (!summary.KeepAlive) { Finish(service, parameters, execution); return; }
         var notification = Notifications.Ongoing(service, DownloadManager.Mobile.NotificationText.Ongoing(summary));
         if (OperatingSystem.IsAndroidVersionAtLeast(34)) service.SetNotification(parameters, Notifications.OngoingId, notification, JobEndNotificationPolicy.Remove);
         else Notifications.Notify(service, Notifications.OngoingId, notification);
     }
 
-    private static void Finish(QueueWorkJob service, JobParameters parameters)
+    private static void Finish(QueueWorkJob service, JobParameters parameters, object execution)
     {
-        if (!Detach(service, parameters)) return;
+        if (!Detach(service, parameters, execution)) return;
         service.JobFinished(parameters, false);
         // A held power condition may still be false. Retry via Android at most once per 15 minutes, never a tight wake loop.
         _notBefore = DateTimeOffset.UtcNow.AddMinutes(15);
@@ -126,22 +130,27 @@ internal static class QueueWorkScheduler
 
     internal static bool Stop(QueueWorkJob service, JobParameters? parameters)
     {
-        if (parameters is null || !Detach(service, parameters)) return false;
+        if (parameters is null) return false;
+        var detached = Detach(service, parameters);
+        var reason = OperatingSystem.IsAndroidVersionAtLeast(31) ? parameters.StopReason : -1;
+        Log.Info(InboundApplication.Tag, $"queue job stopped: reason={reason} detached={detached}");
+        if (!detached) return false;
         _notBefore = DateTimeOffset.UtcNow.AddMinutes(15);
         // The Runtime lease is revoked synchronously before its checkpoint writes await I/O.
         InboundBackground.RefreshTransferPermission();
         if (!InboundBackground.KeepAliveRunning && !Running) Notifications.Cancel(service, Notifications.OngoingId);
-        return !CrashGuardStore.Tripped && parameters.StopReason != (int)StopReason.CancelledByApp;
+        return !CrashGuardStore.Tripped && reason != (int)StopReason.CancelledByApp;
     }
 
-    private static bool Detach(QueueWorkJob service, JobParameters parameters)
+    private static bool Detach(QueueWorkJob service, JobParameters parameters, object? execution = null)
     {
         lock (Gate)
         {
-            if (!ReferenceEquals(_service, service) || _parameters?.Equals(parameters) != true) return false;
-            _service = null; _parameters = null; _ready = false;
+            if (_service?.Equals(service) != true || _runIdentity != JobRunIdentity.From(parameters) ||
+                (execution is not null && !ReferenceEquals(_execution, execution))) return false;
+            _service = null; _parameters = null; _runIdentity = null; _execution = null; _ready = false;
+            CrashGuardStore.SessionEnded(ExecutionLeaseKind.QueueWork);
         }
-        CrashGuardStore.SessionEnded();
         return true;
     }
 }

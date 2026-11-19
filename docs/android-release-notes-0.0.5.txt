@@ -1,0 +1,6 @@
+Review the version, download size and what's new before installing an update.
+Release notes are also available in Settings. Longer notes scroll within the update dialog.
+
+- Keeps your chosen queue when link details finish loading.
+- Fixes background queue downloads continuing after Android stops their background job.
+- Preserves crash recovery tracking while background jobs and download services overlap.

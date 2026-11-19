@@ -77,7 +77,7 @@ public sealed partial class MainActivity : AppCompatActivity
             new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), OpenQueueEditor);
         _hostSettings = new HostSettingsScreen(this, FindViewById<View>(Resource.Id.settings_content)!, _model,
             new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote));
-        _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!);
+        _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!, savedInstanceState?.GetBundle("app_update_prompt"));
         _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
             () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings || _onQueues), PerformBack);
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
@@ -95,6 +95,7 @@ public sealed partial class MainActivity : AppCompatActivity
 #if INBOUND_TEST_BUILD
         // A recreated activity (process death, rotation) or a task brought back from history carries the old intent again: it must not resume twice.
         HandleResumeAll(Intent, redelivered: savedInstanceState is not null || (Intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
+        HandleUpdatePreview(Intent, savedInstanceState);
 #endif
 
         var reported = false;
@@ -133,6 +134,10 @@ public sealed partial class MainActivity : AppCompatActivity
 
     protected override void OnSaveInstanceState(Bundle outState)
     {
+        var updatePrompt = new Bundle(); _updateScreen?.Save(updatePrompt); outState.PutBundle("app_update_prompt", updatePrompt);
+#if INBOUND_TEST_BUILD
+        SaveUpdatePreview(outState);
+#endif
         base.OnSaveInstanceState(outState);
         outState.PutBoolean("on_settings", _onSettings);
         outState.PutBoolean("on_queues", _onQueues);
@@ -462,6 +467,7 @@ public sealed partial class MainActivity : AppCompatActivity
         ReceiveShare(intent, (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
 #if INBOUND_TEST_BUILD
         HandleResumeAll(intent, redelivered: (intent?.Flags & ActivityFlags.LaunchedFromHistory) != 0);
+        HandleUpdatePreview(intent, null);
         if (_model is not null) TestHooks.Run(_model, intent);
         if (intent?.GetBooleanExtra("update_fixture", false) == true)
         {
@@ -477,6 +483,9 @@ public sealed partial class MainActivity : AppCompatActivity
         base.OnStart();
         InboundBackground.SetVisible(true);
         _updateScreen?.Start();
+#if INBOUND_TEST_BUILD
+        ResumeUpdatePreview();
+#endif
         Updates.AndroidUpdates.OnAppVisible();
         _details?.SetVisible(true);
     }
@@ -484,6 +493,9 @@ public sealed partial class MainActivity : AppCompatActivity
     protected override void OnStop()
     {
         _updateScreen?.Stop();
+#if INBOUND_TEST_BUILD
+        SuspendUpdatePreview();
+#endif
         InboundBackground.SetVisible(false);
         _details?.SetVisible(false); // no polling while nothing is shown (findings 11, 15)
         base.OnStop();

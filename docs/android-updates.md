@@ -63,3 +63,11 @@ Extension 339 and web 717 tests plus both typechecks passed after locked depende
 The release was installed on the S24 with data preserved; installed hash and launch were checked.
 
 The fixture upgrade does not establish a public newer-offer production upgrade. Record subsequent device checks and release evidence in the project tracking documents.
+
+## Update prompt and changelog
+
+The approved compact prompt and Settings card show the ready version, APK size and plain-text release notes. Longer notes scroll while Later and Install remain available. Reopening Install update in Settings opens the same review before the Android installer. An open prompt can return after rotation for the same verified version/hash; restoration never starts installation.
+
+New metadata may include `releaseNotes` and `releaseNotesSignature`. Notes are signed separately with the existing update key over `inbound-android-release-notes-v1\n`, the unchanged APK canonical string, a newline and the exact notes text. This preserves the original v1 APK signature for older apps. New apps verify both signatures when notes are present, bound to the version, URL, size and hash. Notes are limited to 8,192 characters and rendered as text; empty/partial, altered or invalid notes are refused. A legacy manifest with both fields absent remains valid and shows release notes unavailable. Omitting both fields cannot be distinguished from legacy metadata; this affects the notes display, not APK authenticity.
+
+Pass `-ReleaseNotesPath <UTF-8-text-file>` to `prepare-android-release.ps1` when staging a release. The signer also accepts that file as its optional seventh argument. It normalizes CRLF to LF and trims surrounding whitespace before signing; do not edit the signed text afterward. Old six-argument invocations and existing published manifests remain supported. These additions are implemented in the unpublished Android 0.0.5 source; see current progress for packaging and acceptance evidence. The candidate notes are in docs/android-release-notes-0.0.5.txt.

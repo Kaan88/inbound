@@ -5,6 +5,8 @@ using DownloadManager.Mobile;
 
 namespace Inbound.App.Background;
 
+internal enum ExecutionLeaseKind { KeepAlive, QueueWork }
+
 /// <summary>
 /// The crash-loop guard's file and in-process state (rules in <see cref="CrashGuard"/>). <see cref="Begin"/> runs at every process start,
 /// right after <see cref="RunTracker.Begin"/>: it accounts for the run whose session was left open, from the platform's exit records.
@@ -15,6 +17,7 @@ internal static class CrashGuardStore
     private const string FileName = "crash-guard.txt";
     private static readonly object Gate = new();
     private static CrashGuardState _state = CrashGuardState.Empty;
+    private static readonly HashSet<ExecutionLeaseKind> Leases = new();
     private static string? _path;
 
     /// <summary>The count (for the test hook's state line).</summary>
@@ -67,25 +70,30 @@ internal static class CrashGuardStore
     }
 
     /// <summary>A session (job or service) starts in this run.</summary>
-    public static void SessionBegan()
+    public static void SessionBegan(ExecutionLeaseKind lease)
     {
         var run = RunTracker.OwnId;
         if (run is null) return;
-        Update(s => CrashGuard.SessionBegan(s, run), "session began");
+        Update(s => { Leases.Add(lease); return CrashGuard.SessionBegan(s, run); }, "session began");
     }
 
     /// <summary>The session ended in an orderly way (finished, held, or stopped by the system with the process alive).</summary>
-    public static void SessionEnded()
+    public static void SessionEnded(ExecutionLeaseKind lease)
     {
         var run = RunTracker.OwnId;
         if (run is null) return;
-        Update(s => CrashGuard.SessionEnded(s, run), "session ended");
+        Update(s => { Leases.Remove(lease); return Leases.Count == 0 ? CrashGuard.SessionEnded(s, run) : s; }, "session ended");
     }
 
     /// <summary>The user resumed: the count starts over.</summary>
     public static void Reset(string why)
     {
-        Update(CrashGuard.Reset, "reset (" + why + ")");
+        var run = RunTracker.OwnId;
+        Update(s =>
+        {
+            var reset = CrashGuard.Reset(s);
+            return Leases.Count > 0 && run is not null ? CrashGuard.SessionBegan(reset, run) : reset;
+        }, "reset (" + why + ")");
         Notifications.Cancel(Android.App.Application.Context, Notifications.GuardId);
     }
 

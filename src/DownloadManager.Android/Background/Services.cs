@@ -35,10 +35,9 @@ internal sealed class SessionJobService : JobService
             return false;
         }
 
-        CrashGuardStore.SessionBegan();
         var keep = InboundBackground.KeepAlive as UidtKeepAlive;
         if (keep is null) return false;
-        keep.Attach(this, p);
+        var execution = keep.Attach(this, p);
         // The notification first: a user-initiated job must have one when it starts.
         SetNotification(p, Notifications.OngoingId, Notifications.Resuming(this), JobEndNotificationPolicy.Remove);
         var app = ApplicationContext!;
@@ -48,13 +47,16 @@ internal sealed class SessionJobService : JobService
             {
                 // May be a cold process (after a reboot): this starts the Host, which resumes what its reconcile resumes.
                 await InboundApplication.GetHostAsync(app).ConfigureAwait(false);
-                InboundBackground.SessionStarted();
+                new Handler(Looper.MainLooper!).Post(() =>
+                {
+                    if (keep.IsCurrent(execution)) InboundBackground.SessionStarted();
+                });
             }
             catch (System.Exception ex)
             {
                 // The Host could not start: nothing to keep the process for.
                 Log.Error(InboundApplication.Tag, "session job: Host did not start: " + ex.Message);
-                keep.Stop();
+                keep.StopIfCurrent(execution);
             }
         });
         return true;
@@ -102,7 +104,6 @@ internal sealed class KeepAliveService : Service
             return StartCommandResult.NotSticky;
         }
 
-        CrashGuardStore.SessionBegan();
         InboundBackground.SessionStarted();
         // Not sticky: a killed service is not brought back unseen; the app starts it again when it is opened.
         return StartCommandResult.NotSticky;

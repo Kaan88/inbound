@@ -1,5 +1,61 @@
 # Android handoff — Codex, 2026-11-19
 
+## Current continuation (2026-11-19, Codex)
+
+Owner approved the compact update dialog with the same signed changelog in Settings.
+Android 0.0.4 is the immutable public prerelease; the separate 0.0.5/code5 source
+is local and uncommitted at this checkpoint. Worktree android-app only; no merge to main.
+
+Current source: optional separately signed notes (8,192 characters, unchanged base
+APK signature), shared prompt/card, lifecycle restoration and no-notes fallback;
+owner-aware crash marker, scheduled-job lineage plus fresh per-execution handles,
+and API30 diagnostic guard. Main Sol personally reviewed every delegated code change.
+Mobile528 and release-tool10 tests passed; signer0warnings/errors. Final solution
+update-prompt-solution-final.txt passed0errors/53warnings. Earlier 0.0.4 consolidated
+Core2373/Engine214/Server208/Integration2095+32skip are separate checkpoint evidence.
+
+Astra SOURCE PASS covered signed notes/UI lifecycle, fresh execution handles and
+API30 cleanup. Keyboard device QA then exposed additional widget behavior; the
+latest picker is a readonly outlined field opening a native modal ListPopupWindow,
+with immutable ID/generation snapshots and a stale-popup version guard. Main read
+that worker change, added click-handler cleanup and verified it. Final picker
+re-audit SOURCE PASS; Debug build0errors/2warnings. Keyboard selection, delayed
+metadata, both rotations and queue2 admission passed on the emulator. All temporary picker test diagnostics were removed from source.
+
+Native API33 stop evidence: stop-identity-after.json reports detached=True,
+queued queue2 membership, queue running/user pause false, checkpoint897859/1048576
+unchanged2sec and crash marker empty. After explicit force-run, the same job finished
+with expected fixture SHA fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83
+(stop-resume-payload-sha.txt). This predates the newest callback/picker fixes and is
+observed stop/resume evidence, not automatic restart, final durability, reboot,
+Doze or phone acceptance. Touch selection earlier survived delayed metadata and
+admitted slow(5).zip to queue2; the modal picker now passed keyboard/metadata/rotation and queue2 admission.
+Task job8d5a2a50-8062-40f3-93ac-3deab48b8d63 (slow(6).zip) is user-paused
+at12806bytes and can be resumed for final NativeAOT stop/hash checks.
+
+IMPORTANT: updater-picker-native-final-build.txt produced an INVALID incremental
+NativeAOT APK: runtime provider missing from dex. Checker rejected it; it was NOT
+installed or distributed. Quarantined artifacts/android-app/android6/rejected-native-missing-provider.apk.
+The exact Release-test/net10.0-android/android-x64 intermediate directory was
+safely renamed to android-x64-missing-provider-backup-20261119 (not deleted).
+Build fresh once picker source is stable. build-android.ps1 now automatically
+checks unsigned/debug-key NativeAOT outputs too; permanent-key signing already
+runs its release checker. Never use an APK just because dotnet publish succeeded.
+
+Current owned emulator5554/API33 is ROOTED, fake-unplugged battery, Light theme.
+Only that emulator is connected; S24 is disconnected/untouched. Restore adb unroot,
+dumpsys battery reset, Follows System theme and free rotation before cleanup.
+Baseline font_scale absent (already restored). Fixture Python PID57556 listens on
+loopback port47612; verify exact process before cleanup. Isolated remote launcher
+16664/child39568 were stopped earlier. Do not touch unrelated Barbican builds.
+
+Next: clean NativeAOT x64 build is running (updater-picker-native-clean-build.txt);
+verify provider/TLS/icon and device stop/prompt/picker tests,
+then clean permanent-key arm64 candidate with docs/android-release-notes-0.0.5.txt.
+No0.0.5 publication yet. ANDROID.6/.7 remain partial for broad remote and physical
+phone/accessibility/lifecycle/pairs acceptance; later review stays OPEN.
+ANDROID.8/.9 still need separate go-ahead/design.
+
 ## Start here
 
 Read CLAUDE.md first, then GOAL.md, ROADMAP.md and PROGRESS.md. This handoff is
@@ -12,7 +68,7 @@ Worktree: C:/Users/kaank/Downloads/idm-android-trial, branch android-app.
 Main checkout: C:/Users/kaank/Downloads/idm, branch main. Do not switch or merge
 into main without the owner's instruction.
 
-## Exact checkpoint
+## Historical checkpoint (before Android 0.0.4 publication)
 
 - Implementer/coordinator: Codex (OpenAI/GPT).
 - HEAD: 50df32b8cd5a51079d054f6fe3d0bc6b14f05fe1, documentation of delivery/evidence.

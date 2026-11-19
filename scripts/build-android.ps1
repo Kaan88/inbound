@@ -69,6 +69,12 @@ else {
     if ($verb -eq "publish") { $out = Join-Path $out "publish" }
     $apk = Join-Path $out "app.inbound.android-Signed.apk"
     if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw "No signed APK at $apk" }
+    if ($Mode -eq 'phone') {
+        $checkArguments = @('-I', (Join-Path $root 'tools/AndroidApp/check-apk.py'), $apk)
+        if (-not $TestBuild) { $checkArguments += '--release' }
+        & python @checkArguments
+        if ($LASTEXITCODE -ne 0) { throw 'NativeAOT APK verification failed; do not install or distribute this artifact.' }
+    }
 }
 $apkFile = Get-Item -LiteralPath $apk
 "{0}  ({1:N0} bytes, {2:N1} MB)" -f $apkFile.FullName, $apkFile.Length, ($apkFile.Length / 1MB)

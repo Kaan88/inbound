@@ -26,10 +26,14 @@ internal sealed class NewDownloadScreen
     private Java.Lang.IRunnable? _pendingCheck;
     private bool _setting;
     private bool _busy;
-    private Spinner _queuePicker = null!;
+    private TextInputEditText _queuePicker = null!;
+    private ListPopupWindow? _queuePopup;
+    private EventHandler<AdapterView.ItemClickEventArgs>? _queuePopupClick;
+    private readonly List<string> _queueLabels = new();
+    private int _queueChoicesVersion;
+    private TextInputLayout _queueLayout = null!;
     private TextView _queueError = null!;
     private readonly List<(int? Id, Guid? Generation)> _queueChoices = new();
-    private bool _settingQueue;
     private int _queueWhenId;
 
     /// <param name="saved">What the page held before the activity was rebuilt (rotation, process death), or null.</param>
@@ -106,7 +110,7 @@ internal sealed class NewDownloadScreen
     public View Root { get; }
 
     /// <summary>The page has gone: it no longer follows the Host's settings.</summary>
-    public void Dispose() => _host.SettingsChanged -= OnSettings;
+    public void Dispose() { _host.SettingsChanged -= OnSettings; CloseQueuePopup(); }
 
     private void OnSettings()
     {
@@ -247,12 +251,28 @@ internal sealed class NewDownloadScreen
         group.AddView(queueButton, 1, new LinearLayout.LayoutParams(0, -2, 1));
         var parent = (LinearLayout)group.Parent!;
         var box = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var label = new TextView(_activity) { Text = "Queue", TextSize = 14 };
-        label.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
-        box.AddView(label);
-        _queuePicker = new Spinner(_activity) { ContentDescription = "Choose queue", SaveEnabled = false };
+        var queueLayout = _queueLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = "Queue" };
+        _queuePicker = new TextInputEditText(queueLayout.Context!) { ContentDescription = "Choose queue", SaveEnabled = false };
+        _queuePicker.KeyListener = null;
+        _queuePicker.Focusable = true;
+        _queuePicker.Clickable = true;
+        _queuePicker.LongClickable = false;
+        _queuePicker.SetSingleLine(true);
         _queuePicker.SetMinimumHeight(Motion.Dp(_activity, 48));
-        box.AddView(_queuePicker, new LinearLayout.LayoutParams(-1, -2));
+        _queuePicker.Click += (_, _) => OpenQueuePopup();
+        _queuePicker.KeyPress += (_, e) =>
+        {
+            e.Handled = false;
+            if (e.KeyCode is not (Keycode.Enter or Keycode.DpadCenter)) return;
+            e.Handled = true;
+            if (e.Event?.Action == KeyEventActions.Up) OpenQueuePopup();
+        };
+        queueLayout.AddView(_queuePicker, new LinearLayout.LayoutParams(-1, -2));
+        queueLayout.EndIconMode = TextInputLayout.EndIconCustom;
+        queueLayout.SetEndIconDrawable(Resource.Drawable.ic_expand_more);
+        queueLayout.EndIconContentDescription = "Choose queue";
+        queueLayout.SetEndIconOnClickListener(new ClickListener(OpenQueuePopup));
+        box.AddView(queueLayout, new LinearLayout.LayoutParams(-1, -2));
         _queueError = new TextView(_activity) { AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
         _queueError.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorError)));
         box.AddView(_queueError);
@@ -260,35 +280,70 @@ internal sealed class NewDownloadScreen
         note.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
         box.AddView(note);
         parent.AddView(box, parent.IndexOfChild(group) + 1, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Motion.Dp(_activity, 16) });
-        _queuePicker.ItemSelected += (_, e) =>
+    }
+
+    private void CloseQueuePopup()
+    {
+        var popup = _queuePopup;
+        var click = _queuePopupClick;
+        _queuePopup = null;
+        _queuePopupClick = null;
+        if (popup is null) return;
+        if (click is not null) popup.ItemClick -= click;
+        popup.Dismiss();
+        popup.Dispose();
+    }
+
+    private void OpenQueuePopup()
+    {
+        if (_busy || !_host.SnapshotShown || !_queuePicker.Enabled) return;
+        CloseQueuePopup();
+        var choices = _queueChoices.ToArray();
+        var labels = _queueLabels.ToArray();
+        var version = _queueChoicesVersion;
+        var popup = new ListPopupWindow(_activity)
         {
-            if (_settingQueue || e.Position != _queuePicker.SelectedItemPosition || e.Position < 0 || e.Position >= _queueChoices.Count) return;
-            var selection = _queueChoices[e.Position];
+            AnchorView = _queueLayout,
+            Modal = true,
+            Width = _queueLayout.Width,
+            Height = -2,
+            InputMethodMode = ListPopupWindowInputMethodMode.NotNeeded
+        };
+        popup.SetAdapter(new ArrayAdapter<string>(_activity, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels));
+        _queuePopup = popup;
+        _queuePopupClick = (_, e) =>
+        {
+            if (!ReferenceEquals(_queuePopup, popup) || version != _queueChoicesVersion || _busy ||
+                !_host.SnapshotShown || e.Position < 0 || e.Position >= choices.Length) return;
+            var selection = choices[e.Position];
             _model.SetQueueSelection(selection.Id, selection.Generation);
+            ShowQueues();
             UpdateButton();
         };
+        popup.ItemClick += _queuePopupClick;
+        popup.Show();
+        var selected = Array.IndexOf(choices, (_model.QueueId, _model.QueueGeneration));
+        if (selected >= 0) popup.SetSelection(selected);
     }
 
     private void ShowQueues()
     {
-        _settingQueue = true;
-        try
+        CloseQueuePopup();
+        _queueChoicesVersion++;
+        var queues = _host.Settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToArray();
+        var defaultName = queues.FirstOrDefault(q => q.Id == _host.Settings.DefaultQueueId)?.Name;
+        var labels = new List<string> { defaultName is null ? "Host default" : "Host default (" + defaultName + ")" };
+        _queueChoices.Clear(); _queueChoices.Add((null, null));
+        foreach (var queue in queues) { _queueChoices.Add((queue.Id, queue.Generation)); labels.Add(queue.Name); }
+        if (_model.QueueId is { } selected && !_queueChoices.Contains((selected, _model.QueueGeneration)))
         {
-            var queues = _host.Settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToArray();
-            var defaultName = queues.FirstOrDefault(q => q.Id == _host.Settings.DefaultQueueId)?.Name;
-            var labels = new List<string> { defaultName is null ? "Host default" : "Host default (" + defaultName + ")" };
-            _queueChoices.Clear(); _queueChoices.Add((null, null));
-            foreach (var queue in queues) { _queueChoices.Add((queue.Id, queue.Generation)); labels.Add(queue.Name); }
-            if (_model.QueueId is { } selected && !_queueChoices.Contains((selected, _model.QueueGeneration)))
-            {
-                _queueChoices.Add((selected, _model.QueueGeneration));
-                labels.Add(_host.SnapshotShown ? "Unavailable queue (" + selected + ")" : "Waiting for selected queue");
-            }
-            _queuePicker.Adapter = new ArrayAdapter<string>(_activity, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
-            var index = _queueChoices.IndexOf((_model.QueueId, _model.QueueGeneration));
-            _queuePicker.SetSelection(index < 0 ? 0 : index);
+            _queueChoices.Add((selected, _model.QueueGeneration));
+            labels.Add(_host.SnapshotShown ? "Unavailable queue (" + selected + ")" : "Waiting for selected queue");
         }
-        finally { _settingQueue = false; }
+        var index = _queueChoices.IndexOf((_model.QueueId, _model.QueueGeneration));
+        _queueLabels.Clear();
+        _queueLabels.AddRange(labels);
+        _queuePicker.Text = labels[index < 0 ? 0 : index];
     }
     private void OnAddress()
     {
@@ -368,7 +423,7 @@ internal sealed class NewDownloadScreen
     {
         _download.Enabled = _model.CanDownload && !_busy;
         _queueError.Text = _model.QueueError ?? "";
-        _queuePicker.Enabled = !_busy && _host.SnapshotShown;
+        _queueLayout.Enabled = _queuePicker.Enabled = !_busy && _host.SnapshotShown;
         var group = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
         for (var i = 0; i < group.ChildCount; i++) group.GetChildAt(i)!.Enabled = !_busy;
     }

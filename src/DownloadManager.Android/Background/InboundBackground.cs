@@ -382,6 +382,8 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
     private readonly TransferMeter _meter = new();
     private SessionJobService? _service;
     private JobParameters? _params;
+    private JobRunIdentity? _runIdentity;
+    private object? _execution;
     private DateTimeOffset _requestedAt = DateTimeOffset.MinValue;
     private long _lastEstimate;
     private bool _estimateDirty;
@@ -405,6 +407,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
     {
         var info = new JobInfo.Builder(JobId, new ComponentName(app, Java.Lang.Class.FromType(typeof(SessionJobService))))
             .SetUserInitiated(true)!
+            .SetExtras(JobRunIdentity.NewExtras())!
             .SetRequiredNetworkType(network)!
             .SetPersisted(true)!
             .SetEstimatedNetworkBytes(estimate, 0)!
@@ -423,7 +426,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             if (_service is not null || DateTimeOffset.UtcNow - _requestedAt < StartGrace) return true;
             var estimate = SessionBytes.Estimate(summary);
             var ok = Schedule(NetworkType.Any, estimate, "session job");
-            if (ok) { _requestedAt = DateTimeOffset.UtcNow; _lastEstimate = estimate; }
+            if (ok) { _requestedAt = DateTimeOffset.UtcNow; _lastEstimate = estimate; CrashGuardStore.SessionBegan(ExecutionLeaseKind.KeepAlive); }
             return ok;
         }
     }
@@ -436,17 +439,21 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
         get { lock (_gate) return _service is null ? null : DateTimeOffset.UtcNow - _attachedAt; }
     }
 
-    public void Attach(SessionJobService service, JobParameters p)
+    public object Attach(SessionJobService service, JobParameters p)
     {
         lock (_gate)
         {
+            var execution = _execution = new object();
             _service = service;
             _params = p;
+            _runIdentity = JobRunIdentity.From(p);
+            CrashGuardStore.SessionBegan(ExecutionLeaseKind.KeepAlive);
             _attachedNetwork = _scheduledNetwork;
             _anyTried = false;
             _attachedAt = DateTimeOffset.UtcNow;
             _estimateDirty = true; // refreshed at every run start
             _meter.Reset();
+            return execution;
         }
     }
 
@@ -456,12 +463,29 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
     {
         lock (_gate)
         {
-            if (!ReferenceEquals(_service, service) || _params is null || p is null || !(ReferenceEquals(_params, p) || _params.Equals(p))) return;
-            CrashGuardStore.SessionEnded();
+            if (_service?.Equals(service) != true || _params is null || p is null || _runIdentity != JobRunIdentity.From(p)) return;
             _service = null;
             _params = null;
+            _runIdentity = null;
+            _execution = null;
             _requestedAt = DateTimeOffset.MinValue;
+            CrashGuardStore.SessionEnded(ExecutionLeaseKind.KeepAlive);
         }
+    }
+
+    public bool IsCurrent(object execution)
+    {
+        lock (_gate) return ReferenceEquals(_execution, execution);
+    }
+
+    public void StopIfCurrent(object execution)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_execution, execution)) return;
+            Stop();
+        }
+        InboundBackground.RefreshTransferPermission();
     }
 
     public bool Update(ActivitySummary summary, Notification? notification)
@@ -516,6 +540,8 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             var p = _params;
             _service = null;
             _params = null;
+            _runIdentity = null;
+            _execution = null;
             _requestedAt = DateTimeOffset.MinValue;
             try
             {
@@ -524,7 +550,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
                 if (s is not null && p is not null) s.JobFinished(p, false);
                 else Scheduler.Cancel(JobId);
                 Log.Info(InboundApplication.Tag, "session job finished");
-                CrashGuardStore.SessionEnded();
+                CrashGuardStore.SessionEnded(ExecutionLeaseKind.KeepAlive);
             }
             catch (System.Exception ex) { Log.Warn(InboundApplication.Tag, "session stop: " + ex.Message); }
         }
@@ -543,7 +569,6 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
             var estimate = SessionBytes.Estimate(summary);
             var s = _service;
             var p = _params;
-            CrashGuardStore.SessionEnded();
             var ok = Schedule(NetworkType.Unmetered, estimate, "hold job" + (s is not null ? " over the running session" : ""));
             if (!ok && s is not null && p is not null)
             {
@@ -554,7 +579,10 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
 
             _service = null;
             _params = null;
+            _runIdentity = null;
+            _execution = null;
             _requestedAt = DateTimeOffset.MinValue;
+            CrashGuardStore.SessionEnded(ExecutionLeaseKind.KeepAlive);
             if (ok) _lastEstimate = estimate;
             else Log.Warn(InboundApplication.Tag, "hold job refused: downloads resume when the app is opened or Use data is tapped");
         }
@@ -600,6 +628,7 @@ internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
                 _gen = gen;
                 _running = true;
                 _started = false;
+                CrashGuardStore.SessionBegan(ExecutionLeaseKind.KeepAlive);
                 Log.Info(InboundApplication.Tag, "foreground service requested gen=" + gen);
                 return true;
             }
@@ -622,7 +651,7 @@ internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
         lock (_gate)
         {
             _running = false;
-            CrashGuardStore.SessionEnded();
+            CrashGuardStore.SessionEnded(ExecutionLeaseKind.KeepAlive);
             // Before the start command ran there is nothing to stop yet: the service sees it is no longer wanted and stops itself.
             if (!_started)
             {
@@ -661,7 +690,7 @@ internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
         {
             if (gen != _gen) return;
             _running = false;
-            CrashGuardStore.SessionEnded();
+            CrashGuardStore.SessionEnded(ExecutionLeaseKind.KeepAlive);
             _started = false;
         }
     }

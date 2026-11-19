@@ -6,9 +6,9 @@ using System.Text.Json.Serialization;
 using DownloadManager.Core;
 using DownloadManager.Mobile.Updates;
 
-if (args.Length != 6 || !long.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out var code))
+if (args.Length is not (6 or 7) || !long.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out var code))
 {
-    Console.Error.WriteLine("usage: AndroidUpdateSigner <apk> <version-code> <version-name> <github-apk-url> <update-private-key-file> <new-manifest-path>");
+    Console.Error.WriteLine("usage: AndroidUpdateSigner <apk> <version-code> <version-name> <github-apk-url> <update-private-key-file> <new-manifest-path> [release-notes-file]");
     return 2;
 }
 try
@@ -28,6 +28,15 @@ try
         throw new InvalidDataException("Wrong update signing key.");
     manifest.Signature = Convert.ToBase64String(key.SignData(Encoding.UTF8.GetBytes(AndroidUpdateTrust.Canonical(manifest)),
         HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+    if (args.Length == 7)
+    {
+        var notesFile = new FileInfo(args[6]);
+        if (notesFile.Length > AndroidUpdateTrust.MaximumReleaseNotesCharacters * 4L)
+            throw new InvalidDataException("Release notes are too large.");
+        manifest.ReleaseNotes = (await File.ReadAllTextAsync(notesFile.FullName)).Replace("\r\n", "\n").Trim();
+        manifest.ReleaseNotesSignature = Convert.ToBase64String(key.SignData(Encoding.UTF8.GetBytes(AndroidUpdateTrust.ReleaseNotesCanonical(manifest)),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+    }
     AndroidUpdateTrust.Validate(manifest, ReleaseUpdates.PublicKey);
     var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, ReleaseJson.Default.AndroidUpdateManifest);
     var final = Path.GetFullPath(args[5]);

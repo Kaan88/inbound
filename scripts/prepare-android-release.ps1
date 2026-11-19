@@ -15,7 +15,8 @@ param(
     [Parameter(Mandatory)][string]$JavaSdkDirectory,
     [string]$AndroidSdkDirectory = (Join-Path $env:LOCALAPPDATA 'Android/Sdk'),
     [string]$PrivateKeyPath = (Join-Path $env:USERPROFILE 'Downloads/secrets/update-signing.pem'),
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$ReleaseNotesPath
 )
 $ErrorActionPreference = 'Stop'
 function Get-Sha256File([string]$Path) {
@@ -66,7 +67,9 @@ try {
     $manifest = Join-Path $stage 'manifest-android-arm64.json'
     $signer = Join-Path $root 'tools/AndroidUpdateSigner/bin/Release/net10.0/AndroidUpdateSigner.dll'
     $url = "https://github.com/Kaan88/inbound/releases/download/android-v$Version/$name"
-    & dotnet $signer $releaseApk $VersionCode $Version $url $PrivateKeyPath $manifest
+    $signerArguments = @($releaseApk, $VersionCode, $Version, $url, $PrivateKeyPath, $manifest)
+    if ($ReleaseNotesPath) { $signerArguments += (Resolve-Path -LiteralPath $ReleaseNotesPath).Path }
+    & dotnet $signer @signerArguments
     if ($LASTEXITCODE -ne 0) { throw 'Android release metadata signing failed.' }
     $hashes = @($releaseApk, $manifest) | ForEach-Object {
         $hash = Get-Sha256File $_

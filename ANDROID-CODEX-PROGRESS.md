@@ -3,7 +3,7 @@
 Android 0.0.4 published (2026-11-19, Codex): owner requested immediate APK publication ("just put the apk already"). Source commit b6c2f6668378c0fc0b16c8be5fa5f92397dd2ba7 is pushed to origin/android-app; no merge to main. Public prerelease https://github.com/Kaan88/inbound/releases/tag/android-v0.0.4 contains the permanent-key NativeAOT arm64 APK, signed manifest and SHA256SUMS. Both releases use latest=false; desktop latest remains v0.9.0. The android-latest feed now serves the identical 0.0.4 manifest. Public APK bytes and both manifest copies were downloaded and matched local checksums: APK cd49d3e2b0b3f729752642934a29f2a5ae4b577e3e50486a7b5107d0fe6bff65 (20,599,175 bytes), manifest 3343eabef3a601c116325203c366c210eb5eea64a104ad184f1bbbd248b5f979. Release/signature/API31/target35/ABI/no-test-hook checks passed. Final solution: 0 errors, 23 warnings; Mobile505, Core2373 and focused final Integration10 passed; remaining broad suites still running at publication. Astra source audit PASS. Final NativeAOT emulator install/launch preserves data; S24 is not attached. ANDROID.6 physical-device/accessibility and final broader acceptance remain OPEN; publication does not complete the milestone or later independent review queue. Evidence: artifacts/android-app/android6/final-production-clean-build.txt, final-release-prepare.txt, final-solution-build.txt, final-regressions.txt, audit-mobile-final.txt and public-verification/.
 
 
-Android release request (2026-11-19, Codex): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major Astra audit returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. Main Sol personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
+Historical pre-publication checkpoint (2026-11-19, superseded by the publication above): owner asked "could you make a release to github," authorizing Android 0.0.4 publication after verification. C1/C2/C7 follow the approved 28-flow mockup board. Initial major Astra audit returned CHANGES REQUIRED; eight verified findings have source fixes, with re-audit pending. Main Sol personally inspected delegated source and added schedule-parent identity checks. Mobile 489 and focused identity/scope/golden 8 passed; full Integration rerun and final Android builds/live checks are in progress. ANDROID.6 remains partial and the later independent review queue remains OPEN. No release has been published yet.
 
 
 ## Ownership and scope
@@ -540,3 +540,74 @@ A signed NativeAOT arm64 production candidate was built with the existing perman
 Separate NativeAOT Release-test x64 build passed its checker and was installed with `install -r` on the owned inbound33 API 33 emulator; launch was OK at 1,401 ms, not a performance benchmark. Paired isolated remote QA created and renamed `Remote-QA` to `Remote-QA-checked`, with state persisted by the test server; phone-only power and summary rows were hidden on the remote Host. Switching back showed local `Night-QA` and `Android6-QA` intact. Evidence is under `android6/` (`android-approved-native-test-build.txt`, `native-remote-*.xml`, `approved-remote-*.xml`). S24 FE was untouched.
 
 Main's NativeAOT/background-schedule QA continues. Astra audit `android6_astra_audit` is running with requested model gpt-6.2-astra at high reasoning; main will inspect and verify any findings. ANDROID.6 remains IN PROGRESS and unchecked; no Astra PASS, public release, physical-phone acceptance or feature-completion claim. Public Android feed remains 0.0.2.
+## ANDROID.6 update prompt and changelog direction (2026-11-19)
+
+The owner asked to “finish milestones as you go” and “implement a bit nicer update prompt with changelog.” The [Android update-prompt review board](docs/plans/android-mockups/android-update-prompt-review.html) is built around the approved C7 reference. Main reviewed the compact update-ready dialog in dark/short and light/long variants; 72 render combinations had no overflow or script failure. The owner said, “Use the proposed dialog,” approving the design direction and putting the same changelog notes in Settings. This is not feature acceptance.
+
+Android 0.0.4 at commit `b6c2f6668378c0fc0b16c8be5fa5f92397dd2ba7` is published and immutable. The nicer prompt is separate work in progress for a future release. The Android update protocol is being extended with separately signed notes, preserving the old v1 manifest signature and fallback behavior for older feeds; plain note text is bounded to 8,192 characters. The Mobile suite passed 526 (`artifacts/android-app/android6/update-notes-mobile.txt`); signer tools built with 0 warnings and 0 errors (`artifacts/android-app/android6/update-notes-signer-build.txt`).
+
+ANDROID.6 checks: Core 2,373, Engine 214 and Server 208 passed. Full Integration remains in progress. ANDROID.6 stays IN PROGRESS; no milestone completion, UI acceptance or newer release is claimed. The physical S24 is not attached; emulator5554 is the only connected device.
+### ANDROID.6 update prompt and JobScheduler stop checkpoint (2026-11-19)
+
+Implementer: Codex. Owner approved the proposed update dialog; implementation for
+Android 0.0.5/code 5 remains local, uncommitted and unpublished. The signed-notes
+Mobile suite passed 528 (artifacts/android-app/android6/update-notes-mobile-final.txt);
+signer build completed with 0 warnings and 0 errors. The full Integration run passed
+2,095, skipped 32 and failed 0 (artifacts/android-app/android6/final-integration-full.txt);
+the accompanying Core 2,373, Engine 214 and Server 208 results predate this prompt
+increment. Main reviewed all delegated source.
+
+A dedicated API 33 NativeAOT stop observation passed for the tested build:
+stop-identity-after.json recorded stop reason 3, detached=true, persisted state
+queued, queue 2 still running, IsQueued=true, PausedByUser=false, checkpoint
+897,859 / 1,048,576 bytes unchanged across two seconds, and an empty crash-marker
+session. This is one controlled stop observation, not proof of durability across
+reboot, Doze, network changes or physical-phone use. That test build included
+JobRunIdentity and the owner-requested crash-guard changes, but not the newest
+per-execution callback ownership, API 30 stop-reason and picker fixes.
+
+A new Astra source pass raised three findings in callback ownership across executions,
+the API 30 stop-reason guard, and Enter/D-pad confirmation in the open queue picker.
+Main and Luna have made source fixes; Astra follow-up is pending. The picker now
+handles Enter/D-pad only while its dropdown is closed, allowing native confirmation
+when open. The latest Debug compile is still running after main corrected binding
+errors. A rebuild containing all fresh fixes, final NativeAOT/arm64 candidate and
+device acceptance remain pending. Android 0.0.4 is immutable; 0.0.5 is not released.
+ANDROID.6 remains IN PROGRESS and unchecked; the later independent review remains OPEN.
+### ANDROID.6 stop-resume and Astra follow-up update (2026-11-19)
+
+Update to the preceding checkpoint: Astra follow-up recorded SOURCE PASS for all
+three new findings (per-execution callback ownership, API 30 stop-reason handling,
+and keyboard confirmation in the open queue picker). This is a source review, not
+milestone completion. The picker Debug build passed with 0 errors / 5 warnings
+(picker-debug-build.txt). A final Debug rerun remains in progress and includes
+explicit e.Handled=false plus the documentation-comment fix
+(picker-debug-final-build.txt).
+
+After the stop observation, the same job resumed only after main explicitly forced
+ordinary job 4100. It completed 1 MiB; payload SHA-256
+fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83 matched the
+fixture (stop-resume-payload-sha.txt). This does not claim automatic restart or
+broader lifecycle acceptance. Android 0.0.5 remains unpublished; ANDROID.6 remains
+IN PROGRESS and unchecked, with final release rebuild and device acceptance pending.
+### ANDROID.6 modal picker Debug checkpoint (2026-11-19)
+
+Implementer: Codex. Astra follow-up recorded SOURCE PASS for the final modal-picker
+source after main read the full worker change and added event unsubscription before
+disposal. On API 33 Debug, keyboard Tab/Enter/Down/Enter selected `Night-QA`; the
+selection survived delayed metadata (6 seconds), landscape rotation and portrait
+restoration. Submission persisted `slow (6).zip` as queue 2, `IsQueued=true`, start
+mode `queue` (picker-modal-keyboard-result.xml, picker-modal-metadata.xml,
+picker-modal-landscape.xml, picker-modal-restored.xml, picker-modal-admission.jsonl).
+Explicit Pause persisted `PausedByUser=true` at 12,806 bytes.
+
+The latest picker Debug build passed with 0 errors / 2 warnings
+(artifacts/android-app/android6/picker-modal-final-build.txt); full solution build
+passed with 0 errors / 53 warnings
+(artifacts/android-app/android6/update-prompt-solution-final.txt). Mobile 528 and
+release-tool 10 are prior final results. A clean NativeAOT x64 rebuild remains in
+progress (artifacts/android-app/android6/updater-picker-native-clean-build.txt),
+so no NativeAOT PASS is claimed. An earlier incremental NativeAOT artifact failed
+the provider checker and was quarantined, not installed or distributed. Android
+0.0.5 remains unpublished; ANDROID.6 remains IN PROGRESS and unchecked, and the
+later independent review remains OPEN.

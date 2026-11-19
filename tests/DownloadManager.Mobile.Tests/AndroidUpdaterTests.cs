@@ -147,14 +147,75 @@ public sealed class AndroidUpdaterTests : IDisposable
         Serve(Offer(3, "3.0")); await updater.CheckAsync(); await updater.CheckAsync(); Assert.True(File.Exists(oldPath));
     }
 
+    [Fact]
+    public async Task SignedReleaseNotesSurviveReadyPointerSidecarAndOfflineRestart()
+    {
+        var offer = Offer();
+        offer.ReleaseNotes = "• Queue schedules\r\n• Güvenlik ve 日本語\n\tMore details";
+        offer.ReleaseNotesSignature = Convert.ToBase64String(_key.SignData(
+            Encoding.UTF8.GetBytes(AndroidUpdateTrust.ReleaseNotesCanonical(offer)), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+        Serve(offer);
+        var writer = Create(); await writer.CheckAsync();
+        Assert.Equal(AndroidUpdateStage.Ready, writer.Status.Stage);
+        Assert.Equal(offer.ReleaseNotes, writer.ReadyOffer!.Manifest.ReleaseNotes);
+        Assert.Equal(offer.ReleaseNotesSignature, writer.ReadyOffer.Manifest.ReleaseNotesSignature);
+        foreach (var file in new[] { "ready.json", "update-2.json" })
+        {
+            var saved = AndroidUpdateTrust.Parse(await File.ReadAllBytesAsync(Path.Combine(_root, file)));
+            Assert.Equal(offer.ReleaseNotes, saved.ReleaseNotes);
+            Assert.Equal(offer.ReleaseNotesSignature, saved.ReleaseNotesSignature);
+            Assert.Equal(offer.Signature, saved.Signature);
+            AndroidUpdateTrust.Validate(saved, _key.ExportSubjectPublicKeyInfoPem());
+        }
+        _feed.FailRead = true; // simulate offline after the cache has been written
+        var offline = Create(); await offline.CheckAsync();
+        Assert.Equal(AndroidUpdateStage.Ready, offline.Status.Stage);
+        Assert.Equal(offer.ReleaseNotes, offline.ReadyOffer!.Manifest.ReleaseNotes);
+        Assert.Equal(offer.ReleaseNotesSignature, offline.ReadyOffer.Manifest.ReleaseNotesSignature);
+        var ready = await offline.ReadyForInstallAsync(CancellationToken.None);
+        Assert.NotNull(ready);
+        Assert.Equal(offer.ReleaseNotes, ready.Manifest.ReleaseNotes);
+        Assert.Equal(offer.ReleaseNotesSignature, ready.Manifest.ReleaseNotesSignature);
+        Assert.Equal(1, _feed.Downloads);
+    }
+
+    [Fact]
+    public async Task AlteredNotesInBothCachedManifestsPreventInstallerHandoffEvenWhenApkIsUnchanged()
+    {
+        var offer = Offer(); offer.ReleaseNotes = "• Original signed notes";
+        offer.ReleaseNotesSignature = Convert.ToBase64String(_key.SignData(
+            Encoding.UTF8.GetBytes(AndroidUpdateTrust.ReleaseNotesCanonical(offer)), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+        Serve(offer);
+        var updater = Create(); await updater.CheckAsync();
+        Assert.NotNull(updater.ReadyOffer);
+        var apkPath = updater.ReadyOffer!.Path;
+        var originalHash = SHA256.HashData(await File.ReadAllBytesAsync(apkPath));
+        int packageChecksBefore = _packageChecks;
+        foreach (var file in new[] { "ready.json", "update-2.json" })
+        {
+            var path = Path.Combine(_root, file);
+            var saved = AndroidUpdateTrust.Parse(await File.ReadAllBytesAsync(path));
+            saved.ReleaseNotes = "• Altered notes"; // keep both signatures and signed APK metadata unchanged
+            await File.WriteAllBytesAsync(path, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(saved,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        }
+        // Both independent cache entries are tampered: neither may provide the installer input.
+        var installerInput = await updater.ReadyForInstallAsync(offer.VersionCode, offer.Sha256, CancellationToken.None);
+        Assert.Null(installerInput);
+        Assert.Null(updater.ReadyOffer);
+        Assert.Equal(AndroidUpdateStage.Error, updater.Status.Stage);
+        Assert.Equal(packageChecksBefore, _packageChecks); // metadata rejected before the package can be handed off
+        Assert.Equal(originalHash, SHA256.HashData(await File.ReadAllBytesAsync(apkPath)));
+        Assert.Equal(_apk, await File.ReadAllBytesAsync(apkPath));
+    }
     private sealed class FakeFeed : IAndroidUpdateFeed
     {
-        public AndroidUpdateManifest? Manifest; public byte[] Bytes = []; public int Reads, Downloads; public bool HoldDownload;
+        public AndroidUpdateManifest? Manifest; public byte[] Bytes = []; public int Reads, Downloads; public bool HoldDownload, FailRead;
         public TaskCompletionSource DownloadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource DownloadGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool HoldRead; public TaskCompletionSource ReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReadGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public async Task<AndroidUpdateManifest?> ReadAsync(CancellationToken ct) { Interlocked.Increment(ref Reads); ct.ThrowIfCancellationRequested(); ReadStarted.TrySetResult(); if (HoldRead) await ReadGate.Task.WaitAsync(ct); return Manifest; }
+        public async Task<AndroidUpdateManifest?> ReadAsync(CancellationToken ct) { Interlocked.Increment(ref Reads); ct.ThrowIfCancellationRequested(); if (FailRead) throw new IOException("offline"); ReadStarted.TrySetResult(); if (HoldRead) await ReadGate.Task.WaitAsync(ct); return Manifest; }
         public async Task DownloadAsync(AndroidUpdateManifest manifest, string path, Action<long> progress, CancellationToken ct)
         {
             Interlocked.Increment(ref Downloads); await File.WriteAllBytesAsync(path, Bytes, ct); progress(Bytes.Length); DownloadStarted.TrySetResult();
