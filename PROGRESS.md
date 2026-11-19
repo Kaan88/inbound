@@ -2,6 +2,11 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 owner decision: bundle rclone in the standard Android APK despite
+  the measured size increase. The Android feature is named **Remote Files**,
+  not Sites. This is approval to implement, not a production packaging or
+  feature acceptance result.
+
 - ANDROID.8 16 KiB runtime passed on a Samsung Remote Test Lab Galaxy A56
   (SM-A566B, API 36, `arm64-v8a`, `aarch64`, `getconf PAGE_SIZE` = `16384`).
   The same 49,033,681-byte probe APK used on the S24 (SHA-256

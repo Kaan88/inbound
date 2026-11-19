@@ -759,7 +759,10 @@ whether rclone is a Setup component that can be unticked.
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
   asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
-- [ ] ANDROID.8 Sites, if rclone can ship inside the app.
+- [ ] ANDROID.8 Remote Files. Bundle rclone in the standard Android APK
+  (owner approved); expose the feature as **Remote Files** for This phone and
+  for capable paired hosts. Keep internal `Sites` identifiers and `sites.*`
+  protocol names unchanged.
   Feasibility checkpoint: the isolated API 33 x64 NativeAOT probe ran bundled
   rclone 1.76.0, listed an HTTPS directory, answered authenticated loopback
   `rc/noop` and exited. Two pinned arm64 source builds then produced identical
@@ -770,8 +773,8 @@ whether rclone is a Setup component that can be unticked.
   baseline; rclone accounts for 28.24 MB compressed and 88.59 MB extracted.
   The same APK passed on a Galaxy A56 (API 36, arm64, `PAGE_SIZE=16384`)
   in Samsung Remote Test Lab: HTTPS listing and authenticated `rc/noop`
-  passed, the child exited, and the probe was removed. The decision to
-  bundle and Android Sites implementation remain open.
+  passed, the child exited, and the probe was removed. Production packaging,
+  host wiring, UI and acceptance remain open.
   The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.

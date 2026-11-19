@@ -31,9 +31,10 @@ See PROGRESS “Android milestone continuation”.
 
 Owner decision (2026-11-19): defer the remaining ANDROID.5/.6 acceptance
 tests to ANDROID.14 rather than gating further work on them. Next active
-milestone: ANDROID.8. Bundled rclone passed the isolated arm64 runtime probe
-on both 4 KiB and 16 KiB devices. Next: decide whether to bundle it before
-implementing Android Sites.
+milestone: ANDROID.8 — **Remote Files**. The owner approved bundling rclone in
+the standard Android APK after the isolated arm64 probe passed on both 4 KiB
+and 16 KiB devices. Next: integrate the verified build and implement Remote Files
+for both This phone and capable paired hosts.
 
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.
