@@ -43,6 +43,14 @@ motion sensing and location checks. Keep the phone stationary and record
 deep `mState` before and after the scheduled minute. Do not start this
 case while a separate screen-off transfer is in progress.
 
+After locking, run `observe-natural-doze.ps1` with the Wi-Fi ADB `-Serial`,
+the server-independent phone schedule time as `-Due` (include its UTC
+offset), the fresh LAN `-FixtureLog`, and a new `-OutputDirectory`.
+The observer only samples; it does not force idle, start jobs or wake
+the phone. Inspect its JSON lines and fixture timestamps together,
+then hash the final file separately. Payload completion alone is not
+proof of natural deep idle.
+
 The focused Server pairing/TLS suite already passed 5/5 on a fresh run
 after its initial fixture-setup failure. Do not repeat it solely to clear
 that historical blocker.
