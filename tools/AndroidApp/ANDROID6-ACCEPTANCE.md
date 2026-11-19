@@ -40,6 +40,23 @@ The focused Server pairing/TLS suite already passed 5/5 on a fresh run
 after its initial fixture-setup failure. Do not repeat it solely to clear
 that historical blocker.
 
+## Current S24 checkpoint (signed 0.0.7)
+
+- Metered Wi-Fi, Battery Saver and physical charging-only holds passed:
+  each stayed at 0 B with no payload requests and completed automatically
+  with a matching hash once the condition cleared.
+- The build plan's 30-minute screen-off check passed over LAN: the
+  unplugged phone finished 128 MiB with a matching hash at 34:06.
+  `IDLE_PENDING` did not establish natural deep Doze.
+- Treat the separate one-hour measurement as soak coverage, not as a
+  substitute for the 30-minute check or natural deep Doze. Start the
+  screen-off clock only after observing nonzero foreground progress.
+  If the observer restarts while the same request is still running,
+  preserve the original clock and disclose the gap in samples.
+- Selected-host checks passed for the 64 KB/s limit, disabled schedule
+  persistence across restart, and manual queue start with a matching
+  payload hash. They do not establish a timer-triggered remote start.
+
 ## Cleanup and report
 
 Delete only test-created jobs, files, queues and schedules; unpair the
