@@ -86,7 +86,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         Func<string, string, RcloneSupervisor>? createSupervisor = null,
         Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null,
         RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null,
-        TimeSpan? transferRetryDelay = null, DownloadManager.Core.ISleepPrevention? sleepPrevention = null, Func<bool>? preventSleep = null)
+        TimeSpan? transferRetryDelay = null, DownloadManager.Core.ISleepPrevention? sleepPrevention = null, Func<bool>? preventSleep = null,
+        bool transferExecutionAllowed = true, Func<CancellationToken, Task>? afterTransferExclusiveOpen = null)
     {
         _stateDirectory = stateDirectory;
         _configStore = new SitesConfigStore(stateDirectory);
@@ -102,7 +103,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         _config = _configStore.Load(out _configProblem);
         if (_configProblem is not null) log(_configProblem);
         _transfers = new SiteTransfers(stateDirectory, (id, ct) => _sites.GetAsync(id, ct), AcquireAsync,
-            () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention, preventSleep);
+            () => _config.Enabled, () => _config.TransfersAtOnce, log, _time, transferRetryDelay, sleepPrevention,
+            preventSleep, transferExecutionAllowed, afterTransferExclusiveOpen);
         _transfers.Changed += change => TransfersChanged?.Invoke(this, change);
         if (_config.Enabled)
         {
@@ -163,7 +165,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     new SiteCountResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
                     new SiteChangeResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
-                SitesMessageTypes.TransferStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
+                SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
                     or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear => IpcMessage.Create(SitesMessageTypes.TransferResult,
                     new SiteTransferResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 _ => IpcMessage.Create(SitesMessageTypes.Result, new SiteResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
@@ -227,7 +229,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.RcloneCheck:
                 return IpcMessage.Create(SitesMessageTypes.Status, await CheckRcloneAsync(cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.TransferStart:
-                return Transfer(request, await _transfers.StartAsync(request.GetPayload<SiteTransferStartRequest>() ?? new SiteTransferStartRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.SafeDownloadStart:
+            {
+                var start = request.GetPayload<SiteTransferStartRequest>() ?? new SiteTransferStartRequest();
+                start.SafeSingleDownload = request.Type == SitesMessageTypes.SafeDownloadStart;
+                return Transfer(request, await _transfers.StartAsync(start, cancellationToken).ConfigureAwait(false));
+            }
             case SitesMessageTypes.TransferPause:
                 return Transfer(request, await _transfers.PauseAsync(TransferId(request)).ConfigureAwait(false));
             case SitesMessageTypes.TransferResume:
@@ -330,6 +337,11 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 var rcloneChanged = next.OwnRclonePath != _config.OwnRclonePath;
                 _config = next;
                 _configProblem = null;
+                if (!next.Enabled)
+                {
+                    Interlocked.Increment(ref _signInEpoch);
+                    CancelSignIn(null);
+                }
                 // Off, or another rclone: the running one stops. With Sites on it starts again when something needs it.
                 if (!next.Enabled || rcloneChanged) await StopRcloneLockedAsync().ConfigureAwait(false);
                 if (!next.Enabled) ForgetAllListings();

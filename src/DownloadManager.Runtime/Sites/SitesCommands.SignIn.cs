@@ -23,15 +23,15 @@ public sealed partial class SitesCommands
 
     private readonly object _signInLock = new();
 
-    // One start at a time: the check, the start and the claim of the one slot are one step.
-    private readonly SemaphoreSlim _signInStart = new(1, 1);
     private SignInSession? _signIn;
+    private long _signInEpoch;
 
-    private sealed class SignInSession(string siteId, Process process, CancellationTokenSource stop)
+    private sealed class SignInSession(string siteId, Process process, CancellationTokenSource stop, long epoch)
     {
         public string SiteId { get; } = siteId;
         public Process Process { get; } = process;
         public CancellationTokenSource Stop { get; } = stop;
+        public long Epoch { get; } = epoch;
     }
 
     [GeneratedRegex(@"(http://127\.0\.0\.1:\d+/auth\?state=[A-Za-z0-9_\-]+)")]
@@ -39,6 +39,7 @@ public sealed partial class SitesCommands
 
     private async Task<SiteSignInResultDto> SignInAsync(SiteSignInRequest request, CancellationToken cancellationToken)
     {
+        var epoch = Interlocked.Read(ref _signInEpoch);
         if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
             return new SiteSignInResultDto { Message = "That site no longer exists." };
         if (!SiteKindCatalog.SignsIn(site.Kind)) return new SiteSignInResultDto { Message = "This kind of site does not sign in through the browser." };
@@ -49,19 +50,22 @@ public sealed partial class SitesCommands
             var token = ReadPastedToken(pasted);
             if (token is null)
                 return new SiteSignInResultDto { Message = "That is not a token from rclone authorize. Paste everything between ---> and <---End paste.", AuthorizeCommand = command };
-            var finished = await FinishSignInAsync(site.Id, token, cancellationToken).ConfigureAwait(false);
+            var finished = await FinishSignInAsync(site.Id, token, epoch, cancellationToken).ConfigureAwait(false);
             return new SiteSignInResultDto { Ok = finished.Ok, Message = finished.Message, Site = finished.Site, AuthorizeCommand = command };
         }
 
         var rclone = _findRclone(_config.OwnRclonePath);
         if (rclone is null) return new SiteSignInResultDto { Message = "rclone is not on this PC yet. Download it in Options > Sites.", AuthorizeCommand = command };
 
-        await _signInStart.WaitAsync(cancellationToken).ConfigureAwait(false);
         SignInSession session;
         StringBuilder output;
         TaskCompletionSource<string?> link;
+        // Serialize process creation with disable and credential storage, never the browser wait.
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_disposing || !_config.Enabled || epoch != Interlocked.Read(ref _signInEpoch))
+                return new SiteSignInResultDto { Message = OffMessage };
             lock (_signInLock)
             {
                 if (_signIn is { } waiting && waiting.SiteId != site.Id && !waiting.Process.HasExited)
@@ -98,7 +102,7 @@ public sealed partial class SitesCommands
             }
 
             var stop = new CancellationTokenSource(SignInTime);
-            session = new SignInSession(site.Id, process, stop);
+            session = new SignInSession(site.Id, process, stop, epoch);
             lock (_signInLock) _signIn = session;
             link = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
             output = new StringBuilder();
@@ -122,7 +126,7 @@ public sealed partial class SitesCommands
         }
         finally
         {
-            _signInStart.Release();
+            _gate.Release();
         }
 
         string? url;
@@ -141,8 +145,10 @@ public sealed partial class SitesCommands
 
         if (url is null)
         {
-            CancelSignIn(site.Id);
+            CancelSignIn(site.Id, session);
             cancellationToken.ThrowIfCancellationRequested();
+            if (_disposing || epoch != Interlocked.Read(ref _signInEpoch))
+                return new SiteSignInResultDto { Message = OffMessage };
             return new SiteSignInResultDto
             {
                 Message = "rclone did not start the sign-in. Another program may be using port 53682; close it and try again, or use the paste flow.",
@@ -150,6 +156,8 @@ public sealed partial class SitesCommands
             };
         }
 
+        if (_disposing || epoch != Interlocked.Read(ref _signInEpoch))
+            return new SiteSignInResultDto { Message = OffMessage };
         await RaiseChangedAsync(cancellationToken).ConfigureAwait(false);
         return new SiteSignInResultDto { Ok = true, Url = url, AuthorizeCommand = command };
     }
@@ -169,7 +177,7 @@ public sealed partial class SitesCommands
             if (session.Stop.IsCancellationRequested) return;
             if (session.Process.ExitCode == 0 && ReadPastedToken(text) is { } token)
             {
-                var finished = await FinishSignInAsync(session.SiteId, token, CancellationToken.None).ConfigureAwait(false);
+                var finished = await FinishSignInAsync(session.SiteId, token, session.Epoch, session.Stop.Token).ConfigureAwait(false);
                 if (!finished.Ok) _log($"A site sign-in could not be stored: {finished.Message}");
             }
             else _log("A site sign-in ended without a token.");
@@ -205,13 +213,14 @@ public sealed partial class SitesCommands
     }
 
     /// <summary>Stops a waiting sign-in of <paramref name="siteId"/> (or any, with null).</summary>
-    private void CancelSignIn(string? siteId)
+    private void CancelSignIn(string? siteId, SignInSession? expected = null)
     {
         SignInSession? session;
         lock (_signInLock)
         {
             session = _signIn;
-            if (session is null || (siteId is not null && session.SiteId != siteId)) return;
+            if (session is null || (siteId is not null && session.SiteId != siteId)
+                || (expected is not null && !ReferenceEquals(expected, session))) return;
             _signIn = null;
         }
 
@@ -282,7 +291,7 @@ public sealed partial class SitesCommands
     }
 
     /// <summary>Seals the new token (and, for OneDrive, the drive it opens) into the site.</summary>
-    private async Task<SiteResultDto> FinishSignInAsync(string siteId, string token, CancellationToken cancellationToken)
+    private async Task<SiteResultDto> FinishSignInAsync(string siteId, string token, long epoch, CancellationToken cancellationToken)
     {
         if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } site) return Fail("That site no longer exists.");
         var settings = new JsonObject { ["token"] = token };
@@ -299,6 +308,7 @@ public sealed partial class SitesCommands
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_disposing || !_config.Enabled || epoch != Interlocked.Read(ref _signInEpoch)) return Fail(OffMessage);
             if (await _sites.GetAsync(siteId, cancellationToken).ConfigureAwait(false) is not { } current) return Fail("That site no longer exists.");
             saved = current with { SealedSignIn = SecretProtector.ProtectSiteSecret(settings.ToJsonString()), ModifiedAt = DateTimeOffset.UtcNow };
             await _sites.SaveAsync(saved, cancellationToken).ConfigureAwait(false);

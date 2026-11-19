@@ -34,10 +34,10 @@ internal static class HostChoice
     /// The connection for the host shown now. For a server it is closed while the activity is not started (no socket, no
     /// tries while the app is in the background) and tries again at once when the phone's network changes.
     /// </summary>
-    public static IHostConnection Connect(Activity activity, Func<IHostConnection> phone)
+    public static IHostConnection Connect(Activity activity, HostEntry selected, Func<IHostConnection> phone)
     {
         // Only the exception's type is logged: a message from the network layer is not ours to vouch for.
-        var connection = HostConnections.ForCurrent(Hosts(activity), phone,
+        var connection = HostConnections.ForEntry(Hosts(activity), selected, phone,
             e => Log.Warn(InboundApplication.Tag, "remote: a frame was skipped (" + e.GetType().Name + ")"));
         if (connection is IRemoteStatus remote) Follow(activity, remote);
         return connection;

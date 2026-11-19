@@ -27,9 +27,11 @@ public static class HostConnections
     /// server whose token can't be read any more gets a connection that only says to pair again.
     /// </summary>
     public static IHostConnection ForCurrent(HostDirectory hosts, Func<IHostConnection> phone, Action<Exception>? onError = null,
-        RemoteHostConnection.Connector? connect = null)
+        RemoteHostConnection.Connector? connect = null) => ForEntry(hosts, hosts.Current, phone, onError, connect);
+
+    public static IHostConnection ForEntry(HostDirectory hosts, HostEntry current, Func<IHostConnection> phone,
+        Action<Exception>? onError = null, RemoteHostConnection.Connector? connect = null)
     {
-        var current = hosts.Current;
         if (current.IsPhone) return phone();
         if (hosts.TargetFor(current) is not { } target) return new UnpairedHostConnection(current.Name);
         var remote = new RemoteHostConnection(target, connect, onError: onError);

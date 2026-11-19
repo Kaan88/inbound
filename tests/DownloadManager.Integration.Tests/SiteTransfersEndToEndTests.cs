@@ -196,6 +196,60 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
     }
 
     [SiteTransfersFact]
+    public async Task ExecutionRevocationStopsTheCopyAndRegrantResumesTheSameBatch()
+    {
+        var sleep = new RecordingSleep();
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true), sleep: sleep);
+        var target = Path.Combine(Local, "lease");
+        commands.Transfers.SetExecutionAllowed(false);
+        var started = await StartAsync(commands, siteId, target, SiteTransferConflicts.Skip, "slow.bin");
+        Assert.Equal(0, started.FilesRunning);
+        Assert.False(sleep.Held);
+
+        commands.Transfers.SetExecutionAllowed(true);
+        await WaitForAsync(commands, started.Id, t => t.FilesRunning > 0 && t.BytesDone > 0);
+        commands.Transfers.SetExecutionAllowed(false);
+        var held = await WaitForAsync(commands, started.Id, t => t.FilesRunning == 0 && !sleep.Held);
+        Assert.Equal(SiteTransferStates.Running, held.State);
+        Assert.False(File.Exists(Path.Combine(target, "slow.bin")));
+        await Task.Delay(200);
+        Assert.Equal(0, Assert.Single(commands.Transfers.List().Transfers).FilesRunning);
+
+        commands.Transfers.SetExecutionAllowed(true);
+        var done = await WaitForAsync(commands, started.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        Assert.Equal(SiteTransferStates.Done, done.State);
+        AssertSame(Path.Combine(Served, "pub", "slow.bin"), Path.Combine(target, "slow.bin"));
+        Assert.False(sleep.Held);
+    }
+
+    [SiteTransfersFact]
+    public async Task SafeSingleDownloadRefusesFoldersAndKeepsAFileCreatedDuringCopy()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true));
+        Directory.CreateDirectory(Path.Combine(Served, "pub", "tree"));
+        var target = Path.Combine(Local, "safe-single");
+        Directory.CreateDirectory(target);
+        var request = new SiteTransferStartRequest
+        {
+            SiteId = siteId, RemoteFolder = "/pub", LocalFolder = target, SafeSingleDownload = true,
+            Names = [new SiteTransferNameDto { Name = "tree" }],
+        };
+        var folder = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.SafeDownloadStart, request);
+        Assert.False(folder.Ok);
+        Assert.Contains("now a folder", folder.Message);
+        request.Names[0].Name = "slow.bin";
+        var started = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.SafeDownloadStart, request);
+        Assert.True(started.Ok, started.Message);
+        await WaitForAsync(commands, started.Transfer!.Id, t => t.BytesDone > 0);
+        var final = Path.Combine(target, "slow.bin");
+        await File.WriteAllTextAsync(final, "keep me");
+        var done = await WaitForAsync(commands, started.Transfer.Id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        Assert.Equal(1, done.FilesSkipped);
+        Assert.Equal("keep me", await File.ReadAllTextAsync(final));
+        Assert.Equal(final, Assert.Single(Directory.EnumerateFiles(target)));
+    }
+
+    [SiteTransfersFact]
     public async Task PauseStopsTheFileInFlightAndResumeStartsItAgainFromZero()
     {
         var port = StartServer(slow: true);
@@ -222,6 +276,67 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
         Assert.Equal(SiteTransferStates.Done, done.State);
         AssertSame(Path.Combine(Served, "pub", "slow.bin"), Path.Combine(target, "slow.bin"));
         Assert.False(sleep.Held);
+    }
+
+    [SiteTransfersFact]
+    public async Task InterruptedExclusivePublicationFailsWithoutDeletingOrSkippingThePublicFile()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true));
+        commands.Transfers.SetExecutionAllowed(false);
+        var target = Path.Combine(Local, "interrupted-publication");
+        Directory.CreateDirectory(target);
+        var result = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest
+        {
+            SiteId = siteId, RemoteFolder = "/pub", LocalFolder = target,
+            Names = [new SiteTransferNameDto { Name = "slow.bin" }],
+        });
+        Assert.True(result.Ok, result.Message);
+        var id = result.Transfer!.Id;
+        await commands.DisposeAsync();
+        _commands.Remove(commands);
+
+        var file = Path.Combine(State, "sites", "transfers", id + ".json");
+        var record = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        Assert.Equal(2, record["schemaVersion"]!.GetValue<int>()); // older Hosts can't resume this as legacy
+        record["publicationPending"] = true; // durable state present if the process dies during the Android copy
+        await File.WriteAllTextAsync(file, record.ToJsonString());
+        var publicFile = Path.Combine(target, "slow.bin");
+        await File.WriteAllTextAsync(publicFile, "uncertain");
+        var again = Open();
+        var failed = await WaitForAsync(again, id, t => SiteTransferStates.IsFinished(t.State));
+        Assert.Equal(SiteTransferStates.Failed, failed.State);
+        Assert.Equal(0, failed.FilesSkipped);
+        Assert.Equal(1, failed.FilesFailed);
+        Assert.Contains("slow.bin: Saving this file was interrupted", failed.Message);
+        Assert.Equal("uncertain", await File.ReadAllTextAsync(publicFile));
+    }
+
+    [SiteTransfersFact]
+    public async Task SafeDownloadRecoveryLeavesFinalNamePartialsAlone()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: true));
+        var target = Path.Combine(Local, "safe-recovery");
+        var result = await Call<SiteTransferResultDto>(commands, SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest
+        {
+            SiteId = siteId, RemoteFolder = "/pub", LocalFolder = target,
+            Names = [new SiteTransferNameDto { Name = "slow.bin" }],
+        });
+        Assert.True(result.Ok, result.Message);
+        var id = result.Transfer!.Id;
+        await WaitForAsync(commands, id, t => t.FilesRunning > 0 && t.BytesDone > 0);
+        await commands.DisposeAsync();
+        _commands.Remove(commands);
+        var unrelated = Path.Combine(target, "slow.bin.0a1b2c3d.partial");
+        var owned = Path.Combine(target, ".inbound-transfer-" + id + ".0a1b2c3d.partial");
+        await File.WriteAllTextAsync(unrelated, "another transfer");
+        await File.WriteAllTextAsync(owned, "interrupted staging");
+
+        var again = Open();
+        var done = await WaitForAsync(again, id, t => SiteTransferStates.IsFinished(t.State), TimeSpan.FromSeconds(60));
+        Assert.Equal(SiteTransferStates.Done, done.State);
+        Assert.False(File.Exists(owned));
+        Assert.Equal("another transfer", await File.ReadAllTextAsync(unrelated));
+        AssertSame(Path.Combine(Served, "pub", "slow.bin"), Path.Combine(target, "slow.bin"));
     }
 
     [SiteTransfersFact]

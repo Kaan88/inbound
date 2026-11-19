@@ -759,7 +759,7 @@ whether rclone is a Setup component that can be unticked.
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
   asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
-- [ ] ANDROID.8 Remote Files. Bundle rclone in the standard Android APK
+- [x] ANDROID.8 Remote Files. Bundle rclone in the standard Android APK
   (owner approved); expose the feature as **Remote Files** for This phone and
   for capable paired hosts. Keep internal `Sites` identifiers and `sites.*`
   protocol names unchanged.
@@ -776,7 +776,14 @@ whether rclone is a Setup component that can be unticked.
   passed, the child exited, and the probe was removed. The standard arm64
   APK now packages the pinned binary and its MIT notice (48,898,585-byte
   local build; hash, no probe hooks and 16 KiB ZIP alignment verified).
-  Host wiring, UI and acceptance remain open. No new release published.
+  Local Host and UI browse/download passed on the isolated API 33 x64
+  emulator: one WebDAV fixture SHA-256 matched and only the probe's file
+  and app were removed. The replay also preserved a competing destination
+  and, after a forced stop during publication, showed the incomplete file
+  by name with one failure and zero skips. Final Astra review of the
+  implementation and signed arm64 release checks: **PASS**.
+  Paired-Host UI and physical-device background transfer acceptance were
+  not covered by that run. No new release published.
   The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.

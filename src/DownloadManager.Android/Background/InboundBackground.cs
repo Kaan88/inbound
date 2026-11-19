@@ -62,7 +62,9 @@ internal static class InboundBackground
         lock (PermissionGate)
         {
             if ((_permissionService ?? _host?.Service) is not { } service) return;
-            var update = service.SetPlatformTransfersAllowedAsync(TransferExecutionAllowed);
+            var allowed = TransferExecutionAllowed;
+            _host?.SetRemoteFilesExecutionAllowed(Visible || _keep?.Attached == true || QueueWorkScheduler.Running);
+            var update = service.SetPlatformTransfersAllowedAsync(allowed);
             _ = update.ContinueWith(t => Log.Warn(InboundApplication.Tag, "transfer permission: " + t.Exception?.GetBaseException().GetType().Name),
                 CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
         }
@@ -224,7 +226,7 @@ internal static class InboundBackground
             }
 #endif
 
-            if (s.KeepAlive)
+            if (s.KeepAlive || (_keep.Attached && _host.RemoteFilesExecutionIntent))
             {
                 if (CrashGuardStore.Tripped)
                 {
@@ -348,6 +350,7 @@ internal interface IKeepAlive
 {
     /// <summary>A session runs, or was just asked for and is expected to start.</summary>
     bool Running { get; }
+    bool Attached { get; }
 
     /// <summary>Asks for a session. Called while the app is visible (or just after "Use data"). False when the system refused.</summary>
     bool Start(ActivitySummary summary);
@@ -375,6 +378,7 @@ internal interface IKeepAlive
 /// </summary>
 internal sealed class UidtKeepAlive(Context app) : IKeepAlive
 {
+    public bool Attached { get { lock (_gate) return _service is not null; } }
     public const int JobId = 1;
     private static readonly TimeSpan StartGrace = TimeSpan.FromSeconds(15);
 
@@ -597,6 +601,7 @@ internal sealed class UidtKeepAlive(Context app) : IKeepAlive
 /// </summary>
 internal sealed class ForegroundKeepAlive(Context app) : IKeepAlive
 {
+    public bool Attached { get { lock (_gate) return _running && _started; } }
     // The service path has no hold job (it ends while held and is started again by the app).
     public TimeSpan? AttachedFor => null;
 

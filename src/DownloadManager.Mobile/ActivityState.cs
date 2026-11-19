@@ -26,6 +26,7 @@ public sealed record ActivitySummary(
     bool WaitingForNetwork, int WaitingCount, int PausedCount, int NoResumeOnMeteredCount)
 {
     public static readonly ActivitySummary Idle = new(false, 0, 0, null, 0, null, false, 0, 0, 0);
+    public bool RemoteFilesActive { get; init; }
 }
 
 /// <summary>A download that moved into completed while observed.</summary>
@@ -83,6 +84,7 @@ public sealed class ActivityState : IDisposable
     private ActivitySummary _summary = ActivitySummary.Idle;
     private bool _gotSnapshot;
     private bool _waiting;
+    private bool _remoteFilesActive;
     private bool _armed;
     private bool _disposed;
 
@@ -102,6 +104,18 @@ public sealed class ActivityState : IDisposable
 
     /// <summary>Something changed in <see cref="Summary"/> or a job finished; see the class remarks for when and on which thread.</summary>
     public event Action? Changed;
+
+    public void SetRemoteFilesActive(bool active)
+    {
+        Action? raise;
+        lock (_gate)
+        {
+            if (_disposed || _remoteFilesActive == active) return;
+            _remoteFilesActive = active;
+            raise = Recompute(forceImmediate: true);
+        }
+        raise?.Invoke();
+    }
 
     /// <summary>
     /// Replaces everything known with the Host's snapshot. Jobs already completed in it are never reported as finished.
@@ -329,7 +343,7 @@ public sealed class ActivityState : IDisposable
                 first.ReceivedBytes, first.TotalBytes, left);
         }
 
-        return new ActivitySummary(keep, active, rate, file, received, active > 0 && totalKnown ? total : null,
-            _waiting && waiting > 0, _waiting ? waiting : 0, paused, noResume);
+        return new ActivitySummary(keep || _remoteFilesActive, active, rate, file, received, active > 0 && totalKnown ? total : null,
+            _waiting && waiting > 0, _waiting ? waiting : 0, paused, noResume) { RemoteFilesActive = _remoteFilesActive };
     }
 }

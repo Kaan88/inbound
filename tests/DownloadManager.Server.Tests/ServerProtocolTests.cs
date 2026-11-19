@@ -10,6 +10,21 @@ namespace DownloadManager.Server.Tests;
 public sealed class ServerProtocolTests
 {
     [Fact]
+    public async Task SafeDownloadOneShotIsScopedToTheServersFolders()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var client = await AuthServer.SetUpAsync(server);
+        var (status, reply) = await client.IpcAsync(SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest
+        {
+            LocalFolder = Path.GetTempPath(),
+            Names = [new SiteTransferNameDto { Name = "test.bin" }],
+        });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(MessageTypes.HostActionResult, reply!.Type);
+        Assert.False(reply.GetPayload<HostActionResult>().Ok);
+    }
+
+    [Fact]
     public async Task AWebSocketClientGetsTheHelloThenTheSnapshotThenAnswersInOrder()
     {
         await using var server = await ServerHarness.StartAsync();
@@ -24,7 +39,7 @@ public sealed class ServerProtocolTests
         // D8 added names after these for the desktop Host; the server has none of them, so its list is as it was, and then
         // "archives" where a 7-Zip is there to extract with, and "uploads" (it stores the web UI's uploads) beside "remote".
         // SITES.7: Sites is followed by shared browser-refresh, HTTP queue-budget and settings revision capabilities.
-        Assert.Equal(["jobs", "settings", "handoff", "status", "folders", "sites", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"],
+        Assert.Equal(["jobs", "settings", "handoff", "status", "folders", SiteTransferStartRequest.SafeSingleDownloadCapability, "sites", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"],
             helloDto.Capabilities.Where(name => name is not ("remote" or "archives" or "uploads")));
         Assert.Equal(DownloadManager.Archives.SevenZipTool.Find() is not null, helloDto.Capabilities.Contains("archives"));
         Assert.Equal(helloDto.Capabilities.Contains("remote"), helloDto.Capabilities.Contains("uploads"));

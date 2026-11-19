@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using DownloadManager.Persistence;
 using DownloadManager.Sites;
@@ -34,6 +36,30 @@ public sealed class SiteSignInRemoteTests : IDisposable
         AuthMethod = SiteAuthMethods.SignIn,
         SealedSignIn = SecretProtector.ProtectSiteSecret(new JsonObject { ["token"] = token }.ToJsonString()),
     };
+
+    [Fact]
+    public void Synthetic_sign_in_token_roundtrips_and_all_forms_are_redacted()
+    {
+        using var client = new RcloneClient(new Uri("http://127.0.0.1:9/"), "u", "rc-pass-1234");
+        const string access = "synthetic-access-123";
+        const string refresh = "synthetic-refresh-456";
+        const string token = "{\"access_token\":\"synthetic-access-123\",\"refresh_token\":\"synthetic-refresh-456\",\"extra\":\"quote \\\" slash \\\\ newline \\n unicode 雪\"}";
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+            writer.WriteStringValue(token);
+        var quotedToken = Encoding.UTF8.GetString(buffer.ToArray());
+        var settings = "{\"token\":" + quotedToken + "}";
+
+        var parsed = SiteRemote.ParseSignIn(settings, client);
+
+        Assert.Equal(token, parsed["token"]!.GetValue<string>());
+        foreach (var secret in new[] { settings, token, quotedToken[1..^1], access, refresh })
+        {
+            var redacted = client.Redact("error: " + secret);
+            Assert.DoesNotContain(secret, redacted);
+            Assert.Contains("***", redacted);
+        }
+    }
 
     [RcloneFact]
     public async Task A_signed_in_site_is_a_named_remote_and_a_renewed_token_is_handed_back()

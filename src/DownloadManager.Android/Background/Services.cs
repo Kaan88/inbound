@@ -138,6 +138,7 @@ internal sealed class PauseAllReceiver : BroadcastReceiver
                 var paused = await host.Service.PauseAllAsync().ConfigureAwait(false);
                 ResumeSet.Add(app, paused, "pause all");
                 ResumeSet.Remove(app, candidates.Except(paused));
+                await host.PauseRemoteFilesAsync().ConfigureAwait(false);
                 // After the pause: the news is "paused" only once it has happened.
                 InboundBackground.MarkPauseAll();
                 Log.Info(InboundApplication.Tag, "pause all (notification)");

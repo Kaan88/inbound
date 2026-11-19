@@ -239,7 +239,7 @@ public static class SiteRemote
     public static void RegisterToken(string token, RcloneClient client)
     {
         client.AddSecret(token);
-        client.AddSecret(System.Text.Json.JsonSerializer.Serialize(token)[1..^1]);
+        client.AddSecret(System.Text.Json.JsonSerializer.Serialize(token, SiteRemoteJsonContext.Default.String)[1..^1]);
         try
         {
             if (JsonNode.Parse(token) is JsonObject fields)
@@ -258,3 +258,6 @@ public static class SiteRemote
         SecretProtector.UnprotectSiteSecret(sealedValue)
         ?? throw new SiteStoreException($"The site's {what} can't be opened on this PC; enter it again in Edit site.");
 }
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(string))]
+internal sealed partial class SiteRemoteJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

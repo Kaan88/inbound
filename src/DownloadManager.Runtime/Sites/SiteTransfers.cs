@@ -92,6 +92,11 @@ public sealed class SiteTransfers : IAsyncDisposable
     private ITimer? _broadcastTimer;
     private Task? _progress;
     private bool _disposed;
+    private bool _executionAllowed;
+    private bool _drainingExecution;
+    private readonly Func<CancellationToken, Task>? _afterExclusiveOpen;
+    private Task? _executionDrain;
+    private Running? _sweepRun;
     /// <summary>A batch is running and Sites is on, as last reported through <see cref="ActivityChanged"/>.</summary>
     private bool _active;
     /// <summary>The share of the overall speed limit (bytes/s; null for none), and what rclone was last told, by process.</summary>
@@ -101,6 +106,16 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     /// <summary>A batch started running, or none runs any more (Host: the overall speed limit is split again).</summary>
     public event Action? ActivityChanged;
+
+    public bool HasRunningTransfers
+    {
+        get { lock (_sync) return _active; }
+    }
+
+    public bool HasExecutionIntent
+    {
+        get { lock (_sync) return !_disposed && _enabled() && _batches.Any(b => b.Record.State == SiteTransferStates.Running); }
+    }
 
     /// <summary>The speeds were read from rclone (about once a second while files move).</summary>
     public event Action? Measured;
@@ -114,9 +129,12 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// <param name="preventSleep">Options › "Prevent sleep while downloading", which covers site transfers too.</param>
     public SiteTransfers(string stateDirectory, Func<string, CancellationToken, Task<SiteRecord?>> getSite,
         Func<CancellationToken, Task<RcloneLease>> acquire, Func<bool> enabled, Func<int> limit, Action<string> log,
-        TimeProvider? time = null, TimeSpan? firstRetryDelay = null, ISleepPrevention? sleep = null, Func<bool>? preventSleep = null)
+        TimeProvider? time = null, TimeSpan? firstRetryDelay = null, ISleepPrevention? sleep = null, Func<bool>? preventSleep = null,
+        bool executionAllowed = true, Func<CancellationToken, Task>? afterExclusiveOpen = null)
     {
         _sleep = sleep ?? NullSleepPrevention.Instance;
+        _executionAllowed = executionAllowed;
+        _afterExclusiveOpen = afterExclusiveOpen;
         _preventSleep = preventSleep ?? (() => true);
         _stateDirectory = stateDirectory;
         _store = new SiteTransferStore(stateDirectory, log);
@@ -243,6 +261,9 @@ public sealed class SiteTransfers : IAsyncDisposable
         if (IsInside(localFolder, _stateDirectory)) return Fail("Files can't be placed in Inbound's own data folder; choose another folder.");
         if (request.Names is null || request.Names.Count == 0 || request.Names.Any(n => n is null)) return Fail("Choose the files to move.");
         if (request.Names.Count > MaxItems) return Fail($"A transfer can hold at most {MaxItems:N0} files.");
+        if (request.SafeSingleDownload && (request.Direction != SiteTransferDirections.Download ||
+            conflict != SiteTransferConflicts.Skip || request.Names is not [{ IsFolder: false }]))
+            return Fail("Choose one file and do not replace an existing download.");
         foreach (var name in request.Names)
         {
             if (!SiteTransferPaths.IsRelative(name.Name) || name.Name.Contains('/', StringComparison.Ordinal)
@@ -258,7 +279,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         try
         {
             items = request.Direction == SiteTransferDirections.Download
-                ? await ListDownloadAsync(site, remoteFolder, names, cancellationToken).ConfigureAwait(false)
+                ? await ListDownloadAsync(site, remoteFolder, names, request.SafeSingleDownload, cancellationToken).ConfigureAwait(false)
                 : ListUpload(localFolder, names, SiteKindCatalog.Has(site.Kind, SiteCapabilities.EmptyFolders));
         }
         catch (ItemFailure e)
@@ -297,6 +318,7 @@ public sealed class SiteTransfers : IAsyncDisposable
 
         var record = new SiteTransferRecord
         {
+            SchemaVersion = request.SafeSingleDownload ? SiteTransferRecord.SafeDownloadSchemaVersion : 1,
             Id = SiteTransferStore.NewId(),
             SiteId = site.Id,
             SiteName = site.Name,
@@ -304,6 +326,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             RemoteFolder = remoteFolder,
             LocalFolder = localFolder,
             Conflict = conflict,
+            SafeSingleDownload = request.SafeSingleDownload,
             State = SiteTransferStates.Running,
             Items = items,
             CreatedAt = _time.GetUtcNow(),
@@ -585,7 +608,8 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     // ---- Listing a batch's files ------------------------------------------------------------------------------
 
-    private async Task<List<SiteTransferItem>> ListDownloadAsync(SiteRecord site, string remoteFolder, List<string> names, CancellationToken cancellationToken)
+    private async Task<List<SiteTransferItem>> ListDownloadAsync(SiteRecord site, string remoteFolder, List<string> names,
+        bool fileOnly, CancellationToken cancellationToken)
     {
         using var lease = await _acquire(cancellationToken).ConfigureAwait(false);
         var fs = await SiteRemote.BuildAsync(site, lease.Client, cancellationToken).ConfigureAwait(false);
@@ -608,6 +632,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 continue;
             }
 
+            if (fileOnly) throw new ItemFailure($"\"{name}\" is now a folder. Refresh and choose a file.");
             var inside = SitePaths.ToRemote(SiteTransferPaths.Remote(remoteFolder, name));
             var listing = await lease.Client.CallAsync("operations/list", new JsonObject
             {
@@ -728,6 +753,50 @@ public sealed class SiteTransfers : IAsyncDisposable
 
     // ---- Scheduling ---------------------------------------------------------------------------------------------
 
+    /// <summary>Holds platform work without changing the persisted user's resume intent.</summary>
+    public void SetExecutionAllowed(bool allowed)
+    {
+        lock (_sync)
+        {
+            if (_disposed || _executionAllowed == allowed) return;
+            _executionAllowed = allowed;
+            if (!allowed && !_drainingExecution)
+            {
+                _drainingExecution = true;
+                var stop = _batches.Where(b => b.Active.Count != 0).Select(b => (Batch: b, Work: ActiveLocked(b))).ToArray();
+                var sweep = _sweepRun;
+                var cancelled = stop.SelectMany(entry => entry.Work.Stops).Select(source => source.CancelAsync()).ToList();
+                if (sweep is not null) cancelled.Add(sweep.Stop.CancelAsync());
+                _executionDrain = Task.Run(() => DrainExecutionAsync(stop, sweep, cancelled));
+            }
+        }
+        // Platform callers may be holding their permission lock. Never invoke activity listeners inline.
+        _ = Task.Run(() => { UpdateSleep(); Pump(); });
+    }
+
+    private async Task DrainExecutionAsync((Batch Batch, (CancellationTokenSource[] Stops, Task[] Tasks) Work)[] active,
+        Running? sweep, List<Task> cancelled)
+    {
+        try
+        {
+            await WaitQuietlyAsync([.. cancelled]).ConfigureAwait(false);
+            await Task.WhenAll(active.Select(async entry =>
+            {
+                await WaitQuietlyAsync(entry.Work.Tasks).ConfigureAwait(false);
+                await StopGroupAsync(entry.Batch).ConfigureAwait(false);
+            })).ConfigureAwait(false);
+            if (sweep is not null) await WaitQuietlyAsync([sweep.Task]).ConfigureAwait(false);
+        }
+        catch (Exception e) { _log($"Site transfers: execution stop failed ({e.GetType().Name})."); }
+        finally
+        {
+            lock (_sync) _drainingExecution = false;
+            Pump();
+        }
+    }
+
+    public void RefreshSleep() => UpdateSleep();
+
     /// <summary>Starts waiting files while there is room, oldest batch first, and sets the timer for the next retry.</summary>
     public void Pump()
     {
@@ -736,7 +805,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         var started = false;
         lock (_sync)
         {
-            if (_disposed || !_enabled()) return;
+            if (_disposed || !_enabled() || !_executionAllowed || _drainingExecution) return;
             var now = _time.GetUtcNow();
             var limit = _limit();
             DateTimeOffset? nextRetry = null;
@@ -750,7 +819,8 @@ public sealed class SiteTransfers : IAsyncDisposable
                     sweep.Sweeping = true;
                     _running++;
                     var swept = sweep;
-                    _ = Task.Run(() => SweepAsync(swept));
+                    var run = _sweepRun = new Running();
+                    run.Task = Task.Run(() => SweepAsync(swept, run.Stop.Token));
                 }
 
                 return;
@@ -807,7 +877,8 @@ public sealed class SiteTransfers : IAsyncDisposable
     {
         lock (_sync)
         {
-            var active = !_disposed && _enabled() && _batches.Any(b => b.Record.State == SiteTransferStates.Running);
+            var active = !_disposed && _enabled() && _executionAllowed &&
+                _batches.Any(b => b.Record.State == SiteTransferStates.Running);
             return new SpeedDemand(active, _batches.Where(b => b.Active.Count > 0).Sum(b => (double)b.Speed));
         }
     }
@@ -876,7 +947,8 @@ public sealed class SiteTransfers : IAsyncDisposable
         lock (_sleepGate)
         {
             bool hold;
-            lock (_sync) hold = !_disposed && _enabled() && _batches.Any(b => b.Record.State == SiteTransferStates.Running);
+            lock (_sync) hold = !_disposed && _enabled() && _executionAllowed && !_drainingExecution &&
+                _batches.Any(b => b.Record.State == SiteTransferStates.Running);
             try
             {
                 hold = hold && _preventSleep();
@@ -1005,6 +1077,7 @@ public sealed class SiteTransfers : IAsyncDisposable
             {
                 item.Error = null;
                 item.NotBefore = null;
+                record.PublicationPending = false;
             }
 
             item.State = state;
@@ -1097,6 +1170,7 @@ public sealed class SiteTransfers : IAsyncDisposable
                 switch (record.Conflict)
                 {
                     case SiteTransferConflicts.Skip:
+                        if (record.PublicationPending) throw new ItemFailure(InterruptedPublication);
                         return SiteTransferItemStates.Skipped;
                     case SiteTransferConflicts.KeepBoth:
                         target = await FreeNameAsync(record, client, fs, item.Path, token).ConfigureAwait(false);
@@ -1112,6 +1186,73 @@ public sealed class SiteTransfers : IAsyncDisposable
 
         var to = target ?? item.Path;
         var remote = SitePaths.ToRemote(SiteTransferPaths.Remote(record.RemoteFolder, download ? item.Path : to));
+        if (record.SafeSingleDownload)
+        {
+            string temporaryName = ".inbound-transfer-" + record.Id;
+            string temporary = SiteTransferPaths.Local(record.LocalFolder, temporaryName);
+            string final = SiteTransferPaths.Local(record.LocalFolder, to);
+            try
+            {
+                await CopyFileAsync(client, batch, fs, local, remote, temporaryName, token).ConfigureAwait(false);
+                return await PublishSafeAsync(batch, temporary, final, token).ConfigureAwait(false);
+            }
+            finally { File.Delete(temporary); }
+        }
+
+        await CopyFileAsync(client, batch, download ? fs : local, download ? local.DeepClone() : fs.DeepClone(),
+            download ? remote : item.Path, download ? to : remote, token).ConfigureAwait(false);
+        return SiteTransferItemStates.Done;
+    }
+
+    private const string InterruptedPublication =
+        "Saving this file was interrupted. The destination may be incomplete. Check it and move it aside before retrying.";
+
+    private async Task<string> PublishSafeAsync(Batch batch, string temporary, string final, CancellationToken token)
+    {
+        bool CanPublish() => _executionAllowed && !_drainingExecution && !_disposed && _enabled() &&
+            batch.Record.State == SiteTransferStates.Running;
+
+        lock (_sync)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!CanPublish()) return SiteTransferItemStates.Waiting;
+            if (SiteFilePublication.TryRename(temporary, final) is bool renamed)
+                return renamed ? SiteTransferItemStates.Done : SiteTransferItemStates.Skipped;
+            batch.Record.PublicationPending = true;
+        }
+        // On Android FUSE, record the uncertainty durably before opening the public path. If
+        // killed at any point afterwards, fail closed without deleting or reusing that path.
+        await SaveAsync(batch, token).ConfigureAwait(false);
+        await using var input = File.OpenRead(temporary);
+        FileStream? output;
+        lock (_sync)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!CanPublish()) return SiteTransferItemStates.Waiting;
+            output = SiteFilePublication.OpenExclusive(final);
+        }
+        if (output is null) return SiteTransferItemStates.Skipped;
+        try
+        {
+            await using (output.ConfigureAwait(false))
+            {
+                if (_afterExclusiveOpen is { } afterOpen)
+                    await afterOpen(token).ConfigureAwait(false);
+                await input.CopyToAsync(output, token).ConfigureAwait(false);
+                await output.FlushAsync(token).ConfigureAwait(false);
+            }
+            return SiteTransferItemStates.Done;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            // Even if we created it, do not unlink a path another process may now own.
+            throw new ItemFailure(InterruptedPublication);
+        }
+    }
+
+    private async Task CopyFileAsync(RcloneClient client, Batch batch, JsonNode source, JsonNode destination,
+        string sourceName, string destinationName, CancellationToken token)
+    {
         token.ThrowIfCancellationRequested();
         // Not on the stop token: a stop that cut this call after rclone had made the job would leave the job running with
         // no id to stop it by. The answer is read in full, and a stop that came meanwhile stops the job in WaitForJobAsync.
@@ -1120,10 +1261,10 @@ public sealed class SiteTransfers : IAsyncDisposable
         {
             job = await client.CallAsync("operations/copyfile", new JsonObject
             {
-                ["srcFs"] = download ? fs : local,
-                ["srcRemote"] = download ? remote : item.Path,
-                ["dstFs"] = download ? local.DeepClone() : fs.DeepClone(),
-                ["dstRemote"] = download ? to : remote,
+                ["srcFs"] = source,
+                ["srcRemote"] = sourceName,
+                ["dstFs"] = destination,
+                ["dstRemote"] = destinationName,
                 ["_async"] = true,
                 ["_group"] = batch.Group,
             }, answer.Token).ConfigureAwait(false);
@@ -1132,7 +1273,6 @@ public sealed class SiteTransfers : IAsyncDisposable
         var jobId = job["jobid"] is JsonValue id && id.TryGetValue<long>(out var value) ? value
             : throw new RcloneCallException("operations/copyfile", 200, "rclone gave no job id.");
         await WaitForJobAsync(client, jobId, token).ConfigureAwait(false);
-        return SiteTransferItemStates.Done;
     }
 
     /// <summary>Waits for an rclone job; a stop asks rclone to stop it (which removes its partial file) and waits for that.</summary>
@@ -1214,7 +1354,7 @@ public sealed class SiteTransfers : IAsyncDisposable
     /// rclone's partial files for those files' targets are removed, on this PC for a download, on the server for an
     /// upload. One look per folder. Runs while nothing else moves (<see cref="Pump"/>).
     /// </summary>
-    private async Task SweepAsync(Batch batch)
+    private async Task SweepAsync(Batch batch, CancellationToken token)
     {
         var record = batch.Record;
         try
@@ -1238,22 +1378,37 @@ public sealed class SiteTransfers : IAsyncDisposable
             var removed = 0;
             if (record.Direction == SiteTransferDirections.Download)
             {
+                if (record.SafeSingleDownload && Directory.Exists(record.LocalFolder))
+                {
+                    token.ThrowIfCancellationRequested();
+                    var staged = ".inbound-transfer-" + record.Id;
+                    File.Delete(SiteTransferPaths.Local(record.LocalFolder, staged));
+                    foreach (var partial in Directory.EnumerateFiles(record.LocalFolder, staged + ".*.partial"))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        File.Delete(partial);
+                    }
+                }
                 foreach (var (folder, names) in folders)
                 {
+                    if (record.SafeSingleDownload) break; // It only ever writes the unique staging name.
+                    token.ThrowIfCancellationRequested();
                     var path = folder.Length == 0 ? record.LocalFolder : SiteTransferPaths.Local(record.LocalFolder, folder);
                     if (!Directory.Exists(path)) continue;
                     foreach (var file in Directory.EnumerateFiles(path, "*.partial"))
                     {
                         var name = Path.GetFileName(file);
                         if (!names.Any(n => SiteTransferPaths.IsPartialOf(name, n))) continue;
+                        token.ThrowIfCancellationRequested();
                         File.Delete(file);
                         removed++;
                     }
                 }
             }
-            else if (await _getSite(record.SiteId, CancellationToken.None).ConfigureAwait(false) is { } site)
+            else if (await _getSite(record.SiteId, token).ConfigureAwait(false) is { } site)
             {
-                using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
+                limit.CancelAfter(TimeSpan.FromMinutes(2));
                 using var lease = await _acquire(limit.Token).ConfigureAwait(false);
                 var fs = await SiteRemote.BuildAsync(site, lease.Client, limit.Token).ConfigureAwait(false);
                 foreach (var (folder, names) in folders)
@@ -1300,7 +1455,8 @@ public sealed class SiteTransfers : IAsyncDisposable
             lock (_sync)
             {
                 batch.Sweeping = false;
-                record.SweepPending = false;
+                if (!token.IsCancellationRequested) record.SweepPending = false;
+                _sweepRun = null;
                 _running--;
                 batch.Dirty = true;
                 ScheduleFlushLocked();
@@ -1521,7 +1677,8 @@ public sealed class SiteTransfers : IAsyncDisposable
             Conflict = r.Conflict,
             State = r.State,
             Problem = r.Problem,
-            Message = r.Message,
+            Message = r.PublicationPending && r.Items.FirstOrDefault(i => i.State == SiteTransferItemStates.Failed) is { } interrupted
+                ? $"{interrupted.Path}: {InterruptedPublication}" : r.Message,
             Files = r.Items.Count,
             Folders = r.Items.Count(i => i.Folder),
             FilesDone = done,
@@ -1552,11 +1709,14 @@ public sealed class SiteTransfers : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         (CancellationTokenSource[] Stops, Task[] Tasks) stopping;
+        Task? executionDrain;
         lock (_sync)
         {
             if (_disposed) return;
             _disposed = true;
             var active = _batches.Select(ActiveLocked).ToList();
+            if (_sweepRun is { } sweep) active.Add(([sweep.Stop], [sweep.Task]));
+            executionDrain = _executionDrain;
             stopping = ([.. active.SelectMany(a => a.Stops)], [.. active.SelectMany(a => a.Tasks)]);
             _retryTimer?.Dispose();
             _retryTimer = null;
@@ -1565,6 +1725,7 @@ public sealed class SiteTransfers : IAsyncDisposable
         }
 
         await StopAndWaitAsync(stopping).ConfigureAwait(false);
+        if (executionDrain is not null) await executionDrain.ConfigureAwait(false);
         lock (_sync)
         {
             _flushTimer?.Dispose();

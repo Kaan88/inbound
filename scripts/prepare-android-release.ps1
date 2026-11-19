@@ -50,7 +50,9 @@ try {
     $name = "Inbound-android-$Version-arm64.apk"
     $releaseApk = Join-Path $stage $name
     Copy-Item -LiteralPath $apk -Destination $releaseApk
-    # All checks and signatures refer to this immutable staged copy, never the changing build output.
+    # Strict verification (including the pinned rclone and 16 KiB alignment)
+    # must succeed on the staged copy before update metadata is signed. Never
+    # pass the historical-only verification option here.
     & python -I (Join-Path $root 'tools/AndroidApp/release-apk.py') verify $releaseApk --java-sdk $JavaSdkDirectory --android-sdk $AndroidSdkDirectory
     if ($LASTEXITCODE -ne 0) { throw 'Staged APK verification failed.' }
     $tools = Get-ChildItem -LiteralPath (Join-Path $AndroidSdkDirectory 'build-tools') -Directory |

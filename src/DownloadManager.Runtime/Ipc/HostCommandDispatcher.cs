@@ -97,6 +97,8 @@ public sealed partial class HostCommandDispatcher
     private List<string> HelloCapabilities(SessionRights rights)
     {
         var capabilities = CapabilitiesOf(rights);
+        if (Sites is DownloadManager.Runtime.Sites.SitesCommands && SitesAnswered(rights))
+            capabilities.Add(SiteTransferStartRequest.SafeSingleDownloadCapability);
         if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         capabilities.Add("browserRefresh");
         capabilities.Add("queueSpeedLimit");
@@ -185,7 +187,7 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public static bool NeedsLifetime(string type) => type == MessageTypes.FileMetadata || WaitsOnProvider(type)
         || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
-        || type is SitesMessageTypes.TransferStart
+        || type is SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart
         // SITES.6b: both read a server's certificate first.
         || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust
         // SITES.6c: waits for rclone to print the sign-in address, or for OneDrive to name the drive.

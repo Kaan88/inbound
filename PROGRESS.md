@@ -2,6 +2,46 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 API 33 UI smoke added a disposable WebDAV location, browsed it,
+  saved the expected fixture file to shared `Download/` with matching SHA-256,
+  then created a competing destination after a second transfer's GET had
+  started. Inbound reported one skipped file and left its hash unchanged.
+  The probe and its file/reverse were removed. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\emu-ui-safe-20261119-221253`.
+  Mobile 543/543 and Server 209/209 passed, including the authenticated
+  one-shot folder restriction. A separate four-case real-rclone suite first
+  verified lease regrant, no replacement, isolated staging recovery, and
+  fail-closed recovery from a seeded interrupted-publication record.
+  The normal signed arm64 candidate is 49,417,539 bytes, SHA-256
+  `86912e60a2c4e2a76c9b709e39efbd56cf50b913d10f0268610ec664bb3023ce`.
+  It passed the pinned signer/binary, MIT notice, no-test-hooks and 16 KiB
+  ZIP checks. The combined API 33 replay passed all three cases: matching
+  download hash, competing file skipped unchanged, and a probe force-stop
+  after exclusive destination creation but before write. On restart the
+  incomplete file was unchanged and the UI showed one failure, zero skips,
+  and the filename-specific incomplete-file warning. Probe and reverse
+  cleanup passed. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\emu-ui-kill-20261119-221807`.
+  Sites suite with rclone: 224 passed, 20 skipped. Astra gave final **PASS**
+  for the ANDROID.8 implementation and signed arm64 release checks after
+  independently inspecting the recovery UI evidence and matching APK size
+  and hash. This does not establish physical-device Remote Files background
+  acceptance or a paired-Host UI walkthrough. The candidate was not published.
+
+- ANDROID.8 isolated NativeAOT API 33 x86-64 Host probe passed through real
+  `sites.*` IPC: the Host refused an out-of-root folder, bundled rclone
+  listed the loopback WebDAV location, then downloaded one 3-byte file under
+  shared `Download/`. The saved file SHA-256 was
+  `ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`.
+  The six-second delayed repeat requested an Android foreground service with
+  no ordinary download running. Both runs stopped rclone, removed the fixture
+  file and uninstalled only the probe. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\rclone-arm64-source\emu-delayed-transfer-20261119-215446`.
+  Mobile suite 539/539, focused real-rclone sign-in suite 3/3, release
+  tooling 16/16, fixture suite 5/5. This is local IPC evidence, not a
+  paired-Host, UI walkthrough or background/screen-off pass. Astra pre-merge
+  review remains open; no APK was published.
+
 - ANDROID.8 standard arm64 production packaging verified locally: the
   48,898,585-byte APK contains one rclone binary matching the tested pin and
   the MIT notice, with no probe hooks; `zipalign -c -P 16` passed. The build

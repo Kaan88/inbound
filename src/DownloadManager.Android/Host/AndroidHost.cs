@@ -4,6 +4,7 @@ using DownloadManager.Mobile;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;
+using DownloadManager.Runtime.Sites;
 
 namespace Inbound.App.Host;
 
@@ -46,7 +47,7 @@ internal sealed class DelegateLog(Action<string> say) : IHostLog
 
 /// <summary>
 /// The Host core on Android, in this process: DownloadManagerService + HostCommandDispatcher composed as
-/// src/DownloadManager.Server/ServerApp.cs composes them, minus the HTTP front, Torrents, TorBox, Archives and Sites. A client is an
+/// src/DownloadManager.Server/ServerApp.cs composes them, minus the HTTP front, Torrents, TorBox and Archives. A client is an
 /// <see cref="InProcessSession"/> talking to the dispatcher with the same IpcMessage envelopes a pipe or WebSocket carries.
 /// For now it lives and dies with the process (no foreground service yet).
 /// </summary>
@@ -62,14 +63,18 @@ internal sealed class AndroidHost : IAsyncDisposable
         Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath ?? "/storage/emulated/0/Download";
 
     private readonly HttpDownloadEngine _engine;
+    private readonly SitesCommands? _sites;
+    private readonly ISleepPrevention? _siteSleep;
     private readonly Action<string> _say;
 
-    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, ActivityState activity,
+    private AndroidHost(DownloadManagerService service, HostCommandDispatcher dispatcher, HttpDownloadEngine engine, SitesCommands? sites, ISleepPrevention? siteSleep, ActivityState activity,
         ISleepPrevention sleep, EventHandler<JobChangeEventArgs> onJob, EventHandler<bool> onWait, EventHandler<AppSettings> onSettings, Action<string> say)
     {
         Service = service;
         Dispatcher = dispatcher;
         _engine = engine;
+        _sites = sites;
+        _siteSleep = siteSleep;
         Activity = activity;
         _sleep = sleep;
         _onJob = onJob;
@@ -136,10 +141,16 @@ internal sealed class AndroidHost : IAsyncDisposable
         EventHandler<JobChangeEventArgs> onJob = (_, e) => activity.OnJobChanged(e.Job, e.ChangeType);
         EventHandler<bool> onWait = (_, waiting) => activity.SetNetworkWait(waiting);
         // A queue started or stopped (or the queues changed): its queued jobs do or don't keep the process alive (Fable finding 8).
-        EventHandler<AppSettings> onSettings = (_, settings) => activity.SetQueues(DownloadManagerService.MapSettings(settings).Queues);
+        SitesCommands? sites = null;
+        EventHandler<AppSettings> onSettings = (_, settings) =>
+        {
+            activity.SetQueues(DownloadManagerService.MapSettings(settings).Queues);
+            sites?.Transfers.RefreshSleep();
+        };
         service.JobChanged += onJob;
         service.MeteredWaitChanged += onWait;
         service.SettingsChanged += onSettings;
+        ISleepPrevention? siteSleep = null;
         try
         {
             // Before InitializeAsync: only stored there, and the first Schedule after reconcile is already held.
@@ -168,9 +179,39 @@ internal sealed class AndroidHost : IAsyncDisposable
 
             var snapshot = service.GetSnapshot();
             activity.ApplySnapshot(snapshot.Jobs, snapshot.Status, snapshot.Settings.Queues);
-            var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log);
+            // Never fetch or run an executable from writable app storage on Android.
+            // Test/other ABI builds without the bundled binary do not advertise this capability.
+            var nativeLibraries = Android.App.Application.Context.ApplicationInfo?.NativeLibraryDir;
+            var bundledRclone = nativeLibraries is null ? null : Path.Combine(nativeLibraries, "librclone.so");
+            if (File.Exists(bundledRclone))
+            {
+                siteSleep = new Background.AndroidSleepPrevention(Android.App.Application.Context);
+                sites = new SitesCommands(paths.Root, log.Info, findRclone: _ => bundledRclone,
+                    sleepPrevention: siteSleep, preventSleep: () => service.GetSettings().PreventSleepWhileDownloading,
+                    transferExecutionAllowed: false
+#if INBOUND_TEST_BUILD && INBOUND_RCLONE_PROBE
+                    , afterTransferExclusiveOpen: TestHooks.HoldRemoteFilesPublicationAsync
+#endif
+                    );
+            }
+            var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log)
+            {
+                Sites = sites,
+                SitesRoots = sites is null ? null : new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" },
+            };
+            if (sites is not null)
+            {
+                sites.Changed += (_, change) => dispatcher.BroadcastSitesChanged(change);
+                sites.TransfersChanged += (_, change) => dispatcher.BroadcastSiteTransfersChanged(change);
+                sites.Transfers.ActivityChanged += service.OnSiteTransfersActivityChanged;
+                void RefreshSiteActivity() => activity.SetRemoteFilesActive(sites.Transfers.HasRunningTransfers);
+                sites.Transfers.ActivityChanged += RefreshSiteActivity;
+                RefreshSiteActivity();
+                sites.Transfers.Measured += service.OnSiteTransfersMeasured;
+                service.AttachSiteTransfers(sites.Transfers.Demand, sites.Transfers.SetSpeedLimit);
+            }
             dispatcher.Start();
-            return new AndroidHost(service, dispatcher, engine, activity, sleep, onJob, onWait, onSettings, say);
+            return new AndroidHost(service, dispatcher, engine, sites, siteSleep, activity, sleep, onJob, onWait, onSettings, say);
         }
         catch (Exception startError)
         {
@@ -180,19 +221,29 @@ internal sealed class AndroidHost : IAsyncDisposable
             service.SettingsChanged -= onSettings;
             activity.Dispose();
             // Nothing half-started may keep writing to the state folder: a later start must be the only writer.
+            Exception? sitesShutdownError = null;
+            try { if (sites is not null) await sites.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { sitesShutdownError = ex; }
+            finally { siteSleep?.Dispose(); }
             try { await service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception ex)
             {
                 say("[host] shutdown after a failed start: " + ex.GetType().Name + ": " + ex.Message);
                 engine.Dispose();
                 // Something may still be running over the state folder: no second start in this process.
-                throw new HostLeftRunningException(startError, ex);
+                throw new HostLeftRunningException(startError, sitesShutdownError is null ? ex : new AggregateException(sitesShutdownError, ex));
             }
 
             engine.Dispose();
+            if (sitesShutdownError is not null) throw new HostLeftRunningException(startError, sitesShutdownError);
             throw;
         }
     }
+
+    internal Task PauseRemoteFilesAsync() => _sites?.Transfers.PauseAllAsync("Paused from the notification.") ?? Task.CompletedTask;
+
+    internal void SetRemoteFilesExecutionAllowed(bool allowed) => _sites?.Transfers.SetExecutionAllowed(allowed);
+    internal bool RemoteFilesExecutionIntent => _sites?.Transfers.HasExecutionIntent == true;
 
     public async ValueTask DisposeAsync()
     {
@@ -201,6 +252,9 @@ internal sealed class AndroidHost : IAsyncDisposable
         Service.MeteredWaitChanged -= _onWait;
         Service.SettingsChanged -= _onSettings;
         Activity.Dispose();
+        try { if (_sites is not null) await _sites.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { _say("[host] remote files shutdown: " + ex.GetType().Name); }
+        finally { _siteSleep?.Dispose(); }
         try { await Service.ShutdownAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { _say("[host] shutdown: " + ex.GetType().Name + ": " + ex.Message); }
         _engine.Dispose();

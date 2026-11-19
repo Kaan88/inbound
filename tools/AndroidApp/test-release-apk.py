@@ -5,10 +5,12 @@ No device, signing key, password or Java process is used.
 """
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("release_apk", Path(__file__).with_name("release-apk.py"))
@@ -88,7 +90,7 @@ class PublicationTests(unittest.TestCase):
                 target.write_bytes(b"existing output")
 
         with patch.object(release, "run", side_effect=fake_run), patch.object(release, "verify", side_effect=fake_verify):
-            release.sign_release(target, source, key, password, "java", "apksigner", "aapt")
+            release.sign_release(target, source, key, password, "java", "apksigner", "aapt", "zipalign")
         return target
 
     def test_final_is_published_only_after_verification(self):
@@ -114,6 +116,101 @@ class PublicationTests(unittest.TestCase):
                 self.exercise_sign(root, race=True)
             self.assertEqual((root / "release.apk").read_bytes(), b"existing output")
             self.assertFalse(list(root.glob("*.pending")))
+
+
+class StrictPackagingTests(unittest.TestCase):
+    def test_real_checker_rejects_missing_wrong_and_duplicate_rclone(self):
+        checker = Path(__file__).with_name("check-apk.py")
+        for variant in ("missing", "wrong", "duplicate"):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as directory:
+                apk = Path(directory) / "fixture.apk"
+                with zipfile.ZipFile(apk, "w") as archive:
+                    archive.writestr("classes.dex", b"net/dot/jni/nativeaot/NativeAotRuntimeProvider")
+                    archive.writestr("lib/arm64-v8a/libDownloadManager.Android.so",
+                                     b"Java_net_dot_android_crypto_DotnetProxyTrustManager_verifyRemoteCertificate")
+                    archive.writestr("res/drawable/ic_launcher.png", b"fixture")
+                    archive.writestr("assets/licenses/rclone.txt", b"Permission is hereby granted")
+                    if variant != "missing":
+                        archive.writestr("lib/arm64-v8a/librclone.so", b"wrong bytes")
+                    if variant == "duplicate":
+                        archive.writestr("lib/x86_64/librclone.so", b"wrong bytes")
+                result = subprocess.run([sys.executable, "-I", str(checker), str(apk),
+                                         "--release", "--bundled-rclone"], capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b"FAIL pinned rclone bytes", result.stdout)
+                if variant == "duplicate":
+                    self.assertIn(b"FAIL only one packaged rclone, arm64", result.stdout)
+
+    def test_staging_uses_strict_verify_before_metadata_signing(self):
+        script = (Path(__file__).resolve().parents[2] / "scripts/prepare-android-release.ps1").read_text()
+        verify_line = next(line for line in script.splitlines() if "release-apk.py') verify " in line)
+        self.assertNotIn("--historical-0.0.7", verify_line)
+        self.assertLess(script.index(verify_line), script.index("& dotnet $signer @signerArguments"))
+
+    def test_strict_checks_use_rclone_pin_and_16k_zipalign(self):
+        calls = []
+        with patch.object(release, "run", side_effect=lambda args: calls.append(args) or ""):
+            release.check_packaging(Path("input.apk"), "zipalign")
+        self.assertIn("--release", calls[0])
+        self.assertIn("--bundled-rclone", calls[0])
+        self.assertEqual(calls[1], ["zipalign", "-c", "-P", "16", "4", Path("input.apk")])
+
+    def test_packaging_failure_prevents_access_to_signer(self):
+        for rejected in ("rclone", "alignment"):
+            with self.subTest(rejected=rejected), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source, key, password = [root / name for name in ("source.apk", "key", "pass")]
+                for path in (source, key, password):
+                    path.write_bytes(b"fixture")
+                calls = []
+                def fake_run(args):
+                    calls.append(args)
+                    if "badging" in args:
+                        return ReleaseOutputTests.manifest()
+                    if (rejected == "rclone" and "--bundled-rclone" in args or
+                            rejected == "alignment" and "-P" in args):
+                        raise ValueError("rejected")
+                    return ""
+                with patch.object(release, "run", side_effect=fake_run), self.assertRaises(ValueError):
+                    release.sign_release(root / "out.apk", source, key, password,
+                                         "java", "jar", "aapt", "zipalign")
+                self.assertFalse(any("sign" in args for args in calls))
+                self.assertFalse((root / "out.apk").exists())
+
+    def test_verify_is_strict_and_historical_is_explicitly_version_limited(self):
+        calls = []
+        def fake_run(args):
+            calls.append(args)
+            if "badging" in args:
+                return ReleaseOutputTests.manifest()
+            if "verify" in args:
+                return "Number of signers: 1\nSigner #1 certificate SHA-256 digest: " + release.RELEASE_CERT_SHA256
+            return ""
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "a.apk"
+            apk.write_bytes(b"fixture")
+            with patch.object(release, "run", side_effect=fake_run):
+                release.verify(apk, "java", "jar", "aapt", "zipalign")
+                self.assertTrue(any("--bundled-rclone" in args for args in calls))
+                self.assertTrue(any("-P" in args for args in calls))
+                with self.assertRaisesRegex(ValueError, "restricted"):
+                    release.verify(apk, "java", "jar", "aapt", "zipalign", historical=True)
+
+    def test_historical_mode_reports_legacy_limits(self):
+        def fake_run(args):
+            if "badging" in args:
+                return ReleaseOutputTests.manifest().replace("0.0.1", "0.0.7")
+            if "verify" in args:
+                return "Number of signers: 1\nSigner #1 certificate SHA-256 digest: " + release.RELEASE_CERT_SHA256
+            self.assertNotIn("--bundled-rclone", args)
+            self.assertNotIn("-P", args)
+            return ""
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "a.apk"
+            apk.write_bytes(b"fixture")
+            with patch.object(release, "run", side_effect=fake_run), patch("builtins.print") as output:
+                release.verify(apk, "java", "jar", "aapt", "zipalign", historical=True)
+            self.assertTrue(any("HISTORICAL ONLY" in str(call) for call in output.call_args_list))
 
 
 if __name__ == "__main__":

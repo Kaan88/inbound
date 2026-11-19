@@ -105,6 +105,7 @@ public static class SitesMessageTypes
     /// with <see cref="TransferResult"/> (its <c>Transfer</c> set).
     /// </summary>
     public const string TransferStart = "sites.transfer.start";
+    public const string SafeDownloadStart = "sites.transfer.safeDownload";
 
     /// <summary><see cref="SiteTransferIdRequest"/>: stops the batch's files in flight; answered with <see cref="TransferResult"/>.</summary>
     public const string TransferPause = "sites.transfer.pause";
@@ -163,7 +164,7 @@ public static class SitesMessageTypes
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
         type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
-            or TransferStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
+            or TransferStart or SafeDownloadStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
             or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
             or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
 }

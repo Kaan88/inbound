@@ -50,20 +50,35 @@ def find_tools(android_sdk, java_sdk):
         if re.fullmatch(r"\d+\.\d+\.\d+", directory.name):
             jar = directory / "lib/apksigner.jar"
             aapt = directory / "aapt2.exe"
-            if jar.is_file() and aapt.is_file():
-                tools.append((tuple(map(int, directory.name.split("."))), jar, aapt))
+            zipalign = directory / "zipalign.exe"
+            if jar.is_file() and aapt.is_file() and zipalign.is_file():
+                tools.append((tuple(map(int, directory.name.split("."))), jar, aapt, zipalign))
     if not java.is_file() or not tools:
-        raise ValueError("Java and a stable Android build-tools apksigner/aapt2 are required")
-    _, jar, aapt = max(tools)
-    return java, jar, aapt
+        raise ValueError("Java and stable Android build-tools apksigner/aapt2/zipalign are required")
+    _, jar, aapt, zipalign = max(tools)
+    return java, jar, aapt, zipalign
 
 
-def verify(apk, java, jar, aapt):
-    check_signer(run([java, "-jar", jar, "verify", "--verbose", "--print-certs", apk]))
-    check_manifest(run([aapt, "dump", "badging", apk]))
+def check_packaging(apk, zipalign):
     checker = Path(__file__).with_name("check-apk.py")
-    packaging = run([sys.executable, "-I", checker, apk, "--release"])
+    packaging = run([sys.executable, "-I", checker, apk, "--release", "--bundled-rclone"])
+    run([zipalign, "-c", "-P", "16", "4", apk])
     print(packaging)
+    print("APK ZIP alignment verified (16 KiB)")
+
+
+def verify(apk, java, jar, aapt, zipalign, *, historical=False):
+    check_signer(run([java, "-jar", jar, "verify", "--verbose", "--print-certs", apk]))
+    badging = run([aapt, "dump", "badging", apk])
+    check_manifest(badging)
+    if historical:
+        if not re.search(r"^package: name='app\.inbound\.android' .* versionName='0\.0\.7'(?:\s|$)", badging, re.M):
+            raise ValueError("Historical verification is restricted to version 0.0.7")
+        checker = Path(__file__).with_name("check-apk.py")
+        print(run([sys.executable, "-I", checker, apk, "--release"]))
+        print("HISTORICAL ONLY: rclone pin and 16 KiB alignment not verified; not eligible for new release staging")
+    else:
+        check_packaging(apk, zipalign)
     print("APK signature verified; sole signer matches Inbound's pinned release certificate")
     print("Package, minimum/target SDK, arm64-only ABI and non-debuggable flag verified")
     print(f"Signer certificate SHA-256: {RELEASE_CERT_SHA256}")
@@ -71,7 +86,7 @@ def verify(apk, java, jar, aapt):
         print(f"APK SHA-256: {hashlib.file_digest(stream, 'sha256').hexdigest()}")
 
 
-def sign_release(apk, source, keystore, password_file, java, jar, aapt):
+def sign_release(apk, source, keystore, password_file, java, jar, aapt, zipalign):
     for path in (source, keystore, password_file):
         if path is None or not path.is_file():
             raise ValueError("sign requires existing --input, --keystore and --password-file")
@@ -79,7 +94,7 @@ def sign_release(apk, source, keystore, password_file, java, jar, aapt):
         raise ValueError("Signing output must be a new file distinct from the input")
     # Check non-secret build output before accessing the release key.
     check_manifest(run([aapt, "dump", "badging", source]))
-    run([sys.executable, "-I", Path(__file__).with_name("check-apk.py"), source, "--release"])
+    check_packaging(source, zipalign)
     descriptor, pending_name = tempfile.mkstemp(prefix=".inbound-", suffix=".apk.pending", dir=apk.parent)
     os.close(descriptor)
     pending = Path(pending_name)
@@ -89,7 +104,7 @@ def sign_release(apk, source, keystore, password_file, java, jar, aapt):
         run([java, "-jar", jar, "sign", "--ks", keystore, "--ks-key-alias", "inbound",
              "--ks-pass", f"file:{password_file.resolve()}", "--debuggable-apk-permitted", "false",
              "--v4-signing-enabled", "false", "--out", pending, source])
-        verify(pending, java, jar, aapt)
+        verify(pending, java, jar, aapt, zipalign)
         # Same-directory hard link publishes atomically and fails if the target
         # appeared meanwhile. It cannot overwrite a user's existing artifact.
         os.link(pending, apk)
@@ -106,14 +121,18 @@ def main():
     parser.add_argument("--input", type=Path, help="Fresh build APK to sign; never overwritten")
     parser.add_argument("--keystore", type=Path)
     parser.add_argument("--password-file", type=Path)
+    parser.add_argument("--historical-0.0.7", dest="historical", action="store_true",
+                        help="Verify legacy 0.0.7 only; does not establish current release eligibility")
     args = parser.parse_args()
-    java, jar, aapt = find_tools(args.android_sdk, args.java_sdk)
+    if args.action == "sign" and args.historical:
+        parser.error("historical verification cannot be used for signing")
+    java, jar, aapt, zipalign = find_tools(args.android_sdk, args.java_sdk)
     if args.action == "sign":
-        sign_release(args.apk, args.input, args.keystore, args.password_file, java, jar, aapt)
+        sign_release(args.apk, args.input, args.keystore, args.password_file, java, jar, aapt, zipalign)
     else:
         if not args.apk.is_file():
             raise ValueError("APK not found")
-        verify(args.apk, java, jar, aapt)
+        verify(args.apk, java, jar, aapt, zipalign, historical=args.historical)
 
 
 if __name__ == "__main__":

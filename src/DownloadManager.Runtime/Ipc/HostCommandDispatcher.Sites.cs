@@ -77,7 +77,7 @@ public sealed partial class HostCommandDispatcher
                 message = message with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(save, IpcJson.Options) };
                 return null;
             }
-            case SitesMessageTypes.TransferStart:
+            case SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart:
             {
                 var start = message.GetPayload<SiteTransferStartRequest>();
                 if (start is null) return null;

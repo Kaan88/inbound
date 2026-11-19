@@ -54,6 +54,25 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task TurningSitesOffCancelsTheBrowserAuthorization()
+    {
+        var commands = Open(null);
+        var enable = new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone };
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, enable);
+        var site = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest { Name = "Box", Kind = SiteKinds.Dropbox });
+        var request = new SiteSignInRequest { Id = site.Site!.Id };
+        Assert.True((await Call<SiteSignInResultDto>(commands, SitesMessageTypes.SignIn, request)).Ok);
+        Assert.False((await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = false })).Enabled);
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, enable);
+        var listed = Assert.Single((await Call<SitesListDto>(commands, SitesMessageTypes.ListRequest, new { })).Sites);
+        Assert.False(listed.SigningIn);
+        Assert.False(listed.SignedIn);
+        var next = await Call<SiteSignInResultDto>(commands, SitesMessageTypes.SignIn, request);
+        Assert.True(next.Ok, next.Message);
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = request.Id })).Ok);
+    }
+
+    [SiteTransfersFact]
     public async Task APastedTokenSignsInAndANewClientIdAsksForANewSignIn()
     {
         var commands = Open(null);

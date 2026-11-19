@@ -6,6 +6,10 @@ namespace DownloadManager.Contracts;
 /// </summary>
 public sealed class SiteTransferStartRequest
 {
+    public const string SafeSingleDownloadCapability = "sitesSafeSingleDownload";
+    /// <summary>Requires one file (never a directory) and no replacement even at final publication.</summary>
+    public bool SafeSingleDownload { get; set; }
+
     public string SiteId { get; set; } = "";
 
     /// <summary><c>download</c> or <c>upload</c>.</summary>

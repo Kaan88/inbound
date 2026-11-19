@@ -87,9 +87,14 @@ public sealed class SiteTransferItem
 /// </summary>
 public sealed class SiteTransferRecord
 {
-    public const int CurrentSchemaVersion = 1;
+    public bool SafeSingleDownload { get; init; }
+    /// <summary>The Host may have left the public file incomplete; never treat it as an ordinary skip.</summary>
+    public bool PublicationPending { get; set; }
 
-    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public const int SafeDownloadSchemaVersion = 2;
+    public const int CurrentSchemaVersion = SafeDownloadSchemaVersion;
+
+    public int SchemaVersion { get; set; } = 1;
     public string Id { get; set; } = "";
     public string SiteId { get; set; } = "";
     public string SiteName { get; set; } = "";

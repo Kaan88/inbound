@@ -54,14 +54,18 @@ public sealed class RemoteHostConnectionTests
         Assert.DoesNotContain(frames.All, m => m.ReplyTo is not null);
     }
 
-    [Fact]
-    public async Task ACallThatWaitsOnTheNetworkGoesAsOnePostNotOverTheSocket()
+    [Theory]
+    [InlineData(MessageTypes.RemoteClassify)]
+    [InlineData(SitesMessageTypes.Browse)]
+    [InlineData(SitesMessageTypes.TransferStart)]
+    [InlineData(SitesMessageTypes.SafeDownloadStart)]
+    public async Task ACallThatWaitsOnTheNetworkGoesAsOnePostNotOverTheSocket(string type)
     {
         var server = new FakeServer().Accepts();
         await using var connection = server.Connection();
         await connection.OpenAsync(_ => { }, CancellationToken.None);
 
-        var request = IpcMessage.Create(MessageTypes.RemoteClassify, new { });
+        var request = IpcMessage.Create(type, new { });
         var reply = await connection.RequestAsync(request, CancellationToken.None);
 
         Assert.Equal(request.Id, reply.ReplyTo);

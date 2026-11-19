@@ -68,6 +68,9 @@ public sealed class DownloadsModel : IDisposable
     /// <summary>The Host's last hello (its kind and what it offers, such as folder browsing); null until it has said.</summary>
     public HostHelloDto? Hello { get; private set; }
 
+    /// <summary>Raised on the UI thread after a new hello, including reconnects.</summary>
+    public event Action? HostHelloChanged;
+
     /// <summary>True (on the UI thread) once the snapshot is shown: <see cref="Settings"/> are the Host's, not defaults.</summary>
     public bool SnapshotShown => _shown;
 
@@ -94,7 +97,12 @@ public sealed class DownloadsModel : IDisposable
     {
         // A screen that went away ignores whatever the Host still sends it.
         if (Disposed) return;
-        if (m.Type == MessageTypes.ServerHello) { try { Hello = m.GetPayload<HostHelloDto>(); } catch (System.IO.InvalidDataException) { } }
+        if (m.Type == MessageTypes.ServerHello)
+        {
+            try { Hello = m.GetPayload<HostHelloDto>() is { Capabilities: not null } hello ? hello : null; }
+            catch (Exception e) when (e is System.IO.InvalidDataException or System.Text.Json.JsonException) { Hello = null; }
+            _post(() => { if (!Disposed) HostHelloChanged?.Invoke(); });
+        }
         else if (m.Type == MessageTypes.JobsSnapshot && !_gotSnapshot)
         {
             _gotSnapshot = true;

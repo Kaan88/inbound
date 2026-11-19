@@ -26,6 +26,8 @@ public static class NotificationText
 
     private static OngoingText OngoingCore(ActivitySummary s)
     {
+        if (s.RemoteFilesActive)
+            return new OngoingText(s.ActiveCount > 0 ? "Downloads and Remote Files" : "Remote Files transferring", null, BarMax, 0, true);
         if (s.ActiveCount <= 0)
             return new OngoingText("Starting downloads", null, BarMax, 0, true);
 

@@ -48,6 +48,26 @@ internal sealed class ManualTime : TimeProvider
 
 public class ActivityStateTests
 {
+    [Fact]
+    public void RemoteFilesKeepsServiceAliveWithoutInventingAnOrdinaryDownload()
+    {
+        using var state = new ActivityState();
+        state.ApplySnapshot([]);
+        int changes = 0;
+        state.Changed += () => changes++;
+
+        state.SetRemoteFilesActive(true);
+        Assert.True(state.Summary.KeepAlive);
+        Assert.True(state.Summary.RemoteFilesActive);
+        Assert.Equal(0, state.Summary.ActiveCount);
+        Assert.Equal("Remote Files transferring", NotificationText.Ongoing(state.Summary).Title);
+        state.ApplySnapshot([]);
+        Assert.True(state.Summary.KeepAlive);
+        state.SetRemoteFilesActive(false);
+        Assert.Equal(ActivitySummary.Idle, state.Summary);
+        Assert.Equal(2, changes);
+    }
+
     private sealed class Counter { public int N; public void Hit() => N++; }
 
     private static (ActivityState S, ManualTime T, Counter C) Make(params JobDto[] jobs)

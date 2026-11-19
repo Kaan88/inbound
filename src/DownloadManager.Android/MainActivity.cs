@@ -36,6 +36,8 @@ public sealed partial class MainActivity : AppCompatActivity
     private PrefsStore? _prefs;
     private bool _onSettings;
     private bool _onQueues;
+    private bool _onRemoteFiles;
+    private RemoteFilesScreen? _remoteFiles;
     private QueuesScreen? _queues;
     private QueueEditorScreen? _queueEditor;
     private HostSettingsScreen? _hostSettings;
@@ -54,12 +56,13 @@ public sealed partial class MainActivity : AppCompatActivity
 
         // --- Step 6 (ANDROID.7) hook: the connection is the shown host's (this phone, or a paired Inbound), and the host
         // chip and the "Files are saved on ..." strip go in the search bar's slots. Hosts/HostChoice.cs, Hosts/HostBar.cs. ---
-        _connection = Hosts.HostChoice.Connect(this, () => new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
-            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e), Background.InboundBackground.UserStartedDownloads));
         var hosts = Hosts.HostChoice.Hosts(this);
-        Capabilities = hosts.Capabilities;
-        HostName = hosts.Current.Name;
-        _linkHostStamp = hosts.Current.ConnectionStamp;
+        var selectedHost = hosts.Current;
+        _connection = Hosts.HostChoice.Connect(this, selectedHost, () => new LazyInProcessConnection(DispatcherAsync(InboundApplication.GetHostAsync(this)),
+            e => Log.Error(InboundApplication.Tag, "screen: a Host frame failed: " + e), Background.InboundBackground.UserStartedDownloads));
+        Capabilities = selectedHost.IsPhone ? DownloadManager.Mobile.Remote.HostCapabilities.Phone : DownloadManager.Mobile.Remote.HostCapabilities.Remote;
+        HostName = selectedHost.Name;
+        _linkHostStamp = selectedHost.ConnectionStamp;
         _linkHosts = hosts; hosts.Changed += OnLinkHostsChanged;
         // The phone's own Host runs whatever host is shown: its downloads, their reconcile and resume, and the keep-alive of
         // step 2 must not wait until the user looks at This phone again (review of steps 3 and 6, finding 6).
@@ -79,10 +82,16 @@ public sealed partial class MainActivity : AppCompatActivity
             new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote));
         _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!, savedInstanceState?.GetBundle("app_update_prompt"));
         _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
-            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings || _onQueues), PerformBack);
+            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings || _onQueues || _onRemoteFiles), PerformBack);
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
         var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
         bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId); e.Handled = true; };
+        _model.HostHelloChanged += () =>
+        {
+            var offered = _model.Hello?.Capabilities.Contains("sites") == true;
+            if (!offered && _onRemoteFiles) bottom.SelectedItemId = Resource.Id.nav_downloads;
+            bottom.Menu.FindItem(Resource.Id.nav_remote_files)!.SetVisible(offered);
+        };
         // A recreated activity (theme or dynamic colour changed) comes back on the tab it was on.
         if (savedInstanceState?.GetBoolean("on_settings") == true) bottom.SelectedItemId = Resource.Id.nav_settings;
         else if (savedInstanceState?.GetBoolean("on_queues") == true) bottom.SelectedItemId = Resource.Id.nav_queues;
@@ -101,6 +110,9 @@ public sealed partial class MainActivity : AppCompatActivity
         var reported = false;
         _model.FirstSnapshotShown += () =>
         {
+            var remoteFilesOffered = _model.Hello?.Capabilities.Contains("sites") == true;
+            if (remoteFilesOffered && savedInstanceState?.GetBoolean("on_remote_files") == true)
+                bottom.SelectedItemId = Resource.Id.nav_remote_files;
             foreach (var r in _model.Rows) WatchForFinish(r);
             _snapshotReady = true;
             PresentShare();
@@ -141,6 +153,7 @@ public sealed partial class MainActivity : AppCompatActivity
         base.OnSaveInstanceState(outState);
         outState.PutBoolean("on_settings", _onSettings);
         outState.PutBoolean("on_queues", _onQueues);
+        outState.PutBoolean("on_remote_files", _onRemoteFiles);
         var queueActions = new Bundle(); _queues?.Save(queueActions);
         queueActions.PutString("host_stamp", _linkHostStamp); outState.PutBundle("queue_actions", queueActions);
         // The open page comes back after a rotation or a process death, with what was typed into it (finding 16).
@@ -277,13 +290,33 @@ public sealed partial class MainActivity : AppCompatActivity
     {
         var settings = tab == Resource.Id.nav_settings;
         var queues = tab == Resource.Id.nav_queues;
-        if (_onSettings == settings && _onQueues == queues) return;
+        var remoteFiles = tab == Resource.Id.nav_remote_files;
+        if (_onSettings == settings && _onQueues == queues && _onRemoteFiles == remoteFiles) return;
         var downloads = FindViewById<View>(Resource.Id.downloads_root)!;
         var settingsPage = FindViewById<View>(Resource.Id.settings_root)!;
         var queuesPage = FindViewById<View>(Resource.Id.queues_root)!;
-        var from = _onSettings ? settingsPage : _onQueues ? queuesPage : downloads;
-        var to = settings ? settingsPage : queues ? queuesPage : downloads;
+        var remoteFilesPage = FindViewById<FrameLayout>(Resource.Id.remote_files_root)!;
+        var from = _onSettings ? settingsPage : _onQueues ? queuesPage : _onRemoteFiles ? remoteFilesPage : downloads;
+        var to = settings ? settingsPage : queues ? queuesPage : remoteFiles ? remoteFilesPage : downloads;
+        if (_onRemoteFiles)
+        {
+            _remoteFiles?.Dispose();
+            _remoteFiles = null;
+            remoteFilesPage.RemoveAllViews();
+        }
+        if (remoteFiles && _connection is not null)
+        {
+            var current = _linkHosts?.Current;
+            bool secureHostConnection = current?.ConnectionStamp == _linkHostStamp &&
+                (current?.IsPhone == true || current?.AddressUri?.Scheme == Uri.UriSchemeHttps);
+            _remoteFiles = new RemoteFilesScreen(this, _connection, _linkHostStamp, secureHostConnection,
+                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.SafeSingleDownloadCapability) == true);
+            InsetsListener.Pad(_remoteFiles.View, top: true, bottom: false);
+            remoteFilesPage.AddView(_remoteFiles.View);
+            _remoteFiles.Start();
+        }
         _onSettings = settings; _onQueues = queues;
+        _onRemoteFiles = remoteFiles;
         _queues?.SetVisible(queues);
         if (Motion.Reduced(this)) Motion.CrossFade(from, to, 150, () => from.Visibility = ViewStates.Gone);
         else
@@ -317,6 +350,7 @@ public sealed partial class MainActivity : AppCompatActivity
             case BackStep.EndSelection: _downloads?.EndSelection(); break;
             case BackStep.CloseSearch: _downloads?.CloseSearch(); break;
             case BackStep.BackToDownloads:
+                if (_onRemoteFiles && _remoteFiles?.HandleBack() == true) break;
                 FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!.SelectedItemId = Resource.Id.nav_downloads;
                 break;
         }
@@ -529,6 +563,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _queueEditor?.Dispose();
         _queues?.Dispose();
         _hostSettings?.Dispose();
+        _remoteFiles?.Dispose();
         _downloads?.Dispose();
         _model?.Dispose();
         if (_connection is not null) _ = _connection.DisposeAsync().AsTask();

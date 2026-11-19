@@ -15,7 +15,9 @@ checks = {
     "launcher icon": any(n.endswith("ic_launcher.png") for n in names) or b"ic_launcher" in z.read("resources.arsc"),
 }
 if release:
-    hooks = [w for w in ("probe_url", "crash_now", "update_fixture", "update_prompt_preview", "InboundRcloneProbe") if w.encode("utf-16-le") in so or w.encode() in so]
+    hooks = [w for w in ("probe_url", "crash_now", "update_fixture", "update_prompt_preview",
+                        "InboundRcloneProbe", "hold_remote_files_publication", "remote_files_fixture_port")
+             if w.encode("utf-16-le") in so or w.encode() in so]
     checks["no test hooks"] = not hooks
 if "--bundled-rclone" in sys.argv:
     binary = "lib/arm64-v8a/librclone.so"

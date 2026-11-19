@@ -30,12 +30,16 @@ the 30-minute acceptance gate.
 See PROGRESS “Android milestone continuation”.
 
 Owner decision (2026-11-19): defer the remaining ANDROID.5/.6 acceptance
-tests to ANDROID.14 rather than gating further work on them. Next active
-milestone: ANDROID.8 — **Remote Files**. The owner approved bundling rclone in
+tests to ANDROID.14 rather than gating further work on them. ANDROID.8 —
+**Remote Files** — completed with Astra sign-off. The owner approved bundling rclone in
 the standard Android APK after the isolated arm64 probe passed on both 4 KiB
 and 16 KiB devices. The standard arm64 build now packages the verified binary
-and MIT notice. Next: wire the host and implement Remote Files for This phone
-and capable paired hosts.
+and MIT notice. Host wiring and the Remote Files UI are implemented for
+This phone and capable paired hosts. On the API 33 emulator, a WebDAV
+download matched the fixture hash and a competing file was left unchanged.
+The process-kill recovery replay and signed arm64 APK checks passed. No release
+was published. Next: scope ANDROID.9 (TorBox, torrents, archives); its Android
+screens and acceptance criteria are not yet designed.
 
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.

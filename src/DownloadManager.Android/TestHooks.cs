@@ -29,14 +29,36 @@ internal static class TestHooks
 {
     public const string Tag = "InboundTest";
 
+#if INBOUND_RCLONE_PROBE
+    private static int _holdPublication;
+
+    internal static Task HoldRemoteFilesPublicationAsync(CancellationToken token)
+    {
+        if (Interlocked.Exchange(ref _holdPublication, 0) == 0) return Task.CompletedTask;
+        Log.Info(Tag, "Remote Files exclusive destination opened; waiting before copy");
+        return Task.Delay(TimeSpan.FromSeconds(30), token);
+    }
+#endif
+
     public static void Run(DownloadsModel model, Intent? intent)
     {
         if (intent is null) return;
 #if INBOUND_RCLONE_PROBE
+        if (intent.GetBooleanExtra("hold_remote_files_publication", false))
+        {
+            intent.RemoveExtra("hold_remote_files_publication");
+            Interlocked.Exchange(ref _holdPublication, 1);
+        }
         if (intent.GetBooleanExtra("rclone_probe", false))
         {
             intent.RemoveExtra("rclone_probe");
             RcloneProbe.Run();
+        }
+        if (intent.GetIntExtra("remote_files_fixture_port", 0) is > 0 and <= 65535)
+        {
+            var port = intent.GetIntExtra("remote_files_fixture_port", 0);
+            intent.RemoveExtra("remote_files_fixture_port");
+            RemoteFilesHostProbe.Run(port);
         }
 #endif
         if (intent.HasExtra("metered_override"))
