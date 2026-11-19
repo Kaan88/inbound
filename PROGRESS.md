@@ -6473,3 +6473,12 @@ Cleanup verified by Codex: task queues stopped, Follows the system theme restore
 battery reset, font_scale absent, free rotation and non-root adbd restored; owned
 fixture57556 and emulator5554 stopped. S24 stayed disconnected and untouched.
 The final NativeAOT dark-dialog preview was also viewed by main.
+
+Documentation-only handoff refresh (2026-11-19, Codex): owner requested a handoff
+with subagent reminders, then cleared the thread goal. Replaced stale checkpoint
+blocks in ANDROID-CODEX-HANDOFF.md with current evidence, stop state, explicit
+Luna/high and Terra/high routing, major-only Astra/high audits and mandatory
+personal main-agent review of every worker code change. Bounded Terra/high
+read-only review passed after main corrected the no-ADB-reverse claim to the
+latest scheduled/reboot batch. No implementation, build, device action or goal
+restart; project scope and outstanding acceptance remain unchanged.

@@ -635,3 +635,12 @@ adaptive mode resumed, so no frozen numeric/byte-identical-settings claim. No ap
 appearance or resume preference changed. Phone capture files removed; no adb
 reverse was used. Only verified trace fixture47618 stopped. Normal hardware
 emulator stays running. Full milestone and later independent review stay OPEN.
+
+Documentation-only handoff refresh (2026-11-19, Codex): owner requested a handoff
+with subagent reminders, then cleared the thread goal. Replaced stale checkpoint
+blocks in ANDROID-CODEX-HANDOFF.md with current evidence, stop state, explicit
+Luna/high and Terra/high routing, major-only Astra/high audits and mandatory
+personal main-agent review of every worker code change. Bounded Terra/high
+read-only review passed after main corrected the no-ADB-reverse claim to the
+latest scheduled/reboot batch. No implementation, build, device action or goal
+restart; project scope and outstanding acceptance remain unchanged.
