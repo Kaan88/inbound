@@ -1,9 +1,9 @@
 # Checks an Inbound APK before it goes to a phone or the owner (2026-11-18: a release APK from a stale obj folder had no
 # net.dot.jni.nativeaot.NativeAotRuntimeProvider and crashed at start).
-#   python -I tools/AndroidApp/check-apk.py <apk> [--release]
+#   python -I tools/AndroidApp/check-apk.py <apk> [--release] [--bundled-rclone]
 # Fails unless: the runtime provider class and our activity are in the dex; the native library exports the TLS trust
 # callback; the launcher icon is there; with --release, the test hooks are not in the native library.
-import sys, zipfile
+import hashlib, sys, zipfile
 apk = sys.argv[1]; release = "--release" in sys.argv
 z = zipfile.ZipFile(apk); names = z.namelist()
 dex = b"".join(z.read(n) for n in names if n.endswith(".dex"))
@@ -15,8 +15,16 @@ checks = {
     "launcher icon": any(n.endswith("ic_launcher.png") for n in names) or b"ic_launcher" in z.read("resources.arsc"),
 }
 if release:
-    hooks = [w for w in ("probe_url", "crash_now", "update_fixture", "update_prompt_preview") if w.encode("utf-16-le") in so or w.encode() in so]
+    hooks = [w for w in ("probe_url", "crash_now", "update_fixture", "update_prompt_preview", "InboundRcloneProbe") if w.encode("utf-16-le") in so or w.encode() in so]
     checks["no test hooks"] = not hooks
+if "--bundled-rclone" in sys.argv:
+    binary = "lib/arm64-v8a/librclone.so"
+    license_path = "assets/licenses/rclone.txt"
+    checks["only one packaged rclone, arm64"] = [n for n in names if n.endswith("/librclone.so")] == [binary]
+    checks["pinned rclone bytes"] = binary in names and hashlib.sha256(z.read(binary)).hexdigest() == (
+        "a68c72a4677e2ba27f1ed7c5b388eea24b1088ad2bc389e461cc7a47c6195191"
+    )
+    checks["rclone license"] = license_path in names and b"Permission is hereby granted" in z.read(license_path)
 bad = [k for k, ok in checks.items() if not ok]
 for k, ok in checks.items(): print(("ok   " if ok else "FAIL ") + k)
 sys.exit(1 if bad else 0)

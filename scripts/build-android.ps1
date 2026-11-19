@@ -33,6 +33,7 @@ $outConfig = if ($TestBuild) { "$config-test" } else { $config }
 $msbuild = @("-c", $config, "-p:RuntimeIdentifier=$runtime", "-p:AndroidSdkDirectory=$AndroidSdkDirectory")
 if ($TestBuild) { $msbuild += "-p:InboundTestBuild=true" }
 if ($JavaSdkDirectory) { $msbuild += "-p:JavaSdkDirectory=$JavaSdkDirectory" }
+$checkBundledRclone = $Mode -eq "phone" -and $runtime -eq "android-arm64" -and -not $TestBuild
 
 if ($ReleaseSigning) {
     if ($Mode -ne "phone" -or $TestBuild -or $runtime -ne "android-arm64") {
@@ -60,6 +61,8 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet $verb failed ($LASTEXITCODE)" }
 if ($ReleaseSigning) {
     $inputApk = Join-Path $publishDir "app.inbound.android-Signed.apk"
     if (-not (Test-Path -LiteralPath $inputApk -PathType Leaf)) { throw "No new build APK at $inputApk" }
+    & python -I (Join-Path $root "tools/AndroidApp/check-apk.py") $inputApk --release --bundled-rclone
+    if ($LASTEXITCODE -ne 0) { throw "Bundled rclone APK verification failed; refusing to sign." }
     $apk = Join-Path $signedOutput "Inbound-android-release.apk"
     & python -I (Join-Path $root "tools/AndroidApp/release-apk.py") sign $apk --input $inputApk --keystore $keystore --password-file $passwordFile --java-sdk $JavaSdkDirectory --android-sdk $AndroidSdkDirectory
     if ($LASTEXITCODE -ne 0) { throw "Release APK signing/verification failed." }
@@ -72,9 +75,20 @@ else {
     if ($Mode -eq 'phone') {
         $checkArguments = @('-I', (Join-Path $root 'tools/AndroidApp/check-apk.py'), $apk)
         if (-not $TestBuild) { $checkArguments += '--release' }
+        if ($checkBundledRclone) { $checkArguments += '--bundled-rclone' }
         & python @checkArguments
         if ($LASTEXITCODE -ne 0) { throw 'NativeAOT APK verification failed; do not install or distribute this artifact.' }
     }
+}
+if ($checkBundledRclone) {
+    $zipalign = Get-ChildItem -LiteralPath (Join-Path $AndroidSdkDirectory 'build-tools') -Directory |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' -and
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'zipalign.exe')) } |
+        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+    if (-not $zipalign) { throw 'Android SDK build-tools with zipalign.exe are required.' }
+    & (Join-Path $zipalign.FullName 'zipalign.exe') -c -P 16 4 $apk
+    if ($LASTEXITCODE -ne 0) { throw '16 KiB APK ZIP alignment check failed; do not install or distribute this artifact.' }
+    Write-Host 'APK ZIP alignment verified (16 KiB).'
 }
 $apkFile = Get-Item -LiteralPath $apk
 "{0}  ({1:N0} bytes, {2:N1} MB)" -f $apkFile.FullName, $apkFile.Length, ($apkFile.Length / 1MB)

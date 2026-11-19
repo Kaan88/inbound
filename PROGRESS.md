@@ -2,6 +2,12 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.8 standard arm64 production packaging verified locally: the
+  48,898,585-byte APK contains one rclone binary matching the tested pin and
+  the MIT notice, with no probe hooks; `zipalign -c -P 16` passed. The build
+  rejected both a missing binary and a wrong SHA-256. Release tooling tests
+  passed 10/10. No permanent release signing, upload, or install performed.
+
 - ANDROID.8 owner decision: bundle rclone in the standard Android APK despite
   the measured size increase. The Android feature is named **Remote Files**,
   not Sites. This is approval to implement, not a production packaging or

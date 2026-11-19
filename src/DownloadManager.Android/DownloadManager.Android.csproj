@@ -36,7 +36,7 @@
     <DefineConstants>$(DefineConstants);INBOUND_RELEASE_ENV</DefineConstants>
   </PropertyGroup>
 
-  <!-- Explicit test experiment; never include an executable in a distributable APK. -->
+  <!-- The probe has its own package ID and hook; the standard arm64 Release bundles only the verified executable. -->
   <PropertyGroup Condition="'$(InboundRcloneProbePath)' != '' And '$(InboundTestBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);INBOUND_RCLONE_PROBE</DefineConstants>
     <ApplicationId>app.inbound.android.rcloneprobe</ApplicationId>
@@ -52,6 +52,26 @@
            Text="The rclone probe requires a Release NativeAOT android-x64 or android-arm64 test build." />
     <Error Condition="!Exists('$(InboundRcloneProbePath)') Or $([System.IO.Path]::GetFileName('$(InboundRcloneProbePath)')) != 'librclone.so'"
            Text="Supply the Android executable for the selected ABI as librclone.so." />
+  </Target>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' And '$(RuntimeIdentifier)' == 'android-arm64' And '$(InboundTestBuild)' != 'true'">
+    <_InboundBundleRclone>true</_InboundBundleRclone>
+    <InboundRclonePath Condition="'$(InboundRclonePath)' == ''">$(MSBuildProjectDirectory)/../../artifacts/android-app/rclone/arm64-v8a/librclone.so</InboundRclonePath>
+    <_InboundRcloneLicense>$(MSBuildProjectDirectory)/../../third_party/rclone/COPYING</_InboundRcloneLicense>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_InboundBundleRclone)' == 'true'">
+    <AndroidNativeLibrary Include="$(InboundRclonePath)" Abi="arm64-v8a" />
+    <AndroidNativeLibraryNoJniPreload Include="librclone.so" />
+    <AndroidAsset Include="$(_InboundRcloneLicense)" Link="licenses/rclone.txt" />
+  </ItemGroup>
+  <Target Name="InboundCheckBundledRclone" BeforeTargets="BeforeBuild" Condition="'$(_InboundBundleRclone)' == 'true'">
+    <Error Condition="!Exists('$(InboundRclonePath)') Or $([System.IO.Path]::GetFileName('$(InboundRclonePath)')) != 'librclone.so'"
+           Text="The standard arm64 APK requires the pinned Android librclone.so. See third_party/rclone/SOURCE.md or set InboundRclonePath." />
+    <GetFileHash Files="$(InboundRclonePath)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_InboundRcloneActualSha256" />
+    </GetFileHash>
+    <Error Condition="'$(_InboundRcloneActualSha256)' != 'A68C72A4677E2BA27F1ED7C5B388EEA24B1088AD2BC389E461CC7A47C6195191'"
+           Text="Bundled Android rclone SHA-256 mismatch: $(_InboundRcloneActualSha256). See third_party/rclone/SOURCE.md." />
   </Target>
 
   <!-- Debug (emulator): a self-contained APK that adb install can install, not the fast-deployment one. -->

@@ -46,9 +46,9 @@ release, after the new key is checked against rclone's own page.
 2. Update `RclonePinned` (version and hashes), the `Dockerfile` arguments, this file and `COPYING` if it changed.
 3. Run the Sites tests with `INBOUND_RCLONE` (and `INBOUND_RCLONE_ZIP`) pointing at the new version.
 
-## Android feasibility build
+## Android Remote Files
 
-The Android arm64 experiment uses rclone `v1.76.0` at commit
+The Android arm64 build uses rclone `v1.76.0` at commit
 `e982ff36668f5130d94b4f70409babb3d964df42`, Go 1.27.3 for Windows amd64
 ([archive](https://go.dev/dl/go1.27.3.windows-amd64.zip), SHA-256
 `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff`), and
@@ -59,15 +59,20 @@ From this repository, with the pinned source checked out cleanly, run:
 ```powershell
 ./tools/AndroidApp/build-rclone-arm64.ps1 `
   -SourceDirectory <rclone-checkout> -Go <go.exe> `
-  -NdkDirectory <android-ndk> -Output <new-path>/librclone.so
+   -NdkDirectory <android-ndk> -Output artifacts/android-app/rclone/arm64-v8a/librclone.so
 ```
 
 The script builds an Android API 31 PIE with cgo, disables self-update,
 and verifies the architecture, Android interpreter and each ELF LOAD
-segment's 16 KiB alignment. The binary is for a separate test package
-only (`InboundTestBuild=true`, `RuntimeIdentifier=android-arm64`,
-`InboundRcloneProbePath` pointing at the output); it is not included in
-public APKs. ELF checks don't replace execution on a 16 KiB Android device.
+segment's 16 KiB alignment. Create the output's parent directory first.
+The standard arm64 phone build requires this file and checks its pinned hash
+before packaging. To use a verified copy elsewhere set `InboundRclonePath`
+to its absolute path. The binary and `COPYING` are packaged together; rclone
+updates ride Android app releases.
+
+For an isolated runtime test instead use `InboundTestBuild=true`,
+`RuntimeIdentifier=android-arm64` and `InboundRcloneProbePath` pointing at
+the verified binary. ELF checks don't replace execution on a 16 KiB device.
 When publishing the probe, pass a dedicated `IntermediateOutputPath`, such as
 `obj/arm64-rclone-probe/`, and a fresh `PublishDir`. Do not share intermediates
 with a no-rclone build of the same RID: an APK can contain the executable and

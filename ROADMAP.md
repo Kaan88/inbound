@@ -773,8 +773,10 @@ whether rclone is a Setup component that can be unticked.
   baseline; rclone accounts for 28.24 MB compressed and 88.59 MB extracted.
   The same APK passed on a Galaxy A56 (API 36, arm64, `PAGE_SIZE=16384`)
   in Samsung Remote Test Lab: HTTPS listing and authenticated `rc/noop`
-  passed, the child exited, and the probe was removed. Production packaging,
-  host wiring, UI and acceptance remain open.
+  passed, the child exited, and the probe was removed. The standard arm64
+  APK now packages the pinned binary and its MIT notice (48,898,585-byte
+  local build; hash, no probe hooks and 16 KiB ZIP alignment verified).
+  Host wiring, UI and acceptance remain open. No new release published.
   The upstream 4 KiB-aligned test binaries are not release inputs.
 - [ ] ANDROID.9 TorBox, torrents, archives (screens not designed yet).
 - **Updated order (owner, 2026-11-18):** "implement update first then continue android.5" and "and then put the updatable apk on the desktop". Auto-update is built, Astra PASS after fixes, and the signed 0.0.2 APK is on Desktop; signed fixture update and system installer flow passed on a NativeAOT emulator. Production assets are unpublished, no live newer production offer was tested, and S24 remains on 0.0.1 at this checkpoint. Full project test rerun is in progress. Evidence and limitations: PROGRESS "Android auto-update and desktop APK". Next: ANDROID.5.
