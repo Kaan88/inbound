@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 S24 FE/USB, signed 0.0.7: Chrome Share link opened Android's
+  system chooser; selecting Inbound showed Shared link with Add file,
+  Open page and Cancel. Cancel submitted no job. A separate HTTP 410 fixture
+  job showed “link expired” and “This link has expired” with 0 bytes saved.
+  Replacing the address via Refresh completed the single existing 1 MiB
+  entry (All 1 / Finished 1); its SHA-256 matched the fixture
+  (`fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`).
+  Deleted the fixture job/file, restored Downloads and display baselines,
+  removed the reverse and stopped the listener. Not a partial-byte resume
+  or real-account test. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\inbound-s24-links-007\` (`b1-*`, `b6-*`).
+
 - Prepared the [ANDROID.6 acceptance runbook](tools/AndroidApp/ANDROID6-ACCEPTANCE.md)
   for the remaining phone and selected-host checks without repeating the
   accepted locked-screen schedule/reboot. Host-only fixture preflight returned
