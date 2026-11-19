@@ -21,6 +21,11 @@ review evidence rather than restarting the trial or screen work.
 Run independent Android verification checks in parallel when practical, but keep
 UI actions on any one emulator sequential so checks cannot interfere with each other.
 
+For authorized QA on the owner's physical Android phone, record its display
+settings before starting, set brightness to minimum, and set the screen timeout
+long enough for the check. Restore and verify the original brightness mode,
+brightness, and timeout when finished. This applies to physical-phone QA only.
+
 Android accessibility polish and expanded TalkBack acceptance are optional follow-up,
 not gates for the remaining Android milestones. Preserve existing accessibility and
 record findings without diverting the current milestone work (owner, 2026-11-19).
@@ -224,6 +229,17 @@ the older Android handoff availability note is outdated. The main Sol agent owns
 architecture, cross-cutting work and final integration; it must read and check all
 subagent code and verify requirements and checks before integrating it. Record
 the requested model configuration separately from a worker's self-report.
+
+Temporary owner override (2026-11-19, current OpenCode session only):
+use `deepseek/deepseek-flash` with the `high` reasoning variant for all
+delegation in this session, in place of the usual worker models. If the
+delegation tool cannot select the variant, disclose that rather than claiming
+it was used. The main agent owns implementation, integration,
+and verification, and retains responsibility for complex or sensitive work.
+Astra still independently reviews completed major milestones after the main
+agent implements and verifies the delegated work. Remind the owner that this
+override exists and is still active when reporting milestone status. Do not
+carry it into a new session unless the owner renews it.
 
 ## Known traps
 

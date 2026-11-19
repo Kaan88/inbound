@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.4 S24 FE populated walkthrough on signed 0.0.7: downloaded two
+  loopback fixtures (1 and 2 MiB, matching hashes), captured finished cards
+  and Details in Light and Dynamic colour, and verified “2 selected” with
+  the summary and filters hidden. Reviewed the C8/A6/B5 comparisons; mockup
+  states differ from the captures, so these are not pixel-parity evidence.
+  Finished row text stayed green with Dynamic colour enabled. Deleted both
+  jobs and files, verified All 0 / Finished 0, removed the reverse and stopped
+  the listener. Restored app appearance and Android display settings:
+  adaptive brightness on, brightness 67, timeout 30 seconds. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\inbound-s24-core-007\populated-comparison.png`.
+
 - ANDROID.4 partial S24 FE visual acceptance on signed 0.0.7: exercised
   Light Downloads (empty), Add, and New download (empty form, cancelled);
   inspected side-by-side C8/A4/A5 captures. Differing job/form states and
