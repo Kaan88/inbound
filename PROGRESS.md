@@ -2,6 +2,13 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 owner-run real-account check on the S24: the built-in
+  browser displayed “This browser request cannot be safely captured.”
+  In-app capture did not succeed for that site. The message is shared by
+  multiple capture rejection paths and does not identify the request
+  method or prove that a regular-browser download succeeded. No private
+  URL or credentials were collected.
+
 - ANDROID.6 metered hold/release passed on the S24 FE over a real Wi-Fi
   LAN fixture (no USB reverse for the transfer). Marking the connected
   Wi-Fi metered removed `NOT_METERED` from the active default network.

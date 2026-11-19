@@ -31,6 +31,11 @@ minimum brightness on the AMOLED device without locking it or weakening
 keyguard security. Restore the original display settings at the end of the
 batch, not after each individual check.
 
+When verification needs the owner's credentials, decision, or manual action,
+pause and ask a direct question with the exact steps and the result to report.
+Do not leave the request buried in a milestone update. Never ask the owner to
+send credentials, MFA codes, or private links.
+
 Android accessibility polish and expanded TalkBack acceptance are optional follow-up,
 not gates for the remaining Android milestones. Preserve existing accessibility and
 record findings without diverting the current milestone work (owner, 2026-11-19).
