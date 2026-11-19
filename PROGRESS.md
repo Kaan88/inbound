@@ -6435,3 +6435,31 @@ no NativeAOT PASS is claimed. The earlier incremental NativeAOT artifact failed 
 provider checker and was quarantined, not installed or distributed. Android 0.0.5
 remains unpublished. ANDROID.6 remains IN PROGRESS and unchecked; the later
 independent review remains OPEN.
+
+### 2026-11-19 — Android 0.0.5 published
+
+Implementer: Codex. Source commit `87555b993ae8f3de7e61a171c87a932a8d6a4a2b` was
+pushed to `android-app` and published as [Android 0.0.5](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.5).
+The permanent-key NativeAOT arm64 APK (20,664,711 bytes) SHA-256 is
+`1cf087a69c56744e1ee7b0bd5e3c29bce1fe7cad5db371f78ada35fac8805691`; manifest SHA-256
+is `a3b4500e68aeb7a59251a54121cc18d38a98d3cb2c65ae224d158a4d8ec3459c`. Public APK,
+manifest and SHA256SUMS matched local checksums. The same signed-notes manifest is
+on android-latest; both Android releases use `latest=false`, desktop latest remains
+0.9.0, and Android was not merged to main. Certificate pin is unchanged. Release
+verification covered API/ABI/debug/hooks/provider/TLS/icon constraints. Evidence is
+under `artifacts/android-app/android6/public-verification-0.0.5/`.
+
+Final NativeAOT API 33 stop and injected-crash recovery checks passed for the tested
+build: partial queued checkpoint preserved, explicit forced run resumed the crash
+recovery transfer, and the final 1 MiB payload matched the fixture hash. This is not
+evidence of natural scheduled wake or reboot/Doze/network-change acceptance. Native
+keyboard selection survived portrait restoration after a landscape cycle; landscape
+selection was not directly asserted. The physical phone was unavailable; handset,
+TalkBack and broader remote-host acceptance remain pending. ANDROID.6 remains
+IN PROGRESS and unchecked, ANDROID.7 and the later independent review remain OPEN;
+publication does not complete those milestones.
+
+Cleanup verified by Codex: task queues stopped, Follows the system theme restored,
+battery reset, font_scale absent, free rotation and non-root adbd restored; owned
+fixture57556 and emulator5554 stopped. S24 stayed disconnected and untouched.
+The final NativeAOT dark-dialog preview was also viewed by main.

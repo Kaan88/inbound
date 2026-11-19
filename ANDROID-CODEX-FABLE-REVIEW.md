@@ -374,3 +374,41 @@ prior final results. A clean NativeAOT x64 rebuild is still running
 incremental NativeAOT artifact failed the provider checker and was quarantined,
 not installed or distributed. Android 0.0.5 remains unpublished, ANDROID.6 remains
 IN PROGRESS, and the later independent review remains OPEN.
+
+### FABLE-CODEX-4 — Android 0.0.5 publication checkpoint (2026-11-19)
+
+Implementer: Codex. Source commit `87555b993ae8f3de7e61a171c87a932a8d6a4a2b`
+was pushed to `android-app` and published as the public Android 0.0.5 prerelease:
+[android-v0.0.5](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.5).
+The permanent-key NativeAOT arm64 APK is 20,664,711 bytes, SHA-256
+`1cf087a69c56744e1ee7b0bd5e3c29bce1fe7cad5db371f78ada35fac8805691`; the signed
+manifest SHA-256 is `a3b4500e68aeb7a59251a54121cc18d38a98d3cb2c65ae224d158a4d8ec3459c`.
+Published APK, manifest and SHA256SUMS matched local bytes; android-latest serves
+the same signed manifest containing 407 characters of release notes. Both prereleases use `latest=false`;
+desktop latest remains 0.9.0 and Android was not merged to main. Certificate pin
+is unchanged. Release checks covered min API 31, target 35, arm64, non-debug/no
+hooks, provider, TLS and icon. Main reviewed source and artifacts. Astra source audit
+passed the confirmed fixes; Mobile 528, release-tool 10 and solution build (0 errors,
+53 warnings) are recorded in the release evidence.
+
+Final NativeAOT API 33 checks recorded a detached stopped job retaining a partial
+20,520-byte checkpoint in queued queue 2, still running and not user-paused, with an
+empty crash-marker session observed for two seconds. One injected native crash was
+recovered after an explicit forced job run; the download resumed and completed with
+fixture SHA-256 `fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`.
+Final crash-marker state was count 0/session false and the ongoing notification was
+absent (`final-0.0.5-native-stop.json`, `final-native-crash-recovery.json`,
+`final-native-recovery-payload-sha.txt`). Native keyboard selection/restoration was
+checked in portrait after a landscape cycle; landscape selection itself was not
+directly asserted. Short and no-notes update previews were viewed; 0.0.6 was only an
+illustrative preview and was not installed.
+
+These checks do not establish physical-phone/TalkBack acceptance, natural scheduled
+wake, or reboot/Doze/network-change acceptance. Physical phone was unavailable;
+broader remote-host acceptance remains open. ANDROID.6/ANDROID.7 and the later
+independent review remain OPEN; publication does not close a milestone or review.
+
+Cleanup verified: task queues stopped; emulator theme restored to Follows the
+system, battery reset, font_scale absent, free rotation and non-root adbd. The
+owned fixture and emulator were stopped; S24 stayed disconnected and untouched.
+Main also viewed the final NativeAOT dark-dialog preview (`update-final-native-dark.png`).

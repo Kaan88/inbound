@@ -1,6 +1,51 @@
 # Android handoff — Codex, 2026-11-19
 
-## Current continuation (2026-11-19, Codex)
+## Current continuation after 0.0.5 publication (2026-11-19, Codex)
+
+Public prerelease: https://github.com/Kaan88/inbound/releases/tag/android-v0.0.5.
+Direct APK: https://github.com/Kaan88/inbound/releases/download/android-v0.0.5/Inbound-android-0.0.5-arm64.apk.
+Source `87555b993ae8f3de7e61a171c87a932a8d6a4a2b` is pushed on android-app; no merge to main.
+APK 20,664,711 bytes, SHA-256 `1cf087a69c56744e1ee7b0bd5e3c29bce1fe7cad5db371f78ada35fac8805691`.
+Manifest SHA-256 `a3b4500e68aeb7a59251a54121cc18d38a98d3cb2c65ae224d158a4d8ec3459c`.
+Versioned assets and android-latest feed were downloaded and matched staged files.
+Desktop latest remains v0.9.0. Stage `artifacts/android-app/release-0.0.5`;
+production `signed-builds/e069627be21342819f9be8f74719568a/Inbound-android-release.apk`.
+Package/pinned signer/min31/target35/arm64/nondebug/provider/TLS/no-hooks checks passed.
+
+Main Sol personally checked delegated source and artifacts; Astra SOURCE PASS includes
+signed notes, execution handles/API30 cleanup and the final modal queue picker.
+Mobile528/release-tool10 and current solution0errors/53warnings passed. Earlier
+Core2373/Engine214/Server208/Integration2095+32skip are separate consolidated checkpoints.
+Final NativeAOT API33 job-stop observation passed (`final-0.0.5-native-stop.json`).
+One injected native crash and explicit forced restart recorded count0->1/sessionpresent,
+resumed queue2 and completed 1MiB with fixture SHA
+`fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`;
+final marker count0/sessionfalse and ongoing1001 absent. See
+`final-native-crash-recovery.json` and `final-native-recovery-payload-sha.txt`.
+Native keyboard selection persisted after a landscape/portrait cycle; landscape value
+was offscreen, not directly asserted. Short/no-notes/dark dialog previews were viewed;
+their illustrative 0.0.6 offer was test-only and never installed.
+
+Logs: `updater-picker-native-clean-build.txt`, `update-prompt-production-build.txt`,
+`update-prompt-release-prepare.txt`, `public-verification-0.0.5/` under android6 artifacts.
+Earlier bad incremental native artifact was quarantined and never installed/distributed;
+architecture-specific intermediate caches were safely renamed as backups. The build
+script now checks unsigned NativeAOT outputs too. Never deliver test x64 APKs.
+
+Cleanup completed: task queues Android6-QA/Night-QA stopped; emulator theme Follows
+the system, battery reset, font_scale absent, free rotation1/user_rotation0 and adbd
+unroot verified uid2000. Owned fixture57556/listener47612 and emulator5554 stopped.
+S24 stayed disconnected/untouched; no daily-phone settings changed. Earlier isolated
+remote launcher16664/child39568 were already stopped; unrelated builds were untouched.
+
+NEXT: ANDROID.6/.7 remain partial for phone/TalkBack/pairs, broader remote workflows
+and remaining Doze/network/reboot acceptance. An optional async request asks the owner
+to connect/unlock S24; no reply yet. Restart owned inbound33/fixtures as needed while
+preserving app data. Remote evidence currently covers create/rename/switch, not every
+C1/C2/C7 workflow. ANDROID.8/.9 still need separate go-ahead/design; later independent
+review remains OPEN. Publication/source PASS does not complete all milestones.
+
+## Historical checkpoint before 0.0.5 publication
 
 Owner approved the compact update dialog with the same signed changelog in Settings.
 Android 0.0.4 is the immutable public prerelease; the separate 0.0.5/code5 source
