@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 metered hold/release passed on the S24 FE over a real Wi-Fi
+  LAN fixture (no USB reverse for the transfer). Marking the connected
+  Wi-Fi metered removed `NOT_METERED` from the active default network.
+  The disposable unmetered-only queue showed “Waiting for Wi-Fi”; the
+  job's Details showed Queued / 0 B and the fixture logged zero body
+  requests. Restoring the original automatic Wi-Fi policy restored
+  `NOT_METERED`, and the job finished without tapping Resume. The phone's
+  1 MiB file matched fixture SHA-256
+  `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  Removed the queue, job and file, stopped the fixture and confirmed
+  All 0 / Finished 0. Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-metered-s24\`.
+
 - ANDROID.6 S24 FE/USB: created a disabled daily 09:00 schedule on a
   disposable remote queue. Independent `settings.get` snapshots before
   and after restarting the server matched on schedule ID, disabled state,
