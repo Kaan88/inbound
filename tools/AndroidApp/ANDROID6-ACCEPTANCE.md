@@ -36,6 +36,13 @@ Suggested first phone batch: selected-host plus short condition checks,
 then run the sustained transfer while the owner can spare the phone. Run
 natural deep Doze separately; the clock time needed is device-dependent.
 Do not substitute an emulator pass for a missing physical result.
+Before choosing the scheduled minute, read the phone's current deep-idle
+timeouts from `dumpsys deviceidle`. On the S24 both `inactive_to` and
+`idle_after_inactive_to` were 30 minutes; allow time for both stages plus
+motion sensing and location checks. Keep the phone stationary and record
+deep `mState` before and after the scheduled minute. Do not start this
+case while a separate screen-off transfer is in progress.
+
 The focused Server pairing/TLS suite already passed 5/5 on a fresh run
 after its initial fixture-setup failure. Do not repeat it solely to clear
 that historical blocker.
