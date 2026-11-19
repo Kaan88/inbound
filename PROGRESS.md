@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.5 actual browser chooser: on `inbound33` (API 33, existing 0.0.6
+  test APK), long-pressed Archive in Chrome on the loopback fixture page, then
+  chose **Share link → More → Inbound** in Android's system chooser. Inbound
+  offered **Add file**, dropped the URL fragment for the download, and finished
+  the 1 MiB payload as `inbound-chrome-chooser-20261119.zip`. Its device SHA-256
+  matched the fixture: `fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`.
+  No synthetic share intent was sent to Inbound. Removed the test job/file,
+  restored the 15 total / 14 finished baseline, and stopped the loopback fixture.
+  Evidence: `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-chrome-share-20261119\`.
+  This verifies anonymous browser-to-app sharing, not real-account compatibility.
+
 - ANDROID.4 completion Open: `tools/AndroidApp/smoke-completion-open.py` passed on
   `inbound33` (API 33, existing 0.0.6 test APK). One batch produced two PNGs with
   matching fixture/device SHA-256 hashes. Both titled notifications shared the
