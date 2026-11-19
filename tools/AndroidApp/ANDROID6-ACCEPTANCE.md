@@ -55,7 +55,9 @@ that historical blocker.
   preserve the original clock and disclose the gap in samples.
 - Selected-host checks passed for the 64 KB/s limit, disabled schedule
   persistence across restart, and manual queue start with a matching
-  payload hash. They do not establish a timer-triggered remote start.
+  payload hash. Separately, an enabled timer on a disposable remote
+  host released a stopped queue automatically and the same job completed
+  with a matching hash. That check used IPC, not the phone UI.
 
 ## Cleanup and report
 

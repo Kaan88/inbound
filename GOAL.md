@@ -23,8 +23,9 @@ built-in browser. A successful real-account capture has not been established.
 ANDROID.6 remains partial: the S24 passed foreground metered Wi-Fi, Battery Saver
 and charging-only holds and the 30-minute screen-off check (34:06, 128 MiB, matching
 hash). The selected remote host passed the 64 KB/s limit, disabled schedule
-persistence and manual queue start. Natural deep Doze of a scheduled queue and
-enabled remote timer firing are unverified. The separate one-hour soak is not
+persistence and manual queue start. A disposable remote host's enabled timer
+also started a stopped queue via host-side scheduling, verified through IPC.
+Natural deep Doze of a scheduled queue is unverified. The separate one-hour soak is not
 the 30-minute acceptance gate.
 See PROGRESS “Android milestone continuation”.
 

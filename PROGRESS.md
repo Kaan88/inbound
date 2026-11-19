@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 enabled remote timer passed on a disposable loopback Inbound
+  Server through IPC, without phone UI or manual Start. At 18:51:56.485
+  the job was still queued at 0 B and the fixture had no payload request.
+  The 18:52 schedule reported `lastRunAt=18:52:00.503` and the queue became
+  running. The same job (`08861860-4edf-4ea9-9d28-bc5f10990fba`) completed
+  with 1,048,576 bytes and matching fixture SHA-256
+  `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  Both listeners stopped. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\android6-remote-timer-20261119-185013`.
+
 - ANDROID.6 one-hour soak retry started transferring before screen-off
   and kept the same payload request through two harness restarts. The
   sample log has restart gaps at 186–587 s and 815–864 s; the original

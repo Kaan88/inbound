@@ -734,8 +734,10 @@ whether rclone is a Setup component that can be unticked.
   created exactly one remote job, and saved a hash-matched payload.
 - [ ] ANDROID.6 Queues, scheduler and settings. PARTIAL (2026-11-19): approved C1/C2/C7 flows, queue conditions and HTTP limits, safe settings writes and ordinary Android jobs shipped in 0.0.6 (`edd073b0`); Astra source review passed. Earlier device evidence includes visual spot checks, ordinary locked-screen scheduling and UIDT reboot recovery. On signed 0.0.7, the S24 passed metered Wi-Fi, Battery Saver and charging-only hold/release, and completed the 30-minute screen-off check at 34:06 with a matching hash. Selected remote host checks passed for the 64 KB/s limit, disabled schedule persistence and manual queue start. Natural deep Doze of a scheduled queue, full visual coverage, broader remote scheduling and later independent review remain open. The separate one-hour soak is additional coverage, not the 30-minute acceptance gate. See [the runbook](tools/AndroidApp/ANDROID6-ACCEPTANCE.md) and PROGRESS.
   The power and network holds above were foreground tests, not background
-  scheduling tests. No enabled timer has fired on the selected remote host
-  in this acceptance run. The one-hour measurement remains tracked separately.
+  scheduling tests. An enabled timer also started the stopped queue on a
+  disposable remote host through IPC; the same job completed with a matching
+  hash and no manual Start. This timer check did not use the phone UI. The
+  one-hour measurement remains tracked separately.
 - [x] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18); acceptance complete
   (2026-11-19). The S24 FE paired with an owner-authorized HTTPS server whose certificate passed normal TLS
   verification, showed its Downloads, then removed the test pairing. Self-signed HTTPS passed on the emulator
