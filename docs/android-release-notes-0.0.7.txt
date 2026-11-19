@@ -1,0 +1,3 @@
+This prerelease makes an in-place update from 0.0.6 available through Inbound's public Android update channel. It contains no new app features or fixes beyond the version bump.
+
+Since 0.0.6, we verified phone pairing over publicly trusted HTTPS and tested remote download, pause/resume, and mid-transfer reconnect on an Android emulator.
