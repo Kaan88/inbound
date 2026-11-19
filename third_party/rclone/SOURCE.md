@@ -77,3 +77,26 @@ Two builds with separate Go build caches on Windows produced identical
 88,586,320-byte executables (SHA-256
 `a68c72a4677e2ba27f1ed7c5b388eea24b1088ad2bc389e461cc7a47c6195191`).
 All four ELF LOAD segments had `p_align=0x4000`.
+
+### 16 KiB runtime check
+
+Use an authorized arm64 ADB target, such as a device reserved from
+[Samsung Remote Test Lab's 16 KiB pool](https://developer.samsung.com/remotetestlab/devices/129/16kb-page-size)
+or the official `system-images;android-35;google_apis_ps16k;arm64-v8a`
+image on an ARM host. Check both `adb shell getconf PAGE_SIZE` (`16384`)
+and `adb shell getprop ro.product.cpu.abi` (`arm64-v8a`) before installing.
+The S24 FE tested so far reports `4096`; the local emulator is x86-64.
+
+With every ADB command pinned to the authorized serial, install only
+`app.inbound.android.rcloneprobe-Signed.apk` and run:
+
+```text
+adb -s SERIAL shell am start -W -n app.inbound.android.rcloneprobe/app.inbound.android.MainActivity --ez rclone_probe true
+```
+
+Capture the `InboundRcloneProbe` log scoped to the current app PID.
+Require Android/arm64, `HTTPS listing succeeded`, and
+`PASS: authenticated rc/noop and child … exited`; check that the logged
+child PID is gone before uninstalling only `app.inbound.android.rcloneprobe`.
+On a rented lab device, use only the isolated probe: no release APK keys,
+account credentials, or user data.
