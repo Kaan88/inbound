@@ -739,6 +739,8 @@ whether rclone is a Setup component that can be unticked.
   with all eight range offsets and the final server-side SHA-256 verified.
   API 33 automatically reconnected after a temporary HTTPS relay outage and
   showed the same completed job without restarting the app or re-pairing.
+  A fresh-boot run also verified automatic reconnect during a throttled transfer,
+  advancing UI progress for the same job and its final hash-matched completion.
   Paired with the owner's desktop Inbound on the S24 and used (2026-11-17); owner's
   report on the counting rate figure fixed ("Good now"). HTTPS on the phone failed in the NativeAOT build (owner's report "secure
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any

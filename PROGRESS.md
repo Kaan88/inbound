@@ -2,6 +2,19 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.7: on a freshly booted API 33 `inbound33`, stopped only the pinned
+  HTTPS relay during an 8 MiB throttled download. The app showed connection
+  loss at 197 KB, then automatically reconnected with no taps or re-pairing
+  and showed the still-active job advance from 590 KB to 1.1 MB. App PID 1687
+  and server PID 153008 stayed unchanged. Four server snapshots returned one
+  identical job (`2684162a-1b31-4aa6-bbd9-e7280ae8d906`), downloading before,
+  during, and after the outage, then completed. The server's 8,388,608-byte
+  file matched fixture SHA-256
+  `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`.
+  Unpaired, restored This phone / All 15 / Finished 14, stopped listeners and
+  removed fixture keys and payload. No physical device was touched. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\inbound-https-live2-20261119\`.
+
 - ANDROID.7: API 33 automatically reconnected after stopping and restarting
   only the pinned HTTPS relay. On the successful retry, Downloads showed
   “Lost the connection … Trying again shortly,” then “Files are saved on

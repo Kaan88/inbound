@@ -13,6 +13,7 @@ Further accessibility work is optional (ANDROID.13), not a milestone gate.
 API 33 paired self-signed HTTPS remote download passed with a matching server-side hash.
 Throttled pause/resume over the same setup preserved the job ID and resumed saved ranges; the final hash matched.
 API 33 automatically reconnected after a relay-only outage and showed the same finished job.
+Fresh-boot API 33 also reconnected mid-transfer, showed advancing progress on the same job, and finished with a matching hash.
 Physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 
