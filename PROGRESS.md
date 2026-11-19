@@ -2,6 +2,18 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 charging-only hold/release passed on the S24 FE with Wi-Fi
+  ADB and a real LAN fixture. With the cable physically unplugged, Android
+  reported no external power and discharging; the running test queue showed
+  “Waiting for charging”, the job stayed Queued / 0 B, and the fixture
+  recorded zero payload requests. Reconnecting USB alone released the
+  job; Android reported USB power and the 1,048,576-byte phone file matched
+  fixture SHA-256 `b13261ceffb27a120f88c3466a3917bfb2875493d5f802422b433a3599407be6`.
+  Removed the test queue, job and file and stopped the listener; local
+  counts returned to All 0 / Finished 0. This was a foreground hold/release,
+  not a background JobScheduler test. Evidence:
+  `%LOCALAPPDATA%\Temp\opencode\android6-charging-s24\`.
+
 - ANDROID.6 Battery Saver hold/release passed on the S24 FE over the
   real Wi-Fi LAN fixture. With Battery Saver ON (`dumpsys power`), the
   test queue showed “Waiting for battery saver to turn off” and the
