@@ -21,6 +21,10 @@ review evidence rather than restarting the trial or screen work.
 Run independent Android verification checks in parallel when practical, but keep
 UI actions on any one emulator sequential so checks cannot interfere with each other.
 
+Android accessibility polish and expanded TalkBack acceptance are optional follow-up,
+not gates for the remaining Android milestones. Preserve existing accessibility and
+record findings without diverting the current milestone work (owner, 2026-11-19).
+
 Later independent Astra review of implementations by Codex is tracked in
 [ANDROID-CODEX-FABLE-REVIEW.md](ANDROID-CODEX-FABLE-REVIEW.md). The legacy filename
 and entry IDs remain for traceability; the owner reassigned this queue from Fable

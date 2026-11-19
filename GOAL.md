@@ -9,6 +9,7 @@ out of eight. Declining remote cookie consent sent no authenticated-file request
 and created no job; accepting created one remote job with a hash-matched payload.
 Edge for Android extension support is future work (ANDROID.12).
 API 33 TalkBack focus and speech were sampled on Downloads, Details and multiselect.
+Further accessibility work is optional (ANDROID.13), not a milestone gate.
 Physical-device and public TLS acceptance remain open. See PROGRESS
 “Android milestone continuation”.
 

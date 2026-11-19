@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- Owner moved additional accessibility work to optional ANDROID.13. The
+  TalkBack observations below are retained; no fixes or retest started.
+- ANDROID.10 public upgrade preflight: freshly downloaded public 0.0.5 matched
+  its published SHA-256 and passed the release APK verifier with the same
+  pinned sole signer previously verified for public 0.0.6. Both APKs have the
+  same package, arm64-only ABI, min SDK 31 and target SDK 35; version code
+  increases from 5 to 6. Evidence: `C:\Users\kaank\AppData\Local\Temp\opencode\inbound-public-upgrade-preflight-20261119\`.
+  No device or feed changed. The installed emulators have x86-64 system images;
+  the real offer/install and data-preservation checks still need a compatible
+  test device with the older signed baseline and a newer public offer.
+
 - ANDROID.4 TalkBack walkthrough on `inbound33` (API 33, 0.0.6 test APK,
   TalkBack 14.2): captured TalkBack's **Display speech output** overlay during
   emulator touch exploration and right-swipe navigation. No audio recording.

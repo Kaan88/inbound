@@ -707,7 +707,7 @@ whether rclone is a Setup component that can be unticked.
   - Owner, 2026-11-17, on Android 12 and 13 when Wi-Fi comes back while the app is hidden: "Tap to resume" (downloads
     stay held; the notification says "Wi-Fi is back · Tap to resume N downloads"; opening the app resumes them).
 - [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). Built, in use on the S24
-  (2026-11-18), Opus milestone review fixed and Fable approved; partial until the light-mode, dynamic-colour and TalkBack
+  (2026-11-18), Opus milestone review fixed and Fable approved; partial until the light-mode and dynamic-colour
   walks on a phone (light-mode checks deferred by the owner to the end). Owner's answers to the step 3
   questions (2026-11-17): selection starts with "Long-press"; tapping a finished row: "Open Details"; Stop in Details:
   "No Stop, Pause only" (these three match what is built); failures: "Short reason in row, full in Details";
@@ -718,8 +718,7 @@ whether rclone is a Setup component that can be unticked.
   emulator evidence covers short/full failure text. A reusable API 33 smoke test now verifies grouped per-file Open:
   two hash-matched PNGs launch Photos and render their distinct expected colors. Full phone acceptance remains open.
   API 33 TalkBack walkthrough captured real speech-overlay output for Downloads, finished Details and multiselect.
-  Follow up on duplicate Change host focus stops and the lack of a separate filename utterance in the tested
-  Details traversal; repeat on a physical phone (see PROGRESS).
+  Further TalkBack work is optional (ANDROID.13), not a milestone gate.
   See PROGRESS “Android milestone continuation”.
 - [ ] ANDROID.5 Catching links (share sheet, built-in browser tab, all links on a page, expired link). PARTIAL (2026-11-19, Codex): source Astra-audited; NativeAOT controlled authenticated catch/refresh and payload hashes verified, with refresh reusing the existing job. Included in public signed0.0.6, whose installed S24 APK hash matches the published artifact. Latest shared-layer Integration checkpoint passed2095 with32 optional skips; see Codex progress for exact scope. Picker/keyboard/rotation and light caught-sheet spot checks have evidence; real-account compatibility, complete phone visual/accessibility flows and later independent review remain OPEN. Public Android feed is0.0.6.
   Chrome → Android's system chooser → Inbound passed on API 33 with a hash-matched loopback download (see PROGRESS).
@@ -746,6 +745,8 @@ whether rclone is a Setup component that can be unticked.
 - [ ] ANDROID.10 Release (signing, distribution, updates). PARTIAL (2026-11-19, Codex): permanent-key APK, signed feed and signed changelog published as 0.0.6 and publicly verified; final real-phone public-offer/installer acceptance remains open. Updates (owner, 2026-11-17: "implement auto update feature [...] it
   should download itself and present an install option"): the app checks the releases page, downloads the new signed APK
   itself and offers Install (the system installer, which asks the user; needs the "install unknown apps" grant).
+  Public 0.0.5 → 0.0.6 APK preflight passed: same pinned signer and package, version code 5 → 6,
+  same arm64 ABI and SDK bounds. No actual installation in this check (see PROGRESS).
 - Owner, 2026-11-17: "put an apk on my desktop for the first usable version, by that I don't mean local downloads only,
   remote connections too." Order now ANDROID.3, ANDROID.4, ANDROID.7, then that APK, then ANDROID.5 and ANDROID.6.
   Done 2026-11-18: release APK of d9f45a6e (with the owner's icon) on the S24 and the desktop, after Fable's approval.
@@ -772,6 +773,9 @@ whether rclone is a Setup component that can be unticked.
   desktop Native Messaging and is not an Android integration. Evaluate an Android-supported handoff, then
   verify it on Edge for Android, including consent for any sign-in data sent to a server. Until then, standard
   Android sharing is the fallback; Edge itself has not been verified.
+- [ ] ANDROID.13 Expanded accessibility checks and polish (optional; owner, 2026-11-19). If picked up,
+  investigate the duplicate Change host stops and Details filename announcement on API 33, then sample
+  TalkBack on a physical phone. Existing evidence remains in PROGRESS; this is not a release gate.
 - arm64 is allowed for the Android app's device work (owner, 2026-11-15); it stays on hold everywhere else.
 - Owner's answers (2026-11-15): the pass marks as proposed in the plan's section 5; oldest version Android 12; a
   signed APK on the releases page with an update check. Nothing waits for the owner.
