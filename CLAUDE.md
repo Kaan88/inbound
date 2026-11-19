@@ -25,6 +25,11 @@ For authorized QA on the owner's physical Android phone, record its display
 settings before starting, set brightness to minimum, and set the screen timeout
 long enough for the check. Restore and verify the original brightness mode,
 brightness, and timeout when finished. This applies to physical-phone QA only.
+When the owner asks to keep the phone awake across a QA batch, retain the
+saved display baseline across tasks. Between tasks, use a black screen at
+minimum brightness on the AMOLED device without locking it or weakening
+keyguard security. Restore the original display settings at the end of the
+batch, not after each individual check.
 
 Android accessibility polish and expanded TalkBack acceptance are optional follow-up,
 not gates for the remaining Android milestones. Preserve existing accessibility and

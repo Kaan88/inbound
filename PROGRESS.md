@@ -2,6 +2,16 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 partial selected-host acceptance on S24 FE/USB: paired a
+  disposable loopback server, created `Android6-QA-USB`, and saved an HTTP
+  limit of 64 KB/s. Independent `settings.get` showed queue ID 1, a
+  persistent generation, and 64,000 B/s. Remote Network showed Overall
+  speed limit without phone-only metering; remote Settings omitted the
+  phone battery and notification sections. Removed the pairing and reverse,
+  stopped the server, and verified This phone / All 0 / Finished 0. Remote
+  schedule, restart persistence and a queued payload remain unverified on
+  this phone. Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-s24-active\`.
+
 - ANDROID.5 S24 FE/USB, signed 0.0.7: Chrome Share link opened Android's
   system chooser; selecting Inbound showed Shared link with Add file,
   Open page and Cancel. Cancel submitted no job. A separate HTTP 410 fixture
