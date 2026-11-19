@@ -26,7 +26,25 @@ function Read-PayloadTrace {
         ForEach-Object { $_.Line })
 }
 
+function Count-CompleteResponses($Trace) {
+    $planned = @{}
+    $complete = @{}
+    foreach ($line in $Trace) {
+        if ($line -match '^TRACE begin id=(\S+).* planned_bytes=(\d+)$') {
+            $planned[$Matches[1]] = [long]$Matches[2]
+        } elseif ($line -match '^TRACE end id=(\S+).* actual_bytes=(\d+)$') {
+            $id = $Matches[1]
+            if ($planned.ContainsKey($id) -and $planned[$id] -gt 0 -and $planned[$id] -eq [long]$Matches[2]) {
+                $complete[$id] = $true
+            }
+        }
+    }
+    $complete.Count
+}
+
 if (@(Read-PayloadTrace).Count) { throw 'Use a dedicated fixture with no earlier payload requests.' }
+$outcome = 'Interrupted; inspect samples and errors.'
+try {
 do {
     $now = [DateTimeOffset]::Now
     $idle = Read-Device 'dumpsys deviceidle'
@@ -51,15 +69,25 @@ do {
         sessionJob = Read-Device 'cmd jobscheduler get-job-state app.inbound.android 1 2>&1 || true'
         payloadBegins = @($trace -match '^TRACE begin ').Count
         payloadEnds = @($trace -match '^TRACE end ').Count
+        completeResponses = Count-CompleteResponses $trace
     }
     $sample | ConvertTo-Json -Compress | Tee-Object -FilePath $out -Append
     if (!$sample.forcedIdleOff -or !$sample.locked -or !$sample.screenOff -or !$sample.unplugged) {
         throw 'Natural locked, screen-off and unplugged preconditions were not observed; see last sample.'
     }
-    if ($sample.payloadEnds -gt 0 -or $now -ge $deadline) { break }
+    if ($sample.completeResponses -gt 0) {
+        $outcome = 'Fixture sent a complete response; verify the final device file and idle state separately.'
+        break
+    }
+    if ($now -ge $deadline) {
+        $outcome = 'Observation deadline reached without a complete fixture response.'
+        break
+    }
     $interval = if ($now -ge $Due.AddMinutes(-2)) { 10 } else { 60 }
     Start-Sleep -Seconds $interval
 } while ($true)
-
-Read-PayloadTrace | Set-Content -LiteralPath (Join-Path $OutputDirectory 'payload-trace.txt')
-Write-Output 'Observer finished. Compare the due-time samples and trace, then verify the final file hash separately.'
+} finally {
+    Set-Content -LiteralPath (Join-Path $OutputDirectory 'payload-trace.txt') -Value (@(Read-PayloadTrace) -join "`n") -Encoding utf8
+    $outcome | Set-Content -LiteralPath (Join-Path $OutputDirectory 'summary.txt') -Encoding utf8
+    Write-Output $outcome
+}
