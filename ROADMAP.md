@@ -730,9 +730,10 @@ whether rclone is a Setup component that can be unticked.
   Accept also passed on API 33: the named disposable server received the fake sign-in only after consent,
   created exactly one remote job, and saved a hash-matched payload.
 - [ ] ANDROID.6 Queues, scheduler and settings. PARTIAL (2026-11-19, Codex): approved C1/C2/C7 flows, shared per-queue conditions/HTTP limits, identity/CAS guards and ordinary Android jobs now ship in 0.0.6 (`edd073b0`), including the approved signed-changelog prompt and native queue picker. Main Sol personally checked worker source and artifacts; Astra SOURCE PASS. Mobile528, release-tool10 and solution0errors/53warnings passed; earlier Core2373/Engine214/Server208/Integration2095+32skip remain shared-layer consolidated checkpoints. Final NativeAOT emulator verified job stop, injected-crash/forced-restart payload hash, keyboard/rotation and dialog previews. S24 signed0.0.6 light/dark C1/C2/C7 and empty dynamic-colour Downloads spot checks, limited schedule save/reopen/selective deletion and hash-matched queue transfer now have evidence; owner confirmed basic TalkBack navigation. API33 OS-metering, battery-saver and corrected natural post-Doze transfer checks passed. Physical API37 natural locked-screen scheduling and one UIDT reboot recovery now passed (latest Codex batch). Full visual/accessibility, phone deep Doze/network/power, long-duration and broader remote acceptance remain pending. See latest Codex acceptance checkpoint. This milestone and later independent review remain OPEN.
-- [ ] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18). https with a self-signed
-  certificate passed on the emulator (trust, pin, swapped and expired certificates); open: a server with a publicly
-  trusted certificate, and https pairing on a phone. Fresh Release loopback pairing/remote work and TLS-pin tests:
+- [x] ANDROID.7 Other hosts (pairing, host switcher). Built, Fable approved (2026-11-18); acceptance complete
+  (2026-11-19). The S24 FE paired with an owner-authorized HTTPS server whose certificate passed normal TLS
+  verification, showed its Downloads, then removed the test pairing. Self-signed HTTPS passed on the emulator
+  (trust, pin, swapped and expired certificates). Fresh Release loopback pairing/remote work and TLS-pin tests:
   5 passed. API 33 also completed a remote job over the paired self-signed HTTPS control connection;
   the server's 1 MiB file matched the fixture SHA-256 (PROGRESS “Android milestone continuation”).
   A throttled 16 MiB remote file also passed pause/resume on the same job ID,

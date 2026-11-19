@@ -2,6 +2,17 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.7 closed: the owner entered the password on the unlocked S24 FE
+  and completed pairing to the authorized public HTTPS Inbound host. Normal
+  desktop curl certificate verification succeeded (`ssl_verify_result=0`);
+  sign-in and health each returned HTTP 200. ADB UI evidence on the S24 FE
+  showed “Files are saved on [host]”, All 0 / Finished 0, and the remote
+  Server row selected. The pairing step was owner-driven; no credentials
+  were collected. Removed the test pairing via the named confirmation, then
+  verified the host was absent and Downloads showed This phone / All 0 /
+  Finished 0. No remote download was submitted to the public host; the
+  remote transfer, pause/resume and reconnect checks are the fixture runs below.
+
 - ANDROID.7: on a freshly booted API 33 `inbound33`, stopped only the pinned
   HTTPS relay during an 8 MiB throttled download. The app showed connection
   loss at 197 KB, then automatically reconnected with no taps or re-pairing
