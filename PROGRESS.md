@@ -2,6 +2,15 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 one-hour screen-off attempt on the S24 FE did not reach
+  the duration check. The 256 MiB job was active but still at 0 B when
+  the screen was turned off. At 212 s, the phone remained unplugged and
+  noninteractive, notification progress was still zero, and the fixture
+  had logged no payload request. The monitor ended the attempt; this
+  establishes a startup stall, not a stall during an established
+  transfer. Retry only after observing nonzero foreground progress.
+  Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-screenoff-60\`.
+
 - ANDROID.6 30-minute screen-off transfer passed on the S24 FE over a
   real Wi-Fi LAN fixture. With the phone unplugged and noninteractive,
   notification progress advanced 43 times, reaching 978/1000 at 2,000 s.
