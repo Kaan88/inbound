@@ -12,6 +12,9 @@
   the listener. Restored app appearance and Android display settings:
   adaptive brightness on, brightness 67, timeout 30 seconds. Evidence:
   `%LOCALAPPDATA%\Temp\opencode\inbound-s24-core-007\populated-comparison.png`.
+  Independent Astra review: PASS for ANDROID.4. Phone evidence covers the
+  completed state; active, paused and failed colours were not accepted on
+  the phone. First run and notification Open remain emulator evidence.
 
 - ANDROID.4 partial S24 FE visual acceptance on signed 0.0.7: exercised
   Light Downloads (empty), Add, and New download (empty form, cancelled);

@@ -706,9 +706,9 @@ whether rclone is a Setup component that can be unticked.
     list, Pause all and Resume fixes passed (owner's hand, 2026-11-17).
   - Owner, 2026-11-17, on Android 12 and 13 when Wi-Fi comes back while the app is hidden: "Tap to resume" (downloads
     stay held; the notification says "Wi-Fi is back · Tap to resume N downloads"; opening the app resumes them).
-- [ ] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). Built, in use on the S24
-  (2026-11-18), Opus milestone review fixed and Fable approved; partial until the light-mode and dynamic-colour
-  walks on a phone (light-mode checks deferred by the owner to the end). Owner's answers to the step 3
+- [x] ANDROID.4 Core screens (first run, Downloads, Add, New download, Details, multiselect). S24 FE Light and
+  Dynamic colour acceptance passed on signed 0.0.7; independent Astra review PASS (2026-11-19).
+  Owner's answers to the step 3
   questions (2026-11-17): selection starts with "Long-press"; tapping a finished row: "Open Details"; Stop in Details:
   "No Stop, Pause only" (these three match what is built); failures: "Short reason in row, full in Details";
   notifications: "Both" (Open on the progress notification, and a Finished notification per file with Open, grouped);
@@ -716,7 +716,7 @@ whether rclone is a Setup component that can be unticked.
   the 0.0.6 test APK, Finished → long press → Select all selected 14 of 15 jobs, the summary/chips hid and returned
   on cancel, and the ongoing notification's Open brought Inbound to the foreground during a live transfer. Earlier
   emulator evidence covers short/full failure text. A reusable API 33 smoke test now verifies grouped per-file Open:
-  two hash-matched PNGs launch Photos and render their distinct expected colors. Full phone acceptance remains open.
+  two hash-matched PNGs launch Photos and render their distinct expected colors.
   API 33 TalkBack walkthrough captured real speech-overlay output for Downloads, finished Details and multiselect.
   Further TalkBack work is optional (ANDROID.13), not a milestone gate.
   See PROGRESS “Android milestone continuation”.
