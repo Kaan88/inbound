@@ -1,0 +1,3 @@
+New: Remote Files. Add a WebDAV location, browse files, and download a file without replacing an existing copy.
+Use Remote Files on This phone or with a compatible paired Inbound Host.
+The standard Android APK now includes rclone, so local Remote Files needs no separate install.
