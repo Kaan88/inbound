@@ -166,8 +166,8 @@ desktop-only settings are not shown.
 **Step 6. Other hosts (ANDROID.7).** Pairing, the host switcher (C5, C6), every built screen against a remote
 Inbound server through the server's existing API.
 
-**After that, each needs its own go-ahead and is not planned here:** Sites (ANDROID.8, only if rclone can ship in
-the APK), TorBox, torrents and archives (ANDROID.9, screens not designed), release (ANDROID.10: signing key,
+**After that:** Remote Files (ANDROID.8, owner approved bundling rclone in the standard APK; see `ROADMAP.md`
+for remaining work), TorBox, torrents and archives (ANDROID.9, screens not designed), release (ANDROID.10: signing key,
 updates, third-party notices). Updates are not only a check (owner, 2026-11-17): the app downloads the new APK itself and
 offers Install through the system installer. Ask the owner after step 3 whether a first signed build should go out before
 steps 4 to 6 are finished.

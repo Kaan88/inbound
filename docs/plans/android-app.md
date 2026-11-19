@@ -9,7 +9,7 @@ found out first, and the order of work. ROADMAP section "Android app" tracks the
 - **The design is accepted** as drawn in Figma (section 2).
 - **The engine stays .NET.** The existing engine runs on the phone. It is ported to Rust only if performance on a
   phone turns out to be a problem. Section 5 says how that is measured.
-- **A downloader in its own right.** The phone runs its own host (engine, queues, scheduler, Sites). Managing another
+- **A downloader in its own right.** The phone runs its own host (engine, queues, scheduler, Remote Files). Managing another
   Inbound host is a second role of the same app, not the main one.
 - **Material You.** The default colours are the web UI's (`webui/src/tokens.css`) mapped onto Material 3 roles.
   Dynamic (wallpaper) colour is a switch, off by default.
@@ -56,7 +56,7 @@ full (`how-it-works.png`, 2x).
 
 ### C. Queues, sites, hosts and settings
 
-| C1 Queues | C2 Schedule | C3 Sites | C4 Browse a site |
+| C1 Queues | C2 Schedule | C3 Remote Files | C4 Browse a remote location |
 | --- | --- | --- | --- |
 | <img src="android-mockups/c1-queues.png" width="200"> | <img src="android-mockups/c2-schedule.png" width="200"> | <img src="android-mockups/c3-sites.png" width="200"> | <img src="android-mockups/c4-site-browser.png" width="200"> |
 
@@ -108,7 +108,7 @@ Desktop features and where they are on the phone:
 | Progress window, segment map, speed graph | Details (A6), summary card on Downloads |
 | Tray, completion dialog and sound | Notifications (A7), snackbar (A3) |
 | Queues and Scheduler | Queues (C1), schedule editor (C2), with Wi-Fi and charging conditions added |
-| Sites | Sites (C3), site browser with Site and This phone tabs (C4) |
+| Remote Files | Remote Files (C3), remote file browser with Site and This phone tabs (C4). The reference images retain the old “Sites” feature label. |
 | Managing another server | Host switcher (C5, C6) |
 | Options | Settings (C7) |
 | Expired-URL refresh | Expired link sheet (B6) |
@@ -199,8 +199,9 @@ Each of these can change the design. Point 1 was checked in the trial (by path, 
 4. **Signed-in downloads.** The built-in browser tab is a system WebView. Check that its download event gives the
    address, cookies, referrer and user agent the desktop extension sends, and that sign-in pages of the common sites
    work in a WebView at all (some refuse it).
-5. **Sites needs rclone.** Android does not let an app run a program it downloaded, so rclone cannot be fetched from
-   Options as on the desktop. It would have to ship inside the app. Check that this works and what it adds in size.
+5. **Remote Files needs rclone.** Android does not let an app run a program it downloaded, so rclone cannot be fetched
+   from Options as on the desktop. The owner approved bundling it in the standard APK after the arm64 probe passed
+   on 4 KiB and 16 KiB devices. See ANDROID.8 in `ROADMAP.md` for measured size and remaining implementation work.
 6. **Reboot and battery.** Resume after a reboot from the checkpoints; behaviour with and without the "unrestricted"
    battery setting; what Doze does to a scheduled queue start.
 7. **Phones are arm64.** arm64 is on hold elsewhere in this project, but the owner allowed it for the Android app's
@@ -235,7 +236,7 @@ Each item is done only with evidence linked in `PROGRESS.md`.
   expired-link refresh.
 - **ANDROID.6 Queues, scheduler and settings (C1, C2, C7).**
 - **ANDROID.7 Other hosts (C5, C6).** Pairing, the host switcher, every screen against a remote host.
-- **ANDROID.8 Sites (C3, C4),** if rclone can ship in the app.
+- **ANDROID.8 Remote Files (C3, C4),** with rclone bundled in the standard APK.
 - **ANDROID.9 TorBox, torrents, archives.** Screens still to be designed.
 - **ANDROID.10 Release.** Signing, how the app is handed out and updated, third-party notices.
 
