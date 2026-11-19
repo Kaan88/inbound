@@ -2,6 +2,24 @@
 
 ### Android milestone continuation (2026-11-19)
 
+- ANDROID.6 natural deep Doze attempt interrupted before the scheduled
+  minute; deep idle remains unobserved. With the approved user exemption
+  temporarily removed, the S24 was locked, screen off and unplugged from
+  the first sample at 19:15:25. The local job was queued at 0 B, Android job
+  4100 was waiting, and UIDT job 1 was absent. At 19:48:39 the phone was
+  still in deep `INACTIVE` / light `IDLE` with zero payload requests. The
+  phone was awake and unlocked at 19:49:39, before the 20:37 schedule.
+  The observer restored the original exemption, verified in the Android
+  user allowlist. The LAN fixture was stopped without interfering with
+  phone use. The disposable phone queue, schedule and job still need
+  cleanup. Evidence: `%LOCALAPPDATA%\Temp\opencode\android6-doze-live`.
+
+- ANDROID.5 partial-file refresh preflight: Release integration test
+  `RefreshDownloadAddressResumesAfterExpiredToken` passed (1/1, 3 s).
+  This verifies the shared Host/engine path using the rotating-token
+  TestServer fixture. It does not verify resuming saved ranges through the
+  Android UI; the S24's HTTP 410 refresh began at 0 B.
+
 - The optional ANDROID.6 one-hour soak was stopped to move on to the
   scheduled-queue deep Doze check. The last screen-off sample at 37:13
   showed 554/1000 and `IDLE_PENDING`; the phone was awake at the next
