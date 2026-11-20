@@ -84,6 +84,7 @@ class Capture:
         self.sent = {key: 0 for key in self.names}
         self.b5_release = {}
         self.b5_arrived = {}
+        self.b5_disconnects = {}
         self.xml_path = f"/data/local/tmp/download-states-{self.nonce}.xml"
         self.smoke.xml_path = self.xml_path
         self.capture_gate = threading.Event()
@@ -152,6 +153,7 @@ class Capture:
             self.b5_release = {key: threading.Event() for key in self.names
                                if key != "other-finished"}
             self.b5_arrived = {key: threading.Event() for key in self.b5_release}
+        self.b5_disconnects = dict.fromkeys(self.b5_arrived, 0)
 
         class Handler(BaseHTTPRequestHandler):
             def do_HEAD(self):
@@ -195,9 +197,11 @@ class Capture:
                                 capture.b5_release[key].wait(3)
                         elif capture.args.details_flow:
                             capture.capture_gate.wait(0.25)
-                        else:
+                        elif not (getattr(capture.args, "verify_b5_bulk_pause", False) and key == "other-finished"):
                             time.sleep(CHUNK_DELAY_SECONDS)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    if key in capture.b5_disconnects:
+                        capture.b5_disconnects[key] += 1
                     capture.log(f"Fixture client disconnected: {key} at {capture.sent[key]} bytes.")
 
             def log_message(self, *_):
@@ -382,7 +386,7 @@ class Capture:
         self.verify_files(("active",))
 
     def wait_for_completion(self, key):
-        self.log(f"Waiting for fixture GET for {key}; transfer is deliberately throttled.")
+        self.log(f"Waiting for the real fixture transfer to finish: {key}.")
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
             if self.sent[key] >= FILE_SIZE:
@@ -560,7 +564,7 @@ class Capture:
         nodes = wait_tree(lambda nodes: all(len(matching(nodes, name)) == 1 for name in expected), "five unique rows")
         def row_state(nodes, name):
             row = matching(nodes, name)
-            return row[0].get("content-desc", "").casefold() if len(row) == 1 else ""
+            return row[0].get("content-desc", "")[len(name) + 2:].casefold() if len(row) == 1 else ""
 
         def has_state(nodes, name, state):
             description = row_state(nodes, name)
@@ -666,6 +670,46 @@ class Capture:
         require(len(again) == 1 and again[0].get("enabled") == "false",
                 "Download again must be disabled while all selected rows are unfinished")
         self.capture("b5-unattended", "b5-select.png", "Move to queue", prompt=False)
+        if self.args.verify_b5_bulk_pause:
+            self.shell("input", "keyevent", "4")  # Close the actual overflow popup.
+            active_keys = ("selected-active", "other-active")
+            running_before = {key: self.sent[key] for key in active_keys}
+
+            def ready_to_pause(nodes):
+                # Individual row actions are hidden in selection mode. Use the
+                # identified rows' live rate and their independent fixture bytes.
+                return (selected(nodes, 3) and not menu_entry(nodes, "Move to queue")
+                        and all(re.search(r"\b[0-9]+(?:\.[0-9]+)? [kmgt]?b/s", row_state(nodes, self.names[key]))
+                                and 0 < running_before[key] < self.sent[key] < FILE_SIZE for key in active_keys))
+
+            nodes = wait_tree(ready_to_pause, "both real transfers advancing with three selected rows")
+            pause_actions = [n for n in nodes if n.get("resource-id", "").endswith(":id/sel_pause")
+                             and n.get("content-desc") == "Pause selected" and n.get("enabled") == "true"
+                             and n.get("clickable") == "true"]
+            require(len(pause_actions) == 1, "Expected exactly one enabled bulk Pause control")
+            disconnects_before = self.b5_disconnects["selected-active"]
+            self.smoke.tap(pause_actions[0])
+            paused = dict(desired, **{"selected-active": "paused"})
+
+            def pause_states(nodes):
+                return all(has_state(nodes, self.names[key], state) for key, state in paused.items())
+
+            wait_tree(lambda ns: pause_states(ns) and self.b5_disconnects["selected-active"] > disconnects_before,
+                      "the targeted job paused and its active fixture socket closed")
+            before = {key: self.sent[key] for key in active_keys}
+            started = time.monotonic()
+            tree = wait_tree(lambda ns: time.monotonic() - started >= 4
+                             and self.sent["other-active"] > before["other-active"] and pause_states(ns),
+                             "the unrelated transfer advanced throughout bulk Pause", return_tree=True)
+            after = {key: self.sent[key] for key in before}
+            require(0 < before["selected-active"] == after["selected-active"],
+                    "The selected transfer did not hold its partial bytes after bulk Pause")
+            (self.evidence / "b5-bulk-pause-proof.json").write_text(
+                json.dumps({"before": before, "after": after, "seconds": time.monotonic() - started}, indent=2) + "\n",
+                encoding="utf-8")
+            (self.evidence / "b5-bulk-pause-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / "b5-bulk-pause-ui.xml", encoding="utf-8", xml_declaration=True)
+            self.log("PASS B5 bulk Pause: the active selection paused at fixed bytes; the unselected transfer advanced.")
         if self.args.capture_mixed_a3:
             self.shell("input", "keyevent", "4")  # Close the actual overflow popup.
             wait_tree(lambda ns: selected(ns, 3) and not menu_entry(ns, "Move to queue"), "popup dismissed")
@@ -850,12 +894,15 @@ def main():
                         help="Opt in to four real uniquely named A2 fixture downloads and guided mixed-state/graph captures")
     parser.add_argument("--capture-b5", action="store_true",
                         help="With --mixed-a2, capture B5 using three real fixture rows selected in Downloads")
+    parser.add_argument("--verify-b5-bulk-pause", action="store_true", help="With --unattended-b5 apply bulk Pause and verify transfer isolation")
     parser.add_argument("--capture-mixed-a3", action="store_true", help="After B5 capture one real completion snackbar among the dark mixed jobs")
     parser.add_argument("--capture-dark-mixed", action="store_true", help="With --unattended-b5 capture representative dark A1/A2 real mixed states")
     parser.add_argument("--capture-c8-light", action="store_true", help="With --unattended-b5 capture the real mixed list in Light mode before selection")
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
+    if args.verify_b5_bulk_pause and (not args.unattended_b5 or args.capture_mixed_a3):
+        parser.error("--verify-b5-bulk-pause requires --unattended-b5 without the mixed A3 lane")
     if args.capture_mixed_a3 and not (args.unattended_b5 and args.capture_dark_mixed):
         parser.error("--capture-mixed-a3 requires --unattended-b5 --capture-dark-mixed")
     if args.capture_dark_mixed and (not args.unattended_b5 or args.capture_c8_light):

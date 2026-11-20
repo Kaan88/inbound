@@ -33,6 +33,12 @@
   save. Cancel preserved the one disabled schedule, its weekdays, times and
   conditions after saving and reopening. Confirmed deletion and the remote
   editor remain open.
+- Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
+  The action closed the selected active fixture's connection. Its fixture
+  count held at 2,899,968 bytes for six seconds while the unselected
+  active transfer advanced by 262,144 bytes. The actual rows showed two
+  paused, one advancing, one queued and one finished. The probe and
+  fixture mapping were removed. Unmatched partials stayed in place.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
