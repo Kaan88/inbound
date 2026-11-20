@@ -19,13 +19,14 @@ internal sealed class NewDownloadScreen
     private readonly TextInputEditText _address, _name, _referrer, _description, _sha;
     private readonly TextInputLayout _addressLayout, _shaLayout;
     private readonly View _nameLayout, _manyNote, _checkCard, _moreBody, _connectionsBlock;
-    private readonly TextView _checkTitle, _checkSub, _connectionsValue;
+    private readonly TextView _checkTitle, _checkSub, _connectionsValue, _submitError;
     private readonly ImageView _checkIcon, _chevron;
     private readonly Slider _slider;
     private readonly MaterialButton _download;
     private Java.Lang.IRunnable? _pendingCheck;
     private bool _setting;
     private bool _busy;
+    private int _collisionInputVersion;
     private TextInputEditText _queuePicker = null!;
     private ListPopupWindow? _queuePopup;
     private EventHandler<AdapterView.ItemClickEventArgs>? _queuePopupClick;
@@ -65,6 +66,7 @@ internal sealed class NewDownloadScreen
         _sha = Root.FindViewById<TextInputEditText>(Resource.Id.sha)!;
         _shaLayout = Root.FindViewById<TextInputLayout>(Resource.Id.sha_layout)!;
         _download = Root.FindViewById<MaterialButton>(Resource.Id.new_download_btn)!;
+        _submitError = Root.FindViewById<TextView>(Resource.Id.new_submit_error)!;
         if (Transient)
         {
             Root.SaveFromParentEnabled = false;
@@ -94,6 +96,7 @@ internal sealed class NewDownloadScreen
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) =>
         {
             if (!on) return;
+            ClearSubmitError();
             _model.IfExists = id == Resource.Id.exists_overwrite ? ConflictChoice.Overwrite : id == Resource.Id.exists_fail ? ConflictChoice.Fail : ConflictChoice.Rename;
         }));
 
@@ -102,8 +105,12 @@ internal sealed class NewDownloadScreen
             if (Outside.ClipboardText(_activity) is { Length: > 0 } text) _address.Text = text.Trim();
             else _activity.ShowMessage("Nothing on the clipboard");
         }));
-        _address.TextChanged += (_, _) => OnAddress();
-        _name.TextChanged += (_, _) => { if (!_setting) _model.FileName = _name.Text ?? ""; };
+        _address.TextChanged += (_, _) => { ClearSubmitError(); OnAddress(); };
+        _name.TextChanged += (_, _) =>
+        {
+            ClearSubmitError();
+            if (!_setting) _model.FileName = _name.Text ?? "";
+        };
         _referrer.TextChanged += (_, _) => _model.Referrer = _referrer.Text;
         _description.TextChanged += (_, _) => _model.Description = _description.Text;
         _sha.TextChanged += (_, _) => { _model.Sha256 = _sha.Text; _shaLayout.Error = _model.ChecksumError; UpdateButton(); };
@@ -246,7 +253,12 @@ internal sealed class NewDownloadScreen
         ShowDestination();
         void Choose()
         {
-            if (FolderPicker.Offered(host)) FolderSheet.Show(_activity, host, _model.SaveTo, folder => { _model.Destination = folder; Show(); });
+            if (FolderPicker.Offered(host)) FolderSheet.Show(_activity, host, _model.SaveTo, folder =>
+            {
+                if (_model.SaveTo != folder) ClearSubmitError();
+                _model.Destination = folder;
+                Show();
+            });
         }
         field.Click += (_, _) => Choose();
         layout.SetEndIconOnClickListener(new ClickListener(Choose));
@@ -461,10 +473,20 @@ internal sealed class NewDownloadScreen
         _chevron.Rotation = open ? 180f : 0f;
     }
 
+    private void ClearSubmitError()
+    {
+        _collisionInputVersion++;
+        _submitError.Visibility = ViewStates.Gone;
+    }
+
     private void Submit()
     {
         if (_busy || !_model.CanDownload) return;
         if (_connectionsBlock.Visibility == ViewStates.Visible) _model.Connections = (int)_slider.Value;
+        _submitError.Visibility = ViewStates.Gone;
+        var collisionInputVersion = _collisionInputVersion;
+        var saveTo = _model.SaveTo;
+        var conflictPolicy = _model.IfExists;
         _busy = true;
         UpdateButton();
         _ = Task.Run(async () =>
@@ -476,7 +498,20 @@ internal sealed class NewDownloadScreen
             {
                 _busy = false;
                 UpdateButton();
-                if (result.Error is { } error) { _activity.ShowMessage(error); return; }
+                if (result.Error is { } error)
+                {
+                    if (!Root.IsAttachedToWindow) return;
+                    var collision = conflictPolicy == ConflictChoice.Fail &&
+                        (error.StartsWith("The destination file already exists: ", StringComparison.Ordinal) ||
+                         (error.StartsWith("Cannot use destination '", StringComparison.Ordinal) &&
+                          error.Contains("': The destination file already exists: ", StringComparison.Ordinal)));
+                    if (collision && (collisionInputVersion != _collisionInputVersion || saveTo != _model.SaveTo)) return;
+                    _submitError.Text = collision
+                        ? "A file with this name already exists. Choose Rename or Overwrite, or change the file name."
+                        : error;
+                    _submitError.Visibility = ViewStates.Visible;
+                    return;
+                }
                 // Only this page: if it was closed meanwhile and another one opened, that one stays (finding 18).
                 _activity.CloseRowPage(Root);
                 _activity.ShowMessage(NewDownloadModel.Describe(result));

@@ -47,6 +47,9 @@ can approve departures from the designs.
   the update snackbar left Add visible.
   Astra approved the updater dialog and Settings card. The isolated
   signed offer showed verified notes and Later kept version 0.0.8 installed.
+  A5 paired Rename, Overwrite and Fail matched their expected Host
+  file outcomes in the selected disposable folder. The inline refusal
+  kept both actions visible and cleared when the policy changed.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

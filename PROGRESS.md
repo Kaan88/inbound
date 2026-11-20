@@ -24,6 +24,13 @@
   Folder Cancel returned the original destination, and Up returned the
   parent. Save here updated only the draft and preserved its address
   and filename. Form Cancel left zero Host jobs and files.
+  Astra approved the A5 existing-file choices in `a5-paired-collision-inline-20261120-105805`.
+  Default Rename preserved the existing file and saved a hash-matched
+  numbered copy. Overwrite replaced only its selected fixture with the
+  matching payload. Fail preserved the file and draft, added no Host
+  job, and made no payload request after submission. The collision
+  explanation appeared above the enabled Cancel and Download buttons.
+  Selecting Rename cleared the explanation.
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals

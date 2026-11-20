@@ -1,12 +1,15 @@
 """Opt-in B2 picker smoke on inbound33. No real credentials or production host."""
 
 import argparse
+from collections import Counter
 import hashlib
 import importlib.machinery
 import json
+import re
 import socket
 import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -80,7 +83,8 @@ class PairedB2:
             raise
 
     def preflight(self):
-        self.smoke.preflight(include_remote_files_payload=not getattr(self.args, "verify_a5_folder", False))
+        a5 = getattr(self.args, "verify_a5_folder", False) or getattr(self.args, "verify_a5_collision", False)
+        self.smoke.preflight(include_remote_files_payload=not a5)
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD,
                 "Refusing anything other than inbound33")
         require(self.shell("getprop", "ro.build.version.sdk").strip() == API,
@@ -95,7 +99,18 @@ class PairedB2:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
         self.port = port
-        self.server = ThreadingHTTPServer(("127.0.0.1", port), link.Handler)
+        self.fixture_requests = Counter()
+        self.fixture_request_lock = threading.Lock()
+        requests = self.fixture_requests
+        lock = self.fixture_request_lock
+
+        class CountedHandler(link.Handler):
+            def do_GET(self):
+                with lock:
+                    requests[self.path] += 1
+                super().do_GET()
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), CountedHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.add_reverse(port)
@@ -235,6 +250,178 @@ class PairedB2:
         }, indent=2) + "\n", encoding="utf-8")
         self.smoke.log("PASS A5: paired folder Cancel retained the original destination; Save here updated the draft. Form Cancel left zero jobs.")
 
+    def verify_a5_collision(self, paired, fixture):
+        """Real A5 policies, using only explicitly owned disposable Host files."""
+        owned_root = Path(fixture["download_root"]).resolve(strict=True)
+        require(owned_root.is_dir() and set(owned_root.iterdir()) == set(self.child_paths),
+                "Unexpected disposable root contents")
+        decoy, root = self.child_paths
+        require(root.resolve(strict=True).parent == owned_root and not any(root.iterdir()),
+                "Expected a fresh direct child of the owned Host root")
+        request = paired.fixture_session(fixture)
+        payload = load("a5_collision_payload", HERE / "link-fixture" / "server.py").PAYLOAD
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        nonce = uuid.uuid4().hex[:12]
+        sentinel = ("Owned A5 sentinel " + nonce).encode("ascii")
+        sentinel_hash = hashlib.sha256(sentinel).hexdigest()
+        names = {case: f"a5-{case}-{nonce}.zip" for case in ("rename", "overwrite", "fail")}
+        paths = {case: root / name for case, name in names.items()}
+        for path in paths.values():
+            require(not path.exists() and not path.is_symlink(), "Collision fixture path already exists")
+            with path.open("xb") as stream:
+                stream.write(sentinel)
+        require(all(p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == sentinel_hash for p in paths.values()),
+                "Sentinel setup failed")
+        baseline = request("jobs.snapshot", {})
+        require(baseline.get("type") == "jobs.snapshot" and (baseline.get("payload") or {}).get("jobs") == [],
+                "Disposable Host must start with no jobs")
+
+        def one(resource):
+            nodes = [n for n in self.tree().iter("node") if n.get("package") == PACKAGE and
+                     n.get("resource-id", "").endswith(":id/" + resource)]
+            require(len(nodes) == 1, "Expected unique control " + resource)
+            return nodes[0]
+        def show(resource):
+            for _ in range(7):
+                tree = self.tree()
+                nodes = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/" + resource)]
+                if len(nodes) == 1: return nodes[0], tree
+                scroll = one("new_scroll")
+                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", scroll.get("bounds", ""))
+                require(match, "New download scroll bounds unavailable")
+                l,t,r,b = map(int, match.groups()); x = (l+r)//2
+                self.shell("input", "swipe", str(x), str(t+(b-t)*4//5), str(x), str(t+(b-t)//3), "350")
+            raise RuntimeError("New download control not visible: " + resource)
+        def capture(key, tree):
+            require(not self.pairing_fields_may_be_visible and not any(n.get("password") == "true" for n in tree.iter("node")),
+                    "Refusing to retain a credentials form")
+            (self.evidence / (key + ".png")).write_bytes(self.smoke.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+        def jobs():
+            reply = request("jobs.snapshot", {})
+            rows = (reply.get("payload") or {}).get("jobs")
+            require(reply.get("type") == "jobs.snapshot" and isinstance(rows, list), "Host jobs unavailable")
+            return rows
+
+        def get_count(url):
+            from urllib.parse import urlsplit
+            parts = urlsplit(url)
+            with self.fixture_request_lock:
+                return self.fixture_requests[parts.path + "?" + parts.query]
+        observed = {}
+        for case in ("fail", "rename", "overwrite"):
+            name = names[case]
+            url = f"http://127.0.0.1:{self.port}/files/a.zip?case={case}-{nonce}"
+            self.tap("Add", "fab"); self.tap("Link or several links"); self.node("New download")
+            self.smoke.tap(one("address")); self.shell("input", "text", url)
+            self.shell("input", "keyevent", "KEYCODE_BACK")
+            self.node(FILENAME, "file_name", timeout=35)
+            field = one("file_name"); old = field.get("text", "")
+            self.smoke.tap(field)
+            self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+            if old: self.shell("input", "keyevent", *(["KEYCODE_DEL"] * len(old)))
+            self.shell("input", "text", name); self.shell("input", "keyevent", "KEYCODE_BACK")
+            self.node(name, "file_name")
+            path_control, _ = self.smoke.wait_content_description(
+                lambda d: d == "Choose a folder on " + HOST_NAME, "New Download folder action")
+            self.smoke.tap(path_control)
+            selector, _ = self.smoke.wait_content_description(
+                lambda d: d in {"Folder " + str(owned_root), "Folder " + str(root)}, "owned picker folder")
+            if selector.get("content-desc") != "Folder " + str(root):
+                self.tap_clickable_label(root.name)
+                self.smoke.wait_content_description(
+                    lambda d: d == "Folder " + str(root), "selected owned Host destination")
+            self.tap_clickable_label("Save here")
+            _, selected = self.smoke.wait_content_description(
+                lambda d: d == "Save to " + str(root) + " on " + HOST_NAME, "exact draft save path")
+            capture("a5-collision-" + case + "-populated", selected)
+            header, _ = show("more_header")
+            self.smoke.tap(header)
+            chosen, _ = show("exists_" + case)
+            tree = self.tree()
+            default = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/exists_rename")]
+            require(len(default) == 1 and default[0].get("checked") == "true", "Rename is not selected by default")
+            if case != "rename": self.smoke.tap(chosen)
+            tree = self.tree()
+            for option in ("rename", "overwrite", "fail"):
+                controls = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/exists_" + option)]
+                require(len(controls) == 1 and controls[0].get("checked") == ("true" if option == case else "false"),
+                        "Collision choice did not retain exclusive selection")
+            capture("a5-collision-" + case + "-form", tree)
+            before_gets = get_count(url)
+            self.tap("Download", "new_download_btn")
+            if case == "fail":
+                expected = "A file with this name already exists. Choose Rename or Overwrite, or change the file name."
+                self.node(expected, "new_submit_error")
+                tree = self.tree()
+                controls = {n.get("resource-id", "").rsplit(":id/", 1)[-1]: n for n in tree.iter("node")}
+                error = controls.get("new_submit_error")
+                require(error is not None and error.get("text") == expected, "Missing inline collision explanation")
+                error_top, error_bottom = (int(y) for y in re.findall(r",(\d+)\]", error.get("bounds", "")))
+                require(error_top < error_bottom, "Collision explanation has no visible area")
+                for action in ("new_cancel", "new_download_btn"):
+                    button = controls.get(action)
+                    require(button is not None and button.get("enabled") == button.get("clickable") == "true",
+                            "Fail disabled or hid a form action")
+                    top, bottom = (int(y) for y in re.findall(r",(\d+)\]", button.get("bounds", "")))
+                    require(error_bottom <= top < bottom, "Collision explanation overlaps a form action")
+                require(not any(j.get("url") == url for j in jobs())
+                        and get_count(url) == before_gets
+                        and hashlib.sha256(paths[case].read_bytes()).hexdigest() == sentinel_hash,
+                        "Fail started a payload request, admitted a job or changed the sentinel")
+                capture("a5-collision-fail-refusal", tree)
+                rename, _ = show("exists_rename")
+                self.smoke.tap(rename)
+                corrected = self.tree()
+                require(not any(n.get("resource-id", "").endswith(":id/new_submit_error") for n in corrected.iter("node")),
+                        "Changing the collision policy left a stale refusal visible")
+                capture("a5-collision-fail-policy-corrected", corrected)
+                self.tap("Cancel", "new_cancel")
+                self.node("Files are saved on " + HOST_NAME)
+                observed[case] = {"state": "refused", "payloadGets": 0, "sentinelSha256": sentinel_hash,
+                                  "inlineError": expected, "footerVisible": True, "errorClearedOnPolicyChange": True}
+                continue
+
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                rows = [j for j in jobs() if j.get("url") == url]
+                require(len(rows) <= 1, "Fixture admitted duplicate collision jobs")
+                if rows and str(rows[0].get("state", "")).lower() in ("completed", "failed"):
+                    break
+                time.sleep(.35)
+            else:
+                raise RuntimeError("Collision job did not settle: " + case)
+            state = str(rows[0].get("state", "")).lower()
+            actual_policy = rows[0].get("conflictPolicy")
+            payload_gets = get_count(url) - before_gets
+            failure = (rows[0].get("failure") or {}).get("kind")
+            require(state == "completed" and actual_policy == case and payload_gets > 0,
+                    f"Collision case {case}: state={state}, policy={actual_policy}, "
+                    f"payload GETs={payload_gets}, failure kind={failure}")
+            target = paths[case]
+            actual = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() and not target.is_symlink() else None
+            require(actual == (payload_hash if case == "overwrite" else sentinel_hash), "Collision changed wrong sentinel: " + case)
+            if case == "rename":
+                renamed = root / (target.stem + " (1)" + target.suffix)
+                require(renamed.is_file() and not renamed.is_symlink() and hashlib.sha256(renamed.read_bytes()).hexdigest() == payload_hash,
+                        f"Default Rename did not create its expected numbered output. "
+                        f"Host reported {rows[0].get('finalFilePath')!r}; owned child contains {sorted(p.name for p in root.iterdir())!r}")
+            expected_path = renamed if case == "rename" else target
+            require(rows[0].get("finalFilePath") == str(expected_path), "Host wrote an unexpected destination")
+            observed[case] = {"state": state, "sentinelSha256": actual, "jobId": rows[0].get("id"),
+                              "payloadGets": get_count(url) - before_gets}
+            require(observed[case]["jobId"], "Host did not identify collision job")
+        require(len(jobs()) == 2 and len({observed[c]["jobId"] for c in ("rename", "overwrite")}) == 2,
+                "Unexpected Host job count or identity")
+        require(set(owned_root.iterdir()) == set(self.child_paths)
+                and set(root.iterdir()) == (set(paths.values()) | {renamed})
+                and not any(decoy.iterdir()), "Unexpected fixture output")
+        (self.evidence / "a5-collision-proof.json").write_text(json.dumps({"cases": observed, "payloadSha256": payload_hash,
+                    "initialSentinelSha256": sentinel_hash}, indent=2) + "\n", encoding="utf-8")
+        self.smoke.log("PASS A5 paired: default Rename, explicit Overwrite and Fail match owned Host files and job outcomes.")
+        # The owned Server and its entire private temporary root are disposed by
+        # running_fixture only after the Host stops; no shared output is removed.
+
     def run(self):
         self.preflight()
         paired = load("b2_pair_fixture", HERE / "paired-host-parity-fixture.py")
@@ -247,6 +434,9 @@ class PairedB2:
                 self.smoke.started = True
                 self.tap("Start downloading", "fr_start")
                 self.pair(fixture)
+                if getattr(self.args, "verify_a5_collision", False):
+                    self.verify_a5_collision(paired, fixture)
+                    return self.evidence
                 if getattr(self.args, "verify_a5_folder", False):
                     self.verify_a5_folder(paired, fixture)
                     return self.evidence
@@ -324,6 +514,7 @@ class PairedB2:
         # Never persist hierarchy/logcat while pairing fields may contain data.
         if errors:
             raise RuntimeError("; ".join(errors))
+        self.smoke.log("Cleanup PASS: removed the isolated probe, owned reverse mappings and browser fixture.")
 
 
 def main():
@@ -334,10 +525,13 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated probe APK")
     parser.add_argument("--server-dll", required=True, help="Explicit built DownloadManager.Server.dll")
     parser.add_argument("--dotnet", default="dotnet")
+    parser.add_argument("--verify-a5-collision", action="store_true", help="Exercise Rename, Overwrite and Fail on owned paired Host files")
     parser.add_argument("--verify-a5-folder", action="store_true",
                         help="Verify the paired New Download picker selection and Cancel without submitting")
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
+    if args.verify_a5_collision and args.verify_a5_folder:
+        parser.error("--verify-a5-collision is separate from --verify-a5-folder")
     run = PairedB2(args)
     print(f"Evidence: {run.run()}", flush=True)
 
