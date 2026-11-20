@@ -194,6 +194,13 @@ download summary depends on tracked upload support.
   candidate. Later dismissed the in-app installation permission
   explanation and kept version code 8. The test used disposable signing
   identities and covered the path through the in-app permission prompt.
+- Astra approved C7 appearance in `c7-nav-geometry-final-retry-20261120-1200`. The native
+  Theme chooser opened over local Settings. Selecting Light and Dark
+  changed the active appearance. Back and reopen preserved both themes
+  and the Dynamic colour On and Off choices. The navigation highlight
+  matched the native selected tab on all four destinations and stayed
+  aligned through appearance changes. The Dark comparison and isolated
+  probe cleanup passed.
 - Astra approved the C7 Settings search and Back route in
   `c7-settings-insets-20261120-063758`. Catching links showed its
   guidance and browser entry with the keyboard dismissed. Site logins

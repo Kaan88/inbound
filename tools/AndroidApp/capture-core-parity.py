@@ -336,6 +336,159 @@ class Capture:
         save("a0-battery-cancel-return", returned)
         self.log(f"PASS A0: notification {self.args.a0_permissions} and battery {cancel.get('text')} returned to setup; probe whitelist unchanged")
 
+    def verify_c7_appearance(self):
+        """Exercise the app-owned Theme setting on the fresh disposable probe."""
+        def save(key, tree, reference=None):
+            image = self.evidence / (key + "-capture.png")
+            image.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+            if reference:
+                parity = load_module("appearance_pair_helper", Path(__file__).with_name("capture-remote-files-parity.py"))
+                parity.make_pair(MOCKUPS / reference, image, self.evidence / (key + "-pair.png"), key.upper())
+
+        def settings():
+            self.smoke.wait_node("Settings", resource="settings_title", timeout=30)
+            _, tree = self.smoke.wait_node("Theme", timeout=30)
+            tabs = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/nav_settings")]
+            require(len(tabs) == 1 and tabs[0].get("selected") == "true", "Settings tab is not selected")
+            return tree
+
+        indicator_capture = 0
+        def require_indicator(selected_tab):
+            nonlocal indicator_capture
+            from PIL import Image
+            import io
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                tree = self.smoke.tree()
+                items = [n for n in tree.iter("node")
+                         if n.get("resource-id", "").endswith((":id/nav_downloads", ":id/nav_settings",
+                                                                ":id/nav_queues", ":id/nav_remote_files"))]
+                selected = [n.get("resource-id", "").split(":id/")[-1] for n in items if n.get("selected") == "true"]
+                if selected != [selected_tab]:
+                    time.sleep(.25); continue
+                data = self.adb("exec-out", "screencap", "-p", raw=True)
+                samples = {}
+                with Image.open(io.BytesIO(data)) as image:
+                    image = image.convert("RGB")
+                    for item in items:
+                        icon = [n for n in item.iter("node") if n.get("resource-id", "").endswith(":id/navigation_bar_item_icon_view")]
+                        require(len(icon) == 1, "Native nav icon missing")
+                        match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", icon[0].get("bounds", ""))
+                        require(match, "Native nav icon bounds missing")
+                        l,t,r,b = map(int, match.groups())
+                        require(0 <= l < r <= image.width and 0 <= t < b <= image.height, "Nav icon bounds invalid")
+                        # One icon width to either side of its center lies inside
+                        # the 64x32 pill and outside the 24dp icon glyph.
+                        center = (l+r)//2; width = r-l; y = (t+b)//2
+                        require(center-width >= 0 and center+width < image.width, "Nav sample outside screenshot")
+                        samples[item.get("resource-id", "").split(":id/")[-1]] = [
+                            image.getpixel((center-width,y)), image.getpixel((center+width,y))]
+                active = samples[selected_tab]
+                others = [pair for key, pair in samples.items() if key != selected_tab]
+                inactive = others[0][0] if others else None
+                if (len(others) >= 2 and active[0] == active[1]
+                        and all(pair[0] == pair[1] == inactive for pair in others)
+                        and sum(abs(a-b) for a,b in zip(active[0], inactive)) >= 15):
+                    indicator_capture += 1
+                    key = f"c7-nav-pixel-{indicator_capture}-{selected_tab}"
+                    (self.evidence / (key + ".png")).write_bytes(data)
+                    ET.ElementTree(tree).write(self.evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+                    (self.evidence / (key + ".json")).write_text(json.dumps({"selected": selected, "samples": samples}, indent=2) + "\n", encoding="utf-8")
+                    return tree
+                time.sleep(.25)
+            raise RuntimeError("Selected navigation pill pixels did not follow " + selected_tab)
+
+        def theme_dialog(expected=None):
+            self.click_resource(APP_ID + "setting_theme")
+            _, tree = self.smoke.wait_node("Light")
+            for label in ("Follows the system", "Light", "Dark"):
+                nodes = [n for n in tree.iter("node") if n.get("text") == label and n.get("checkable") == "true"]
+                require(len(nodes) == 1, "Theme choice is missing or ambiguous: " + label)
+                if expected is not None:
+                    require(nodes[0].get("checked") == str(label == expected).lower(),
+                            "Theme chooser does not reflect " + expected)
+            return tree
+
+        def choose(theme):
+            node, _ = self.smoke.wait_node(theme)
+            require(node.get("checkable") == "true" and node.get("enabled") == "true", "Theme choice unavailable")
+            self.smoke.tap(node)
+            self.smoke.wait_node(theme, resource="theme_text", timeout=30)
+            settings()  # AppCompat may recreate the activity.
+            return require_indicator("nav_settings")
+
+        self.smoke.tap(self.smoke.wait_node("Start downloading", resource="fr_start")[0])
+        self.smoke.wait_node("Search downloads", timeout=30)
+        self.smoke.wait_content_description(lambda d: d == "Downloads shown from This phone. Change host", "local Host")
+        require_indicator("nav_downloads")
+        for tab in ("nav_queues", "nav_remote_files"):
+            self.click_resource(APP_ID + tab)
+            require_indicator(tab)
+        self.click_resource(APP_ID + "nav_downloads")
+        self.smoke.wait_node("Search downloads", timeout=30)
+        require_indicator("nav_downloads")
+        self.click_resource(SELECTORS["settings"])
+        settings()
+        require_indicator("nav_settings")
+        switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+        if switch.get("checked") == "true":
+            require(switch.get("enabled") == "true", "Dynamic colour cannot be disabled in the probe")
+            self.smoke.tap(switch)
+            settings()
+        require(self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")[0].get("checked") == "false",
+                "Dynamic colour remained enabled")
+        save("c7-appearance-chooser", theme_dialog())
+        tree = choose("Light")
+        save("c7-appearance-light", tree)
+        self.shell("input", "keyevent", "4")
+        self.smoke.wait_node("Search downloads", timeout=30)
+        require_indicator("nav_downloads")
+        self.click_resource(SELECTORS["settings"])
+        require_indicator("nav_settings")
+        self.smoke.wait_node("Light", resource="theme_text", timeout=30)
+        settings()
+        tree = theme_dialog("Light")
+        save("c7-appearance-light-reopened", tree)
+        tree = choose("Dark")
+        save("c7-appearance-dark", tree, "c7-settings.png")
+        self.shell("input", "keyevent", "4")
+        self.smoke.wait_node("Search downloads", timeout=30)
+        require_indicator("nav_downloads")
+        self.click_resource(SELECTORS["settings"])
+        require_indicator("nav_settings")
+        self.smoke.wait_node("Dark", resource="theme_text", timeout=30)
+        settings()
+        tree = theme_dialog("Dark")
+        save("c7-appearance-dark-reopened", tree)
+        self.smoke.tap(self.smoke.wait_node("Cancel")[0])
+        settings()
+        switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+        if switch.get("enabled") == "true":
+            for desired in ("true", "false"):
+                switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+                require(switch.get("checked") != desired, "Dynamic colour did not begin in the opposite state")
+                self.smoke.tap(switch)
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+                    if switch.get("checked") == desired: break
+                    time.sleep(.25)
+                else: raise RuntimeError("Dynamic colour selection did not persist")
+                settings(); tree = require_indicator("nav_settings")
+                save("c7-dynamic-" + ("on" if desired == "true" else "off"), tree)
+                self.shell("input", "keyevent", "4")
+                self.smoke.wait_node("Search downloads", timeout=30)
+                require_indicator("nav_downloads")
+                self.click_resource(SELECTORS["settings"])
+                settings(); require_indicator("nav_settings")
+                switch, tree = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+                require(switch.get("checked") == desired, "Dynamic colour did not survive Back/reopen")
+                save("c7-dynamic-" + ("on" if desired == "true" else "off") + "-reopened", tree)
+        else:
+            self.log("Dynamic colour unavailable on this device; On/Off remains unverified.")
+        self.log("PASS C7 appearance: Light and Dark survived recreation and Back/reopen; navigation highlight followed Settings and Downloads.")
+
     def verify_c7_routes(self):
         """Visit local Settings routes without reading the clipboard or signing in."""
         def save(key, tree):
@@ -392,7 +545,9 @@ class Capture:
         self.check()
         try:
             self.launch()
-            if self.args.verify_c7_routes:
+            if self.args.verify_c7_appearance:
+                self.verify_c7_appearance()
+            elif self.args.verify_c7_routes:
                 self.verify_c7_routes()
             elif self.args.a0_permissions:
                 self.verify_a0_permissions()
@@ -416,7 +571,7 @@ class Capture:
             tree = self.smoke.tree()
             ET.ElementTree(tree).write(self.evidence / "failure-ui.xml",
                                        encoding="utf-8", xml_declaration=True)
-            if self.args.verify_c7_routes:
+            if self.args.verify_c7_routes or self.args.verify_c7_appearance:
                 return
             # These app tags are scoped; avoid a full logcat dump that could
             # include unrelated app/device data.
@@ -442,6 +597,7 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--apk", required=True, help="Explicit probe APK with the rcloneprobe application ID")
     parser.add_argument("--evidence", type=Path, required=True, help="New, previously absent evidence directory")
+    parser.add_argument("--verify-c7-appearance", action="store_true", help="Standalone local app Theme chooser and persistence check")
     parser.add_argument("--verify-c7-routes", action="store_true", help="Standalone local Catching links and Site logins route check")
     parser.add_argument("--a0-permissions", choices=("deny", "allow"), help="Standalone native first-run permission check; battery prompt is cancelled")
     parser.add_argument("--verify-a4-c7", action="store_true", help="Assert updated A4 rows and C7 search in an unattended run")
@@ -450,6 +606,8 @@ def main():
     parser.add_argument("--unattended", action="store_true",
                         help="Opt in to hands-off capture of safely observable, already reached states")
     args = parser.parse_args()
+    if args.verify_c7_appearance and (args.verify_c7_routes or args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
+        parser.error("--verify-c7-appearance is a standalone lane")
     if args.verify_c7_routes and (args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
         parser.error("--verify-c7-routes is a standalone lane")
     if args.a0_permissions and (args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):

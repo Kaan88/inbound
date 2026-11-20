@@ -11,7 +11,7 @@
       <include layout="@layout/settings_page" />
     </FrameLayout>
     <com.google.android.material.bottomnavigation.BottomNavigationView android:id="@+id/nav" android:layout_width="match_parent" android:layout_height="wrap_content"
-        app:menu="@menu/nav" app:labelVisibilityMode="labeled" android:background="?attr/colorSurfaceContainer" />
+        app:menu="@menu/nav" app:labelVisibilityMode="labeled" app:itemBackground="@drawable/nav_selected_pill" app:itemActiveIndicatorStyle="@null" app:itemPaddingTop="16dp" app:activeIndicatorLabelPadding="8dp" android:background="?attr/colorSurfaceContainer" />
   </LinearLayout>
   <!-- No background: the page is opaque, and the list stays drawn under a page that grows or fades in (Navigator). -->
   <FrameLayout android:id="@+id/overlay" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"

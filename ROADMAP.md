@@ -52,6 +52,8 @@ can approve departures from the designs.
   kept both actions visible and cleared when the policy changed.
   A5 paired single-link referrer, description and checksum validation
   passed alongside real checksum success and mismatch.
+  C7 Light, Dark and Dynamic colour choices survived Back and reopen.
+  The navigation highlight matched all four selected tabs.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
