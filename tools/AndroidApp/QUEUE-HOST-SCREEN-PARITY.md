@@ -183,3 +183,11 @@ finished payload hash and requires both server bytes and the app's received
 figure to advance on another transfer before capturing C6. Pairing forms,
 password-bearing descriptors and app logs are excluded from the evidence.
 Inspect the graph and switcher pairs before recording visual acceptance.
+
+Add `--verify-scheduled-start` to the real C1 workload lane to choose a
+near-future Night window using the emulator's unchanged local clock. The probe
+waits for actual Night fixture bytes, checks that the app exposes Pause for
+that same job, and verifies that Mobile stays stopped. The evidence gives the
+planned local time, first fixture byte timestamp and an advancing sample.
+This lane verifies the start of one window. Inspect the retained shared
+fixture files by exact name and hash before removing any.

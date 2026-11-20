@@ -66,7 +66,10 @@ acceptance remains open. Earlier entries document their original checkpoints.
   activation remain open.
 - **C1:** Astra approved the revised populated cards, action sheet and chart
   navigation in `c1-present-20261120-042308`. The chart opened the same Host's
-  live Downloads graph. Actual scheduled execution remains open.
+  live Downloads graph. In `c1-schedule-fires-20261120-051952` Night
+  started at 05:30 on the unchanged device clock and advanced from 131,072
+  to 262,144 bytes. The stopped Mobile control stayed at zero. The probe
+  cleaned up its app and mapping; shared fixture data was retained.
 - **C4:** The scoped S3 upload rerun `c4-conditional-ui-20261120-043617`
   verified both Back paths, Cancel with zero PUTs, Confirm with one
   conditional PUT for the exact 34 MediaStore bytes, and owned cleanup.

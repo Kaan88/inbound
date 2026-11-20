@@ -228,7 +228,7 @@ class Capture:
         self.smoke.tap(node)
         return node
 
-    def _time_picker(self, hour, period="AM"):
+    def _time_picker(self, hour, period="AM", minute=0):
         """Set a native API 33 clock picker by its observed resource IDs and radial bounds."""
         tree = self.smoke.tree()
         picker = self._unique_resource(tree, "timePicker")
@@ -260,19 +260,19 @@ class Capture:
         self.smoke.tap(self._unique_resource(tree, "minutes"))
         tree = self.smoke.tree()
         radial = self._unique_resource(tree, "radial_picker")
-        zero_nodes = [n for n in tree.iter("node")
-                      if n.get("content-desc") in ("00", "0")
-                      and n.get("clickable") == "false"
-                      and n.get("bounds") and radial.get("bounds")]
-        require(len(zero_nodes) == 1,
-                f"Expected one non-clickable radial minute 00 node; got {len(zero_nodes)}")
+        minute_nodes = [n for n in tree.iter("node")
+                        if n.get("content-desc") in (f"{minute:02}", str(minute))
+                        and n.get("clickable") == "false"
+                        and n.get("bounds") and radial.get("bounds")]
+        require(len(minute_nodes) == 1,
+                f"Expected one non-clickable radial minute {minute:02}; got {len(minute_nodes)}")
         radial_bounds = [int(x) for x in re.findall(r"\d+", radial.get("bounds", ""))]
-        zero_bounds = [int(x) for x in re.findall(r"\d+", zero_nodes[0].get("bounds", ""))]
-        require(len(radial_bounds) == 4 and len(zero_bounds) == 4
-                and radial_bounds[0] <= zero_bounds[0] < zero_bounds[2] <= radial_bounds[2]
-                and radial_bounds[1] <= zero_bounds[1] < zero_bounds[3] <= radial_bounds[3],
-                "Radial minute 00 bounds are missing or outside android:id/radial_picker")
-        self.smoke.tap(zero_nodes[0])
+        minute_bounds = [int(x) for x in re.findall(r"\d+", minute_nodes[0].get("bounds", ""))]
+        require(len(radial_bounds) == 4 and len(minute_bounds) == 4
+                and radial_bounds[0] <= minute_bounds[0] < minute_bounds[2] <= radial_bounds[2]
+                and radial_bounds[1] <= minute_bounds[1] < minute_bounds[3] <= radial_bounds[3],
+                "Radial minute bounds are missing or outside android:id/radial_picker")
+        self.smoke.tap(minute_nodes[0])
         tree = self.smoke.tree()
         am = self._unique_resource(tree, "am_label")
         pm = self._unique_resource(tree, "pm_label")
@@ -286,6 +286,8 @@ class Capture:
         require(self._unique_resource(tree, period.lower() + "_label").get("checked") == "true"
                 and self._unique_resource(tree, ("pm" if period == "AM" else "am") + "_label").get("checked") == "false",
                 f"Native picker did not retain exclusive {period} selection")
+        require(self._unique_resource(tree, "minutes").get("text") == f"{minute:02}",
+                "Native minute selection did not retain the requested value")
         self.smoke.tap(self._unique_resource(tree, "button1"))
 
     def configure_c2(self):
@@ -520,6 +522,7 @@ class Capture:
         nonce = uuid.uuid4().hex[:10]
         names = {key: f"inbound-c1-{key}-{nonce}.bin" for key in ("main", "night", "mobile")}
         sent = {key: 0 for key in names}
+        first_byte_at = {}
         stop = threading.Event()
         class Handler(BaseHTTPRequestHandler):
             def respond(self, include_body):
@@ -540,6 +543,7 @@ class Capture:
                         chunk = body[offset:offset + chunk_size]
                         self.wfile.write(chunk)
                         self.wfile.flush()
+                        first_byte_at.setdefault(key, time.time())
                         sent[key] = offset + len(chunk)
                         if stop.wait(1.7):
                             return
@@ -556,11 +560,14 @@ class Capture:
             # Local device time is read only; never change it.
             clock = self.shell("date", "+%H%M").strip()
             require(re.fullmatch(r"(?:[01][0-9]|2[0-3])[0-5][0-9]", clock), "Cannot establish emulator local time")
-            start_hour = (int(clock[:2]) + 2) % 24
+            start_hour, minute = (int(clock[:2]) + 2) % 24, 0
+            if self.args.verify_scheduled_start:
+                now = 60 * int(clock[:2]) + int(clock[2:])
+                start_hour, minute = divmod((5 * ((now + 12) // 5)) % 1440, 60)
             stop_hour = (start_hour + 1) % 24
-            self.c1_start, self.c1_stop = f"{start_hour:02}:00", f"{stop_hour:02}:00"
+            self.c1_start, self.c1_stop = f"{start_hour:02}:{minute:02}", f"{stop_hour:02}:{minute:02}"
             def set_hour(hour):
-                self._time_picker(hour % 12 or 12, "PM" if hour >= 12 else "AM")
+                self._time_picker(hour % 12 or 12, "PM" if hour >= 12 else "AM", minute)
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             port = server.server_address[1]
             require(not re.search(rf"\btcp:{port}\b", self.adb("reverse", "--list")), "Reverse port already in use")
@@ -686,7 +693,35 @@ class Capture:
                 lambda desc: desc == "Pause all downloads", "live speed summary")
             (self.evidence / "c1-chart-destination.png").write_bytes(
                 self.adb("exec-out", "screencap", "-p", raw=True))
-            self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified. Visual review and schedule execution remain open.")
+            self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified.")
+            if self.args.verify_scheduled_start:
+                require(sent["night"] == sent["mobile"] == 0, "A stopped fixture transferred before the scheduled check")
+                self.log(f"Waiting for the real Night schedule at {self.c1_start}; device time is unchanged.")
+                deadline = time.monotonic() + 13 * 60
+                while time.monotonic() < deadline and sent["night"] == 0:
+                    time.sleep(.5)
+                observed = self.shell("date", "+%H%M%S").strip()
+                require(re.fullmatch(r"(?:[01][0-9]|2[0-3])[0-5][0-9][0-5][0-9]", observed),
+                        "Cannot establish observed schedule time")
+                observed_minute = 60 * int(observed[:2]) + int(observed[2:4])
+                require((observed_minute - (60 * start_hour + minute)) % 1440 < 60 and sent["night"] > 0,
+                        "Night did not begin within its scheduled window")
+                first = sent["night"]
+                self.smoke.wait_content_description(
+                    lambda d: d == "Pause " + names["night"], "running scheduled Night fixture")
+                deadline = time.monotonic() + 6
+                while time.monotonic() < deadline and sent["night"] <= first:
+                    time.sleep(.25)
+                require(first < sent["night"] < len(body) and sent["mobile"] == 0,
+                        "Night bytes did not advance, or the stopped control transferred")
+                (self.evidence / "c1-schedule-start.json").write_text(json.dumps({
+                    "planned_local_start": self.c1_start, "observed_device_clock_hhmmss": observed,
+                    "first_night_fixture_byte_unix_utc": first_byte_at["night"],
+                    "night_bytes": [first, sent["night"]], "stopped_mobile_bytes": sent["mobile"],
+                }, indent=2) + "\n", encoding="utf-8")
+                (self.evidence / "c1-schedule-start.png").write_bytes(
+                    self.adb("exec-out", "screencap", "-p", raw=True))
+                self.log("PASS C1 scheduled execution: Night started in its live window and Mobile stayed stopped.")
         except Exception:
             self.collect_failure(); raise
         finally:
@@ -1040,6 +1075,8 @@ def main():
                         help="Exact disposable paired-host label to enter manually")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
+    parser.add_argument("--verify-scheduled-start", action="store_true",
+                        help="With --unattended-c1-workload wait for a real near-future Night queue start")
     parser.add_argument("--mixed-hosts", action="store_true",
                         help="With --paired-server-dll, exercise two fixture Hosts and a real mixed workload")
     mode = parser.add_mutually_exclusive_group()
@@ -1054,6 +1091,8 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_scheduled_start and not args.unattended_c1_workload:
+        parser.error("--verify-scheduled-start requires --unattended-c1-workload")
     if args.verify_remote_layout and not args.mixed_hosts:
         parser.error("--verify-remote-layout requires --mixed-hosts")
     if args.mixed_hosts and not args.paired_server_dll:
