@@ -135,7 +135,7 @@ public sealed partial class MainActivity
                 : "No sign-in cookies captured. Form POST and browser-only downloads may need your regular browser.";
             var max = Math.Max(1, _model.Settings.MaxConnectionsPerHost);
             var defaultConnections = Math.Clamp(_model.Settings.DefaultConnections, 1, max);
-            if ((!capture.HasCookies || Capabilities.IsRemote) && metadata.AdvertisesByteRanges == true) detail += " · Supports byte ranges";
+            bool showRanges = (!capture.HasCookies || Capabilities.IsRemote) && metadata.AdvertisesByteRanges == true;
             CaughtFolderChoice? folder = null;
             if (DownloadManager.Mobile.FolderPicker.Offered(_model))
             {
@@ -144,7 +144,7 @@ public sealed partial class MainActivity
                     (start, chosen) => FolderSheet.Show(this, host, start, chosen, cancellationToken));
             }
             CaughtDownloadSheet.Show(this, _model, new CaughtSheetSpec(name, detail, LinkDestination, privacy, defaultConnections, max,
-                LocalSignedIn: capture.HasCookies && !Capabilities.IsRemote, HasCookies: capture.HasCookies,
+                LocalSignedIn: capture.HasCookies && !Capabilities.IsRemote, HasCookies: capture.HasCookies, AdvertisesByteRanges: showRanges,
                 Queues: _model.Hello?.Capabilities.Contains("queueIdentity") == true
                     ? _model.Settings.Queues.Where(q => q.Generation.GetValueOrDefault() != Guid.Empty)
                         .OrderByDescending(q => q.Id == _model.Settings.DefaultQueueId).ThenBy(q => q.Order).ToArray() : []), folder,

@@ -1,0 +1,4 @@
+Remote Files now shows active uploads and downloads reported by the selected Host, with a reconnect action for expired cloud sign-ins.
+Queue and schedule settings are easier to review, including when another client has changed the selected Host's settings.
+Expired download links can be refreshed from the download list while keeping the saved part when the Host can resume it.
+App Settings gives direct access to Android's battery and notification settings.

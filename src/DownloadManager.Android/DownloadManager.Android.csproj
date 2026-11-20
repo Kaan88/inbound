@@ -11,8 +11,8 @@
     <OutputType>Exe</OutputType>
     <ApplicationId>app.inbound.android</ApplicationId>
     <ApplicationTitle>Inbound</ApplicationTitle>
-    <ApplicationVersion>8</ApplicationVersion>
-    <ApplicationDisplayVersion>0.0.8</ApplicationDisplayVersion>
+    <ApplicationVersion>9</ApplicationVersion>
+    <ApplicationDisplayVersion>0.0.9</ApplicationDisplayVersion>
     <RootNamespace>Inbound.App</RootNamespace>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -27,8 +27,9 @@
   <PropertyGroup Condition="'$(InboundTestBuild)' == 'true'">
     <SupportedOSPlatformVersion>30</SupportedOSPlatformVersion>
     <DefineConstants>$(DefineConstants);INBOUND_TEST_BUILD</DefineConstants>
-    <OutputPath>bin\$(Configuration)-test\</OutputPath>
-    <IntermediateOutputPath>obj\$(Configuration)-test\</IntermediateOutputPath>
+    <OutputPath Condition="'$(UseArtifactsOutput)' != 'true'">bin\$(Configuration)-test\</OutputPath>
+    <IntermediateOutputPath Condition="'$(UseArtifactsOutput)' != 'true'">obj\$(Configuration)-test\</IntermediateOutputPath>
+    <ArtifactsPivots Condition="'$(UseArtifactsOutput)' == 'true' And '$(ArtifactsPivots)' == ''">$(Configuration)-test-$(RuntimeIdentifier)</ArtifactsPivots>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

@@ -89,6 +89,9 @@ class Capture:
                 "other-finished": f"Notes-{self.nonce}.pdf",
                 "owned-failed": f"Missing-{self.nonce}.bin",
             }
+        if getattr(args, "verify_b5_menu_results", False):
+            self.names = {key: f"inbound-b5-{key}-{self.nonce}.bin"
+                          for key in ("owned-failed", "second-failed")}
         self.retry_armed = threading.Event()
         self.retry_allowed = threading.Event()
         self.retry_output_owned = False
@@ -181,7 +184,7 @@ class Capture:
                 if key not in capture.names:
                     self.send_error(404)
                     return
-                if key == "owned-failed":
+                if key in ("owned-failed", "second-failed"):
                     capture.requests.append({"file": key, "method": "HEAD", "at": time.time()})
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -198,7 +201,7 @@ class Capture:
                     self.send_error(404)
                     return
                 capture.requests.append({"file": key, "method": "GET", "at": time.time(), "monotonic": time.monotonic()})
-                if key == "owned-failed":
+                if key in ("owned-failed", "second-failed"):
                     # A request racing the tap waits for its explicit acknowledgement.
                     if capture.retry_armed.is_set():
                         capture.retry_allowed.wait(8)
@@ -238,7 +241,11 @@ class Capture:
                             if capture.sent[key] % (128 * 1024) == 0:
                                 capture.b5_release[key].wait(3)
                         elif capture.args.details_flow:
-                            capture.capture_gate.wait(0.25)
+                            if getattr(capture.args, "verify_a7_concurrent", False) and key == "queued":
+                                if capture.sent[key] % (128 * 1024) == 0:
+                                    capture.capture_gate.wait(1.3)
+                            else:
+                                capture.capture_gate.wait(0.25)
                         elif not (key == "other-finished" and
                                   (getattr(capture.args, "verify_b5_bulk_pause", False)
                                    or getattr(capture.args, "c8_typed_a1_failed", False))):
@@ -258,7 +265,9 @@ class Capture:
         self.reversed = True
         self.log("Fixture ready. Add only the printed http://127.0.0.1 URLs in the probe.")
         keys = ("active", "queued", "paused", "finished") if self.args.mixed_a2 else ("active", "queued")
-        if getattr(self.args, "unattended_b5", False):
+        if getattr(self.args, "verify_b5_menu_results", False):
+            keys = tuple(self.names)
+        elif getattr(self.args, "unattended_b5", False):
             keys = B5_KEYS
         for key in keys:
             self.log(f"{key}: http://127.0.0.1:{self.port}/{key}")
@@ -474,6 +483,9 @@ class Capture:
             if self.args.mixed_a2:
                 self.capture_mixed_a2()
                 return self.evidence
+            if self.args.verify_b5_menu_results:
+                self.capture_b5_eligible_actions()
+                return self.evidence
             if self.args.unattended_b5:
                 self.capture_b5_unattended()
                 self.log("B5 fixture payloads are retained; cleanup must use exact name+SHA-256 verification.")
@@ -528,6 +540,7 @@ class Capture:
         self.smoke.tap(theme_row())
         choice, _ = self.smoke.wait_node(theme)
         self.smoke.tap(choice)
+        self.smoke.tap(self.smoke.wait_node("Apply")[0])
         # AppCompat can recreate the activity; wait for the restored Settings tab.
         self.smoke.wait_node(theme, resource="theme_text", timeout=30)
         switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
@@ -549,6 +562,95 @@ class Capture:
         self.smoke.wait_node("Search downloads", timeout=30)
         label = "C8" if theme == "Light" else "A1/A2 dark"
         self.log(f"PASS {label} setup: {theme} selected and dynamic colour off in the probe UI")
+
+    def capture_b5_eligible_actions(self):
+        """Supplement retained B5 mixed-state evidence with two owned failed jobs."""
+        smoke = self.smoke
+        self.smoke.tap(smoke.wait_node("Start downloading", resource="fr_start")[0])
+        smoke.wait_node("Search downloads")
+
+        def url(key):
+            return f"http://127.0.0.1:{self.port}/{key}"
+
+        def row(key):
+            return smoke.wait_content_description(
+                lambda d: d.startswith(self.names[key] + ". Failed"), "exact failed fixture " + key)[0]
+
+        def open_menu():
+            smoke.tap(smoke.wait_node("More actions", resource="sel_more")[0])
+
+        def tap_option(label):
+            option, _ = smoke.wait_content_description(lambda d: d == label, label)
+            require(option.get("enabled") == "true", label + " was disabled")
+            smoke.tap(option)
+
+        def capture_state(key, tree):
+            (self.evidence / (key + ".png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+
+        for key in self.names:
+            self.adb("shell", "am", "start", "-W", "-n", ACTIVITY, "--es", "add_url", url(key))
+            row(key)
+
+        original = "owned-failed"
+        x, y = self.smoke_module.center(row(original))
+        self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
+        smoke.tap(row("second-failed"))
+        open_menu()
+        tap_option("Properties")
+        choice, chooser = smoke.wait_node(self.names[original])
+        require(any(n.get("text") == "Properties" for n in chooser.iter("node")), "Properties chooser unavailable")
+        capture_state("b5-properties-chooser", chooser)
+        smoke.tap(choice)
+        _, details = smoke.wait_node(self.names[original], resource="details_title")
+        capture_state("b5-properties-details", details)
+        self.shell("input", "keyevent", "KEYCODE_BACK")
+
+        def select_original():
+            x, y = self.smoke_module.center(row(original))
+            self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
+            open_menu()
+
+        select_original()
+        if self.args.verify_b5_clipboard:
+            tap_option("Copy address")
+            close, _ = smoke.wait_node("Cancel selection", resource="sel_close")
+            smoke.tap(close)
+            smoke.tap(smoke.wait_node("Add", resource="fab")[0])
+            use, offer = smoke.wait_node("Use", resource="clip_use")
+            capture_state("a4-clipboard-offer", offer)
+            pairer = load_module("b5_clipboard_pair", PAIR_HELPER_PATH)
+            pairer.make_pair(MOCKUPS / "a4-add.png", self.evidence / "a4-clipboard-offer.png",
+                             self.evidence / "a4-clipboard-offer-pair.png", "A4 clipboard")
+            smoke.tap(use)
+            smoke.wait_node(url(original), resource="address")
+            smoke.tap(smoke.wait_node("Cancel", resource="new_cancel")[0])
+            select_original()
+            self.log("PASS A4/B5: Copy address offered the owned loopback URL and Use opened the exact address.")
+
+        _, menu = smoke.wait_content_description(lambda d: d == "Download again", "eligible action")
+        capture_state("b5-again-enabled", menu)
+        before = sum(r["file"] == original and r["method"] == "GET" for r in self.requests)
+        tap_option("Download again")
+        pattern = "inbound-b5-owned-failed-" + self.nonce
+        until = time.monotonic() + 35
+        while time.monotonic() < until:
+            result = smoke.tree()
+            after = sum(r["file"] == original and r["method"] == "GET" for r in self.requests)
+            matching = [n for n in result.iter("node") if n.get("clickable") == "true"
+                        and n.get("content-desc", "").startswith(pattern)
+                        and ". Failed" in n.get("content-desc", "")]
+            if after > before and len(matching) == 2:
+                break
+            time.sleep(.25)
+        else:
+            raise RuntimeError("Download again did not expose a second failed job and request")
+        capture_state("b5-again-result", result)
+        (self.evidence / "b5-menu-proof.json").write_text(json.dumps({
+            "failed_gets_before": before, "failed_gets_after": after,
+            "properties_target": self.names[original], "clipboard_verified": self.args.verify_b5_clipboard,
+        }, indent=2) + "\n", encoding="utf-8")
+        self.log("PASS B5: Properties opened the chosen Details and Download again created a second owned request and row.")
 
     def capture_b5_unattended(self):
         keys = B5_KEYS
@@ -1034,7 +1136,7 @@ class Capture:
             if not writer_stopped:
                 for event in self.b5_release.values():
                     event.set()
-        if self.installed and writer_stopped and getattr(self.args, "unattended_b5", False):
+        if self.installed and writer_stopped and getattr(self.args, "unattended_b5", False) and not self.args.verify_b5_menu_results:
             try:
                 self.cleanup_b5_finished_payload()
             except Exception as exc:
@@ -1089,6 +1191,8 @@ def main():
                         help="Opt in to four real uniquely named A2 fixture downloads and guided mixed-state/graph captures")
     parser.add_argument("--capture-b5", action="store_true",
                         help="With --mixed-a2, capture B5 using three real fixture rows selected in Downloads")
+    parser.add_argument("--verify-b5-menu-results", action="store_true", help="Verify Properties and Download again on an owned failed fixture")
+    parser.add_argument("--verify-b5-clipboard", action="store_true", help="Also copy and use the synthetic URL on the emulator clipboard")
     parser.add_argument("--verify-b5-bulk-pause", action="store_true", help="With --unattended-b5 apply bulk Pause and verify transfer isolation")
     parser.add_argument("--verify-b5-bulk-resume", action="store_true", help="After bulk Pause resume only its paused target and verify another paused job remains unchanged")
     parser.add_argument("--capture-mixed-a3", action="store_true", help="After B5 capture one real completion snackbar among the dark mixed jobs")
@@ -1099,6 +1203,10 @@ def main():
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
+    if args.verify_b5_menu_results and (not args.unattended_b5 or args.verify_b5_bulk_pause or args.capture_mixed_a3 or args.c8_typed_a1_failed):
+        parser.error("--verify-b5-menu-results requires --unattended-b5 and excludes other action lanes")
+    if args.verify_b5_clipboard and not args.verify_b5_menu_results:
+        parser.error("--verify-b5-clipboard requires --verify-b5-menu-results")
     if args.verify_b5_bulk_resume and not args.verify_b5_bulk_pause:
         parser.error("--verify-b5-bulk-resume requires --verify-b5-bulk-pause")
     if args.verify_b5_bulk_pause and (not args.unattended_b5 or args.capture_mixed_a3):

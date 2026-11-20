@@ -61,7 +61,7 @@ internal sealed partial class DownloadsScreen
         _graph = new SpeedGraphView(activity);
         var graphSlot = page.FindViewById<FrameLayout>(Resource.Id.summary_graph)!;
         var graphLayout = (ViewGroup.MarginLayoutParams)graphSlot.LayoutParameters!;
-        var graphMargin = activity.Capabilities.IsRemote ? Motion.Dp(activity, 20) : 0;
+        var graphMargin = Motion.Dp(activity, 20);
         graphLayout.LeftMargin = graphMargin;
         graphLayout.RightMargin = graphMargin;
         graphSlot.LayoutParameters = graphLayout;
@@ -183,6 +183,12 @@ internal sealed partial class DownloadsScreen
 
     private string SubtitleFor(JobRow row)
     {
+        if (row.Action == RowAction.RefreshLink)
+        {
+            bool expired = row.Job.Failure?.HttpStatus == 410 ||
+                string.Equals(row.Job.Failure?.Kind, "expiredUrl", StringComparison.OrdinalIgnoreCase);
+            return (expired ? "Link expired" : row.Subtitle) + " · tap to refresh";
+        }
         if (!row.Job.IsQueued ||
             !string.Equals(row.Job.State, "queued", StringComparison.OrdinalIgnoreCase) ||
             !_queueStarts.TryGetValue(row.Job.QueueId, out var queue))
@@ -307,6 +313,7 @@ internal sealed partial class DownloadsScreen
             case RowAction.Pause: Fire(_model.PauseAsync(row.Id)); break;
             case RowAction.Resume: Fire(_model.ResumeAsync(row.Id)); break;
             case RowAction.Retry: Fire(_model.RetryAsync(row.Id)); break;
+            case RowAction.RefreshLink: _activity.ShowRefreshLink(row); break;
             case RowAction.ShowInFolder when _activity.Capabilities.CanShowInFolder:
                 if (!Outside.ShowDownloadFolder(_activity)) _activity.ShowMessage("No app on this phone can show the folder.");
                 break;
@@ -480,8 +487,8 @@ internal sealed partial class DownloadsScreen
 
             _bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Gone;
             if (!row.ShowBar) return;
-            // The bar follows the state: blue while it transfers, grey while it waits.
-            _bar.SetIndicatorColor(Motion.Attr(ctx, row.Group == RowGroup.Paused ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorPrimary));
+            _bar.SetIndicatorColor(row.Kind == StatusKind.Failed ? ctx.GetColor(Resource.Color.state_failed)
+                : Motion.Attr(ctx, row.Group == RowGroup.Paused ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorPrimary));
             if (row.Indeterminate) { if (!_bar.Indeterminate) _bar.Indeterminate = true; return; }
             if (_bar.Indeterminate) _bar.Indeterminate = false;
             _bar.SetProgressCompat((int)(row.Progress * 1000), animate); // glides to the new value; no jump between updates
@@ -494,6 +501,7 @@ internal sealed partial class DownloadsScreen
                 RowAction.Pause => (PauseIcon, "Pause"),
                 RowAction.Resume => (Resource.Drawable.ic_play_outline, "Resume"),
                 RowAction.Retry => (Resource.Drawable.ic_refresh, "Retry"),
+                RowAction.RefreshLink => (Resource.Drawable.ic_refresh, "Refresh link for"),
                 RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_flow_folder, "Show in folder"),
                 _ => (0, ""),
             };

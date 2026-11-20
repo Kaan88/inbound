@@ -420,7 +420,8 @@ internal sealed class QueuesScreen : IDisposable
         {
             if (_closed || _busy || !MayChangeQueue(id) || !SameCurrent(baseline)) return;
             var name = (field.Text ?? "").Trim();
-            if (name.Length is 0 or > 80) { fieldLayout.Error = "Enter a queue name up to 80 characters."; return; }
+            if (name.Length == 0) { fieldLayout.Error = "Enter a queue name."; field.RequestFocus(); return; }
+            if (name.Length > 80) { fieldLayout.Error = "Enter a queue name up to 80 characters."; return; }
             var edited = CopyQueue(baseline); edited.Name = name;
             _busy = _renameInFlight = true; Render(); save.Enabled = cancel.Enabled = field.Enabled = false; dialog.SetCancelable(false); fieldLayout.Error = null;
             try
@@ -459,7 +460,8 @@ internal sealed class QueuesScreen : IDisposable
         {
             if (_closed || _busy || _createUncertain || !SupportsIdentity || !_settings.CanWriteSafely) return;
             var name = (field.Text ?? "").Trim();
-            if (name.Length is 0 or > 80) { fieldLayout.Error = "Enter a queue name up to 80 characters."; return; }
+            if (name.Length == 0) { fieldLayout.Error = "Enter a queue name."; field.RequestFocus(); return; }
+            if (name.Length > 80) { fieldLayout.Error = "Enter a queue name up to 80 characters."; return; }
             var before = _settings.Settings.Queues.Select(q => q.Id).ToHashSet();
             bool notices = !_activity.Capabilities.IsRemote || _downloads.Hello?.Capabilities.Contains("queueCompletionNotification") == true;
             var draftQueue = new QueueDto { Name = name, IsRunning = false, NotifyWhenFinished = notices ? true : null };
@@ -492,40 +494,51 @@ internal sealed class QueuesScreen : IDisposable
         if (_closed || _busy || !MayChangeQueue(captured.Id) || !SameCurrent(captured)) return;
         var source = CopyQueue(captured);
         var targets = _settings.Settings.Queues.Where(q => q.Id != source.Id).OrderBy(q => q.Order).ThenBy(q => q.Id).Select(CopyQueue).ToArray();
-        var labels = targets.Select(q => q.Name + (q.IsRunning ? " \u00b7 running" : " \u00b7 stopped")).Append("No queue").ToArray();
-        int chosen = 0;
-        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Move downloads from " + source.Name)!
-            .SetSingleChoiceItems(labels, chosen, (_, e) => chosen = e.Which)!
-            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Continue", (IDialogInterfaceOnClickListener?)null)!.Create()!;
-        Track(dialog); dialog.Show();
-        dialog.GetButton((int)DialogButtonType.Positive)!.Click += (_, _) =>
-        {
-            if (_closed || _busy || chosen < 0 || chosen > targets.Length || !SameCurrent(source)) return;
-            var target = chosen == targets.Length ? null : targets[chosen];
-            if (target is not null && (!MayChangeQueue(target.Id) || !SameCurrent(target))) return;
-            dialog.Dismiss(); _ui.Post(() => ConfirmMove(source, target));
-        };
-    }
-    private void ConfirmMove(QueueDto source, QueueDto? target)
-    {
-        if (_closed || _busy || !MayChangeQueue(source.Id) || !SameCurrent(source)) return;
-        if (target is not null && (!MayChangeQueue(target.Id) || !SameCurrent(target))) return;
         var jobs = _downloads.Rows.Where(r => r.Job.IsQueued && r.Job.QueueId == source.Id).Select(r => r.Id).Distinct().ToArray();
         if (jobs.Length == 0) { _activity.ShowMessage("There are no downloads in this queue to move."); return; }
-        string destination = target?.Name ?? "No queue";
-        string effect = target is null ? "Queued downloads will wait until resumed." : target.IsRunning ? "The destination is running; eligible downloads may start." : "The destination is stopped; active downloads may pause.";
-        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Move downloads?")!
-            .SetMessage($"Move {jobs.Length} downloads from {source.Name} to {destination}. {effect} Moves happen one at a time; a failure can leave a partial result.")!
-            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Move", (IDialogInterfaceOnClickListener?)null)!.Create()!;
-        Track(dialog); dialog.Show();
-        var move = dialog.GetButton((int)DialogButtonType.Positive)!; var cancel = dialog.GetButton((int)DialogButtonType.Negative)!;
+        int chosen = 0;
+        var dialog = new BottomSheetDialog(_activity);
+        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        int pad = Motion.Dp(_activity, 20); body.SetPadding(pad, pad, pad, pad);
+        var handle = new View(_activity); handle.SetBackgroundResource(Resource.Drawable.bg_handle);
+        body.AddView(handle, new LinearLayout.LayoutParams(Motion.Dp(_activity, 32), Motion.Dp(_activity, 4)) { Gravity = GravityFlags.CenterHorizontal, BottomMargin = pad });
+        body.AddView(Label("Move to queue", 22, Resource.Attribute.colorOnSurface));
+        body.AddView(Label($"Moving {jobs.Length} {(jobs.Length == 1 ? "download" : "downloads")} from {source.Name}. Moves happen one at a time; a failure can leave a partial result.", 14, Resource.Attribute.colorOnSurfaceVariant));
+        var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
+        var current = new RadioButton(_activity) { Text = source.Name + " · current queue", Enabled = false };
+        current.SetMinimumHeight(Motion.Dp(_activity, 48));
+        choices.AddView(current);
+        for (int i = 0; i <= targets.Length; i++)
+        {
+            int index = i;
+            string label = i == targets.Length ? "No queue\nRemove queue membership; queued downloads wait until resumed" : QueueDestinationLabel(targets[i]);
+            var radio = new RadioButton(_activity) { Text = label, Checked = i == 0 };
+            radio.SetMinimumHeight(Motion.Dp(_activity, 48));
+            radio.Click += (_, _) => chosen = index; choices.AddView(radio);
+        }
+        body.AddView(choices);
+        var error = Label("", 14, Resource.Attribute.colorError); body.AddView(error);
+        var actions = new LinearLayout(_activity) { Orientation = Orientation.Horizontal }; actions.SetGravity(GravityFlags.End);
+        var cancel = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Cancel" };
+        var move = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Move" };
+        actions.AddView(cancel);
+        actions.AddView(move, new LinearLayout.LayoutParams(-2, -2) { MarginStart = Motion.Dp(_activity, 8) });
+        body.AddView(actions);
+        var scroll = new ScrollView(_activity); scroll.AddView(body); dialog.SetContentView(scroll); Track(dialog); dialog.Show();
+        cancel.Click += (_, _) => dialog.Dismiss();
         move.Click += async (_, _) =>
         {
-            if (_closed || _busy || !SameCurrent(source) || (target is not null && !SameCurrent(target))) return;
+            if (_closed || _busy || chosen < 0 || chosen > targets.Length || !MayChangeQueue(source.Id) || !SameCurrent(source)) return;
+            var target = chosen == targets.Length ? null : targets[chosen];
+            if (target is not null && (!MayChangeQueue(target.Id) || !SameCurrent(target))) return;
+            if (target is not null && CurrentQueue(target.Id)?.IsRunning != target.IsRunning)
+            { error.Text = "The destination's running state changed. Close and review it before moving."; move.Enabled = false; return; }
+            if (!jobs.ToHashSet().SetEquals(_downloads.Rows.Where(r => r.Job.IsQueued && r.Job.QueueId == source.Id).Select(r => r.Id)))
+            { error.Text = "Downloads in this queue changed. Close and review the queue before moving."; move.Enabled = false; return; }
             _busy = true; _moveInFlight = source; _moveTargetInFlight = target; _moveJobs = jobs; _moveConfirmed = 0; _movePending = true;
-            Render(); move.Enabled = cancel.Enabled = false; dialog.SetCancelable(false);
+            Render(); move.Enabled = cancel.Enabled = false;
+            for (int i = 0; i < choices.ChildCount; i++) choices.GetChildAt(i)!.Enabled = false;
+            dialog.SetCancelable(false);
             try
             {
                 foreach (var job in jobs)
@@ -533,24 +546,30 @@ internal sealed class QueuesScreen : IDisposable
                     var row = _downloads.Rows.FirstOrDefault(r => r.Id == job);
                     if (row is null || !row.Job.IsQueued || row.Job.QueueId != source.Id || !SameCurrent(source) || (target is not null && !SameCurrent(target)))
                     {
-                        MarkUncertain(source); if (target is not null) MarkUncertain(target); dialog.Dismiss();
-                        _activity.ShowMessage($"{_moveConfirmed} moves confirmed. Review all downloads before trying again."); return;
+                        MarkUncertain(source); if (target is not null) MarkUncertain(target);
+                        error.Text = $"{_moveConfirmed} moves confirmed. Review all downloads before trying again."; return;
                     }
                     var result = await _downloads.MoveToQueueAsync(job, target?.Id, _life.Token, expectedQueueId: source.Id,
                         expectedSourceQueueGeneration: source.Generation, expectedDestinationQueueGeneration: target?.Generation);
                     if (_closed) return;
                     if (!result.Ok)
                     {
-                        MarkUncertain(source); if (target is not null) MarkUncertain(target); dialog.Dismiss();
-                        _activity.ShowMessage($"{_moveConfirmed} moves confirmed. Review all downloads before trying again; the last move may have completed."); return;
+                        MarkUncertain(source); if (target is not null) MarkUncertain(target);
+                        error.Text = $"{_moveConfirmed} moves confirmed. Review all downloads before trying again; the last move may have completed."; return;
                     }
                     _moveConfirmed++;
                 }
                 _movePending = false; _moveJobs = []; dialog.Dismiss(); _activity.ShowMessage($"Moved {_moveConfirmed} downloads.");
             }
             catch (System.OperationCanceledException) when (_life.IsCancellationRequested) { }
-            finally { _moveInFlight = _moveTargetInFlight = null; if (!_closed) { dialog.SetCancelable(true); _busy = false; Render(); } }
+            finally { _moveInFlight = _moveTargetInFlight = null; if (!_closed) { dialog.SetCancelable(true); cancel.Enabled = true; _busy = false; Render(); } }
         };
+    }
+    private static string QueueDestinationLabel(QueueDto queue)
+    {
+        var state = queue.IsRunning ? "Running · eligible downloads may start" : "Stopped · downloads wait";
+        var limit = queue.SpeedLimitBytesPerSecond is > 0 ? $" · {Fmt.Bytes(queue.SpeedLimitBytesPerSecond.Value)}/s limit" : "";
+        return queue.Name + "\n" + state + limit;
     }
     private void ChooseDeleteDestination(QueueDto captured)
     {
@@ -559,33 +578,48 @@ internal sealed class QueuesScreen : IDisposable
         if (queue.Id == _settings.Settings.DefaultQueueId) { _activity.ShowMessage("The default queue cannot be deleted."); return; }
         var destinations = _settings.Settings.Queues.Where(q => q.Id != queue.Id).OrderBy(q => q.Order).Select(CopyQueue).ToArray();
         if (destinations.Length == 0) { _activity.ShowMessage("There is no other queue to receive these downloads."); return; }
-        var labels = destinations.Select(q => q.Name + (q.IsRunning ? " \u00b7 running" : " \u00b7 stopped")).ToArray();
-        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Move downloads to")!.SetItems(labels, (_, e) =>
-        {
-            if (_closed || _busy || e.Which < 0 || e.Which >= destinations.Length) return;
-            var destination = destinations[e.Which];
-            _ui.Post(() => { if (!_closed) ConfirmDelete(queue, destination); });
-        })!.SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!.Create()!;
-        Track(dialog); dialog.Show();
-    }
-    private void ConfirmDelete(QueueDto source, QueueDto target)
-    {
-        if (_closed || _busy || !MayChangeQueue(source.Id) || !MayChangeQueue(target.Id) || !SameCurrent(source) || !SameCurrent(target)) return;
-        string state = target.IsRunning ? "It is running; eligible waiting downloads may start." : "It is stopped; downloads will wait.";
+        var source = queue;
+        var jobs = _downloads.Rows.Where(r => r.Job.IsQueued && r.Job.QueueId == source.Id).Select(r => r.Id).Distinct().ToArray();
+        var count = jobs.Length;
         bool removeSchedules = !_activity.Capabilities.IsRemote || _downloads.Hello?.Capabilities.Contains("queueDeleteSchedules") == true;
         var schedules = removeSchedules ? "This queue's schedules will be removed." : "This Host moves the queue's schedules to the destination.";
+        int chosen = 0;
+        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        int pad = Motion.Dp(_activity, 24); body.SetPadding(pad, 0, pad, 0);
+        body.AddView(Label($"Keep the files and move this queue's {count} {(count == 1 ? "download" : "downloads")} to:", 14, Resource.Attribute.colorOnSurfaceVariant));
+        var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
+        for (int i = 0; i < destinations.Length; i++)
+        {
+            int index = i;
+            var radio = new RadioButton(_activity) { Text = QueueDestinationLabel(destinations[i]), Checked = i == 0 };
+            radio.SetMinimumHeight(Motion.Dp(_activity, 48));
+            radio.Click += (_, _) => chosen = index; choices.AddView(radio);
+        }
+        body.AddView(choices);
+        body.AddView(Label(schedules + " If a move fails, the queue is kept and some downloads may already have moved.", 14, Resource.Attribute.colorOnSurfaceVariant));
+        var error = Label("", 14, Resource.Attribute.colorError); body.AddView(error);
+        var scroll = new ScrollView(_activity); scroll.AddView(body);
         var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Delete " + source.Name + "?")!
-            .SetMessage("Move this queue's downloads to " + target.Name + ". Files are kept. " + schedules + " " + state + " If a move fails, the queue is kept and some downloads may already have moved.")!
+            .SetView(scroll)!
             .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
             .SetPositiveButton("Delete queue", (IDialogInterfaceOnClickListener?)null)!.Create()!;
         Track(dialog); dialog.Show();
         var save = dialog.GetButton((int)DialogButtonType.Positive)!; var cancel = dialog.GetButton((int)DialogButtonType.Negative)!;
+        save.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorError)));
         save.Click += async (_, _) =>
         {
-            if (_closed || _busy || !SameCurrent(source) || !SameCurrent(target)) return;
+            if (_closed || _busy || chosen < 0 || chosen >= destinations.Length || !MayChangeQueue(source.Id) || !SameCurrent(source)) return;
+            var target = destinations[chosen];
+            if (!MayChangeQueue(target.Id) || !SameCurrent(target)) return;
+            if (CurrentQueue(target.Id)?.IsRunning != target.IsRunning)
+            { error.Text = "The destination's running state changed. Close and review it before deleting."; save.Enabled = false; return; }
+            if (!jobs.ToHashSet().SetEquals(_downloads.Rows.Where(r => r.Job.IsQueued && r.Job.QueueId == source.Id).Select(r => r.Id)))
+            { error.Text = "Downloads in this queue changed. Close and review the queue before deleting."; save.Enabled = false; return; }
             _busy = true; _deleteInFlight = source; _deleteTargetInFlight = target;
-            _moveJobs = _downloads.Rows.Where(r => r.Job.IsQueued && r.Job.QueueId == source.Id).Select(r => r.Id).Distinct().ToArray();
-            _moveConfirmed = 0; _movePending = true; Render(); save.Enabled = cancel.Enabled = false; dialog.SetCancelable(false);
+            _moveJobs = jobs;
+            _moveConfirmed = 0; _movePending = true; Render(); save.Enabled = cancel.Enabled = false;
+            for (int i = 0; i < choices.ChildCount; i++) choices.GetChildAt(i)!.Enabled = false;
+            dialog.SetCancelable(false);
             try
             {
                 var result = await _settings.QueueActionAsync(new QueueActionRequest { Action = "delete", QueueId = source.Id, MoveContentsToQueueId = target.Id, RemoveSchedules = removeSchedules,
@@ -594,11 +628,11 @@ internal sealed class QueuesScreen : IDisposable
                 _downloads.ApplySettingsResult(_settings.LastResult);
                 if (result.Ok) { _movePending = false; _moveJobs = []; dialog.Dismiss(); _activity.ShowMessage(removeSchedules ? "Queue deleted; downloads moved and schedules removed." : "Queue deleted; downloads and schedules moved."); return; }
                 // A refused delete may still have moved some downloads before failing.
-                MarkUncertain(source); MarkUncertain(target); dialog.Dismiss();
-                _activity.ShowMessage((result.Error ?? "The deletion was not confirmed.") + " Review the queue and downloads before trying again.");
+                MarkUncertain(source); MarkUncertain(target);
+                error.Text = (result.Error ?? "The deletion was not confirmed.") + " Review the queue and downloads before trying again.";
             }
             catch (System.OperationCanceledException) when (_life.IsCancellationRequested) { }
-            finally { _deleteInFlight = _deleteTargetInFlight = null; if (!_closed) { dialog.SetCancelable(true); _busy = false; Render(); } }
+            finally { _deleteInFlight = _deleteTargetInFlight = null; if (!_closed) { dialog.SetCancelable(true); cancel.Enabled = true; _busy = false; Render(); } }
         };
     }
     private async Task ActionAsync(int id)

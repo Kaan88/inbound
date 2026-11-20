@@ -272,11 +272,18 @@ internal sealed class QueueEditorScreen : IDisposable
     private void EditCompletion()
     {
         if (!_completionSupported || !CanEditSafely) return;
-        int choice = _draft.NotifyWhenFinished == true ? 0 : 1;
-        new MaterialAlertDialogBuilder(_activity).SetTitle("When the queue finishes")!
-            .SetSingleChoiceItems(["Notify and finish", "Do nothing"], choice, (_, e) => choice = e.Which)!
-            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Apply", (_, _) => { if (!_closed) { _draft.NotifyWhenFinished = choice == 0; Refresh(); } })!.ShowTracked(_dialogs);
+        bool remote = _activity.Capabilities.IsRemote;
+        var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
+        var notify = AddSheetChoice(choices, remote ? "Notify and finish" : "Notify when the queue finishes",
+            remote ? "Ask the selected Host to notify when the queue finishes" : "Show a notification when all files finish",
+            _draft.NotifyWhenFinished == true);
+        AddSheetChoice(choices, "Do nothing", "Skip the queue completion notification", _draft.NotifyWhenFinished != true);
+        ShowChoiceSheet("When the queue finishes", choices, "Cancel", null, "Apply", () =>
+        {
+            if (_closed || _busy) return;
+            _draft.NotifyWhenFinished = notify.Checked;
+            Refresh();
+        });
     }
     private static string SpeedText(long bytes) => (bytes / Fmt.BytesPerKilobyte + (bytes % Fmt.BytesPerKilobyte == 0 ? 0 : 1)).ToString(CultureInfo.InvariantCulture);
     private void Options()
@@ -314,12 +321,23 @@ internal sealed class QueueEditorScreen : IDisposable
         {
             var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
             row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Motion.Dp(_activity, 72));
+            var clock = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+            clock.SetImageResource(Resource.Drawable.ic_queue_schedule);
+            clock.SetBackgroundResource(Resource.Drawable.bg_circle_dark);
+            var inset = Motion.Dp(_activity, 10);
+            clock.SetPadding(inset, inset, inset, inset);
+            clock.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+            row.AddView(clock, new LinearLayout.LayoutParams(Motion.Dp(_activity, 40), Motion.Dp(_activity, 40)) { MarginEnd = Motion.Dp(_activity, 12) });
             var labels = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Clickable = true, Focusable = true };
             labels.Background = new TypedValueHolder(_activity).SelectableBackground();
             labels.SetPadding(0, Motion.Dp(_activity, 12), 0, Motion.Dp(_activity, 12));
             labels.AddView(Text(schedule.Name, 17, Resource.Attribute.colorOnSurface));
-            labels.AddView(Text(schedule.Days + " · " + schedule.StartTime + (schedule.StopTime is { } stop ? "–" + stop : ""), 13, Resource.Attribute.colorOnSurfaceVariant));
-            labels.ContentDescription = schedule.Name + ", " + schedule.Days + ", " + schedule.StartTime + ". Edit schedule";
+            bool editable = Supported(schedule);
+            var timing = editable
+                ? schedule.Days + " · " + schedule.StartTime + (schedule.StopTime is { } stop ? "–" + stop : "")
+                : ScheduleKind(schedule) + " · " + DateAndStart(schedule);
+            labels.AddView(Text(timing, 13, Resource.Attribute.colorOnSurfaceVariant));
+            labels.ContentDescription = schedule.Name + ", " + timing + (editable ? ". Edit schedule" : ". View schedule");
             labels.Click += (_, _) => { sheet.Dismiss(); if (_closed) return; if (Supported(schedule)) { _selectedId = schedule.Id; Refresh(); } else ScheduleOptions(schedule); };
             row.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1));
             if (Supported(schedule))
@@ -337,9 +355,15 @@ internal sealed class QueueEditorScreen : IDisposable
         var add = Text("+  Add schedule", 17, Resource.Attribute.colorPrimary); add.SetMinHeight(Motion.Dp(_activity, 56)); add.Gravity = GravityFlags.CenterVertical;
         add.Clickable = true; add.Focusable = true; add.Background = new TypedValueHolder(_activity).SelectableBackground();
         add.Click += (_, _) => { sheet.Dismiss(); if (!_closed) AddSchedule(); }; body.AddView(add);
+        var actions = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        var close = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Close" };
+        close.Click += (_, _) => sheet.Dismiss();
         var done = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = "Done" };
         done.Click += (_, _) => sheet.Dismiss();
-        body.AddView(done, new LinearLayout.LayoutParams(-2, Motion.Dp(_activity, 48)) { Gravity = GravityFlags.End });
+        actions.SetGravity(GravityFlags.End);
+        actions.AddView(close);
+        actions.AddView(done);
+        body.AddView(actions);
         sheet.SetContentView(body); _dialogs.Add(sheet); sheet.DismissEvent += (_, _) => _dialogs.Remove(sheet); sheet.Show();
     }
     private void AddSchedule(string? initial = null) => Input("New schedule", "Schedule name", initial ?? "", false, "Continue", text =>
@@ -347,10 +371,24 @@ internal sealed class QueueEditorScreen : IDisposable
         if (text.Length is 0 or > 80) return "Enter a name up to 80 characters.";
         var s = new ScheduleDto { Id = Guid.NewGuid(), QueueId = _draft.Id, Name = text, Kind = "daily", Enabled = true, TimedStartEnabled = true, StartTime = "09:00", Days = string.Join(',', DayNames) };
         _draftSchedules.Add(s); _selectedId = s.Id; Refresh(); return null;
-    });
+    }, helper: "Next, choose its times and days.");
     private void ScheduleOptions(ScheduleDto s)
     {
-        if (!Supported(s)) { new MaterialAlertDialogBuilder(_activity).SetTitle("View this schedule")!.SetMessage($"{s.Name}\n{s.StartTime} \u00b7 {(s.Enabled ? "enabled" : "off")}\n\nEdit this schedule from a client that supports its type. Its values are kept.")!.SetPositiveButton("Close", (IDialogInterfaceOnClickListener?)null)!.ShowTracked(_dialogs); return; }
+        if (!Supported(s))
+        {
+            var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+            int pad = Motion.Dp(_activity, 24);
+            body.SetPadding(pad, pad, pad, 0);
+            body.AddView(Text(s.Name, 18, Resource.Attribute.colorOnSurface));
+            body.AddView(Text(ScheduleKind(s), 14, Resource.Attribute.colorOnSurfaceVariant), Margin(4));
+            body.AddView(Text(DateAndStart(s), 16, Resource.Attribute.colorOnSurface), Margin(12));
+            body.AddView(Text(s.Enabled ? "Enabled" : "Off", 14, Resource.Attribute.colorOnSurfaceVariant), Margin(4));
+            body.AddView(Text("Edit this schedule from a client that supports its type. Its values are kept.", 14,
+                Resource.Attribute.colorOnSurfaceVariant), Margin(12));
+            new MaterialAlertDialogBuilder(_activity).SetTitle("View this schedule")!.SetView(body)!
+                .SetPositiveButton("Close", (IDialogInterfaceOnClickListener?)null)!.ShowTracked(_dialogs);
+            return;
+        }
         string[] choices = ["Edit times and days", s.Enabled ? "Disable schedule" : "Enable schedule", "Rename schedule", "Delete schedule"];
         new MaterialAlertDialogBuilder(_activity).SetTitle(s.Name)!.SetItems(choices, (_, e) =>
         {
@@ -377,6 +415,12 @@ internal sealed class QueueEditorScreen : IDisposable
             }
         })!.SetNegativeButton("Back", (_, _) => ScheduleList())!.ShowTracked(_dialogs);
     }
+    private static string DateAndStart(ScheduleDto schedule) => schedule.StartDate is { } date
+        ? date.ToString("d MMMM yyyy", CultureInfo.CurrentCulture) + " · " + schedule.StartTime
+        : schedule.StartTime;
+
+    private static string ScheduleKind(ScheduleDto schedule) => string.Equals(schedule.Kind, "oneTime", StringComparison.OrdinalIgnoreCase)
+        ? "One-time schedule" : "Schedule from another Host";
     private void EditScheduleName(ScheduleDto schedule, string? initial = null)
     {
         _inputScheduleId = schedule.Id;
@@ -390,9 +434,65 @@ internal sealed class QueueEditorScreen : IDisposable
         if (!Supported(s)) { ScheduleOptions(s); return; }
         if (stop)
         {
-            new MaterialAlertDialogBuilder(_activity).SetTitle("Stop time")!.SetItems(["Choose time", "No stop time"], (_, e) => { if (e.Which == 0) ShowTime(s, true); else { s.StopTime = null; Refresh(); } })!.SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!.ShowTracked(_dialogs);
+            var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
+            var atTime = AddSheetChoice(choices, "At a time", s.StopTime, s.StopTime is not null);
+            AddSheetChoice(choices, "No stop time", "Keep running until stopped or no work remains", s.StopTime is null);
+            ShowChoiceSheet("Stop time", choices, "Cancel", null, "Apply", () =>
+            {
+                if (_closed || _busy || Selected != s) return;
+                if (atTime.Checked) ShowTime(s, true);
+                else { s.StopTime = null; Refresh(); }
+            });
         }
         else ShowTime(s, false);
+    }
+    private RadioButton AddSheetChoice(RadioGroup choices, string title, string? subtitle, bool selected)
+    {
+        var radio = new RadioButton(_activity) { Id = View.GenerateViewId(), Text = title, Checked = selected };
+        radio.SetMinimumHeight(Motion.Dp(_activity, 48));
+        choices.AddView(radio, new RadioGroup.LayoutParams(-1, -2));
+        if (subtitle is not null)
+        {
+            var detail = Text(subtitle, 14, Resource.Attribute.colorOnSurfaceVariant);
+            choices.AddView(detail, new RadioGroup.LayoutParams(-1, -2)
+            {
+                MarginStart = Motion.Dp(_activity, 36), BottomMargin = Motion.Dp(_activity, 8)
+            });
+        }
+        return radio;
+    }
+    private void ShowChoiceSheet(string title, View content, string cancelText, Action? afterCancel,
+        string confirmText, Action confirm)
+    {
+        var sheet = new BottomSheetDialog(_activity);
+        var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        int pad = Motion.Dp(_activity, 24);
+        body.SetPadding(pad, Motion.Dp(_activity, 16), pad, pad);
+        var handle = new View(_activity);
+        handle.SetBackgroundResource(Resource.Drawable.bg_handle);
+        body.AddView(handle, new LinearLayout.LayoutParams(Motion.Dp(_activity, 32), Motion.Dp(_activity, 4))
+        {
+            Gravity = GravityFlags.CenterHorizontal, BottomMargin = Motion.Dp(_activity, 16)
+        });
+        var heading = Text(title, 22, Resource.Attribute.colorOnSurface);
+        heading.AccessibilityHeading = true;
+        body.AddView(heading);
+        body.AddView(content, Margin(12));
+        var actions = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        actions.SetGravity(GravityFlags.End);
+        var cancel = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = cancelText };
+        var apply = new MaterialButton(_activity, null, Resource.Attribute.borderlessButtonStyle) { Text = confirmText };
+        cancel.Click += (_, _) => { sheet.Dismiss(); afterCancel?.Invoke(); };
+        apply.Click += (_, _) => { sheet.Dismiss(); confirm(); };
+        actions.AddView(cancel);
+        actions.AddView(apply);
+        body.AddView(actions, Margin(12));
+        var scroll = new ScrollView(_activity);
+        scroll.AddView(body);
+        sheet.SetContentView(scroll);
+        _dialogs.Add(sheet);
+        sheet.DismissEvent += (_, _) => _dialogs.Remove(sheet);
+        sheet.Show();
     }
     private void ShowTime(ScheduleDto s, bool stop, Bundle? restored = null)
     {
@@ -513,11 +613,11 @@ internal sealed class QueueEditorScreen : IDisposable
             case "Speed limit": EditSpeed(text, true); break;
         }
     }
-    private void Input(string title, string hint, string initial, bool number, string confirm, Func<string, string?> apply, Action? cancel = null, string? error = null)
+    private void Input(string title, string hint, string initial, bool number, string confirm, Func<string, string?> apply, Action? cancel = null, string? error = null, string? helper = null)
     {
         if (_closed || _busy || !CanEditSafely) return;
         var wrapper = new LinearLayout(_activity) { Orientation = Orientation.Vertical }; var pad = Motion.Dp(_activity, 24); wrapper.SetPadding(pad, 0, pad, 0);
-        var fieldLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = hint };
+        var fieldLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = hint, HelperText = helper };
         _inputTitle = title; _inputText = initial;
         var field = new TextInputEditText(fieldLayout.Context!) { Text = initial, ContentDescription = hint }; field.SetSingleLine(true);
         field.TextChanged += (_, _) => _inputText = field.Text;
@@ -546,7 +646,6 @@ internal sealed class QueueEditorScreen : IDisposable
             if (Days(schedule).Count == 0) { _selectedId = schedule.Id; _error.Text = "Choose at least one day for " + schedule.Name + "."; Refresh(); return; }
         }
         _busy = true; _error.Text = ""; Refresh();
-        bool queueSaved = false;
         try
         {
             var ids = _settings.Settings.Queues.Select(q => q.Id).ToHashSet();
@@ -557,14 +656,14 @@ internal sealed class QueueEditorScreen : IDisposable
             var queues = _settings.LastResult?.Settings.Queues ?? [];
             var found = _baseline is null ? queues.Where(q => !ids.Contains(q.Id)).ToArray() : queues.Where(q => q.Id == _baseline.Id).ToArray();
             if (found.Length != 1) { MarkUncertain("The Host saved the queue but did not identify it. Check the queue list before saving again."); return; }
-            _baseline = Clone(found[0]); _draft = Clone(found[0]); queueSaved = true;
+            _baseline = Clone(found[0]); _draft = Clone(found[0]);
             foreach (var item in _draftSchedules) item.QueueId = _baseline.Id;
             foreach (var removed in _originalSchedules.Where(o => _draftSchedules.All(d => d.Id != o.Id)).ToArray())
             {
                 result = await _settings.DeleteScheduleAsync(removed, _life.Token, _baseline.Generation);
                 if (_closed) return;
                 _downloads.ApplySettingsResult(_settings.LastResult);
-                if (!result.Ok) { ScheduleFailure(removed, null, result.Error, queueSaved); return; }
+                if (!result.Ok) { ScheduleFailure(result.Error); return; }
                 _originalSchedules.Remove(removed);
             }
             foreach (var item in _draftSchedules.ToArray())
@@ -574,7 +673,7 @@ internal sealed class QueueEditorScreen : IDisposable
                 result = await _settings.SaveScheduleAsync(item, old, _life.Token, _baseline.Generation);
                 if (_closed) return;
                 _downloads.ApplySettingsResult(_settings.LastResult);
-                if (!result.Ok) { ScheduleFailure(old, item, result.Error, queueSaved); return; }
+                if (!result.Ok) { ScheduleFailure(result.Error); return; }
                 var committed = _settings.LastResult?.Settings.Schedules.FirstOrDefault(s => s.Id == item.Id);
                 if (committed is null) { MarkUncertain("The Host did not identify the saved schedule. Check the queue before saving again."); return; }
                 if (old is not null) _originalSchedules.Remove(old);
@@ -747,25 +846,81 @@ internal sealed class QueueEditorScreen : IDisposable
             {
                 MarkUncertain("The queue identity changed or cannot be verified. Review the latest state before choosing what to keep."); return;
             }
-            var comparison = "Your draft: " + QueueSummary(_draft) + "\n\nHost now: " + QueueSummary(latest) + "\n\nChoose which values to keep in the draft. Nothing will be saved yet.";
-            new MaterialAlertDialogBuilder(_activity).SetTitle("Settings changed elsewhere")!.SetMessage(comparison)!
-                .SetNegativeButton("Use Host values", (_, _) => { _baseline = Clone(latest); _draft = Clone(latest); SyncConditions(); Refresh(); })!
-                .SetPositiveButton("Keep my values", (_, _) => { _draft = RebaseQueue(latest); _baseline = Clone(latest); SyncConditions(); Refresh(); })!.ShowTracked(_dialogs);
+            ShowQueueConflict(latest);
             return;
         }
         _error.Text = error ?? "The Host refused the queue save.";
         new MaterialAlertDialogBuilder(_activity).SetTitle("Queue not saved")!.SetMessage(_error.Text)!.SetPositiveButton("Keep editing", (IDialogInterfaceOnClickListener?)null)!.ShowTracked(_dialogs);
     }
-    private QueueDto RebaseQueue(QueueDto latest)
+    private void ShowQueueConflict(QueueDto latest)
+    {
+        new MaterialAlertDialogBuilder(_activity).SetTitle("Queue changed elsewhere")!
+            .SetMessage($"Another client updated {_draft.Name} while you were editing it. Your draft is still here.")!
+            .SetNegativeButton("Keep editing", (IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Review latest", (_, _) =>
+            {
+                if (_closed || _busy) return;
+                var conflicts = new List<(string Label, string Mine, string Host)>();
+                var mine = RebaseQueue(latest, conflicts: conflicts);
+                var host = RebaseQueue(latest, useLatestConflicts: true);
+                var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+                RadioButton? keepDraft = null;
+                if (conflicts.Count > 0)
+                {
+                    foreach (var conflict in conflicts)
+                    {
+                        body.AddView(Text(conflict.Label, 17, Resource.Attribute.colorOnSurface), Margin(8));
+                        body.AddView(Text($"Your draft: {conflict.Mine} · Latest on Host: {conflict.Host}",
+                            14, Resource.Attribute.colorOnSurfaceVariant));
+                    }
+                    body.AddView(Text("Choose which values to keep in your draft.", 14,
+                        Resource.Attribute.colorOnSurfaceVariant), Margin(16));
+                    var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
+                    keepDraft = AddSheetChoice(choices,
+                        conflicts is [var only] ? $"Keep my value: {only.Mine}" : "Keep my values",
+                        "Review before saving again", true);
+                    AddSheetChoice(choices,
+                        conflicts is [var one] ? $"Use latest value: {one.Host}" : "Use latest values", null, false);
+                    body.AddView(choices);
+                }
+                else body.AddView(Text("Your edits fit alongside the latest queue settings. Review your draft before saving.",
+                    14, Resource.Attribute.colorOnSurfaceVariant));
+                ShowChoiceSheet("Review queue changes", body, "Back", () => { if (!_closed) ShowQueueConflict(latest); },
+                    "Keep editing", () =>
+                    {
+                        if (_closed || _busy) return;
+                        _draft = keepDraft?.Checked == false ? host : mine;
+                        _baseline = Clone(latest);
+                        SyncConditions();
+                        Refresh();
+                    });
+            })!.ShowTracked(_dialogs);
+    }
+    private QueueDto RebaseQueue(QueueDto latest, bool useLatestConflicts = false,
+        List<(string Label, string Mine, string Host)>? conflicts = null)
     {
         var result = Clone(latest); var original = _baseline!;
-        if (_draft.Name != original.Name) result.Name = _draft.Name;
-        if (_draft.MaxConcurrentDownloads != original.MaxConcurrentDownloads) result.MaxConcurrentDownloads = _draft.MaxConcurrentDownloads;
-        if (_draft.SpeedLimitBytesPerSecond != original.SpeedLimitBytesPerSecond) result.SpeedLimitBytesPerSecond = _draft.SpeedLimitBytesPerSecond;
-        if (_draft.RequireUnmeteredNetwork != original.RequireUnmeteredNetwork) result.RequireUnmeteredNetwork = _draft.RequireUnmeteredNetwork;
-        if (_draft.RequireCharging != original.RequireCharging) result.RequireCharging = _draft.RequireCharging;
-        if (_draft.RequireBatterySaverOff != original.RequireBatterySaverOff) result.RequireBatterySaverOff = _draft.RequireBatterySaverOff;
-        if (_draft.NotifyWhenFinished != original.NotifyWhenFinished) result.NotifyWhenFinished = _draft.NotifyWhenFinished;
+        T Choose<T>(string label, T before, T draft, T current, Func<T, string> display)
+        {
+            var equality = EqualityComparer<T>.Default;
+            if (equality.Equals(before, draft)) return current;
+            if (equality.Equals(before, current) || equality.Equals(draft, current)) return draft;
+            conflicts?.Add((label, display(draft), display(current)));
+            return useLatestConflicts ? current : draft;
+        }
+        static string Toggle(bool? value) => value == true ? "On" : "Off";
+        result.Name = Choose("Queue name", original.Name, _draft.Name, latest.Name, value => value);
+        result.MaxConcurrentDownloads = Choose("Downloads at once", original.MaxConcurrentDownloads,
+            _draft.MaxConcurrentDownloads, latest.MaxConcurrentDownloads, value => value.ToString(CultureInfo.InvariantCulture));
+        result.SpeedLimitBytesPerSecond = Choose("HTTP speed limit", original.SpeedLimitBytesPerSecond,
+            _draft.SpeedLimitBytesPerSecond, latest.SpeedLimitBytesPerSecond, value => value is > 0 ? Fmt.Rate(value.Value) : "None");
+        result.RequireUnmeteredNetwork = Choose("Unmetered network", original.RequireUnmeteredNetwork,
+            _draft.RequireUnmeteredNetwork, latest.RequireUnmeteredNetwork, Toggle);
+        result.RequireCharging = Choose("Charging", original.RequireCharging, _draft.RequireCharging, latest.RequireCharging, Toggle);
+        result.RequireBatterySaverOff = Choose("Battery saver is off", original.RequireBatterySaverOff,
+            _draft.RequireBatterySaverOff, latest.RequireBatterySaverOff, Toggle);
+        result.NotifyWhenFinished = Choose("Notify when the queue finishes", original.NotifyWhenFinished,
+            _draft.NotifyWhenFinished, latest.NotifyWhenFinished, Toggle);
         return result;
     }
     private static string QueueSummary(QueueDto q) => $"{q.Name}; {q.MaxConcurrentDownloads} at once; " +
@@ -775,43 +930,27 @@ internal sealed class QueueEditorScreen : IDisposable
     {
         _refreshing = true; _unmetered.Checked = _draft.RequireUnmeteredNetwork == true; _charging.Checked = _draft.RequireCharging == true; _battery.Checked = _draft.RequireBatterySaverOff == true; _refreshing = false;
     }
-    private void ScheduleFailure(ScheduleDto? old, ScheduleDto? draft, string? error, bool queueSaved)
+    private void ScheduleFailure(string? error)
     {
         var response = _settings.LastResult;
         if (response is null) { MarkUncertain("Queue settings were saved, but the Host did not confirm the schedule change. It may have been saved."); return; }
         var latestQueue = _baseline is null ? null : response.Settings.Queues.FirstOrDefault(q => q.Id == _baseline.Id);
         if (_baseline is null || _baseline.Generation is not { } generation || generation == Guid.Empty || latestQueue?.Generation != generation)
-        { MarkUncertain("The queue identity changed or cannot be verified. Review the latest state before choosing what to keep."); return; }
-        var latest = old is null ? null : response.Settings.Schedules.FirstOrDefault(s => s.Id == old.Id && s.QueueId == _baseline.Id);
-        if (latest is not null) latest = HostSchedule(latest);
-        if ((response.Ok || response.Error == "Settings changed on the Host. Reopen the editor and try again.") && old is not null && latest is not null)
-        {
-            var mine = draft is null ? "Delete this schedule" : ScheduleSummary(draft);
-            var comparison = "Your draft: " + mine + "\n\nHost now: " + ScheduleSummary(latest) + "\n\nChoose which values to keep. Nothing will be saved yet.";
-            new MaterialAlertDialogBuilder(_activity).SetTitle("Schedule changed elsewhere")!.SetMessage(comparison)!
-                .SetNegativeButton("Use Host values", (_, _) => { _originalSchedules.Remove(old); _originalSchedules.Add(Clone(latest)); _draftSchedules.RemoveAll(s => s.Id == latest.Id); _draftSchedules.Add(Clone(latest)); _selectedId = latest.Id; Refresh(); })!
-                .SetPositiveButton("Keep my values", (_, _) =>
-                {
-                    if (draft is not null && !Supported(latest)) { _error.Text = "The Host changed this schedule to a type this editor cannot modify. Use Host values."; return; }
-                    if (draft is not null)
-                    {
-                        var rebased = Clone(latest);
-                        if (draft.Name != old.Name) rebased.Name = draft.Name;
-                        if (draft.Enabled != old.Enabled) rebased.Enabled = draft.Enabled;
-                        if (draft.StartTime != old.StartTime) rebased.StartTime = draft.StartTime;
-                        if (draft.StopTime != old.StopTime) rebased.StopTime = draft.StopTime;
-                        if (draft.Days != old.Days) rebased.Days = draft.Days;
-                        var i = _draftSchedules.FindIndex(s => s.Id == old.Id); if (i >= 0) _draftSchedules[i] = rebased;
-                    }
-                    _originalSchedules.Remove(old); _originalSchedules.Add(Clone(latest)); Refresh();
-                })!.ShowTracked(_dialogs);
-            return;
-        }
-        var prefix = queueSaved ? "Queue settings were saved. " : "";
-        _error.Text = prefix + (error ?? "The Host refused the schedule change.") + " Your draft is kept.";
-        new MaterialAlertDialogBuilder(_activity).SetTitle("Schedule not saved")!.SetMessage(_error.Text)!.SetPositiveButton("Keep editing", (IDialogInterfaceOnClickListener?)null)!.ShowTracked(_dialogs);
+        { MarkUncertain("Queue settings were saved. The queue identity changed or cannot be verified."); return; }
+        _uncertain = true;
+        _error.Text = "Queue settings were saved. The schedule was not saved. " +
+            (error is null ? "" : error + " ") + "Your schedule draft is still here. Review the latest schedule before saving again.";
+        new MaterialAlertDialogBuilder(_activity).SetTitle("Schedule not saved")!.SetMessage(_error.Text)!
+            .SetNegativeButton("Close", (IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Review schedule", async (_, _) => await ReviewLatestAsync())!.ShowTracked(_dialogs);
     }
-    private static string ScheduleSummary(ScheduleDto s) => $"{s.Name}; {(s.Enabled ? "enabled" : "off")}; {s.Days}; {s.StartTime} to {s.StopTime ?? "none"}";
+    private static string ScheduleSummary(ScheduleDto s)
+    {
+        string timing = Supported(s)
+            ? $"{s.Days}; {s.StartTime} to {s.StopTime ?? "none"}"
+            : $"{ScheduleKind(s)}; {DateAndStart(s)}";
+        return $"{s.Name}; {(s.Enabled ? "enabled" : "off")}; {timing}";
+    }
     public void Dispose()
     {
         if (_closed) return; _closed = true;

@@ -1,0 +1,10 @@
+<resources>
+  <style name="InboundControlledSheetDialog" parent="InboundSheetDialog">
+    <item name="android:backgroundDimEnabled">false</item>
+    <item name="android:windowAnimationStyle">@style/InboundStaticWindowAnimation</item>
+  </style>
+  <style name="InboundStaticWindowAnimation">
+    <item name="android:windowEnterAnimation">@anim/sheet_window_static</item>
+    <item name="android:windowExitAnimation">@anim/sheet_window_static</item>
+  </style>
+</resources>

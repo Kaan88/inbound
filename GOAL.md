@@ -2,7 +2,7 @@
 
 ## Current Android objective
 
-Deliver the phone downloader and paired-Host client to the approved Android designs. Android 0.0.8 shipped Remote Files on the `android-app` release line. The owner subsequently reopened ANDROID.8 for C3/C4 parity and required source and visual sign-off across the implemented UI before accepting 0.0.9. Implementation is paused. The [Android roadmap](ROADMAP.md#current-android-roadmap) records the delivery order.
+Deliver the phone downloader and paired-Host client to the approved Android designs. Android 0.0.8 shipped Remote Files on the `android-app` release line. The owner reopened ANDROID.8 for C3/C4 parity and requires source and visual sign-off across the implemented UI before publishing 0.0.9. Parity work resumed on 2026-11-20. C3 requires a real tracked upload concurrent with a download and successful account recovery after expiry. The [Android roadmap](ROADMAP.md#current-android-roadmap) records the delivery order.
 
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.

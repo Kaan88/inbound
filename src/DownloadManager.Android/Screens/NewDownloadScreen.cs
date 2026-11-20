@@ -4,6 +4,7 @@ using Android.Widget;
 using DownloadManager.Mobile;
 using Google.Android.Material.Button;
 using Google.Android.Material.Card;
+using Google.Android.Material.Chip;
 using Google.Android.Material.Slider;
 using Google.Android.Material.TextField;
 
@@ -27,15 +28,13 @@ internal sealed class NewDownloadScreen
     private bool _setting;
     private bool _busy;
     private int _collisionInputVersion;
-    private TextInputEditText _queuePicker = null!;
+    private MaterialButton _queuePicker = null!;
     private ListPopupWindow? _queuePopup;
     private EventHandler<AdapterView.ItemClickEventArgs>? _queuePopupClick;
     private readonly List<string> _queueLabels = new();
     private int _queueChoicesVersion;
-    private TextInputLayout _queueLayout = null!;
     private TextView _queueError = null!;
     private readonly List<(int? Id, Guid? Generation)> _queueChoices = new();
-    private int _queueWhenId;
 
     /// <param name="saved">What the page held before the activity was rebuilt (rotation, process death), or null.</param>
     public NewDownloadScreen(MainActivity activity, DownloadsModel host, string? address, Bundle? saved = null, bool transient = false)
@@ -90,7 +89,7 @@ internal sealed class NewDownloadScreen
                 whenGroup.FindViewById<MaterialButton>(id)?.SetIconResource(on ? Resource.Drawable.ic_check : 0);
             if (!on) return;
             _model.StartLater = id == Resource.Id.when_later;
-            _model.WaitForQueue = id == _queueWhenId;
+            _model.WaitForQueue = id == Resource.Id.when_queue;
         }));
         whenGroup.Check(Resource.Id.when_now);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) =>
@@ -110,6 +109,7 @@ internal sealed class NewDownloadScreen
         {
             ClearSubmitError();
             if (!_setting) _model.FileName = _name.Text ?? "";
+            _showSaveTo?.Invoke();
         };
         _referrer.TextChanged += (_, _) => _model.Referrer = _referrer.Text;
         _description.TextChanged += (_, _) => _model.Description = _description.Text;
@@ -199,7 +199,7 @@ internal sealed class NewDownloadScreen
             _ => Resource.Id.exists_rename,
         });
         if (state.GetBoolean("later")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_later);
-        else if (state.GetBoolean("wait_queue")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(_queueWhenId);
+        else if (state.GetBoolean("wait_queue")) Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_queue);
         if (state.GetBoolean("more")) { _moreBody.Visibility = ViewStates.Visible; _chevron.Rotation = 180f; }
     }
 
@@ -218,6 +218,8 @@ internal sealed class NewDownloadScreen
     {
         var field = Root.FindViewById<TextInputEditText>(Resource.Id.save_to)!;
         var layout = Root.FindViewById<TextInputLayout>(Resource.Id.save_layout)!;
+        var category = Root.FindViewById<View>(Resource.Id.new_category_rule)!;
+        var typeChip = Root.FindViewById<Chip>(Resource.Id.new_category_type)!;
         var remote = _activity.Capabilities.IsRemote;
         if (remote) layout.Hint = "Save to, on " + _activity.HostName;
         void Show()
@@ -236,6 +238,18 @@ internal sealed class NewDownloadScreen
 
             field.Text = full;
             field.ContentDescription = SavePathWords.Label(remote ? _activity.HostName : null, path);
+            var byRule = _model.CategoryDestination is not null;
+            category.Visibility = byRule ? ViewStates.Visible : ViewStates.Gone;
+            if (byRule)
+            {
+                var kind = FileKinds.Of(_model.FileName);
+                typeChip.Text = kind switch
+                {
+                    FileKind.Disc => "Disc images", FileKind.Archive => "Archives", FileKind.Video => "Videos",
+                    FileKind.Audio => "Audio", FileKind.Image => "Images", FileKind.Document => "Documents", _ => "Other files"
+                };
+                typeChip.SetChipIconResource(FileIcons.For(kind).Drawable);
+            }
             field.Post(Fit);
         }
 
@@ -267,47 +281,13 @@ internal sealed class NewDownloadScreen
     private void SetUpQueue()
     {
         var group = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
-        group.SaveEnabled = false; // Save/Restore below owns this choice, including the generated queue button ID.
-        var queueButton = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
-        {
-            Id = View.GenerateViewId(), Text = "Queue", ContentDescription = "Wait for queue"
-        };
-        _queueWhenId = queueButton.Id;
-        queueButton.SetMinWidth(0); queueButton.SetMinimumWidth(0);
-        group.AddView(queueButton, 1, new LinearLayout.LayoutParams(0, -2, 1));
-        var parent = (LinearLayout)group.Parent!;
-        var box = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var queueLayout = _queueLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = "Queue" };
-        var cornerRadius = _activity.Resources!.GetDimension(Resource.Dimension.new_download_field_radius);
-        queueLayout.SetBoxCornerRadii(cornerRadius, cornerRadius, cornerRadius, cornerRadius);
-        _queuePicker = new TextInputEditText(queueLayout.Context!) { ContentDescription = "Choose queue", SaveEnabled = false };
-        _queuePicker.KeyListener = null;
-        _queuePicker.Focusable = true;
-        _queuePicker.Clickable = true;
-        _queuePicker.LongClickable = false;
-        _queuePicker.SetSingleLine(true);
-        _queuePicker.SetMinimumHeight(Motion.Dp(_activity, 48));
+        group.SaveEnabled = false; // Save/Restore below owns this choice.
+        _queuePicker = group.FindViewById<MaterialButton>(Resource.Id.when_queue)!;
         _queuePicker.Click += (_, _) => OpenQueuePopup();
-        _queuePicker.KeyPress += (_, e) =>
-        {
-            e.Handled = false;
-            if (e.KeyCode is not (Keycode.Enter or Keycode.DpadCenter)) return;
-            e.Handled = true;
-            if (e.Event?.Action == KeyEventActions.Up) OpenQueuePopup();
-        };
-        queueLayout.AddView(_queuePicker, new LinearLayout.LayoutParams(-1, -2));
-        queueLayout.EndIconMode = TextInputLayout.EndIconCustom;
-        queueLayout.SetEndIconDrawable(Resource.Drawable.ic_expand_more);
-        queueLayout.EndIconContentDescription = "Choose queue";
-        queueLayout.SetEndIconOnClickListener(new ClickListener(OpenQueuePopup));
-        box.AddView(queueLayout, new LinearLayout.LayoutParams(-1, -2));
+        var parent = (LinearLayout)group.Parent!;
         _queueError = new TextView(_activity) { AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
         _queueError.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorError)));
-        box.AddView(_queueError);
-        var note = new TextView(_activity) { Text = "Downloads follow the queue's running state and conditions. Later waits until you resume it.", TextSize = 14 };
-        note.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
-        box.AddView(note);
-        parent.AddView(box, parent.IndexOfChild(group) + 1, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Motion.Dp(_activity, 16) });
+        parent.AddView(_queueError, parent.IndexOfChild(group) + 1, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void CloseQueuePopup()
@@ -331,9 +311,9 @@ internal sealed class NewDownloadScreen
         var version = _queueChoicesVersion;
         var popup = new ListPopupWindow(_activity)
         {
-            AnchorView = _queueLayout,
+            AnchorView = _queuePicker,
             Modal = true,
-            Width = _queueLayout.Width,
+            Width = ((View)_queuePicker.Parent!).Width,
             Height = -2,
             InputMethodMode = ListPopupWindowInputMethodMode.NotNeeded
         };
@@ -345,6 +325,7 @@ internal sealed class NewDownloadScreen
                 !_host.SnapshotShown || e.Position < 0 || e.Position >= choices.Length) return;
             var selection = choices[e.Position];
             _model.SetQueueSelection(selection.Id, selection.Generation);
+            ((MaterialButtonToggleGroup)_queuePicker.Parent!).Check(Resource.Id.when_queue);
             ShowQueues();
             UpdateButton();
         };
@@ -371,7 +352,9 @@ internal sealed class NewDownloadScreen
         var index = _queueChoices.IndexOf((_model.QueueId, _model.QueueGeneration));
         _queueLabels.Clear();
         _queueLabels.AddRange(labels);
-        _queuePicker.Text = labels[index < 0 ? 0 : index];
+        var current = index <= 0 ? defaultName ?? "Host default" : labels[index];
+        _queuePicker.Text = current;
+        _queuePicker.ContentDescription = "Choose queue, " + current;
     }
     private void OnAddress()
     {
@@ -379,6 +362,7 @@ internal sealed class NewDownloadScreen
         _addressLayout.Error = _model.AddressError;
         if (_pendingCheck is not null) { _ui.RemoveCallbacks(_pendingCheck); _pendingCheck = null; }
         ShowName(); // a name found for the previous address goes with it (finding 9)
+        _showSaveTo?.Invoke();
         RenderChecksum();
         _nameLayout.Visibility = _model.ShowFileName || _model.Urls.Count == 0 ? ViewStates.Visible : ViewStates.Gone;
         if (_model.Urls.Count == 1)
@@ -455,9 +439,10 @@ internal sealed class NewDownloadScreen
     {
         _download.Enabled = _model.CanDownload && !_busy;
         _queueError.Text = _model.QueueError ?? "";
-        _queueLayout.Enabled = _queuePicker.Enabled = !_busy && _host.SnapshotShown;
+        _queueError.Visibility = string.IsNullOrEmpty(_queueError.Text) ? ViewStates.Gone : ViewStates.Visible;
         var group = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
         for (var i = 0; i < group.ChildCount; i++) group.GetChildAt(i)!.Enabled = !_busy;
+        _queuePicker.Enabled = !_busy && _host.SnapshotShown;
     }
 
     // The field shows the model's name unless the user typed one (then it is already what the field holds).

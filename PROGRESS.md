@@ -1,5 +1,13 @@
 # Progress — session handoff
 
+## Android 0.0.9 parity resumed, 2026-11-20
+
+The owner requires the C3 tracked mixed-transfer state for 0.0.9 and authorized synthetic emulator clipboard coverage for A4/B5. The [acceptance matrix](docs/plans/android-mockup-acceptance.md#remaining-work) records which cases were exercised and which remain open. TorBox follows parity sign-off.
+
+The paired 0.0.9 test build captured the required C3 upload/download summary and verified both hashes. The owner completed real Drive recovery and confirmed browsing. The queue notification, queue operations, stop time, conflict review, first-run battery exemption, folder selection and expired-link recovery have scoped evidence in the matrix. The final release probe verified all three concurrent A7 notices and recovered the held file through Use data. C6 resumed the same paired job from byte 720,896 after the row opened B6, without retrying the expired URL. The resulting hash matched.
+
+The verified arm64 package and update manifest are in `artifacts/android-app/arm64-rc-20261120-153057/staged/`. The release APK hash is `73068b96c74493e310598add0f3adcd1c314177a6f4fb9d588d146bb77088747`. It and the isolated x64 probe `009c38e89bf4e63cdce3562fce789c9e860ff88faa0b70fa082873780a6d1e2a` share application patch `98524b270454f2a2868106e46406a8ea0c5a6b79a6dea65da70b7395681ffed2` against `6616111c`. Mobile 567 and Android harness 66 passed. A5 verified both category indicators and exact hashes in the automatic and overridden folders. Astra High passed source, native visuals and flows for all four parity batches on the exact candidate and retained comparisons. No owner decision remains open within that scope. C6 keyboard input was exercised with emulator key events. The owner's C3 real browse passed, with a separate automated repeat timeout.
+
 ## Android workflow correction, 2026-11-20
 
 The owner paused implementation at `af7ec829` after the enabled C2 queue notification check stopped. The [handoff](docs/plans/android-parity-handoff.md) records the interrupted check, evidence locations and source of the repeated reviews. The [matrix](docs/plans/android-mockup-acceptance.md#remaining-work) maps outstanding work to four shared flows for a single candidate audit. Existing scoped verdicts carry forward. ANDROID.8 and the 0.0.9 candidate gate are open. Entries below record earlier work.

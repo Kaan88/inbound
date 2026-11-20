@@ -1,6 +1,8 @@
 """Guided C1/C2/C5/C6 captures on the isolated inbound33 probe."""
 
 import argparse
+from contextlib import ExitStack
+import datetime
 import hashlib
 import importlib.machinery
 import json
@@ -156,6 +158,10 @@ class Capture:
             self.navigate_local_hosts(key)
         elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer", "c2-paired-saved", "c2-paired-saved-list", "c5-b-queued-switcher", "c5-b-queued-row"):
             pass  # run_paired already navigated and verified the expected state.
+        elif self.args.verify_paired_category_folder and key in ("a5-category-automatic", "a5-category-override"):
+            pass
+        elif self.args.verify_paired_c2_lost_reply and key in ("c2-lost-reply", "c2-lost-reply-reviewed"):
+            pass
         else:
             self.log(f"Prepare {key}: {self.args.instructions[key]}")
             input(f"\nNavigate the isolated probe to {key} and match the reference state. "
@@ -312,8 +318,9 @@ class Capture:
         self._tap_description_prefix("Start time")
         self._time_picker(1)
         self._tap_description_prefix("Stop time")
-        choose, _ = self.smoke.wait_node("Choose time")
+        choose, _ = self.smoke.wait_node("At a time")
         self.smoke.tap(choose)
+        self._tap_exact_text("Apply")
         self._time_picker(7)
 
         # QueueEditorScreen creates the seven day controls with stable source IDs.
@@ -382,6 +389,19 @@ class Capture:
         require(toggle.get("checked") == "false",
                 "Weekdays schedule is enabled after save/reopen")
         self._tap_exact_text("Done")
+        for action, expected in (("Cancel", "07:00"), ("Apply", "None")):
+            self._tap_description_prefix("Stop time")
+            self.capture_checkpoint("c2-stop-options-" + action.casefold(), None, "No stop time")
+            self._tap_exact_text("No stop time")
+            self._tap_exact_text(action)
+            self.smoke.wait_content_description(lambda text: text == "Stop time, " + expected, "stop time " + expected)
+        self.capture_checkpoint("c2-stop-cleared-draft", None, "Stop time, None")
+        self._tap_description_prefix("Stop time")
+        self._tap_exact_text("At a time")
+        self._tap_exact_text("Apply")
+        self._time_picker(7)
+        self.smoke.wait_content_description(lambda text: text == "Stop time, 07:00", "restored original stop time")
+        self.log("PASS C2 stop time: Cancel retained 07:00, Apply cleared the draft, and the native picker restored 07:00.")
         # Leave the reopened, persisted editor visible for the dedicated captures.
         self.smoke.wait_node("Save", resource="queue_editor_save")
 
@@ -405,6 +425,173 @@ class Capture:
             require(item.get("checked") == "false" and item.get("enabled") == "false",
                     f"No-schedule {day} must be unchecked and disabled")
         self.log("PASS C2: exact no-schedule queue, empty times and disabled days.")
+
+    def verify_paired_c2_conflict(self, before, request, owned):
+        """Rebase one local draft against a concurrently changed disposable Host."""
+        def settings():
+            reply = request("settings.get", {})
+            payload = reply.get("payload") or {}
+            state = payload.get("settings")
+            require(reply.get("type") == "settings.result" and payload.get("ok") is True
+                    and isinstance(state, dict) and isinstance(state.get("revision"), int),
+                    "Cannot read exact disposable Host settings and revision")
+            return state
+        def no_payloads():
+            reply = request("jobs.snapshot", {})
+            require(reply.get("type") == "jobs.snapshot" and (reply.get("payload") or {}).get("jobs") == []
+                    and not any(Path(owned["download_root"]).iterdir()), "Conflict fixture has jobs or files")
+        def capture(name):
+            tree = self.smoke.tree()
+            require(not any(n.get("password") == "true" for n in tree.iter("node")), "Credentials form visible")
+            (self.evidence / (name + ".png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
+        def without_revision(state):
+            result = json.loads(json.dumps(state)); result.pop("revision", None); return result
+        require(len(before[0]) == 1 and before[0][0].get("name") == "Main" and not before[1],
+                "Conflict proof requires a fresh Main queue and no schedules")
+        original = before[0][0]
+        require(original.get("generation") and isinstance(original.get("maxConcurrentDownloads"), int),
+                "Main identity or concurrency baseline is unavailable")
+        initial_value = original["maxConcurrentDownloads"]
+        draft_value, external_value = [x for x in (2, 3, 4) if x != initial_value][:2]
+        no_payloads()
+        card, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith("Main, ") and ". 0 files." in d and "Double tap to edit" in d, "empty Main queue")
+        self.smoke.tap(card)
+        _, tree = self.smoke.wait_node("Main queue", resource="queue_editor_title")
+        self.verify_no_schedule(tree, "Main")
+        self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+        limit, _ = self.smoke.wait_content_description(lambda d: d == "Downloads at once, " + str(initial_value), "baseline concurrency")
+        self.smoke.tap(limit)
+        field, _ = self.smoke.wait_content_description(lambda d: d == "Downloads at once (1–16)", "concurrency field")
+        self.smoke.tap(field); self.shell("input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+        self.shell("input", "text", str(draft_value)); self.shell("input", "keyevent", "4")
+        field, _ = self.smoke.wait_content_description(lambda d: d == "Downloads at once (1–16)", "concurrency draft")
+        require(field.get("text") == str(draft_value), "Concurrency draft did not round-trip")
+        self._tap_exact_text("Apply")
+        self.smoke.wait_content_description(lambda d: d == "Downloads at once, " + str(draft_value), "draft concurrency row")
+        base = settings()
+        require(base.get("queues") == before[0] and base.get("schedules") == before[1], "Draft changed Host settings")
+        capture("c2-conflict-draft")
+        changed = json.loads(json.dumps(base))
+        require(len(changed["queues"]) == 1 and changed["queues"][0].get("generation") == original["generation"],
+                "The disposable queue identity changed before concurrent update")
+        changed["queues"][0]["maxConcurrentDownloads"] = external_value
+        reply = request("settings.update", {"expectedRevision": base["revision"], "settings": changed})
+        payload = reply.get("payload") or {}
+        require(reply.get("type") == "settings.result" and payload.get("ok") is True,
+                "Concurrent revision-guarded update was refused")
+        concurrent = settings()
+        require(concurrent["revision"] > base["revision"] and without_revision(concurrent) == without_revision(changed),
+                "Concurrent update changed unexpected Host settings")
+        self._tap_resource("queue_editor_save")
+        self.smoke.wait_node("Queue changed elsewhere", timeout=30)
+        require(settings() == concurrent, "Conflict handling wrote to the Host")
+        capture("c2-conflict-warning")
+        self._tap_exact_text("Review latest")
+        self.smoke.wait_node("Review queue changes")
+        tree = self.smoke.tree()
+        mine = [n for n in tree.iter("node") if n.get("text") == f"Keep my value: {draft_value}"]
+        latest = [n for n in tree.iter("node") if n.get("text") == f"Use latest value: {external_value}"]
+        labels = {n.get("text") for n in tree.iter("node")}
+        require(len(mine) == len(latest) == 1 and "Downloads at once" in labels
+                and f"Your draft: {draft_value} · Latest on Host: {external_value}" in labels,
+                "Review did not show the exact draft and Host values")
+        capture("c2-conflict-review")
+        self.smoke.tap(mine[0]); self._tap_exact_text("Keep editing")
+        self.smoke.wait_content_description(lambda d: d == "Downloads at once, " + str(draft_value), "rebased draft")
+        require(settings() == concurrent, "Review or Keep editing wrote to the Host")
+        capture("c2-conflict-rebased")
+        self._tap_resource("queue_editor_save")
+        self.smoke.wait_content_description(lambda d: d.startswith("Main, ") and ". 0 files." in d, "saved Main queue")
+        final = settings(); expected = json.loads(json.dumps(concurrent))
+        expected["queues"][0]["maxConcurrentDownloads"] = draft_value
+        require(final["revision"] > concurrent["revision"] and without_revision(final) == without_revision(expected)
+                and final["queues"][0].get("generation") == original["generation"],
+                "Final save changed unexpected fields or queue identity")
+        no_payloads()
+        (self.evidence / "c2-conflict-proof.json").write_text(json.dumps({
+            "host": "Parity Host", "queue": "Main", "generation": original["generation"],
+            "initial": initial_value, "concurrent": external_value, "kept_draft": draft_value,
+            "revisions": [base["revision"], concurrent["revision"], final["revision"]],
+            "review_wrote_nothing": True, "jobs": 0, "files": 0,
+        }, indent=2) + "\n", encoding="utf-8")
+        self.log("PASS C2 conflict: revision-guarded concurrent change, review without writes, explicit rebased save and unchanged queue identity.")
+
+        # Populate only the disposable queue with two disabled schedules, one
+        # of a type the Android editor must preserve without edits.
+        seeded = json.loads(json.dumps(final))
+        common = {"queueId": original["id"], "enabled": False, "timedStartEnabled": True, "startTime": "01:00"}
+        once_id, daily_id = str(uuid.uuid4()), str(uuid.uuid4())
+        seeded["schedules"] = [
+            dict(common, id=daily_id, name="Weekdays", kind="daily", days="Mon,Tue,Wed,Thu,Fri"),
+            dict(common, id=once_id, name="Once", kind="oneTime", startDate=self.shell("date", "+%Y-%m-%d").strip()),
+        ]
+        seeded_reply = request("settings.update", {"expectedRevision": final["revision"], "settings": seeded})
+        require((seeded_reply.get("payload") or {}).get("ok") is True, "Host refused the owned schedule fixtures")
+        schedules = settings()
+        require({s["id"] for s in schedules["schedules"]} == {once_id, daily_id}, "Unexpected schedule fixture snapshot")
+        main, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith("Main, ") and "2 schedules" in d, "Host-reported Main schedules")
+        self.smoke.tap(main)
+        self._open_schedule_list()
+        date = datetime.date.fromisoformat(seeded["schedules"][1]["startDate"])
+        when = f"{date.day} {date:%B %Y} · 01:00"
+        schedule, chooser = self.smoke.wait_content_description(
+            lambda d: d == f"Once, One-time schedule · {when}. View schedule", "owned one-time schedule")
+        require(any(n.get("content-desc", "").startswith("Weekdays, ") for n in chooser.iter("node"))
+                and not any(n.get("content-desc") in ("Enable Once", "Options for Once") for n in chooser.iter("node")),
+                "Schedule list did not distinguish editable and read-only entries")
+        capture("c2-schedule-chooser")
+        self.smoke.tap(schedule)
+        _, detail = self.smoke.wait_node("View this schedule")
+        labels = {n.get("text") for n in detail.iter("node")}
+        require({"One-time schedule", when}.issubset(labels),
+                "Read-only schedule omitted its date or type")
+        capture("c2-schedule-unsupported")
+        self._tap_exact_text("Close")
+        require(settings() == schedules, "Viewing a one-time schedule changed the Host")
+        no_payloads()
+        self.log("PASS C2 schedules: the two disabled schedules appeared together and the one-time schedule opened read-only.")
+
+        self._open_schedule_list()
+        weekdays, _ = self.smoke.wait_content_description(lambda d: d.startswith("Weekdays, "), "editable weekdays schedule")
+        self.smoke.tap(weekdays)
+        self._tap_description_prefix("Start time")
+        self._time_picker(2)
+        self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+        self._tap_description_prefix("Downloads at once")
+        field, _ = self.smoke.wait_content_description(lambda d: d == "Downloads at once (1–16)", "policy limit input")
+        self.smoke.tap(field)
+        self.shell("input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+        self.shell("input", "text", str(initial_value))
+        self.shell("input", "keyevent", "4")
+        self._tap_exact_text("Apply")
+        concurrent_schedule = json.loads(json.dumps(schedules))
+        next(s for s in concurrent_schedule["schedules"] if s["id"] == daily_id)["startTime"] = "03:00"
+        updated = request("settings.update", {"expectedRevision": schedules["revision"], "settings": concurrent_schedule})
+        require((updated.get("payload") or {}).get("ok"), "Concurrent weekdays schedule change was refused")
+        before_partial = settings()
+        self._tap_resource("queue_editor_save")
+        _, dialog = self.smoke.wait_node("Schedule not saved", timeout=30)
+        require(any("Queue settings were saved. The schedule was not saved." in n.get("text", "") for n in dialog.iter("node")),
+                "Partial save did not show both outcomes")
+        partial = settings()
+        expected = json.loads(json.dumps(before_partial))
+        expected["queues"][0]["maxConcurrentDownloads"] = initial_value
+        require(partial["revision"] > before_partial["revision"] and without_revision(partial) == without_revision(expected),
+                "Partial save did not preserve the changed Host schedule and commit only the policy")
+        capture("c2-schedule-partial-save")
+        self._tap_exact_text("Review schedule")
+        _, review = self.smoke.wait_node("Review latest state")
+        require(any("02:00" in n.get("text", "") and "03:00" in n.get("text", "") and
+                    f"One-time schedule; {when}" in n.get("text", "") for n in review.iter("node")),
+                "Schedule review did not show both draft and Host values")
+        capture("c2-schedule-partial-review")
+        self._tap_exact_text("Use Host values")
+        require(settings() == partial, "Review of a partial save wrote to the Host")
+        no_payloads()
+        self.log("PASS C2 partial save: policy committed, concurrent schedule preserved, both outcomes shown and review did not write.")
 
     def verify_paired_c2_limits(self, queue_state, before, request, owned):
         """Verify queue cap drafts and persistence on the empty disposable Host."""
@@ -554,7 +741,8 @@ class Capture:
         self._tap_description_prefix("Start time")
         self._time_picker(1)
         self._tap_description_prefix("Stop time")
-        self._tap_exact_text("Choose time")
+        self._tap_exact_text("At a time")
+        self._tap_exact_text("Apply")
         self._time_picker(7)
         for day in ("sat", "sun"):
             self._tap_resource("queue_editor_day_" + day)
@@ -630,11 +818,11 @@ class Capture:
             value = row.get("content-desc", "").removeprefix(prefix)
             require(value in ("Notify when the queue finishes", "Do nothing"),
                     "Queue completion value is missing or ambiguous")
-            current = "Notify and finish" if value == "Notify when the queue finishes" else "Do nothing"
+            current = value
             self.smoke.tap(row)
             self.smoke.wait_node("When the queue finishes")
             tree = self.smoke.tree()
-            for label in ("Notify and finish", "Do nothing"):
+            for label in ("Notify when the queue finishes", "Do nothing"):
                 matches = [n for n in tree.iter("node") if n.get("text") == label and n.get("checkable") == "true"]
                 require(len(matches) == 1 and matches[0].get("checked") == str(label == current).lower(),
                         "Queue finish dialog did not reflect its current value")
@@ -659,7 +847,7 @@ class Capture:
         check_schedule()
         self.capture_checkpoint("c2-finish-baseline-editor", "c2-schedule.png", "Notify when the queue finishes")
         baseline = open_choice()
-        require(baseline == "Notify and finish", "New Night queue did not default to notifying")
+        require(baseline == "Notify when the queue finishes", "New Night queue did not default to notifying")
         alternate = "Do nothing"
         self.capture_checkpoint("c2-finish-choice", None, "When the queue finishes")
         choose(alternate)
@@ -1081,15 +1269,29 @@ class Capture:
         body = states.fixture_bytes()
         verify_stop = self.args.verify_scheduled_stop
         verify_start = self.args.verify_scheduled_start or verify_stop
+        verify_c8 = getattr(self.args, "verify_c8_workload", False)
+        style_only = getattr(self.args, "verify_c1_final_style", False)
         night_body = body * 2 if verify_stop else body
         nonce = uuid.uuid4().hex[:10]
         names = {key: f"inbound-c1-{key}-{nonce}.bin" for key in ("main", "night", "mobile")}
+        finished = {f"done-{i}": (f"C8 {i}\n" * 1024).encode("ascii") for i in range(1, 9)} if verify_c8 else {}
+        if verify_c8:
+            names.update({
+                "main": f"inbound-c8-linux-{nonce}.iso",
+                "night": f"inbound-c8-archive-{nonce}.zip",
+                "video": f"inbound-c8-video-{nonce}.mp4",
+                "audio": f"inbound-c8-audio-{nonce}.flac",
+            })
+            for key, extension in zip(finished, ("zip", "pdf", "png", "txt", "apk", "mp3", "tar", "epub")):
+                names[key] = f"inbound-c8-{key}-{nonce}.{extension}"
         sent = {key: 0 for key in names}
         first_byte_at = {}
         get_counts = dict.fromkeys(names, 0)
         in_flight = dict.fromkeys(names, 0)
         fixture_lock = threading.Lock()
         stop = threading.Event()
+        pulse_allowed = threading.Event()
+        pulse_allowed.set()
 
         def night_progress():
             with fixture_lock:
@@ -1107,7 +1309,7 @@ class Capture:
                 if include_body:
                     with fixture_lock:
                         get_counts[key] += 1
-                payload = night_body if key == "night" else body
+                payload = finished.get(key, night_body if key == "night" else body)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(len(payload)))
@@ -1119,6 +1321,9 @@ class Capture:
                 try:
                     chunk_size = 128 * 1024
                     for offset in range(0, len(payload), chunk_size):
+                        if verify_c8 and key in ("audio", "main"):
+                            while not pulse_allowed.wait(.2) and not stop.is_set():
+                                pass
                         if stop.is_set():
                             return
                         chunk = payload[offset:offset + chunk_size]
@@ -1127,7 +1332,7 @@ class Capture:
                         with fixture_lock:
                             first_byte_at.setdefault(key, time.time())
                             sent[key] = offset + len(chunk)
-                        if stop.wait(1.7):
+                        if key not in finished and stop.wait(1.7):
                             return
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
@@ -1167,6 +1372,10 @@ class Capture:
             self.adb("reverse", "--no-rebind", f"tcp:{port}", f"tcp:{port}"); reverse = True
             self.launch()
             self.smoke.wait_node("Search downloads")
+            if verify_c8:
+                states.Capture.select_theme(self, "Light")
+                for key in names:
+                    self.shell("test", "!", "-e", f"/sdcard/Download/{names[key]}")
             self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
 
             def card(name):
@@ -1175,6 +1384,11 @@ class Capture:
                     name + " queue card")[0]
             def create(name):
                 self.smoke.tap(self.smoke.wait_node("New queue", resource="queue_new")[0])
+                if self.args.verify_c1_dialogs and name == "Night":
+                    self.capture_checkpoint("c1-create-dialog", None, "New queue")
+                    self.smoke.tap(self.smoke.wait_node("Create")[0])
+                    self.smoke.wait_node("Enter a queue name.")
+                    self.capture_checkpoint("c1-create-empty", None, "Enter a queue name.")
                 self.smoke.tap(self.smoke.wait_content_description(lambda d: d == "Queue name", "queue name")[0])
                 self.shell("input", "text", name)
                 self.smoke.tap(self.smoke.wait_node("Create")[0])
@@ -1182,26 +1396,30 @@ class Capture:
                 self.shell("input", "keyevent", "4")
                 card(name)
             create("Night")
-            self.smoke.tap(card("Night"))
-            self.smoke.wait_node("Choose or add a schedule")
-            self._tap_exact_text("Choose or add a schedule")
-            self.smoke.tap(self.smoke.wait_node("+  Add schedule")[0])
-            self.smoke.tap(self.smoke.wait_node("Schedule name")[0]); self.shell("input", "text", "Daily")
-            self.smoke.tap(self.smoke.wait_node("Continue")[0])
-            self._tap_description_prefix("Start time"); set_time(start_hour, start_minute)
-            self._tap_description_prefix("Stop time")
-            self.smoke.tap(self.smoke.wait_node("Choose time")[0]); set_time(stop_hour, stop_minute)
-            self._open_schedule_list()
-            toggle, _ = self.smoke.wait_content_description(lambda d: d == "Enable Daily", "enabled Daily schedule")
-            require(toggle.get("checked") == "true", "Night schedule is not enabled")
-            self._tap_exact_text("Done")
-            self.smoke.tap(self.smoke.wait_node("Save", resource="queue_editor_save")[0])
-            self.smoke.wait_content_description(lambda d: d.startswith("Night, Scheduled for ")
-                                                and self.c1_start in d.split(". ", 1)[0]
-                                                and self.c1_start in d and self.c1_stop in d,
-                                                "enabled future Night schedule")
-            create("Mobile")
-            require(", Stopped." in card("Mobile").get("content-desc", ""), "Mobile is not stopped")
+            if not style_only:
+                self.smoke.tap(card("Night"))
+                self.smoke.wait_node("Choose or add a schedule")
+                self._tap_exact_text("Choose or add a schedule")
+                self.smoke.tap(self.smoke.wait_node("+  Add schedule")[0])
+                self.smoke.tap(self.smoke.wait_node("Schedule name")[0]); self.shell("input", "text", "Daily")
+                self.smoke.tap(self.smoke.wait_node("Continue")[0])
+                self._tap_description_prefix("Start time"); set_time(start_hour, start_minute)
+                self._tap_description_prefix("Stop time")
+                self._tap_exact_text("At a time")
+                self._tap_exact_text("Apply")
+                set_time(stop_hour, stop_minute)
+                self._open_schedule_list()
+                toggle, _ = self.smoke.wait_content_description(lambda d: d == "Enable Daily", "enabled Daily schedule")
+                require(toggle.get("checked") == "true", "Night schedule is not enabled")
+                self._tap_exact_text("Done")
+                self.smoke.tap(self.smoke.wait_node("Save", resource="queue_editor_save")[0])
+                self.smoke.wait_content_description(lambda d: d.startswith("Night, Scheduled for ")
+                                                    and self.c1_start in d.split(". ", 1)[0]
+                                                    and self.c1_start in d and self.c1_stop in d,
+                                                    "enabled future Night schedule")
+            if not verify_c8:
+                create("Mobile")
+                require(", Stopped." in card("Mobile").get("content-desc", ""), "Mobile is not stopped")
             self.smoke.tap(self.smoke.wait_node("Downloads", resource="nav_downloads")[0])
 
             def add(key, queue):
@@ -1219,27 +1437,118 @@ class Capture:
                     if name_field.get("text") == names[key]: break
                     time.sleep(.4)
                 else: raise RuntimeError(f"Metadata probe did not populate fixture filename for {key}")
-                timing, _ = self.smoke.wait_content_description(lambda d: d == "Wait for queue", "queue timing")
-                self.smoke.tap(timing)
-                timing, _ = self.smoke.wait_content_description(lambda d: d == "Wait for queue", "queue timing")
-                require(timing.get("checked") == "true", "Queue timing was not selected")
-                tree = self.smoke.tree()
-                choices = [n for n in tree.iter("node")
-                           if n.get("resource-id", "").endswith(":id/text_input_end_icon")
-                           and n.get("content-desc") == "Choose queue"
-                           and n.get("clickable") == "true" and n.get("enabled") == "true"]
-                require(len(choices) == 1, "Expected one enabled Choose queue dropdown icon")
-                self.smoke.tap(choices[0])
+                def choose_queue():
+                    self._tap_description_prefix("Choose queue, ")
+                if style_only:
+                    self._tap_resource("when_later")
+                    choose_queue()
+                    self.smoke.wait_node(queue)
+                    self.shell("input", "keyevent", "4")
+                    require(self._unique_resource(self.smoke.tree(), "when_later").get("checked") == "true",
+                            "Cancel changed the selected Later timing")
+                    self._tap_resource("when_now")
+                    require(self._unique_resource(self.smoke.tree(), "when_now").get("checked") == "true",
+                            "Start now did not regain selection")
+                choose_queue()
                 option, _ = self.smoke.wait_node(queue)
                 self.smoke.tap(option)
-                selected = [n for n in self.smoke.tree().iter("node")
-                            if n.get("class", "").endswith("EditText")
-                            and n.get("content-desc") == "Choose queue" and n.get("text") == queue]
-                require(len(selected) == 1, "The New download form did not retain the selected queue")
+                selected, _ = self.smoke.wait_content_description(lambda d: d == "Choose queue, " + queue, "selected queue timing")
+                require(selected.get("checked") == "true", "The New download form did not retain the selected queue")
+                if style_only:
+                    self.capture_checkpoint("a5-named-queue", "a5-new-download.png", "New download")
                 submit, _ = self.smoke.wait_node("Download", resource="new_download_btn")
                 require(submit.get("enabled") == "true", "Download submission is disabled")
                 self.smoke.tap(submit)
                 self.smoke.wait_content_description(lambda d: d.startswith(names[key] + ". "), "fixture row")
+            if style_only:
+                add("mobile", "Mobile")
+                self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
+                for action, anchor, key in (("Move downloads", "Move to queue", "c1-final-move"),
+                                            ("Delete queue", "Delete Mobile?", "c1-final-delete")):
+                    node = card("Mobile")
+                    bounds = tuple(map(int, re.findall(r"\d+", node.get("bounds", ""))))
+                    require(len(bounds) == 4, "Mobile card has invalid bounds")
+                    left, top, right, bottom = bounds
+                    require(left < right and top < bottom, "Mobile card is not visible")
+                    x, y = left + (right - left) // 4, (top + bottom) // 2
+                    self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
+                    self.smoke.wait_node("Edit schedule")
+                    self._tap_description_prefix(action)
+                    self.capture_checkpoint(key, None, anchor)
+                    self._tap_exact_text("Cancel")
+                    require("1 file" in card("Mobile").get("content-desc", "") and mobile_fixture_state() == (0, 0),
+                            "Reading the confirmation changed the owned stopped queue")
+                self.log("PASS C1 final style: captured both confirmations on the exact candidate APK; Cancel kept the owned job.")
+                return self.evidence
+
+            if verify_c8:
+                def start_now(key):
+                    self.adb("shell", "am", "start", "-W", "-n", ACTIVITY, "--es", "add_url",
+                             f"http://127.0.0.1:{port}/{key}")
+
+                def hash_file(key):
+                    path = "/sdcard/Download/" + names[key]
+                    lines = self.shell(f"if [ -f '{path}' ] && [ ! -L '{path}' ]; then sha256sum '{path}'; fi").split()
+                    return lines[0] if lines else None
+
+                hashes = {key: hashlib.sha256(payload).hexdigest() for key, payload in finished.items()}
+                for key, digest in hashes.items():
+                    start_now(key)
+                    until = time.monotonic() + 25
+                    while hash_file(key) != digest:
+                        require(time.monotonic() < until, "C8 completed fixture hash did not match")
+                        time.sleep(.3)
+                self.smoke.wait_node("Finished 8")
+                until = time.monotonic() + 15
+                while any(n.get("resource-id", "").endswith(":id/snackbar_action") for n in self.smoke.tree().iter("node")):
+                    require(time.monotonic() < until, "A completion snackbar still covers Add")
+                    time.sleep(.3)
+                self.log("C8: eight completed files matched their hashes; staging the remaining four jobs.")
+                add("night", "Night")
+                start_now("video")
+                self.smoke.tap(self.smoke.wait_content_description(
+                    lambda d: d == "Pause " + names["video"], "active owned video")[0])
+                self.smoke.wait_content_description(lambda d: d.startswith(names["video"] + ". Paused"), "paused owned video")
+                for key in ("audio", "main"):
+                    start_now(key)
+                    until = time.monotonic() + 25
+                    while sent[key] == 0:
+                        require(time.monotonic() < until, "C8 active fixture did not start " + key)
+                        time.sleep(.25)
+                chart_start = time.monotonic()
+                samples = []
+                self.log("C8: two jobs are running; accumulating chart history.")
+                while time.monotonic() - chart_start < 108:
+                    with fixture_lock:
+                        samples.append([sent["audio"], sent["main"]])
+                    time.sleep(2)
+                require(all(0 < value < len(body) for value in samples[-1]) and
+                        all(all(new > old for old, new in zip(a, b)) for a, b in zip(samples, samples[1:])),
+                        "C8 active transfers did not advance continuously through the chart window")
+                # The app keeps both transfers active. Briefly hold the fixture
+                # pulses so Android can export a settled accessibility tree.
+                pulse_allowed.clear()
+                try:
+                    tree = self.smoke.tree()
+                    labels = {n.get("text", "") for n in tree.iter("node")}
+                    require({"All 12", "Active 2", "Queued 1", "Finished 8"}.issubset(labels), "Incorrect C8 workload counts")
+                    descriptions = {n.get("content-desc", "") for n in tree.iter("node")}
+                    require(any(d.startswith(names["night"] + ". Queued for Night · scheduled ") and
+                                self.c1_start in d for d in descriptions), "Night row lacks the actual future schedule")
+                    require(get_counts["night"] == 0, "Night transferred before its schedule")
+                    image = self.evidence / "c8-full-workload-capture.png"
+                    image.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                finally:
+                    pulse_allowed.set()
+                ET.ElementTree(tree).write(self.evidence / "c8-full-workload-ui.xml", encoding="utf-8", xml_declaration=True)
+                self.pairer.make_pair(MOCKUPS / "c8-light.png", image, self.evidence / "c8-full-workload-pair.png", "C8")
+                (self.evidence / "c8-full-workload-proof.json").write_text(json.dumps({
+                    "hashes": hashes, "night_start": self.c1_start, "night_payload_requests": get_counts["night"],
+                    "continuous_samples": samples, "seconds": time.monotonic() - chart_start,
+                }, indent=2) + "\n", encoding="utf-8")
+                self.log("PASS C8: eight verified files, two live downloads, one paused and one queued for Night.")
+                return self.evidence
+
             # Add stopped workloads first so the live Main has maximum capture time.
             add("night", "Night"); add("mobile", "Mobile")
             self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
@@ -1274,10 +1583,107 @@ class Capture:
             self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
             self.smoke.wait_node("Edit schedule")
             self.capture_checkpoint("c1-queue-actions", "c1-queues.png", "Edit schedule")
-            self.shell("input", "keyevent", "4")
+            if self.args.verify_c1_dialogs:
+                def open_mobile_actions():
+                    item = card("Mobile")
+                    b = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", item.get("bounds", ""))
+                    require(b is not None, "Mobile card has invalid bounds")
+                    l, t, r, bottom = map(int, b.groups())
+                    require(l < r and t < bottom, "Mobile card is not visible")
+                    px, py = l + (r - l) // 4, (t + bottom) // 2
+                    self.shell("input", "swipe", str(px), str(py), str(px), str(py), "900")
+                    self.smoke.wait_node("Edit schedule")
+                def cancel_preserved():
+                    state = card("Mobile").get("content-desc", "")
+                    require(", Stopped." in state and "1 file" in state,
+                            "Cancel changed the owned Mobile queue or membership")
+                    require(mobile_fixture_state() == (0, 0),
+                            "Cancelled action started the stopped Mobile fixture")
+                self._tap_description_prefix("Rename queue")
+                field, _ = self.smoke.wait_content_description(lambda d: d == "Queue name", "rename field")
+                require(field.get("text") == "Mobile", "Rename did not retain the current name")
+                self.capture_checkpoint("c1-rename", None, "Rename queue")
+                self.smoke.tap(field); self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+                for _ in "Mobile": self.shell("input", "keyevent", "KEYCODE_DEL")
+                self.shell("input", "keyevent", "4")
+                self.smoke.tap(self.smoke.wait_node("Save")[0])
+                self.smoke.wait_node("Enter a queue name.")
+                self.capture_checkpoint("c1-rename-empty", None, "Enter a queue name.")
+                self.shell("input", "text", "MobileTemp")
+                self.shell("input", "keyevent", "4")
+                self.smoke.tap(self.smoke.wait_node("Save")[0]); card("MobileTemp")
+                renamed = card("MobileTemp")
+                b = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", renamed.get("bounds", ""))
+                require(b is not None, "Renamed queue card has invalid bounds")
+                l, t, r, bottom = map(int, b.groups()); px, py = l + (r-l)//4, (t+bottom)//2
+                self.shell("input", "swipe", str(px), str(py), str(px), str(py), "900")
+                self.smoke.wait_node("Edit schedule"); self._tap_description_prefix("Rename queue")
+                field, _ = self.smoke.wait_content_description(lambda d: d == "Queue name", "rename field")
+                require(field.get("text") == "MobileTemp", "Saved rename was not retained")
+                self.smoke.tap(field); self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+                for _ in "MobileTemp": self.shell("input", "keyevent", "KEYCODE_DEL")
+                self.shell("input", "text", "Mobile"); self.shell("input", "keyevent", "4")
+                self.smoke.tap(self.smoke.wait_node("Save")[0]); cancel_preserved()
+                open_mobile_actions()
+                self._tap_description_prefix("Move downloads")
+                self.smoke.wait_node("Move to queue")
+                self.capture_checkpoint("c1-move-choices", None, "Move to queue")
+                tree = self.smoke.tree()
+                labels = " ".join(n.get("text", "") for n in tree.iter("node"))
+                require("Mobile" in labels and "current queue" in labels and "No queue" in labels
+                        and "Main" in labels and "Night" in labels, "Move choices are incomplete")
+                self.smoke.tap(self.smoke.wait_node("Cancel")[0]); cancel_preserved()
+                open_mobile_actions()
+                self._tap_description_prefix("Delete queue")
+                self.smoke.wait_node("Delete Mobile?")
+                self.capture_checkpoint("c1-delete-choices", None, "Delete Mobile?")
+                tree = self.smoke.tree()
+                labels = " ".join(n.get("text", "") for n in tree.iter("node"))
+                require("Main" in labels and "Night" in labels and "schedules" in labels
+                        and "1 download" in labels, "Delete choices or warnings are incomplete")
+                self.smoke.tap(self.smoke.wait_node("Cancel")[0]); cancel_preserved()
+                open_mobile_actions()
+                self._tap_description_prefix("Move downloads")
+                self.smoke.wait_node("Move to queue")
+                tree = self.smoke.tree()
+                choices = [n for n in tree.iter("node") if n.get("text", "").startswith("Night\n")
+                           and n.get("clickable") == "true"]
+                require(len(choices) == 1, "Expected one Night move destination")
+                self.smoke.tap(choices[0]); self.smoke.tap(self.smoke.wait_node("Move")[0])
+                self.smoke.wait_content_description(lambda d: d.startswith("Mobile, Stopped.") and ". 0 files." in d,
+                                                    "empty Mobile after move")
+                night_card, _ = self.smoke.wait_content_description(
+                    lambda d: d.startswith("Night, Scheduled for ") and "2 files" in d and "Double tap to edit" in d,
+                    "Night with both owned jobs")
+                require(mobile_fixture_state() == (0, 0), "Move started the stopped fixture")
+                b = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", night_card.get("bounds", ""))
+                require(b is not None, "Night card has invalid bounds")
+                l, t, r, bottom = map(int, b.groups()); px, py = l + (r-l)//4, (t+bottom)//2
+                self.shell("input", "swipe", str(px), str(py), str(px), str(py), "900")
+                self.smoke.wait_node("Edit schedule"); self._tap_description_prefix("Delete queue")
+                self.smoke.wait_node("Delete Night?")
+                self.capture_checkpoint("c1-delete-two-jobs", None, "Delete Night?")
+                tree = self.smoke.tree()
+                choices = [n for n in tree.iter("node") if n.get("text", "").startswith("Mobile\n")
+                           and n.get("clickable") == "true"]
+                require(len(choices) == 1, "Expected one stopped Mobile deletion destination")
+                self.smoke.tap(choices[0]); self.smoke.tap(self.smoke.wait_node("Delete queue")[0])
+                self.smoke.wait_content_description(lambda d: d.startswith("Mobile, Stopped.") and "2 files" in d,
+                                                    "Mobile received both owned jobs")
+                require(not any(n.get("content-desc", "").startswith("Night, ") for n in self.smoke.tree().iter("node")),
+                        "Deleted Night queue still appeared")
+                require(mobile_fixture_state() == (0, 0), "Delete started the stopped fixture")
+                self.log("PASS C1 dialogs: Cancel retained Mobile; explicit Move placed its owned job in Night; explicit Delete moved both owned jobs to stopped Mobile and removed Night.")
+            else:
+                self.shell("input", "keyevent", "4")
             chart, _ = self.smoke.wait_node("Show download speed graph", resource="queues_chart")
             self.smoke.tap(chart)
             self.smoke.wait_node("Search downloads")
+            if self.args.verify_c1_dialogs:
+                self.smoke.wait_content_description(lambda d: d.startswith(names["mobile"] + ". Queued"),
+                                                    "same owned Mobile download after Cancel")
+                self.smoke.wait_content_description(lambda d: d.startswith(names["night"] + ". Queued"),
+                                                    "same owned Night download after deletion")
             self.smoke.wait_content_description(
                 lambda desc: desc == "Downloads shown from This phone. Change host", "unchanged phone graph Host")
             self.smoke.wait_content_description(
@@ -1387,6 +1793,7 @@ class Capture:
             pending = sys.exc_info()[0] is not None
             errors = []
             stop.set()
+            pulse_allowed.set()
             # Try each owned cleanup independently, preserving the capture error.
             for label, action in (
                 ("fixture shutdown", lambda: server.shutdown() if server_started else None),
@@ -1398,6 +1805,13 @@ class Capture:
                 except Exception as exc:
                     errors.append(f"{label}: {exc}")
                     self.log(f"Cleanup WARNING: {label}: {exc}")
+            if verify_c8 and self.installed and not any(item.startswith("probe uninstall:") for item in errors):
+                for key, payload in finished.items():
+                    path = "/sdcard/Download/" + names[key]
+                    digest = hashlib.sha256(payload).hexdigest()
+                    found = self.shell(f"if [ -f '{path}' ] && [ ! -L '{path}' ]; then sha256sum '{path}'; fi").split()
+                    if found == [digest, path]:
+                        self.shell("rm", "--", path)
             self.log("Retention: task-named partial/shared Download files are not deleted; inspect exact paths before any removal.")
             if errors and not pending:
                 raise RuntimeError("C1 cleanup incomplete: " + "; ".join(errors))
@@ -1860,6 +2274,160 @@ class Capture:
                     raise RuntimeError("Mixed Host cleanup incomplete: " + ", ".join(cleanup_errors))
         return self.evidence
 
+    def verify_paired_category_folder(self, fixture, owned):
+        http = load_module("paired_category_payload", Path(__file__).with_name("link-fixture") / "server.py")
+        root = Path(owned["download_root"])
+        rule, manual = root / "Archive category", root / "Chosen folder"
+        rule.mkdir(); manual.mkdir()
+        request = fixture.fixture_session(owned)
+        before = request("settings.get", {})["payload"]["settings"]
+        candidate = json.loads(json.dumps(before))
+        candidate["useCategoryFolders"] = True
+        candidate["categoryFolders"]["compressed"] = str(rule)
+        saved = request("settings.update", {"expectedRevision": before["revision"], "settings": candidate})
+        require(saved["payload"].get("ok"), "Disposable Host did not allow the archive folder rule")
+        files = {"automatic.zip": http.ARCHIVES["field-recordings-vol1.zip"],
+                 "override.zip": http.ARCHIVES["field-recordings-vol2.zip"]}
+
+        class Handler(http.Handler):
+            def handle_request(handler, body):
+                name = handler.path.removeprefix("/")
+                if name not in files:
+                    handler.empty(404)
+                    return
+                handler.serve_payload(files[name], handler.headers.get("Range", ""), '"' + name + '"', name, body)
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                for name, folder in (("automatic.zip", rule), ("override.zip", manual)):
+                    url = f"http://127.0.0.1:{server.server_port}/{name}"
+                    self._tap_resource("fab")
+                    self._tap_resource("entry_link")
+                    self._tap_resource("address")
+                    self.shell("input", "text", url)
+                    self.shell("input", "keyevent", "4")
+                    self.smoke.wait_node(name, resource="file_name")
+                    _, tree = self.smoke.wait_content_description(lambda d: str(rule) in d and d.endswith("on Parity Host"), "category folder preview")
+                    require({"Archives", "Chosen by a category rule"}.issubset({n.get("text") for n in tree.iter("node")}),
+                            "Archive type or category-rule disclosure missing")
+                    if folder == manual:
+                        self._tap_resource("save_to")
+                        self.smoke.wait_content_description(lambda d: d.startswith("Folder ") and d.endswith(str(rule)), "rule folder picker start")
+                        self._tap_exact_text("Up")
+                        choice, _ = self.smoke.wait_content_description(lambda d: d == manual.name, "owned override folder")
+                        self.smoke.tap(choice)
+                        self.smoke.wait_content_description(lambda d: d == "Folder " + str(manual), "selected override path")
+                        self._tap_exact_text("Save here")
+                        _, tree = self.smoke.wait_content_description(lambda d: str(manual) in d and d.endswith("on Parity Host"), "manual folder preview")
+                        require(not any(n.get("text") in ("Archives", "Chosen by a category rule") for n in tree.iter("node")),
+                                "Manual override still displayed the category-rule indicators")
+                    self.capture_checkpoint("a5-category-" + name.split('.')[0], "a5-new-download.png", "New download")
+                    self._tap_resource("new_download_btn")
+                    self.smoke.wait_content_description(lambda d: d.startswith(name + ". "), "owned Host row")
+                    deadline = time.monotonic() + 60
+                    while time.monotonic() < deadline:
+                        snapshot = request("jobs.snapshot", {})["payload"]["jobs"]
+                        matches = [j for j in snapshot if j.get("url") == url]
+                        require(len(matches) <= 1, "More than one job used the owned fixture address")
+                        if matches and matches[0].get("state") in {"completed", "failed"}: break
+                        time.sleep(.25)
+                    else:
+                        raise RuntimeError(f"Host job {name} did not reach a terminal state")
+                    completed = matches[0]
+                    require(completed.get("state") == "completed", f"Host fixture {name} failed: {completed.get('failure', {}).get('kind')}")
+                    output = Path(completed.get("finalFilePath", "")).resolve()
+                    require(output.parent == folder.resolve() and output.is_file(), "Host wrote the fixture outside the selected owned folder")
+                    require(hashlib.sha256(output.read_bytes()).digest() == hashlib.sha256(files[name]).digest(), "Selected folder did not contain the exact fixture payload")
+                    alternative = manual if folder == rule else rule
+                    require(not (alternative / name).exists(), "Output appeared in the unselected fixture folder")
+                self.log("PASS A5: paired category disclosure and path matched verified archive placement, and explicit override placed the second file as shown.")
+            finally:
+                server.shutdown()
+                worker.join(timeout=5)
+
+    def verify_paired_expired_link(self, fixture, owned):
+        http = load_module("paired_expired_payload", Path(__file__).with_name("link-fixture") / "server.py")
+        requests = []
+
+        class Handler(http.Handler):
+            def handle_request(handler, body):
+                if handler.command == "GET":
+                    requests.append((handler.path, handler.headers.get("Range", "")))
+                super().handle_request(body)
+
+        def until(predicate, label, timeout=45):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                item = current()
+                if predicate(item): return item
+                time.sleep(.25)
+            raise RuntimeError("Timed out waiting for " + label)
+
+        request = fixture.fixture_session(owned)
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_port}/partial/"
+                name = f"inbound-c6-expiry-{uuid.uuid4().hex[:10]}.zip"
+                result = request("job.add", {"url": url + "old.zip", "fileName": name,
+                                             "startMode": "startNow", "connections": 1}).get("payload") or {}
+                job = (result.get("job") or {}).get("id")
+                require(result.get("accepted") and job, "Disposable Host refused the expiry fixture")
+
+                def current():
+                    snapshot = request("jobs.snapshot", {}).get("payload") or {}
+                    matches = [item for item in snapshot.get("jobs", []) if item.get("id") == job]
+                    require(len(matches) == 1, "Expected one original fixture transfer")
+                    return matches[0]
+
+                until(lambda j: j.get("receivedBytes", 0) > 512 * 1024, "initial bytes")
+                require((request("job.pause", {"jobId": job}).get("payload") or {}).get("ok"), "Fixture pause failed")
+                paused = until(lambda j: j.get("state") == "paused", "paused fixture")
+                with http.PARTIAL_STATE["lock"]:
+                    http.PARTIAL_STATE["expired"] = True
+                require((request("job.resume", {"jobId": job}).get("payload") or {}).get("ok"), "Fixture resume failed")
+                failed = until(lambda j: j.get("state") == "failed" and (j.get("failure") or {}).get("httpStatus") == 410, "expired HTTP 410")
+                kept = failed["receivedBytes"]
+                require(kept >= paused["receivedBytes"] > 0, "Expired link lost its partial bytes")
+
+                def capture(key, ref, tree):
+                    image = self.evidence / (key + "-capture.png")
+                    image.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                    ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+                    self.pairer.make_pair(MOCKUPS / ref, image, self.evidence / (key + "-pair.png"), key)
+
+                row, tree = self.smoke.wait_content_description(lambda d: d == "Refresh link for " + name, "expired list action")
+                capture("c6-expired-row", "c6-remote-host.png", tree)
+                stale = sum(path == "/partial/old.zip" for path, _ in requests)
+                self.smoke.tap(row)
+                _, sheet = self.smoke.wait_node("This link has expired", resource="refresh_title")
+                capture("c6-b6-refresh", "b6-expired-link.png", sheet)
+                require(current()["receivedBytes"] == kept, "Opening the sheet altered the saved bytes")
+                self._tap_exact_text("Paste a new address")
+                self._tap_resource("refresh_address")
+                self.shell("input", "text", url + "new.zip")
+                self.shell("input", "keyevent", "4")
+                self._tap_resource("refresh_submit")
+                completed = until(lambda j: j.get("state") == "completed", "original job completion", 130)
+                root = Path(owned["download_root"]).resolve()
+                output = Path(completed.get("finalFilePath", "")).resolve()
+                require(output.is_relative_to(root) and output.suffix == ".zip", "Host result was outside the owned ZIP fixture")
+                digest = hashlib.sha256(http.PARTIAL_PAYLOAD).hexdigest()
+                actual = hashlib.sha256(output.read_bytes()).hexdigest() if output.is_file() else None
+                require(actual == digest, f"Refreshed file did not match SHA-256: actual={actual}, expected={digest}, received_bytes={completed.get('receivedBytes')}")
+                resumes = [h for p, h in requests if p == "/partial/new.zip" and re.match(r"bytes=[1-9]\d*-", h)]
+                require(resumes and sum(path == "/partial/old.zip" for path, _ in requests) == stale,
+                        "The replacement did not resume from nonzero bytes or the old URL was retried")
+                (self.evidence / "c6-expired-proof.json").write_text(json.dumps({"job": job, "retained_bytes": kept,
+                    "stale_gets_before_and_after": stale, "replacement_ranges": resumes, "sha256": digest}, indent=2) + "\n", encoding="utf-8")
+                self.log("PASS C6: paired Host retained bytes on HTTP 410, row opened B6 without an old GET, same job resumed and matched SHA-256.")
+            finally:
+                server.shutdown()
+                worker.join(timeout=5)
+
     def run_paired(self):
         import hashlib
         from urllib.parse import urlsplit
@@ -1913,8 +2481,12 @@ class Capture:
             self.smoke.wait_content_description(selected_phone, "selected phone Host")
             return (card.get("content-desc"), *phone_limits)
 
-        with fixture.running_fixture(self.args.paired_server_dll) as owned:
-            port = urlsplit(owned["base_url"]).port
+        with ExitStack() as stack:
+            owned = stack.enter_context(fixture.running_fixture(self.args.paired_server_dll))
+            settings_probe = (stack.enter_context(fixture.settings_probe_proxy(owned, read_only=self.args.verify_paired_c7_readonly))
+                              if self.args.verify_paired_c2_lost_reply or self.args.verify_paired_c7_readonly else None)
+            base_url = settings_probe["url"] if settings_probe else owned["base_url"]
+            port = urlsplit(base_url).port
             endpoint = f"tcp:{port}"
             require(not any(endpoint in line.split() for line in self.adb("reverse", "--list").splitlines()),
                     "The disposable fixture port already has a reverse mapping")
@@ -1926,7 +2498,7 @@ class Capture:
                 host_chip("This phone")
                 tap("Connect to another Inbound", "host_connect")
                 self.smoke.wait_node("Connect", resource="pair_btn")
-                enter("Address", "pair_address", owned["base_url"])
+                enter("Address", "pair_address", base_url)
                 self.shell("input", "keyevent", "4")  # Dismiss address keyboard before locating the password field.
                 enter("Password of that Inbound", "pair_password", owned["password"], secret=True)
                 self.shell("input", "keyevent", "4")
@@ -1937,6 +2509,73 @@ class Capture:
                 self.smoke.tap(connect)
                 self.smoke.wait_node("Files are saved on Parity Host", timeout=30)
                 self.current_checkpoint = "c6-paired"
+                if self.args.verify_paired_expired_link:
+                    self.verify_paired_expired_link(fixture, owned)
+                    return self.evidence
+                if self.args.verify_paired_category_folder:
+                    self.verify_paired_category_folder(fixture, owned)
+                    return self.evidence
+                if settings_probe:
+                    request = fixture.fixture_session(owned)
+                    setting = lambda: request("settings.get", {})["payload"]["settings"]
+                    baseline = setting()
+                    if self.args.verify_paired_c2_lost_reply:
+                        tap("Queues", "nav_queues")
+                        main, _ = self.smoke.wait_content_description(lambda d: d.startswith("Main, "), "Main queue")
+                        self.smoke.tap(main)
+                        self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+                        self._tap_description_prefix("Downloads at once")
+                        field, _ = self.smoke.wait_content_description(lambda d: d == "Downloads at once (1–16)", "lost reply draft field")
+                        changed = 2 if baseline["queues"][0]["maxConcurrentDownloads"] != 2 else 3
+                        self.smoke.tap(field)
+                        self.shell("input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+                        self.shell("input", "text", str(changed))
+                        self.shell("input", "keyevent", "4")
+                        self._tap_exact_text("Apply")
+                        settings_probe["enable_loss"].set()
+                        self._tap_resource("queue_editor_save")
+                        self.smoke.wait_node("Check before saving again", timeout=75)
+                        require(settings_probe["lost"].is_set(), "The disposable proxy did not withhold a successful write reply")
+                        latest = setting()
+                        expected = json.loads(json.dumps(baseline))
+                        expected["queues"][0]["maxConcurrentDownloads"] = changed
+                        expected["revision"] = latest["revision"]
+                        require(latest == expected and latest["revision"] > baseline["revision"], "The Host did not commit exactly the edited policy")
+                        self.capture_checkpoint("c2-lost-reply", None, "Check before saving again")
+                        self._tap_exact_text("Reconnect")
+                        self.smoke.wait_node("Changes already applied", timeout=75)
+                        self.capture_checkpoint("c2-lost-reply-reviewed", None, "Changes already applied")
+                        require(setting() == latest, "Reconnect or review reissued a write")
+                        self.log("PASS C2 lost reply: one committed policy update, explicit reconnect reviewed it, no write replay.")
+                    else:
+                        require(settings_probe["legacy_hello"].is_set(), "The probe did not receive the synthetic legacy capability")
+                        tap("Settings", "nav_settings")
+                        downloads, _ = self.smoke.wait_content_description(lambda d: d.startswith("Downloads. Folder"), "Downloads settings")
+                        self.smoke.tap(downloads)
+                        self.smoke.wait_node("Downloads at once")
+                        value, _ = self.smoke.wait_node("Downloads at once")
+                        self.smoke.tap(value)
+                        tree = self.smoke.tree()
+                        require(not any(n.get("text") == "Apply" for n in tree.iter("node")),
+                                "Legacy Host opened a writable setting dialog")
+                        self.shell("input", "keyevent", "4")
+                        links, _ = self.smoke.wait_content_description(lambda d: d.startswith("Catching links."), "Catching links settings")
+                        self.smoke.tap(links)
+                        tap("Built-in browser")
+                        self.smoke.wait_node("Browser options")
+                        self.shell("input", "keyevent", "4")
+                        tap("Settings", "nav_settings")
+                        hosts, _ = self.smoke.wait_content_description(lambda d: d.startswith("Hosts and web UI."), "Hosts settings")
+                        self.smoke.tap(hosts)
+                        tap("Switch Host")
+                        self.smoke.wait_node("Where downloads run")
+                        self.shell("input", "keyevent", "4")
+                        tap("Pair another Host")
+                        self.smoke.wait_node("Connect", resource="pair_btn")
+                        self.shell("input", "keyevent", "4")
+                        require(setting() == baseline, "Legacy Host navigation changed remote settings")
+                        self.log("PASS C7 on legacy Host: read-only limits; Built-in browser, Switch and Pair opened; Host settings unchanged.")
+                    return self.evidence
                 if self.args.verify_paired_c7:
                     request = fixture.fixture_session(owned)
                     def host_settings():
@@ -2088,6 +2727,9 @@ class Capture:
                     self._tap_resource("queue_editor_back")
                     self.smoke.wait_node("Host: Parity Host")
                     require(queue_state() == before, "Queue or schedule changed while viewing editor")
+                    if self.args.verify_paired_c2_conflict:
+                        self.verify_paired_c2_conflict(before, request, owned)
+                        return self.evidence
                     if self.args.verify_paired_c2_limits:
                         self.verify_paired_c2_limits(queue_state, before, request, owned)
                         if self.args.verify_paired_c2_limits_transfer:
@@ -2188,6 +2830,7 @@ def main():
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
     parser.add_argument("--verify-paired-c2-limits-transfer", action="store_true", help="Exercise saved queue limits with three owned HTTP jobs")
     parser.add_argument("--verify-paired-c2-limits", action="store_true", help="Verify paired queue speed and concurrency drafts and persistence")
+    parser.add_argument("--verify-paired-c2-conflict", action="store_true", help="With --verify-paired-c2 exercise revision conflict and explicit draft rebase/save")
     parser.add_argument("--verify-paired-c2-save", action="store_true",
                         help="With --verify-paired-c2 save and reopen one disabled schedule on the empty owned Server")
     parser.add_argument("--verify-host-b-queued", action="store_true",
@@ -2200,6 +2843,12 @@ def main():
                         help="With --mixed-hosts touch Pause and verify the owned active Host job")
     parser.add_argument("--verify-b5-move-night", action="store_true",
                         help="With --unattended-c1-workload move only Mobile's file into a future scheduled Night")
+    parser.add_argument("--verify-c1-dialogs", action="store_true",
+                        help="With --unattended-c1-workload capture create, rename, move and delete choices and Cancel")
+    parser.add_argument("--verify-c1-final-style", action="store_true",
+                        help="With --unattended-c1-workload capture final Move and Delete controls without changing a job")
+    parser.add_argument("--verify-c8-workload", action="store_true",
+                        help="With --unattended-c1-workload capture 12 real mixed jobs and the Light speed graph")
     parser.add_argument("--verify-scheduled-row", action="store_true",
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-stop", action="store_true",
@@ -2207,6 +2856,10 @@ def main():
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
     parser.add_argument("--verify-c2-completion-preference", action="store_true", help="Prove Cancel, Discard and saved queue completion preference")
+    parser.add_argument("--verify-paired-expired-link", action="store_true", help="Verify C6's expired-link row on one disposable paired Host")
+    parser.add_argument("--verify-paired-category-folder", action="store_true", help="Verify A5 category preview and override on one disposable paired Host")
+    parser.add_argument("--verify-paired-c2-lost-reply", action="store_true", help="Verify C2 recovery after a committed response is lost")
+    parser.add_argument("--verify-paired-c7-readonly", action="store_true", help="Verify C7 local navigation with legacy remote settings")
     parser.add_argument("--verify-c2-no-days", action="store_true", help="Reject an empty day draft, then recover and save")
     parser.add_argument("--verify-schedule-delete-confirm", action="store_true",
                         help="With --unattended-configured-c2 prove draft discard and saved schedule deletion")
@@ -2226,6 +2879,14 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    standalone = sum((args.verify_paired_expired_link, args.verify_paired_category_folder,
+                      args.verify_paired_c2_lost_reply, args.verify_paired_c7_readonly))
+    if standalone:
+        if (not args.paired_server_dll or args.mixed_hosts or args.verify_paired_c7 or args.verify_paired_c2
+                or standalone > 1):
+            parser.error("Standalone paired settings, C6 expiry and A5 category lanes require one disposable paired Host each")
+    if args.verify_paired_c2_conflict and (not args.verify_paired_c2 or args.verify_paired_c2_limits or args.verify_paired_c2_save):
+        parser.error("--verify-paired-c2-conflict requires --verify-paired-c2 and excludes other C2 write lanes")
     if args.verify_host_b_queued and (not args.mixed_hosts or not args.paired_server_dll):
         parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
     if args.verify_paired_c7 and (not args.paired_server_dll or args.mixed_hosts or args.verify_paired_c2):
@@ -2252,6 +2913,15 @@ def main():
         parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
     if args.verify_b5_move_night and (not args.unattended_c1_workload or args.verify_scheduled_start or args.verify_scheduled_stop):
         parser.error("--verify-b5-move-night requires --unattended-c1-workload without scheduled start or stop checks")
+    if args.verify_c1_dialogs and (not args.unattended_c1_workload or args.verify_scheduled_start or args.verify_scheduled_stop or args.verify_b5_move_night):
+        parser.error("--verify-c1-dialogs requires the standalone --unattended-c1-workload lane")
+    if args.verify_c1_final_style and (not args.unattended_c1_workload or args.verify_c1_dialogs or args.verify_c8_workload
+                                       or args.verify_scheduled_start or args.verify_scheduled_stop or args.verify_scheduled_row
+                                       or args.verify_b5_move_night):
+        parser.error("--verify-c1-final-style requires the standalone --unattended-c1-workload lane")
+    if args.verify_c8_workload and (not args.unattended_c1_workload or args.verify_scheduled_start or args.verify_scheduled_stop
+                                   or args.verify_b5_move_night or args.verify_scheduled_row or args.verify_c1_dialogs):
+        parser.error("--verify-c8-workload requires the standalone --unattended-c1-workload lane")
     if args.verify_scheduled_row and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-row requires --unattended-c1-workload")
     if args.verify_scheduled_stop and not args.unattended_c1_workload:

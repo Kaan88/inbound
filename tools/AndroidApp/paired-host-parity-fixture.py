@@ -6,6 +6,7 @@ URL to stdout for the capture runner's in-memory use only. Never persist it.
 """
 
 import argparse
+import asyncio
 from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -58,14 +59,14 @@ def ephemeral_port():
         return sock.getsockname()[1]
 
 
-def fixture_session(fixture):
+def fixture_session(fixture, *, timeout=10):
     """Open an in-memory session on this run's disposable loopback Host."""
     def post(path, data, token=None):
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
         request = Request(fixture["base_url"] + path, json.dumps(data).encode(), headers)
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=timeout) as response:
             return json.load(response)
 
     pairing = post("/api/pair", {"role": "remoteClient", "password": fixture["password"],
@@ -80,6 +81,98 @@ def fixture_session(fixture):
         return reply
 
     return request
+
+
+@contextmanager
+def settings_probe_proxy(fixture, *, read_only=False):
+    """Forward only a disposable Host's pairing and IPC, optionally losing one committed reply."""
+    from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
+
+    origin = fixture["base_url"]
+    if not origin.startswith("http://127.0.0.1:"):
+        raise RuntimeError("Settings probe requires an owned loopback Host")
+    state = {"enable_loss": threading.Event(), "lost": threading.Event(), "legacy_hello": threading.Event()}
+    ready = threading.Event()
+    loop = asyncio.new_event_loop()
+
+    def auth(request):
+        return {key: request.headers[key] for key in ("Authorization", "Content-Type") if key in request.headers}
+
+    async def post(request):
+        async with ClientSession(timeout=ClientTimeout(total=20)) as session:
+            async with session.post(origin + request.path, data=await request.read(), headers=auth(request), allow_redirects=False) as response:
+                return web.Response(body=await response.read(), status=response.status, content_type="application/json")
+
+    async def websocket(request):
+        async with ClientSession(timeout=ClientTimeout(total=20)) as session:
+            async with session.ws_connect(origin + "/api/ws?hello=1", headers=auth(request)) as upstream:
+                downstream = web.WebSocketResponse()
+                await downstream.prepare(request)
+                outstanding = set()
+
+                async def to_host():
+                    async for frame in downstream:
+                        if frame.type != WSMsgType.TEXT: continue
+                        data = json.loads(frame.data)
+                        if state["enable_loss"].is_set() and data.get("type") == "settings.update":
+                            outstanding.add(data.get("id"))
+                        await upstream.send_str(frame.data)
+
+                async def to_phone():
+                    async for frame in upstream:
+                        if frame.type != WSMsgType.TEXT: continue
+                        data = json.loads(frame.data)
+                        payload = data.get("payload") or {}
+                        if read_only and data.get("type") == "server.hello":
+                            capabilities = payload.get("capabilities", [])
+                            if "settingsCompareAndSwap" not in capabilities:
+                                raise RuntimeError("Disposable Host does not advertise the capability being tested")
+                            capabilities.remove("settingsCompareAndSwap")
+                            state["legacy_hello"].set()
+                            await downstream.send_json(data)
+                        elif data.get("type") == "settings.result" and data.get("replyTo") in outstanding and payload.get("ok"):
+                            state["enable_loss"].clear()
+                            state["lost"].set()
+                            await downstream.close(code=1011)
+                            return
+                        else:
+                            await downstream.send_str(frame.data)
+
+                tasks = [asyncio.create_task(to_host()), asyncio.create_task(to_phone())]
+                _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending: task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                return downstream
+
+    async def start():
+        app = web.Application()
+        app.router.add_post("/api/pair", post)
+        app.router.add_post("/api/ipc", post)
+        app.router.add_get("/api/ws", websocket)
+        app.router.add_get("/health", lambda _: web.json_response({"status": "ok"}))
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        state["url"] = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        ready.set()
+        return runner
+
+    def run():
+        runner = loop.run_until_complete(start())
+        try: loop.run_forever()
+        finally:
+            loop.run_until_complete(runner.cleanup())
+            loop.close()
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    try:
+        if not ready.wait(10): raise RuntimeError("Disposable settings probe did not start")
+        yield state
+    finally:
+        if loop.is_running(): loop.call_soon_threadsafe(loop.stop)
+        worker.join(timeout=10)
+        if worker.is_alive(): raise RuntimeError("Disposable settings probe did not stop")
 
 
 def seed_download(fixture, *, filename="c5-c6.bin", slow=False):
@@ -108,7 +201,7 @@ def fixture_job_state(fixture, job_id):
 
 
 @contextmanager
-def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Host", *, rclone=None):
+def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Host", *, rclone=None, site_transfer_limit=None):
     dll = Path(server_dll).resolve(strict=True)
     if dll.suffix.lower() != ".dll" or dll.name.lower() != "downloadmanager.server.dll":
         raise ValueError("--server-dll must be the explicitly built DownloadManager.Server.dll")
@@ -124,9 +217,12 @@ def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Ho
         sites.mkdir()
         # This owned fresh Server starts disabled. Choose the local executable
         # here because its paired clients cannot change the Host's program.
-        (sites / "config.json").write_text(json.dumps({
+        config = {
             "enabled": False, "ownRclonePath": str(binary), "autoUpdateRclone": False,
-        }), encoding="utf-8")
+        }
+        if site_transfer_limit is not None:
+            config["maxTransfers"] = site_transfer_limit
+        (sites / "config.json").write_text(json.dumps(config), encoding="utf-8")
     stop = threading.Event()
     counters = {"bytes": 0, "lock": threading.Lock()}
     slow_payload = PAYLOAD * 8

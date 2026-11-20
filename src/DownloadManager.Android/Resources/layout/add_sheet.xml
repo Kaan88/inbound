@@ -16,7 +16,7 @@
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Link on the clipboard" android:textSize="13sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" />
         <TextView android:id="@+id/clip_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="middle" android:textSize="14sp" android:textColor="?attr/colorOnSecondaryContainer" />
       </LinearLayout>
-      <com.google.android.material.button.MaterialButton android:id="@+id/clip_use" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:text="Use" android:contentDescription="Use the link on the clipboard" />
+      <com.google.android.material.button.MaterialButton android:id="@+id/clip_use" style="@style/Widget.Material3.Button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="8dp" android:backgroundTint="?attr/colorPrimary" android:textColor="?attr/colorOnPrimary" android:text="Use" android:contentDescription="Use the link on the clipboard" />
     </LinearLayout>
   </com.google.android.material.card.MaterialCardView>
   <LinearLayout android:id="@+id/entry_link" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:minHeight="72dp" android:orientation="horizontal" android:gravity="center_vertical"

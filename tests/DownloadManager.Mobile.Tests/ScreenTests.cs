@@ -375,6 +375,27 @@ public sealed class NewDownloadTests
         Assert.False(m.CanDownload);
     }
 
+    [Fact]
+    public void Category_preview_uses_the_known_file_but_keeps_automatic_routing_on_the_host()
+    {
+        var (host, model) = Setup();
+        host.Push(IpcMessage.Create(MessageTypes.SettingsChanged, new SettingsDto
+        {
+            Revision = 1,
+            DefaultDownloadDirectory = @"C:\Downloads",
+            CategoryFolders = new() { ["compressed"] = @"C:\Downloads\Archives" },
+        }));
+        model.Address = "https://example.test/opaque";
+        Assert.Null(model.CategoryDestination);
+        model.FileName = "saved.zip";
+        Assert.Equal(@"C:\Downloads\Archives", model.SaveTo);
+        Assert.Null(Assert.Single(model.BuildRequests()).DestinationDirectory);
+        model.Destination = @"C:\Downloads\Manual";
+        Assert.Null(model.CategoryDestination);
+        Assert.Equal(model.Destination, model.SaveTo);
+        Assert.Equal(model.Destination, Assert.Single(model.BuildRequests()).DestinationDirectory);
+    }
+
     [Theory]
     [InlineData("ftp://x.test/a.zip")]
     [InlineData("magnet:?xt=urn:btih:abc")]

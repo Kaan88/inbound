@@ -67,11 +67,7 @@ public sealed class AddSheet : BottomSheetDialogFragment
         }
     }
 
-    public override void OnStart()
-    {
-        base.OnStart();
-        Dialog?.Window?.SetDimAmount(0.62f);
-    }
+    public override Android.App.Dialog OnCreateDialog(Bundle? savedInstanceState) => new AnimatedSheetDialog(RequireActivity(), 0.62f);
 
     private void ReadClipboard()
     {

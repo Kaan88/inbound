@@ -1,3 +1,4 @@
+using DownloadManager.Contracts;
 using DownloadManager.Mobile;
 
 namespace DownloadManager.Mobile.Tests;
@@ -103,6 +104,23 @@ public sealed class JobRowTests
     {
         Assert.Equal("Failed", Jobs.Row(Jobs.Make("failed")).Subtitle);
         Assert.Equal("Failed", Jobs.Row(Jobs.Make("failed", note: "")).Subtitle);
+    }
+
+    [Theory]
+    [InlineData(410, false, RowAction.RefreshLink, true)]
+    [InlineData(404, false, RowAction.Retry, false)]
+    [InlineData(410, true, RowAction.Retry, false)]
+    public void Only_a_refreshable_http_failure_shows_the_partial_bar_and_refresh_action(
+        int status, bool providerOwned, RowAction action, bool showBar)
+    {
+        var job = Jobs.Make("failed", total: 1000, received: 250);
+        job.Url = "https://example.test/archive.zip";
+        job.IsRemote = providerOwned;
+        job.Failure = new FailureDto { Kind = "http", HttpStatus = status };
+        var row = Jobs.Row(job);
+        Assert.Equal(action, row.Action);
+        Assert.Equal(showBar, row.ShowBar);
+        Assert.Equal(0.25, row.Progress);
     }
 
     [Fact]

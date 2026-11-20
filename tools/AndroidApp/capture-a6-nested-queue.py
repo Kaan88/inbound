@@ -160,13 +160,9 @@ def run(args):
             smoke.shell("input", "swipe", str(right - inset), slider_y, str(second_step_x), slider_y, "450")
             value = node("connections_value").get("text")
             require(value == "2", f"Connections slider displayed {value!r} instead of two")
-            smoke.tap(desc("Wait for queue"))
-            tree = smoke.tree()
-            selectors = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/text_input_end_icon")
-                         and n.get("content-desc") == "Choose queue" and n.get("enabled") == "true"]
-            require(len(selectors) == 1, "Queue chooser unavailable")
-            smoke.tap(selectors[0]); tap(args.queue_name)
-            require(any(n.get("content-desc") == "Choose queue" and n.get("text") == args.queue_name
+            choice, _ = smoke.wait_content_description(lambda d: d.startswith("Choose queue, "), "queue timing")
+            smoke.tap(choice); tap(args.queue_name)
+            require(any(n.get("content-desc") == "Choose queue, " + args.queue_name and n.get("checked") == "true"
                         for n in smoke.tree().iter("node")), "Queue choice not retained")
             require(unmetered(smoke.shell("dumpsys", "connectivity")), "Active network no longer verified unmetered")
             tap("Download", "new_download_btn")

@@ -247,8 +247,7 @@ internal sealed class DetailsScreen
     }
 
     private bool MayRefresh => !_row.Job.IsRemote && _row.Group is RowGroup.Failed or RowGroup.Paused or RowGroup.Queued;
-    private bool SuggestRefresh => _row.Job.Failure?.Kind.Equals("expiredUrl", StringComparison.OrdinalIgnoreCase) == true
-        || _row.Job.Failure?.HttpStatus is 401 or 403 or 410;
+    private bool SuggestRefresh => _row.NeedsLinkRefresh;
 
     private void OnMain()
     {

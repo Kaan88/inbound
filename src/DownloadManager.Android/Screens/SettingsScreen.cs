@@ -101,15 +101,19 @@ internal sealed class SettingsScreen
     private void PickTheme()
     {
         string[] names = ["Follows the system", "Light", "Dark"];
+        var draft = _appearance.Theme;
         new MaterialAlertDialogBuilder(_activity).SetTitle("Theme")!
             .SetSingleChoiceItems(names, (int)_appearance.Theme, (d, e) =>
             {
-                _appearance.Theme = (ThemeChoice)e.Which;
-                ((Android.App.Dialog)d!).Dismiss();
+                draft = (ThemeChoice)e.Which;
+            })!
+            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Apply", (_, _) =>
+            {
+                _appearance.Theme = draft;
                 Refresh();
                 ThemeSupport.ApplyNightMode(_appearance);
-            })!
-            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!.Show();
+            })!.Show();
     }
 }
 

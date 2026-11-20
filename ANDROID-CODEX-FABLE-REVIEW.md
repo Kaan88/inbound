@@ -36,6 +36,13 @@ important implementation changes and decisions as work proceeds.
 - Existing milestone audits remain recorded as PASS where established. Later
   independent review and the documented device/acceptance gaps remain OPEN.
 
+## Android 0.0.9 parity resumption (2026-11-20)
+
+- Implementer: Codex. Base `6616111c0b865cf6ba3330a6fd5f67abafe95cca` with the local application patch recorded alongside the candidate builds.
+- Scope includes the C1 queue destination decisions, C2 stop-time and conflict review, C7 Theme draft, and A7 waiting-notice coexistence. The owner's required C3 mixed-transfer state is exercised with real paired-Host uploads and downloads.
+- [Acceptance and flow evidence](docs/plans/android-mockup-acceptance.md) records exact probe outcomes. Candidate artifacts, fingerprints, and their common source patch are indexed in `artifacts/android-app/pairs/parity-probe-20261120-140909/review-evidence.md`.
+- Mobile 563 and Android harness 66 passed. The milestone's consolidated code and visual verdict is open. This later independent review entry remains open separately.
+
 ## FABLE-CODEX-1 — Permanent Android release signing
 
 - Status: OPEN for later Fable review; Astra code audit PASSED; S24 reinstall/startup passed; broader phone acceptance pending.

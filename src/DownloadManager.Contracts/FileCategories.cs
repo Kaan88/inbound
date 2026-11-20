@@ -39,4 +39,13 @@ public static class FileCategories
         return categories.FirstOrDefault(category => category.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase))?.Id
             ?? For(fileName);
     }
+
+    public static string? DestinationFor(string category, IEnumerable<CategoryDefinitionDto> categories,
+        IReadOnlyDictionary<string, string> folders)
+    {
+        var custom = categories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
+        if (!string.IsNullOrWhiteSpace(custom)) return custom.Trim();
+        return folders.TryGetValue(category, out var folder) && !string.IsNullOrWhiteSpace(folder)
+            ? folder.Trim() : null;
+    }
 }

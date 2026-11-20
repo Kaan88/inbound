@@ -10,7 +10,7 @@ public enum StatusKind { Active, Done, Failed, Waiting, Neutral }
 public enum RowGroup { Active, Queued, Paused, Finished, Failed }
 
 /// <summary>What the button at the end of a row does.</summary>
-public enum RowAction { None, Pause, Resume, Retry, ShowInFolder }
+public enum RowAction { None, Pause, Resume, Retry, ShowInFolder, RefreshLink }
 
 /// <summary>One row of the Downloads screen. Raises PropertyChanged on the UI thread only (the model posts).</summary>
 public sealed class JobRow : INotifyPropertyChanged
@@ -64,6 +64,11 @@ public sealed class JobRow : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    public bool NeedsLinkRefresh => !Job.IsRemote
+        && Uri.TryCreate(Job.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+        && (string.Equals(Job.Failure?.Kind, "expiredUrl", StringComparison.OrdinalIgnoreCase)
+            || Job.Failure?.HttpStatus is 401 or 403 or 410);
+
     private void Set<T>(ref T field, T value, string name)
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
@@ -109,7 +114,10 @@ public sealed class JobRow : INotifyPropertyChanged
                 break;
             case "failed":
             case "cancelled":
-                Kind = StatusKind.Failed; Group = RowGroup.Failed; Action = RowAction.Retry; ShowBar = false; Indeterminate = false;
+                bool refresh = state == "failed" && NeedsLinkRefresh;
+                Kind = StatusKind.Failed; Group = RowGroup.Failed; Action = refresh ? RowAction.RefreshLink : RowAction.Retry;
+                ShowBar = refresh && total is > 0 && j.ReceivedBytes > 0; Indeterminate = false;
+                Progress = total is > 0 ? Math.Clamp(j.ReceivedBytes / (double)total.Value, 0, 1) : 0;
                 Subtitle = (state == "failed" ? "Failed" : "Cancelled") + (FailureWords.Short(j) is { } why ? " · " + why : "");
                 break;
             case "retrywaiting":

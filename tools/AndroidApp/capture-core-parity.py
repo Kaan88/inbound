@@ -263,6 +263,32 @@ class Capture:
         """Capture an already reached state; report unsupported transitions honestly."""
         return self.await_checkpoint(key, reference, anchor)
 
+    def verify_a4_site_route(self):
+        """Follow the site entry without inspecting or changing clipboard contents."""
+        self.smoke.wait_node("Set up Inbound", timeout=30)
+        self.click_resource(SELECTORS["first_run_start"])
+        self.smoke.wait_node("Search downloads", timeout=30)
+        self.click_resource(SELECTORS["add"])
+        row, tree = self.smoke.wait_content_description(
+            lambda value: value.startswith("From a site. "), "A4 From a site row")
+        require(row.get("enabled") == "true" and row.get("clickable") == "true",
+                "From a site is unavailable on this probe")
+        for title in ("Torrent file or magnet", "TorBox", "Import a list"):
+            rows = [n for n in tree.iter("node") if n.get("content-desc", "").startswith(title + ".")]
+            require(len(rows) == 1 and rows[0].get("enabled") == "false",
+                    f"{title} is not marked unavailable")
+        # Do not save the Add hierarchy or image: a pre-existing clipboard
+        # offer may contain private data. Never tap its Use action here.
+        self.smoke.tap(row)
+        _, landing = self.smoke.wait_node("Enable Remote Files", timeout=35)
+        require(any(n.get("resource-id", "").endswith(":id/nav_remote_files") and n.get("selected") == "true"
+                    for n in landing.iter("node")), "From a site did not select Remote Files")
+        (self.evidence / "a4-site-landing-capture.png").write_bytes(
+            self.adb("exec-out", "screencap", "-p", raw=True))
+        ET.ElementTree(landing).write(self.evidence / "a4-site-landing-ui.xml",
+                                      encoding="utf-8", xml_declaration=True)
+        self.log("PASS A4: From a site opened local Remote Files landing; unfinished rows were disabled. Clipboard was not changed or captured.")
+
     def verify_a0_permissions(self):
         """Use the probe's actual first-run buttons and safe native dialog actions."""
         def tree_until(predicate, description, timeout=30):
@@ -294,6 +320,7 @@ class Capture:
                              len(by_id(t, "fr_batt_allow")) == 1, "first-run permission controls")
         require(not permission_granted(), "Probe notification permission is already granted")
         before_battery = battery_entries()
+        require(not before_battery, "Probe is already on the battery whitelist")
         save("a0-permissions-before", initial)
         self.click_resource(APP_ID + "fr_notif_allow")
         button_id = ("permission_allow_button" if self.args.a0_permissions == "allow"
@@ -317,24 +344,38 @@ class Capture:
         save("a0-notification-return", returned)
         require(len(by_id(returned, "fr_batt_allow")) == 1, "Battery permission is already unrestricted")
         self.click_resource(APP_ID + "fr_batt_allow")
-        def cancel_dialog(tree):
-            buttons = [n for n in tree.iter("node") if n.get("resource-id") == "android:id/button2"
-                       and n.get("text", "").casefold() in ("cancel", "deny", "no") and n.get("clickable") == "true"
+        grant_battery = self.args.a0_battery_grant
+        battery_button = "android:id/button1" if grant_battery else "android:id/button2"
+        battery_labels = ("allow", "yes") if grant_battery else ("cancel", "deny", "no")
+        def battery_dialog(tree):
+            buttons = [n for n in tree.iter("node") if n.get("resource-id") == battery_button
+                       and n.get("text", "").casefold() in battery_labels and n.get("clickable") == "true"
                        and n.get("enabled") == "true" and n.get("package") == "com.android.settings"]
             return len(buttons) == 1
-        dialog = tree_until(cancel_dialog, "native battery prompt with an explicit negative action")
+        dialog = tree_until(battery_dialog, "native battery prompt with the requested explicit action")
         text = " ".join(n.get("text", "") for n in dialog.iter("node"))
         require("Inbound" in text and ("battery" in text.casefold() or "background" in text.casefold()),
                 "Battery dialog does not identify the probe and the requested permission")
         save("a0-battery-prompt", dialog)
-        cancel = next(n for n in dialog.iter("node") if n.get("resource-id") == "android:id/button2"
-                      and n.get("text", "").casefold() in ("cancel", "deny", "no"))
-        self.smoke.tap(cancel)
-        returned = tree_until(lambda t: len(by_id(t, "fr_batt_allow")) == 1 and bool(by_id(t, "fr_start")),
-                              "battery prompt dismissal returned to first-run setup")
-        require(battery_entries() == before_battery, "Probe battery whitelist changed after Cancel")
-        save("a0-battery-cancel-return", returned)
-        self.log(f"PASS A0: notification {self.args.a0_permissions} and battery {cancel.get('text')} returned to setup; probe whitelist unchanged")
+        action = next(n for n in dialog.iter("node") if n.get("resource-id") == battery_button
+                      and n.get("text", "").casefold() in battery_labels)
+        self.smoke.tap(action)
+        returned = tree_until(lambda t: bool(by_id(t, "fr_start")) and
+                              (not by_id(t, "fr_batt_allow") if grant_battery else len(by_id(t, "fr_batt_allow")) == 1),
+                              "battery prompt returned to first-run setup")
+        after_battery = battery_entries()
+        require(bool(after_battery) if grant_battery else after_battery == before_battery,
+                "Probe battery whitelist did not match the chosen action")
+        save("a0-battery-allow-return" if grant_battery else "a0-battery-cancel-return", returned)
+        if grant_battery:
+            self.shell("am", "force-stop", PACKAGE)
+            self.adb("shell", "am", "start", "-W", "-n", ACTIVITY)
+            reopened = tree_until(lambda t: bool(by_id(t, "fr_start")) and not by_id(t, "fr_batt_allow"),
+                                  "first-run setup with battery exemption after relaunch")
+            require(battery_entries() == after_battery, "Battery exemption did not persist across relaunch")
+            save("a0-battery-allow-reopened", reopened)
+        self.log(f"PASS A0: notification {self.args.a0_permissions}; battery {action.get('text')} "
+                 + ("persisted across probe relaunch" if grant_battery else "left probe whitelist unchanged"))
 
     def verify_c7_appearance(self):
         """Exercise the app-owned Theme setting on the fresh disposable probe."""
@@ -414,6 +455,9 @@ class Capture:
             node, _ = self.smoke.wait_node(theme)
             require(node.get("checkable") == "true" and node.get("enabled") == "true", "Theme choice unavailable")
             self.smoke.tap(node)
+            selected, _ = self.smoke.wait_node(theme)
+            require(selected.get("checked") == "true", "Theme draft was not selected")
+            self.smoke.tap(self.smoke.wait_node("Apply")[0])
             self.smoke.wait_node(theme, resource="theme_text", timeout=30)
             settings()  # AppCompat may recreate the activity.
             return require_indicator("nav_settings")
@@ -438,7 +482,20 @@ class Capture:
             settings()
         require(self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")[0].get("checked") == "false",
                 "Dynamic colour remained enabled")
-        save("c7-appearance-chooser", theme_dialog())
+        originals = [n for n in settings().iter("node")
+                     if n.get("resource-id", "").endswith(":id/theme_text")]
+        require(len(originals) == 1, "Theme summary is missing or ambiguous")
+        original_theme = originals[0].get("text")
+        require(original_theme in ("Follows the system", "Light", "Dark"), "Unknown initial theme")
+        save("c7-appearance-chooser", theme_dialog(original_theme))
+        cancelled_theme = "Dark" if original_theme == "Light" else "Light"
+        self.smoke.tap(self.smoke.wait_node(cancelled_theme)[0])
+        draft, tree = self.smoke.wait_node(cancelled_theme)
+        require(draft.get("checked") == "true", "Cancelled theme draft was not selected")
+        save("c7-appearance-cancel-draft", tree)
+        self.smoke.tap(self.smoke.wait_node("Cancel")[0])
+        self.smoke.wait_node(original_theme, resource="theme_text", timeout=30)
+        save("c7-appearance-cancel-reopened", theme_dialog(original_theme))
         tree = choose("Light")
         save("c7-appearance-light", tree)
         self.shell("input", "keyevent", "4")
@@ -487,7 +544,7 @@ class Capture:
                 save("c7-dynamic-" + ("on" if desired == "true" else "off") + "-reopened", tree)
         else:
             self.log("Dynamic colour unavailable on this device; On/Off remains unverified.")
-        self.log("PASS C7 appearance: Light and Dark survived recreation and Back/reopen; navigation highlight followed Settings and Downloads.")
+        self.log("PASS C7 appearance: Cancel preserved the original theme; Apply committed Light and Dark across recreation and Back/reopen; navigation highlight followed Settings and Downloads.")
 
     def verify_c7_routes(self):
         """Visit local Settings routes without reading the clipboard or signing in."""
@@ -541,6 +598,127 @@ class Capture:
         save("c7-site-logins-landing", tree)
         self.log("PASS C7: Catching links guidance, browser entry and Back; Site logins opened the local Remote Files landing. No provider sign-in attempted.")
 
+    def verify_c7_settings_details(self):
+        """Inspect local C7 details and system handoffs without applying settings."""
+        def save(key, tree):
+            (self.evidence / (key + "-capture.png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+        def wait_tree(predicate, description):
+            end = time.monotonic() + 30
+            while time.monotonic() < end:
+                tree = self.smoke.tree()
+                if predicate(tree): return tree
+                time.sleep(.3)
+            raise RuntimeError("Could not verify " + description)
+        def row(tree, label):
+            candidates = [n for n in tree.iter("node") if n.get("clickable") == "true"
+                          and n.get("enabled") == "true" and any(child.get("text") == label for child in n.iter("node"))]
+            matches = [n for n in candidates if not any(child in candidates for child in n.iter("node") if child is not n)]
+            require(len(matches) == 1, f"Expected one enabled row for {label}, found {len(matches)}")
+            return matches[0]
+        def row_value(tree, label):
+            texts = [n.get("text", "") for n in row(tree, label).iter("node") if n.get("text")]
+            require(len(texts) == 2 and texts[0] == label, f"Could not identify value for {label}")
+            return texts[1]
+        def category(query, description, detail_anchor):
+            self.smoke.wait_node("Settings", resource="settings_title")
+            self.click_resource(APP_ID + "settings_search")
+            self.smoke.wait_node("Search settings", resource="settings_search_input")
+            self.adb("shell", "input", "text", query)
+            selected, _ = self.smoke.wait_content_description(lambda d: d == description, description)
+            self.smoke.tap(selected)
+            return self.smoke.wait_node(detail_anchor)[1]
+        def back_to_root():
+            self.shell("input", "keyevent", "4")
+            tree = self.smoke.wait_node("Settings", resource="settings_title")[1]
+            if any(n.get("resource-id") == APP_ID + "settings_search_input" for n in tree.iter("node")):
+                self.click_resource(APP_ID + "settings_search")
+            self.smoke.wait_node("Settings", resource="settings_title")
+        def numeric(label, input_description, draft, key, speed=False):
+            tree = self.smoke.tree(); before = row_value(tree, label)
+            self.smoke.tap(row(tree, label))
+            field, tree = self.smoke.wait_content_description(lambda d: d == input_description, input_description)
+            if speed:
+                choice, _ = self.smoke.wait_content_description(lambda d: d == "Custom overall speed limit", "custom overall speed")
+                self.smoke.tap(choice)
+                field, tree = self.smoke.wait_content_description(lambda d: d == input_description, input_description)
+            require(field.get("enabled") == "true", "Numeric field is not editable")
+            self.smoke.tap(field); self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+            current = field.get("text", "")
+            if speed and current == "KB/s":
+                current = ""
+            require(len(current) <= 24 and (not current or current.isdigit()), "Unexpected numeric field content")
+            for _ in current: self.shell("input", "keyevent", "KEYCODE_DEL")
+            self.shell("input", "text", draft); self.shell("input", "keyevent", "4")
+            field, tree = self.smoke.wait_content_description(lambda d: d == input_description, input_description)
+            require(field.get("text") == draft, "Dialog did not retain the disposable draft")
+            save(key + "-dialog", tree)
+            self.smoke.tap(self.smoke.wait_node("Cancel")[0])
+            tree = wait_tree(lambda t: any(n.get("text") == label for n in t.iter("node")) and
+                             not any(n.get("text") == "Apply" for n in t.iter("node")), label + " after Cancel")
+            require(row_value(tree, label) == before, label + " changed after Cancel")
+            save(key + "-cancel", tree)
+        def system_handoff(label, key, predicate):
+            tree = self.smoke.tree(); self.smoke.tap(row(tree, label))
+            tree = wait_tree(predicate, key + " Android system surface")
+            save(key + "-system", tree)
+            self.shell("input", "keyevent", "4")
+            _, returned = self.smoke.wait_node(label, timeout=30)
+            save(key + "-return", returned)
+        def system_package(tree):
+            return any(n.get("package") == "com.android.settings" for n in tree.iter("node"))
+        def notification_surface(tree, activity):
+            focus = self.shell("dumpsys", "activity", "activities").splitlines()
+            return system_package(tree) and any(("topResumedActivity" in line or "mResumedActivity" in line) and
+                                                "com.android.settings" in line and activity in line for line in focus)
+        def system_permissions():
+            package = self.shell("dumpsys", "package", PACKAGE)
+            grants = re.findall(r"android\.permission\.POST_NOTIFICATIONS:\s*granted=(true|false)", package)
+            require(len(grants) == 1, "Probe notification permission is unavailable or ambiguous")
+            whitelist = self.shell("cmd", "deviceidle", "whitelist").splitlines()
+            require(any(line.startswith(("system,", "user,")) for line in whitelist), "Battery whitelist is unavailable")
+            entries = tuple(sorted(line.strip() for line in whitelist
+                                   if re.search(r"(?:^|[,\s])" + re.escape(PACKAGE) + r"(?:$|[,\s])", line)))
+            return grants[0], entries
+        self.smoke.tap(self.smoke.wait_node("Start downloading", resource="fr_start")[0])
+        self.smoke.wait_node("Search downloads", timeout=30)
+        self.smoke.wait_content_description(lambda d: d == "Downloads shown from This phone. Change host", "local Host")
+        self.shell("pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
+        before_system = system_permissions()
+        self.click_resource(SELECTORS["settings"])
+        if not self.args.only_c7_system_handoffs:
+            tree = category("Downloads", "Downloads. Folder and connections", "Download folder")
+            require(any(n.get("text") == "This phone" for n in tree.iter("node")), "Downloads is not phone scoped")
+            save("c7-downloads", tree)
+            for label, draft, key in (("Downloads at once", "7", "downloads-at-once"),
+                                      ("Connections per file", "9", "connections-per-file"),
+                                      ("Connections per host", "10", "connections-per-host")):
+                numeric(label, label, draft, "c7-" + key)
+            back_to_root()
+            tree = category("Network", "Network. Network rule and speed limit", "Overall speed limit")
+            save("c7-network", tree)
+            require(any(n.get("content-desc") == "Unmetered network only" for n in tree.iter("node")), "Unmetered rule missing")
+            numeric("Overall speed limit", "Speed limit in KB per second", "123", "c7-overall-speed", speed=True)
+            back_to_root()
+        tree = category("Background", "Background and battery. Resume and sleep prevention", "Android battery settings")
+        require({"Resume on launch", "Keep awake while transferring"}.issubset(
+            {n.get("content-desc", "") for n in tree.iter("node")}), "Background switches missing")
+        save("c7-background", tree)
+        system_handoff("Android battery settings", "c7-battery", lambda t: notification_surface(t, "HighPowerApplicationsActivity"))
+        back_to_root()
+        tree = category("Notifications", "Notifications and sounds", "Notification settings")
+        require(any(n.get("content-desc") == "Download finished" for n in tree.iter("node")), "Completion switch missing")
+        save("c7-notifications", tree)
+        system_handoff("Sound and vibration", "c7-sound", lambda t: system_package(t)
+                       and any(n.get("text", "").casefold() == "finished downloads" for n in t.iter("node")))
+        system_handoff("Notification settings", "c7-notification-app", lambda t: system_package(t) and
+                       (notification_surface(t, "AppNotificationSettingsActivity") or
+                        {"Downloads in progress", "Finished downloads"}.issubset({n.get("text") for n in t.iter("node")})))
+        require(system_permissions() == before_system, "Probe notification permission or battery exemption changed")
+        if not self.args.only_c7_system_handoffs:
+            self.log("PASS C7 local limits: draft changes were cancelled and settings stayed unchanged.")
+        self.log("PASS C7 system handoffs: battery management, finished channel and app notification settings returned with probe permission and battery exemption unchanged after the setup grant.")
+
     def run(self):
         self.check()
         try:
@@ -549,8 +727,12 @@ class Capture:
                 self.verify_c7_appearance()
             elif self.args.verify_c7_routes:
                 self.verify_c7_routes()
+            elif self.args.verify_c7_settings_details:
+                self.verify_c7_settings_details()
             elif self.args.a0_permissions:
                 self.verify_a0_permissions()
+            elif self.args.verify_a4_site:
+                self.verify_a4_site_route()
             elif self.args.unattended:
                 self.unattended_sequence()
             else:
@@ -567,11 +749,15 @@ class Capture:
     def collect_failure(self):
         if not self.started:
             return
+        if self.args.verify_a4_site:
+            # The Add sheet may show private clipboard text; do not capture it
+            # on a failed or interrupted route.
+            return
         try:
             tree = self.smoke.tree()
             ET.ElementTree(tree).write(self.evidence / "failure-ui.xml",
                                        encoding="utf-8", xml_declaration=True)
-            if self.args.verify_c7_routes or self.args.verify_c7_appearance:
+            if self.args.verify_c7_routes or self.args.verify_c7_appearance or self.args.verify_c7_settings_details:
                 return
             # These app tags are scoped; avoid a full logcat dump that could
             # include unrelated app/device data.
@@ -599,13 +785,25 @@ def main():
     parser.add_argument("--evidence", type=Path, required=True, help="New, previously absent evidence directory")
     parser.add_argument("--verify-c7-appearance", action="store_true", help="Standalone local app Theme chooser and persistence check")
     parser.add_argument("--verify-c7-routes", action="store_true", help="Standalone local Catching links and Site logins route check")
+    parser.add_argument("--verify-c7-settings-details", action="store_true", help="Standalone C7 local limits, battery and notification handoffs")
+    parser.add_argument("--only-c7-system-handoffs", action="store_true", help="Repeat just the three Android system handoffs")
     parser.add_argument("--a0-permissions", choices=("deny", "allow"), help="Standalone native first-run permission check; battery prompt is cancelled")
+    parser.add_argument("--a0-battery-grant", action="store_true", help="In the A0 lane grant battery exemption and verify it across a probe relaunch")
+    parser.add_argument("--verify-a4-site", action="store_true", help="Standalone A4 From a site route on a fresh local probe")
     parser.add_argument("--verify-a4-c7", action="store_true", help="Assert updated A4 rows and C7 search in an unattended run")
     parser.add_argument("--a5-metadata", action="store_true", help="Populate A5 from a loopback metadata fixture without submitting")
     parser.add_argument("--a5-validation", action="store_true", help="Check the A5 invalid URL state without submitting")
     parser.add_argument("--unattended", action="store_true",
                         help="Opt in to hands-off capture of safely observable, already reached states")
     args = parser.parse_args()
+    if args.only_c7_system_handoffs and not args.verify_c7_settings_details:
+        parser.error("--only-c7-system-handoffs requires --verify-c7-settings-details")
+    if args.verify_c7_settings_details and (args.verify_c7_appearance or args.verify_c7_routes or args.verify_a4_site or args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
+        parser.error("--verify-c7-settings-details is a standalone lane")
+    if args.a0_battery_grant and not args.a0_permissions:
+        parser.error("--a0-battery-grant requires --a0-permissions")
+    if args.verify_a4_site and (args.verify_c7_appearance or args.verify_c7_routes or args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
+        parser.error("--verify-a4-site is a standalone lane")
     if args.verify_c7_appearance and (args.verify_c7_routes or args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
         parser.error("--verify-c7-appearance is a standalone lane")
     if args.verify_c7_routes and (args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):

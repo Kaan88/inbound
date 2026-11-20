@@ -1,4 +1,6 @@
 using Android.OS;
+using Android.Text;
+using Android.Text.Style;
 using Android.Runtime;
 using Android.Views;
 using Android.Widget;
@@ -9,7 +11,7 @@ using Google.Android.Material.Button;
 namespace Inbound.App.Screens;
 
 internal sealed record CaughtSheetSpec(string FileName, string Detail, string Destination, string Privacy,
-    int DefaultConnections, int MaxConnections, bool LocalSignedIn, bool HasCookies, QueueDto[] Queues);
+    int DefaultConnections, int MaxConnections, bool LocalSignedIn, bool HasCookies, bool AdvertisesByteRanges, QueueDto[] Queues);
 
 internal sealed record CaughtFolderChoice(string? InitialPath, Func<bool> StillCurrent,
     Func<string?, Action<string>, BottomSheetDialog> Open);
@@ -62,8 +64,11 @@ internal sealed class CaughtDownloadSheet : BottomSheetDialogFragment
         _viewAlive = true;
         view.FindViewById<TextView>(Resource.Id.caught_name)!.Text = _spec.FileName;
         var detail = view.FindViewById<TextView>(Resource.Id.caught_detail)!;
-        detail.Text =
-            _spec.LocalSignedIn ? _spec.Detail + " · uses your sign-in" : _spec.Detail;
+        var icon = view.FindViewById<ImageView>(_spec.LocalSignedIn ? Resource.Id.caught_signed_in_icon : Resource.Id.caught_file_icon)!;
+        var fileIcon = FileIcons.For(DownloadManager.Mobile.FileKinds.Of(_spec.FileName));
+        icon.SetImageResource(fileIcon.Drawable);
+        icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(
+            new Android.Graphics.Color(FileIcons.Color(RequireContext(), fileIcon)));
         var privacy = view.FindViewById<TextView>(Resource.Id.caught_privacy)!;
         privacy.Text = _spec.Privacy;
         var hasCookies = _spec.HasCookies;
@@ -76,11 +81,7 @@ internal sealed class CaughtDownloadSheet : BottomSheetDialogFragment
         var preferred = Math.Clamp(_spec.DefaultConnections, 1, max);
         if (_spec.LocalSignedIn)
         {
-            var icon = view.FindViewById<ImageView>(Resource.Id.caught_signed_in_icon)!;
-            var fileIcon = FileIcons.For(DownloadManager.Mobile.FileKinds.Of(_spec.FileName));
-            icon.SetImageResource(fileIcon.Drawable);
-            icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(
-                new Android.Graphics.Color(FileIcons.Color(RequireContext(), fileIcon)));
+            detail.Text = _spec.Detail + " · uses your sign-in";
             _choices = [preferred];
             _button.Click += OnSubmit;
             return view;
@@ -154,8 +155,21 @@ internal sealed class CaughtDownloadSheet : BottomSheetDialogFragment
         _choices = choices.ToArray();
         var adapter = new ArrayAdapter<string>(RequireContext(), Android.Resource.Layout.SimpleSpinnerItem, _choices.Select(n => n.ToString()).ToArray());
         adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-        var details = _spec.Detail;
-        void Describe(int n) => detail.Text = $"{details} · {n} {(n == 1 ? "connection" : "connections")}";
+        void Describe(int n)
+        {
+            var connections = $" · {n} {(n == 1 ? "connection" : "connections")}";
+            if (!_spec.AdvertisesByteRanges)
+            {
+                detail.Text = _spec.Detail + connections;
+                return;
+            }
+            string prefix = _spec.Detail + " · ";
+            const string ranges = "Supports byte ranges";
+            using var metadata = new SpannableString(prefix + ranges + connections);
+            using var positive = new ForegroundColorSpan(new Android.Graphics.Color(RequireContext().GetColor(Resource.Color.state_done)));
+            metadata.SetSpan(positive, prefix.Length, prefix.Length + ranges.Length, SpanTypes.ExclusiveExclusive);
+            detail.SetText(metadata, TextView.BufferType.Normal);
+        }
         _connections.ItemSelected += (_, e) =>
         {
             if (e.Position >= 0 && e.Position < _choices.Length) Describe(_choices[e.Position]);
@@ -212,11 +226,8 @@ internal sealed class CaughtDownloadSheet : BottomSheetDialogFragment
         _network.ContentDescription = $"Host network rule: {_network.Text}. Change in Settings.";
     }
 
-    public override void OnStart()
-    {
-        base.OnStart();
-        if (_spec?.LocalSignedIn == true) Dialog?.Window?.SetDimAmount(.28f);
-    }
+    public override Android.App.Dialog OnCreateDialog(Bundle? savedInstanceState) =>
+        new AnimatedSheetDialog(RequireActivity(), _spec?.LocalSignedIn == true ? .28f : .6f);
 
     public override void OnDestroyView()
     {

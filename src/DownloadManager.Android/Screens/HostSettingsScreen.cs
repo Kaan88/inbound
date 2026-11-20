@@ -178,7 +178,7 @@ internal sealed class HostSettingsScreen : IDisposable
         body.AddView(label, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(16) });
     }
     private string Target => _activity.Capabilities.IsRemote ? _activity.HostName : "This phone";
-    private TextView ValueRow(LinearLayout list, string name, int icon, Action? action)
+    private TextView ValueRow(LinearLayout list, string name, int icon, Action? action, bool settingsWrite = true)
     {
         var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Focusable = action is not null, Clickable = action is not null };
         row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Dp(72)); row.SetPadding(Dp(16), Dp(8), Dp(16), Dp(8));
@@ -195,7 +195,9 @@ internal sealed class HostSettingsScreen : IDisposable
         if (action is not null)
         {
             var arrow = new ImageView(_activity); arrow.SetImageResource(Resource.Drawable.ic_chevron_right); arrow.ImportantForAccessibility = ImportantForAccessibility.No;
-            row.AddView(arrow, new LinearLayout.LayoutParams(Dp(24), Dp(24))); row.Click += (_, _) => { if (Ready()) action(); }; _controls.Add(row);
+            row.AddView(arrow, new LinearLayout.LayoutParams(Dp(24), Dp(24)));
+            row.Click += (_, _) => { if (!_disposed && (!settingsWrite || Ready())) action(); };
+            if (settingsWrite) _controls.Add(row);
         }
         list.AddView(row); return value;
     }
@@ -246,22 +248,22 @@ internal sealed class HostSettingsScreen : IDisposable
         var list = DetailCard(body, "This phone");
         SwitchRow(list, "Resume on launch", "Resume eligible unfinished downloads", Resource.Drawable.ic_refresh, s => s.AutoResumeUnfinishedOnStartup, (s, v) => s.AutoResumeUnfinishedOnStartup = v);
         SwitchRow(list, "Keep awake while transferring", "CPU and Wi-Fi during active work", Resource.Drawable.ic_flow_bolt, s => s.PreventSleepWhileDownloading, (s, v) => s.PreventSleepWhileDownloading = v);
-        var settings = ValueRow(list, "Android battery settings", Resource.Drawable.ic_flow_battery, BatterySettings); settings.Text = "Manage Inbound in system settings";
+        var settings = ValueRow(list, "Android battery settings", Resource.Drawable.ic_flow_battery, BatterySettings, settingsWrite: false); settings.Text = "Manage Inbound in system settings";
         Note(body, "Android battery saving and Doze can delay scheduled work. After a force-stop, open Inbound again.");
     }
     private void NotificationsPage(LinearLayout body)
     {
         var list = DetailCard(body, "This phone");
         SwitchRow(list, "Download finished", "Notify when a download completes", Resource.Drawable.ic_flow_bell, s => s.NotifyOnCompletion, (s, v) => s.NotifyOnCompletion = v);
-        var sound = ValueRow(list, "Sound and vibration", Resource.Drawable.ic_audio, NotificationSettings); sound.Text = "Managed by Android";
-        var settings = ValueRow(list, "Notification settings", Resource.Drawable.ic_flow_bell, NotificationSettings); settings.Text = "Permissions and channels";
+        var sound = ValueRow(list, "Sound and vibration", Resource.Drawable.ic_audio, () => NotificationSettings(channel: true), settingsWrite: false); sound.Text = "Managed by Android";
+        var settings = ValueRow(list, "Notification settings", Resource.Drawable.ic_flow_bell, () => NotificationSettings(channel: false), settingsWrite: false); settings.Text = "Permissions and channels";
         Note(body, "If Android notifications are off, enable them in system settings to receive completion alerts.");
     }
     private void Links(LinearLayout body, View root)
     {
         var list = DetailCard(body, "");
         var share = ValueRow(list, "Share to Inbound", Resource.Drawable.ic_flow_globe, null); share.Text = "Use Share in your browser or another app";
-        var browser = ValueRow(list, "Built-in browser", Resource.Drawable.ic_flow_globe, () => _activity.OpenBrowserFromSettings(root)); browser.Text = "Browse a page and choose its downloads";
+        var browser = ValueRow(list, "Built-in browser", Resource.Drawable.ic_flow_globe, () => _activity.OpenBrowserFromSettings(root), settingsWrite: false); browser.Text = "Browse a page and choose its downloads";
         var clip = ValueRow(list, "Clipboard links", Resource.Drawable.ic_paste, null); clip.Text = "Offer a copied link while Inbound is open";
         Note(body, "Clipboard links are not monitored in the background.");
     }
@@ -269,8 +271,8 @@ internal sealed class HostSettingsScreen : IDisposable
     {
         var list = DetailCard(body, "Selected Host");
         var host = ValueRow(list, _activity.HostName, Resource.Drawable.ic_flow_host, null); host.Text = _activity.Capabilities.IsRemote ? "Downloads saved on the selected Host" : "Downloads saved on this device";
-        var choose = ValueRow(list, "Switch Host", Resource.Drawable.ic_switch_host, () => HostSwitcherSheet.Show(_activity)); choose.Text = "Phone and paired computers";
-        var pair = ValueRow(list, "Pair another Host", Resource.Drawable.ic_add, () => PairingSheet.Show(_activity)); pair.Text = "Enter a Host address and pair";
+        var choose = ValueRow(list, "Switch Host", Resource.Drawable.ic_switch_host, () => HostSwitcherSheet.Show(_activity), settingsWrite: false); choose.Text = "Phone and paired computers";
+        var pair = ValueRow(list, "Pair another Host", Resource.Drawable.ic_add, () => PairingSheet.Show(_activity), settingsWrite: false); pair.Text = "Enter a Host address and pair";
         var scope = Card();
         var scopeText = Label("Queue, schedule and download settings follow the selected Host. Appearance, phone battery and Android notifications stay local.",
             14, Resource.Attribute.colorOnSurfaceVariant);
@@ -438,12 +440,23 @@ internal sealed class HostSettingsScreen : IDisposable
     }
     private void BatterySettings()
     {
-        try { var intent = new Intent(Settings.ActionRequestIgnoreBatteryOptimizations); intent.SetData(Android.Net.Uri.Parse("package:" + _activity.PackageName)); _activity.StartActivity(intent); }
-        catch (ActivityNotFoundException) { try { _activity.StartActivity(new Intent(Settings.ActionIgnoreBatteryOptimizationSettings)); } catch (ActivityNotFoundException) { if (_error is { } error) error.Text = "Battery settings are unavailable on this device."; } }
+        try { _activity.StartActivity(new Intent(Settings.ActionIgnoreBatteryOptimizationSettings)); }
+        catch (ActivityNotFoundException)
+        {
+            try { _activity.StartActivity(new Intent(Settings.ActionApplicationDetailsSettings, Android.Net.Uri.Parse("package:" + _activity.PackageName))); }
+            catch (ActivityNotFoundException) { if (_error is { } error) error.Text = "Battery settings are unavailable on this device."; }
+        }
     }
-    private void NotificationSettings()
+    private void NotificationSettings(bool channel)
     {
-        try { var intent = new Intent(Settings.ActionChannelNotificationSettings); intent.PutExtra(Settings.ExtraAppPackage, _activity.PackageName); intent.PutExtra(Settings.ExtraChannelId, Notifications.FinishedChannel); _activity.StartActivity(intent); }
+        try
+        {
+            Notifications.EnsureChannels(_activity);
+            var intent = new Intent(channel ? Settings.ActionChannelNotificationSettings : Settings.ActionAppNotificationSettings);
+            intent.PutExtra(Settings.ExtraAppPackage, _activity.PackageName);
+            if (channel) intent.PutExtra(Settings.ExtraChannelId, Notifications.FinishedChannel);
+            _activity.StartActivity(intent);
+        }
         catch (ActivityNotFoundException) { if (_error is { } error) error.Text = "Notification settings are unavailable on this device."; }
     }
     public void Dispose()

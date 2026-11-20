@@ -37,8 +37,20 @@ public sealed class NewDownloadModel
     /// <summary>The folder chosen on a server (<see cref="FolderPicker"/>); null keeps the Host's own folder for new downloads.</summary>
     public string? Destination { get; set; }
 
-    /// <summary>Where the download will go: the chosen folder, else the Host's folder for new downloads.</summary>
-    public string SaveTo => Destination ?? _host.DefaultDownloadDirectory;
+    /// <summary>The folder this Host's category rule selects for a known single file.</summary>
+    public string? CategoryDestination
+    {
+        get
+        {
+            var settings = _host.Settings;
+            if (!settings.UseCategoryFolders || Destination is not null || Urls.Count != 1 || FileName.Trim() is not { Length: > 0 } name)
+                return null;
+            return FileCategories.DestinationFor(FileCategories.For(name, settings.CustomCategories), settings.CustomCategories, settings.CategoryFolders);
+        }
+    }
+
+    /// <summary>Where the download will go: the chosen folder, category folder or Host default.</summary>
+    public string SaveTo => Destination ?? CategoryDestination ?? _host.DefaultDownloadDirectory;
 
     /// <summary>The most connections one download may have, from the Host's settings (at least 1).</summary>
     public int MaxConnections => Math.Max(1, _host.Settings.MaxConnectionsPerHost);

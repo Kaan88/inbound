@@ -241,7 +241,7 @@ internal static class InboundBackground
                 if (s.ActiveCount > 0) _pausedAll = false;
                 _holdDone = false;
                 _stopIssued = false;
-                if (_waitingShown) { Notifications.Cancel(app, Notifications.WaitingId); _waitingShown = false; }
+                UpdateWaitingNotification(app, s);
                 if (_pausedShown) { Notifications.Cancel(app, Notifications.PausedId); _pausedShown = false; }
                 if (_keep.Running)
                 {
@@ -291,17 +291,6 @@ internal static class InboundBackground
                         _ = Task.Delay(wait).ContinueWith(_ => Evaluate(), TaskScheduler.Default);
                     }
                 }
-                if (s.ActiveCount == 0)
-                {
-                    if (!_waitingShown || _waitingCount != s.WaitingCount || _waitingWifiBack != _wifiBack)
-                    {
-                        _waitingShown = true;
-                        _waitingCount = s.WaitingCount;
-                        _waitingWifiBack = _wifiBack;
-                        Notifications.Notify(app, Notifications.WaitingId,
-                            _wifiBack ? Notifications.WifiBack(app, s.WaitingCount) : Notifications.Waiting(app, s.WaitingCount));
-                    }
-                }
             }
             else
             {
@@ -311,10 +300,7 @@ internal static class InboundBackground
                 if (!_stopIssued) { _stopIssued = true; _keep.Stop(); }
             }
 
-            if (!s.WaitingForNetwork || s.ActiveCount > 0)
-            {
-                if (_waitingShown) { Notifications.Cancel(app, Notifications.WaitingId); _waitingShown = false; }
-            }
+            UpdateWaitingNotification(app, s);
 
             // Only what Pause all paused counts (owner, S24: "201 downloads paused" for one download).
             var paused = _pausedAll && s.ActiveCount == 0 ? ResumeSet.StillPaused(app, _host) : 0;
@@ -331,6 +317,24 @@ internal static class InboundBackground
                 if (_pausedShown) { Notifications.Cancel(app, Notifications.PausedId); _pausedShown = false; }
             }
         }
+    }
+
+    private static void UpdateWaitingNotification(Context app, ActivitySummary summary)
+    {
+        if (!summary.WaitingForNetwork)
+        {
+            if (_waitingShown) Notifications.Cancel(app, Notifications.WaitingId);
+            _waitingShown = false;
+            return;
+        }
+
+        // Other transfers may still run while eligible downloads are held for Wi-Fi.
+        if (_waitingShown && _waitingCount == summary.WaitingCount && _waitingWifiBack == _wifiBack) return;
+        _waitingShown = true;
+        _waitingCount = summary.WaitingCount;
+        _waitingWifiBack = _wifiBack;
+        Notifications.Notify(app, Notifications.WaitingId,
+            _wifiBack ? Notifications.WifiBack(app, summary.WaitingCount) : Notifications.Waiting(app, summary.WaitingCount));
     }
 
 #if INBOUND_TEST_BUILD

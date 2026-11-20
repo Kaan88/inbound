@@ -9,6 +9,7 @@ using AndroidX.AppCompat.App;
 using DownloadManager.Mobile.Remote;
 using Google.Android.Material.BottomSheet;
 using Google.Android.Material.Dialog;
+using Inbound.App.Screens;
 
 namespace Inbound.App.Hosts;
 
@@ -41,11 +42,7 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
     private readonly Dictionary<string, (TextView Detail, View Row, HostEntry Host, bool Shown)> _rows = new();
     private CancellationTokenSource? _asking;
 
-    public override void OnStart()
-    {
-        base.OnStart();
-        Dialog?.Window?.SetDimAmount(0.56f);
-    }
+    public override Android.App.Dialog OnCreateDialog(Bundle? savedInstanceState) => new AnimatedSheetDialog(RequireActivity(), 0.56f);
 
     public override View? OnCreateView(LayoutInflater inflater, ViewGroup? container, Bundle? savedInstanceState)
     {

@@ -74,11 +74,17 @@ class Smoke:
         return self.adb("shell", *args)
 
     def tree(self):
-        for _ in range(2):
-            result = self.shell("uiautomator", "dump", self.xml_path)
-            if f"dumped to: {self.xml_path}" in result:
-                return ET.fromstring(self.adb("exec-out", "cat", self.xml_path, raw=True))
-        raise RuntimeError("Android did not write a fresh UI hierarchy")
+        last_error = None
+        for _ in range(3):
+            try:
+                result = self.shell("uiautomator", "dump", self.xml_path)
+                if f"dumped to: {self.xml_path}" in result:
+                    return ET.fromstring(self.adb("exec-out", "cat", self.xml_path, raw=True))
+            except (subprocess.CalledProcessError, ET.ParseError) as error:
+                # The hierarchy can be unavailable while a keyboard, activity or dialog is animating.
+                last_error = error
+            time.sleep(.35)
+        raise RuntimeError("Android did not write a fresh UI hierarchy") from last_error
 
     @staticmethod
     def matches(tree, label):

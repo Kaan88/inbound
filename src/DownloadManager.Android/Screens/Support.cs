@@ -224,6 +224,8 @@ internal sealed class SpeedGraphView : View
     private readonly Android.Graphics.Path _path = new();
     private readonly Android.Graphics.Path _area = new();
     private IReadOnlyList<float> _data = Array.Empty<float>();
+    private IReadOnlyList<float> _from = Array.Empty<float>();
+    private long _transitionStart;
 
     public SpeedGraphView(Context c) : base(c)
     {
@@ -237,15 +239,34 @@ internal sealed class SpeedGraphView : View
 
     public void SetData(IReadOnlyList<float> data)
     {
+        if (_data.SequenceEqual(data)) return;
+        long now = Android.OS.SystemClock.UptimeMillis();
+        float amount = BlendAt(now);
+        _from = data.Count >= 2 && _data.Count >= 2 && !Motion.Reduced(Context!)
+            ? Enumerable.Range(0, _data.Count).Select(i => At(i, amount)).ToArray()
+            : Array.Empty<float>();
         _data = data;
+        _transitionStart = now;
         Invalidate();
+    }
+
+    private float BlendAt(long now) => _from.Count == 0 ? 1f
+        : Math.Clamp((float)((now - _transitionStart) / DownloadList.SampleInterval.TotalMilliseconds), 0f, 1f);
+
+    private float At(int index, float amount)
+    {
+        if (amount == 1f) return _data[index];
+        int prior = Math.Clamp(index + _from.Count - _data.Count, 0, _from.Count - 1);
+        return _from[prior] + (_data[index] - _from[prior]) * amount;
     }
 
     protected override void OnDraw(Canvas canvas)
     {
         base.OnDraw(canvas);
         if (_data.Count < 2) return;
-        var max = Math.Max(1f, _data.Max());
+        float amount = BlendAt(Android.OS.SystemClock.UptimeMillis());
+        float max = 1;
+        for (var i = 0; i < _data.Count; i++) max = Math.Max(max, At(i, amount));
         float w = Width, h = Height, pad = _line.StrokeWidth;
         var step = w / (DownloadList.MaxHistory - 1);
         // Grows from the right edge, so the newest sample is always at the edge and the line slides left as it fills.
@@ -255,7 +276,7 @@ internal sealed class SpeedGraphView : View
         for (var i = 0; i < _data.Count; i++)
         {
             var x = x0 + step * i;
-            var y = h - pad - (h - 2 * pad) * (_data[i] / max) * 0.9f;
+            var y = h - pad - (h - 2 * pad) * (At(i, amount) / max) * 0.9f;
             if (i == 0) { _path.MoveTo(x, y); _area.MoveTo(x, h); _area.LineTo(x, y); }
             else { _path.LineTo(x, y); _area.LineTo(x, y); }
         }
@@ -264,5 +285,6 @@ internal sealed class SpeedGraphView : View
         _area.Close();
         canvas.DrawPath(_area, _fill);
         canvas.DrawPath(_path, _line);
+        if (amount < 1f) PostInvalidateOnAnimation();
     }
 }

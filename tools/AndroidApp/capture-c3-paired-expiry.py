@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,7 +57,8 @@ def run(args):
     addr = f'http://127.0.0.1:{proxy.server_port}'
     names = ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','http_proxy','https_proxy','all_proxy','no_proxy')
     prior = {key: os.environ.get(key) for key in names}
-    os.environ.update({key: ('127.0.0.1,localhost' if key.lower() == 'no_proxy' else addr) for key in names})
+    if not args.manual_live_auth:
+        os.environ.update({key: ('127.0.0.1,localhost' if key.lower() == 'no_proxy' else addr) for key in names})
     installed = False
     reverse = None
     request = None
@@ -163,6 +165,32 @@ def run(args):
                     capture('c3-cloud-expired', tree)
                     smoke.tap(card)
                     assert_blank_sign_in(origin)
+                    if args.manual_live_auth:
+                        # Leave the blank masked field for the operator. Do not dump the
+                        # device or capture its screen while a real account is in use.
+                        result_file = smoke.evidence / 'operator-result.txt'
+                        require(not result_file.exists(), 'Operator result existed before handoff')
+                        smoke.log('READY C3 real sign-in: the expired Drive card opened the blank token dialog on the pinned disposable Host.')
+                        smoke.log(f'Pinned authorization executable: {rclone}')
+                        expiry = time.monotonic() + 1200
+                        while not result_file.is_file() and time.monotonic() < expiry:
+                            time.sleep(1)
+                        require(result_file.is_file(), 'Owner sign-in was not confirmed within 20 minutes')
+                        require(result_file.read_text(encoding='utf-8').strip() == 'done', 'Owner stopped the live sign-in check')
+                        proof = smoke.evidence / 'c3-real-sign-in-proof.json'
+                        sanitized = {'expiredCardObserved': True, 'ownerConfirmedSignInAndBrowse': True,
+                                     'providerBrowseSucceeded': None, 'storedProviderListing': False}
+                        proof.write_text(json.dumps(sanitized, indent=2) + '\n', encoding='utf-8')
+                        # The provider browse is intentional. Do not retain its payload,
+                        # names, account identity, token or retry details.
+                        check = paired.fixture_session(owned, timeout=60)
+                        outcome = check('sites.browse', {'id': site_id, 'path': '/', 'limit': 1}).get('payload') or {}
+                        require(outcome.get('ok') is True, 'Live provider browse did not confirm recovery')
+                        require(not any(root.iterdir()), 'The sign-in check unexpectedly wrote a payload')
+                        sanitized['providerBrowseSucceeded'] = True
+                        proof.write_text(json.dumps(sanitized, indent=2) + '\n', encoding='utf-8')
+                        smoke.log('PASS C3: the owner reauthorized the expired Drive location and the paired Host successfully browsed it.')
+                        return
                     smoke.tap(smoke.wait_node('Cancel')[0])
                     _, tree = smoke.wait_content_description(lambda d: d == expired_label, 'expired card after Cancel')
                     capture('c3-cloud-expired-card-cancel', tree)
@@ -209,6 +237,8 @@ def main():
     parser.add_argument('--serial',required=True); parser.add_argument('--apk',required=True)
     parser.add_argument('--server-dll',type=Path,required=True); parser.add_argument('--rclone-zip',type=Path,required=True)
     parser.add_argument('--node',default='node'); parser.add_argument('--evidence',type=Path,required=True)
+    parser.add_argument('--manual-live-auth', action='store_true',
+                        help='Let the owner reauthorize the disposable expired Drive and confirm with operator-result.txt')
     run(parser.parse_args())
 
 if __name__ == '__main__': main()

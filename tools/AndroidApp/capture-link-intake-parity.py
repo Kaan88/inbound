@@ -95,7 +95,22 @@ class Capture:
         module = self.fixture_module
 
         class QuietHandler(module.Handler):
-            pass
+            def handle_request(handler, body):
+                if self.args.verify_b2_type_metadata and handler.path == "/iso-fixture":
+                    target = b'<title>Disc fixture</title><a href="/fixture.iso">Disc image</a>'
+                    mime, disposition = "text/html; charset=utf-8", None
+                elif self.args.verify_b2_type_metadata and handler.path == "/fixture.iso":
+                    target = module.PAYLOAD
+                    mime, disposition = "application/x-iso9660-image", 'attachment; filename="fixture.iso"'
+                else:
+                    super().handle_request(body)
+                    return
+                handler.send_response(200)
+                handler.send_header("Content-Type", mime)
+                handler.send_header("Content-Length", str(len(target)))
+                if disposition: handler.send_header("Content-Disposition", disposition)
+                handler.end_headers()
+                if body: handler.wfile.write(target)
 
         self.fixture = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
         self.port = self.fixture.server_port
@@ -617,6 +632,37 @@ class Capture:
                              HERE / "capture-remote-files-parity.py")
         helper.make_pair(MOCKUPS / "b6-expired-link.png", image,
                          self.evidence / "b6-partial-refresh-sheet-pair.png", "B6")
+        if self.args.verify_b6_empty_dismiss:
+            with self.fixture_module.PARTIAL_STATE["lock"]:
+                before_ranges = list(self.fixture_module.PARTIAL_STATE["ranges"])
+            tap("Paste a new address")
+            tap("Refresh", "refresh_submit")
+            _, empty = self.smoke.wait_node("Enter a new address first.", resource="refresh_error")
+            (self.evidence / "b6-empty-input-capture.png").write_bytes(
+                self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(empty).write(self.evidence / "b6-empty-input-ui.xml",
+                                        encoding="utf-8", xml_declaration=True)
+            # Dismiss the sheet and verify the original Details progress and
+            # absence of replacement requests.
+            self.shell("input", "keyevent", "4")
+            if any(n.get("resource-id", "").endswith(":id/refresh_title")
+                   for n in self.smoke.tree().iter("node")):
+                self.shell("input", "keyevent", "4")
+            button, returned = self.smoke.wait_node("Refresh link", resource="hero_main", timeout=30)
+            require(not any(n.get("resource-id", "").endswith(":id/refresh_title")
+                            for n in returned.iter("node")), "B6 sheet did not dismiss")
+            require(self.details_percent(returned) == before_refresh,
+                    "Dismissing B6 changed retained progress")
+            with self.fixture_module.PARTIAL_STATE["lock"]:
+                require(self.fixture_module.PARTIAL_STATE["ranges"] == before_ranges,
+                        "Empty input or dismissal caused a fixture request")
+            (self.evidence / "b6-dismiss-return-capture.png").write_bytes(
+                self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(returned).write(self.evidence / "b6-dismiss-return-ui.xml",
+                                           encoding="utf-8", xml_declaration=True)
+            self.smoke.tap(button)
+            self.smoke.wait_node("This link has expired", resource="refresh_title", timeout=30)
+            self.log("PASS B6: empty address rejected; dismissal retained progress with no requests; reopened same Details sheet.")
         if self.args.capture_b6_browser:
             self.capture_browser_replacement(name, before_refresh)
         else:
@@ -812,6 +858,15 @@ class Capture:
                 self.log(f"B3 cleanup warning; preserving original failure and unexpected file: {exc}")
 
     def capture_fixture_catches(self):
+        def detail_with(*phrases):
+            for _ in range(12):
+                tree = self.smoke.tree()
+                if any(n.get("resource-id", "").endswith(":id/caught_detail") and
+                       all(phrase in n.get("text", "") for phrase in phrases) for n in tree.iter("node")):
+                    return
+                time.sleep(.25)
+            raise RuntimeError("Caught details did not show " + ", ".join(phrases))
+
         def tap_web_link(label):
             for _ in range(12):
                 tree = self.smoke.tree()
@@ -825,10 +880,19 @@ class Capture:
 
         tap_web_link("Archive")
         self.smoke.wait_node("a.zip", resource="caught_name")
+        if self.args.verify_b2_type_metadata:
+            detail_with("Supports byte ranges")
         self.capture("b2", "b2-caught.png", "Download with Inbound", prompt=False)
         more, _ = self.smoke.wait_node("More options", resource="caught_more")
         self.smoke.tap(more)
         self.smoke.wait_node("Connections", resource="caught_connections")
+        if self.args.verify_b2_type_metadata:
+            spinner, _ = self.smoke.wait_node("Connections", resource="caught_connections")
+            self.smoke.tap(spinner)
+            one, _ = self.smoke.wait_node("1")
+            self.smoke.tap(one)
+            detail_with("Supports byte ranges", "1 connection")
+            self.capture("b2-range-spinner", "b2-caught.png", "Download with Inbound", prompt=False)
         fewer, _ = self.smoke.wait_node("Fewer options", resource="caught_more")
         self.smoke.tap(fewer)
         _, tree = self.smoke.wait_node("More options", resource="caught_more")
@@ -839,6 +903,16 @@ class Capture:
             self.verify_phone_folder(tap_web_link)
         else:
             self.smoke.shell("input", "keyevent", "4")
+        if self.args.verify_b2_type_metadata:
+            self.navigate_browser("/iso-fixture")
+            tap_web_link("Disc image")
+            _, tree = self.smoke.wait_node("fixture.iso", resource="caught_name")
+            require(not any("Supports byte ranges" in n.get("text", "") for n in tree.iter("node")),
+                    "Disc fixture with no Accept-Ranges header claimed range support")
+            self.capture("b2-unknown-range-iso", "b2-caught.png", "Download with Inbound", prompt=False)
+            self.shell("input", "keyevent", "4")
+            self.log("PASS B2: archive range metadata survived the spinner; ISO did not claim range support. No download was submitted.")
+            return
         tap_web_link("Sign in")
         # This is only the fixture's synthetic loopback cookie.
         tap_web_link("Authenticated archive")
@@ -923,15 +997,22 @@ def main():
     parser.add_argument("--capture-archives", action="store_true", help="Verify six real archives and their selected byte total")
     parser.add_argument("--verify-b3-completion", action="store_true", help="Complete the isolated authenticated B3 fixture report and verify its hash")
     parser.add_argument("--capture-caught", action="store_true", help="Also capture B2 and B3 against the loopback fixture")
+    parser.add_argument("--verify-b2-type-metadata", action="store_true", help="Capture ZIP/ISO icons and advertised/unknown byte ranges")
     parser.add_argument("--capture-b6", action="store_true",
                         help="Opt in to the loopback expired-link → refresh → hash/cleanup B6 flow")
     parser.add_argument("--capture-b6-partial", action="store_true",
                         help="Opt in to guided B6 nonzero-byte pause/410/refresh/Range/hash/cleanup")
     parser.add_argument("--capture-b6-browser", action="store_true",
                         help="Use the actual browser confirmation and Cancel in the partial B6 lane")
+    parser.add_argument("--verify-b6-empty-dismiss", action="store_true",
+                        help="Check empty input and dismissal before partial B6 replacement")
     parser.add_argument("--verify-details-stop", action="store_true",
                         help="In the partial B6 flow verify active Details Stop retains progress and hides restart from zero")
     args = parser.parse_args()
+    if args.verify_b2_type_metadata and not (args.unattended and args.capture_caught and not (args.verify_phone_folder or args.verify_b3_completion)):
+        parser.error("--verify-b2-type-metadata requires unattended capture-caught without B3 completion or folder submissions")
+    if args.verify_b6_empty_dismiss and not (args.unattended and args.capture_b6_partial):
+        parser.error("--verify-b6-empty-dismiss requires --unattended --capture-b6-partial")
     if args.b1_action != "cancel" and not args.b1_only:
         parser.error("--b1-action open-page/add-file requires --b1-only")
     if args.verify_b3_completion and (not args.unattended or not args.capture_caught or args.b1_only
@@ -963,6 +1044,8 @@ def main():
         "b1-open-page": "Capture the exact owned page in the probe browser.",
         "b1-add-file": "Capture the prefilled Archive form before cancelling.",
         "b2": "Open the fixture in Inbound's browser and tap Archive. Capture Download with Inbound before submitting; verify one job/hash separately.",
+        "b2-range-spinner": "Capture advertised byte ranges after changing the connection count.",
+        "b2-unknown-range-iso": "Capture the disc-image icon with unconfirmed byte-range support.",
         "b3": "Select This phone. In Inbound's browser, visit the fixture /signin then tap Authenticated archive. Capture the cookie-use notice before submitting.",
         "b4": "On the fixture page open Links on page; capture the eight-link list/filter state.",
         "b4-selected": "Select only Document and Image; capture selected count/action without submitting.",
