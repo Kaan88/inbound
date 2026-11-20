@@ -32,6 +32,12 @@
   Switching to B showed its save banner and the exact queued file. The
   disposable Host reported zero received bytes. The fixture saw zero HEAD
   or GET requests and the output stayed absent through cleanup.
+- Astra approved B2's timing controls and selected-Host network status in
+  `b2-timing-network-unique-20261120-075214`. Start now and Later
+  selected exclusively, all three labels fit with 48 dp targets, and the
+  phone showed Any network with the rule off. The paired headless Host
+  omitted that control in both sheet sizes. Both Hosts stayed at zero jobs.
+  The checkmark sits farther from its label than in the reference.
 - Astra approved B4 submission in `b4-real-submission-20261120-061608`.
   The actual page selected two of four links and Downloads showed exactly
   two finished jobs. The two output hashes matched distinct payloads, and
