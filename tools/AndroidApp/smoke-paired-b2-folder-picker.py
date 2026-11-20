@@ -83,7 +83,7 @@ class PairedB2:
             raise
 
     def preflight(self):
-        a5 = getattr(self.args, "verify_a5_folder", False) or getattr(self.args, "verify_a5_collision", False) or getattr(self.args, "verify_a5_advanced", False)
+        a5 = getattr(self.args, "verify_a5_folder", False) or getattr(self.args, "verify_a5_collision", False) or getattr(self.args, "verify_a5_advanced", False) or getattr(self.args, "verify_a5_multi_sha", False)
         self.smoke.preflight(include_remote_files_payload=not a5)
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD,
                 "Refusing anything other than inbound33")
@@ -427,6 +427,81 @@ class PairedB2:
         # The owned Server and its entire private temporary root are disposed by
         # running_fixture only after the Host stops; no shared output is removed.
 
+    def verify_a5_multi_sha(self, paired, fixture):
+        """Exercise the checksum guard in the actual A5 form without admitting jobs."""
+        request = paired.fixture_session(fixture)
+        root = Path(fixture["download_root"]).resolve(strict=True)
+
+        def empty():
+            reply = request("jobs.snapshot", {})
+            require(reply.get("type") == "jobs.snapshot" and (reply.get("payload") or {}).get("jobs") == [],
+                    "A5 validation must leave the Host empty")
+            require(set(root.iterdir()) == set(self.child_paths)
+                    and all(p.is_dir() and not p.is_symlink() and not any(p.iterdir()) for p in self.child_paths),
+                    "A5 validation changed the owned destination inventory")
+        def visible(resource):
+            for _ in range(7):
+                tree = self.tree()
+                nodes = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/" + resource)]
+                if len(nodes) == 1:
+                    return nodes[0]
+                scroll = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/new_scroll")]
+                require(len(scroll) == 1, "A5 scroll region unavailable")
+                m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", scroll[0].get("bounds", ""))
+                require(m is not None, "A5 scroll bounds unavailable")
+                l,t,r,b = map(int, m.groups()); x=(l+r)//2
+                start, end = ((t+(b-t)//3, t+(b-t)*4//5) if resource == "address" else (t+(b-t)*4//5, t+(b-t)//3))
+                self.shell("input", "swipe", str(x), str(start), str(x), str(end), "350")
+            raise RuntimeError("A5 field unavailable: " + resource)
+
+        def field(resource, value):
+            node = visible(resource)
+            old = node.get("text", "")
+            self.smoke.tap(node)
+            if old:
+                self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+                self.shell("input", "keyevent", *(["KEYCODE_DEL"] * len(old)))
+            if value: self.shell("input", "text", value)
+            self.shell("input", "keyevent", "KEYCODE_BACK")
+        def save(name):
+            tree = self.tree()
+            (self.evidence / (name + ".png")).write_bytes(self.smoke.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
+        empty()
+        self.tap("Add", "fab"); self.tap("Link or several links"); self.node("New download")
+        field("address", f"http://127.0.0.1:{self.port}/files/a.zip")
+        self.node(FILENAME, "file_name", timeout=35)
+        self.smoke.tap(visible("more_header"))
+        checksum = "a" * 64
+        field("sha", checksum)
+        field("address", f"http://127.0.0.1:{self.port}/files/f[01-02].zip")
+        self.node("Use one link or clear the SHA-256 checksum.", "many_note")
+        require(self.node("Download", "new_download_btn").get("enabled") == "false", "Multi-link SHA did not disable Download")
+        save("a5-multi-sha-blocked")
+        empty()
+        # Collapse More options; the many-link note must still explain the blocker.
+        self.smoke.tap(visible("more_header"))
+        self.node("Use one link or clear the SHA-256 checksum.", "many_note")
+        collapsed = self.tree()
+        require(not any(n.get("resource-id", "").endswith((":id/more_body", ":id/sha"))
+                        for n in collapsed.iter("node")), "More options did not collapse")
+        require(self.node("Download", "new_download_btn").get("enabled") == "false",
+                "Collapsing More options enabled a multi-link SHA submission")
+        save("a5-multi-sha-collapsed")
+        field("address", f"http://127.0.0.1:{self.port}/files/a.zip")
+        self.node(FILENAME, "file_name", timeout=35)
+        require(not any(n.get("text") == "Use one link or clear the SHA-256 checksum." for n in self.tree().iter("node")),
+                "Single-link transition did not clear the blocker")
+        self.smoke.tap(visible("more_header"))
+        sha = visible("sha")
+        require(sha.get("text") == checksum, "Returning to one link did not preserve the checksum")
+        require(self.node("Download", "new_download_btn").get("enabled") == "true",
+                "Returning to one link did not re-enable Download")
+        save("a5-multi-sha-recovered")
+        self.tap("Cancel", "new_cancel")
+        empty()
+        self.smoke.log("PASS A5: multi-link checksum rejected with no job or output; one-link return cleared the blocker.")
+
     def verify_a5_advanced(self, paired, fixture):
         """Two owned paired Host jobs with real referrer and SHA verification."""
         from urllib.parse import urlsplit
@@ -564,6 +639,9 @@ class PairedB2:
                 self.smoke.started = True
                 self.tap("Start downloading", "fr_start")
                 self.pair(fixture)
+                if getattr(self.args, "verify_a5_multi_sha", False):
+                    self.verify_a5_multi_sha(paired, fixture)
+                    return self.evidence
                 if getattr(self.args, "verify_a5_advanced", False):
                     self.verify_a5_advanced(paired, fixture)
                     return self.evidence
@@ -658,12 +736,15 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated probe APK")
     parser.add_argument("--server-dll", required=True, help="Explicit built DownloadManager.Server.dll")
     parser.add_argument("--dotnet", default="dotnet")
+    parser.add_argument("--verify-a5-multi-sha", action="store_true", help="Check the multi-link SHA guard without jobs")
     parser.add_argument("--verify-a5-advanced", action="store_true", help="Verify synthetic referrer, description and SHA outcomes")
     parser.add_argument("--verify-a5-collision", action="store_true", help="Exercise Rename, Overwrite and Fail on owned paired Host files")
     parser.add_argument("--verify-a5-folder", action="store_true",
                         help="Verify the paired New Download picker selection and Cancel without submitting")
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
+    if args.verify_a5_multi_sha and (args.verify_a5_advanced or args.verify_a5_collision or args.verify_a5_folder):
+        parser.error("--verify-a5-multi-sha is a standalone lane")
     if args.verify_a5_advanced and (args.verify_a5_collision or args.verify_a5_folder):
         parser.error("--verify-a5-advanced is a standalone lane")
     if args.verify_a5_collision and args.verify_a5_folder:

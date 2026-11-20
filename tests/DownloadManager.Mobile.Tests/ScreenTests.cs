@@ -490,6 +490,31 @@ public sealed class NewDownloadTests
         Assert.True(m.CanDownload);
     }
 
+    [Theory]
+    [InlineData("https://x.test/file[01-02].zip")]
+    [InlineData("https://x.test/a.zip https://x.test/b.zip")]
+    public async Task A_checksum_with_multiple_links_is_never_discarded(string addresses)
+    {
+        var (host, m) = Setup();
+        m.Address = "https://x.test/a.zip";
+        m.Sha256 = new string('a', 64);
+        m.Address = addresses;
+        Assert.Equal("Use one link or clear the SHA-256 checksum.", m.ChecksumError);
+        Assert.False(m.CanDownload);
+        Assert.Throws<InvalidOperationException>(() => m.BuildRequests());
+        var refused = await m.SubmitAsync();
+        Assert.Equal(m.ChecksumError, refused.Error);
+        Assert.Empty(host.Sent);
+        m.Address = "https://x.test/a.zip";
+        Assert.Null(m.ChecksumError);
+        Assert.Equal(new string('a', 64), Assert.Single(m.BuildRequests()).ExpectedSha256);
+        m.Address = addresses;
+        m.Sha256 = "";
+        Assert.Null(m.ChecksumError);
+        Assert.True(m.CanDownload);
+        Assert.All(m.BuildRequests(), r => Assert.Null(r.ExpectedSha256));
+    }
+
     [Fact]
     public async Task Submit_adds_each_address_and_stops_at_a_refusal()
     {

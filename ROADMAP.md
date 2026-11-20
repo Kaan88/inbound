@@ -51,7 +51,9 @@ can approve departures from the designs.
   file outcomes in the selected disposable folder. The inline refusal
   kept both actions visible and cleared when the policy changed.
   A5 paired single-link referrer, description and checksum validation
-  passed alongside real checksum success and mismatch.
+  passed alongside real checksum success and mismatch. A checksum on
+  a range gets an explanation and stays in the draft if the user returns
+  to one link.
   C7 Light, Dark and Dynamic colour choices survived Back and reopen.
   The navigation highlight matched all four selected tabs.
   The acceptance matrix tracks the remaining screen variants.

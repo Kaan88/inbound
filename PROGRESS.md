@@ -37,7 +37,10 @@
   expected referrer on each transfer. The matching checksum completed
   with the fixture hash. The mismatch showed a checksum failure and
   retained only its hash-verified partial until fixture cleanup.
-  Multiple-link checksum behavior remains open.
+  Astra approved the multiple-link checksum guard in `a5-paired-multi-sha-20261120-113037`.
+  A numbered range with an entered checksum disabled Download and gave
+  guidance with More options open or closed. Returning to one link kept
+  the checksum and re-enabled Download. Cancel left zero jobs or files.
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals

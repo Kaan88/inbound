@@ -25,6 +25,7 @@ public sealed class NewDownloadModel
     private int _checkVersion;
     private string _address = "";
     private string _fileName = "";
+    private string? _sha256;
     private bool _fileNameEdited;
 
     public NewDownloadModel(DownloadsModel host, bool requireQueueIdentity = false)
@@ -48,7 +49,11 @@ public sealed class NewDownloadModel
 
     public string? Description { get; set; }
 
-    public string? Sha256 { get; set; }
+    public string? Sha256
+    {
+        get { lock (_gate) return _sha256; }
+        set { lock (_gate) _sha256 = value; }
+    }
 
     public ConflictChoice IfExists { get; set; } = ConflictChoice.Rename;
 
@@ -150,7 +155,22 @@ public sealed class NewDownloadModel
     public bool CanDownload => Urls.Count > 0 && AddressError is null && Check != CheckState.Checking && Check != CheckState.Refused
         && ChecksumError is null && QueueError is null;
 
-    public string? ChecksumError => string.IsNullOrWhiteSpace(Sha256) || IsSha256(Sha256.Trim()) ? null : "A SHA-256 checksum is 64 hexadecimal characters.";
+    public string? ChecksumError
+    {
+        get { lock (_gate) return ChecksumErrorFor(Urls.Count, _sha256); }
+    }
+
+    private static string? ChecksumErrorFor(int count, string? sha)
+    {
+        if (string.IsNullOrWhiteSpace(sha)) return null;
+        if (count > 1) return "Use one link or clear the SHA-256 checksum.";
+        return IsSha256(sha.Trim()) ? null : "A SHA-256 checksum is 64 hexadecimal characters.";
+    }
+
+    private (IReadOnlyList<string> Urls, string? Sha) SnapshotChecksumInputs()
+    {
+        lock (_gate) return (Urls, _sha256);
+    }
 
     private static bool IsSha256(string s) => s.Length == 64 && s.All(Uri.IsHexDigit);
 
@@ -228,6 +248,13 @@ public sealed class NewDownloadModel
 
     public IReadOnlyList<AddJobRequest> BuildRequests()
     {
+        var (urls, sha) = SnapshotChecksumInputs();
+        if (ChecksumErrorFor(urls.Count, sha) is { } error) throw new InvalidOperationException(error);
+        return BuildRequests(urls, sha);
+    }
+
+    private IReadOnlyList<AddJobRequest> BuildRequests(IReadOnlyList<string> urls, string? sha)
+    {
         var list = new List<AddJobRequest>();
         string fileName;
         var selectedQueue = QueueId;
@@ -235,12 +262,12 @@ public sealed class NewDownloadModel
         var resolvedQueue = selectedQueue ?? _host.Settings.DefaultQueueId;
         var startMode = StartLater ? StartModes.Later : WaitForQueue ? StartModes.Queue : StartModes.StartNow;
         lock (_gate) fileName = _fileName;
-        foreach (var u in Urls)
+        foreach (var u in urls)
             list.Add(new AddJobRequest
             {
                 Url = u,
                 DestinationDirectory = string.IsNullOrWhiteSpace(Destination) ? null : Destination,
-                FileName = Urls.Count == 1 && !string.IsNullOrWhiteSpace(fileName) ? fileName.Trim() : null,
+                FileName = urls.Count == 1 && !string.IsNullOrWhiteSpace(fileName) ? fileName.Trim() : null,
                 StartMode = startMode,
                 QueueId = resolvedQueue,
                 RequireQueue = selectedQueue.HasValue,
@@ -248,7 +275,7 @@ public sealed class NewDownloadModel
                 Connections = Connections,
                 Referrer = string.IsNullOrWhiteSpace(Referrer) ? null : Referrer.Trim(),
                 Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim(),
-                ExpectedSha256 = Urls.Count == 1 && !string.IsNullOrWhiteSpace(Sha256) ? Sha256.Trim() : null,
+                ExpectedSha256 = urls.Count == 1 && !string.IsNullOrWhiteSpace(sha) ? sha.Trim() : null,
                 ConflictPolicy = IfExists switch { ConflictChoice.Overwrite => "overwrite", ConflictChoice.Fail => "fail", _ => "rename" },
             });
         return list;
@@ -259,7 +286,9 @@ public sealed class NewDownloadModel
     {
         int added = 0, duplicates = 0;
         if (QueueError is { } initialError) return new SubmitResult(0, 0, initialError);
-        var requests = BuildRequests();
+        var (urls, sha) = SnapshotChecksumInputs();
+        if (ChecksumErrorFor(urls.Count, sha) is { } checksumError) return new SubmitResult(0, 0, checksumError);
+        var requests = BuildRequests(urls, sha);
         foreach (var request in requests)
         {
             if (ValidateQueue(request.RequireQueue ? request.QueueId : null, request.ExpectedQueueGeneration) is { } queueError) return new SubmitResult(added, duplicates, queueError);

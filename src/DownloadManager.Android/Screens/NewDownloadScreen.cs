@@ -113,7 +113,7 @@ internal sealed class NewDownloadScreen
         };
         _referrer.TextChanged += (_, _) => _model.Referrer = _referrer.Text;
         _description.TextChanged += (_, _) => _model.Description = _description.Text;
-        _sha.TextChanged += (_, _) => { _model.Sha256 = _sha.Text; _shaLayout.Error = _model.ChecksumError; UpdateButton(); };
+        _sha.TextChanged += (_, _) => { _model.Sha256 = _sha.Text; RenderChecksum(); UpdateButton(); };
         Root.FindViewById<View>(Resource.Id.more_header)!.Click += (_, _) => ToggleMore();
         Root.FindViewById<View>(Resource.Id.new_close)!.Click += (_, _) => _activity.CloseRowPage(Root);
         Root.FindViewById<View>(Resource.Id.new_cancel)!.Click += (_, _) => _activity.CloseRowPage(Root);
@@ -379,12 +379,7 @@ internal sealed class NewDownloadScreen
         _addressLayout.Error = _model.AddressError;
         if (_pendingCheck is not null) { _ui.RemoveCallbacks(_pendingCheck); _pendingCheck = null; }
         ShowName(); // a name found for the previous address goes with it (finding 9)
-        if (_model.IsMany)
-        {
-            _manyNote.Visibility = ViewStates.Visible;
-            ((TextView)_manyNote).Text = $"{_model.Urls.Count} links will be added";
-        }
-        else _manyNote.Visibility = ViewStates.Gone;
+        RenderChecksum();
         _nameLayout.Visibility = _model.ShowFileName || _model.Urls.Count == 0 ? ViewStates.Visible : ViewStates.Gone;
         if (_model.Urls.Count == 1)
         {
@@ -395,6 +390,15 @@ internal sealed class NewDownloadScreen
 
         RenderCheck();
         UpdateButton();
+    }
+
+    private void RenderChecksum()
+    {
+        var error = _model.ChecksumError;
+        _shaLayout.Error = error;
+        _manyNote.Visibility = _model.IsMany ? ViewStates.Visible : ViewStates.Gone;
+        if (_model.IsMany)
+            ((TextView)_manyNote).Text = error ?? $"{_model.Urls.Count} links will be added";
     }
 
     private void RunCheck()
