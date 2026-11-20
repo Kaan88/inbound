@@ -30,7 +30,11 @@
   `a7-owned-record-actions-20261120-054749`. Open returned to Downloads
   and Pause all left the sole job paused with 2,097,152 bytes unchanged
   for four seconds. The isolated app and mapping were removed. The owned
-  incomplete fixture was retained. Finished and waiting notices remain open.
+  incomplete fixture was retained. In `a7-finished-proof-20261120-061054`,
+  Astra approved a real background completion with the exact 156-byte PNG
+  hash and confirmed that the notification's Open action displayed the
+  expected colour in Photos. The hash-matched output was removed after
+  uninstall. The network-wait notice remains open.
 - B3 completed the protected fixture report after local consent and matched
   its SHA-256 in `b3-real-auth-20261120-053929`. The exact output was
   removed after stopping its writer. Paired-Host consent remains open.
