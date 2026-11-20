@@ -22,6 +22,11 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   `b1-native-share-final-20261120-060519`. Chrome shared the exact
   fixture Archive link to Inbound Probe. Cancel left the Downloads count
   at zero and created no new fixture-named file.
+- Astra approved B4 submission in `b4-real-submission-20261120-061608`.
+  The actual page selected two of four links and Downloads showed exactly
+  two finished jobs. The two output hashes matched distinct payloads, and
+  neither unselected file was requested. Cleanup removed the two exact
+  hash-matched outputs after the probe was uninstalled.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
