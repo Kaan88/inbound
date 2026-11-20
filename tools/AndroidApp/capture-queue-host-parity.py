@@ -470,6 +470,83 @@ class Capture:
                 "The saved Host schedule did not match the reopened editor")
         return expected
 
+    def verify_c2_no_days(self):
+        """Reject an empty day draft, prove saved state, then recover and save."""
+        weekdays = ("mon", "tue", "wed", "thu", "fri")
+        all_days = (*weekdays, "sat", "sun")
+
+        def day_states(expected):
+            tree = self.smoke.tree()
+            self._unique_resource(tree, "queue_editor_title")
+            for day in all_days:
+                node = self._unique_resource(tree, "queue_editor_day_" + day)
+                require(node.get("enabled") == "true" and node.get("checked") ==
+                        ("true" if day in expected else "false"), "Unexpected day state: " + day)
+            return tree
+
+        def clear_and_reject():
+            day_states(weekdays)
+            for day in weekdays:
+                self._tap_resource("queue_editor_day_" + day)
+            day_states(())
+            self._tap_resource("queue_editor_save")
+            self.smoke.wait_node("Choose at least one day for Weekdays.")
+            tree = day_states(())
+            require(sum(n.get("text") == "Choose at least one day for Weekdays." for n in tree.iter("node")) == 1,
+                    "Expected exact no-days validation in the open editor")
+
+        def reopen_night(days):
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline:
+                tree = self.smoke.tree()
+                nodes = list(tree.iter("node"))
+                if (self._nodes(tree, "queue_editor_title")
+                        or any(node.get("text") == "Discard changes?" for node in nodes)):
+                    time.sleep(.35)
+                    continue
+                cards = [node for node in nodes if node.get("content-desc", "").startswith("Night, ")
+                         and f". Off: {days} 01:00 to 07:00" in node.get("content-desc", "")
+                         and ". 0 files. Double tap to edit." in node.get("content-desc", "")
+                         and node.get("enabled") == "true" and node.get("clickable") == "true"]
+                if len(cards) == 1:
+                    self.smoke.tap(cards[0])
+                    self.smoke.wait_node("Night queue", resource="queue_editor_title")
+                    return
+                time.sleep(.35)
+            raise RuntimeError("The queue editor did not close to the exact saved Night schedule")
+
+        clear_and_reject()
+        self.capture_checkpoint("c2-no-days-error", "c2-schedule.png", "Choose at least one day for Weekdays.")
+        # Discard and reopen demonstrates the rejected draft never persisted.
+        self._tap_resource("queue_editor_back")
+        self.smoke.wait_node("Discard changes?")
+        self._tap_exact_text("Discard")
+        reopen_night("Mon, Tue, Wed, Thu, Fri")
+        day_states(weekdays)
+        self._open_schedule_list()
+        toggle, tree = self.smoke.wait_content_description(lambda d: d == "Enable Weekdays", "saved Weekdays after invalid save")
+        require(toggle.get("checked") == "false" and
+                sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                "Rejected draft changed the saved schedule")
+        self._tap_exact_text("Done")
+        clear_and_reject()
+        self._tap_resource("queue_editor_day_mon")
+        day_states(("mon",))
+        self._tap_resource("queue_editor_save")
+        reopen_night("Mon")
+        day_states(("mon",))
+        for prefix, value in (("Start time", "01:00"), ("Stop time", "07:00")):
+            require(self._unique_description_prefix(self.smoke.tree(), prefix).get("content-desc") == f"{prefix}, {value}",
+                    "Saved schedule time changed")
+        self._open_schedule_list()
+        toggle, tree = self.smoke.wait_content_description(lambda d: d == "Enable Weekdays", "recovered Weekdays")
+        require(toggle.get("checked") == "false" and
+                sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                "Recovered schedule missing or unexpectedly enabled")
+        self._tap_exact_text("Done")
+        self.capture_checkpoint("c2-no-days-recovered", "c2-schedule.png", "Night queue")
+        self.log("PASS C2: no-days rejected, saved schedule preserved, and Monday recovery saved and reopened.")
+
     def verify_schedule_delete_cancel(self):
         """On the saved fixture schedule, cancel deletion and verify persisted values."""
         self._open_schedule_list()
@@ -689,6 +766,8 @@ class Capture:
                 self.log("UNVERIFIED in unattended local-host mode: paired C6 and both C5 switcher states.")
             for key, reference, anchor in checkpoints:
                 self.capture_checkpoint(key, reference, anchor)
+            if self.args.unattended_configured_c2 and self.args.verify_c2_no_days:
+                self.verify_c2_no_days()
             if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_cancel:
                 self.verify_schedule_delete_cancel()
             if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_confirm:
@@ -1683,6 +1762,7 @@ def main():
                         help="With --unattended-c1-workload prove a real five-minute Night window and timed stop")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
+    parser.add_argument("--verify-c2-no-days", action="store_true", help="Reject an empty day draft, then recover and save")
     parser.add_argument("--verify-schedule-delete-confirm", action="store_true",
                         help="With --unattended-configured-c2 prove draft discard and saved schedule deletion")
     parser.add_argument("--verify-schedule-delete-cancel", action="store_true",
@@ -1711,6 +1791,8 @@ def main():
         parser.error("remote Pause verification requires --mixed-hosts")
     if sum((args.verify_remote_touch_pause, args.verify_remote_keyboard_pause, args.verify_remote_layout)) > 1:
         parser.error("run remote keyboard Pause, touch Pause and layout verification separately")
+    if args.verify_c2_no_days and (not args.unattended_configured_c2 or args.verify_schedule_delete_cancel or args.verify_schedule_delete_confirm):
+        parser.error("--verify-c2-no-days requires --unattended-configured-c2 and excludes delete checks")
     if args.verify_schedule_delete_confirm and not args.unattended_configured_c2:
         parser.error("--verify-schedule-delete-confirm requires --unattended-configured-c2")
     if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:

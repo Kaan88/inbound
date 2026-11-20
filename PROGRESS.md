@@ -72,6 +72,11 @@
   one disabled Monday to Friday 01:00 to 07:00 schedule on the paired Main
   queue. The draft left its Host snapshot intact before Save. The phone's
   Main remained unscheduled, and the disposable Host had zero jobs or files.
+- Astra approved C2's missing-days validation in
+  `c2-no-days-validation-20261120-084341`. Save with no selected days
+  showed the specific error. Discard retained the original weekdays.
+  Selecting Monday allowed Save, and reopening showed Monday only,
+  the original 01:00 to 07:00 times and the disabled switch.
 - Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
   The action closed the selected active fixture's connection. Its fixture
   count held at 2,899,968 bytes for six seconds while the unselected
