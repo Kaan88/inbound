@@ -1,7 +1,7 @@
 """UI-only paired Remote Files download proof, called by an owned fixture runner.
 
 run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
-    capabilities, get_count) -> dict
+    capabilities, get_count, verify_refresh=False, get_listing_count=None) -> dict
 
 `smoke` is the existing smoke-remote-files-ui.Smoke on a fresh probe with the
 explicit TLS-paired Host already selected. `get_count(name)` must return the
@@ -25,7 +25,7 @@ def require(ok, message):
 
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
-        capabilities, get_count):
+        capabilities, get_count, verify_refresh=False, get_listing_count=None):
     """Use the actual paired-Host UI through one confirmed safe download request."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -130,6 +130,55 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
               and n.get("enabled") == "true" and n.get("clickable") == "true"]
     require(len(action) == 1, "Expected the enabled targeted Host download action")
     save_state("c4-paired-selection", tree)
+    refresh_proof = None
+    if verify_refresh:
+        require(callable(get_listing_count), "Refresh proof requires a scoped listing counter")
+        before_listing = get_listing_count()
+        require(before_listing > 0 and get_count(FILE) == 0
+                and not output.exists() and not output.is_symlink(),
+                "Refresh preconditions were not met")
+        tap_description(lambda d: d == "More options", "folder options")
+        refresh, menu = smoke.wait_node("Refresh folder", resource="title")
+        menu_lists = [node for node in menu.iter("node") if node.get("class") == "android.widget.ListView"
+                      and any(item is refresh for item in node.iter("node"))
+                      and any(item.get("text") == "Transfers" for item in node.iter("node"))]
+        require(len(menu_lists) == 1 and refresh.get("class") == "android.widget.TextView"
+                and refresh.get("enabled") == "true", "Expected the enabled native Refresh folder menu label")
+        save_state("c4-paired-refresh-menu", menu)
+        # PopupMenu exposes an enabled title but keeps click handling on its ListView rows.
+        smoke.tap(refresh)
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline:
+            tree = smoke.tree()
+            nodes = list(tree.iter("node"))
+            texts = [n.get("text", "") for n in nodes]
+            descriptions = [n.get("content-desc", "") for n in nodes]
+            actions = [n for n in nodes if n.get("text") == "To " + host_name]
+            if (get_listing_count() > before_listing and "2026" in texts
+                    and sum(d.startswith("Select " + FILE + ", ") for d in descriptions) == 1
+                    and not any(d.startswith("Selected ") for d in descriptions)
+                    and any(t.startswith("0 files \u00b7 ") for t in texts)
+                    and len(actions) == 1 and actions[0].get("enabled") == "false"):
+                break
+            time.sleep(.3)
+        else:
+            raise RuntimeError("Refresh did not reload the fixture folder and clear selection")
+        require(get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Refresh requested the payload or created Host output")
+        save_state("c4-paired-refresh-cleared", tree)
+        tap_description(lambda d: d.startswith("Select " + FILE + ", "), "fixture file after refresh")
+        _, tree = smoke.wait_content_description(lambda d: d.startswith("Selected " + FILE + ", "),
+                                                 "selected fixture file after refresh")
+        require(any(n.get("text") == "To " + destination_text for n in tree.iter("node")),
+                "Refresh changed the exact Host destination")
+        require(sum(n.get("content-desc", "").startswith("Selected ") for n in tree.iter("node")) == 1,
+                "Reselecting after refresh did not leave exactly one file selected")
+        action = [n for n in tree.iter("node") if n.get("text") == "To " + host_name
+                  and n.get("enabled") == "true" and n.get("clickable") == "true"]
+        require(len(action) == 1, "Expected the refreshed enabled Host download action")
+        refresh_proof = {"folder": "media/recordings/2026", "listing_before": before_listing,
+                         "listing_after": get_listing_count(), "payload_gets_before_download": get_count(FILE)}
+        smoke.log("PASS C4 refresh: exact folder re-listed, selection cleared, no payload GET or output.")
     before = get_count(FILE)
     require(before == 0 and not output.exists() and not output.is_symlink(), "Fixture payload was requested or destination appeared before confirmation")
     smoke.tap(action[0])
@@ -156,4 +205,7 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
     tap("Download")
     _, tree = smoke.wait_node("Transfers", timeout=35)
     save_state("c4-paired-submitted", tree)
-    return {"file": FILE, "destination": destination_text, "get_count_before": before}
+    result = {"file": FILE, "destination": destination_text, "get_count_before": before}
+    if refresh_proof is not None:
+        result["refresh"] = refresh_proof
+    return result

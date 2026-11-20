@@ -98,6 +98,11 @@
   1,048,576-byte FLAC with its expected hash in the exact Host child.
   The decoy child stayed empty and the file never appeared on the phone.
   The owned probe, reverse, relay, and fixture Servers were stopped.
+  In `c4-paired-refresh-final-20261120-083500`, Astra approved Refresh
+  folder from the native menu. The same folder obtained a fresh child
+  listing, cleared the selection and disabled download. Refresh issued
+  zero payload GETs. After reselecting and confirming, one request saved
+  the hash-matched 1 MiB payload only in the selected Host folder.
 - Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
   The selected paired Host reported 2,228,224 received bytes four seconds
   apart after one tap. The Android row offered Resume and the finished

@@ -180,10 +180,16 @@ def run(args):
     cap = states.Capture(args)
     smoke = cap.smoke
     smoke.preflight(include_remote_files_payload=False)
-    counts, lock = Counter(), threading.Lock()
+    counts, listing_counts, lock = Counter(), Counter(), threading.Lock()
     tracked_folder = dav.RECORDINGS + "/"
 
     class CountedHandler(dav.Handler):
+        def do_PROPFIND(self):
+            if self._path() == dav.RECORDINGS and self.headers.get("Depth", "infinity") != "0":
+                with lock:
+                    listing_counts["recordings"] += 1
+            super().do_PROPFIND()
+
         def _serve_file(self, send_body):
             path = self._path()
             if send_body and path.startswith(tracked_folder):
@@ -196,6 +202,10 @@ def run(args):
     def get_count(name):
         with lock:
             return counts[name]
+
+    def listing_count():
+        with lock:
+            return listing_counts["recordings"]
 
     def phone_count():
         return len(smoke.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines())
@@ -250,7 +260,9 @@ def run(args):
                         result = ui.run(smoke, host_name=HOST_NAME, host_origin=origin,
                                         webdav_url=f"http://127.0.0.1:{server.server_port}/",
                                         owned_root=root, destination=destination,
-                                        capabilities=capabilities, get_count=get_count)
+                                        capabilities=capabilities, get_count=get_count,
+                                        verify_refresh=args.verify_folder_refresh,
+                                        get_listing_count=listing_count)
                         file_name = result["file"]
                         output = destination / file_name
                         expected = dav.HASHES[file_name]
@@ -273,12 +285,16 @@ def run(args):
                         require(status.get("type") == "sites.status" and data.get("enabled") is True
                                 and data.get("rclone") == "running" and data.get("rcloneVersion") == "1.76.0",
                                 "The disposable Server did not report its Remote Files backend running")
-                        (smoke.evidence / "c4-paired-proof.json").write_text(json.dumps({
+                        proof = {
                             "host": HOST_NAME, "tls_pinned": True, "destination_child": destination.name,
                             "file": file_name, "bytes": output.stat().st_size, "sha256": expected,
                             "payload_gets": observed, "decoy_empty": True, "phone_count_unchanged": True,
                             "phone_target_absent": True, "rclone_updates_disabled": True,
-                        }, indent=2) + "\n", encoding="utf-8")
+                        }
+                        if "refresh" in result:
+                            proof["refresh"] = result["refresh"]
+                        (smoke.evidence / "c4-paired-proof.json").write_text(
+                            json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
                         if paired_ready:
@@ -335,6 +351,8 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-folder-refresh", action="store_true",
+                        help="Verify the selected paired WebDAV folder reloads and clears selection")
     run(parser.parse_args())
 
 
