@@ -26,7 +26,7 @@ def require(ok, message):
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
-        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None):
+        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None, verify_s3_validation=None):
     """Use actual paired-Host UI for an owned download or location removal."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -68,12 +68,17 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         smoke.tap(node)
         return tree
 
-    def enter(label, value):
+    def enter(label, value, *, sensitive=False):
         node, _ = smoke.wait_content_description(lambda d: d == label, label)
         require(node.get("class", "").endswith("EditText") and node.get("enabled") == "true",
                 "Expected an enabled editable field: " + label)
         smoke.tap(node)
-        smoke.shell("input", "text", "'" + value.replace(" ", "%s") + "'")
+        try:
+            smoke.shell("input", "text", "'" + value.replace(" ", "%s") + "'")
+        except Exception:
+            if sensitive:
+                raise RuntimeError("Could not enter the disposable access key") from None
+            raise
         node, _ = smoke.wait_content_description(lambda d: d == label, label)
         require(node.get("text") == value, "Entered value did not round-trip in " + label)
         smoke.shell("input", "keyevent", "4")  # Close the input method, not the form.
@@ -106,9 +111,101 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
             "Remote Files did not show the expected selected Host")
     smoke.tap(add)
     smoke.wait_node("Add location")
-    if verify_add_validation is not None:
+    def capture_label(key, label, tree):
         import io
         from PIL import Image
+
+        nodes = [n for n in tree.iter("node") if n.get("text") == label]
+        require(len(nodes) == 1, "Validation message missing or ambiguous")
+        match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", nodes[0].get("bounds", ""))
+        require(match is not None, "Validation bounds missing")
+        l,t,r,b = map(int, match.groups())
+        for field in tree.iter("node"):
+            if field.get("password") == "true" or field.get("class", "").endswith("EditText"):
+                m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", field.get("bounds", ""))
+                if m:
+                    x1,y1,x2,y2=map(int,m.groups())
+                    require(r <= x1 or x2 <= l or b <= y1 or y2 <= t, "Validation crop overlaps a form field")
+        with Image.open(io.BytesIO(smoke.adb("exec-out", "screencap", "-p", raw=True))) as image:
+            require(0 <= l < r <= image.width and 0 <= t < b <= image.height, "Invalid validation crop")
+            image.crop((l,t,r,b)).save(evidence / (key + ".png"))
+        ET.ElementTree(ET.Element("validation", {"text":label})).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+
+    if verify_s3_validation is not None:
+        def chooser_capture(key, tree, labels):
+            nodes = list(tree.iter("node"))
+            for field in nodes:
+                if field.get("class", "").endswith("EditText"):
+                    require(field.get("text", "") in ("", field.get("content-desc", "")), "Refusing nonblank form capture")
+            for label in labels:
+                require(sum(n.get("text") == label for n in nodes) == 1, "Missing or ambiguous chooser option: " + label)
+            (evidence / (key + ".png")).write_bytes(smoke.adb("exec-out", "screencap", "-p", raw=True))
+            root = ET.Element("chooser")
+            for label in labels: ET.SubElement(root, "option", {"text": label})
+            ET.ElementTree(root).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+        tap("Location type: WebDAV")
+        s3, tree = smoke.wait_node("S3")
+        chooser_capture("c3-s3-types", tree, ("WebDAV", "Google Drive", "OneDrive", "Dropbox", "S3", "SFTP"))
+        smoke.tap(s3)
+        smoke.wait_node("Location type: S3")
+        provider, tree = smoke.wait_content_description(lambda d: d == "S3 provider", "S3 provider")
+        require(any(n.get("text") == "Amazon S3" for n in provider.iter("node")), "Default provider is not Amazon S3")
+        endpoint, _ = smoke.wait_content_description(lambda d: d == "S3 endpoint (optional for Amazon S3)", "S3 endpoint")
+        require(endpoint.get("text", "") in ("", endpoint.get("content-desc", "")), "Default endpoint is not blank")
+        smoke.tap(provider)
+        other, tree = smoke.wait_node("Other S3-compatible service")
+        chooser_capture("c3-s3-providers", tree, ("Amazon S3", "Cloudflare R2", "Wasabi", "MinIO", "Other S3-compatible service"))
+        smoke.tap(other)
+        enter("Location name", LOCATION)
+        tap("Save location")
+        message = "Enter the access key ID and secret access key."
+        _, tree = smoke.wait_node(message); capture_label("c3-s3-missing-keys", message, tree)
+        verify_s3_validation("rejected")
+        enter("Access key ID", "INBOUNDTESTKEY", sensitive=True)
+        _, tree = smoke.wait_node(message)
+        capture_label("c3-s3-access-id-only", message, tree)
+        verify_s3_validation("rejected")
+        secret, _ = smoke.wait_content_description(lambda d: d == "Secret access key", "Secret access key")
+        require(secret.get("password") == "true" and secret.get("enabled") == "true", "Secret field is not masked")
+        smoke.tap(secret)
+        try:
+            smoke.shell("input", "text", "inbound-test-secret-8813")
+        except Exception:
+            raise RuntimeError("Could not enter the disposable secret") from None
+        smoke.shell("input", "keyevent", "4")
+        require(not any(n.get("text") == "Enter the access key ID and secret access key." for n in smoke.tree().iter("node")),
+                "Missing-key error did not clear after both keys were entered")
+        tap("Save location")
+        message = "Enter the S3 endpoint for this provider."
+        _, tree = smoke.wait_node(message); capture_label("c3-s3-missing-endpoint", message, tree)
+        verify_s3_validation("rejected")
+        provider, _ = smoke.wait_content_description(lambda d: d == "S3 provider", "S3 provider")
+        smoke.tap(provider); smoke.tap(smoke.wait_node("Amazon S3")[0])
+        require(not any(n.get("text") == message for n in smoke.tree().iter("node")),
+                "Endpoint error did not clear after switching to Amazon S3")
+        provider, _ = smoke.wait_content_description(lambda d: d == "S3 provider", "S3 provider")
+        smoke.tap(provider); smoke.tap(smoke.wait_node("Other S3-compatible service")[0])
+        tap("Save location")
+        _, tree = smoke.wait_node(message); capture_label("c3-s3-missing-endpoint-rechecked", message, tree)
+        verify_s3_validation("rejected")
+        enter("S3 endpoint (optional for Amazon S3)", webdav_url)
+        warning = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit."
+        checkbox, _ = smoke.wait_node(warning)
+        require(checkbox.get("checked") == "false", "HTTP consent unexpectedly preselected")
+        smoke.tap(checkbox)
+        checkbox, _ = smoke.wait_node(warning)
+        require(checkbox.get("checked") == "true", "HTTP consent not selected")
+        tap("Save location")
+        _, tree = smoke.wait_content_description(lambda d: d.startswith(LOCATION + ". S3 ·"), "saved S3 card", timeout=45)
+        verify_s3_validation("saved")
+        # No credential input or synthetic value may be present in retained card evidence.
+        require(not any(n.get("password") == "true" or n.get("class", "").endswith("EditText")
+                        or "INBOUNDTESTKEY" in (n.get("text", "") + n.get("content-desc", ""))
+                        or "inbound-test-secret-8813" in (n.get("text", "") + n.get("content-desc", ""))
+                        for n in tree.iter("node")), "Refusing credential-bearing saved card")
+        save_state("c3-s3-saved", tree)
+        return {"s3_validation": True}
+    if verify_add_validation is not None:
         label = "WebDAV address (https://…)"
         warning = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit."
         def set_address(value):
@@ -129,25 +226,8 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
             return node
         def rejected(message, key):
             tap("Save location")
-            node, tree = smoke.wait_node(message)
-            require(sum(n.get("text") == message for n in tree.iter("node")) == 1, "Ambiguous validation message")
-            # Persist only the validation label and its own pixels, excluding all form fields.
-            bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-            require(bounds is not None, "Validation label bounds missing")
-            l,t,r,b = map(int, bounds.groups())
-            require(l < r and t < b, "Validation label is not visible")
-            for field in tree.iter("node"):
-                if field.get("password") == "true" or field.get("class", "").endswith("EditText"):
-                    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", field.get("bounds", ""))
-                    if match:
-                        x1,y1,x2,y2 = map(int, match.groups())
-                        require(r <= x1 or x2 <= l or b <= y1 or y2 <= t, "Validation capture overlaps a form field")
-            data = smoke.adb("exec-out", "screencap", "-p", raw=True)
-            with Image.open(io.BytesIO(data)) as image:
-                require(0 <= l < r <= image.width and 0 <= t < b <= image.height, "Validation bounds outside screenshot")
-                image.crop((l,t,r,b)).save(evidence / (key + ".png"))
-            root = ET.Element("validation", {"text": message})
-            ET.ElementTree(root).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+            _, tree = smoke.wait_node(message)
+            capture_label(key, message, tree)
             verify_add_validation("rejected")
         verify_add_validation("rejected")
         invalid = webdav_url + "?bad=1"

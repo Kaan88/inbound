@@ -10,6 +10,13 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved the C3 location type and S3 provider flow in `c3-paired-s3-validation-20261120-121529`.
+  The native menus showed six types and five S3 providers. The missing-key
+  error held after entering just the access ID and cleared after both keys.
+  Selecting Amazon cleared the missing-endpoint error. Switching back to
+  Other required an endpoint again. The paired Host saved one disposable
+  loopback S3 location. The run recorded zero endpoint connections, jobs,
+  transfers or output. The WebDAV validation regression passed on the same APK.
 - Astra approved paired C3 Add location validation in `c3-paired-add-validation-20261120-120454`.
   Editing the address preserved the missing-name message. Supplying a name
   cleared it. The form rejected a query and an unsupported scheme, and

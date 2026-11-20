@@ -64,6 +64,8 @@ can approve departures from the designs.
   files available. Cancel preserved both locations.
   C3 Add location now resets HTTP consent after address edits, and
   paired WebDAV validation and save passed.
+  C3 S3 key and endpoint errors clear when corrected. The paired
+  provider picker and disposable loopback save passed.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

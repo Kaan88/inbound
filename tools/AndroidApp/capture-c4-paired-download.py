@@ -362,6 +362,23 @@ def run(args):
                                         and site.get("url") == f"http://127.0.0.1:{server.server_port}/"
                                         and site.get("vendor") == "other" and not site.get("user")
                                         and not site.get("localFolder"), "Saved Host location differs from the owned form")
+                            verify_validation_idle()
+                        def verify_s3_validation(stage):
+                            reply = site_request("sites.list", {})
+                            sites = (reply.get("payload") or {}).get("sites")
+                            require(reply.get("type") == "sites.listResult" and isinstance(sites, list), "Host location snapshot unavailable")
+                            if stage == "rejected":
+                                require(sites == [], "A rejected S3 form created a Host location")
+                            else:
+                                require(len(sites) == 1, "Expected precisely one S3 location")
+                                site = sites[0]
+                                require(site.get("id") and site.get("name") == ui.LOCATION and site.get("kind") == "s3"
+                                        and site.get("provider") == "Other" and site.get("endpoint") == f"http://127.0.0.1:{server.server_port}/"
+                                        and site.get("user") == "INBOUNDTESTKEY" and site.get("hasPassword") is True
+                                        and not site.get("localFolder"), "Saved S3 configuration differs from owned input")
+                            verify_validation_idle()
+
+                        def verify_validation_idle():
                             jobs = site_request("jobs.snapshot", {})
                             require(jobs.get("type") == "jobs.snapshot" and (jobs.get("payload") or {}).get("jobs") == [], "Unexpected Host jobs")
                             require_no_transfers()
@@ -372,6 +389,7 @@ def run(args):
                                         "Fixture files changed")
                             require(set(root.iterdir()) == {destination, decoy} and not any(destination.iterdir())
                                     and not any(decoy.iterdir()) and phone_count() == baseline and phone_target_absent(), "Unexpected output")
+
                         def require_no_transfers():
                             reply = site_request("sites.transfer.list", {})
                             require(reply.get("type") == "sites.transfer.listResult" and
@@ -385,7 +403,16 @@ def run(args):
                                         get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers,
                                         verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers,
                                         verify_location_remove=verify_location_remove if args.verify_location_remove else None,
-                                        verify_add_validation=verify_add_validation if args.verify_add_validation else None)
+                                        verify_add_validation=verify_add_validation if args.verify_add_validation else None,
+                                        verify_s3_validation=verify_s3_validation if args.verify_s3_validation else None)
+                        if args.verify_s3_validation:
+                            require(result == {"s3_validation": True}, "S3 validation proof did not complete")
+                            (smoke.evidence / "c3-s3-proof.json").write_text(json.dumps({
+                                "type_options": True, "provider_options": True, "default_amazon_blank_endpoint": True,
+                                "missing_keys_rejected_and_cleared": True, "missing_endpoint_rejected_and_cleared": True,
+                                "owned_s3_saved": True, "fixture_connections": 0, "jobs": 0, "transfers": 0, "outputs": 0}, indent=2) + "\n", encoding="utf-8")
+                            smoke.log("PASS C3 S3 provider validation and owned Host save.")
+                            return
                         if args.verify_add_validation:
                             require(result == {"add_validation": True}, "Validation proof did not complete")
                             (smoke.evidence / "c3-add-proof.json").write_text(json.dumps({
@@ -457,7 +484,7 @@ def run(args):
                             json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
-                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation:
+                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation and not args.verify_s3_validation:
                             try:
                                 tree = smoke.tree()
                                 for node in tree.iter("node"):
@@ -510,6 +537,7 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-s3-validation", action="store_true", help="Verify S3 provider validation and owned Host save")
     parser.add_argument("--verify-add-validation", action="store_true", help="Verify WebDAV address and HTTP consent validation")
     parser.add_argument("--verify-location-remove", action="store_true", help="Verify exact paired location Remove Cancel and Confirm")
     parser.add_argument("--verify-folder-delete", action="store_true",
@@ -523,6 +551,8 @@ def main():
         parser.error("--verify-location-remove is a standalone lane")
     if args.verify_add_validation and (args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
         parser.error("--verify-add-validation is a standalone lane")
+    if args.verify_s3_validation and (args.verify_add_validation or args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
+        parser.error("--verify-s3-validation is a standalone lane")
     run(args)
 
 

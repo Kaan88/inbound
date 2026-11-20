@@ -690,6 +690,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (address is not null) _content.AddView(allowHttp);
         if (cloud) AddText("Save the location, then choose Sign in from Remote Files.", 14, Resource.Attribute.colorOnSurfaceVariant);
         const string nameRequired = "Enter a location name.";
+        const string s3KeysRequired = "Enter the access key ID and secret access key.";
         const string s3EndpointRequired = "Enter the S3 endpoint for this provider.";
         const string invalidEndpoint = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment.";
         const string httpConsentRequired = "HTTP is not encrypted. Tick the warning to allow it.";
@@ -712,6 +713,24 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 if (e.IsChecked && validation.Text == httpConsentRequired) validation.Text = "";
             };
         }
+        if (providerPicker is not null)
+        {
+            void ClearS3KeysError()
+            {
+                if (validation.Text == s3KeysRequired && !string.IsNullOrWhiteSpace(user?.Text)
+                    && !string.IsNullOrWhiteSpace(password?.Text))
+                    validation.Text = "";
+            }
+
+            user!.TextChanged += (_, _) => ClearS3KeysError();
+            password!.TextChanged += (_, _) => ClearS3KeysError();
+            providerPicker.ItemSelected += (_, e) =>
+            {
+                if (validation.Text == s3EndpointRequired && e.Position >= 0 && e.Position < providers.Count
+                    && providers[e.Position].Value == SiteKindCatalog.AwsProvider)
+                    validation.Text = "";
+            };
+        }
         AddButton("Save location", () =>
         {
             if (!SameHost() || _busy) return;
@@ -723,7 +742,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             if (string.IsNullOrWhiteSpace(name.Text))
             { validation.Text = nameRequired; return; }
             if (s3 && (string.IsNullOrWhiteSpace(user?.Text) || string.IsNullOrWhiteSpace(password?.Text)))
-            { validation.Text = "Enter the access key ID and secret access key."; return; }
+            { validation.Text = s3KeysRequired; return; }
             if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
             { validation.Text = s3EndpointRequired; return; }
             int port = 22;
