@@ -168,6 +168,12 @@ class Capture:
 
         baseline = download_count()
         outputs = fixture_outputs()
+        inventory = None
+        if self.args.b1_action != "cancel":
+            require(baseline == 0, "Fresh probe must have no jobs before the B1 action")
+            self.smoke.wait_content_description(lambda d: d == "Downloads shown from This phone. Change host", "local Host")
+            # Keep the shared Download inventory only in memory; do not save unrelated names.
+            inventory = set(self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines())
         self.log(f"B1 probe baseline: selected All count {baseline}; fixture-name baseline recorded in memory only.")
         refs = {key: (reference, anchor) for key, reference, anchor in CAPTURES}
         self.capture("b1-chooser", *refs["b1-chooser"])
@@ -181,6 +187,7 @@ class Capture:
                 "Android chooser did not preview an exact URL from the owned fixture")
         require(any("Inbound Probe" in (node.get("text"), node.get("content-desc"))
                     for node in system_nodes), "Android chooser did not expose the distinct Inbound Probe target")
+        self.log("B1 chooser verified")
         self.capture("b1-caught", *refs["b1-caught"])
         dialog = ET.parse(self.evidence / "b1-caught-ui.xml").getroot()
         probe_nodes = [node for node in dialog.iter("node") if node.get("package") == PACKAGE]
@@ -189,11 +196,54 @@ class Capture:
                 and any(node.get("resource-id") == "android:id/message"
                         and node.get("text", "").partition("\n")[0] == "127.0.0.1" for node in probe_nodes),
                 "Expected the probe Shared link dialog with the exact fixture host and all three actions")
-        input("\nIn the probe tap Cancel, return to its Downloads list, then press Enter: ")
-        self.smoke.wait_node("Search downloads", timeout=30)
-        require(download_count() == baseline, "Downloads count changed after cancelling the shared link")
+        self.log("B1 shared dialog verified")
+        if self.args.b1_action == "add-file":
+            input("\nIn the probe tap Add file; show the populated form, then press Enter: ")
+            self.capture("b1-add-file", None, "New download", prompt=False)
+            tree = ET.parse(self.evidence / "b1-add-file-ui.xml").getroot()
+            nodes = [n for n in tree.iter("node") if n.get("package") == PACKAGE]
+            addresses = [n for n in nodes if n.get("resource-id", "").endswith(":id/address")]
+            require(len(addresses) == 1 and addresses[0].get("text") == origin + "/files/a.zip"
+                    and sum(n.get("resource-id", "").endswith(":id/new_cancel") for n in nodes) == 1,
+                    "Add file did not show the exact normalized Archive address and Cancel")
+            self.log("B1 action state verified")
+            input("\nCancel the probe form without downloading, then press Enter: ")
+        else:
+            input("\nIn the probe tap Cancel, return to its Downloads list, then press Enter: ")
+        # Downloads can remain in the hierarchy under a page or dialog. Require
+        # one fresh tree to prove the exact foreground and the absence of overlays.
+        deadline = time.monotonic() + 30
+        final_tree = None
+        while time.monotonic() < deadline:
+            focus = next((line for line in self.shell("dumpsys", "window").splitlines()
+                          if "mCurrentFocus=" in line), "")
+            if not re.search(r"\b" + re.escape(PACKAGE) + r"/", focus):
+                time.sleep(.3); continue
+            tree = self.smoke.tree()
+            nodes = [n for n in tree.iter("node") if n.get("package") == PACKAGE]
+            counts = [n for n in nodes if n.get("text") == f"All {baseline}" and n.get("checked") == "true"]
+            search = [n for n in nodes if n.get("resource-id", "").endswith(":id/search_input")]
+            local_host = [n for n in nodes if n.get("content-desc") == "Downloads shown from This phone. Change host"]
+            overlays = [n for n in nodes if n.get("text") == "Shared link"
+                        or n.get("content-desc") == "Close browser"
+                        or n.get("resource-id", "").endswith((":id/new_root", ":id/new_cancel", ":id/address"))
+                        or (n.get("class", "").endswith("EditText") and not n.get("resource-id", "").endswith(":id/search_input"))]
+            if len(counts) == len(search) == len(local_host) == 1 and not overlays:
+                final_tree = tree; break
+            time.sleep(.3)
+        require(final_tree is not None, "Probe Downloads is not uniquely foreground with all action overlays closed")
+        focus = next((line for line in self.shell("dumpsys", "window").splitlines()
+                      if "mCurrentFocus=" in line), "")
+        require(re.search(r"\b" + re.escape(PACKAGE) + r"/", focus) is not None,
+                "Probe lost foreground before final capture")
+        (self.evidence / "b1-final-downloads-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+        ET.ElementTree(final_tree).write(self.evidence / "b1-final-downloads-ui.xml", encoding="utf-8", xml_declaration=True)
         require(fixture_outputs() == outputs, "The fixture-named shared Download inventory changed")
-        self.log(f"PASS B1 cancellation: probe All count remained {baseline}; no new fixture-named output observed.")
+        if inventory is not None:
+            require(set(self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()) == inventory,
+                    "Shared Download file inventory changed during the action")
+        label = "cancellation" if self.args.b1_action == "cancel" else self.args.b1_action
+        self.log(f"PASS B1 {label}: probe All count remained {baseline}; no new fixture-named output observed.")
         self.log("B2–B6 were not captured in this B1-only run.")
 
     def unattended_sequence(self):
@@ -852,7 +902,9 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated rcloneprobe APK")
     parser.add_argument("--evidence", type=Path, required=True,
                         help="New, previously absent evidence directory")
-    parser.add_argument("--b1-only", action="store_true", help="Guided real Chrome share chooser and cancel check only")
+    parser.add_argument("--b1-only", action="store_true", help="Guided real Chrome share chooser check only")
+    parser.add_argument("--b1-action", choices=("cancel", "add-file"), default="cancel",
+                        help="In the B1-only lane, verify Cancel or Add file")
     parser.add_argument("--unattended", action="store_true",
                          help="Capture B4 and its selected state in the built-in browser without prompting")
     parser.add_argument("--verify-search", action="store_true", help="Verify the B4 header search toggle")
@@ -869,6 +921,8 @@ def main():
     parser.add_argument("--verify-details-stop", action="store_true",
                         help="In the partial B6 flow verify active Details Stop retains progress and hides restart from zero")
     args = parser.parse_args()
+    if args.b1_action != "cancel" and not args.b1_only:
+        parser.error("--b1-action add-file requires --b1-only")
     if args.verify_b3_completion and (not args.unattended or not args.capture_caught or args.b1_only
                                        or args.verify_search or args.verify_phone_folder or args.capture_archives
                                        or args.capture_b6 or args.capture_b6_partial or args.capture_b6_browser or args.verify_details_stop):
@@ -895,6 +949,7 @@ def main():
         "b4-archives": "Capture six checked archives and the combined size.",
         "b1-chooser": "In Chrome open http://127.0.0.1:PORT/page; Share link → Android chooser. Capture chooser itself.",
         "b1-caught": "Choose Inbound Probe in the Android chooser; capture Shared link before choosing an action.",
+        "b1-add-file": "Capture the prefilled Archive form before cancelling.",
         "b2": "Open the fixture in Inbound's browser and tap Archive. Capture Download with Inbound before submitting; verify one job/hash separately.",
         "b3": "Select This phone. In Inbound's browser, visit the fixture /signin then tap Authenticated archive. Capture the cookie-use notice before submitting.",
         "b4": "On the fixture page open Links on page; capture the eight-link list/filter state.",

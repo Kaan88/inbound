@@ -22,6 +22,10 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   `b1-native-share-final-20261120-060519`. Chrome shared the exact
   fixture Archive link to Inbound Probe. Cancel left the Downloads count
   at zero and created no new fixture-named file.
+  In `b1-native-add-dismissal-20261120-072402`, Astra approved Add file
+  prefilling the Archive URL without its fragment. Cancel closed the form,
+  returned to the empty Downloads list and preserved the shared file
+  inventory. The Open page route remains open.
 - Astra approved B4 submission in `b4-real-submission-20261120-061608`.
   The actual page selected two of four links and Downloads showed exactly
   two finished jobs. The two output hashes matched distinct payloads, and
