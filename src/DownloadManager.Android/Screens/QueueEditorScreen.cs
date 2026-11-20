@@ -419,38 +419,87 @@ internal sealed class QueueEditorScreen : IDisposable
         var choices = new RadioGroup(_activity) { Orientation = Orientation.Vertical };
         var none = new RadioButton(_activity) { Text = "None", ContentDescription = "No queue speed limit" };
         var custom = new RadioButton(_activity) { Text = "Custom limit", ContentDescription = "Custom queue speed limit" };
-        choices.AddView(none); choices.AddView(custom); body.AddView(choices);
-        var input = new EditText(_activity) { Hint = "KB/s", Text = initial, InputType = Android.Text.InputTypes.ClassNumber, ContentDescription = "Queue speed limit in KB per second" };
-        input.SetSingleLine(true); body.AddView(input);
-        var note = Text("Shared by this queue's HTTP downloads.", 14, Resource.Attribute.colorOnSurfaceVariant); body.AddView(note);
-        var error = Text("", 14, Resource.Attribute.colorError); error.AccessibilityLiveRegion = AccessibilityLiveRegion.Polite; body.AddView(error);
-        var buttons = new LinearLayout(_activity) { Orientation = Orientation.Horizontal }; buttons.SetGravity(GravityFlags.End);
-        var cancel = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = "Cancel" };
-        var apply = new MaterialButton(_activity) { Text = "Apply" }; buttons.AddView(cancel); buttons.AddView(apply); body.AddView(buttons);
-        _speedCustom = restoredCustom ?? current is > 0; custom.Checked = _speedCustom; none.Checked = !_speedCustom; input.Enabled = _speedCustom;
-        custom.CheckedChange += (_, e) => { if (_closed) return; _speedCustom = e.IsChecked; input.Enabled = e.IsChecked; };
-        if (selectionStart >= 0 && selectionEnd >= 0) input.SetSelection(Math.Clamp(selectionStart, 0, initial.Length), Math.Clamp(selectionEnd, 0, initial.Length));
-        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Speed limit")!.SetView(body)!.Create()!;
+        none.SetMinimumHeight(Motion.Dp(_activity, 48));
+        custom.SetMinimumHeight(Motion.Dp(_activity, 48));
+        choices.AddView(none, new RadioGroup.LayoutParams(-1, -2));
+        choices.AddView(Text("Use the Host's other limits", 14, Resource.Attribute.colorOnSurfaceVariant),
+            new RadioGroup.LayoutParams(-1, -2) { MarginStart = Motion.Dp(_activity, 32) });
+        choices.AddView(custom, new RadioGroup.LayoutParams(-1, -2));
+        choices.AddView(Text("Shared by this queue's HTTP downloads.", 14, Resource.Attribute.colorOnSurfaceVariant),
+            new RadioGroup.LayoutParams(-1, -2) { MarginStart = Motion.Dp(_activity, 32) });
+        body.AddView(choices);
+
+        var fieldLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = "KB/s" };
+        var input = new TextInputEditText(fieldLayout.Context!)
+        {
+            Text = initial, InputType = Android.Text.InputTypes.ClassNumber,
+            ContentDescription = "Queue speed limit in KB per second"
+        };
+        input.SetSingleLine(true);
+        fieldLayout.AddView(input);
+        body.AddView(fieldLayout, Margin(16));
+        body.AddView(Text("Enter a positive whole number. Choose None to remove the limit.", 14,
+            Resource.Attribute.colorOnSurfaceVariant), Margin(4));
+        var error = Text("", 14, Resource.Attribute.colorError);
+        error.AccessibilityLiveRegion = AccessibilityLiveRegion.Polite;
+        body.AddView(error);
+
+        bool TryReadLimit(out long limit)
+        {
+            var text = (input.Text ?? "").Trim();
+            // Preserve legacy byte limits that are rounded for display.
+            if (current is > 0 && text == SpeedText(current.Value))
+            {
+                limit = current.Value;
+                return true;
+            }
+            if (long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var kb)
+                && kb >= 1 && kb <= long.MaxValue / Fmt.BytesPerKilobyte)
+            {
+                limit = kb * Fmt.BytesPerKilobyte;
+                return true;
+            }
+            limit = 0;
+            return false;
+        }
+
+        input.TextChanged += (_, _) =>
+        {
+            if (!string.IsNullOrEmpty(error.Text) && TryReadLimit(out _)) error.Text = "";
+        };
+        _speedCustom = restoredCustom ?? current is > 0;
+        custom.Checked = _speedCustom;
+        none.Checked = !_speedCustom;
+        fieldLayout.Enabled = _speedCustom;
+        custom.CheckedChange += (_, e) =>
+        {
+            if (_closed) return;
+            _speedCustom = e.IsChecked;
+            fieldLayout.Enabled = e.IsChecked;
+            if (!e.IsChecked) error.Text = "";
+        };
+        if (selectionStart >= 0 && selectionEnd >= 0)
+            input.SetSelection(Math.Clamp(selectionStart, 0, initial.Length), Math.Clamp(selectionEnd, 0, initial.Length));
+        var dialog = new MaterialAlertDialogBuilder(_activity).SetTitle("Speed limit")!.SetView(body)!
+            .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Apply", (IDialogInterfaceOnClickListener?)null)!.Create()!;
         _speedDialog = dialog; _speedInput = input; _dialogs.Add(dialog);
         dialog.DismissEvent += (_, _) => { _dialogs.Remove(dialog); if (_speedDialog == dialog) { _speedDialog = null; _speedInput = null; } ReviewAfterDialog(); };
-        cancel.Click += (_, _) => { if (!_closed) dialog.Dismiss(); };
-        apply.Click += (_, _) =>
+        dialog.SetCanceledOnTouchOutside(false);
+        dialog.Show();
+        dialog.GetButton((int)DialogButtonType.Positive)!.Click += (_, _) =>
         {
             if (_closed || _busy || !CanEditSafely) return;
-            if (!_speedCustom) _draft.SpeedLimitBytesPerSecond = 0;
-            else
+            long limit = 0;
+            if (_speedCustom && !TryReadLimit(out limit))
             {
-                var text = (input.Text ?? "").Trim();
-                if (!(current is > 0 && text == SpeedText(current.Value)))
-                {
-                    if (!long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var kb) || kb < 1 || kb > long.MaxValue / Fmt.BytesPerKilobyte)
-                    { error.Text = "Enter a positive whole number in KB/s."; return; }
-                    _draft.SpeedLimitBytesPerSecond = kb * Fmt.BytesPerKilobyte;
-                }
+                error.Text = "Enter a positive whole number in KB/s.";
+                return;
             }
-            Refresh(); dialog.Dismiss();
+            _draft.SpeedLimitBytesPerSecond = limit;
+            Refresh();
+            dialog.Dismiss();
         };
-        dialog.SetCanceledOnTouchOutside(false); dialog.Show();
     }
     private void RestoreInput(string title, string text, Guid? scheduleId)
     {

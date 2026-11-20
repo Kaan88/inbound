@@ -406,6 +406,131 @@ class Capture:
                     f"No-schedule {day} must be unchecked and disabled")
         self.log("PASS C2: exact no-schedule queue, empty times and disabled days.")
 
+    def verify_paired_c2_limits(self, queue_state, before, request, owned):
+        """Verify queue cap drafts and persistence on the empty disposable Host."""
+        require(len(before[0]) == 1 and before[0][0].get("name") == "Main" and not before[1],
+                "Limits proof requires the fresh Main queue and no schedules")
+        original = before[0][0]
+        require(original.get("generation") and original.get("maxConcurrentDownloads") != 2
+                and not original.get("speedLimitBytesPerSecond"), "Unexpected fixture limits baseline")
+        def empty():
+            reply = request("jobs.snapshot", {})
+            require(reply.get("type") == "jobs.snapshot" and (reply.get("payload") or {}).get("jobs") == []
+                    and not any(Path(owned["download_root"]).iterdir()), "Limits proof requires zero jobs and files")
+        def save_capture(name):
+            tree = self.smoke.tree()
+            require(not any(n.get("password") == "true" for n in tree.iter("node")), "Credentials form visible")
+            (self.evidence / (name + ".png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
+        def open_main():
+            card, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith("Main, ") and ". 0 files." in d and "Double tap to edit" in d, "empty Main queue")
+            self.smoke.tap(card)
+            _, tree = self.smoke.wait_node("Main queue", resource="queue_editor_title")
+            self.verify_no_schedule(tree, "Main")
+            self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+            self.smoke.wait_node("HTTP speed limit")
+        def row(prefix, value):
+            node, _ = self.smoke.wait_content_description(lambda d: d == prefix + ", " + value, prefix + " value")
+            return node
+        def enter(desc, value):
+            field, _ = self.smoke.wait_content_description(lambda d: d == desc, desc)
+            require(field.get("enabled") == "true", "Input is disabled")
+            self.smoke.tap(field)
+            self.shell("input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+            self.shell("input", "text", value)
+            self.shell("input", "keyevent", "4")
+            field, _ = self.smoke.wait_content_description(lambda d: d == desc, desc)
+            require(field.get("text") == value, "Input did not round-trip")
+        def speed():
+            node, _ = self.smoke.wait_content_description(lambda d: d.startswith("HTTP speed limit, "), "queue speed row")
+            self.smoke.tap(node)
+            self.smoke.wait_node("Speed limit")
+        def set_draft(*, capture_dialogs=False):
+            speed()
+            choice, _ = self.smoke.wait_content_description(lambda d: d == "Custom queue speed limit", "custom speed")
+            self.smoke.tap(choice)
+            enter("Queue speed limit in KB per second", "500")
+            if capture_dialogs:
+                save_capture("c2-paired-limit-custom")
+            self._tap_exact_text("Apply")
+            row("HTTP speed limit", "500 KB/s")
+            node, _ = self.smoke.wait_content_description(lambda d: d.startswith("Downloads at once, "), "concurrency row")
+            self.smoke.tap(node)
+            if capture_dialogs:
+                enter("Downloads at once (1–16)", "17")
+                self._tap_exact_text("Apply")
+                self.smoke.wait_node("Enter a number from 1 to 16.")
+                save_capture("c2-paired-concurrency-invalid")
+                require(queue_state() == before, "Invalid concurrency changed the Host")
+                self._tap_exact_text("Cancel")
+                self.smoke.tap(row("Downloads at once", str(original["maxConcurrentDownloads"])))
+            enter("Downloads at once (1–16)", "2")
+            if capture_dialogs:
+                save_capture("c2-paired-concurrency-custom")
+            self._tap_exact_text("Apply")
+            row("Downloads at once", "2")
+
+        empty(); open_main()
+        row("HTTP speed limit", "None")
+        row("Downloads at once", str(original["maxConcurrentDownloads"]))
+        speed()
+        choice, _ = self.smoke.wait_content_description(lambda d: d == "Custom queue speed limit", "custom speed")
+        self.smoke.tap(choice)
+        enter("Queue speed limit in KB per second", "0")
+        self._tap_exact_text("Apply")
+        self.smoke.wait_node("Enter a positive whole number in KB/s.")
+        save_capture("c2-paired-limit-invalid")
+        require(queue_state() == before, "Invalid draft changed the Host")
+        error = "Enter a positive whole number in KB/s."
+        field_desc = "Queue speed limit in KB per second"
+        enter(field_desc, "500")
+        require(not any(n.get("text") == error for n in self.smoke.tree().iter("node")),
+                "Corrected speed left the validation error visible")
+        enter(field_desc, "0")
+        self._tap_exact_text("Apply")
+        self.smoke.wait_node(error)
+        none, _ = self.smoke.wait_content_description(lambda d: d == "No queue speed limit", "no speed limit")
+        self.smoke.tap(none)
+        selected, tree = self.smoke.wait_content_description(
+            lambda d: d == "No queue speed limit", "no speed limit")
+        require(selected.get("checked") == "true", "None was not selected")
+        require(not any(n.get("text") == error or (n.get("content-desc") == field_desc and n.get("enabled") == "true")
+                        for n in tree.iter("node")), "None left an error or an enabled custom field")
+        save_capture("c2-paired-limit-none")
+        self._tap_exact_text("Cancel")
+        row("HTTP speed limit", "None")
+        set_draft(capture_dialogs=True)
+        save_capture("c2-paired-limits-draft")
+        require(queue_state() == before, "Unsaved limits reached the Host")
+        self._tap_resource("queue_editor_back")
+        self.smoke.wait_node("Discard changes?")
+        self._tap_exact_text("Discard")
+        open_main()
+        row("HTTP speed limit", "None")
+        row("Downloads at once", str(original["maxConcurrentDownloads"]))
+        save_capture("c2-paired-limits-discarded")
+        require(queue_state() == before, "Discard changed queue or schedules")
+        set_draft()
+        require(queue_state() == before, "Second unsaved draft reached the Host")
+        self._tap_resource("queue_editor_save")
+        open_main()
+        row("HTTP speed limit", "500 KB/s"); row("Downloads at once", "2")
+        save_capture("c2-paired-limits-saved")
+        expected = dict(original)
+        expected["speedLimitBytesPerSecond"] = 500000
+        expected["maxConcurrentDownloads"] = 2
+        after = queue_state()
+        require(after == ([expected], before[1]), "Saved Host queue/schedule snapshot differed from the exact expected limits")
+        empty()
+        self._tap_resource("queue_editor_back")
+        self.smoke.wait_node("Host: Parity Host")
+        (self.evidence / "c2-paired-limits-proof.json").write_text(json.dumps({
+            "host": "Parity Host", "queue": "Main", "speedBytesPerSecond": 500000,
+            "maxConcurrentDownloads": 2, "unsavedSnapshotUnchanged": True,
+            "schedulesUnchanged": True, "jobs": 0, "files": 0}, indent=2) + "\n", encoding="utf-8")
+        self.log("PASS paired C2: invalid speed rejected; discard preserved limits; 500 KB/s and concurrency 2 saved and reopened.")
+
     def save_paired_c2_schedule(self, queue_state, before):
         """Use the native editor to save one disabled schedule on the empty fixture Host."""
         schedule_name = "Paired weekdays"
@@ -1776,11 +1901,17 @@ class Capture:
             self.smoke.tap(card)
             _, tree = self.smoke.wait_node("Main queue", resource="queue_editor_title")
             self.verify_no_schedule(tree, "Main")
+            phone_limits = []
+            if self.args.verify_paired_c2_limits:
+                self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+                for label in ("Speed limit, ", "Downloads at once, "):
+                    node, _ = self.smoke.wait_content_description(lambda d: d.startswith(label), "phone " + label)
+                    phone_limits.append(node.get("content-desc"))
             self._tap_resource("queue_editor_back")
             self.smoke.wait_content_description(lambda d: d == card.get("content-desc"), "unchanged phone Main card")
             tap("Downloads", "nav_downloads")
             self.smoke.wait_content_description(selected_phone, "selected phone Host")
-            return card.get("content-desc")
+            return (card.get("content-desc"), *phone_limits)
 
         with fixture.running_fixture(self.args.paired_server_dll) as owned:
             port = urlsplit(owned["base_url"]).port
@@ -1790,7 +1921,7 @@ class Capture:
             self.adb("reverse", "--no-rebind", endpoint, endpoint)
             try:
                 self.launch()
-                phone_before = phone_main_state() if self.args.verify_paired_c2_save else None
+                phone_before = phone_main_state() if (self.args.verify_paired_c2_save or self.args.verify_paired_c2_limits) else None
                 self.current_checkpoint = "c6-pairing-form"  # Never retain pairing-field UI or logs on failure.
                 host_chip("This phone")
                 tap("Connect to another Inbound", "host_connect")
@@ -1957,6 +2088,17 @@ class Capture:
                     self._tap_resource("queue_editor_back")
                     self.smoke.wait_node("Host: Parity Host")
                     require(queue_state() == before, "Queue or schedule changed while viewing editor")
+                    if self.args.verify_paired_c2_limits:
+                        self.verify_paired_c2_limits(queue_state, before, request, owned)
+                        tap("Downloads", "nav_downloads")
+                        host_chip("Parity Host")
+                        phone, _ = self.smoke.wait_content_description(
+                            lambda d: d.startswith("This phone, ") and ", shown now" not in d, "unselected phone Host")
+                        self.smoke.tap(phone)
+                        self.smoke.wait_content_description(lambda d: d == "Downloads shown from This phone. Change host", "selected phone Host")
+                        require(phone_main_state() == phone_before, "Phone Main changed during paired limits save")
+                        self.log("PASS C2: both phone Main limit values stayed unchanged.")
+                        return self.evidence
                     if self.args.verify_paired_c2_save:
                         initial_jobs = request("jobs.snapshot", {})
                         require(initial_jobs.get("type") == "jobs.snapshot"
@@ -2041,6 +2183,7 @@ def main():
     parser.add_argument("--verify-paired-c7", action="store_true", help="Verify paired and phone Settings boundaries")
     parser.add_argument("--verify-paired-c2", action="store_true",
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
+    parser.add_argument("--verify-paired-c2-limits", action="store_true", help="Verify paired queue speed and concurrency drafts and persistence")
     parser.add_argument("--verify-paired-c2-save", action="store_true",
                         help="With --verify-paired-c2 save and reopen one disabled schedule on the empty owned Server")
     parser.add_argument("--verify-host-b-queued", action="store_true",
@@ -2083,6 +2226,8 @@ def main():
         parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
     if args.verify_paired_c7 and (not args.paired_server_dll or args.mixed_hosts or args.verify_paired_c2):
         parser.error("--verify-paired-c7 requires a separate non-mixed --paired-server-dll lane")
+    if args.verify_paired_c2_limits and (not args.verify_paired_c2 or args.verify_paired_c2_save):
+        parser.error("--verify-paired-c2-limits requires --verify-paired-c2 and excludes --verify-paired-c2-save")
     if args.verify_paired_c2_save and not args.verify_paired_c2:
         parser.error("--verify-paired-c2-save requires --verify-paired-c2")
     if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):

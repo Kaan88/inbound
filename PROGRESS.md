@@ -4,6 +4,14 @@
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved the C2 paired queue limits in `c2-paired-limits-board-20261120-125855`.
+  The speed dialog keeps the outlined KB/s label visible and explains
+  both choices. The editor rejected zero speed and concurrency 17.
+  Entering a valid speed or choosing None cleared the speed error.
+  Cancel and Discard left the Host snapshot intact. Save and reopen
+  verified 500 KB/s and two simultaneous downloads, with exact other
+  fields and schedules unchanged. Both phone limits stayed unchanged.
+  The run created zero transfers or files.
 - Astra approved paired C3 cloud location setup in `c3-paired-cloud-final-20261120-123633`.
   The form preserved the draft name when switching types and cleared it
   after Cancel and Save. Choosing the same type kept the entered address.

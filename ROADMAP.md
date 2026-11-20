@@ -70,6 +70,8 @@ can approve departures from the designs.
   validation and local fingerprint trust and browse passed.
   C3 keeps the draft name when switching location types. Google Drive,
   OneDrive and Dropbox setup passed through the unsigned card state.
+  C2 paired queue limits passed invalid-input, Cancel, Discard and Save.
+  The speed dialog keeps its KB/s label visible with a cap entered.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
