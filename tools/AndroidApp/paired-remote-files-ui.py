@@ -25,7 +25,8 @@ def require(ok, message):
 
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
-        capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False):
+        capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
+        verify_delete=False, delete_state=None, require_no_transfers=None):
     """Use the actual paired-Host UI through one confirmed safe download request."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -118,6 +119,63 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
     tap_description(lambda d: d.startswith(LOCATION + ". WebDAV ·"), "owned WebDAV location")
     for part in ("media", "recordings", "2026"):
         tap_description(lambda d, part=part: d == part + ", folder. Open", part + " fixture folder")
+    delete_proof = None
+    if verify_delete:
+        require(callable(delete_state) and callable(require_no_transfers), "Delete proof requires owned fixture and Host checks")
+        require_no_transfers()
+        before = delete_state()
+        require(before == {"notes_attempts": 0, "other_attempts": 0, "notes_accepted": 0, "notes_deleted": False, "payload_gets": 0}
+                and get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Owned delete fixture is not fresh")
+        tree = smoke.tree()
+        descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
+        require(sum(d.startswith("Select notes.pdf, ") for d in descriptions) == 1
+                and sum(d.startswith("Select " + FILE + ", ") for d in descriptions) == 1,
+                "Expected both distinct fixture files before delete")
+        tap_description(lambda d: d.startswith("Select notes.pdf, "), "owned notes file")
+        _, selected_notes = smoke.wait_content_description(lambda d: d.startswith("Selected notes.pdf, "), "selected notes file")
+        require(sum(n.get("content-desc", "").startswith("Selected ") for n in selected_notes.iter("node")) == 1,
+                "Expected exactly notes.pdf selected")
+        save_state("c4-paired-delete-selection", selected_notes)
+        def delete_dialog():
+            _, dialog = smoke.wait_node("Delete notes.pdf?")
+            text = "\n".join(n.get("text", "") for n in dialog.iter("node"))
+            require("Host: " + host_name + " (" + host_origin.rstrip("/") + ")" in text
+                    and LOCATION + " · /media/recordings/2026" in text,
+                    "Delete confirmation did not identify the owned Host and folder")
+            return dialog
+
+        tap_description(lambda d: d == "Delete selected remote files", "delete selection")
+        save_state("c4-paired-delete-confirmation", delete_dialog())
+        tap("Cancel")
+        _, canceled = smoke.wait_content_description(lambda d: d.startswith("Selected notes.pdf, "), "notes retained after Cancel")
+        require(delete_state() == before and get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Cancel caused a fixture deletion or payload request")
+        require_no_transfers()
+        save_state("c4-paired-delete-canceled", canceled)
+        tap_description(lambda d: d == "Delete selected remote files", "delete selection after Cancel")
+        delete_dialog()
+        require(delete_state() == before, "Fixture changed before confirming Delete")
+        tap("Delete")
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline:
+            tree = smoke.tree()
+            descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
+            current = delete_state()
+            if (current == {"notes_attempts": 1, "other_attempts": 0, "notes_accepted": 1, "notes_deleted": True, "payload_gets": 0}
+                    and not any("notes.pdf" in d for d in descriptions)
+                    and sum(d.startswith("Select " + FILE + ", ") for d in descriptions) == 1
+                    and not any(d.startswith("Selected ") for d in descriptions)):
+                break
+            time.sleep(.3)
+        else:
+            raise RuntimeError("Confirmed delete did not remove only owned notes and refresh selection")
+        require(get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Delete unexpectedly requested or wrote the download fixture")
+        require_no_transfers()
+        save_state("c4-paired-delete-completed", tree)
+        delete_proof = {"cancel_requests": 0, "confirmed_notes_requests": 1, "other_delete_requests": 0}
+        smoke.log("PASS C4 paired delete: Cancel preserved notes; Confirm removed only notes and cleared selection.")
     tap_description(lambda d: d.startswith("Select " + FILE + ", "), "fixture file")
     _, tree = smoke.wait_content_description(lambda d: d.startswith("Selected " + FILE + ", "), "selected fixture file")
     selected = [n.get("content-desc", "") for n in tree.iter("node")
@@ -251,4 +309,6 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
     result = {"file": FILE, "destination": destination_text, "get_count_before": before}
     if refresh_proof is not None:
         result["refresh"] = refresh_proof
+    if delete_proof is not None:
+        result["delete"] = delete_proof
     return result

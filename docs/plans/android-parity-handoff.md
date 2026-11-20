@@ -132,6 +132,11 @@ download summary depends on tracked upload support.
   The paired Host showed no transfer before confirmation. Refresh
   transfers showed one completed copy with the same batch ID as the
   Host, and the 1 MiB file matched its hash in the chosen Host child.
+  In `c4-paired-delete-final-20261120-093118`, Astra approved the paired
+  delete dialog and refreshed folder. Cancel retained the selected
+  notes.pdf and sent zero DELETEs. Confirm sent one accepted DELETE for
+  notes.pdf, cleared selection, and left the sibling files available.
+  The subsequent sibling download matched its hash in the chosen Host child.
 - Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
   The selected paired Host reported 2,228,224 received bytes four seconds
   apart after one tap. The Android row offered Resume and the finished

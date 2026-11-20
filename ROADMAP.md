@@ -35,6 +35,8 @@ can approve departures from the designs.
   schedule and kept its start visible during reselection.
   The C4 folder Transfers action returned to the same selection and
   showed a hash-verified completed WebDAV copy on the paired Host.
+  Paired C4 deletion preserved the selected file on Cancel and
+  removed exactly the named fixture file on confirmation.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

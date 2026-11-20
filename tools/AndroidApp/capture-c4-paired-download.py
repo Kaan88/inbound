@@ -180,7 +180,7 @@ def run(args):
     cap = states.Capture(args)
     smoke = cap.smoke
     smoke.preflight(include_remote_files_payload=False)
-    counts, listing_counts, lock = Counter(), Counter(), threading.Lock()
+    counts, listing_counts, delete_counts, lock = Counter(), Counter(), Counter(), threading.Lock()
     tracked_folder = dav.RECORDINGS + "/"
 
     class CountedHandler(dav.Handler):
@@ -189,6 +189,22 @@ def run(args):
                 with lock:
                     listing_counts["recordings"] += 1
             super().do_PROPFIND()
+
+        def do_GET(self):
+            with lock:
+                delete_counts["all_gets"] += 1
+            super().do_GET()
+
+        def do_DELETE(self):
+            with lock:
+                delete_counts["notes" if self._path() == dav.NOTES else "other"] += 1
+            super().do_DELETE()
+
+        def _status(self, status):
+            if self.command == "DELETE" and self._path() == dav.NOTES and status == 204:
+                with lock:
+                    delete_counts["accepted"] += 1
+            super()._status(status)
 
         def _serve_file(self, send_body):
             path = self._path()
@@ -206,6 +222,15 @@ def run(args):
     def listing_count():
         with lock:
             return listing_counts["recordings"]
+
+    def delete_state():
+        with lock:
+            notes_attempts, other_attempts, accepted = delete_counts["notes"], delete_counts["other"], delete_counts["accepted"]
+            payload_gets = delete_counts["all_gets"]
+        with server.parity_lock:
+            deleted = server.parity_notes_deleted
+        return {"notes_attempts": notes_attempts, "other_attempts": other_attempts, "notes_accepted": accepted,
+                "notes_deleted": deleted, "payload_gets": payload_gets}
 
     def phone_count():
         return len(smoke.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines())
@@ -257,12 +282,18 @@ def run(args):
                                 and config.get("ownRclonePath") == str(rclone)
                                 and config.get("autoUpdateRclone") is False,
                                 "The disposable Host did not start with its pinned rclone and Sites off")
+                        def require_no_transfers():
+                            reply = site_request("sites.transfer.list", {})
+                            require(reply.get("type") == "sites.transfer.listResult" and
+                                    (reply.get("payload") or {}).get("transfers") == [],
+                                    "Unexpected paired Host transfer before the normal download")
                         result = ui.run(smoke, host_name=HOST_NAME, host_origin=origin,
                                         webdav_url=f"http://127.0.0.1:{server.server_port}/",
                                         owned_root=root, destination=destination,
                                         capabilities=capabilities, get_count=get_count,
                                         verify_refresh=args.verify_folder_refresh,
-                                        get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers)
+                                        get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers,
+                                        verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers)
                         file_name = result["file"]
                         output = destination / file_name
                         expected = dav.HASHES[file_name]
@@ -310,6 +341,8 @@ def run(args):
                         }
                         if transfer_proof is not None:
                             proof["folder_transfers"] = transfer_proof
+                        if "delete" in result:
+                            proof["folder_delete"] = result["delete"]
                         if "refresh" in result:
                             proof["refresh"] = result["refresh"]
                         (smoke.evidence / "c4-paired-proof.json").write_text(
@@ -370,6 +403,8 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-folder-delete", action="store_true",
+                        help="Verify paired fixture Delete Cancel and Confirm")
     parser.add_argument("--verify-folder-transfers", action="store_true",
                         help="Verify folder Transfers empty and completed paired Host states")
     parser.add_argument("--verify-folder-refresh", action="store_true",
