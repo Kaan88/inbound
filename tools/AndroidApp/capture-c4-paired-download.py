@@ -256,7 +256,12 @@ def run(args):
             destination, decoy = root / "C4-selected", root / "C4-decoy"
             destination.mkdir()
             decoy.mkdir()
-            server = dav.FixtureServer(("127.0.0.1", 0), CountedHandler)
+            class TrackedServer(dav.FixtureServer):
+                def get_request(self):
+                    sock, address = super().get_request()
+                    with lock: listing_counts["connections"] += 1
+                    return sock, address
+            server = TrackedServer(("127.0.0.1", 0), CountedHandler)
             worker = threading.Thread(target=server.serve_forever, daemon=True)
             try:
                 worker.start()
@@ -344,6 +349,29 @@ def run(args):
                             require(set(root.iterdir()) == {destination, decoy}
                                     and not any(destination.iterdir()) and not any(decoy.iterdir())
                                     and phone_count() == baseline and phone_target_absent(), "Unexpected output from removal")
+                        def verify_add_validation(stage):
+                            reply = site_request("sites.list", {})
+                            sites = (reply.get("payload") or {}).get("sites")
+                            require(reply.get("type") == "sites.listResult" and isinstance(sites, list), "Host location snapshot unavailable")
+                            if stage == "rejected":
+                                require(sites == [], "A rejected form created a Host location")
+                            else:
+                                require(len(sites) == 1, "Expected precisely one saved location")
+                                site = sites[0]
+                                require(site.get("id") and site.get("name") == ui.LOCATION and site.get("kind") == "webdav"
+                                        and site.get("url") == f"http://127.0.0.1:{server.server_port}/"
+                                        and site.get("vendor") == "other" and not site.get("user")
+                                        and not site.get("localFolder"), "Saved Host location differs from the owned form")
+                            jobs = site_request("jobs.snapshot", {})
+                            require(jobs.get("type") == "jobs.snapshot" and (jobs.get("payload") or {}).get("jobs") == [], "Unexpected Host jobs")
+                            require_no_transfers()
+                            with lock:
+                                require(not counts and not delete_counts and not listing_counts, "Unexpected WebDAV connection or payload")
+                            with server.parity_lock:
+                                require(not server.parity_notes_deleted and not server.parity_uploads and not server.parity_upload_staging,
+                                        "Fixture files changed")
+                            require(set(root.iterdir()) == {destination, decoy} and not any(destination.iterdir())
+                                    and not any(decoy.iterdir()) and phone_count() == baseline and phone_target_absent(), "Unexpected output")
                         def require_no_transfers():
                             reply = site_request("sites.transfer.list", {})
                             require(reply.get("type") == "sites.transfer.listResult" and
@@ -356,7 +384,16 @@ def run(args):
                                         verify_refresh=args.verify_folder_refresh,
                                         get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers,
                                         verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers,
-                                        verify_location_remove=verify_location_remove if args.verify_location_remove else None)
+                                        verify_location_remove=verify_location_remove if args.verify_location_remove else None,
+                                        verify_add_validation=verify_add_validation if args.verify_add_validation else None)
+                        if args.verify_add_validation:
+                            require(result == {"add_validation": True}, "Validation proof did not complete")
+                            (smoke.evidence / "c3-add-proof.json").write_text(json.dumps({
+                                "malformed_rejected": True, "unsupported_rejected": True, "http_consent_required": True,
+                                "consent_reset_on_address_change": True, "owned_location_saved": True,
+                                "fixture_connections": 0, "jobs": 0, "transfers": 0, "outputs": 0}, indent=2) + "\n", encoding="utf-8")
+                            smoke.log("PASS C3 WebDAV validation and exact owned Host save.")
+                            return
                         if args.verify_location_remove:
                             require(result == {"location_remove": True}, "Removal proof did not complete")
                             (smoke.evidence / "c3-remove-proof.json").write_text(json.dumps({
@@ -420,7 +457,7 @@ def run(args):
                             json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
-                        if paired_ready and not args.verify_location_remove:
+                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation:
                             try:
                                 tree = smoke.tree()
                                 for node in tree.iter("node"):
@@ -473,6 +510,7 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-add-validation", action="store_true", help="Verify WebDAV address and HTTP consent validation")
     parser.add_argument("--verify-location-remove", action="store_true", help="Verify exact paired location Remove Cancel and Confirm")
     parser.add_argument("--verify-folder-delete", action="store_true",
                         help="Verify paired fixture Delete Cancel and Confirm")
@@ -483,6 +521,8 @@ def main():
     args = parser.parse_args()
     if args.verify_location_remove and (args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
         parser.error("--verify-location-remove is a standalone lane")
+    if args.verify_add_validation and (args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
+        parser.error("--verify-add-validation is a standalone lane")
     run(args)
 
 

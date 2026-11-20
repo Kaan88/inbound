@@ -62,6 +62,8 @@ can approve departures from the designs.
   Cancel kept This phone selected. An address edit cleared prior consent.
   C3 paired location removal kept the sibling location and its WebDAV
   files available. Cancel preserved both locations.
+  C3 Add location now resets HTTP consent after address edits, and
+  paired WebDAV validation and save passed.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

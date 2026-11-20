@@ -10,6 +10,14 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved paired C3 Add location validation in `c3-paired-add-validation-20261120-120454`.
+  Editing the address preserved the missing-name message. Supplying a name
+  cleared it. The form rejected a query and an unsupported scheme, and
+  required explicit consent for HTTP. Editing an HTTP address cleared
+  prior consent. The form refused the changed address. Returning to the
+  original address and giving fresh consent saved exactly one WebDAV
+  location. This save created zero WebDAV connections, jobs, transfers
+  or output. The standard C4 paired download then passed on the same APK.
 - Astra approved paired C3 location removal in `c3-paired-location-remove-20261120-115508`.
   Cancel preserved both location IDs. Confirm removed only the selected
   location from the Host, and the sibling still listed the original

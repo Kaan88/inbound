@@ -26,7 +26,7 @@ def require(ok, message):
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
-        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None):
+        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None):
     """Use actual paired-Host UI for an owned download or location removal."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -106,6 +106,81 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
             "Remote Files did not show the expected selected Host")
     smoke.tap(add)
     smoke.wait_node("Add location")
+    if verify_add_validation is not None:
+        import io
+        from PIL import Image
+        label = "WebDAV address (https://…)"
+        warning = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit."
+        def set_address(value):
+            node, _ = smoke.wait_content_description(lambda d: d == label, label)
+            require(node.get("class", "").endswith("EditText"), "Address field unavailable")
+            previous = node.get("text", "")
+            smoke.tap(node)
+            smoke.shell("input", "keyevent", "123")
+            if previous: smoke.shell("input", "keyevent", *(["67"] * len(previous)))
+            smoke.shell("input", "text", "'" + value + "'")
+            current, _ = smoke.wait_content_description(lambda d: d == label, label)
+            require(current.get("text") == value, "Address entry did not round-trip")
+            smoke.shell("input", "keyevent", "4")
+        def consent(expected):
+            node, _ = smoke.wait_node(warning)
+            require(node.get("checkable") == "true" and node.get("checked") == str(expected).lower(),
+                    "HTTP acknowledgement state mismatch")
+            return node
+        def rejected(message, key):
+            tap("Save location")
+            node, tree = smoke.wait_node(message)
+            require(sum(n.get("text") == message for n in tree.iter("node")) == 1, "Ambiguous validation message")
+            # Persist only the validation label and its own pixels, excluding all form fields.
+            bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+            require(bounds is not None, "Validation label bounds missing")
+            l,t,r,b = map(int, bounds.groups())
+            require(l < r and t < b, "Validation label is not visible")
+            for field in tree.iter("node"):
+                if field.get("password") == "true" or field.get("class", "").endswith("EditText"):
+                    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", field.get("bounds", ""))
+                    if match:
+                        x1,y1,x2,y2 = map(int, match.groups())
+                        require(r <= x1 or x2 <= l or b <= y1 or y2 <= t, "Validation capture overlaps a form field")
+            data = smoke.adb("exec-out", "screencap", "-p", raw=True)
+            with Image.open(io.BytesIO(data)) as image:
+                require(0 <= l < r <= image.width and 0 <= t < b <= image.height, "Validation bounds outside screenshot")
+                image.crop((l,t,r,b)).save(evidence / (key + ".png"))
+            root = ET.Element("validation", {"text": message})
+            ET.ElementTree(root).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+            verify_add_validation("rejected")
+        verify_add_validation("rejected")
+        invalid = webdav_url + "?bad=1"
+        unsupported = "ftp://127.0.0.1:" + str(dav.port) + "/"
+        message = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment."
+        missing_name = "Enter a location name."
+        rejected(missing_name, "c3-add-name-required")
+        set_address(invalid)
+        smoke.wait_node(missing_name)
+        enter("Location name", LOCATION)
+        require(not any(n.get("text") == missing_name for n in smoke.tree().iter("node")),
+                "Entering a location name did not clear its validation")
+        consent(False)
+        rejected(message, "c3-add-invalid")
+        set_address(unsupported); consent(False); rejected(message, "c3-add-unsupported")
+        http_message = "HTTP is not encrypted. Tick the warning to allow it."
+        set_address(webdav_url)
+        consent(False)
+        rejected(http_message, "c3-add-no-consent")
+        smoke.tap(consent(False))
+        consent(True)
+        set_address(webdav_url + "different")
+        consent(False)
+        rejected(http_message, "c3-add-address-changed")
+        set_address(webdav_url)
+        consent(False)
+        verify_add_validation("rejected")
+        smoke.tap(consent(False)); consent(True)
+        tap("Save location")
+        _, tree = smoke.wait_content_description(lambda d: d.startswith(LOCATION + ". WebDAV ·"), "saved location", timeout=45)
+        verify_add_validation("saved")
+        save_state("c3-add-saved", tree)
+        return {"add_validation": True}
     enter("Location name", LOCATION)
     enter("WebDAV address (https://…)", webdav_url)
     enter("Download folder on the selected Host (optional)", destination_text)

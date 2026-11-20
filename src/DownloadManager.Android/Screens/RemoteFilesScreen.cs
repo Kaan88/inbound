@@ -689,8 +689,29 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         };
         if (address is not null) _content.AddView(allowHttp);
         if (cloud) AddText("Save the location, then choose Sign in from Remote Files.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        var validation = Label("", 14, Resource.Attribute.colorOnSurfaceVariant);
+        const string nameRequired = "Enter a location name.";
+        const string s3EndpointRequired = "Enter the S3 endpoint for this provider.";
+        const string invalidEndpoint = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment.";
+        const string httpConsentRequired = "HTTP is not encrypted. Tick the warning to allow it.";
+        var validation = Label("", 14, Resource.Attribute.colorError);
+        validation.AccessibilityLiveRegion = AccessibilityLiveRegion.Polite;
         _content.AddView(validation);
+        name.TextChanged += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(name.Text) && validation.Text == nameRequired) validation.Text = "";
+        };
+        if (address is not null)
+        {
+            address.TextChanged += (_, _) =>
+            {
+                allowHttp.Checked = false;
+                if (validation.Text is invalidEndpoint or httpConsentRequired or s3EndpointRequired) validation.Text = "";
+            };
+            allowHttp.CheckedChange += (_, e) =>
+            {
+                if (e.IsChecked && validation.Text == httpConsentRequired) validation.Text = "";
+            };
+        }
         AddButton("Save location", () =>
         {
             if (!SameHost() || _busy) return;
@@ -700,11 +721,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             var provider = providerPicker is { SelectedItemPosition: >= 0 } picker
                 ? providers[picker.SelectedItemPosition].Value : SiteKindCatalog.AwsProvider;
             if (string.IsNullOrWhiteSpace(name.Text))
-            { validation.Text = "Enter a location name."; return; }
+            { validation.Text = nameRequired; return; }
             if (s3 && (string.IsNullOrWhiteSpace(user?.Text) || string.IsNullOrWhiteSpace(password?.Text)))
             { validation.Text = "Enter the access key ID and secret access key."; return; }
             if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
-            { validation.Text = "Enter the S3 endpoint for this provider."; return; }
+            { validation.Text = s3EndpointRequired; return; }
             int port = 22;
             if (sftp && (string.IsNullOrWhiteSpace(server?.Text) || string.IsNullOrWhiteSpace(user?.Text)
                 || !int.TryParse(portField?.Text, out port) || port is < 1 or > 65535))
@@ -715,9 +736,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                     (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) ||
                     string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) ||
                     !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                { validation.Text = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment."; return; }
+                { validation.Text = invalidEndpoint; return; }
                 if (uri.Scheme == Uri.UriSchemeHttp && !allowHttp.Checked)
-                { validation.Text = "HTTP is not encrypted. Tick the warning to allow it."; return; }
+                { validation.Text = httpConsentRequired; return; }
             }
             var request = new SiteSaveRequest
             {
