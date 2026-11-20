@@ -89,6 +89,9 @@ class Capture:
                 "other-finished": f"Notes-{self.nonce}.pdf",
                 "owned-failed": f"Missing-{self.nonce}.bin",
             }
+        self.retry_armed = threading.Event()
+        self.retry_allowed = threading.Event()
+        self.retry_output_owned = False
         self.requests = []
         self.sent = {key: 0 for key in self.names}
         self.b5_total_sent = {key: 0 for key in self.names}
@@ -173,6 +176,8 @@ class Capture:
         class Handler(BaseHTTPRequestHandler):
             def do_HEAD(self):
                 key = self.path.strip("/")
+                if getattr(capture.args, "verify_a1_retry", False) and key == "owned-failed-" + capture.nonce:
+                    key = "owned-failed"
                 if key not in capture.names:
                     self.send_error(404)
                     return
@@ -187,12 +192,28 @@ class Capture:
 
             def do_GET(self):
                 key = self.path.strip("/")
+                if getattr(capture.args, "verify_a1_retry", False) and key == "owned-failed-" + capture.nonce:
+                    key = "owned-failed"
                 if key not in capture.names:
                     self.send_error(404)
                     return
-                capture.requests.append({"file": key, "method": "GET", "at": time.time()})
+                capture.requests.append({"file": key, "method": "GET", "at": time.time(), "monotonic": time.monotonic()})
                 if key == "owned-failed":
-                    self.send_error(404)
+                    # A request racing the tap waits for its explicit acknowledgement.
+                    if capture.retry_armed.is_set():
+                        capture.retry_allowed.wait(8)
+                    if not capture.retry_allowed.is_set():
+                        self.send_error(404)
+                        return
+                    payload = fixture_bytes(key)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Disposition", f'attachment; filename="{capture.names[key]}"')
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    try:
+                        self.wfile.write(payload); self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError): pass
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -565,9 +586,9 @@ class Capture:
             require(match, f"Missing or invalid bounds for identified row: {bounds!r}")
             left, top, right, bottom = map(int, match.groups())
             return left + (right - left) // (4 if quarter else 2), (top + bottom) // 2
-        def add_hook_job(key):
+        def add_hook_job(key, endpoint=None):
             self.adb("shell", "am", "start", "-W", "-n", ACTIVITY,
-                     "--es", "add_url", f"http://127.0.0.1:{self.port}/{key}")
+                     "--es", "add_url", f"http://127.0.0.1:{self.port}/{endpoint or key}")
 
         def wait_arrived(key):
             require(self.b5_arrived[key].wait(30), f"B5 fixture did not start {key}")
@@ -646,7 +667,7 @@ class Capture:
                     self.smoke.tap(action_for(ns, self.names[key], "Pause"))
                     wait_tree(lambda ns: has_state(ns, self.names[key], "paused"), "owned row paused")
                 failed_path = "/sdcard/Download/" + self.names["owned-failed"]
-                add_hook_job("owned-failed")
+                add_hook_job("owned-failed", "owned-failed-" + self.nonce if self.args.verify_a1_retry else None)
                 # Search isolates the sixth row without relying on list ordering or viewport height.
                 self.smoke.enter("Search downloads", self.names["owned-failed"])
                 self.shell("input", "keyevent", "KEYCODE_BACK")  # Hide only the search keyboard.
@@ -664,6 +685,41 @@ class Capture:
                 (self.evidence / "a1-real-failed-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
                 ET.ElementTree(tree).write(self.evidence / "a1-real-failed-ui.xml", encoding="utf-8", xml_declaration=True)
                 self.log("PASS typed C8 and A1: exact mixed file names, Later row, and real fixture 404 failure with Retry.")
+                if self.args.verify_a1_retry:
+                    def get_count():
+                        return sum(r["file"] == "owned-failed" and r["method"] == "GET" for r in self.requests)
+                    count = get_count()
+                    started = time.monotonic()
+                    tree = wait_tree(lambda ns: time.monotonic() - started >= 4 and failed_visible(ns),
+                                     "failed job stable before explicit Retry", return_tree=True)
+                    require(get_count() == count and count > 0, "Failure retried autonomously before user action")
+                    actions = [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/action")
+                               and n.get("content-desc") == "Retry " + self.names["owned-failed"]
+                               and n.get("enabled") == "true" and n.get("clickable") == "true"]
+                    require(len(actions) == 1, "Retry is missing or ambiguous")
+                    require(self.shell(f"if [ -e '{failed_path}' ] || [ -L '{failed_path}' ]; then echo present; fi").strip() != "present",
+                            "Retry output appeared before the tap")
+                    self.retry_output_owned = True
+                    armed_at = time.monotonic()
+                    self.retry_armed.set()
+                    require(get_count() == count, "Unexpected retry before arming completed")
+                    tap_started = time.monotonic()
+                    self.smoke.tap(actions[0])
+                    require(not any(r["file"] == "owned-failed" and r["method"] == "GET" and
+                                    armed_at <= r.get("monotonic", 0) < tap_started for r in self.requests),
+                            "Unexpected retry before the explicit tap")
+                    self.retry_allowed.set()
+                    expected = hashlib.sha256(fixture_bytes("owned-failed")).hexdigest()
+                    def retried_done(ns):
+                        digest = self.shell(f"if [ -f '{failed_path}' ] && [ ! -L '{failed_path}' ]; then sha256sum '{failed_path}'; fi").split()
+                        return (len(matching(ns, self.names["owned-failed"])) == 1 and
+                                has_state(ns, self.names["owned-failed"], "finished") and
+                                get_count() > count and digest[:1] == [expected])
+                    tree = wait_tree(retried_done, "same retry row finished with matching owned payload", return_tree=True)
+                    (self.evidence / "a1-real-retry-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                    ET.ElementTree(tree).write(self.evidence / "a1-real-retry-ui.xml", encoding="utf-8", xml_declaration=True)
+                    (self.evidence / "a1-real-retry-proof.json").write_text(json.dumps({"sha256": expected, "gets_before": count, "gets_after": get_count()}, indent=2) + "\n", encoding="utf-8")
+                    self.log("PASS A1: explicit Retry completed the same named fixture row and matched its payload hash.")
                 return
         if self.args.capture_dark_mixed:
             active_keys = ("selected-active", "other-active")
@@ -940,7 +996,7 @@ class Capture:
     def clean(self):
         errors = []
         writer_stopped = True
-        if self.args.capture_mixed_a3 and self.installed:
+        if (self.args.capture_mixed_a3 or self.retry_output_owned) and self.installed:
             # Stop the writer before fixture release or exact-file cleanup.
             try:
                 self.shell("am", "force-stop", PACKAGE)
@@ -985,6 +1041,18 @@ class Capture:
                 # Never replace the original capture failure or delete an
                 # unexpected/mismatched file. Keep the cleanup diagnostic visible.
                 self.log(f"Cleanup WARNING: {exc}")
+        if self.retry_output_owned and self.installed and writer_stopped:
+            try:
+                target = "/sdcard/Download/" + self.names["owned-failed"]
+                if self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() == "present":
+                    expected = hashlib.sha256(fixture_bytes("owned-failed")).hexdigest()
+                    digest = self.shell(f"if [ -f '{target}' ] && [ ! -L '{target}' ]; then sha256sum '{target}'; fi").split()
+                    require(digest[:1] == [expected], "Retry output is not exact; preserving it")
+                    self.shell("rm", "--", target)
+                    require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                            "Exact Retry fixture output remains after cleanup")
+            except Exception as exc:
+                errors.append(f"Retry output cleanup: {exc}")
         if self.args.capture_mixed_a3 and self.a3_output_owned and self.installed and writer_stopped:
             target = "/sdcard/Download/" + self.names["other-active"]
             if self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() == "present":
@@ -1027,6 +1095,7 @@ def main():
     parser.add_argument("--capture-dark-mixed", action="store_true", help="With --unattended-b5 capture representative dark A1/A2 real mixed states")
     parser.add_argument("--capture-c8-light", action="store_true", help="With --unattended-b5 capture the real mixed list in Light mode before selection")
     parser.add_argument("--c8-typed-a1-failed", action="store_true", help="Capture typed C8 rows and a separate real 404 failure; ends before B5 selection")
+    parser.add_argument("--verify-a1-retry", action="store_true", help="After actual fixture 404, tap Retry and verify the exact completed hash")
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
@@ -1038,6 +1107,8 @@ def main():
         parser.error("--capture-mixed-a3 requires --unattended-b5 --capture-dark-mixed")
     if args.capture_dark_mixed and (not args.unattended_b5 or args.capture_c8_light):
         parser.error("--capture-dark-mixed requires --unattended-b5 and cannot be combined with --capture-c8-light")
+    if args.verify_a1_retry and not args.c8_typed_a1_failed:
+        parser.error("--verify-a1-retry requires --c8-typed-a1-failed")
     if args.c8_typed_a1_failed and (not args.capture_c8_light or not args.unattended_b5 or
                                     args.verify_b5_bulk_pause or args.verify_b5_bulk_resume):
         parser.error("--c8-typed-a1-failed requires --unattended-b5 --capture-c8-light and excludes bulk actions")

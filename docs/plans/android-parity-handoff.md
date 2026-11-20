@@ -92,7 +92,11 @@ download summary depends on tracked upload support.
 - Astra approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real
-  404 failure and enabled Retry with no completed output.
+  404 failure and enabled Retry with no completed output. In
+  `a1-retry-owned-20261120-083311`, Astra approved one explicit Retry.
+  The same row moved from 404 to Finished, the fixture saw two additional
+  GETs, and the 16 MiB output matched SHA-256. Cleanup removed the exact
+  hash-matched output after stopping the probe writer.
 - Astra approved a real paired C4 WebDAV download in
   `c4-paired-pinned-final-20261120-064240`. The probe matched and pinned
   the disposable Host's HTTPS certificate. Cancel retained the selection
