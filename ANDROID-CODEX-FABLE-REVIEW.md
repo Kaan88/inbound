@@ -26,6 +26,10 @@ findings. Record its later findings, Codex's fixes, verification and final verdi
 separately; keep entries OPEN until that review actually happens. Continue adding
 important implementation changes and decisions as work proceeds.
 
+## Remote Files 0.0.10 phone hotfix, 2026-11-20
+
+Implementer: Codex. Later independent review remains open. The Android bundled-rclone control client uses managed HTTP for its loopback connection. The Android Transfers UI explains a download skip due to an existing destination item. A delegated UI edit was checked by the lead and verified on the phone. See the [diagnosis, signed APK fingerprint and phone results](PROGRESS.md#remote-files-on-the-owners-galaxy-s24-fe-2026-11-20). Live verification covered provider browsing and retained transfer results.
+
 ## Codex review handoff (2026-11-19)
 
 - Implementer/coordinator: Codex. Later independent reviewer: Astra.

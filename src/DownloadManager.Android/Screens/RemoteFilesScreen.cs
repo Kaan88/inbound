@@ -556,6 +556,10 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 + " skipped, " + transfer.FilesFailed + " failed of " + transfer.Files
                  + "\n" + transfer.RemoteFolder + " ↔ " + transfer.LocalFolder
                  + "\nStarted: " + transfer.CreatedAt.ToLocalTime().ToString("g") + " · ID " + transfer.Id;
+            if (transfer.Direction == "download" && transfer.Conflict == "skip" && transfer.FilesSkipped > 0)
+                detail += transfer.FilesSkipped == 1
+                    ? "\nAn item with this name already exists at the destination and was kept."
+                    : "\nItems with these names already exist at the destination and were kept.";
             if (!string.IsNullOrWhiteSpace(transfer.Message)) detail += "\n" + transfer.Message;
             if (transfer.State == "paused") detail += "\nUnfinished files restart from the beginning on resume.";
             _content.AddView(Card(transfer.Direction + " · " + transfer.SiteName, detail, false));

@@ -170,8 +170,11 @@ public sealed class RcloneProcess : IRcloneInstance
 
         var lifetime = ChildLifetime.Tie(process);
         var exitedFlag = 0;
+        // Android's native handler can throw "Socket closed" when an optional request is
+        // canceled. Use the managed handler for rclone's loopback control requests.
+        var handler = OperatingSystem.IsAndroid() ? new SocketsHttpHandler { UseProxy = false } : null;
         var client = new RcloneClient(new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/"), user, password,
-            () => Volatile.Read(ref exitedFlag) == 1);
+            () => Volatile.Read(ref exitedFlag) == 1, handler);
         client.AddSecret(user);
         var rclone = new RcloneProcess(process, lifetime, client, pidFile, log)
         {

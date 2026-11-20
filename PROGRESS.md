@@ -1,5 +1,15 @@
 # Progress — session handoff
 
+## Remote Files on the owner's Galaxy S24 FE, 2026-11-20
+
+Confirmed Android 0.0.9 on the physical phone. The owner reproduced Google Drive's folder error while staying on the page. At 15:52:32 Istanbul time, bundled rclone logged a canceled list and the local Host logged `IPC command 'sites.browse' failed: Socket closed`. The two-second optional child-count budget is the leading explanation, based on the Android request enabling those counts and the Host handling managed cancellation there but allowing this socket error to escape. The exact canceled subrequest remains unverified. The two recent Dropbox transfer cards on This phone matched the accepted jobs. One item was skipped at 15:48:56 under the no-replace policy, and one was copied to the phone's Downloads folder at 15:49:20. Both reported zero failures. This was read-only diagnosis. No account contents or raw diagnostics were retained.
+
+The follow-up confirmed OneDrive showing the same folder error at 15:58:23 Istanbul time. The OneDrive list was canceled and the local Host again reported `Socket closed`. Earlier Dropbox browse attempts also logged this sequence, separately from the successful and skipped Dropbox transfers. This confirms a shared browse failure signature across the three providers.
+
+Built signed Android 0.0.10 for the owner's phone. The Android rclone loopback client now uses the managed HTTP handler so a canceled folder-count request reaches the existing optional-cancellation handling. Transfer results explain that an existing destination item was kept when a download is skipped under the no-replace policy. The APK is `artifacts/android-app/remote-files-hotfix-20261120-160049/Inbound-android-0.0.10-arm64.apk`, SHA-256 `babaecf1ca09f4f0c98672f923f27ce24389953c15301aeda72f433d0498b513`. The permanent release signature, arm64 package, pinned rclone and 16 KiB alignment passed. Installed in place on the Galaxy S24 FE and matched the installed APK hash. Sites tests passed 214 with 32 platform or fixture skips. Mobile tests passed 567.
+
+On the installed build, the existing saved Google Drive, OneDrive and Dropbox locations all opened their folder listings. The Inbound process logged two canceled rclone list requests and zero propagated browse failures. Verified the new skip explanation on the retained Dropbox transfer. This pass exercised browsing and transfer history with no new file transfer. The phone's original display settings were restored and checked. APK delivery was a direct phone installation.
+
 ## Android 0.0.9 parity resumed, 2026-11-20
 
 Published [Android 0.0.9](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.9) from `d053242e177f95c7536ca0c9b32cbab9bb928e58`. The public APK, signed manifest and SHA256SUMS matched the staged files. The public `android-latest` manifest matched the release manifest SHA-256 `65fed75c7d89a28a8f00426c468790d13c7248336ea68936209887e36b2d56d9`. The desktop Latest marker remained `v0.9.0`. ANDROID.9 is next in the roadmap.
