@@ -378,6 +378,22 @@ def run(args):
                                         and not site.get("localFolder"), "Saved S3 configuration differs from owned input")
                             verify_validation_idle()
 
+                        def verify_sftp_validation(stage):
+                            reply = site_request("sites.list", {})
+                            sites = (reply.get("payload") or {}).get("sites")
+                            require(reply.get("type") == "sites.listResult" and isinstance(sites, list), "Host location snapshot unavailable")
+                            if stage == "rejected":
+                                require(sites == [], "A rejected SFTP form created a Host location")
+                            else:
+                                require(len(sites) == 1, "Expected precisely one saved SFTP location")
+                                site = sites[0]
+                                require(site.get("id") and site.get("name") == ui.LOCATION and site.get("kind") == "sftp"
+                                        and site.get("host") == "127.0.0.1" and site.get("port") == server.server_port
+                                        and site.get("user") == "fixtureuser" and site.get("authMethod") == "password"
+                                        and site.get("hasPassword") is False and not site.get("localFolder")
+                                        and not site.get("remoteFolder"), "Saved SFTP configuration differs from owned input")
+                            verify_validation_idle()
+
                         def verify_validation_idle():
                             jobs = site_request("jobs.snapshot", {})
                             require(jobs.get("type") == "jobs.snapshot" and (jobs.get("payload") or {}).get("jobs") == [], "Unexpected Host jobs")
@@ -404,7 +420,16 @@ def run(args):
                                         verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers,
                                         verify_location_remove=verify_location_remove if args.verify_location_remove else None,
                                         verify_add_validation=verify_add_validation if args.verify_add_validation else None,
-                                        verify_s3_validation=verify_s3_validation if args.verify_s3_validation else None)
+                                        verify_s3_validation=verify_s3_validation if args.verify_s3_validation else None,
+                                        verify_sftp_validation=verify_sftp_validation if args.verify_sftp_validation else None)
+                        if args.verify_sftp_validation:
+                            require(result == {"sftp_validation": True}, "SFTP validation proof did not complete")
+                            (smoke.evidence / "c3-sftp-proof.json").write_text(json.dumps({
+                                "default_port_22": True, "missing_server_rejected_and_cleared": True,
+                                "invalid_port_rejected_and_cleared": True, "missing_user_rejected_and_cleared": True,
+                                "owned_sftp_saved": True, "fixture_connections": 0, "jobs": 0, "transfers": 0, "outputs": 0}, indent=2) + "\n", encoding="utf-8")
+                            smoke.log("PASS C3 SFTP validation and owned Host save.")
+                            return
                         if args.verify_s3_validation:
                             require(result == {"s3_validation": True}, "S3 validation proof did not complete")
                             (smoke.evidence / "c3-s3-proof.json").write_text(json.dumps({
@@ -484,7 +509,7 @@ def run(args):
                             json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
-                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation and not args.verify_s3_validation:
+                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation and not args.verify_s3_validation and not args.verify_sftp_validation:
                             try:
                                 tree = smoke.tree()
                                 for node in tree.iter("node"):
@@ -537,6 +562,7 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-sftp-validation", action="store_true", help="Verify SFTP form validation and owned Host save")
     parser.add_argument("--verify-s3-validation", action="store_true", help="Verify S3 provider validation and owned Host save")
     parser.add_argument("--verify-add-validation", action="store_true", help="Verify WebDAV address and HTTP consent validation")
     parser.add_argument("--verify-location-remove", action="store_true", help="Verify exact paired location Remove Cancel and Confirm")
@@ -553,6 +579,8 @@ def main():
         parser.error("--verify-add-validation is a standalone lane")
     if args.verify_s3_validation and (args.verify_add_validation or args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
         parser.error("--verify-s3-validation is a standalone lane")
+    if args.verify_sftp_validation and (args.verify_s3_validation or args.verify_add_validation or args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
+        parser.error("--verify-sftp-validation is a standalone lane")
     run(args)
 
 

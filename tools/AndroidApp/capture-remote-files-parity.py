@@ -588,7 +588,7 @@ class Capture:
                 self.tap("SFTP")
             meta = fixture.metadata()
             for label, value in (("Location name", "Test SFTP"), ("SFTP server name or address", meta["host"]),
-                                 ("Port", str(port)), ("User name (optional)", meta["username"]),
+                                 ("Port", str(port)), ("SFTP user name", meta["username"]),
                                  ("Password (optional)", meta["password"])):
                 if label == "Port":
                     self.tap(label)
@@ -817,7 +817,7 @@ class Capture:
             if self.smoke.started:
                 try:
                     tree = self.tree()
-                    credential_fields = {"User name (optional)", "Password (optional)",
+                    credential_fields = {"User name (optional)", "SFTP user name", "Password (optional)",
                                          "Access key ID", "Secret access key"}
                     if any(node.get("password") == "true" or credential_fields.intersection(
                             (node.get("text"), node.get("content-desc"))) for node in tree.iter("node")):

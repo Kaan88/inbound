@@ -674,7 +674,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         var remoteFolder = sftp || s3 ? Field("Starting folder (optional)", InputTypes.ClassText) : null;
         var region = s3 ? Field("Region (optional)", InputTypes.ClassText) : null;
         var localFolder = _phoneHost ? null : Field("Download folder on the selected Host (optional)", InputTypes.ClassText);
-        var user = cloud ? null : Field(s3 ? "Access key ID" : "User name (optional)", InputTypes.ClassText);
+        var user = cloud ? null : Field(sftp ? "SFTP user name" : s3 ? "Access key ID" : "User name (optional)", InputTypes.ClassText);
         var password = _password = cloud ? null : Field(s3 ? "Secret access key" : "Password (optional)",
             InputTypes.ClassText | InputTypes.TextVariationPassword);
         if (password is not null) password.Enabled = _secureHostConnection;
@@ -690,6 +690,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (address is not null) _content.AddView(allowHttp);
         if (cloud) AddText("Save the location, then choose Sign in from Remote Files.", 14, Resource.Attribute.colorOnSurfaceVariant);
         const string nameRequired = "Enter a location name.";
+        const string sftpServerRequired = "Enter an SFTP server address.";
+        const string sftpPortInvalid = "Enter a port from 1 to 65535.";
+        const string sftpUserRequired = "Enter an SFTP user name.";
         const string s3KeysRequired = "Enter the access key ID and secret access key.";
         const string s3EndpointRequired = "Enter the S3 endpoint for this provider.";
         const string invalidEndpoint = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment.";
@@ -731,6 +734,22 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                     validation.Text = "";
             };
         }
+        bool TrySftpPort(out int port) => int.TryParse(portField?.Text, out port) && port is >= 1 and <= 65535;
+        if (sftp)
+        {
+            server!.TextChanged += (_, _) =>
+            {
+                if (validation.Text == sftpServerRequired && !string.IsNullOrWhiteSpace(server.Text)) validation.Text = "";
+            };
+            portField!.TextChanged += (_, _) =>
+            {
+                if (validation.Text == sftpPortInvalid && TrySftpPort(out _)) validation.Text = "";
+            };
+            user!.TextChanged += (_, _) =>
+            {
+                if (validation.Text == sftpUserRequired && !string.IsNullOrWhiteSpace(user.Text)) validation.Text = "";
+            };
+        }
         AddButton("Save location", () =>
         {
             if (!SameHost() || _busy) return;
@@ -746,9 +765,15 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
             { validation.Text = s3EndpointRequired; return; }
             int port = 22;
-            if (sftp && (string.IsNullOrWhiteSpace(server?.Text) || string.IsNullOrWhiteSpace(user?.Text)
-                || !int.TryParse(portField?.Text, out port) || port is < 1 or > 65535))
-            { validation.Text = "Enter the SFTP server, port and user name."; return; }
+            if (sftp)
+            {
+                if (string.IsNullOrWhiteSpace(server?.Text))
+                { validation.Text = sftpServerRequired; return; }
+                if (!TrySftpPort(out port))
+                { validation.Text = sftpPortInvalid; return; }
+                if (string.IsNullOrWhiteSpace(user?.Text))
+                { validation.Text = sftpUserRequired; return; }
+            }
             if (address is not null && (!s3 || text.Length > 0))
             {
                 if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||

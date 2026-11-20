@@ -4,6 +4,13 @@
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved paired C3 SFTP form validation in `c3-paired-sftp-validation-20261120-122245`.
+  The required username is labeled as such. The form defaults to port 22,
+  rejects a missing server, port 65536 and a missing username separately,
+  and clears each message when corrected. The paired Host saved exactly
+  one loopback SFTP configuration without connecting. A local SFTP run on
+  the same APK verified the fingerprint, Cancel before login and browse
+  after explicit trust.
 - Astra approved the C3 location type and S3 provider flow in `c3-paired-s3-validation-20261120-121529`.
   The native menus showed six types and five S3 providers. The missing-key
   error held after entering just the access ID and cleared after both keys.

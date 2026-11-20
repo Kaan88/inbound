@@ -26,7 +26,7 @@ def require(ok, message):
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
-        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None, verify_s3_validation=None):
+        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None, verify_s3_validation=None, verify_sftp_validation=None):
     """Use actual paired-Host UI for an owned download or location removal."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -131,6 +131,49 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
             image.crop((l,t,r,b)).save(evidence / (key + ".png"))
         ET.ElementTree(ET.Element("validation", {"text":label})).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
 
+    if verify_sftp_validation is not None:
+        tap("Location type: WebDAV")
+        smoke.tap(smoke.wait_node("SFTP")[0])
+        smoke.wait_node("Location type: SFTP")
+        enter("Location name", LOCATION)
+        port, _ = smoke.wait_content_description(lambda d: d == "Port", "Port")
+        require(port.get("text") == "22", "SFTP default port is not 22")
+        verify_sftp_validation("rejected")
+        def error(label, key):
+            tap("Save location")
+            _, tree = smoke.wait_node(label)
+            capture_label(key, label, tree)
+            verify_sftp_validation("rejected")
+        def cleared(label):
+            require(not any(n.get("text") == label for n in smoke.tree().iter("node")), "Corrected SFTP error remained visible")
+        error("Enter an SFTP server address.", "c3-sftp-missing-server")
+        enter("SFTP server name or address", "127.0.0.1")
+        cleared("Enter an SFTP server address.")
+        def replace_port(value):
+            node, _ = smoke.wait_content_description(lambda d: d == "Port", "Port")
+            old = node.get("text", "")
+            require(old.isdigit(), "Expected numeric SFTP port")
+            smoke.tap(node); smoke.shell("input", "keyevent", "123")
+            smoke.shell("input", "keyevent", *(["67"] * len(old)))
+            smoke.shell("input", "text", value)
+            node, _ = smoke.wait_content_description(lambda d: d == "Port", "Port")
+            require(node.get("text") == value, "SFTP port did not round-trip")
+            smoke.shell("input", "keyevent", "4")
+        replace_port("65536")
+        error("Enter a port from 1 to 65535.", "c3-sftp-invalid-port")
+        replace_port(str(dav.port))
+        cleared("Enter a port from 1 to 65535.")
+        error("Enter an SFTP user name.", "c3-sftp-missing-user")
+        enter("SFTP user name", "fixtureuser", sensitive=True)
+        cleared("Enter an SFTP user name.")
+        tap("Save location")
+        _, tree = smoke.wait_content_description(lambda d: d.startswith(LOCATION + ". SFTP ·"), "saved SFTP card", timeout=45)
+        verify_sftp_validation("saved")
+        require(not any(n.get("password") == "true" or n.get("class", "").endswith("EditText")
+                        or "fixtureuser" in (n.get("text", "") + n.get("content-desc", ""))
+                        for n in tree.iter("node")), "Refusing credential-bearing saved card")
+        save_state("c3-sftp-saved", tree)
+        return {"sftp_validation": True}
     if verify_s3_validation is not None:
         def chooser_capture(key, tree, labels):
             nodes = list(tree.iter("node"))
