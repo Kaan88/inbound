@@ -350,6 +350,7 @@ public sealed partial class MainActivity : AppCompatActivity
             AndroidX.Transitions.TransitionManager.BeginDelayedTransition(FindViewById<ViewGroup>(Resource.Id.pages)!, Motion.Fade());
             from.Visibility = ViewStates.Gone; to.Visibility = ViewStates.Visible;
         }
+        if (remoteFiles && _remoteFiles is not null) ViewCompat.RequestApplyInsets(_remoteFiles.View);
         _nav?.UpdateBack();
     }
 

@@ -147,6 +147,12 @@ internal sealed class HostSettingsScreen : IDisposable
         if (!_model.CanWriteSafely) Note(body, "Update this Host to edit its settings safely. Current values are read-only.");
         Refresh();
         if (!_activity.OpenHostSettingsPage(root, title, () => PageClosed(generation))) PageClosed(generation);
+        else if (_activity.FindViewById<EditText>(Resource.Id.settings_search_input) is { } search)
+        {
+            search.ClearFocus();
+            var keyboard = (Android.Views.InputMethods.InputMethodManager?)_activity.GetSystemService(Context.InputMethodService);
+            keyboard?.HideSoftInputFromWindow(search.WindowToken, 0);
+        }
     }
 
     private void PageClosed(int generation)

@@ -336,11 +336,65 @@ class Capture:
         save("a0-battery-cancel-return", returned)
         self.log(f"PASS A0: notification {self.args.a0_permissions} and battery {cancel.get('text')} returned to setup; probe whitelist unchanged")
 
+    def verify_c7_routes(self):
+        """Visit local Settings routes without reading the clipboard or signing in."""
+        def save(key, tree):
+            (self.evidence / (key + "-capture.png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+        self.smoke.tap(self.smoke.wait_node("Start downloading", resource="fr_start")[0])
+        self.smoke.wait_node("Search downloads", timeout=30)
+        self.smoke.wait_content_description(lambda d: d == "Downloads shown from This phone. Change host", "local Host")
+        self.click_resource(SELECTORS["settings"])
+        self.smoke.wait_node("Settings", resource="settings_title")
+        self.click_resource(APP_ID + "settings_search")
+        self.smoke.wait_node("Search settings", resource="settings_search_input")
+        self.adb("shell", "input", "text", "Catching")
+        row, tree = self.smoke.wait_content_description(
+            lambda d: d == "Catching links. Share, browser and clipboard", "filtered Catching links row")
+        require(not any(n.get("text") == "Site logins" for n in tree.iter("node")),
+                "Settings search did not filter Site logins")
+        save("c7-links-search", tree)
+        self.smoke.tap(row)
+        _, tree = self.smoke.wait_node("Clipboard links")
+        labels = {n.get("text", "") for n in tree.iter("node")}
+        expected = {"Share to Inbound", "Use Share in your browser or another app", "Built-in browser",
+                    "Browse a page and choose its downloads", "Clipboard links",
+                    "Offer a copied link while Inbound is open", "Clipboard links are not monitored in the background."}
+        require(expected.issubset(labels), "Catching links did not show its guidance and browser entry")
+        require(not any("Switch" in n.get("class", "") for n in tree.iter("node")),
+                "Catching links unexpectedly exposed a switch")
+        save("c7-catching-links", tree)
+        for _ in range(2):
+            self.shell("input", "keyevent", "4")
+            tree = self.smoke.tree()
+            # First Back may dismiss the keyboard, and the visible hierarchy can
+            # include the Settings root underneath the detail during navigation.
+            if not self.smoke.matches(tree, "Clipboard links"):
+                break
+        else:
+            raise RuntimeError("Native Back did not close Catching links")
+        _, tree = self.smoke.wait_node("Settings", timeout=30, resource="settings_title")
+        if any(n.get("resource-id") == APP_ID + "settings_search_input" for n in tree.iter("node")):
+            self.click_resource(APP_ID + "settings_search")
+        row, tree = self.smoke.wait_content_description(
+            lambda d: d == "Site logins. Manage sign-ins in Remote Files", "Site logins row")
+        save("c7-site-logins-row", tree)
+        self.smoke.tap(row)
+        _, tree = self.smoke.wait_node("Enable Remote Files", timeout=35)
+        labels = {n.get("text", "") for n in tree.iter("node")}
+        require("Remote Files is off on this Host." in labels and
+                any(n.get("resource-id", "").endswith(":id/nav_remote_files") and n.get("selected") == "true"
+                    for n in tree.iter("node")), "Site logins did not open the local Remote Files landing")
+        save("c7-site-logins-landing", tree)
+        self.log("PASS C7: Catching links guidance, browser entry and Back; Site logins opened the local Remote Files landing. No provider sign-in attempted.")
+
     def run(self):
         self.check()
         try:
             self.launch()
-            if self.args.a0_permissions:
+            if self.args.verify_c7_routes:
+                self.verify_c7_routes()
+            elif self.args.a0_permissions:
                 self.verify_a0_permissions()
             elif self.args.unattended:
                 self.unattended_sequence()
@@ -362,6 +416,8 @@ class Capture:
             tree = self.smoke.tree()
             ET.ElementTree(tree).write(self.evidence / "failure-ui.xml",
                                        encoding="utf-8", xml_declaration=True)
+            if self.args.verify_c7_routes:
+                return
             # These app tags are scoped; avoid a full logcat dump that could
             # include unrelated app/device data.
             logs = self.adb("logcat", "-d", "-s", "Inbound", "InboundRemoteFilesProbe")
@@ -386,6 +442,7 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--apk", required=True, help="Explicit probe APK with the rcloneprobe application ID")
     parser.add_argument("--evidence", type=Path, required=True, help="New, previously absent evidence directory")
+    parser.add_argument("--verify-c7-routes", action="store_true", help="Standalone local Catching links and Site logins route check")
     parser.add_argument("--a0-permissions", choices=("deny", "allow"), help="Standalone native first-run permission check; battery prompt is cancelled")
     parser.add_argument("--verify-a4-c7", action="store_true", help="Assert updated A4 rows and C7 search in an unattended run")
     parser.add_argument("--a5-metadata", action="store_true", help="Populate A5 from a loopback metadata fixture without submitting")
@@ -393,6 +450,8 @@ def main():
     parser.add_argument("--unattended", action="store_true",
                         help="Opt in to hands-off capture of safely observable, already reached states")
     args = parser.parse_args()
+    if args.verify_c7_routes and (args.a0_permissions or args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
+        parser.error("--verify-c7-routes is a standalone lane")
     if args.a0_permissions and (args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
         parser.error("--a0-permissions is a standalone lane")
     if args.a5_metadata and not args.unattended:

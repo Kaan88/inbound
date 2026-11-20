@@ -53,6 +53,12 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   apart after one tap. The Android row offered Resume and the finished
   file kept its matching hash. The keyboard run stopped before activation
   because the emulator's keyboard visibility could not be verified.
+- Astra approved the C7 Settings search and Back route in
+  `c7-settings-insets-20261120-063758`. Catching links showed its
+  guidance and browser entry with the keyboard dismissed. Site logins
+  opened the disabled local Remote Files screen below the status bar.
+  The enabled Remote Files list kept its layout and showed the real
+  205 GB SFTP capacity in `c3-enabled-insets-20261120-064627`.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
