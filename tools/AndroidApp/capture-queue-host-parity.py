@@ -899,7 +899,7 @@ class Capture:
                 self.smoke.tap(node)
                 self.smoke.wait_node("Files are saved on " + names[0], timeout=30)
 
-                fixture.seed_download(a)
+                finished_id = fixture.seed_download(a)
                 path = Path(a["download_root"]) / "c5-c6.bin"
                 deadline = time.monotonic() + 30
                 while time.monotonic() < deadline:
@@ -942,6 +942,65 @@ class Capture:
                     "ui_bytes_before_rounded": ui_before, "ui_bytes_after_rounded": ui_after,
                     "sample_seconds": 4}, indent=2) + "\n", encoding="utf-8")
                 self.log("Mixed Host workload captured; graph and mockup parity require visual review.")
+                if self.args.verify_remote_touch_pause:
+                    self.current_checkpoint = "c6-touch-pause"
+                    require(finished_id and active_id and finished_id != active_id, "Fixture jobs do not have distinct identities")
+                    request = fixture.fixture_session(a)
+
+                    def job_snapshot():
+                        reply = request("jobs.snapshot", {})
+                        require(reply.get("type") == "jobs.snapshot", "Fixture Host snapshot unavailable")
+                        jobs = (reply.get("payload") or {}).get("jobs", [])
+                        require(len(jobs) == 2, "Fixture Host must contain exactly two jobs")
+                        selected = [j for j in jobs if j.get("id") == active_id and j.get("fileName") == "c5-c6-active.bin"]
+                        finished = [j for j in jobs if j.get("id") == finished_id and j.get("fileName") == "c5-c6.bin"]
+                        require(len(selected) == 1 and len(finished) == 1, "Fixture Host job identities changed")
+                        return selected[0], finished[0]
+
+                    running, done = job_snapshot()
+                    require(str(running.get("state", "")).lower() in ("connecting", "downloading")
+                            and 0 < (running.get("receivedBytes") or 0) < (running.get("totalBytes") or 0)
+                            and str(done.get("state", "")).lower() == "completed", "Fixture jobs not in the expected active/finished states")
+                    self.smoke.wait_node("Files are saved on " + names[0])
+                    focus_line = next((line for line in self.shell("dumpsys", "window").splitlines()
+                                       if "mCurrentFocus=" in line), "")
+                    require(PACKAGE in focus_line, "Probe is not the foreground window")
+                    tree = self.smoke.tree()
+                    controls = self._nodes(tree, "summary_toggle")
+                    require(len(controls) == 1 and controls[0].get("package") == PACKAGE and controls[0].get("enabled") == "true"
+                            and controls[0].get("clickable") == "true"
+                            and controls[0].get("content-desc") == "Pause all downloads", "Exact remote Pause control unavailable")
+                    (self.evidence / "c6-touch-pause-attempt.json").write_text('{"activation_attempted": true}\n', encoding="ascii")
+                    self.smoke.tap(controls[0])  # One touch; do not retry an uncertain result.
+                    self.smoke.wait_content_description(lambda d: d == "Resume all downloads", "remote Resume control", timeout=20)
+                    _, paused_tree = self.smoke.wait_content_description(
+                        lambda d: d.startswith("c5-c6-active.bin. Paused"), "paused fixture row", timeout=20)
+                    stem = "c6-touch-paused"
+                    (self.evidence / (stem + "-capture.png")).write_bytes(
+                        self.adb("exec-out", "screencap", "-p", raw=True))
+                    ET.ElementTree(paused_tree).write(self.evidence / (stem + "-ui.xml"),
+                                                     encoding="utf-8", xml_declaration=True)
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        paused, completed = job_snapshot()
+                        if str(paused.get("state", "")).lower() == "paused": break
+                        time.sleep(.3)
+                    else: raise RuntimeError("Fixture Host did not report the active job paused")
+                    time.sleep(4)
+                    paused_after, completed_after = job_snapshot()
+                    require(str(paused_after.get("state", "")).lower() == "paused"
+                            and 0 < paused.get("receivedBytes", 0) == paused_after.get("receivedBytes")
+                            and paused.get("receivedBytes") < paused.get("totalBytes", 0), "Paused Host bytes did not remain stable")
+                    require(all(str(job.get("state", "")).lower() == "completed" for job in (completed, completed_after)),
+                            "Finished fixture job changed state")
+                    require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == a["payload_sha256"],
+                            "Finished fixture hash changed after Pause")
+                    result = {"mode": "touch", "active_state": "paused", "received_before": paused["receivedBytes"],
+                        "received_after": paused_after["receivedBytes"], "sample_seconds": 4,
+                        "finished_state": "completed", "finished_sha256": a["payload_sha256"]}
+                    (self.evidence / "c6-touch-pause.json").write_text(
+                        json.dumps(result, indent=2) + "\n", encoding="utf-8")
+                    self.log("PASS C6 touch: owned Host job stayed paused with stable bytes.")
                 if self.args.verify_remote_layout:
                     # Capture the selected Host row only after its asynchronously fetched live figures arrive.
                     host_chip(names[0])
@@ -1144,6 +1203,8 @@ def main():
                         help="Exact disposable paired-host label to enter manually")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
+    parser.add_argument("--verify-remote-touch-pause", action="store_true",
+                        help="With --mixed-hosts touch Pause and verify the owned active Host job")
     parser.add_argument("--verify-scheduled-row", action="store_true",
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-start", action="store_true",
@@ -1164,6 +1225,10 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_remote_touch_pause and not args.mixed_hosts:
+        parser.error("--verify-remote-touch-pause requires --mixed-hosts")
+    if args.verify_remote_touch_pause and args.verify_remote_layout:
+        parser.error("run remote touch Pause separately from layout verification")
     if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:
         parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
     if args.verify_scheduled_row and not args.unattended_c1_workload:

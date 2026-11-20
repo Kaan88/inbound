@@ -46,6 +46,11 @@
   1,048,576-byte FLAC with its expected hash in the exact Host child.
   The decoy child stayed empty and the file never appeared on the phone.
   The owned probe, reverse, relay, and fixture Servers were stopped.
+- Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
+  The selected paired Host reported 2,228,224 received bytes four seconds
+  apart after one tap. The Android row offered Resume and the finished
+  file kept its matching hash. The keyboard run stopped before activation
+  because the emulator's keyboard visibility could not be verified.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
