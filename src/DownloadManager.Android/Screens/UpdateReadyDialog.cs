@@ -28,9 +28,9 @@ internal static class UpdateReadyDialog
         var heading = Label(activity, $"Inbound {manifest.VersionName} is ready", 23, Resource.Attribute.colorOnSurface);
         heading.AccessibilityHeading = true; body.AddView(heading, Margin(activity, 14));
         body.AddView(Label(activity, Metadata(manifest), 14, Resource.Attribute.colorOnSurfaceVariant), Margin(activity, 4));
-        var title = Label(activity, "What’s new", 15, Resource.Attribute.colorOnSurface); title.AccessibilityHeading = true;
+        var title = Label(activity, "What’s new", 15, Resource.Attribute.colorOnSurface); title.AccessibilityHeading = true; title.SetTypeface(null, Android.Graphics.TypefaceStyle.Bold);
         body.AddView(title, Margin(activity, 16));
-        var notes = CreateNotes(activity, out var text); text.Text = Notes(manifest); body.AddView(notes, Margin(activity, 8));
+        var notes = CreateNotes(activity, out var text); BindNotes(text, manifest); body.AddView(notes, Margin(activity, 8));
         // The whole body may scroll on a short or large-font display; the native dialog button panel remains visible.
         var outer = new NestedScrollView(activity) { FillViewport = false }; outer.AddView(body);
         var dialog = new MaterialAlertDialogBuilder(activity).SetView(outer)!
@@ -61,6 +61,14 @@ internal static class UpdateReadyDialog
         text.SetTextIsSelectable(false);
         scroll.AddView(text, new Android.Views.ViewGroup.LayoutParams(-1, -2));
         return scroll;
+    }
+    public static void BindNotes(TextView text, AndroidUpdateManifest manifest)
+    {
+        var value = Notes(manifest);
+        if (text.Text != value) text.Text = value;
+        var colour = string.IsNullOrWhiteSpace(manifest.ReleaseNotes)
+            ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorOnSurface;
+        text.SetTextColor(new Android.Graphics.Color(Motion.Attr(text.Context!, colour)));
     }
     private static TextView Label(Context context, string value, float size, int colour)
     {

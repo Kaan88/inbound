@@ -13,7 +13,7 @@ internal sealed class AppUpdatesScreen : IDisposable
 {
     private readonly MainActivity _activity;
     private readonly AndroidUpdater _service;
-    private readonly TextView _status, _offerMetadata, _notes;
+    private readonly TextView _status, _offerMetadata, _notesTitle, _notes;
     private readonly View _offerDetails;
     private readonly LinearProgressIndicator _progress;
     private readonly MaterialButton _check, _install;
@@ -49,6 +49,7 @@ internal sealed class AppUpdatesScreen : IDisposable
         _install = card.FindViewById<MaterialButton>(Resource.Id.update_install)!;
         _offerDetails = card.FindViewById<View>(Resource.Id.update_offer_details)!;
         _offerMetadata = card.FindViewById<TextView>(Resource.Id.update_offer_metadata)!;
+        _notesTitle = card.FindViewById<TextView>(Resource.Id.update_offer_notes_title)!;
         var notes = UpdateReadyDialog.CreateNotes(activity, out var notesText); _notes = notesText;
         card.FindViewById<FrameLayout>(Resource.Id.update_notes_container)!.AddView(notes, new FrameLayout.LayoutParams(-1, -2));
         var version = activity.PackageManager?.GetPackageInfo(activity.PackageName!, 0)?.VersionName;
@@ -140,9 +141,10 @@ internal sealed class AppUpdatesScreen : IDisposable
         if (offer is not null)
         {
             var metadata = UpdateReadyDialog.Metadata(offer.Manifest);
-            var notes = UpdateReadyDialog.Notes(offer.Manifest);
             if (_offerMetadata.Text != metadata) _offerMetadata.Text = metadata;
-            if (_notes.Text != notes) _notes.Text = notes;
+            var title = $"What’s new in {offer.Manifest.VersionName}";
+            if (_notesTitle.Text != title) _notesTitle.Text = title;
+            UpdateReadyDialog.BindNotes(_notes, offer.Manifest);
         }
         if (_restoreCode is { } restored && _restoreHash is { } restoredHash && offer is not null && _dialog is null)
         {

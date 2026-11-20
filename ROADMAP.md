@@ -44,6 +44,8 @@ can approve departures from the designs.
   B5 Change category updated only the selected queued job on the
   disposable paired Host. Cancel preserved the original categories and
   the update snackbar left Add visible.
+  Astra approved the updater dialog and Settings card. The isolated
+  signed offer showed verified notes and Later kept version 0.0.8 installed.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

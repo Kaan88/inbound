@@ -161,6 +161,16 @@ download summary depends on tracked upload support.
   Both detail pages showed the correct destination, switch icon, scope
   callout and Web interface section. Filtered hierarchy checks showed only
   the detail while open and restored the root on Back.
+- Astra approved the update dialog in `android-update-preview-native-20261120-101002`.
+  Short, long and unavailable notes used the reviewed heading and empty
+  state. The last long note remained readable with both actions available.
+  Later and Back returned to the selected Settings tab. The signed
+  loopback flow in `android-signed-update-flow-20261120-101120` showed real Checking,
+  Downloading and Ready states, then the same verified notes in Settings.
+  One manifest GET and one package GET delivered the 61,767,573-byte
+  candidate. Later dismissed the in-app installation permission
+  explanation and kept version code 8. The test used disposable signing
+  identities and covered the path through the in-app permission prompt.
 - Astra approved the C7 Settings search and Back route in
   `c7-settings-insets-20261120-063758`. Catching links showed its
   guidance and browser entry with the keyboard dismissed. Site logins
