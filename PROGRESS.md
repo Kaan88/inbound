@@ -39,6 +39,13 @@
   active transfer advanced by 262,144 bytes. The actual rows showed two
   paused, one advancing, one queued and one finished. The probe and
   fixture mapping were removed. Unmatched partials stayed in place.
+- Astra approved a real paired C4 WebDAV download in
+  `c4-paired-pinned-final-20261120-064240`. The probe matched and pinned
+  the disposable Host's HTTPS certificate. Cancel retained the selection
+  and made no payload request. Confirm made one request and wrote the
+  1,048,576-byte FLAC with its expected hash in the exact Host child.
+  The decoy child stayed empty and the file never appeared on the phone.
+  The owned probe, reverse, relay, and fixture Servers were stopped.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.

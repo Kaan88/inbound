@@ -108,7 +108,7 @@ def fixture_job_state(fixture, job_id):
 
 
 @contextmanager
-def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Host"):
+def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Host", *, rclone=None):
     dll = Path(server_dll).resolve(strict=True)
     if dll.suffix.lower() != ".dll" or dll.name.lower() != "downloadmanager.server.dll":
         raise ValueError("--server-dll must be the explicitly built DownloadManager.Server.dll")
@@ -118,6 +118,15 @@ def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Ho
     data = Path(owned.name) / "data"
     root.mkdir()
     data.mkdir()
+    if rclone is not None:
+        binary = Path(rclone).resolve(strict=True)
+        sites = data / "sites"
+        sites.mkdir()
+        # This owned fresh Server starts disabled. Choose the local executable
+        # here because its paired clients cannot change the Host's program.
+        (sites / "config.json").write_text(json.dumps({
+            "enabled": False, "ownRclonePath": str(binary), "autoUpdateRclone": False,
+        }), encoding="utf-8")
     stop = threading.Event()
     counters = {"bytes": 0, "lock": threading.Lock()}
     slow_payload = PAYLOAD * 8
