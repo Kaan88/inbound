@@ -167,6 +167,8 @@ class Capture:
             texts = [node.get("text", "") + " " + node.get("content-desc", "")
                      for node in tree.iter("node")]
             if any(expected.casefold() in text.casefold() for text in texts):
+                if key == "c2-no-schedule" and self.args.unattended_c1_c2:
+                    self.verify_no_schedule(tree)
                 if key == "c5-host-a-active":
                     descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
                     active = [d for d in descriptions if d.startswith("Parity Host A, ")
@@ -388,6 +390,59 @@ class Capture:
         option, _ = self.smoke.wait_node("Schedules")
         self.smoke.tap(option)
 
+    def verify_no_schedule(self, tree):
+        title = self._unique_resource(tree, "queue_editor_title")
+        expected = self.args.queue_name if self.args.queue_name.lower().endswith(" queue") or self.args.queue_name.lower() == "queue" else self.args.queue_name + " queue"
+        require(title.get("text") == expected, "Unexpected queue editor title")
+        require(sum(n.get("text") == "Choose or add a schedule" for n in tree.iter("node")) == 1,
+                "No-schedule prompt missing or ambiguous")
+        for prefix, value in (("Start time", "--:--"), ("Stop time", "None")):
+            item = self._unique_description_prefix(tree, prefix)
+            require(item.get("content-desc") == f"{prefix}, {value}", f"Unexpected {prefix} value")
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
+            item = self._unique_resource(tree, "queue_editor_day_" + day)
+            require(item.get("checked") == "false" and item.get("enabled") == "false",
+                    f"No-schedule {day} must be unchecked and disabled")
+        self.log("PASS C2: exact no-schedule queue, empty times and disabled days.")
+
+    def verify_schedule_delete_cancel(self):
+        """On the saved fixture schedule, cancel deletion and verify persisted values."""
+        self._open_schedule_list()
+        options, _ = self.smoke.wait_content_description(lambda d: d == "Options for Weekdays", "Weekdays options")
+        self.smoke.tap(options)
+        self._tap_exact_text("Delete schedule")
+        self.smoke.wait_node("Delete Weekdays?")
+        self.smoke.wait_node("Only this schedule will be removed when you save. The queue and downloads stay.")
+        self.capture_checkpoint("c2-delete-confirm", None, "Delete Weekdays?")
+        self._tap_exact_text("Cancel")
+        self._open_schedule_list()
+        toggle, tree = self.smoke.wait_content_description(lambda d: d == "Enable Weekdays", "Weekdays switch after Cancel")
+        require(toggle.get("checked") == "false", "Cancel changed schedule enabled state")
+        require(sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                "Cancel did not preserve exactly one Weekdays schedule")
+        self._tap_exact_text("Done")
+        self._tap_resource("queue_editor_save")
+        card, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith("Night, ") and "Off:" in d and "01:00" in d and "07:00" in d
+            and "unmetered" in d and "charging" in d, "saved unchanged Night queue")
+        self.smoke.tap(card)
+        tree = self.smoke.tree()
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
+            expected = "false" if day in ("sat", "sun") else "true"
+            require(self._unique_resource(tree, "queue_editor_day_" + day).get("checked") == expected,
+                    f"Weekdays {day} changed after Cancel")
+        for resource in ("queue_editor_charging", "queue_editor_unmetered"):
+            require(self._unique_resource(tree, resource).get("checked") == "true", f"{resource} changed after Cancel")
+        for prefix, value in (("Start time", "01:00"), ("Stop time", "07:00")):
+            require(value in self._unique_description_prefix(tree, prefix).get("content-desc", ""), f"{prefix} changed after Cancel")
+        self._open_schedule_list()
+        toggle, tree = self.smoke.wait_content_description(lambda d: d == "Enable Weekdays", "saved Weekdays switch")
+        require(toggle.get("checked") == "false" and sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                "Weekdays was not preserved disabled after save/reopen")
+        self._tap_exact_text("Done")
+        self.capture_checkpoint("c2-delete-cancel", None, "Schedule")
+        self.log("PASS C2: deletion cancelled and one disabled Weekdays schedule preserved after save/reopen.")
+
     def _tap_exact_text(self, text):
         tree = self.smoke.tree()
         found = [n for n in tree.iter("node") if n.get("text") == text and n.get("enabled") != "false"]
@@ -508,6 +563,8 @@ class Capture:
                 self.log("UNVERIFIED in unattended local-host mode: paired C6 and both C5 switcher states.")
             for key, reference, anchor in checkpoints:
                 self.capture_checkpoint(key, reference, anchor)
+            if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_cancel:
+                self.verify_schedule_delete_cancel()
         except Exception:
             self.collect_failure()
             raise
@@ -1091,6 +1148,8 @@ def main():
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
+    parser.add_argument("--verify-schedule-delete-cancel", action="store_true",
+                        help="With --unattended-configured-c2 cancel schedule deletion and verify persistence")
     parser.add_argument("--mixed-hosts", action="store_true",
                         help="With --paired-server-dll, exercise two fixture Hosts and a real mixed workload")
     mode = parser.add_mutually_exclusive_group()
@@ -1105,6 +1164,8 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:
+        parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
     if args.verify_scheduled_row and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-row requires --unattended-c1-workload")
     if args.verify_scheduled_start and not args.unattended_c1_workload:

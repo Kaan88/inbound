@@ -27,6 +27,14 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   two finished jobs. The two output hashes matched distinct payloads, and
   neither unselected file was requested. Cleanup removed the two exact
   hash-matched outputs after the probe was uninstalled.
+- Astra approved the empty C2 schedule editor in
+  `c2-no-schedule-final-20261120-060648`. The empty times and seven
+  disabled day controls matched the disposable queue's state. In
+  `c2-named-delete-20261120-061717`, the confirmation named Weekdays,
+  distinguished Delete in the theme's error colour and explained deferred
+  save. Cancel preserved the one disabled schedule, its weekdays, times and
+  conditions after saving and reopening. Confirmed deletion and the remote
+  editor remain open.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.

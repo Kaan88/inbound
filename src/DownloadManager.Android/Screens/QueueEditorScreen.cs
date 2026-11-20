@@ -359,7 +359,21 @@ internal sealed class QueueEditorScreen : IDisposable
                 case 0: _selectedId = s.Id; Refresh(); break;
                 case 1: s.Enabled = !s.Enabled; Refresh(); ScheduleList(); break;
                 case 2: EditScheduleName(s); break;
-                case 3: new MaterialAlertDialogBuilder(_activity).SetTitle("Delete schedule?")!.SetMessage("Only this schedule will be removed when you save. The queue and downloads stay.")!.SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!.SetPositiveButton("Delete", (_, _) => { _draftSchedules.Remove(s); if (_selectedId == s.Id) _selectedId = null; Refresh(); })!.ShowTracked(_dialogs); break;
+                case 3:
+                    var dialog = new MaterialAlertDialogBuilder(_activity)
+                        .SetTitle($"Delete {s.Name}?")!
+                        .SetMessage("Only this schedule will be removed when you save. The queue and downloads stay.")!
+                        .SetNegativeButton("Cancel", (IDialogInterfaceOnClickListener?)null)!
+                        .SetPositiveButton("Delete", (_, _) =>
+                        {
+                            _draftSchedules.Remove(s);
+                            if (_selectedId == s.Id) _selectedId = null;
+                            Refresh();
+                        })!
+                        .ShowTracked(_dialogs);
+                    dialog?.GetButton((int)DialogButtonType.Positive)?.SetTextColor(
+                        new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorError)));
+                    break;
             }
         })!.SetNegativeButton("Back", (_, _) => ScheduleList())!.ShowTracked(_dialogs);
     }
