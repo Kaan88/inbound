@@ -154,7 +154,7 @@ class Capture:
             self.navigate_c1_c2(key)
         elif self.args.unattended_local_hosts:
             self.navigate_local_hosts(key)
-        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer"):
+        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer", "c5-b-queued-switcher", "c5-b-queued-row"):
             pass  # run_paired already navigated and verified the expected state.
         else:
             self.log(f"Prepare {key}: {self.args.instructions[key]}")
@@ -1023,6 +1023,60 @@ class Capture:
         with ExitStack() as stack:
             a = stack.enter_context(fixture.running_fixture(self.args.paired_server_dll, name=names[0]))
             b = stack.enter_context(fixture.running_fixture(self.args.paired_server_dll, name=names[1]))
+            if self.args.verify_host_b_queued:
+                request_count = {"head": 0, "get": 0, "lock": threading.Lock()}
+
+                class DeferredHandler(BaseHTTPRequestHandler):
+                    def count_and_reject(self, method):
+                        with request_count["lock"]:
+                            request_count[method] += 1
+                        self.send_response(503)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    def do_HEAD(self): self.count_and_reject("head")
+                    def do_GET(self): self.count_and_reject("get")
+                    def log_message(self, *_args): pass
+
+                listener = ThreadingHTTPServer(("127.0.0.1", 0), DeferredHandler)
+                listener_thread = threading.Thread(target=listener.serve_forever, daemon=True)
+                listener_thread.start()
+                def stop_deferred_listener():
+                    listener.shutdown()
+                    listener_thread.join(timeout=5)
+                    listener.server_close()
+                    require(not listener_thread.is_alive(), "Deferred fixture listener did not stop")
+                stack.callback(stop_deferred_listener)
+                queued_name = "c5-host-b-later.bin"
+                queued_path = Path(b["download_root"]) / queued_name
+                require(not queued_path.exists() and not queued_path.is_symlink(),
+                        "Deferred fixture destination already exists")
+                b_request = fixture.fixture_session(b)
+                queued_url = f"http://127.0.0.1:{listener.server_port}/deferred.bin"
+                added = b_request("job.add", {"url": queued_url,
+                                              "fileName": queued_name, "startMode": "later", "connections": 1})
+                result = added.get("payload") or {}
+                queued_id = (result.get("job") or {}).get("id")
+                require(added.get("type") == "job.addResult" and result.get("accepted")
+                        and not result.get("duplicate") and queued_id,
+                        "Fixture Host B did not accept one new deferred job")
+
+                def verify_deferred():
+                    reply = b_request("jobs.snapshot", {})
+                    jobs = (reply.get("payload") or {}).get("jobs", [])
+                    require(reply.get("type") == "jobs.snapshot" and len(jobs) == 1,
+                            "Fixture Host B must have exactly one job")
+                    job = jobs[0]
+                    require(job.get("id") == queued_id and job.get("fileName") == queued_name and job.get("url") == queued_url
+                            and str(job.get("state", "")).lower() == "queued"
+                            and str(job.get("startMode", "")).lower() == "later"
+                            and (job.get("receivedBytes") or 0) == 0,
+                            "Fixture Host B job is not the exact deferred job")
+                    with request_count["lock"]:
+                        require(request_count["head"] == 0 and request_count["get"] == 0,
+                                "Deferred job contacted the fixture listener")
+                    require(not queued_path.exists() and not queued_path.is_symlink(),
+                            "Deferred job produced an output")
+                verify_deferred()
             targets = ["tcp:" + str(urlsplit(item["base_url"]).port) for item in (a, b)]
             require(len(set(targets)) == 2, "Fixture Host ports must differ")
             existing = self.adb("reverse", "--list").splitlines()
@@ -1039,6 +1093,22 @@ class Capture:
                 node, _ = self.smoke.wait_content_description(lambda d: d.startswith(names[0] + ", "), "Host A row")
                 self.smoke.tap(node)
                 record_selection(names[0], "c5-host-a")
+                if self.args.verify_host_b_queued:
+                    node, _ = self.smoke.wait_content_description(
+                        lambda d: d.startswith(names[1] + ", ") and re.search(r"(?<![0-9])1 queued\b", d),
+                        "Host B switcher row with one queued job", timeout=30)
+                    self.capture_checkpoint("c5-b-queued-switcher", "c5-switch-host.png", "Where downloads run")
+                    self.smoke.tap(node)
+                    self.smoke.wait_node("Files are saved on " + names[1], timeout=30)
+                    self.smoke.wait_content_description(
+                        lambda d: d.startswith(queued_name + ". Queued"), "exact deferred Host B row", timeout=30)
+                    self.capture_checkpoint("c5-b-queued-row", "c6-remote-host.png", "Files are saved on " + names[1])
+                    verify_deferred()
+                    host_chip(names[1])
+                    node, _ = self.smoke.wait_content_description(lambda d: d.startswith(names[0] + ", "), "Host A row")
+                    self.smoke.tap(node)
+                    host_chip(names[0])
+                    verify_switcher(names[0])
                 node, _ = self.smoke.wait_content_description(lambda d: d.startswith("This phone, "), "phone row")
                 self.smoke.tap(node)
                 record_selection("This phone", "c5-phone-mixed")
@@ -1230,6 +1300,13 @@ class Capture:
                     tree = wait_state(strip_hidden, "filter strip hidden after closing search")
                     save_state("c6-filter-closed", tree)
                     self.log("Remote filter layout checked; exclusion while active " + ("observed." if still_active else "unverified."))
+                if self.args.verify_host_b_queued:
+                    verify_deferred()
+                    (self.evidence / "c5-host-b-queued-proof.json").write_text(json.dumps({
+                        "host": names[1], "file": queued_name, "queued": 1, "received_bytes": 0,
+                        "head_requests": 0, "get_requests": 0, "output_absent": True,
+                    }, indent=2) + "\n", encoding="utf-8")
+                    self.log("PASS C5 Host B: one deferred job, zero HEAD/GET requests and no output.")
             except Exception:
                 if self.current_checkpoint != "c6-pairing-form":
                     try:
@@ -1404,6 +1481,8 @@ def main():
                         help="Exact disposable paired-host label to enter manually")
     parser.add_argument("--verify-paired-c2", action="store_true",
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
+    parser.add_argument("--verify-host-b-queued", action="store_true",
+                        help="With --mixed-hosts verify a real deferred Host B job and zero fixture requests")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
     parser.add_argument("--verify-remote-keyboard-pause", action="store_true",
@@ -1432,6 +1511,8 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_host_b_queued and (not args.mixed_hosts or not args.paired_server_dll):
+        parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
     if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):
         parser.error("--verify-paired-c2 requires non-mixed --paired-server-dll")
     if (args.verify_remote_touch_pause or args.verify_remote_keyboard_pause) and not args.mixed_hosts:

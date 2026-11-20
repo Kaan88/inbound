@@ -25,7 +25,15 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   In `b1-native-add-dismissal-20261120-072402`, Astra approved Add file
   prefilling the Archive URL without its fragment. Cancel closed the form,
   returned to the empty Downloads list and preserved the shared file
-  inventory. The Open page route remains open.
+  inventory. In `b1-native-page-final-20261120-074410`, Astra approved
+  Open page from the native chooser. The probe rendered the exact fixture
+  page. Closing its browser returned to unobscured Downloads with zero jobs
+  and an unchanged shared file inventory.
+- Astra approved C5's queued Host B in `c5-queued-host-20261120-074518`.
+  The switcher displayed 1 queued for B while idle Host A was selected.
+  Switching to B showed its save banner and the exact queued file. The
+  disposable Host reported zero received bytes. The fixture saw zero HEAD
+  or GET requests and the output stayed absent through cleanup.
 - Astra approved B4 submission in `b4-real-submission-20261120-061608`.
   The actual page selected two of four links and Downloads showed exactly
   two finished jobs. The two output hashes matched distinct payloads, and

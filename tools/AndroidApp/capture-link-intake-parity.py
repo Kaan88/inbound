@@ -181,7 +181,7 @@ class Capture:
         system_packages = {"android", "com.android.intentresolver", "com.google.android.intentresolver"}
         origin = f"http://127.0.0.1:{self.port}"
         system_nodes = [node for node in chooser.iter("node") if node.get("package") in system_packages]
-        expected_link = origin + "/files/a.zip#section"
+        expected_link = origin + ("/page" if self.args.b1_action == "open-page" else "/files/a.zip#section")
         require(any(node.get("resource-id", "").endswith(":id/content_preview_text")
                     and node.get("text") == expected_link for node in system_nodes),
                 "Android chooser did not preview an exact URL from the owned fixture")
@@ -197,7 +197,18 @@ class Capture:
                         and node.get("text", "").partition("\n")[0] == "127.0.0.1" for node in probe_nodes),
                 "Expected the probe Shared link dialog with the exact fixture host and all three actions")
         self.log("B1 shared dialog verified")
-        if self.args.b1_action == "add-file":
+        if self.args.b1_action == "open-page":
+            input("\nIn the probe tap Open page; show the owned fixture page, then press Enter: ")
+            self.capture("b1-open-page", None, "Inbound link fixture", prompt=False)
+            tree = ET.parse(self.evidence / "b1-open-page-ui.xml").getroot()
+            nodes = [n for n in tree.iter("node") if n.get("package") == PACKAGE]
+            require(sum(n.get("content-desc") == "Close browser" for n in nodes) == 1
+                    and sum(n.get("class", "").endswith("EditText") and n.get("text") == origin + "/page" for n in nodes) == 1
+                    and any(n.get("text") == "Inbound link fixture" for n in nodes),
+                    "Open page did not show the exact owned HTML page in the probe browser")
+            self.log("B1 action state verified")
+            input("\nClose the probe browser, then press Enter: ")
+        elif self.args.b1_action == "add-file":
             input("\nIn the probe tap Add file; show the populated form, then press Enter: ")
             self.capture("b1-add-file", None, "New download", prompt=False)
             tree = ET.parse(self.evidence / "b1-add-file-ui.xml").getroot()
@@ -903,8 +914,8 @@ def main():
     parser.add_argument("--evidence", type=Path, required=True,
                         help="New, previously absent evidence directory")
     parser.add_argument("--b1-only", action="store_true", help="Guided real Chrome share chooser check only")
-    parser.add_argument("--b1-action", choices=("cancel", "add-file"), default="cancel",
-                        help="In the B1-only lane, verify Cancel or Add file")
+    parser.add_argument("--b1-action", choices=("cancel", "open-page", "add-file"), default="cancel",
+                        help="In the B1-only lane, verify Cancel, Open page or Add file")
     parser.add_argument("--unattended", action="store_true",
                          help="Capture B4 and its selected state in the built-in browser without prompting")
     parser.add_argument("--verify-search", action="store_true", help="Verify the B4 header search toggle")
@@ -922,7 +933,7 @@ def main():
                         help="In the partial B6 flow verify active Details Stop retains progress and hides restart from zero")
     args = parser.parse_args()
     if args.b1_action != "cancel" and not args.b1_only:
-        parser.error("--b1-action add-file requires --b1-only")
+        parser.error("--b1-action open-page/add-file requires --b1-only")
     if args.verify_b3_completion and (not args.unattended or not args.capture_caught or args.b1_only
                                        or args.verify_search or args.verify_phone_folder or args.capture_archives
                                        or args.capture_b6 or args.capture_b6_partial or args.capture_b6_browser or args.verify_details_stop):
@@ -949,6 +960,7 @@ def main():
         "b4-archives": "Capture six checked archives and the combined size.",
         "b1-chooser": "In Chrome open http://127.0.0.1:PORT/page; Share link → Android chooser. Capture chooser itself.",
         "b1-caught": "Choose Inbound Probe in the Android chooser; capture Shared link before choosing an action.",
+        "b1-open-page": "Capture the exact owned page in the probe browser.",
         "b1-add-file": "Capture the prefilled Archive form before cancelling.",
         "b2": "Open the fixture in Inbound's browser and tap Archive. Capture Download with Inbound before submitting; verify one job/hash separately.",
         "b3": "Select This phone. In Inbound's browser, visit the fixture /signin then tap Authenticated archive. Capture the cookie-use notice before submitting.",
