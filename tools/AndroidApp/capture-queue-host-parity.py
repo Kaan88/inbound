@@ -2090,6 +2090,9 @@ class Capture:
                     require(queue_state() == before, "Queue or schedule changed while viewing editor")
                     if self.args.verify_paired_c2_limits:
                         self.verify_paired_c2_limits(queue_state, before, request, owned)
+                        if self.args.verify_paired_c2_limits_transfer:
+                            transfer = load_module("paired_c2_queue_transfer", Path(__file__).with_name("paired-c2-queue-transfer.py"))
+                            transfer.run(self, request, owned, queue_state)
                         tap("Downloads", "nav_downloads")
                         host_chip("Parity Host")
                         phone, _ = self.smoke.wait_content_description(
@@ -2183,6 +2186,7 @@ def main():
     parser.add_argument("--verify-paired-c7", action="store_true", help="Verify paired and phone Settings boundaries")
     parser.add_argument("--verify-paired-c2", action="store_true",
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
+    parser.add_argument("--verify-paired-c2-limits-transfer", action="store_true", help="Exercise saved queue limits with three owned HTTP jobs")
     parser.add_argument("--verify-paired-c2-limits", action="store_true", help="Verify paired queue speed and concurrency drafts and persistence")
     parser.add_argument("--verify-paired-c2-save", action="store_true",
                         help="With --verify-paired-c2 save and reopen one disabled schedule on the empty owned Server")
@@ -2226,6 +2230,8 @@ def main():
         parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
     if args.verify_paired_c7 and (not args.paired_server_dll or args.mixed_hosts or args.verify_paired_c2):
         parser.error("--verify-paired-c7 requires a separate non-mixed --paired-server-dll lane")
+    if args.verify_paired_c2_limits_transfer and not args.verify_paired_c2_limits:
+        parser.error("--verify-paired-c2-limits-transfer requires --verify-paired-c2-limits")
     if args.verify_paired_c2_limits and (not args.verify_paired_c2 or args.verify_paired_c2_save):
         parser.error("--verify-paired-c2-limits requires --verify-paired-c2 and excludes --verify-paired-c2-save")
     if args.verify_paired_c2_save and not args.verify_paired_c2:

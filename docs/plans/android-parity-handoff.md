@@ -10,6 +10,13 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- The live C2 check in `c2-paired-transfer-20261120-130425` used the settings saved from Android.
+  On an isolated paired Host, two downloads averaged 494.2 KB/s combined
+  over 8.22 seconds with a 500 KB/s cap. The loopback source exceeded
+  four times that cap. The third job stayed queued at zero bytes without
+  a payload request and started after a slot freed. All three hashes
+  matched. The phone limits stayed unchanged. The four focused engine
+  limiter tests and 66 Android harness tests passed.
 - Astra approved the C2 paired queue limits in `c2-paired-limits-board-20261120-125855`.
   The speed dialog keeps the outlined KB/s label visible and explains
   both choices. The editor rejected zero speed and concurrency 17.
