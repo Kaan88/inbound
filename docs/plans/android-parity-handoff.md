@@ -156,7 +156,12 @@ download summary depends on tracked upload support.
   reopened dialog reset to list-only. Confirming that choice removed
   exactly the two selected entries and kept the completed file intact.
   The unselected job stayed queued and both deferred sources saw zero
-  requests. File deletion confirmation remains a separate case.
+  requests. Astra also approved file deletion in `b5-paired-delete-file-20261120-114856`.
+  Cancel preserved both completed files and all four jobs. Confirming
+  the explicit file-delete choice removed the selected completed file
+  and the two selected entries. The unselected completed file kept its
+  independent hash, the other queued entry remained, and both deferred
+  sources saw zero requests. A separate list-only regression passed.
 - Astra approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real
