@@ -83,7 +83,7 @@ class PairedB2:
             raise
 
     def preflight(self):
-        a5 = getattr(self.args, "verify_a5_folder", False) or getattr(self.args, "verify_a5_collision", False)
+        a5 = getattr(self.args, "verify_a5_folder", False) or getattr(self.args, "verify_a5_collision", False) or getattr(self.args, "verify_a5_advanced", False)
         self.smoke.preflight(include_remote_files_payload=not a5)
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD,
                 "Refusing anything other than inbound33")
@@ -101,13 +101,18 @@ class PairedB2:
         self.port = port
         self.fixture_requests = Counter()
         self.fixture_request_lock = threading.Lock()
+        self.advanced_referers = Counter()
         requests = self.fixture_requests
+        referers = self.advanced_referers
         lock = self.fixture_request_lock
 
         class CountedHandler(link.Handler):
             def do_GET(self):
                 with lock:
                     requests[self.path] += 1
+                    if self.path.startswith("/files/a.zip?advanced="):
+                        expected = f"http://127.0.0.1:{port}/synthetic-source"
+                        referers[self.path, self.headers.get("Referer") == expected] += 1
                 super().do_GET()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", port), CountedHandler)
@@ -422,6 +427,131 @@ class PairedB2:
         # The owned Server and its entire private temporary root are disposed by
         # running_fixture only after the Host stops; no shared output is removed.
 
+    def verify_a5_advanced(self, paired, fixture):
+        """Two owned paired Host jobs with real referrer and SHA verification."""
+        from urllib.parse import urlsplit
+        payload = load("a5_advanced_payload", HERE / "link-fixture" / "server.py").PAYLOAD
+        digest = hashlib.sha256(payload).hexdigest()
+        incorrect = ("0" if digest[0] != "0" else "1") + digest[1:]
+        nonce = uuid.uuid4().hex[:12]
+        root = Path(fixture["download_root"]).resolve(strict=True)
+        decoy, destination = self.child_paths
+        require(set(root.iterdir()) == set(self.child_paths) and not any(decoy.iterdir())
+                and not any(destination.iterdir()), "Expected two empty owned Host folders")
+        request = paired.fixture_session(fixture)
+        def jobs():
+            reply = request("jobs.snapshot", {})
+            rows = (reply.get("payload") or {}).get("jobs")
+            require(reply.get("type") == "jobs.snapshot" and isinstance(rows, list), "Host snapshot unavailable")
+            return rows
+        require(jobs() == [], "Disposable Host must have no jobs")
+
+        def one(resource):
+            found = [n for n in self.tree().iter("node") if n.get("package") == PACKAGE
+                     and n.get("resource-id", "").endswith(":id/" + resource)]
+            require(len(found) == 1, "Expected unique field " + resource)
+            return found[0]
+        def show(resource):
+            for _ in range(7):
+                nodes = [n for n in self.tree().iter("node") if n.get("resource-id", "").endswith(":id/" + resource)]
+                if len(nodes) == 1: return nodes[0]
+                scroll = one("new_scroll")
+                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", scroll.get("bounds", ""))
+                require(match is not None, "New download scroll bounds unavailable")
+                l, t, r, b = map(int, match.groups()); x = (l + r) // 2
+                self.shell("input", "swipe", str(x), str(t + (b-t)*4//5), str(x), str(t + (b-t)//3), "350")
+            raise RuntimeError("New download control not visible: " + resource)
+        def set_field(resource, value):
+            node = show(resource); old = node.get("text", "")
+            self.smoke.tap(node)
+            if old:
+                self.shell("input", "keyevent", "KEYCODE_MOVE_END")
+                self.shell("input", "keyevent", *(["KEYCODE_DEL"] * len(old)))
+            self.shell("input", "text", value.replace(" ", "%s"))
+            self.shell("input", "keyevent", "KEYCODE_BACK")
+            require(show(resource).get("text") == value, "Advanced fixture field did not round-trip: " + resource)
+        def capture(name):
+            tree = self.tree()
+            require(not self.pairing_fields_may_be_visible and not any(n.get("password") == "true" for n in tree.iter("node")),
+                    "Refusing capture of credentials")
+            (self.evidence / (name + ".png")).write_bytes(self.smoke.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
+        def counts(path):
+            with self.fixture_request_lock:
+                return (self.advanced_referers[path, True], self.advanced_referers[path, False])
+
+        results = {}
+        expected_outputs = set()
+        for case, expected in (("valid", digest), ("mismatch", incorrect)):
+            name = f"a5-advanced-{case}-{nonce}.zip"
+            target = destination / name
+            require(not target.exists() and not target.is_symlink(), "Owned target already exists")
+            path = f"/files/a.zip?advanced={case}-{nonce}"
+            url = f"http://127.0.0.1:{self.port}{path}"
+            description = "Synthetic A5 " + case
+            self.tap("Add", "fab"); self.tap("Link or several links"); self.node("New download")
+            set_field("address", url)
+            self.node(FILENAME, "file_name", timeout=35)
+            set_field("file_name", name)
+            picker, _ = self.smoke.wait_content_description(lambda d: d == "Choose a folder on " + HOST_NAME, "Host folder picker")
+            self.smoke.tap(picker)
+            selector, _ = self.smoke.wait_content_description(lambda d: d in {"Folder " + str(root), "Folder " + str(destination)}, "owned folder")
+            if selector.get("content-desc") != "Folder " + str(destination):
+                self.tap_clickable_label(destination.name)
+                self.smoke.wait_content_description(lambda d: d == "Folder " + str(destination), "owned destination")
+            self.tap_clickable_label("Save here")
+            self.smoke.wait_content_description(lambda d: d == "Save to " + str(destination) + " on " + HOST_NAME, "draft destination")
+            self.smoke.tap(show("more_header"))
+            set_field("referrer", f"http://127.0.0.1:{self.port}/synthetic-source")
+            set_field("description", description)
+            if case == "valid":
+                set_field("sha", "abc")
+                self.node("A SHA-256 checksum is 64 hexadecimal characters.")
+                require(self.node("Download", "new_download_btn").get("enabled") == "false", "Invalid SHA did not disable Download")
+                capture("a5-advanced-malformed")
+            set_field("sha", expected)
+            require(self.node("Download", "new_download_btn").get("enabled") == "true", "Valid SHA did not enable Download")
+            capture("a5-advanced-" + case + "-form")
+            before = counts(path)
+            self.tap("Download", "new_download_btn")
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                rows = [j for j in jobs() if j.get("url") == url and j.get("fileName") == name]
+                require(len(rows) <= 1, "Duplicate owned job")
+                if rows and str(rows[0].get("state", "")).lower() in ("completed", "failed"): break
+                time.sleep(.35)
+            else: raise RuntimeError("Advanced fixture job did not settle: " + case)
+            job = rows[0]; state = str(job.get("state", "")).lower()
+            after = counts(path)
+            require(job.get("id") and job.get("description") == description and job.get("expectedSha256", "").lower() == expected
+                    and job.get("receivedBytes") == len(payload), "Host job did not retain advanced values and bytes")
+            require(after[0] > before[0] and after[1] == before[1], "Transfer did not use the exact synthetic referrer")
+            outcome = {"state": state, "bytes": job.get("receivedBytes"), "jobId": job.get("id"),
+                       "matchingReferrerGets": after[0] - before[0], "expectedSha256": expected}
+            require(job.get("finalFilePath") == str(target), "Unexpected destination for the advanced fixture job")
+            if case == "valid":
+                require(state == "completed" and target.is_file() and not target.is_symlink()
+                        and hashlib.sha256(target.read_bytes()).hexdigest() == digest, "Valid checksum did not finish with matching bytes")
+                expected_outputs.add(target)
+            else:
+                require(state == "failed" and (job.get("failure") or {}).get("kind", "").lower() == "verificationfailed"
+                        and not target.exists() and not target.is_symlink(), "Mismatch did not fail without final output")
+                partial = destination / f"{name}.{uuid.UUID(job['id']).hex}.part"
+                require(partial.is_file() and not partial.is_symlink() and partial.stat().st_size == len(payload)
+                        and hashlib.sha256(partial.read_bytes()).hexdigest() == digest, "Mismatch did not preserve the owned partial")
+                expected_outputs.add(partial)
+                outcome["retainedPartialSha256"] = digest
+                self.smoke.wait_content_description(lambda d: d.startswith(name + ". ")
+                    and "checksum did not match" in d.lower(), "checksum failure row", timeout=35)
+                capture("a5-advanced-mismatch-row")
+            results[case] = outcome
+        require(len(jobs()) == 2 and results["valid"]["jobId"] != results["mismatch"]["jobId"]
+                and not any(decoy.iterdir()) and set(destination.iterdir()) == expected_outputs,
+                "Unexpected Host output or job identities")
+        (self.evidence / "a5-advanced-proof.json").write_text(json.dumps({"cases": results, "payloadSha256": digest}, indent=2) + "\n", encoding="utf-8")
+        self.smoke.log("PASS A5 advanced: synthetic referrer, descriptions, valid checksum and mismatch verified on the owned Host.")
+        # Host and its owned temporary data/partial directory are removed only after its writer stops.
+
     def run(self):
         self.preflight()
         paired = load("b2_pair_fixture", HERE / "paired-host-parity-fixture.py")
@@ -434,6 +564,9 @@ class PairedB2:
                 self.smoke.started = True
                 self.tap("Start downloading", "fr_start")
                 self.pair(fixture)
+                if getattr(self.args, "verify_a5_advanced", False):
+                    self.verify_a5_advanced(paired, fixture)
+                    return self.evidence
                 if getattr(self.args, "verify_a5_collision", False):
                     self.verify_a5_collision(paired, fixture)
                     return self.evidence
@@ -525,11 +658,14 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated probe APK")
     parser.add_argument("--server-dll", required=True, help="Explicit built DownloadManager.Server.dll")
     parser.add_argument("--dotnet", default="dotnet")
+    parser.add_argument("--verify-a5-advanced", action="store_true", help="Verify synthetic referrer, description and SHA outcomes")
     parser.add_argument("--verify-a5-collision", action="store_true", help="Exercise Rename, Overwrite and Fail on owned paired Host files")
     parser.add_argument("--verify-a5-folder", action="store_true",
                         help="Verify the paired New Download picker selection and Cancel without submitting")
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
+    if args.verify_a5_advanced and (args.verify_a5_collision or args.verify_a5_folder):
+        parser.error("--verify-a5-advanced is a standalone lane")
     if args.verify_a5_collision and args.verify_a5_folder:
         parser.error("--verify-a5-collision is separate from --verify-a5-folder")
     run = PairedB2(args)

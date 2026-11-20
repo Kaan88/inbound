@@ -37,6 +37,13 @@ download summary depends on tracked upload support.
   job, and made no payload request after submission. The collision
   explanation appeared above the enabled Cancel and Download buttons.
   Selecting Rename cleared the explanation.
+  Astra approved the paired A5 advanced options in `a5-paired-advanced-20261120-110919`.
+  Invalid SHA-256 disabled Download and showed an inline explanation.
+  The disposable Host stored both synthetic descriptions and sent the
+  expected referrer on each transfer. The matching checksum completed
+  with the fixture hash. The mismatch showed a checksum failure and
+  retained only its hash-verified partial until fixture cleanup.
+  Multiple-link checksum behavior remains open.
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals

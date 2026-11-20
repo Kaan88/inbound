@@ -50,6 +50,8 @@ can approve departures from the designs.
   A5 paired Rename, Overwrite and Fail matched their expected Host
   file outcomes in the selected disposable folder. The inline refusal
   kept both actions visible and cleared when the policy changed.
+  A5 paired single-link referrer, description and checksum validation
+  passed alongside real checksum success and mismatch.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
