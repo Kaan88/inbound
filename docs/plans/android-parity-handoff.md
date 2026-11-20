@@ -4,6 +4,10 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
+The isolated S3 upload writes through a device stream. The C3 Locations
+summary counts tracked site transfers, so a genuine combined upload and
+download summary depends on tracked upload support.
+
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
 - Astra approved the representative five-job Dark A1/A2 workload in
@@ -127,7 +131,10 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   Cancel. Send allowed one authenticated metadata request. Download
   created one Host job and its exact 1,379-byte report matched SHA-256
   inside the owned category folder. The phone received no output.
-  Authenticated resume remains open.
+  In `b3-auth-resume-final-20261120-082402`, Astra approved local authenticated
+  Resume. After a settled Pause, the same job requested an authenticated
+  range at byte 2,097,152 and received the entire remaining suffix.
+  The 16 MiB file matched SHA-256. Paired-Host authenticated resume remains open.
 
 ### Native first-run permission returns (2026-11-20)
 

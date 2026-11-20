@@ -125,7 +125,10 @@
   Cancel. Send allowed one authenticated metadata request. Download
   created one Host job and its exact 1,379-byte report matched SHA-256
   inside the owned category folder. The phone received no output.
-  Authenticated resume remains open.
+  In `b3-auth-resume-final-20261120-082402`, Astra approved local authenticated
+  Resume. After a settled Pause, the same job requested an authenticated
+  range at byte 2,097,152 and received the entire remaining suffix.
+  The 16 MiB file matched SHA-256. Paired-Host authenticated resume remains open.
 
 ### Native first-run permission returns (2026-11-20)
 
