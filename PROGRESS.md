@@ -54,8 +54,11 @@
 - Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
   The selected paired Host reported 2,228,224 received bytes four seconds
   apart after one tap. The Android row offered Resume and the finished
-  file kept its matching hash. The keyboard run stopped before activation
-  because the emulator's keyboard visibility could not be verified.
+  file kept its matching hash. In `c6-keyboard-integrated-20261120-071829`,
+  Astra approved Tab to search, directional focus on Finished and Pause,
+  and one centre-key activation. The Host's paused transfer held at
+  3,276,800 received bytes for four seconds. A physical keyboard remains
+  outside this emulator proof.
 - Astra approved the C7 Settings search and Back route in
   `c7-settings-insets-20261120-063758`. Catching links showed its
   guidance and browser entry with the keyboard dismissed. Site logins

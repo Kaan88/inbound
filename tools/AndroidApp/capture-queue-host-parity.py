@@ -876,6 +876,90 @@ class Capture:
                 raise RuntimeError("C1 cleanup incomplete: " + "; ".join(errors))
         return self.evidence
 
+    def activate_remote_pause_from_keyboard(self, host_name):
+        """Navigate only the verified probe's Downloads controls before one key activation."""
+        trace = []
+        keys = []
+        chip_pattern = re.compile(r"(?:All|Active|Queued|Finished|Failed) [0-9]+")
+        trace_path = self.evidence / "c6-keyboard-focus-trace.json"
+
+        def observe(event, *, initial=False):
+            focus = next((line for line in self.shell("dumpsys", "window").splitlines()
+                          if "mCurrentFocus=" in line), "")
+            require(re.search(r"\b" + re.escape(PACKAGE) + r"/", focus), "Probe is not the exact foreground window")
+            if not initial:
+                self.shell("input", "keyevent", event)
+                keys.append(event)
+            tree = self.smoke.tree()
+            dump = self.shell("dumpsys", "input_method")
+            values = re.findall(r"\bmInputShown\s*[=:]\s*(true|false)\b", dump, re.I)
+            hidden = len(values) == 1 and values[0].lower() == "false"
+            focused = [node for node in tree.iter("node")
+                       if node.get("package") == PACKAGE and node.get("focused") == "true"]
+            trace.append({"event": event, "ime_hidden": hidden, "focus": [
+                {"resource": node.get("resource-id", "").rsplit("/", 1)[-1],
+                 "class": node.get("class", ""),
+                 "filter": node.get("text", "") if chip_pattern.fullmatch(node.get("text", "")) else ""}
+                for node in focused]})
+            trace_path.write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+            require(hidden, "IME is visible or its state is unavailable")
+            require(len(focused) == (0 if initial else 1), "Probe focus is missing, unexpected or ambiguous")
+            return tree, focused[0] if focused else None
+
+        def is_filter(node):
+            return node.get("checkable") == "true" and node.get("focusable") == "true" and bool(
+                chip_pattern.fullmatch(node.get("text", "")))
+
+        def is_pause(node):
+            return (node.get("resource-id") == PACKAGE + ":id/summary_toggle"
+                    and node.get("content-desc") == "Pause all downloads")
+
+        def is_in_route(node):
+            return (node.get("resource-id") == PACKAGE + ":id/search_input"
+                    or node.get("content-desc") == f"Downloads shown from {host_name}. Change host"
+                    or (node.get("clickable") == "true" and any(
+                        child.get("text") == "Files are saved on " + host_name for child in node.iter("node")))
+                    or is_filter(node) or is_pause(node))
+
+        def capture_focus(stem, tree):
+            (self.evidence / (stem + "-capture.png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (stem + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+
+        observe("START", initial=True)
+        tree, focused = observe("KEYCODE_TAB")
+        require(focused is self._unique_resource(tree, "search_input") and len(self._nodes(tree, "chips_scroll")) == 1,
+                "Tab did not focus search and expose the remote filters")
+        for _ in range(5):
+            tree, focused = observe("KEYCODE_DPAD_DOWN")
+            require(is_in_route(focused), "Down reached an unexpected probe control")
+            if is_filter(focused):
+                break
+        else:
+            raise RuntimeError("Directional input did not reach a remote filter chip")
+        chip = focused.get("text")
+        require(self._unique_resource(tree, "search_input").get("focused") == "false"
+                and len(self._nodes(tree, "chips_scroll")) == 1,
+                "Filters closed when focus left search")
+        capture_focus("c6-keyboard-filter-focus", tree)
+
+        for _ in range(5):
+            tree, focused = observe("KEYCODE_DPAD_UP")
+            require(is_in_route(focused), "Up reached an unexpected probe control")
+            if is_pause(focused):
+                break
+        else:
+            raise RuntimeError("Directional input did not reach the remote Pause control")
+        require(focused is self._unique_resource(tree, "summary_toggle")
+                and focused.get("enabled") == "true" and focused.get("clickable") == "true",
+                "Focused remote Pause is not the unique enabled action")
+        capture_focus("c6-keyboard-pause-focus", tree)
+
+        trace.append({"event": "KEYCODE_DPAD_CENTER", "activation_attempted": True})
+        trace_path.write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+        self.shell("input", "keyevent", "KEYCODE_DPAD_CENTER")
+        keys.append("KEYCODE_DPAD_CENTER")
+        return chip, keys
+
     def run_paired_mixed(self):
         """Two isolated loopback Hosts and a real, bounded mixed remote workload."""
         from contextlib import ExitStack
@@ -1005,8 +1089,10 @@ class Capture:
                     "ui_bytes_before_rounded": ui_before, "ui_bytes_after_rounded": ui_after,
                     "sample_seconds": 4}, indent=2) + "\n", encoding="utf-8")
                 self.log("Mixed Host workload captured; graph and mockup parity require visual review.")
-                if self.args.verify_remote_touch_pause:
-                    self.current_checkpoint = "c6-touch-pause"
+                if self.args.verify_remote_touch_pause or self.args.verify_remote_keyboard_pause:
+                    keyboard = self.args.verify_remote_keyboard_pause
+                    mode = "keyboard" if keyboard else "touch"
+                    self.current_checkpoint = f"c6-{mode}-pause"
                     require(finished_id and active_id and finished_id != active_id, "Fixture jobs do not have distinct identities")
                     request = fixture.fixture_session(a)
 
@@ -1025,20 +1111,23 @@ class Capture:
                             and 0 < (running.get("receivedBytes") or 0) < (running.get("totalBytes") or 0)
                             and str(done.get("state", "")).lower() == "completed", "Fixture jobs not in the expected active/finished states")
                     self.smoke.wait_node("Files are saved on " + names[0])
-                    focus_line = next((line for line in self.shell("dumpsys", "window").splitlines()
-                                       if "mCurrentFocus=" in line), "")
-                    require(PACKAGE in focus_line, "Probe is not the foreground window")
-                    tree = self.smoke.tree()
-                    controls = self._nodes(tree, "summary_toggle")
-                    require(len(controls) == 1 and controls[0].get("package") == PACKAGE and controls[0].get("enabled") == "true"
-                            and controls[0].get("clickable") == "true"
-                            and controls[0].get("content-desc") == "Pause all downloads", "Exact remote Pause control unavailable")
-                    (self.evidence / "c6-touch-pause-attempt.json").write_text('{"activation_attempted": true}\n', encoding="ascii")
-                    self.smoke.tap(controls[0])  # One touch; do not retry an uncertain result.
+                    if keyboard:
+                        chip, keys = self.activate_remote_pause_from_keyboard(names[0])
+                    else:
+                        focus_line = next((line for line in self.shell("dumpsys", "window").splitlines()
+                                           if "mCurrentFocus=" in line), "")
+                        require(PACKAGE in focus_line, "Probe is not the foreground window")
+                        tree = self.smoke.tree()
+                        controls = self._nodes(tree, "summary_toggle")
+                        require(len(controls) == 1 and controls[0].get("package") == PACKAGE and controls[0].get("enabled") == "true"
+                                and controls[0].get("clickable") == "true"
+                                and controls[0].get("content-desc") == "Pause all downloads", "Exact remote Pause control unavailable")
+                        (self.evidence / "c6-touch-pause-attempt.json").write_text('{"activation_attempted": true}\n', encoding="ascii")
+                        self.smoke.tap(controls[0])  # One touch; do not retry an uncertain result.
                     self.smoke.wait_content_description(lambda d: d == "Resume all downloads", "remote Resume control", timeout=20)
                     _, paused_tree = self.smoke.wait_content_description(
                         lambda d: d.startswith("c5-c6-active.bin. Paused"), "paused fixture row", timeout=20)
-                    stem = "c6-touch-paused"
+                    stem = f"c6-{mode}-paused"
                     (self.evidence / (stem + "-capture.png")).write_bytes(
                         self.adb("exec-out", "screencap", "-p", raw=True))
                     ET.ElementTree(paused_tree).write(self.evidence / (stem + "-ui.xml"),
@@ -1058,12 +1147,14 @@ class Capture:
                             "Finished fixture job changed state")
                     require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == a["payload_sha256"],
                             "Finished fixture hash changed after Pause")
-                    result = {"mode": "touch", "active_state": "paused", "received_before": paused["receivedBytes"],
+                    result = {"mode": mode, "active_state": "paused", "received_before": paused["receivedBytes"],
                         "received_after": paused_after["receivedBytes"], "sample_seconds": 4,
                         "finished_state": "completed", "finished_sha256": a["payload_sha256"]}
-                    (self.evidence / "c6-touch-pause.json").write_text(
+                    if keyboard:
+                        result.update(filter_focus=chip, keys=keys)
+                    (self.evidence / f"c6-{mode}-pause.json").write_text(
                         json.dumps(result, indent=2) + "\n", encoding="utf-8")
-                    self.log("PASS C6 touch: owned Host job stayed paused with stable bytes.")
+                    self.log(f"PASS C6 {mode}: owned Host job stayed paused with stable bytes.")
                 if self.args.verify_remote_layout:
                     # Capture the selected Host row only after its asynchronously fetched live figures arrive.
                     host_chip(names[0])
@@ -1315,6 +1406,8 @@ def main():
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
+    parser.add_argument("--verify-remote-keyboard-pause", action="store_true",
+                        help="With --mixed-hosts focus the filter and activate Pause with Android keyboard events")
     parser.add_argument("--verify-remote-touch-pause", action="store_true",
                         help="With --mixed-hosts touch Pause and verify the owned active Host job")
     parser.add_argument("--verify-scheduled-row", action="store_true",
@@ -1341,10 +1434,10 @@ def main():
     args = parser.parse_args()
     if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):
         parser.error("--verify-paired-c2 requires non-mixed --paired-server-dll")
-    if args.verify_remote_touch_pause and not args.mixed_hosts:
-        parser.error("--verify-remote-touch-pause requires --mixed-hosts")
-    if args.verify_remote_touch_pause and args.verify_remote_layout:
-        parser.error("run remote touch Pause separately from layout verification")
+    if (args.verify_remote_touch_pause or args.verify_remote_keyboard_pause) and not args.mixed_hosts:
+        parser.error("remote Pause verification requires --mixed-hosts")
+    if sum((args.verify_remote_touch_pause, args.verify_remote_keyboard_pause, args.verify_remote_layout)) > 1:
+        parser.error("run remote keyboard Pause, touch Pause and layout verification separately")
     if args.verify_schedule_delete_confirm and not args.unattended_configured_c2:
         parser.error("--verify-schedule-delete-confirm requires --unattended-configured-c2")
     if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:
