@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -25,8 +26,38 @@ class PairedHostFixtureTests(unittest.TestCase):
         self.assertIn("secrets.token_urlsafe", text)
         self.assertIn("stdout=subprocess.DEVNULL", text)
         self.assertIn('"password": password', text)  # transient runner handoff only
-        self.assertNotIn("write_text(", text)
+        after_password_generation = text.partition('    password = "Parity-"')[2]
+        self.assertTrue(after_password_generation)
+        self.assertNotIn("write_text(", after_password_generation)
         self.assertIn("owned.cleanup()", text)
+
+    def test_only_pinned_rclone_settings_are_written_in_fresh_fixture_data(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dll = root / "DownloadManager.Server.dll"
+            binary = root / "rclone.exe"
+            dll.touch()
+            binary.touch()
+            with patch.object(FIXTURE.subprocess, "Popen") as start_server, patch.object(FIXTURE, "urlopen") as health:
+                start_server.return_value.poll.return_value = None
+                health.return_value.__enter__.return_value.status = 200
+
+                with FIXTURE.running_fixture(dll, temp_root=root, rclone=binary) as descriptor:
+                    data = Path(descriptor["data_directory"])
+                    config_path = data / "sites" / "config.json"
+                    regular_files = [path for path in data.parent.rglob("*") if path.is_file()]
+                    self.assertEqual(regular_files, [config_path])
+                    config = json.loads(config_path.read_text(encoding="utf-8"))
+                    self.assertEqual(config, {
+                        "enabled": False,
+                        "ownRclonePath": str(binary.resolve()),
+                        "autoUpdateRclone": False,
+                    })
+                    self.assertNotIn(descriptor["password"], config_path.read_text(encoding="utf-8"))
+                    self.assertEqual(start_server.call_args.kwargs["env"]["DOWNLOADMANAGER_DATA"], str(data))
+
+                self.assertFalse(data.parent.exists())
+                start_server.return_value.terminate.assert_called_once()
 
     def test_seed_requires_authenticated_correlated_acceptance(self):
         descriptor = {"base_url": "http://127.0.0.1:18100", "password": "fake-case",
