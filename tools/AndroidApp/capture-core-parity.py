@@ -250,7 +250,7 @@ class Capture:
             try:
                 self.adb("shell", "input", "text", f"http://10.0.2.2:{fixture.server_port}/inbound-parity.iso")
                 self.adb("shell", "input", "keyevent", "4")  # Dismiss keyboard, not the form.
-                self.await_checkpoint("a5-populated", "a5-new-download.png", "The server answered")
+                self.await_checkpoint("a5-populated", "a5-new-download.png", "6.1 GB")
                 tree = self.smoke.tree()
                 require(any(n.get("resource-id") == APP_ID + "file_name" and n.get("text") == "inbound-parity.iso"
                             for n in tree.iter("node")), "A5 did not populate the filename from the fixture")

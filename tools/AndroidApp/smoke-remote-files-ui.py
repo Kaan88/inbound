@@ -165,8 +165,6 @@ class Smoke:
         self.baseline_files = {line.rsplit("/", 1)[-1] for line in inventory.splitlines()}
         (self.evidence / "apk.sha256").write_text(
             hashlib.sha256(Path(self.args.apk).read_bytes()).hexdigest() + "\n", encoding="ascii")
-        (self.evidence / "baseline-files.txt").write_text(
-            "\n".join(sorted(self.baseline_files)) + "\n", encoding="utf-8")
         self.log(f"Preflight PASS: {AVD}, API {API}; probe absent; Download files={len(self.baseline_files)}")
 
     def run(self):
@@ -238,8 +236,8 @@ class Smoke:
             current = {line.rsplit("/", 1)[-1] for line in
                        self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()}
             require(current == self.baseline_files | {FILE},
-                    f"Unexpected Download files: added={current - self.baseline_files}, "
-                    f"missing={self.baseline_files - current - {FILE}}")
+                    f"Unexpected Download inventory: {len(current - self.baseline_files - {FILE})} extra, "
+                    f"{len((self.baseline_files | {FILE}) - current)} missing")
             self.log(f"PASS browse and download: {target}; SHA-256 {SHA256}; no extra files")
             (self.evidence / "download.sha256").write_text(digest, encoding="utf-8")
             self.shell("rm", target)
@@ -339,7 +337,8 @@ class Smoke:
                     current = {line.rsplit("/", 1)[-1] for line in
                                self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()}
                     require(current == self.baseline_files,
-                            f"Download directory differs from baseline after cleanup: {current ^ self.baseline_files}")
+                            f"Download directory differs after cleanup: {len(current - self.baseline_files)} added, "
+                            f"{len(self.baseline_files - current)} removed")
             except Exception as exc:
                 errors.append(f"payload cleanup: {exc}")
             if self.reversed:

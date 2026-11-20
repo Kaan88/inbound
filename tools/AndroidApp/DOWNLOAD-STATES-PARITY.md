@@ -178,3 +178,13 @@ Host-only checks (no device/build action):
 python -m unittest tools/AndroidApp/test_download_states_parity.py
 python -m py_compile tools/AndroidApp/capture-download-states-parity.py
 ```
+
+## Completion snackbar Open
+
+Run `capture-a3-snackbar-open.py` with the same explicit ADB path, serial,
+probe APK and new evidence directory. The isolated run requires Photos as the
+unique PNG viewer. It finishes a nonce-named synthetic PNG, taps the
+filename-matched snackbar action, checks the viewer and image pixel, and
+verifies the saved file hash. It removes its exact hash-matched file after
+uninstalling the probe. The result records metadata without saving the viewer
+image or its hierarchy.

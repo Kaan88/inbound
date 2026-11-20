@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
 import hashlib
 import re
+import time
 from threading import Lock
 from urllib.parse import quote, unquote, urlsplit
 
@@ -184,7 +185,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Last-Modified", LAST_MODIFIED.get(name, DEFAULT_MODIFIED))
         self.end_headers()
         if send_body:
-            self.wfile.write(payload)
+            if self.server.parity_pulse and name in ("session-0412.flac", "session-0419.flac"):
+                try:
+                    for offset in range(0, len(payload), 16384):
+                        block = payload[offset:offset + 16384]
+                        self.wfile.write(block)
+                        self.wfile.flush()
+                        with self.server.parity_lock:
+                            self.server.parity_pulsed_bytes += len(block)
+                        if offset + len(block) < len(payload):
+                            time.sleep(0.35)  # Real, bounded payload pacing; never used as a UI-state assertion.
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+            else:
+                self.wfile.write(payload)
 
     def do_PUT(self):
         stage = self._staging()
@@ -274,6 +288,8 @@ class FixtureServer(ThreadingHTTPServer):
         self.parity_lock = Lock()
         self.parity_notes_deleted = False
         self.parity_gets = set()
+        self.parity_pulse = False
+        self.parity_pulsed_bytes = 0
         self.parity_upload_staging = {}
         # Published fixture-relative paths (no leading slash) mapped to their exact bytes.
         self.parity_uploads = {}

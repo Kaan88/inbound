@@ -10,10 +10,16 @@ import stat
 import threading
 
 import paramiko
+from paramiko.sftp import CMD_EXTENDED, CMD_EXTENDED_REPLY, CMD_INIT, CMD_VERSION, SFTPError
 
 
 USERNAME = "android-proof"
 PASSWORD = "fixture-only-password"
+STATVFS_EXTENSION = "statvfs@openssh.com"
+BLOCK_SIZE = 4096
+TOTAL_BLOCKS = 100_000_000
+FREE_BLOCKS = 50_000_000
+FREE_BYTES = BLOCK_SIZE * FREE_BLOCKS
 VIRTUAL_TREE = {
     "/": (("Documents", True, 0), ("Downloads", True, 0), ("welcome.txt", False, 32)),
     "/Documents": (("readme.txt", False, 48),),
@@ -99,6 +105,39 @@ class ReadOnlySftp(paramiko.SFTPServerInterface):
         return paramiko.SFTP_PERMISSION_DENIED
 
 
+class CapacitySftpServer(paramiko.SFTPServer):
+    """Expose a synthetic filesystem capacity over the authenticated SFTP channel."""
+
+    def _send_server_version(self):
+        packet, data = self._read_packet()
+        if packet != CMD_INIT or len(data) < 4:
+            raise SFTPError("Invalid SFTP initialization")
+        version = paramiko.Message(data).get_int()
+        reply = paramiko.Message()
+        reply.add_int(3)
+        reply.add("check-file", "md5,sha1", STATVFS_EXTENSION, "2")
+        self._send_packet(CMD_VERSION, reply)
+        return version
+
+    def _process(self, packet, request_number, message):
+        if packet != CMD_EXTENDED:
+            return super()._process(packet, request_number, message)
+        extension = paramiko.Message(message.get_remainder())
+        if extension.get_text() != STATVFS_EXTENSION:
+            return super()._process(packet, request_number, message)
+        if self.server._virtual_path(extension.get_text()) not in VIRTUAL_TREE:
+            return self._send_status(request_number, paramiko.SFTP_NO_SUCH_FILE)
+        reply = paramiko.Message()
+        reply.add_int(request_number)
+        fields = (
+            BLOCK_SIZE, BLOCK_SIZE, TOTAL_BLOCKS, FREE_BLOCKS, FREE_BLOCKS,
+            16, 8, 8, 1, 1, 255,
+        )
+        for field in fields:
+            reply.add_int64(field)
+        self._send_packet(CMD_EXTENDED_REPLY, reply)
+
+
 class FixtureSshServer(paramiko.ServerInterface):
     def __init__(self, authenticated):
         self.authenticated = authenticated
@@ -128,7 +167,8 @@ class _RequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
         transport = paramiko.Transport(self.request)
         transport.add_server_key(self.server.host_key)
-        transport.set_subsystem_handler("sftp", paramiko.SFTPServer, ReadOnlySftp)
+        handler = CapacitySftpServer if self.server.provide_capacity else paramiko.SFTPServer
+        transport.set_subsystem_handler("sftp", handler, ReadOnlySftp)
         try:
             transport.start_server(server=FixtureSshServer(self.server.authenticated))
             transport.join()
@@ -143,16 +183,17 @@ class _LoopbackTcpServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     address_family = socketserver.socket.AF_INET
 
-    def __init__(self, address, host_key):
+    def __init__(self, address, host_key, provide_capacity):
         self.host_key = host_key
+        self.provide_capacity = provide_capacity
         self.authenticated = threading.Event()
         super().__init__(address, _RequestHandler)
 
 
 class SftpFixture:
-    def __init__(self, port=0):
+    def __init__(self, port=0, *, provide_capacity=False):
         self.host_key = paramiko.RSAKey.generate(2048)
-        self.server = _LoopbackTcpServer(("127.0.0.1", port), self.host_key)
+        self.server = _LoopbackTcpServer(("127.0.0.1", port), self.host_key, provide_capacity)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     @property

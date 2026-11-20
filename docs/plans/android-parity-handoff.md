@@ -4,12 +4,42 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
+### Core screens and Downloads selection (2026-11-20)
+
+- Astra passed first launch before the permission prompts, the idle Add sheet
+  and the dark Settings root in `core-a0-a5-c7-retry-20261120-045033`. The
+  Settings search narrowed to Catching links and the Site logins row was visible.
+- The same run populated A5 from a loopback metadata response with a 6.1 GB
+  size, byte-range support, exact fixture filename and eight requested
+  connections. The capture submitted no download. Astra requested slimmer
+  slider styling and taller visible footer buttons.
+- `b5-mixed-retry-20261120-045121` verified three selected real jobs in active,
+  paused and queued states, alongside an unselected active and finished job.
+  The finished file matched its hash and the probe cleaned up. Some owned
+  fixture partials remain on the emulator.
+
+### Verified Remote Files and completion actions (2026-11-20)
+
+- Astra passed the direct A3 snackbar Open in `a3-snackbar-open-20261120-044317`.
+  Photos displayed the expected synthetic PNG, the completed SHA-256 matched,
+  and scoped cleanup passed. The mixed A3 list remains open.
+- Astra passed the C3 active WebDAV view in `c3-c4-active-20261120-043917`.
+  It showed two downloads at 57.3 KB/s and fixture bytes advanced from
+  1,638,400 to 1,900,544. The trusted SFTP browse in
+  `c3-sftp-capacity-20261120-044216` showed 205 GB free from the fixture's
+  204,800,000,000-byte response. Astra also passed all three browsable
+  protocols together in `c3-three-protocols-20261120-045409`. Remaining C3
+  work includes icon and button polish, expired cloud sign-in, and concurrent
+  upload/download.
+- Astra passed the C4 nested WebDAV list in `c3-c4-active-20261120-043917`.
+  Order and 12/48 folder counts matched, both selected FLAC hashes passed in
+  Downloads/Inbound/Music, and delete Cancel preserved the fixture while
+  Confirm removed only notes.pdf.
+
 ### Scoped parity evidence update (2026-11-20)
 
-Existing pushed checkpoint: `f3707bc4`. The following scoped evidence does not
-close the remaining Android screens, states or major-milestone review. Earlier
-entries below describe their historical checkpoint; this update supersedes their
-then-open assertions where stated.
+Pushed checkpoints: `f3707bc4` and `f085e394`. Full Android visual
+acceptance remains open. Earlier entries document their original checkpoints.
 
 - **A3/A6:** Astra approved `a3-a6-present-20261120-042101`: Add remained
   visible, the navigation gap was 16 px, and the folder action was outlined.
@@ -17,9 +47,10 @@ then-open assertions where stated.
   matched its hash. A3 mixed-list/Open tap and A6 nested destination, constraints
   and multiple connections remain open. A6 Stop passed separately in
   `b6-stop-retry-20261120-034215`.
-- **B4:** `b4-present-20261120-042149` verified eight links, six checked
-  archives and 689 KB totals, with search clearing back to all eight. Astra
-  passed controls and CTA; final card inset and row-spacing correction remains.
+- **B4:** Astra approved the Archives state in
+  `b4-archive-final-20261120-043155`. Final spacing aligns the eight rows and
+  checkboxes. Six archives were checked, both totals showed 689 KB, and
+  clearing search restored all eight links. Submission remains open.
 - **B6:** Astra approved `b6-recatch-20261120-040546`: Cancel preserved the
   same 7% job; a real WebView Confirm resumed that same job at byte 1,310,720
   and its completed payload matched SHA-256.
@@ -27,12 +58,18 @@ then-open assertions where stated.
   `c5-c6-pulses-20261120-041845`: three exclusive Host choices and a C6
   running-plus-finished list, matching completed hash, and live graph; the
   active transfer advanced from 655,360 to 917,504 bytes over four seconds.
-  Astra also passed C5's three selections and the scoped default C6 layout in
-  `c5-c6-present-20261120-042644`. The active switcher, keyboard/filter and
-  other C6 row/action checks remain open.
+  Astra passed the live switcher and final C6 layout in
+  `c5-c6-final-20261120-043359`. Host A showed 1 active at 76.8 KB/s. Finished
+  excluded its active job, All restored both, Back from Queues preserved the
+  filter session and closing search hid it. Hardware-keyboard and Pause
+  activation remain open.
 - **C1:** Astra approved the revised populated cards, action sheet and chart
   navigation in `c1-present-20261120-042308`. The chart opened the same Host's
   live Downloads graph. Actual scheduled execution remains open.
+- **C4:** The scoped S3 upload rerun `c4-conditional-ui-20261120-043617`
+  verified both Back paths, Cancel with zero PUTs, Confirm with one
+  conditional PUT for the exact 34 MediaStore bytes, and owned cleanup.
+  The separate C4 folder-list visual check remains open.
 
 ### C1 workload and A3/A6 recapture (2026-11-20)
 

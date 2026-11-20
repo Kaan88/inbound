@@ -121,3 +121,16 @@ and verifies that **Cancel** sends no PUT and **Upload** sends exactly one
 conditional PUT containing the source bytes. It captures the selection,
 confirmation, and completed listing, then removes the exact MediaStore row.
 These controls are compiled only into the isolated probe.
+
+## Active summary, capacity and mixed locations
+
+Add `--verify-c3-active` to the regular WebDAV run. The same two test files
+arrive in pulses so the location view can report a real rate while bytes
+advance. The run still verifies both hashes and uses its exact cleanup.
+
+Run `--sftp-only --sftp-capacity` to browse the pinned read-only SFTP fixture
+and check 205 GB free. The number comes from the fixture's SFTP response.
+
+Use standalone `--c3-mixed` to browse WebDAV, S3 and capacity-enabled SFTP
+while all three owned loopback services remain available. This lane creates
+no Downloads files.

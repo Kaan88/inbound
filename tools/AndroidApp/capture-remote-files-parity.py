@@ -70,6 +70,7 @@ class Capture:
         self.fixture = None
         self.fixture_thread = None
         self.output_paths = []
+        self.owns_outputs = False
         self.port = None
         self.s3_process = None
         self.s3_root = None
@@ -120,7 +121,7 @@ class Capture:
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD, f"Expected dedicated AVD {AVD}")
         require(self.shell("getprop", "ro.build.version.sdk").strip() == API, f"Expected API {API}")
         self.smoke.preflight()
-        standalone = (self.args.s3_only or getattr(self.args, "upload_host_only", False)
+        standalone = (self.args.c3_mixed or self.args.s3_only or self.args.sftp_only or getattr(self.args, "upload_host_only", False)
                       or getattr(self.args, "upload_source_only", False) or getattr(self.args, "s3_upload_ui", False))
         if not standalone:
             require(self.shell("test", "!", "-e", "/sdcard/Download/session-0412.flac").strip() == "",
@@ -145,6 +146,7 @@ class Capture:
         reverse = self.adb("reverse", "--list")
         require(not re.search(rf"\btcp:{self.port}\b", reverse), f"ADB reverse port {self.port} is already in use")
         self.fixture = self.fixture_module.FixtureServer(("127.0.0.1", self.port))
+        self.fixture.parity_pulse = self.args.verify_c3_active
         import threading
         self.fixture_thread = threading.Thread(target=self.fixture.serve_forever, daemon=True)
         self.fixture_thread.start()
@@ -222,7 +224,7 @@ class Capture:
             self.s3_temp.cleanup()
             self.s3_temp = None
 
-    def verify_s3(self, atomic=False):
+    def verify_s3(self, atomic=False, port=None):
         self.tap("Add location", timeout=40)
         self.tap("Location type: WebDAV")
         self.tap("S3")
@@ -231,7 +233,7 @@ class Capture:
             lambda value: value == "S3 provider", "S3 provider")
         self.smoke.tap(provider)
         self.tap("Other S3-compatible service")
-        endpoint = f"http://127.0.0.1:{self.port}"
+        endpoint = f"http://127.0.0.1:{self.port if port is None else port}"
         self.smoke.enter("S3 endpoint (optional for Amazon S3)", endpoint)
         self.smoke.enter("Region (optional)", "eu-central")
         self.smoke.enter("Access key ID", "INBOUNDTESTKEY")
@@ -464,8 +466,13 @@ class Capture:
         self.tap("To this phone" if any(node.get("text") == "To this phone" for node in tree.iter("node"))
                  else "↓  To this phone")
         self.wait_node("Download 2 files?", timeout=20)
+        for path in self.output_paths:
+            require(self.shell("test", "!", "-e", path).strip() == "", "Fixture destination already exists")
+        self.owns_outputs = True
         self.tap("Download", timeout=20)
         self.wait_node("Transfers", timeout=35)
+        if self.args.verify_c3_active:
+            self.capture_active_summary()
         deadlines = time.monotonic() + 90
         hashes = {}
         while time.monotonic() < deadlines:
@@ -485,7 +492,9 @@ class Capture:
         current = {line.rsplit("/", 1)[-1] for line in
                    self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()}
         expected_root = self.smoke.baseline_files if self.args.nested_destination else self.smoke.baseline_files | set(EXPECTED_FILES)
-        require(current == expected_root, f"Unexpected shared Downloads changes: {current ^ expected_root}")
+        require(current == expected_root,
+                f"Unexpected shared Downloads changes: {len(current - expected_root)} added, "
+                f"{len(expected_root - current)} removed")
         if self.args.nested_destination:
             nested = set(self.shell("find", "/sdcard/Download/Inbound/Music", "-maxdepth", "1", "-type", "f").splitlines())
             require(nested == set(self.output_paths), "Nested destination contains something other than the selected files")
@@ -493,8 +502,41 @@ class Capture:
             "\n".join(f"{name} {hashes[name]}" for name in EXPECTED_FILES) + "\n", encoding="ascii")
         self.smoke.log("PASS two selected files: " + ", ".join(f"{name} SHA-256 {hashes[name]}" for name in EXPECTED_FILES))
 
+    def capture_active_summary(self):
+        # Leave Transfers, then each nested folder, using only the real Back flow.
+        for _ in range(6):
+            if self.smoke.matches(self.tree(), "Add location"):
+                break
+            self.shell("input", "keyevent", "4")
+        self.wait_node("Add location", timeout=30)
+        deadline = time.monotonic() + 35
+        with self.fixture.parity_lock:
+            before = self.fixture.parity_pulsed_bytes
+        while time.monotonic() < deadline:
+            tree = self.tree()
+            matches = [n.get("content-desc", "") for n in tree.iter("node")
+                       if re.fullmatch(r"[1-9][0-9]* transfers? · [0-9]+ up, [1-9][0-9]* down · [0-9]+(?:\.[0-9]+)? (?:B|KB|MB|GB)/s\. Open transfers\.", n.get("content-desc", ""))]
+            matches = [text for text in matches if float(re.search(r"([0-9]+(?:\.[0-9]+)?) (?:B|KB|MB|GB)/s", text).group(1)) > 0]
+            with self.fixture.parity_lock:
+                after = self.fixture.parity_pulsed_bytes
+            if len(matches) == 1 and after > before:
+                capture = self.capture_screen("c3-active-capture")
+                (self.evidence / "c3-active-ui.xml").write_bytes(ET.tostring(tree, encoding="utf-8"))
+                make_pair(MOCKUPS / "c3-sites.png", capture, self.evidence / "c3-active-pair.png", "C3 active")
+                (self.evidence / "c3-active-pulses.txt").write_text(
+                    f"Owned fixture bytes before={before}, after={after}; summary={matches[0]}\n", encoding="utf-8")
+                self.smoke.log("PASS C3 active transfer summary with real advancing fixture bytes and nonzero reported rate")
+                return
+            time.sleep(.3)  # Poll actual Host/UI and fixture state, bounded by the deadline.
+        raise RuntimeError("No active summary with nonzero speed and advancing owned fixture bytes; preserve evidence")
+
     def delete_and_verify(self):
-        self.adb("shell", "input", "keyevent", "4")
+        if self.args.verify_c3_active:
+            self.tap_card_prefix(self.location + ". ")
+            for folder in ("media", "recordings", "2026"):
+                self.tap_card_prefix(folder + ", folder.", timeout=35)
+        else:
+            self.adb("shell", "input", "keyevent", "4")
         self.wait_node("2026")
         tree = self.tree()
         for node in tree.iter("node"):
@@ -521,9 +563,10 @@ class Capture:
             time.sleep(0.5)
         raise RuntimeError("Confirmed deletion was not verified against the fixture and refreshed listing")
 
-    def verify_sftp(self):
+    def verify_sftp(self, capacity=None, after_browse=None):
         fixture_module = load_module("sftp_onboarding_fixture", Path(__file__).with_name("sftp-onboarding-fixture.py"))
-        fixture = fixture_module.SftpFixture().start()
+        capacity = self.args.sftp_capacity if capacity is None else capacity
+        fixture = fixture_module.SftpFixture(provide_capacity=capacity).start()
         owned_reverse = False
         port = fixture.port
         try:
@@ -536,8 +579,13 @@ class Capture:
                     break
                 self.adb("shell", "input", "keyevent", "4")
             self.tap("Add location")
-            self.tap("Location type: WebDAV")
-            self.tap("SFTP")
+            tree = self.wait_contains("Location type: ")
+            kinds = [node for node in tree.iter("node") if node.get("text", "").startswith("Location type: ")]
+            require(len(kinds) == 1, "Missing or ambiguous location type picker")
+            kind = kinds[0]
+            if kind.get("text") != "Location type: SFTP":
+                self.smoke.tap(kind)
+                self.tap("SFTP")
             meta = fixture.metadata()
             for label, value in (("Location name", "Test SFTP"), ("SFTP server name or address", meta["host"]),
                                  ("Port", str(port)), ("User name (optional)", meta["username"]),
@@ -570,18 +618,85 @@ class Capture:
             self.smoke.log("PASS SFTP: fixture fingerprint matched; Cancel sent no login; Trust then browse authenticated")
             self.shell("input", "keyevent", "4")
             self.wait_node("Add location")
-            expected_card = f"Test SFTP. SFTP · {meta['host']}:{port}. Open location."
-            cards = [node.get("content-desc", "") for node in self.tree().iter("node")
-                     if node.get("content-desc", "").startswith("Test SFTP. ")]
-            require(cards == [expected_card], "Post-browse SFTP card did not show the expected unavailable-space detail")
+            expected_space = f" · {fixture_module.FREE_BYTES / 10**9:.0f} GB free" if capacity else ""
+            expected_card = f"Test SFTP. SFTP · {meta['host']}:{port}{expected_space}. Open location."
+            self.smoke.wait_content_description(
+                lambda desc: desc == expected_card, "post-browse SFTP capacity")
             self.capture_screen("c3-sftp-location-after-browse")
-            self.smoke.log("PASS SFTP unavailable space: post-browse location card shows no free-space figure")
+            self.smoke.log(f"PASS SFTP capacity: {expected_space.strip(' ·') or 'unavailable'} after browse")
+            if after_browse is not None:
+                after_browse(expected_card)
         finally:
             try:
                 if owned_reverse:
                     self.adb("reverse", "--remove", f"tcp:{port}")
             finally:
                 fixture.close()
+
+    def capture_c3_mixed(self):
+        """Three independently owned, real loopback protocols; no downloads or cloud account."""
+        import threading
+        self.setup_location(populate=False)
+        self.location = "Home NAS"
+        self.tap("Add location")
+        self.smoke.enter("Location name", self.location)
+        self.smoke.enter("WebDAV address (https://…)", f"http://127.0.0.1:{self.port}/")
+        self.tap("Allow HTTP: not encrypted. Credentials and files can be read or changed in transit.")
+        self.tap("Save location")
+        self.smoke.wait_content_description_prefix("Home NAS. WebDAV ·", timeout=40)
+        # Confirm an actual WebDAV listing before including the location in the mixed state.
+        self.tap_card_prefix("Home NAS. WebDAV ·")
+        self.smoke.wait_content_description_prefix("media, folder.", timeout=35)
+        self.shell("input", "keyevent", "4")
+        self.wait_node("Add location")
+
+        module = load_module("mixed_c3_s3_fixture", Path(__file__).with_name("s3-conditional-upload-fixture.py"))
+        s3 = module.serve()
+        thread = threading.Thread(target=s3.serve_forever, daemon=True)
+        started = False
+        reversed_s3 = False
+        port = s3.server_port
+        try:
+            require(not re.search(rf"\btcp:{port}\b", self.adb("reverse", "--list")),
+                    "Mixed S3 fixture reverse already exists")
+            thread.start(); started = True
+            self.adb("reverse", f"tcp:{port}", f"tcp:{port}")
+            reversed_s3 = True
+            self.verify_s3(atomic=True, port=port)
+            # verify_s3 ends inside bucket/pub; return through the real hierarchy.
+            for _ in range(5):
+                if self.smoke.matches(self.tree(), "Add location"):
+                    break
+                self.shell("input", "keyevent", "4")
+            self.wait_node("Add location")
+
+            def capture_mixed(expected_sftp):
+                tree = self.tree()
+                descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
+                expected = (
+                    f"Home NAS. WebDAV · 127.0.0.1:{self.port} · Not encrypted. Open location.",
+                    "Backups. S3 · eu-central · Not encrypted. Open location.",
+                    expected_sftp,
+                )
+                require(all(descriptions.count(value) == 1 for value in expected),
+                        "Mixed view did not expose each exact WebDAV, S3 and capacity SFTP card")
+                capture = self.capture_screen("c3-mixed-capture")
+                (self.evidence / "c3-mixed-ui.xml").write_bytes(ET.tostring(tree, encoding="utf-8"))
+                make_pair(MOCKUPS / "c3-sites.png", capture, self.evidence / "c3-mixed-pair.png", "C3 mixed")
+                self.smoke.log("PASS mixed C3: three live fixture protocols, with SFTP-reported capacity")
+
+            # The callback runs before SFTP's own finally tears down its reverse/listener.
+            self.verify_sftp(capacity=True, after_browse=capture_mixed)
+        finally:
+            try:
+                if reversed_s3:
+                    self.adb("reverse", "--remove", f"tcp:{port}")
+            finally:
+                try:
+                    if started: s3.shutdown()
+                finally:
+                    s3.server_close()
+                    if started: thread.join(timeout=5)
 
     def run(self):
         self.fixture_module = load_module("remote_files_parity_fixture", FIXTURE_PATH)
@@ -606,6 +721,9 @@ class Capture:
                 self.smoke.port = self.port
             else:
                 self.start_fixture()
+            if self.args.c3_mixed:
+                self.capture_c3_mixed()
+                return self.evidence
             if getattr(self.args, "s3_upload_ui", False):
                 self.setup_location(populate=False)
                 self.verify_s3(atomic=True)
@@ -637,7 +755,14 @@ class Capture:
         except Exception:
             if self.smoke.started:
                 try:
-                    ET.ElementTree(self.tree()).write(self.evidence / "failure-ui.xml", encoding="utf-8")
+                    tree = self.tree()
+                    credential_fields = {"User name (optional)", "Password (optional)",
+                                         "Access key ID", "Secret access key"}
+                    if any(node.get("password") == "true" or credential_fields.intersection(
+                            (node.get("text"), node.get("content-desc"))) for node in tree.iter("node")):
+                        self.smoke.log("Skipped failure hierarchy while a credentials form was visible.")
+                    else:
+                        ET.ElementTree(tree).write(self.evidence / "failure-ui.xml", encoding="utf-8")
                 except Exception as error:
                     self.smoke.log(f"Could not collect failure UI: {error}")
             raise
@@ -654,7 +779,14 @@ class Capture:
 
     def clean(self):
         errors = []
-        if self.smoke.started:
+        writer_stopped = False
+        if self.owns_outputs:
+            try:
+                self.shell("am", "force-stop", PACKAGE)
+                writer_stopped = True
+            except Exception as exc:
+                errors.append(f"Could not stop the owned probe before removing fixture outputs: {exc}")
+        if writer_stopped:
             for name, path in zip(EXPECTED_FILES, self.output_paths):
                 try:
                     if self.file_exists(path):
@@ -685,8 +817,12 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--apk", required=True, help="Explicit app.inbound.android.rcloneprobe APK")
     parser.add_argument("--evidence", type=Path, required=True, help="New evidence directory")
+    parser.add_argument("--c3-mixed", action="store_true", help="Capture three live loopback WebDAV, S3 and capacity SFTP locations")
+    parser.add_argument("--verify-c3-active", action="store_true", help="Verify the active location summary during pulsed WebDAV downloads")
     parser.add_argument("--verify-sftp", action="store_true", help="Additionally verify first-use SFTP trust with a loopback fixture (requires Paramiko)")
     parser.add_argument("--sftp-only", action="store_true", help="Run only first-use SFTP trust (requires Paramiko)")
+    parser.add_argument("--sftp-capacity", action="store_true",
+                        help="With --sftp-only verify capacity from the synthetic SFTP statvfs reply")
     parser.add_argument("--s3-only", action="store_true",
                         help="Run only S3 location setup and bucket browsing against the passed --rclone executable")
     parser.add_argument("--rclone", help="Installed Windows rclone executable for --s3-only; no bundled/test substitute")
@@ -696,6 +832,17 @@ def main():
     parser.add_argument("--upload-source-only", action="store_true", help="Verify isolated MediaStore source creation and exact cleanup, not UI")
     parser.add_argument("--s3-upload-ui", action="store_true", help="Verify C4 UI using only the loopback atomic S3 fixture")
     args = parser.parse_args()
+    if args.c3_mixed and (args.verify_c3_active or args.verify_sftp or args.sftp_only or args.sftp_capacity
+                          or args.s3_only or args.upload_host_only or args.s3_upload_host_only
+                          or args.upload_source_only or args.s3_upload_ui or args.nested_destination):
+        parser.error("--c3-mixed is a standalone lane")
+    if args.verify_c3_active and (args.s3_only or args.sftp_only or args.upload_host_only
+                                  or args.s3_upload_host_only or args.upload_source_only or args.s3_upload_ui):
+        parser.error("--verify-c3-active requires the normal WebDAV C3/C4 lane")
+    if args.sftp_only and args.nested_destination:
+        parser.error("--nested-destination requires the normal WebDAV C3/C4 lane")
+    if args.sftp_capacity and not args.sftp_only:
+        parser.error("--sftp-capacity requires --sftp-only")
     if args.s3_upload_host_only:
         args.upload_host_only = True
     if args.s3_upload_ui and (args.upload_source_only or args.upload_host_only or args.s3_only or args.sftp_only or args.verify_sftp or args.nested_destination):

@@ -128,7 +128,7 @@ class Capture:
             "serial": self.args.serial,
             "package": PACKAGE,
             "apk": str(apk),
-            "initial_download_files": initial_files,
+            "initial_download_count": len(initial_files),
             "fixture_bytes": FILE_SIZE,
             "chunk_bytes": CHUNK_SIZE,
             "chunk_delay_seconds": CHUNK_DELAY_SECONDS,
@@ -466,7 +466,7 @@ class Capture:
         keys = B5_KEYS
         setup, _ = self.smoke.wait_node("Start downloading", resource="fr_start")
         self.smoke.tap(setup)
-        self.log("B5: complete the real finished fixture first; then stage active rows one at a time and admit the queued row with New download → Later.")
+        self.log("B5: complete the real finished fixture first; then stage active rows one at a time and admit the queued row with New download, then Later.")
         expected = [self.names[key] for key in keys]
         def wait_tree(predicate, description):
             deadline = time.monotonic() + 60
