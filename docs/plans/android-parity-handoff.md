@@ -102,7 +102,11 @@ download summary depends on tracked upload support.
   One selected paused job made a new GET and the fixture sent another
   278,528 bytes. The unselected paused job stayed at 1,474,560 cumulative
   bytes and two GETs. This fixture restarts from byte zero because it
-  lacks Range support.
+  lacks Range support. In `b5-selected-night-final-20261120-091415`,
+  Astra approved moving the one selected file from stopped Mobile to
+  scheduled Night. Night showed two files and Mobile showed zero.
+  Reselecting the moved row preserved its reported Night start. The
+  moved file remained queued and produced zero fixture GETs or output.
 - Astra approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real

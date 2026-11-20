@@ -779,6 +779,83 @@ class Capture:
             self.clean()
         return self.evidence
 
+    def verify_b5_move_to_night(self, name, mobile_fixture_state):
+        """Move one synthetic Mobile job through the real bulk queue chooser."""
+        target = "/sdcard/Download/" + name
+
+        def untouched():
+            require(mobile_fixture_state() == (0, 0),
+                    "The moved fixture received a GET or transferred bytes")
+            require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                    "The moved fixture unexpectedly wrote output")
+
+        row, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith(name + ". Queued") and "scheduled" not in d,
+            "the exact stopped Mobile job")
+        untouched()
+        def select_only(row):
+            bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", row.get("bounds", ""))
+            require(bounds is not None and row.get("clickable") == "true", "The owned row was not visible and actionable")
+            left, top, right, bottom = map(int, bounds.groups())
+            require(left < right and top < bottom, "The owned row has invalid bounds")
+            x, y = left + (right - left) // 4, (top + bottom) // 2
+            self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
+            _, tree = self.smoke.wait_node("1 selected", resource="sel_title")
+            selected = [node for node in tree.iter("node") if node.get("selected") == "true"
+                        and ". " in node.get("content-desc", "")
+                        and node.get("content-desc", "").startswith("inbound-c1-")]
+            require(len(selected) == 1 and selected[0].get("content-desc", "").startswith(name + ". "),
+                    "The selection contains a different fixture row")
+            return selected[0]
+
+        select_only(row)
+        self._tap_resource("sel_more")
+        move, _ = self.smoke.wait_content_description(lambda d: d == "Move to queue", "the bulk move action")
+        require(move.get("enabled") == "true" and move.get("clickable") == "true", "Move to queue is disabled")
+        self.capture_checkpoint("b5-move-night-selection", "b5-select.png", "Move to queue")
+        self.smoke.tap(move)
+        self.smoke.wait_node("Move to queue")
+        choice, dialog = self.smoke.wait_node("Night")
+        require(choice.get("enabled") == "true" and self.smoke.matches(dialog, "No queue")
+                and self.smoke.matches(dialog, "Mobile"), "The exact Night choice was not in the native queue dialog")
+        self.capture_checkpoint("b5-move-night-chooser", None, "Move to queue")
+        untouched()
+        self.smoke.tap(choice)
+
+        def moved():
+            moved_row, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith(name + ". Queued for Night") and "scheduled " in d and self.c1_start in d,
+                "the exact new Night queue assignment")
+            require(moved_row.get("selected") == "false", "The bulk selection did not clear")
+            untouched()
+            return moved_row.get("content-desc")
+
+        state = moved()
+        self.capture_checkpoint("b5-move-night-result", None, "Queued for Night")
+        time.sleep(4)
+        require(moved() == state, "The scheduled row changed during the observation")
+        scheduled, _ = self.smoke.wait_content_description(lambda d: d == state, "the verified scheduled file")
+        selected = select_only(scheduled)
+        require(selected.get("content-desc") == state, "Selection hid or changed the named schedule")
+        self.capture_checkpoint("b5-move-night-selected-scheduled", "b5-select.png", "Queued for Night")
+        self._tap_resource("sel_close")
+        require(moved() == state, "Closing selection changed the scheduled file")
+        self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
+        night, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith("Night, Scheduled for ") and self.c1_start in d.split(". ", 1)[0]
+            and (". 2 files." in d or ". 2 files " in d), "Night with two owned files")
+        mobile, _ = self.smoke.wait_content_description(
+            lambda d: d.startswith("Mobile, Stopped.") and ". 0 files." in d, "Mobile now empty")
+        self.capture_checkpoint("b5-move-night-queues", "c1-queues.png", "Double tap to edit")
+        untouched()
+        (self.evidence / "b5-move-night-proof.json").write_text(json.dumps({
+            "filename": name, "from_queue": "Mobile", "to_queue": "Night",
+            "scheduled_start": self.c1_start, "stable_for_seconds": 4, "moved_fixture_gets": 0,
+            "moved_fixture_bytes": 0, "output_absent": True, "result_row": state,
+            "night_card": night.get("content-desc"), "mobile_card": mobile.get("content-desc"),
+        }, indent=2) + "\n", encoding="utf-8")
+        self.log("PASS B5: moved the one selected queued file from Mobile to scheduled Night with zero GETs or output.")
+
     def run_c1_workload(self):
         """Use a fresh probe, ordinary UI and a bounded local HTTP workload."""
         states = load_module("c1_state_fixture", Path(__file__).with_name("capture-download-states-parity.py"))
@@ -790,6 +867,7 @@ class Capture:
         names = {key: f"inbound-c1-{key}-{nonce}.bin" for key in ("main", "night", "mobile")}
         sent = {key: 0 for key in names}
         first_byte_at = {}
+        get_counts = dict.fromkeys(names, 0)
         in_flight = dict.fromkeys(names, 0)
         fixture_lock = threading.Lock()
         stop = threading.Event()
@@ -798,11 +876,18 @@ class Capture:
             with fixture_lock:
                 return sent["night"], sent["mobile"], in_flight["night"]
 
+        def mobile_fixture_state():
+            with fixture_lock:
+                return get_counts["mobile"], sent["mobile"]
+
         class Handler(BaseHTTPRequestHandler):
             def respond(self, include_body):
                 key = self.path.strip("/")
                 if key not in names:
                     self.send_error(404); return
+                if include_body:
+                    with fixture_lock:
+                        get_counts[key] += 1
                 payload = night_body if key == "night" else body
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -993,6 +1078,8 @@ class Capture:
             (self.evidence / "c1-chart-destination.png").write_bytes(
                 self.adb("exec-out", "screencap", "-p", raw=True))
             self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified.")
+            if self.args.verify_b5_move_night:
+                self.verify_b5_move_to_night(names["mobile"], mobile_fixture_state)
             if verify_start:
                 require(sent["night"] == sent["mobile"] == 0, "A stopped fixture transferred before the scheduled check")
                 self.log(f"Waiting for the real Night schedule at {self.c1_start}; device time is unchanged.")
@@ -1756,6 +1843,8 @@ def main():
                         help="With --mixed-hosts focus the filter and activate Pause with Android keyboard events")
     parser.add_argument("--verify-remote-touch-pause", action="store_true",
                         help="With --mixed-hosts touch Pause and verify the owned active Host job")
+    parser.add_argument("--verify-b5-move-night", action="store_true",
+                        help="With --unattended-c1-workload move only Mobile's file into a future scheduled Night")
     parser.add_argument("--verify-scheduled-row", action="store_true",
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-stop", action="store_true",
@@ -1797,6 +1886,8 @@ def main():
         parser.error("--verify-schedule-delete-confirm requires --unattended-configured-c2")
     if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:
         parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
+    if args.verify_b5_move_night and (not args.unattended_c1_workload or args.verify_scheduled_start or args.verify_scheduled_stop):
+        parser.error("--verify-b5-move-night requires --unattended-c1-workload without scheduled start or stop checks")
     if args.verify_scheduled_row and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-row requires --unattended-c1-workload")
     if args.verify_scheduled_stop and not args.unattended_c1_workload:
