@@ -61,7 +61,11 @@
   the schedule while the empty Night queue remained. Astra approved the
   paired Main editor in `c2-paired-editor-20261120-065822`. It showed
   the Host-local timing footer and headless Host controls. Back left the
-  exact queue and schedule snapshot unchanged. Paired saves remain open.
+  exact queue and schedule snapshot unchanged. In
+  `c2-paired-save-live-20261120-080656`, Astra approved saving and reopening
+  one disabled Monday to Friday 01:00 to 07:00 schedule on the paired Main
+  queue. The draft left its Host snapshot intact before Save. The phone's
+  Main remained unscheduled, and the disposable Host had zero jobs or files.
 - Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
   The action closed the selected active fixture's connection. Its fixture
   count held at 2,899,968 bytes for six seconds while the unselected

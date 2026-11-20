@@ -154,7 +154,7 @@ class Capture:
             self.navigate_c1_c2(key)
         elif self.args.unattended_local_hosts:
             self.navigate_local_hosts(key)
-        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer", "c5-b-queued-switcher", "c5-b-queued-row"):
+        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer", "c2-paired-saved", "c2-paired-saved-list", "c5-b-queued-switcher", "c5-b-queued-row"):
             pass  # run_paired already navigated and verified the expected state.
         else:
             self.log(f"Prepare {key}: {self.args.instructions[key]}")
@@ -390,9 +390,10 @@ class Capture:
         option, _ = self.smoke.wait_node("Schedules")
         self.smoke.tap(option)
 
-    def verify_no_schedule(self, tree):
+    def verify_no_schedule(self, tree, queue_name=None):
         title = self._unique_resource(tree, "queue_editor_title")
-        expected = self.args.queue_name if self.args.queue_name.lower().endswith(" queue") or self.args.queue_name.lower() == "queue" else self.args.queue_name + " queue"
+        queue_name = queue_name or self.args.queue_name
+        expected = queue_name if queue_name.lower().endswith(" queue") or queue_name.lower() == "queue" else queue_name + " queue"
         require(title.get("text") == expected, "Unexpected queue editor title")
         require(sum(n.get("text") == "Choose or add a schedule" for n in tree.iter("node")) == 1,
                 "No-schedule prompt missing or ambiguous")
@@ -404,6 +405,70 @@ class Capture:
             require(item.get("checked") == "false" and item.get("enabled") == "false",
                     f"No-schedule {day} must be unchecked and disabled")
         self.log("PASS C2: exact no-schedule queue, empty times and disabled days.")
+
+    def save_paired_c2_schedule(self, queue_state, before):
+        """Use the native editor to save one disabled schedule on the empty fixture Host."""
+        schedule_name = "Paired weekdays"
+
+        def open_main(summary=None):
+            card, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith("Main, ") and ". 0 files." in d
+                and (summary is None or summary in d) and "Double tap to edit" in d, "empty paired Main queue")
+            self.smoke.tap(card)
+            return self.smoke.wait_node("Main queue", resource="queue_editor_title")[1]
+
+        require(len(before[0]) == 1 and not before[1] and before[0][0].get("name") == "Main",
+                "Paired save requires exactly one disposable Main queue and zero schedules")
+        self.verify_no_schedule(open_main(), "Main")
+        self._tap_exact_text("Choose or add a schedule")
+        self._tap_exact_text("+  Add schedule")
+        field, _ = self.smoke.wait_node("Schedule name")
+        self.smoke.tap(field)
+        self.shell("input", "text", schedule_name.replace(" ", "%s"))
+        self._tap_exact_text("Continue")
+        self._tap_description_prefix("Start time")
+        self._time_picker(1)
+        self._tap_description_prefix("Stop time")
+        self._tap_exact_text("Choose time")
+        self._time_picker(7)
+        for day in ("sat", "sun"):
+            self._tap_resource("queue_editor_day_" + day)
+        self._open_schedule_list()
+        toggle, _ = self.smoke.wait_content_description(
+            lambda d: d == "Enable " + schedule_name, "paired draft schedule switch")
+        require(toggle.get("checked") == "true", "Expected the new draft schedule to begin enabled")
+        self.smoke.tap(toggle)
+        self._tap_exact_text("Done")
+        require(queue_state() == before, "The unsaved draft reached the Host")
+        self._tap_resource("queue_editor_save")
+        tree = open_main("Off:")
+        expected_days = ("mon", "tue", "wed", "thu", "fri")
+        for day in (*expected_days, "sat", "sun"):
+            node = self._unique_resource(tree, "queue_editor_day_" + day)
+            require(node.get("checked") == ("true" if day in expected_days else "false"),
+                    "Saved paired schedule day did not match: " + day)
+        for label, value in (("Start time", "01:00"), ("Stop time", "07:00")):
+            require(self._unique_description_prefix(tree, label).get("content-desc") == f"{label}, {value}",
+                    "Saved paired schedule time did not match: " + label)
+        self._open_schedule_list()
+        toggle, _ = self.smoke.wait_content_description(
+            lambda d: d == "Enable " + schedule_name, "persisted paired schedule switch")
+        require(toggle.get("checked") == "false", "The paired schedule was not saved disabled")
+        self.capture_checkpoint("c2-paired-saved-list", None, schedule_name)
+        self._tap_exact_text("Done")
+        self.capture_checkpoint("c2-paired-saved", "c2-schedule.png", "Main queue")
+        self._tap_resource("queue_editor_back")
+        self.smoke.wait_node("Host: Parity Host")
+        queues, schedules = queue_state()
+        require(queues == before[0] and len(schedules) == 1,
+                "Paired save changed a queue or persisted an unexpected number of schedules")
+        expected = {
+            "name": schedule_name, "queueId": queues[0].get("id"), "enabled": False,
+            "kind": "daily", "days": "Mon,Tue,Wed,Thu,Fri", "startTime": "01:00", "stopTime": "07:00",
+        }
+        require(schedules[0].get("id") and all(schedules[0].get(k) == v for k, v in expected.items()),
+                "The saved Host schedule did not match the reopened editor")
+        return expected
 
     def verify_schedule_delete_cancel(self):
         """On the saved fixture schedule, cancel deletion and verify persisted values."""
@@ -1441,6 +1506,22 @@ class Capture:
                 lambda desc: desc == f"Downloads shown from {name}. Change host", f"{name} host chip")
             self.smoke.tap(node)
 
+        def phone_main_state():
+            selected_phone = lambda d: d == "Downloads shown from This phone. Change host"
+            self.smoke.wait_content_description(selected_phone, "selected phone Host")
+            tap("Queues", "nav_queues")
+            card, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith("Main, ") and ". 0 files." in d and "Double tap to edit" in d,
+                "empty phone Main queue")
+            self.smoke.tap(card)
+            _, tree = self.smoke.wait_node("Main queue", resource="queue_editor_title")
+            self.verify_no_schedule(tree, "Main")
+            self._tap_resource("queue_editor_back")
+            self.smoke.wait_content_description(lambda d: d == card.get("content-desc"), "unchanged phone Main card")
+            tap("Downloads", "nav_downloads")
+            self.smoke.wait_content_description(selected_phone, "selected phone Host")
+            return card.get("content-desc")
+
         with fixture.running_fixture(self.args.paired_server_dll) as owned:
             port = urlsplit(owned["base_url"]).port
             endpoint = f"tcp:{port}"
@@ -1449,6 +1530,7 @@ class Capture:
             self.adb("reverse", "--no-rebind", endpoint, endpoint)
             try:
                 self.launch()
+                phone_before = phone_main_state() if self.args.verify_paired_c2_save else None
                 self.current_checkpoint = "c6-pairing-form"  # Never retain pairing-field UI or logs on failure.
                 host_chip("This phone")
                 tap("Connect to another Inbound", "host_connect")
@@ -1502,6 +1584,33 @@ class Capture:
                     self._tap_resource("queue_editor_back")
                     self.smoke.wait_node("Host: Parity Host")
                     require(queue_state() == before, "Queue or schedule changed while viewing editor")
+                    if self.args.verify_paired_c2_save:
+                        initial_jobs = request("jobs.snapshot", {})
+                        require(initial_jobs.get("type") == "jobs.snapshot"
+                                and (initial_jobs.get("payload") or {}).get("jobs") == [],
+                                "Schedule save is restricted to an empty disposable Host")
+                        saved = self.save_paired_c2_schedule(queue_state, before)
+                        final_jobs = request("jobs.snapshot", {})
+                        require(final_jobs.get("type") == "jobs.snapshot"
+                                and (final_jobs.get("payload") or {}).get("jobs") == []
+                                and not any(Path(owned["download_root"]).iterdir()),
+                                "The disposable Host acquired a job or file while saving its schedule")
+                        tap("Downloads", "nav_downloads")
+                        host_chip("Parity Host")
+                        phone, _ = self.smoke.wait_content_description(
+                            lambda d: d.startswith("This phone, ") and ", shown now" not in d,
+                            "unselected phone Host")
+                        self.smoke.tap(phone)
+                        self.smoke.wait_content_description(
+                            lambda d: d == "Downloads shown from This phone. Change host", "selected phone Host")
+                        require(phone_main_state() == phone_before, "Phone Main queue changed during paired save")
+                        (self.evidence / "c2-paired-save-proof.json").write_text(json.dumps({
+                            "host": "Parity Host", "queue": "Main", "schedule": saved,
+                            "draft_did_not_reach_host": True, "phone_main_unchanged": True,
+                            "host_jobs": 0, "host_files": 0,
+                        }, indent=2) + "\n", encoding="utf-8")
+                        self.log("PASS paired C2 save: one disabled weekday schedule persisted on the disposable Host.")
+                        return self.evidence
                     tap("Downloads", "nav_downloads")
                     self.smoke.wait_node("Files are saved on Parity Host")
                     (self.evidence / "c2-paired-proof.json").write_text(json.dumps({
@@ -1558,6 +1667,8 @@ def main():
                         help="Exact disposable paired-host label to enter manually")
     parser.add_argument("--verify-paired-c2", action="store_true",
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
+    parser.add_argument("--verify-paired-c2-save", action="store_true",
+                        help="With --verify-paired-c2 save and reopen one disabled schedule on the empty owned Server")
     parser.add_argument("--verify-host-b-queued", action="store_true",
                         help="With --mixed-hosts verify a real deferred Host B job and zero fixture requests")
     parser.add_argument("--verify-remote-layout", action="store_true",
@@ -1592,6 +1703,8 @@ def main():
     args = parser.parse_args()
     if args.verify_host_b_queued and (not args.mixed_hosts or not args.paired_server_dll):
         parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
+    if args.verify_paired_c2_save and not args.verify_paired_c2:
+        parser.error("--verify-paired-c2-save requires --verify-paired-c2")
     if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):
         parser.error("--verify-paired-c2 requires non-mixed --paired-server-dll")
     if (args.verify_remote_touch_pause or args.verify_remote_keyboard_pause) and not args.mixed_hosts:
