@@ -60,6 +60,8 @@ can approve departures from the designs.
   The navigation highlight matched all four selected tabs.
   C5 HTTPS pairing now shows the warning before its fingerprint.
   Cancel kept This phone selected. An address edit cleared prior consent.
+  C3 paired location removal kept the sibling location and its WebDAV
+  files available. Cancel preserved both locations.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

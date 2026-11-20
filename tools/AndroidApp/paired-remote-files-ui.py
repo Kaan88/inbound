@@ -26,8 +26,8 @@ def require(ok, message):
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
-        verify_delete=False, delete_state=None, require_no_transfers=None):
-    """Use the actual paired-Host UI through one confirmed safe download request."""
+        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None):
+    """Use actual paired-Host UI for an owned download or location removal."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
     require(host.scheme == "https" and host.hostname == "127.0.0.1" and host.port
@@ -116,6 +116,48 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
     checkbox, _ = smoke.wait_node("Allow HTTP: not encrypted. Credentials and files can be read or changed in transit.")
     require(checkbox.get("checked") == "true", "HTTP acknowledgement was not selected")
     tap("Save location")
+    if verify_location_remove is not None:
+
+        def card():
+            node, tree = smoke.wait_content_description(lambda d: d.startswith(LOCATION + ". WebDAV ·"), "owned WebDAV card")
+            require(node.get("long-clickable") == "true", "Owned location cannot be long pressed")
+            return node, tree
+        def menu(action):
+            node, _ = card()
+            match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+            require(match is not None, "Location card bounds unavailable")
+            l,t,r,b = map(int, match.groups()); x=(l+r)//2; y=(t+b)//2
+            smoke.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
+            entry, tree = smoke.wait_node("Remove location", resource="title")
+            # PopupMenu exposes its label while the ListView handles the tap.
+            require(entry.get("enabled") == "true", "Remove menu unavailable")
+            save_state("c3-remove-menu-" + action, tree)
+            smoke.tap(entry)
+            _, tree = smoke.wait_node("Remove location?")
+            labels = [n.get("text", "") for n in tree.iter("node")]
+            require("Remove " + LOCATION + " from " + host_name + "? Remote files will not be deleted." in labels, "Remove dialog identity mismatch")
+            save_state("c3-remove-confirmation-" + action, tree)
+
+        _, initial = card()
+        verify_location_remove("before")
+        save_state("c3-remove-initial", initial)
+        menu("cancel")
+        tap("Cancel")
+        _, canceled = card()
+        verify_location_remove("cancel")
+        save_state("c3-remove-canceled", canceled)
+        menu("confirm")
+        tap("Remove")
+        verify_location_remove("removed")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            tree = smoke.tree()
+            desc = [n.get("content-desc", "") for n in tree.iter("node")]
+            if not any(d.startswith(LOCATION + ". WebDAV ·") for d in desc) and any(d.startswith("C3 sibling. WebDAV ·") for d in desc):
+                save_state("c3-remove-completed", tree)
+                return {"location_remove": True}
+            time.sleep(.3)
+        raise RuntimeError("Location removal did not refresh the exact cards")
     tap_description(lambda d: d.startswith(LOCATION + ". WebDAV ·"), "owned WebDAV location")
     for part in ("media", "recordings", "2026"):
         tap_description(lambda d, part=part: d == part + ", folder. Open", part + " fixture folder")

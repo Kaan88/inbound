@@ -4,6 +4,12 @@
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved paired C3 location removal in `c3-paired-location-remove-20261120-115508`.
+  Cancel preserved both location IDs. Confirm removed only the selected
+  location from the Host, and the sibling still listed the original
+  WebDAV files through a fresh request. The run made zero payload GETs
+  or DELETEs and left zero jobs, transfers, or output. The default C4
+  paired download regression also passed with a matching hash.
 - Astra approved the paired C3 cloud expiry and recovery in `c3-expired-cloud-card-action-20261120-103005`.
   A synthetic expired Drive grant without a refresh token was stored through
   the normal Host API. The real rclone browse returned SignInNeeded and the

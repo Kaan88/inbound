@@ -110,6 +110,12 @@ def tls_relay(node, upstream_port, listen_port, temp):
                 child.wait(timeout=5)
 
 
+@contextmanager
+def report_cleanup(smoke):
+    yield
+    smoke.log("Cleanup PASS: owned probe, reverse, WebDAV server, TLS relay and disposable Server stopped.")
+
+
 def host_capabilities(origin, password, tls, opener):
     request = Request(origin + "/api/pair", data=json.dumps({
         "role": "remoteClient", "password": password, "name": "Owned C4 capability check",
@@ -242,7 +248,7 @@ def run(args):
 
     require(phone_target_absent(), "Exact paired fixture filename already exists on the emulator")
     baseline = phone_count()
-    with tempfile.TemporaryDirectory(prefix="inbound-c4-relay-") as scratch:
+    with report_cleanup(smoke), tempfile.TemporaryDirectory(prefix="inbound-c4-relay-") as scratch:
         temp = Path(scratch).resolve()
         rclone = extract_rclone(args.rclone_zip, temp)
         with paired.running_fixture(args.server_dll, name=HOST_NAME, rclone=rclone) as fixture:
@@ -282,6 +288,62 @@ def run(args):
                                 and config.get("ownRclonePath") == str(rclone)
                                 and config.get("autoUpdateRclone") is False,
                                 "The disposable Host did not start with its pinned rclone and Sites off")
+                        sibling_id = None
+                        if args.verify_location_remove:
+                            enabled = site_request("sites.setEnabled", {"enabled": True})
+                            require((enabled.get("payload") or {}).get("enabled") is True, "Could not enable disposable Sites")
+                            saved = site_request("sites.save", {"name": "C3 sibling", "kind": "webdav",
+                                "url": f"http://127.0.0.1:{server.server_port}/", "vendor": "other"})
+                            result_site = (saved.get("payload") or {})
+                            sibling = result_site.get("site") or {}
+                            sibling_id = sibling.get("id")
+                            require(saved.get("type") == "sites.result" and result_site.get("ok") is True and sibling_id,
+                                    "Could not create the owned sibling")
+                        target_id = None
+                        sibling_snapshot = None
+                        def verify_location_remove(stage):
+                            nonlocal target_id, sibling_snapshot
+                            deadline = time.monotonic() + 30
+                            while True:
+                                reply = site_request("sites.list", {})
+                                sites = (reply.get("payload") or {}).get("sites")
+                                require(reply.get("type") == "sites.listResult" and isinstance(sites, list), "Host location snapshot unavailable")
+                                named = {x.get("name"): x.get("id") for x in sites}
+                                if stage == "before":
+                                    require(len(sites) == 2 and set(named) == {ui.LOCATION, "C3 sibling"}
+                                            and named["C3 sibling"] == sibling_id and named[ui.LOCATION]
+                                            and named[ui.LOCATION] != sibling_id, "Unexpected owned location identities")
+                                    target_id = named[ui.LOCATION]
+                                    sibling_snapshot = next(x for x in sites if x.get("id") == sibling_id)
+                                expected = ({"C3 sibling": sibling_id} if stage == "removed"
+                                            else {"C3 sibling": sibling_id, ui.LOCATION: target_id})
+                                if named == expected and len(sites) == len(expected): break
+                                if stage != "removed" or time.monotonic() >= deadline:
+                                    raise RuntimeError("Location identity snapshot changed unexpectedly")
+                                time.sleep(.3)
+                            current_sibling = next(x for x in sites if x.get("id") == sibling_id)
+                            for field in ("id", "name", "kind", "url", "vendor", "user", "localFolder", "remoteFolder"):
+                                require(current_sibling.get(field) == sibling_snapshot.get(field), "Sibling configuration changed")
+                            if stage == "removed":
+                                previous_listings = listing_count()
+                                browse = site_request("sites.browse", {"id": sibling_id, "path": "/media/recordings/2026", "limit": 100})
+                                data = browse.get("payload") or {}
+                                names = {item.get("name") for item in data.get("items", [])}
+                                require(browse.get("type") == "sites.browseResult" and data.get("ok") is True
+                                        and {"notes.pdf", "session-0412.flac"}.issubset(names)
+                                        and listing_count() > previous_listings,
+                                        "The untouched sibling cannot browse the original fixture files")
+                            jobs = site_request("jobs.snapshot", {})
+                            require(jobs.get("type") == "jobs.snapshot" and (jobs.get("payload") or {}).get("jobs") == [], "Unexpected Host jobs")
+                            require_no_transfers()
+                            with lock:
+                                require(not counts and not delete_counts, "Unexpected payload GET or DELETE")
+                            with server.parity_lock:
+                                require(not server.parity_notes_deleted and not server.parity_uploads
+                                        and not server.parity_upload_staging, "WebDAV fixture was mutated")
+                            require(set(root.iterdir()) == {destination, decoy}
+                                    and not any(destination.iterdir()) and not any(decoy.iterdir())
+                                    and phone_count() == baseline and phone_target_absent(), "Unexpected output from removal")
                         def require_no_transfers():
                             reply = site_request("sites.transfer.list", {})
                             require(reply.get("type") == "sites.transfer.listResult" and
@@ -293,7 +355,16 @@ def run(args):
                                         capabilities=capabilities, get_count=get_count,
                                         verify_refresh=args.verify_folder_refresh,
                                         get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers,
-                                        verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers)
+                                        verify_delete=args.verify_folder_delete, delete_state=delete_state, require_no_transfers=require_no_transfers,
+                                        verify_location_remove=verify_location_remove if args.verify_location_remove else None)
+                        if args.verify_location_remove:
+                            require(result == {"location_remove": True}, "Removal proof did not complete")
+                            (smoke.evidence / "c3-remove-proof.json").write_text(json.dumps({
+                                "cancel_preserved_exact_ids": True, "confirmed_removed_only_target": True,
+                                "sibling_preserved": True, "fixture_files_unchanged": True,
+                                "jobs": 0, "transfers": 0, "payload_gets": 0, "deletes": 0, "outputs": 0}, indent=2) + "\n", encoding="utf-8")
+                            smoke.log("PASS C3: location Cancel preserved both IDs; Confirm removed only the owned target.")
+                            return
                         file_name = result["file"]
                         output = destination / file_name
                         expected = dav.HASHES[file_name]
@@ -349,7 +420,7 @@ def run(args):
                             json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
-                        if paired_ready:
+                        if paired_ready and not args.verify_location_remove:
                             try:
                                 tree = smoke.tree()
                                 for node in tree.iter("node"):
@@ -390,7 +461,6 @@ def run(args):
                     server.shutdown()
                     worker.join(timeout=5)
                 server.server_close()
-    smoke.log("Cleanup PASS: owned probe, reverse, WebDAV server, TLS relay and disposable Server stopped.")
 
 
 def main():
@@ -403,13 +473,17 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-location-remove", action="store_true", help="Verify exact paired location Remove Cancel and Confirm")
     parser.add_argument("--verify-folder-delete", action="store_true",
                         help="Verify paired fixture Delete Cancel and Confirm")
     parser.add_argument("--verify-folder-transfers", action="store_true",
                         help="Verify folder Transfers empty and completed paired Host states")
     parser.add_argument("--verify-folder-refresh", action="store_true",
                         help="Verify the selected paired WebDAV folder reloads and clears selection")
-    run(parser.parse_args())
+    args = parser.parse_args()
+    if args.verify_location_remove and (args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
+        parser.error("--verify-location-remove is a standalone lane")
+    run(args)
 
 
 if __name__ == "__main__":
