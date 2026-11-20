@@ -4,6 +4,72 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
+## Resume here
+
+**Paused by the owner on 2026-11-20.** This handoff records the checkpoint.
+Resume the milestone only when asked. Use the existing
+`android-remote-files-parity` worktree. The last pushed implementation and
+verification checkpoint is `34a07e8d`. The private signed **0.0.8 APK** was
+delivered earlier. ANDROID.8 and the **0.0.9** release gate remain open.
+ANDROID.9, including TorBox, resumes after parity sign-off. Production Remote
+Files upload is separate work. The owner accepted the isolated S3 upload for C4.
+
+### Work in progress at the pause
+
+The local, uncommitted runner
+[`capture-c2-queue-notification.py`](../../tools/AndroidApp/capture-c2-queue-notification.py)
+checks two disposable phone queues against the saved completion preference.
+The latest run is C2 evidence `c2-queue-notification-20261120-131343`.
+**Do nothing** passed. The fixture file matched its hash and got a
+per-file notification, and no queue summary appeared for four seconds.
+The run then exited with status 1 while polling the enabled case.
+Android's `cmd notification get` returned status 1 for the probe's
+notification ID 1001 after the key appeared in `list`. The enabled queue
+summary remains unverified. A key disappearing during polling is one
+possible cause. Re-list after a failed lookup and tolerate the failure
+only if that exact key is gone. Keep other failures visible.
+
+Cleanup logged probe uninstall and removal of the verified fixture output
+and directory. The final reverse-list check was skipped by the failed run.
+The evidence folder contains `c2-queue-notification-run-path.txt` and
+`c2-limits-polished-build-path.txt`.
+The latter points to the signed x64 probe. If a rerun is needed, use
+`emulator-5554` / `inbound33` API 33, pass the exact isolated APK, and give
+the runner a fresh evidence directory. The harness requires `--serial`,
+`--apk`, and `--evidence`. Set `--adb` and `--aapt` explicitly on Windows.
+Confirm the old run exited, its reverse was removed, and the probe package
+is absent before installing again. Preserve the working tree and stage
+explicit paths. The handoff and previous implementation pushes leave the
+new runner for review in the local worktree.
+
+### Remaining 0.0.9 acceptance
+
+Use the [acceptance matrix](android-mockup-acceptance.md) and
+[approved flow board](android-mockups/android6-flow-review.html).
+Reuse the existing approved evidence. Turn the matrix's general references
+to other variants into named cases from the board before scheduling a capture.
+Group the outstanding cases into these emulator batches.
+
+1. **First run and link intake.** Check the remaining A0 battery prompt state
+   and A4 offer and source routes. A clipboard-dependent case needs an
+   approved setup or existing admissible evidence.
+2. **Network and queues.** Pair the A6 network-wait state with the A7 waiting
+   notification and its available actions. Resolve the C2 summary check above.
+3. **Mixed Downloads.** Use one owned workload for the remaining named A1
+   failure, B5 bulk-action, and C8 scheduled-item and chart states.
+4. **Paired Host and Remote Files.** Finish the named C3/C4 folder and location
+   comparisons and C7 Settings subsections. Carry forward the approved C3
+   validation and C4 WebDAV download, refresh, Transfers, deletion, and
+   isolated S3 proofs. Record any provider flow that requires owner consent
+   or account access as a separate decision.
+
+Use Terra for routine work while Luna is unavailable. Keep UI actions
+sequential on each emulator and run independent checks in parallel. Give
+Astra one consolidated package with the approved references, native captures,
+functional checks and the corresponding source. Fix and recapture confirmed
+findings before claiming parity. Pushing reviewed changes is authorized.
+The owner must approve a design departure.
+
 The isolated S3 upload writes through a device stream. The C3 Locations
 summary counts tracked site transfers, so a genuine combined upload and
 download summary depends on tracked upload support.
