@@ -33,6 +33,7 @@ internal sealed partial class DownloadsScreen
     private readonly Dictionary<DownloadFilter, Chip> _chipFor = new();
     private double _shownRate;
     private bool _toggleIsPause = true;
+    private bool _remoteFiltersExpanded;
     private long _rateShownAt;
 
     public DownloadsScreen(MainActivity activity, View page, DownloadsModel model, Bundle? selectionDraft)
@@ -54,7 +55,13 @@ internal sealed partial class DownloadsScreen
         _selResume = page.FindViewById<ImageButton>(Resource.Id.sel_resume)!;
         _selPause = page.FindViewById<ImageButton>(Resource.Id.sel_pause)!;
         _graph = new SpeedGraphView(activity);
-        page.FindViewById<FrameLayout>(Resource.Id.summary_graph)!.AddView(_graph, new FrameLayout.LayoutParams(-1, -1));
+        var graphSlot = page.FindViewById<FrameLayout>(Resource.Id.summary_graph)!;
+        var graphLayout = (ViewGroup.MarginLayoutParams)graphSlot.LayoutParameters!;
+        var graphMargin = activity.Capabilities.IsRemote ? Motion.Dp(activity, 20) : 0;
+        graphLayout.LeftMargin = graphMargin;
+        graphLayout.RightMargin = graphMargin;
+        graphSlot.LayoutParameters = graphLayout;
+        graphSlot.AddView(_graph, new FrameLayout.LayoutParams(-1, -1));
 
         _adapter = new RowAdapter(this);
         _recycler.SetLayoutManager(new LinearLayoutManager(activity));
@@ -80,9 +87,19 @@ internal sealed partial class DownloadsScreen
         {
             _list.Search = _search.Text ?? "";
             _searchClear.Visibility = (_search.Text?.Length ?? 0) > 0 ? ViewStates.Visible : ViewStates.Gone;
+            UpdateFilterVisibility();
             _activity.UpdateBack();
         };
-        _search.FocusChange += (_, _) => _activity.UpdateBack();
+        _search.FocusChange += (_, _) =>
+        {
+            if (_activity.Capabilities.IsRemote && _search.HasFocus)
+            {
+                // Keep filters available while focus moves from search to the chips.
+                _remoteFiltersExpanded = true;
+                UpdateFilterVisibility();
+            }
+            _activity.UpdateBack();
+        };
         _search.EditorAction += (_, e) =>
         {
             if (e.ActionId != Android.Views.InputMethods.ImeAction.Search) return;
@@ -98,9 +115,11 @@ internal sealed partial class DownloadsScreen
         page.FindViewById<View>(Resource.Id.sel_more)!.Click += (v, _) => ShowSelectionMenu((View)v!);
     }
 
+    private int PauseIcon => _activity.Capabilities.IsRemote ? Resource.Drawable.ic_pause_remote : Resource.Drawable.ic_pause;
+
     public bool Selecting => _list.Selecting;
 
-    public bool Searching => (_search.Text?.Length ?? 0) > 0 || _search.HasFocus;
+    public bool Searching => _remoteFiltersExpanded || (_search.Text?.Length ?? 0) > 0 || _search.HasFocus;
 
     public void EndSelection()
     {
@@ -112,6 +131,8 @@ internal sealed partial class DownloadsScreen
     {
         _search.Text = "";
         _search.ClearFocus();
+        _remoteFiltersExpanded = false;
+        UpdateFilterVisibility();
         HideKeyboard();
         _activity.UpdateBack();
     }
@@ -138,7 +159,7 @@ internal sealed partial class DownloadsScreen
             var chip = (Chip)LayoutInflater.From(_activity)!.Inflate(Resource.Layout.chip_filter, group, false)!;
             var filter = f;
             chip.Checked = f == DownloadFilter.All;
-            chip.Click += (_, _) => _list.Filter = filter;
+            chip.Click += (_, _) => { _list.Filter = filter; UpdateFilterVisibility(); };
             group.AddView(chip);
             _chipFor[f] = chip;
         }
@@ -160,7 +181,7 @@ internal sealed partial class DownloadsScreen
         var canResume = s.Active == 0 && _model.Rows.Any(r => r.Group is RowGroup.Paused or RowGroup.Queued);
         _toggle.Visibility = s.Active > 0 || canResume ? ViewStates.Visible : ViewStates.Invisible;
         _toggleIsPause = s.Active > 0;
-        _toggle.SetImageResource(_toggleIsPause ? Resource.Drawable.ic_pause : Resource.Drawable.ic_play);
+        _toggle.SetImageResource(_toggleIsPause ? PauseIcon : Resource.Drawable.ic_play);
         _toggle.ContentDescription = _toggleIsPause ? "Pause all downloads" : "Resume all downloads";
     }
 
@@ -172,13 +193,19 @@ internal sealed partial class DownloadsScreen
         _activity.SetDownloadsSelectionChrome(sel);
         if (!sel) CloseSelectionWindows();
         _page.FindViewById<View>(Resource.Id.summary)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
-        _page.FindViewById<View>(Resource.Id.chips_scroll)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
+        UpdateFilterVisibility();
         _refreshMenuItems?.Invoke();
         _selTitle.Text = _list.SelectionTitle;
         _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
         _adapter.RefreshAll();
         _activity.UpdateBack();
+    }
+
+    private void UpdateFilterVisibility()
+    {
+        var show = !_list.Selecting && (!_activity.Capabilities.IsRemote || Searching || _list.Filter != DownloadFilter.All);
+        _page.FindViewById<View>(Resource.Id.chips_scroll)!.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
     }
 
     // A selected row changed state: the bar's Pause and Resume follow (finding 14). The rows redraw themselves.
@@ -415,18 +442,21 @@ internal sealed partial class DownloadsScreen
         {
             var (icon, text) = row.Action switch
             {
-                RowAction.Pause => (Resource.Drawable.ic_pause, "Pause"),
+                RowAction.Pause => (_s.PauseIcon, "Pause"),
                 RowAction.Resume => (Resource.Drawable.ic_play, "Resume"),
                 RowAction.Retry => (Resource.Drawable.ic_refresh, "Retry"),
-                RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_folder, "Show in folder"),
+                RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_flow_folder, "Show in folder"),
                 _ => (0, ""),
             };
             _action.Visibility = _s.Selecting ? ViewStates.Gone : icon == 0 ? ViewStates.Invisible : ViewStates.Visible;
             if (icon == 0) return;
             _action.SetImageResource(icon);
             _action.ContentDescription = text + " " + row.Name;
-            _action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorSecondaryContainer)));
-            _action.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnSecondaryContainer)));
+            var folder = row.Action == RowAction.ShowInFolder;
+            var background = folder ? Resource.Attribute.colorSurfaceContainerHighest : Resource.Attribute.colorSecondaryContainer;
+            var foreground = folder ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorOnSecondaryContainer;
+            _action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, background)));
+            _action.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, foreground)));
         }
     }
 }

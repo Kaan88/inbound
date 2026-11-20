@@ -58,8 +58,8 @@ def ephemeral_port():
         return sock.getsockname()[1]
 
 
-def seed_download(fixture):
-    """Create a real transfer on the owned Host via its documented client path."""
+def fixture_session(fixture):
+    """Open an in-memory session on this run's disposable loopback Host."""
     def post(path, data, token=None):
         headers = {"Content-Type": "application/json"}
         if token:
@@ -72,18 +72,43 @@ def seed_download(fixture):
                                  "name": "Disposable fixture seeder"})
     if pairing.get("role") != "remoteClient" or not pairing.get("token"):
         raise RuntimeError("The disposable Host refused the fixture seeder")
-    message_id = secrets.token_hex(16)
-    reply = post("/api/ipc", {
-        "v": 1, "id": message_id, "type": "job.add",
-        "payload": {"url": fixture["payload_url"], "fileName": "c5-c6.bin",
-                    "startMode": "startNow", "connections": 1},
-    }, pairing["token"])
-    if reply.get("type") != "job.addResult" or reply.get("replyTo") != message_id or not (reply.get("payload") or {}).get("accepted"):
-        raise RuntimeError("The disposable Host refused the fixture transfer")
+    def request(kind, payload):
+        message_id = secrets.token_hex(16)
+        reply = post("/api/ipc", {"v": 1, "id": message_id, "type": kind, "payload": payload}, pairing["token"])
+        if reply.get("replyTo") != message_id:
+            raise RuntimeError("The disposable Host did not return the expected reply")
+        return reply
+
+    return request
+
+
+def seed_download(fixture, *, filename="c5-c6.bin", slow=False):
+    """Create a real transfer on the owned Host via its documented client path."""
+    request = fixture_session(fixture)
+    reply = request("job.add", {"url": fixture["slow_url"] if slow else fixture["payload_url"],
+                               "fileName": filename, "startMode": "startNow", "connections": 1})
+    result = reply.get("payload") or {}
+    if reply.get("type") != "job.addResult" or not result.get("accepted") or result.get("duplicate"):
+        raise RuntimeError("The disposable Host refused a new fixture transfer")
+    return (result.get("job") or {}).get("id")
+
+
+def fixture_job_state(fixture, job_id):
+    """Read only the matching synthetic job state and byte counts."""
+    if not job_id:
+        raise RuntimeError("The Host did not identify the fixture transfer")
+    reply = fixture_session(fixture)("jobs.snapshot", {})
+    if reply.get("type") != "jobs.snapshot":
+        raise RuntimeError("The disposable Host did not return a snapshot")
+    matches = [job for job in (reply.get("payload") or {}).get("jobs", []) if job.get("id") == job_id]
+    if len(matches) != 1:
+        raise RuntimeError("Expected one exact synthetic job in the Host snapshot")
+    row = matches[0]
+    return {key:row.get(key) for key in ("fileName", "state", "receivedBytes", "totalBytes")}
 
 
 @contextmanager
-def running_fixture(server_dll, dotnet="dotnet", temp_root=None):
+def running_fixture(server_dll, dotnet="dotnet", temp_root=None, name="Parity Host"):
     dll = Path(server_dll).resolve(strict=True)
     if dll.suffix.lower() != ".dll" or dll.name.lower() != "downloadmanager.server.dll":
         raise ValueError("--server-dll must be the explicitly built DownloadManager.Server.dll")
@@ -93,9 +118,43 @@ def running_fixture(server_dll, dotnet="dotnet", temp_root=None):
     data = Path(owned.name) / "data"
     root.mkdir()
     data.mkdir()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), PayloadHandler)
+    stop = threading.Event()
+    counters = {"bytes": 0, "lock": threading.Lock()}
+    slow_payload = PAYLOAD * 8
+    class FixtureHandler(PayloadHandler):
+        def do_HEAD(self):
+            if self.path != "/fixture/slow.bin":
+                return super().do_HEAD()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(slow_payload)))
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path != "/fixture/slow.bin":
+                return super().do_GET()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(slow_payload)))
+            self.end_headers()
+            try:
+                chunk_size = 128 * 1024
+                for offset in range(0, len(slow_payload), chunk_size):
+                    if stop.is_set():
+                        break
+                    chunk = slow_payload[offset:offset + chunk_size]
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    with counters["lock"]:
+                        counters["bytes"] += len(chunk)
+                    # Each actual transfer pulse leaves Android time for a fresh UI hierarchy.
+                    if stop.wait(1.7):
+                        break
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler)
     listener = threading.Thread(target=server.serve_forever, daemon=True)
-    listener.start()
     password = "Parity-" + secrets.token_urlsafe(18).replace("-", "A").replace("_", "B")
     port = ephemeral_port()
     base = f"http://127.0.0.1:{port}"
@@ -106,13 +165,16 @@ def running_fixture(server_dll, dotnet="dotnet", temp_root=None):
         "DOWNLOADMANAGER_ROOTS": str(root),
         "DOWNLOADMANAGER_URLS": base,
         "DOWNLOADMANAGER_AUTH": "on",
-        "DOWNLOADMANAGER_NAME": "Parity Host",
+        "DOWNLOADMANAGER_NAME": name,
         "DOWNLOADMANAGER_PASSWORD": password,
         "DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED": "0",
         "DOWNLOADMANAGER_TORRENT_UPNP": "off",
     })
     child = None
+    listening = False
     try:
+        listener.start()
+        listening = True
         child = subprocess.Popen(
             [dotnet, str(dll)], cwd=str(dll.parent), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -134,23 +196,31 @@ def running_fixture(server_dll, dotnet="dotnet", temp_root=None):
             "base_url": base,
             "password": password,
             "payload_url": f"http://127.0.0.1:{server.server_port}{PAYLOAD_PATH}",
+            "slow_url": f"http://127.0.0.1:{server.server_port}/fixture/slow.bin",
+            "slow_counters": counters,
             "payload_sha256": PAYLOAD_SHA256,
             "payload_bytes": len(PAYLOAD),
             "data_directory": str(data),
             "download_root": str(root),
         }
     finally:
-        if child is not None and child.poll() is None:
-            child.terminate()
+        stop.set()
+        try:
+            if child is not None and child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+        finally:
             try:
-                child.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait()
-        server.shutdown()
-        server.server_close()
-        listener.join(timeout=3)
-        owned.cleanup()
+                if listening:
+                    server.shutdown()
+                    listener.join(timeout=3)
+            finally:
+                server.server_close()
+                owned.cleanup()
 
 
 def main():
@@ -160,7 +230,7 @@ def main():
     args = parser.parse_args()
     try:
         with running_fixture(args.server_dll, args.dotnet) as descriptor:
-            print(json.dumps(descriptor), flush=True)
+            print(json.dumps({k: v for k, v in descriptor.items() if k != "slow_counters"}), flush=True)
             # End on stdin EOF, making graceful cleanup available to scripts too.
             sys.stdin.read()
     except KeyboardInterrupt:

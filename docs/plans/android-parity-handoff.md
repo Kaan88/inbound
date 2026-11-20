@@ -4,6 +4,36 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
+### Scoped parity evidence update (2026-11-20)
+
+Existing pushed checkpoint: `f3707bc4`. The following scoped evidence does not
+close the remaining Android screens, states or major-milestone review. Earlier
+entries below describe their historical checkpoint; this update supersedes their
+then-open assertions where stated.
+
+- **A3/A6:** Astra approved `a3-a6-present-20261120-042101`: Add remained
+  visible, the navigation gap was 16 px, and the folder action was outlined.
+  Active Details used one connection and Downloads wording; the finished transfer
+  matched its hash. A3 mixed-list/Open tap and A6 nested destination, constraints
+  and multiple connections remain open. A6 Stop passed separately in
+  `b6-stop-retry-20261120-034215`.
+- **B4:** `b4-present-20261120-042149` verified eight links, six checked
+  archives and 689 KB totals, with search clearing back to all eight. Astra
+  passed controls and CTA; final card inset and row-spacing correction remains.
+- **B6:** Astra approved `b6-recatch-20261120-040546`: Cancel preserved the
+  same 7% job; a real WebView Confirm resumed that same job at byte 1,310,720
+  and its completed payload matched SHA-256.
+- **C5/C6:** Astra gave a scoped functional PASS for
+  `c5-c6-pulses-20261120-041845`: three exclusive Host choices and a C6
+  running-plus-finished list, matching completed hash, and live graph; the
+  active transfer advanced from 655,360 to 917,504 bytes over four seconds.
+  Astra also passed C5's three selections and the scoped default C6 layout in
+  `c5-c6-present-20261120-042644`. The active switcher, keyboard/filter and
+  other C6 row/action checks remain open.
+- **C1:** Astra approved the revised populated cards, action sheet and chart
+  navigation in `c1-present-20261120-042308`. The chart opened the same Host's
+  live Downloads graph. Actual scheduled execution remains open.
+
 ### C1 workload and A3/A6 recapture (2026-11-20)
 
 - The C1 probe showed Main running, Night scheduled for its actual Host
@@ -83,7 +113,7 @@ Evidence bundles below are in this Codex chat's local visualizations directory.
 - The mobile suite passed 554 tests and the host capture suite passed 40.
   The signed private snapshot delivered earlier predates these visual changes.
 
-### Latest verified checkpoint
+### Earlier verified checkpoint (superseded where noted above)
 
 - B2: both the paired Host and the phone wrote the expected bytes into the chosen child folder. B3: Astra passed the compact signed-in sheet. B4: six checked archives and their combined 689 KB passed; Astra requested that the unselected files remain visible, the group total appear beside the selector, and the row layout change. The follow-up UI builds and still needs recapture. Evidence: `b234-dest-20261120-025429`.
 - B5: the real five-job mix, exact three selections and disabled Download again passed. Astra approved selection styling/menu; visible transfer progress, a scheduled queue time and final toolbar-icon comparison remain open. Evidence: `b5-verified-20261120-023412`.
@@ -201,8 +231,8 @@ or release on the strength of a functional probe alone.
 |---|---|---|
 | **C3/C4 Remote Files** | API 33 verified SFTP key confirmation and S3 onboarding against disposable fixtures; nested downloads matched both hashes; cancel/confirm delete worked. Host regressions cover stale delete confirmations and credential carryover after endpoint edits. C4 probe upload passed both Back paths, exact source cleanup, Cancel without a PUT, Confirm with one conditional PUT, and a separate competing-writer test. Astra passed that **isolated C4 upload recheck only**. | No full C3/C4 sign-off. Recheck C3 transfer summary, free space and expired cloud sign-in states; inspect remaining C3/C4 visual deltas. **Production upload stays disabled**: the S3 proof is fixture/probe-only and WebDAV `MOVE Overwrite: F` is not atomic no-replace. |
 | **A0–A7 / C7–C8 core** | A0 initial setup, empty A1, one real active A2 transfer with a hash-matched finish, A4 source order and unavailable states, A5 blank/populated metadata/invalid-address states, and C7 settings/search were captured or checked on API 33. | A0 permission return, populated/mixed Downloads, completion snackbar and active/finished Details and notification states need fresh coverage as listed in the matrix. A4 clipboard offer is observe-only; no clipboard injection. C8 populated light mode is unverified. No overall visual pass. |
-| **B1–B6 link intake** | B2 More options opens/closes without submission. Compact B3 shows the local cookie-use/resume notice before submission. Astra passed **static B2/B3 consent and Host binding**, not visual parity. B4 search narrowed eight links to one and clearing restored all eight. Revised B6 recovered the existing job from HTTP 410 and matched the fixture hash; the failed job had zero bytes, so this does not prove partial resume. Astra passed the B6 layout and action order only. | B1 needs the real Chrome share chooser. B2 remote Change is implemented for folder-browsing Hosts; the latest safety fix needs a device check. Phone destination and queue/Wi-Fi choices are still open. B3 needs visual re-review. B4 still lacks the reference's Archives/six-selected state and byte totals. **B5 is Downloads multiselect, not B4 page-link selection**: the standalone runner now exists; the first device attempt hit a UI dump error and the retry is pending. |
-| **C1/C2 queues; C5/C6 Hosts** | Stopped Night queue and its no-schedule editor were captured. Real loopback pairing verified both C5 selections and one completed C6 row with a hash match in Host storage. Astra passed the revised C5 handle and both selection states. | C1 running/scheduled workload and C2 configured/reopened weekday schedule remain open. The two idle C5 rows and one-row idle C6 do not verify the reference workloads. The unpaired settings/pairing form is only supplemental evidence. |
+| **B1–B6 link intake** | B2/B3 have scoped fixture and consent evidence. B4 `b4-present-20261120-042149` verifies eight links, six archives, 689 KB and search; Astra passed controls/CTA. B6 `b6-recatch-20261120-040546` verifies cancellation and same-job WebView recovery with matching hash. | B1 real chooser and B3 visual review remain open. B4 final card inset/row spacing correction remains. B5 is a separate Downloads multiselect flow; its remaining visual/workload checks remain open. |
+| **C1/C2 queues; C5/C6 Hosts** | C1 workload states passed in `c1-dropdown-20261120-035933`; configured local C2 passed in `c2-clean-boot-20261120-035129`. C5/C6 `c5-c6-pulses-20261120-041845` passed the scoped three-Host, mixed transfer and live graph checks. | Latest C1 style/chart comparison and Astra pass remain open, as do other C2 states, final C5/C6 layout, active switcher and other C6 row/action variants. |
 
 ## Resume safely
 

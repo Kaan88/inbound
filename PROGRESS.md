@@ -2,6 +2,36 @@
 
 **Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
 
+### Scoped parity evidence update (2026-11-20)
+
+Existing pushed checkpoint: `f3707bc4`. The following scoped evidence does not
+close the remaining Android screens, states or major-milestone review. Earlier
+entries below describe their historical checkpoint; this update supersedes their
+then-open assertions where stated.
+
+- **A3/A6:** Astra approved `a3-a6-present-20261120-042101`: Add remained
+  visible, the navigation gap was 16 px, and the folder action was outlined.
+  Active Details used one connection and Downloads wording; the finished transfer
+  matched its hash. A3 mixed-list/Open tap and A6 nested destination, constraints
+  and multiple connections remain open. A6 Stop passed separately in
+  `b6-stop-retry-20261120-034215`.
+- **B4:** `b4-present-20261120-042149` verified eight links, six checked
+  archives and 689 KB totals, with search clearing back to all eight. Astra
+  passed controls and CTA; final card inset and row-spacing correction remains.
+- **B6:** Astra approved `b6-recatch-20261120-040546`: Cancel preserved the
+  same 7% job; a real WebView Confirm resumed that same job at byte 1,310,720
+  and its completed payload matched SHA-256.
+- **C5/C6:** Astra gave a scoped functional PASS for
+  `c5-c6-pulses-20261120-041845`: three exclusive Host choices and a C6
+  running-plus-finished list, matching completed hash, and live graph; the
+  active transfer advanced from 655,360 to 917,504 bytes over four seconds.
+  Astra also passed C5's three selections and the scoped default C6 layout in
+  `c5-c6-present-20261120-042644`. The active switcher, keyboard/filter and
+  other C6 row/action checks remain open.
+- **C1:** Astra approved the revised populated cards, action sheet and chart
+  navigation in `c1-present-20261120-042308`. The chart opened the same Host's
+  live Downloads graph. Actual scheduled execution remains open.
+
 ### Android parity continuation (2026-11-20)
 
 - Delivered the owner a private ARM64 APK built from the current parity checkout through the SFTP free-space change. Its embedded version is 0.0.8. The existing release certificate, pinned rclone, and 16 KiB alignment verified. No public release or device install of the private APK.

@@ -79,12 +79,18 @@ public sealed partial class MainActivity : AppCompatActivity
             selectionDraft?.GetString("host_stamp") == _linkHostStamp ? selectionDraft : null);
         _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance, query => _hostSettings?.FilterCategories(query));
         _queues = new QueuesScreen(this, FindViewById<View>(Resource.Id.queues_root)!, _model,
-            new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), OpenQueueEditor);
+            new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), OpenQueueEditor,
+            () => FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!.SelectedItemId = Resource.Id.nav_downloads);
         _hostSettings = new HostSettingsScreen(this, FindViewById<View>(Resource.Id.settings_content)!, _model,
             new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote));
         _updateScreen = new AppUpdatesScreen(this, FindViewById<View>(Resource.Id.settings_content)!, savedInstanceState?.GetBundle("app_update_prompt"));
         _nav = new Navigator(this, root, FindViewById<FrameLayout>(Resource.Id.overlay)!,
-            () => BackPlan.Next(_nav!.PageOpen, _downloads.Selecting, _downloads.Searching, _onSettings || _onQueues || _onRemoteFiles), PerformBack);
+            () =>
+            {
+                var onOtherTab = _onSettings || _onQueues || _onRemoteFiles;
+                return BackPlan.Next(_nav!.PageOpen, !onOtherTab && _downloads.Selecting,
+                    !onOtherTab && _downloads.Searching, onOtherTab);
+            }, PerformBack);
         FindViewById<View>(Resource.Id.fab)!.Click += (_, _) => ShowAddSheet();
         var bottom = FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!;
         bottom.ItemSelected += (_, e) => { ShowTab(e.Item.ItemId); e.Handled = true; };
@@ -385,13 +391,17 @@ public sealed partial class MainActivity : AppCompatActivity
         RunOnUiThread(() =>
         {
             if (IsFinishing || IsDestroyed) return;
-            // The Downloads coordinator lets the completion bar dodge the Add button while it is attached.
-            bool downloadsCompletion = completion && !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true;
+            // Downloads already ends above the visible navigation bar and its system insets.
+            var navigation = FindViewById<View>(Resource.Id.nav);
+            bool downloadsCompletion = completion && navigation?.Visibility == ViewStates.Visible &&
+                !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true;
             var parent = FindViewById<View>(downloadsCompletion ? Resource.Id.downloads_root : Resource.Id.root)!;
             var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
             if (downloadsCompletion)
             {
                 var view = bar.View;
+                bar.SetGestureInsetBottomIgnored(true);
+                ViewCompat.SetOnApplyWindowInsetsListener(view, new InsetsListener((_, insets) => insets));
                 if (view.LayoutParameters is ViewGroup.MarginLayoutParams margins)
                 {
                     margins.LeftMargin = margins.RightMargin = Motion.Dp(this, 16);
@@ -405,7 +415,7 @@ public sealed partial class MainActivity : AppCompatActivity
                 else if (background is Android.Graphics.Drawables.GradientDrawable gradient)
                     gradient.SetCornerRadius(Motion.Dp(this, 16));
             }
-            else if (_nav?.PageOpen != true) bar.SetAnchorView(FindViewById<View>(Resource.Id.nav));
+            else if (_nav?.PageOpen != true) bar.SetAnchorView(navigation);
             if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
             bar.Show();
         });

@@ -599,6 +599,8 @@ public sealed class DetailsInfoTests
     {
         Assert.Equal("Download", DetailsInfo.FolderName("/storage/emulated/0/Download"));
         Assert.Equal("Download", DetailsInfo.FolderName("/storage/emulated/0/Download/"));
+        Assert.Equal("Downloads", DetailsInfo.FolderName("/storage/emulated/0/Download/", "/storage/emulated/0/Download"));
+        Assert.Equal("Inner", DetailsInfo.FolderName("/storage/emulated/0/Download/Inner", "/storage/emulated/0/Download"));
         Assert.Equal("x", DetailsInfo.FolderName("x"));
         Assert.Equal("", DetailsInfo.FolderName(null));
     }

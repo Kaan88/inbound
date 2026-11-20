@@ -74,8 +74,11 @@ class Smoke:
         return self.adb("shell", *args)
 
     def tree(self):
-        self.shell("uiautomator", "dump", self.xml_path)
-        return ET.fromstring(self.adb("exec-out", "cat", self.xml_path, raw=True))
+        for _ in range(2):
+            result = self.shell("uiautomator", "dump", self.xml_path)
+            if f"dumped to: {self.xml_path}" in result:
+                return ET.fromstring(self.adb("exec-out", "cat", self.xml_path, raw=True))
+        raise RuntimeError("Android did not write a fresh UI hierarchy")
 
     @staticmethod
     def matches(tree, label):

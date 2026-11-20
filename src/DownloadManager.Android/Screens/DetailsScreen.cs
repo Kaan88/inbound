@@ -153,10 +153,10 @@ internal sealed class DetailsScreen
         var running = _row.Group is RowGroup.Active or RowGroup.Paused;
         _connCard.Visibility = running ? ViewStates.Visible : ViewStates.Gone;
         _connTitle.Text = DetailsInfo.ConnectionsTitle(_row);
-        _connNote.Text = running ? "Part file in " + DetailsInfo.FolderName(j.DestinationDirectory) : "";
+        var sharedDownloadFolder = _activity.Capabilities.IsRemote ? null : AndroidHost.SharedDownloadFolder;
+        _connNote.Text = running ? "Part file in " + DetailsInfo.FolderName(j.DestinationDirectory, sharedDownloadFolder) : "";
         BindSegments();
 
-        var sharedDownloadFolder = _activity.Capabilities.IsRemote ? null : AndroidHost.SharedDownloadFolder;
         var lines = DetailsInfo.Lines(j, _model.Settings, DateTimeOffset.Now, sharedDownloadFolder).ToList();
         if (lines.Count == _lines.Count && lines.Select(l => l.Label).SequenceEqual(_lines.Select(l => l.Label)))
         {
@@ -196,7 +196,8 @@ internal sealed class DetailsScreen
     private void BindSegments()
     {
         var ctx = _activity;
-        _segments.ContentDescription = _fractions.Count == 0 ? null : $"{_fractions.Count} connections, " + DetailsInfo.Percent(_row);
+        var connectionCount = _fractions.Count == 1 ? "1 connection" : $"{_fractions.Count} connections";
+        _segments.ContentDescription = _fractions.Count == 0 ? null : connectionCount + ", " + DetailsInfo.Percent(_row);
         while (_segments.ChildCount > _fractions.Count) _segments.RemoveViewAt(_segments.ChildCount - 1);
         for (var i = 0; i < _fractions.Count; i++)
         {

@@ -103,9 +103,10 @@ internal sealed class QueuesScreen : IDisposable
         RenameQueue(baseline.Id, baseline, _renameDraft);
     }
 
-    public QueuesScreen(MainActivity activity, View page, DownloadsModel downloads, QueueSettingsModel settings, Action<QueueDto?> openEditor)
+    public QueuesScreen(MainActivity activity, View page, DownloadsModel downloads, QueueSettingsModel settings, Action<QueueDto?> openEditor, Action showSpeedGraph)
     {
         _activity = activity; _downloads = downloads; _settings = settings; _open = openEditor;
+        page.FindViewById<View>(Resource.Id.queues_chart)!.Click += (_, _) => showSpeedGraph();
         _startLabelExpiry = new Java.Lang.Runnable(() =>
         {
             _startLabelExpiresAt = null;
@@ -199,8 +200,13 @@ internal sealed class QueuesScreen : IDisposable
             card.State.SetTextColor(new Android.Graphics.Color(queue.IsRunning && queue.ConditionWaitReason is null
                 ? _activity.GetColor(Resource.Color.state_done)
                 : Motion.Attr(_activity, scheduled && !queue.IsRunning ? Resource.Attribute.colorPrimary : Resource.Attribute.colorOnSurfaceVariant)));
-            Text(card.Action, queue.IsRunning ? "\u25a1" : scheduled ? "Start now" : "Start");
-            card.Action.TextSize = queue.IsRunning ? 24 : 14;
+            Text(card.Action, queue.IsRunning ? "" : scheduled ? "Start now" : "Start");
+            if ((card.Action.Icon is not null) != queue.IsRunning)
+            {
+                card.Action.InsetTop = queue.IsRunning ? 0 : card.InsetTop;
+                card.Action.InsetBottom = queue.IsRunning ? 0 : card.InsetBottom;
+                card.Action.SetIconResource(queue.IsRunning ? Resource.Drawable.ic_stop_outline : 0);
+            }
             card.Action.ContentDescription = (queue.IsRunning ? "Stop " : "Start ") + queue.Name;
             var actionWidth = Motion.Dp(_activity, queue.IsRunning ? 48 : scheduled ? 104 : 80);
             if (card.Action.LayoutParameters is LinearLayout.LayoutParams actionLayout && actionLayout.Width != actionWidth)
@@ -256,6 +262,11 @@ internal sealed class QueuesScreen : IDisposable
         var name = Label("", 22, Resource.Attribute.colorOnSurface); var state = Label("", 14, Resource.Attribute.colorOnSurfaceVariant);
         title.AddView(name); title.AddView(state); header.AddView(title, new LinearLayout.LayoutParams(0, -2, 1));
         var action = new MaterialButton(_activity) { CornerRadius = Motion.Dp(_activity, 24) };
+        var insetTop = action.InsetTop; var insetBottom = action.InsetBottom;
+        action.TextSize = 14;
+        action.IconGravity = MaterialButton.IconGravityTextStart;
+        action.IconSize = Motion.Dp(_activity, 24);
+        action.IconTint = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSecondaryContainer)));
         action.SetAllCaps(false); action.SetMinWidth(0); action.SetMinimumWidth(0); action.SetPadding(0, 0, 0, 0);
         action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorSecondaryContainer)));
         action.SetTextColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSecondaryContainer)));
@@ -268,13 +279,14 @@ internal sealed class QueuesScreen : IDisposable
         download.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
         body.AddView(InfoRow(download, files, 12));
         var progress = new LinearProgressIndicator(_activity) { Max = 1000, TrackThickness = Motion.Dp(_activity, 6), TrackCornerRadius = Motion.Dp(_activity, 3), TrackStopIndicatorSize = 0, IndicatorTrackGapSize = 0 };
+        progress.TrackColor = Motion.Attr(_activity, Resource.Attribute.colorSurfaceContainerHighest);
         var progressLayout = new LinearLayout.LayoutParams(-1, -2) { TopMargin = Motion.Dp(_activity, 12) };
         progress.ImportantForAccessibility = ImportantForAccessibility.No; body.AddView(progress, progressLayout);
         root.AddView(body);
         root.Click += (_, _) => { if (!_busy && MayChangeQueue(id) && _settings.Settings.Queues.FirstOrDefault(q => q.Id == id) is { } queue) _open(queue); };
         root.LongClickable = true;
         root.LongClick += (_, e) => { if (!_busy && !_closed) ShowQueueActions(id); e.Handled = true; };
-        return new Card(root, name, state, schedule, files, action, progress);
+        return new Card(root, name, state, schedule, files, action, progress, insetTop, insetBottom);
     }
     private View InfoRow(View icon, TextView text, int top)
     {
@@ -338,27 +350,46 @@ internal sealed class QueuesScreen : IDisposable
         queue = CopyQueue(queue);
         var sheet = new BottomSheetDialog(_activity);
         var body = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        var pad = Motion.Dp(_activity, 20); body.SetPadding(pad, pad, pad, Motion.Dp(_activity, 28));
+        var pad = Motion.Dp(_activity, 20); body.SetPadding(pad, Motion.Dp(_activity, 12), pad, Motion.Dp(_activity, 28));
+        var handle = new View(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+        handle.SetBackgroundResource(Resource.Drawable.bg_handle);
+        body.AddView(handle, new LinearLayout.LayoutParams(Motion.Dp(_activity, 32), Motion.Dp(_activity, 4))
+            { Gravity = GravityFlags.CenterHorizontal, BottomMargin = Motion.Dp(_activity, 20) });
         var title = Label(queue.Name, 22, Resource.Attribute.colorOnSurface); title.AccessibilityHeading = true; body.AddView(title);
-        void Option(string text, string subtitle, Action run)
+        bool first = true;
+        void Option(string text, string subtitle, int iconResource, Action run)
         {
-            var row = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Clickable = true, Focusable = true };
+            if (!first)
+            {
+                var divider = new View(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+                divider.SetBackgroundColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorSurfaceContainerHighest)));
+                body.AddView(divider, new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 1)));
+            }
+            first = false;
+            var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Clickable = true, Focusable = true };
+            row.SetGravity(GravityFlags.CenterVertical);
             row.SetMinimumHeight(Motion.Dp(_activity, 60)); row.SetPadding(Motion.Dp(_activity, 8), Motion.Dp(_activity, 10), Motion.Dp(_activity, 8), Motion.Dp(_activity, 10));
             row.Background = new TypedValueHolder(_activity).SelectableBackground();
-            row.AddView(Label(text, 17, Resource.Attribute.colorOnSurface));
-            if (subtitle.Length != 0) row.AddView(Label(subtitle, 14, Resource.Attribute.colorOnSurfaceVariant));
+            var icon = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+            icon.SetImageResource(iconResource);
+            icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+            row.AddView(icon, new LinearLayout.LayoutParams(Motion.Dp(_activity, 24), Motion.Dp(_activity, 24)));
+            var labels = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+            labels.AddView(Label(text, 17, Resource.Attribute.colorOnSurface));
+            if (subtitle.Length != 0) labels.AddView(Label(subtitle, 14, Resource.Attribute.colorOnSurfaceVariant));
+            row.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1) { MarginStart = Motion.Dp(_activity, 16) });
             row.ContentDescription = text + (subtitle.Length > 0 ? ". " + subtitle : "");
             row.Click += (_, _) => { sheet.Dismiss(); if (!_closed && !_busy) run(); };
             body.AddView(row);
         }
-        Option("Edit schedule", "Times, conditions and limits", () => { if (MayChangeQueue(id) && SameCurrent(queue) && CurrentQueue(id) is { } q) _open(q); });
+        Option("Edit schedule", "Times, conditions and limits", Resource.Drawable.ic_queue_schedule, () => { if (MayChangeQueue(id) && SameCurrent(queue) && CurrentQueue(id) is { } q) _open(q); });
         if (_renameBaseline is { } draftBaseline && draftBaseline.Id == queue.Id && draftBaseline.Generation == queue.Generation)
-            Option("Resume rename draft", "Review the name you entered", () => RenameQueue(id, draftBaseline, _renameDraft));
-        Option("Rename queue", "", () => RenameQueue(id, queue));
+            Option("Resume rename draft", "Review the name you entered", Resource.Drawable.ic_queue_rename, () => RenameQueue(id, draftBaseline, _renameDraft));
+        Option("Rename queue", "", Resource.Drawable.ic_queue_rename, () => RenameQueue(id, queue));
         if (!_activity.Capabilities.IsRemote || _downloads.Hello?.Capabilities.Contains("queueConditionalMove") == true)
-            Option("Move downloads", "Choose another queue", () => ChooseMoveDestination(queue));
+            Option("Move downloads", "Choose another queue", Resource.Drawable.ic_queue_move, () => ChooseMoveDestination(queue));
         if (id != _settings.Settings.DefaultQueueId)
-            Option("Delete queue", "Move downloads and keep files", () => ChooseDeleteDestination(queue));
+            Option("Delete queue", "Move downloads and keep files", Resource.Drawable.ic_remote_trash, () => ChooseDeleteDestination(queue));
         sheet.SetContentView(body); Track(sheet); sheet.Show();
     }
     private bool MayChangeQueue(int id)
@@ -651,5 +682,5 @@ internal sealed class QueuesScreen : IDisposable
         _ui.RemoveCallbacksAndMessages(null); _startLabelExpiry.Dispose(); _downloads.SettingsChanged -= ScheduleRender; _downloads.Rows.CollectionChanged -= OnRows;
         foreach (var row in _rows) row.PropertyChanged -= OnRow; _rows.Clear(); _ui.Dispose();
     }
-    private sealed record Card(MaterialCardView Root, TextView Name, TextView State, TextView Schedule, TextView Files, MaterialButton Action, LinearProgressIndicator Progress);
+    private sealed record Card(MaterialCardView Root, TextView Name, TextView State, TextView Schedule, TextView Files, MaterialButton Action, LinearProgressIndicator Progress, int InsetTop, int InsetBottom);
 }

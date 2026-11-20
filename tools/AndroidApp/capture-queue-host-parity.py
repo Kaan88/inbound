@@ -154,7 +154,7 @@ class Capture:
             self.navigate_c1_c2(key)
         elif self.args.unattended_local_hosts:
             self.navigate_local_hosts(key)
-        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected"):
+        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active"):
             pass  # run_paired already navigated and verified the expected state.
         else:
             self.log(f"Prepare {key}: {self.args.instructions[key]}")
@@ -167,6 +167,14 @@ class Capture:
             texts = [node.get("text", "") + " " + node.get("content-desc", "")
                      for node in tree.iter("node")]
             if any(expected.casefold() in text.casefold() for text in texts):
+                if key == "c5-host-a-active":
+                    descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
+                    active = [d for d in descriptions if d.startswith("Parity Host A, ")
+                              and "1 active" in d and ", shown now" in d
+                              and re.search(r"\b[0-9]+(?:[.,][0-9]+)?\s*(?:B|KB|MB|GB)/s\b", d)]
+                    if len(active) != 1:
+                        time.sleep(0.5)
+                        continue
                 if key == "c1-workload":
                     descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
                     expected_cards = (("Main, Running", ("1 of 1 running", "left")),
@@ -476,6 +484,8 @@ class Capture:
 
     def run(self):
         self.check()
+        if self.args.paired_server_dll and self.args.mixed_hosts:
+            return self.run_paired_mixed()
         if self.args.paired_server_dll:
             return self.run_paired()
         if self.args.unattended_c1_workload:
@@ -523,11 +533,16 @@ class Capture:
                 self.end_headers()
                 if not include_body: return
                 try:
-                    for offset in range(0, len(body), states.CHUNK_SIZE):
-                        if stop.is_set(): return
-                        self.wfile.write(body[offset:offset + states.CHUNK_SIZE]); self.wfile.flush()
-                        sent[key] = offset + states.CHUNK_SIZE
-                        if stop.wait(0.25): return
+                    chunk_size = 128 * 1024
+                    for offset in range(0, len(body), chunk_size):
+                        if stop.is_set():
+                            return
+                        chunk = body[offset:offset + chunk_size]
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        sent[key] = offset + len(chunk)
+                        if stop.wait(1.7):
+                            return
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
             def do_HEAD(self): self.respond(False)
@@ -661,7 +676,17 @@ class Capture:
             self.shell("input", "swipe", str(x), str(y), str(x), str(y), "900")
             self.smoke.wait_node("Edit schedule")
             self.capture_checkpoint("c1-queue-actions", "c1-queues.png", "Edit schedule")
-            self.log("C1 workload: fixture bytes and queue cards recorded; visual review and actual schedule execution remain open.")
+            self.shell("input", "keyevent", "4")
+            chart, _ = self.smoke.wait_node("Show download speed graph", resource="queues_chart")
+            self.smoke.tap(chart)
+            self.smoke.wait_node("Search downloads")
+            self.smoke.wait_content_description(
+                lambda desc: desc == "Downloads shown from This phone. Change host", "unchanged phone graph Host")
+            self.smoke.wait_content_description(
+                lambda desc: desc == "Pause all downloads", "live speed summary")
+            (self.evidence / "c1-chart-destination.png").write_bytes(
+                self.adb("exec-out", "screencap", "-p", raw=True))
+            self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified. Visual review and schedule execution remain open.")
         except Exception:
             self.collect_failure(); raise
         finally:
@@ -682,6 +707,236 @@ class Capture:
             self.log("Retention: task-named partial/shared Download files are not deleted; inspect exact paths before any removal.")
             if errors and not pending:
                 raise RuntimeError("C1 cleanup incomplete: " + "; ".join(errors))
+        return self.evidence
+
+    def run_paired_mixed(self):
+        """Two isolated loopback Hosts and a real, bounded mixed remote workload."""
+        from contextlib import ExitStack
+        from urllib.parse import urlsplit
+
+        fixture = load_module("mixed_host_parity_fixture", Path(__file__).with_name("paired-host-parity-fixture.py"))
+        names = ("Parity Host A", "Parity Host B")
+        endpoints = []
+        cleanup_errors = []
+
+        def tap(label, resource=None):
+            node, _ = self.smoke.wait_node(label, resource=resource)
+            self.smoke.tap(node)
+
+        def host_chip(name):
+            node, _ = self.smoke.wait_content_description(
+                lambda desc: desc == f"Downloads shown from {name}. Change host", name + " chip")
+            self.smoke.tap(node)
+
+        def enter(resource, value, secret=False):
+            tree = self.smoke.tree()
+            fields = self._nodes(tree, resource)
+            require(len(fields) == 1, "Pairing field missing or ambiguous")
+            self.smoke.tap(fields[0])
+            try:
+                self.shell("input", "text", value.replace(" ", "%s"))
+            except Exception:
+                if secret:
+                    raise RuntimeError("Could not enter disposable pairing password") from None
+                raise
+            self.shell("input", "keyevent", "4")
+
+        def pair_from(current, owned, expected):
+            self.current_checkpoint = "c6-pairing-form"
+            host_chip(current)
+            tap("Connect to another Inbound", "host_connect")
+            self.smoke.wait_node("Connect", resource="pair_btn")
+            enter("pair_address", owned["base_url"])
+            enter("pair_password", owned["password"], secret=True)
+            connect, tree = self.smoke.wait_node("Connect", resource="pair_btn")
+            require(not self._nodes(tree, "pair_plain_http"), "Expected loopback-only HTTP pairing")
+            require(connect.get("enabled") == "true", "Fixture pairing is disabled")
+            self.smoke.tap(connect)
+            self.smoke.wait_node("Files are saved on " + expected, timeout=30)
+            self.current_checkpoint = "c6-paired"
+
+        def verify_switcher(selected):
+            tree = self.smoke.tree()
+            descriptions = [n.get("content-desc", "") for n in tree.iter("node")]
+            for name in ("This phone", *names):
+                matches = [d for d in descriptions if d.startswith(name + ", ")]
+                require(len(matches) == 1, "Expected one row for " + name)
+                require((", shown now" in matches[0]) == (name == selected),
+                        "Unexpected selected Host: " + name)
+
+        def record_selection(selected, key):
+            host_chip(selected)
+            verify_switcher(selected)
+            self.capture_checkpoint(key, "c5-switch-host.png", "Where downloads run")
+
+        with ExitStack() as stack:
+            a = stack.enter_context(fixture.running_fixture(self.args.paired_server_dll, name=names[0]))
+            b = stack.enter_context(fixture.running_fixture(self.args.paired_server_dll, name=names[1]))
+            targets = ["tcp:" + str(urlsplit(item["base_url"]).port) for item in (a, b)]
+            require(len(set(targets)) == 2, "Fixture Host ports must differ")
+            existing = self.adb("reverse", "--list").splitlines()
+            require(all(not any(endpoint in line.split() for line in existing) for endpoint in targets),
+                    "A fixture reverse mapping already exists")
+            try:
+                for endpoint in targets:
+                    self.adb("reverse", endpoint, endpoint)
+                    endpoints.append(endpoint)
+                self.launch()
+                pair_from("This phone", a, names[0])
+                pair_from(names[0], b, names[1])
+                record_selection(names[1], "c5-host-b")
+                node, _ = self.smoke.wait_content_description(lambda d: d.startswith(names[0] + ", "), "Host A row")
+                self.smoke.tap(node)
+                record_selection(names[0], "c5-host-a")
+                node, _ = self.smoke.wait_content_description(lambda d: d.startswith("This phone, "), "phone row")
+                self.smoke.tap(node)
+                record_selection("This phone", "c5-phone-mixed")
+                node, _ = self.smoke.wait_content_description(lambda d: d.startswith(names[0] + ", "), "Host A row")
+                self.smoke.tap(node)
+                self.smoke.wait_node("Files are saved on " + names[0], timeout=30)
+
+                fixture.seed_download(a)
+                path = Path(a["download_root"]) / "c5-c6.bin"
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == a["payload_sha256"]:
+                        break
+                    time.sleep(.25)
+                else:
+                    raise RuntimeError("Finished fixture payload did not match its hash")
+                self.smoke.wait_node("c5-c6.bin")
+                active_id = fixture.seed_download(a, filename="c5-c6-active.bin", slow=True)
+                try:
+                    self.smoke.wait_content_description(
+                        lambda d: d.startswith("c5-c6-active.bin. "), "exact active fixture row", timeout=30)
+                except RuntimeError:
+                    self.log("Owned Host job state: " + json.dumps(fixture.fixture_job_state(a, active_id)))
+                    raise
+                self.smoke.wait_content_description(lambda d: d == "Pause all downloads", "active remote download")
+                def active_amount():
+                    node, _ = self.smoke.wait_content_description(
+                        lambda d: d.startswith("c5-c6-active.bin. ") and " of " in d,
+                        "active remote row with received bytes")
+                    match = re.search(r"^c5-c6-active\.bin\. ([\d.]+) (B|KB|MB|GB|TB) of ", node.get("content-desc", ""))
+                    require(match is not None, "Active row has no parseable received-byte figure")
+                    return float(match.group(1)) * 1000 ** ("B", "KB", "MB", "GB", "TB").index(match.group(2))
+                ui_before = active_amount()
+                counters = a["slow_counters"]
+                with counters["lock"]: before = counters["bytes"]
+                time.sleep(4)  # Allows several real rate-history samples while bytes continue flowing.
+                with counters["lock"]: after = counters["bytes"]
+                require(after > before > 0, "Slow fixture did not advance")
+                ui_after = active_amount()
+                require(ui_after > ui_before, "Remote UI received-byte figure did not advance")
+                self.smoke.wait_content_description(lambda d: d == "Pause all downloads", "still-active remote download")
+                self.smoke.wait_content_description(lambda d: d.startswith("c5-c6.bin. Finished"), "finished remote row")
+                self.smoke.wait_node("c5-c6-active.bin")
+                self.capture_checkpoint("c6-mixed", "c6-remote-host.png", "Files are saved on")
+                (self.evidence / "c6-workload.json").write_text(json.dumps({
+                    "finished_name": "c5-c6.bin", "finished_sha256": a["payload_sha256"],
+                    "active_name": "c5-c6-active.bin", "bytes_before": before, "bytes_after": after,
+                    "ui_bytes_before_rounded": ui_before, "ui_bytes_after_rounded": ui_after,
+                    "sample_seconds": 4}, indent=2) + "\n", encoding="utf-8")
+                self.log("Mixed Host workload captured; graph and mockup parity require visual review.")
+                if self.args.verify_remote_layout:
+                    # Capture the selected Host row only after its asynchronously fetched live figures arrive.
+                    host_chip(names[0])
+                    self.capture_checkpoint("c5-host-a-active", "c5-switch-host.png", "Where downloads run")
+                    node, _ = self.smoke.wait_content_description(
+                        lambda d: d.startswith(names[0] + ", ") and "1 active" in d and ", shown now" in d,
+                        "selected active Host A row")
+                    self.smoke.tap(node)
+                    self.smoke.wait_node("Files are saved on " + names[0])
+
+                    def wait_state(predicate, description, timeout=20):
+                        deadline = time.monotonic() + timeout
+                        while time.monotonic() < deadline:
+                            tree = self.smoke.tree()
+                            if predicate(tree): return tree
+                            time.sleep(.3)
+                        raise RuntimeError("Timed out waiting for " + description)
+                    def matches_chip(tree, name):
+                        return [n for n in tree.iter("node")
+                                if re.fullmatch(re.escape(name) + r" [0-9]+", n.get("text", ""))]
+                    def row(tree, prefix):
+                        return [n for n in tree.iter("node") if n.get("content-desc", "").startswith(prefix)]
+                    def chip_checked(tree, name):
+                        found = matches_chip(tree, name)
+                        return len(found) == 1 and found[0].get("checked") == "true"
+                    def strip_hidden(tree):
+                        return not self._nodes(tree, "chips_scroll") and not matches_chip(tree, "All")
+                    def save_state(key, tree):
+                        (self.evidence / (key + "-capture.png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                        ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+
+                    tree = wait_state(strip_hidden, "remote default filter strip hidden")
+                    save_state("c6-filter-default", tree)
+                    search = self._unique_resource(tree, "search_input")
+                    self.smoke.tap(search)
+                    tree = wait_state(lambda t: len(matches_chip(t, "Finished")) == 1 and
+                                      self._unique_resource(t, "search_input").get("focused") == "true",
+                                      "focused search and remote filter chips")
+                    save_state("c6-filter-search", tree)
+                    # Hide only the keyboard so both list rows can be inspected; focus remains in search.
+                    self.shell("input", "keyevent", "4")
+                    tree = wait_state(lambda t: len(matches_chip(t, "Finished")) == 1, "Finished filter available")
+                    self.smoke.tap(matches_chip(tree, "Finished")[0])
+                    tree = wait_state(lambda t: chip_checked(t, "Finished") and
+                                      bool(row(t, "c5-c6.bin. Finished")), "Finished filter selected")
+                    active_state = fixture.fixture_job_state(a, active_id)
+                    still_active = active_state.get("state") in ("connecting", "downloading")
+                    if still_active:
+                        require(not row(tree, "c5-c6-active.bin. "), "Finished filter retained the active task")
+                    save_state("c6-filter-finished", tree)
+                    if not still_active:
+                        self.log("UNVERIFIED: fixture transfer was no longer active during the Finished check.")
+                    tree = wait_state(lambda t: len(matches_chip(t, "All")) == 1, "All filter available")
+                    self.smoke.tap(matches_chip(tree, "All")[0])
+                    tree = wait_state(lambda t: (chip_checked(t, "All") or strip_hidden(t)) and
+                                      bool(row(t, "c5-c6.bin. Finished")) and
+                                      bool(row(t, "c5-c6-active.bin. ")), "All restores both owned rows")
+                    save_state("c6-filter-all", tree)
+                    queues, _ = self.smoke.wait_node("Queues", resource="nav_queues")
+                    self.smoke.tap(queues)
+                    self.smoke.wait_node("New queue", resource="queue_new")
+                    self.shell("input", "keyevent", "4")
+                    self.smoke.wait_node("Files are saved on " + names[0])
+                    tree = wait_state(lambda t: chip_checked(t, "All"), "filter session preserved after returning from Queues")
+                    save_state("c6-filter-return-from-queues", tree)
+                    # Explicitly refocus search, then Back dismisses the IME and closes search.
+                    self.smoke.tap(self._unique_resource(tree, "search_input"))
+                    wait_state(lambda t: self._unique_resource(t, "search_input").get("focused") == "true" and
+                               len(matches_chip(t, "All")) == 1, "search reopened before closing")
+                    for _ in range(3):
+                        if strip_hidden(self.smoke.tree()): break
+                        self.shell("input", "keyevent", "4")
+                    tree = wait_state(strip_hidden, "filter strip hidden after closing search")
+                    save_state("c6-filter-closed", tree)
+                    self.log("Remote filter layout checked; exclusion while active " + ("observed." if still_active else "unverified."))
+            except Exception:
+                if self.current_checkpoint != "c6-pairing-form":
+                    try:
+                        tree = self.smoke.tree()
+                        if (not self._nodes(tree, "pair_password")
+                            and self.smoke.matches(tree, "Files are saved on " + names[0])):
+                            (self.evidence / "c6-failure-capture.png").write_bytes(
+                                self.adb("exec-out", "screencap", "-p", raw=True))
+                    except Exception:
+                        pass
+                raise
+            finally:
+                pending = sys.exc_info()[0] is not None
+                for label, action in [("temporary UI dump", lambda: self.shell("rm", "-f", self.smoke.xml_path)),
+                                      ("probe uninstall", self.clean)] + [
+                    ("fixture reverse", lambda endpoint=endpoint: self.adb("reverse", "--remove", endpoint))
+                    for endpoint in reversed(endpoints)]:
+                    try:
+                        action()
+                    except Exception:
+                        cleanup_errors.append(label)
+                        self.log("Cleanup failed: " + label)
+                if cleanup_errors and not pending:
+                    raise RuntimeError("Mixed Host cleanup incomplete: " + ", ".join(cleanup_errors))
         return self.evidence
 
     def run_paired(self):
@@ -783,6 +1038,10 @@ def main():
                         help="Exact disposable queue name to enter manually")
     parser.add_argument("--host-name", default="Parity Host",
                         help="Exact disposable paired-host label to enter manually")
+    parser.add_argument("--verify-remote-layout", action="store_true",
+                        help="With --mixed-hosts verify live Host row and remote search/filter visibility")
+    parser.add_argument("--mixed-hosts", action="store_true",
+                        help="With --paired-server-dll, exercise two fixture Hosts and a real mixed workload")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--unattended-c1-workload", action="store_true",
                       help="Capture real local Main, scheduled Night and stopped Mobile workloads")
@@ -795,6 +1054,10 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_remote_layout and not args.mixed_hosts:
+        parser.error("--verify-remote-layout requires --mixed-hosts")
+    if args.mixed_hosts and not args.paired_server_dll:
+        parser.error("--mixed-hosts requires --paired-server-dll")
     args.instructions = {
         "c1-empty": "Select This phone → Queues; capture the empty/ready Main queue.",
         "c1-populated-stopped": "Create the named disposable queue, leave it stopped, and show its card beside Main.",

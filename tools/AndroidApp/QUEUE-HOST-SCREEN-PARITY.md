@@ -3,9 +3,9 @@
 This is a separate guided capture runner for the approved C1/C2/C5/C6 exports
 listed in `docs/plans/android-mockup-acceptance.md`. It reuses only the existing
 probe smoke helper's ADB/UI-tree primitives and the existing unchanged-image
-side-by-side compositor. It does not edit or invoke either existing parity
-runner. The runner does not build an APK, clear app data, reset the AVD, change
-device settings, delete shared files, start/stop a Host, or remove ADB reverses.
+side-by-side compositor. It installs an explicitly supplied probe. Opt-in
+workload lanes own their disposable loopback Hosts and ADB reverse mappings.
+The runner preserves device settings, existing apps and shared files.
 
 ## Isolation and preparation
 
@@ -64,10 +64,9 @@ before save, then reopens and verifies the persisted time, weekday selection,
 conditions and disabled schedule state. It captures the configured editor and
 its footer as separate states. Only the disposable queue is modified; cleanup
 uninstalls only the probe. It reports running/action C1, C5 and C6 unverified.
-This automation has not been run against the emulator; the supplied native
-picker hierarchy and minute-node description are assumptions to validate in
-the owner-run capture. If its hierarchy differs, it must stop rather than
-fall back to coordinate guessing.
+The configured editor and footer passed review on API 33 in
+`c2-clean-boot-20261120-035129`. An unexpected picker hierarchy stops the
+procedure before it tries to select a time.
 
 Each checkpoint checks a UI-tree
 anchor before saving the original-resolution screen capture, hierarchy XML,
@@ -161,8 +160,9 @@ after the emulator's current local hour, and uses the normal New download form t
 uniquely named synthetic loopback downloads to Main, Night and Mobile. It
 starts Main if needed and captures three concurrently visible cards and the
 Mobile long-press actions sheet. It records two increasing fixture byte counts
-and card descriptions. The lane never changes the device clock. It does not establish actual
-schedule firing or execute an action from the sheet. If the cards cannot all
+and card descriptions. It also taps the chart and verifies the same Host's live
+Downloads graph. Schedule firing and queue-sheet actions require separate
+checks. If the cards cannot all
 fit or the native picker/queue selector is different, it fails rather than
 claiming a matching capture.
 
@@ -173,3 +173,13 @@ Cleanup attempts are independent, with failures recorded; an interrupted or
 timed-out installation or reverse request can need manual reconciliation.
 The screenshots still require visual review. No real accounts or production
 data are involved.
+
+## Two paired Hosts and a live remote workload
+
+Add --mixed-hosts to the existing --paired-server-dll invocation. The runner
+creates two independently owned loopback Hosts and pairs them through the
+isolated probe. It verifies all three switcher selections. It checks the
+finished payload hash and requires both server bytes and the app's received
+figure to advance on another transfer before capturing C6. Pairing forms,
+password-bearing descriptors and app logs are excluded from the evidence.
+Inspect the graph and switcher pairs before recording visual acceptance.

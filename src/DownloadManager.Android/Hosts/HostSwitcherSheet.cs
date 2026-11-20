@@ -41,6 +41,12 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
     private readonly Dictionary<string, (TextView Detail, View Row, HostEntry Host, bool Shown)> _rows = new();
     private CancellationTokenSource? _asking;
 
+    public override void OnStart()
+    {
+        base.OnStart();
+        Dialog?.Window?.SetDimAmount(0.56f);
+    }
+
     public override View? OnCreateView(LayoutInflater inflater, ViewGroup? container, Bundle? savedInstanceState)
     {
         var v = inflater.Inflate(Resource.Layout.host_switcher, container, false)!;
@@ -66,18 +72,24 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
         {
             var row = inflater.Inflate(Resource.Layout.host_row, rows, false)!;
             var shown = host.Id == current;
-            row.FindViewById<TextView>(Resource.Id.host_name)!.Text = host.Name;
+            var nameView = row.FindViewById<TextView>(Resource.Id.host_name)!;
+            nameView.Text = host.Name;
             var detail = _figures.TryGetValue(host.Id, out var known) ? SubtitleWithPhoneSpace(ctx, host, known, now) : HostWords.Subtitle(host, now);
             var detailView = row.FindViewById<TextView>(Resource.Id.host_detail)!;
             detailView.Text = detail;
+            if (shown)
+            {
+                var onSelected = ToColor(Attr(ctx, Resource.Attribute.colorOnSecondaryContainer));
+                nameView.SetTextColor(onSelected);
+                detailView.SetTextColor(onSelected);
+            }
             _rows[host.Id] = (detailView, row, host, shown);
             row.FindViewById<View>(Resource.Id.host_tick)!.Visibility = shown ? ViewStates.Visible : ViewStates.Invisible;
             var surface = Attr(ctx, Resource.Attribute.colorSurface);
             row.Background = Rounded(ctx, shown
-                ? Blend(Attr(ctx, Resource.Attribute.colorSecondaryContainer), surface, .38f)
-                : Blend(Attr(ctx, Resource.Attribute.colorSurfaceContainerHigh), surface, .62f), 12);
+                ? Attr(ctx, Resource.Attribute.colorSecondaryContainer)
+                : Blend(Attr(ctx, Resource.Attribute.colorSurfaceContainerHigh), surface, .62f), 20);
             row.Foreground = RowForeground(ctx);
-            row.Alpha = shown ? 1f : .82f;
             var iconBg = row.FindViewById<View>(Resource.Id.host_icon_bg)!;
             iconBg.Background = Rounded(ctx, Attr(ctx, shown ? Resource.Attribute.colorPrimary : Resource.Attribute.colorSurfaceVariant), 20);
             var icon = row.FindViewById<ImageView>(Resource.Id.host_icon)!;
@@ -221,11 +233,11 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
         var states = new StateListDrawable();
         var focus = new GradientDrawable();
         focus.SetColor(Android.Graphics.Color.Transparent);
-        focus.SetCornerRadius(HostBar.Dp(ctx, 12));
+        focus.SetCornerRadius(HostBar.Dp(ctx, 20));
         focus.SetStroke((int)HostBar.Dp(ctx, 2), ColorStateList.ValueOf(ToColor(Attr(ctx, Resource.Attribute.colorPrimary))));
         states.AddState(new[] { Android.Resource.Attribute.StateFocused }, focus);
 
-        var mask = Rounded(ctx, Android.Graphics.Color.White, 12);
+        var mask = Rounded(ctx, Android.Graphics.Color.White, 20);
         var rippleColor = unchecked((int)0x20000000) | (Attr(ctx, Resource.Attribute.colorOnSurface) & 0x00ffffff);
         var ripple = new RippleDrawable(ColorStateList.ValueOf(ToColor(rippleColor)), null, mask);
         states.AddState(Array.Empty<int>(), ripple);

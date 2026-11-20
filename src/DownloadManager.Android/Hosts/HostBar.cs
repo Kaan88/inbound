@@ -76,6 +76,7 @@ internal static class HostBar
         icon.ImageTintList = ColorStateList.ValueOf(new Android.Graphics.Color(fg));
         strip.AddView(icon, new LinearLayout.LayoutParams(Dp(activity, 20), Dp(activity, 20)));
         var text = new TextView(activity) { AccessibilityLiveRegion = AccessibilityLiveRegion.Polite };
+        text.Typeface = Android.Graphics.Typeface.Create("sans-serif-medium", Android.Graphics.TypefaceStyle.Normal);
         text.SetTextColor(new Android.Graphics.Color(fg));
         text.SetTextSize(ComplexUnitType.Sp, 15);
         strip.AddView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f) { MarginStart = Dp(activity, 12) });

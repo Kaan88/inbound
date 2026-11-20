@@ -72,9 +72,11 @@ public static class DetailsInfo
         Uri.TryCreate(j.Url, UriKind.Absolute, out var u) && !string.IsNullOrEmpty(u.Host) ? u.Host : j.Url;
 
     /// <summary>The last folder of a path ("/storage/emulated/0/Download" gives "Download"), so a long path does not fill the line.</summary>
-    public static string FolderName(string? path)
+    public static string FolderName(string? path, string? sharedDownloadFolder = null)
     {
         var trimmed = (path ?? "").TrimEnd('/', '\\');
+        if (sharedDownloadFolder is not null && trimmed == sharedDownloadFolder.TrimEnd('/'))
+            return "Downloads";
         var i = trimmed.LastIndexOfAny(['/', '\\']);
         return i >= 0 && i < trimmed.Length - 1 ? trimmed[(i + 1)..] : trimmed;
     }

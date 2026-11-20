@@ -45,13 +45,30 @@ internal sealed class PageLinksScreen : IDisposable
         var host = Uri.CheckHostName(pageHost) != UriHostNameType.Unknown ? pageHost : "This page";
         Root.FindViewById<TextView>(Resource.Id.page_links_host)!.Text = $"{host} · {model.TotalCount} links";
         Root.FindViewById<TextView>(Resource.Id.page_links_destination)!.Text = $"To {destinationText}";
+        var chipScroll = Root.FindViewById<HorizontalScrollView>(Resource.Id.page_links_chip_scroll)!;
         var chips = Root.FindViewById<LinearLayout>(Resource.Id.page_links_chips)!;
         foreach (var kind in Enum.GetValues<PageLinkKind>())
         {
             var chip = (Chip)LayoutInflater.From(activity)!.Inflate(Resource.Layout.chip_filter, chips, false)!;
-            chip.Text = $"{kind} {model.Count(kind)}";
-            chip.Click += (_, _) => { if (_busy || _disposed) return; _model.Kind = kind; Refresh(); };
-            chips.AddView(chip); _chips.Add(kind, chip);
+            var count = model.Count(kind);
+            chip.Text = $"{kind} {count}";
+            chip.Visibility = kind == PageLinkKind.All || count > 0 ? ViewStates.Visible : ViewStates.Gone;
+            chip.SetChipIconResource(KindIcon(kind));
+            chip.ChipIconVisible = true;
+            chip.Click += (_, _) =>
+            {
+                if (_busy || _disposed) return;
+                _model.Kind = kind; Refresh();
+                // All remains reachable by scrolling back; the selected category is brought to the leading edge.
+                chipScroll.Post(() =>
+                {
+                    if (_disposed) return;
+                    var offset = chipScroll.LayoutDirection == LayoutDirection.Rtl ? chip.Right - chipScroll.Width : chip.Left;
+                    chipScroll.SmoothScrollTo(offset, 0);
+                });
+            };
+            var layout = new LinearLayout.LayoutParams(-2, -2) { MarginEnd = Motion.Dp(activity, 8) };
+            chips.AddView(chip, layout); _chips.Add(kind, chip);
         }
         Root.FindViewById<View>(Resource.Id.page_links_close)!.Click += OnClose;
         _search.TextChanged += OnSearch;
@@ -59,6 +76,24 @@ internal sealed class PageLinksScreen : IDisposable
         _submit.Click += OnDownload;
         Refresh();
     }
+    private static int KindIcon(PageLinkKind kind) => kind switch
+    {
+        PageLinkKind.Archives => Resource.Drawable.ic_remote_archive,
+        PageLinkKind.Audio => Resource.Drawable.ic_remote_audio,
+        PageLinkKind.Video => Resource.Drawable.ic_page_link_video,
+        PageLinkKind.Images => Resource.Drawable.ic_page_link_image,
+        PageLinkKind.Documents => Resource.Drawable.ic_remote_document,
+        PageLinkKind.Other => Resource.Drawable.ic_remote_document,
+        _ => Resource.Drawable.ic_page_link_all,
+    };
+    private static int FileIcon(DownloadManager.Mobile.FileKind kind) => kind switch
+    {
+        DownloadManager.Mobile.FileKind.Archive => Resource.Drawable.ic_remote_archive,
+        DownloadManager.Mobile.FileKind.Audio => Resource.Drawable.ic_remote_audio,
+        DownloadManager.Mobile.FileKind.Video => Resource.Drawable.ic_page_link_video,
+        DownloadManager.Mobile.FileKind.Image => Resource.Drawable.ic_page_link_image,
+        _ => Resource.Drawable.ic_remote_document,
+    };
     public View Root { get; }
     private void ToggleSearch(object? sender, EventArgs e)
     {
@@ -181,10 +216,13 @@ internal sealed class PageLinksScreen : IDisposable
                 }
                 _check.Checked = selected;
                 _check.Enabled = enabled;
-                var icon = FileIcons.For(DownloadManager.Mobile.FileKinds.Of(new Uri(link.Url).AbsolutePath));
-                var drawable = ItemView.Context!.GetDrawable(icon.Drawable)?.Mutate();
+                var kind = DownloadManager.Mobile.FileKinds.Of(new Uri(link.Url).AbsolutePath);
+                var icon = FileIcons.For(kind);
+                var drawable = ItemView.Context!.GetDrawable(FileIcon(kind))?.Mutate();
                 drawable?.SetTint(FileIcons.Color(ItemView.Context!, icon));
-                _check.SetCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null);
+                var iconSize = Motion.Dp(ItemView.Context!, 24);
+                drawable?.SetBounds(0, 0, iconSize, iconSize);
+                _check.SetCompoundDrawablesRelative(drawable, null, null, null);
             }
             public void Detach() => _check.Click -= OnClick;
             private void OnClick(object? sender, EventArgs e) { var owner = _rows._owner; if (owner._disposed || owner._busy || _url is null) return; owner._model.Toggle(_url); owner.Refresh(); }
