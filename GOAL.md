@@ -2,7 +2,7 @@
 
 ## Current Android objective
 
-Deliver the phone downloader and paired-Host client to the approved Android designs. Android 0.0.8 shipped Remote Files on the `android-app` release line. The owner reopened ANDROID.8 for C3/C4 parity and requires source and visual sign-off across the implemented UI before publishing 0.0.9. Parity work resumed on 2026-11-20. C3 requires a real tracked upload concurrent with a download and successful account recovery after expiry. The [Android roadmap](ROADMAP.md#current-android-roadmap) records the delivery order.
+Continue the Android downloader and paired-Host client from the completed 0.0.9 parity milestone. ANDROID.8 passed the consolidated source, visual and flow audit; 0.0.9 was published and verified. The subsequent 0.0.10 Remote Files browse hotfix was signed, installed and checked on the owner's phone; public publication is not recorded. Next is ANDROID.9 (TorBox, torrents and archives), after inventorying its separate working copy. Preserve the ANDROID.14 acceptance deferrals and separate production-upload scope. See the [current handoff](docs/plans/android-parity-handoff.md) and [roadmap](ROADMAP.md#current-android-roadmap).
 
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.

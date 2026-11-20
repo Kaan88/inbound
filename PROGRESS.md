@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+## Claude continuation prepared, 2026-11-20
+
+Reconciled the current goal, roadmap, onboarding and [handoff](docs/plans/android-parity-handoff.md): 0.0.9 parity/release is complete, `5c12a1af` is the 0.0.10 phone hotfix, and ANDROID.9 is next after inventorying the separate working copy. The [review index](ANDROID-CODEX-FABLE-REVIEW.md#changes-since-the-last-claude-commit) maps the full range after Claude's `49f5663c` baseline. Later independent review remains open; this update performs no milestone audit. Historical tests below were not rerun for this documentation-only change.
+
+The archived `android-app` path was discovered with `git worktree list`, but its status could not be read because access was denied. The handoff records that limitation and existing local status rather than claiming a clean project. Source files and untracked local directories were preserved. No build, device action, publication or merge was performed.
+
 ## Remote Files on the owner's Galaxy S24 FE, 2026-11-20
 
 Confirmed Android 0.0.9 on the physical phone. The owner reproduced Google Drive's folder error while staying on the page. At 15:52:32 Istanbul time, bundled rclone logged a canceled list and the local Host logged `IPC command 'sites.browse' failed: Socket closed`. The two-second optional child-count budget is the leading explanation, based on the Android request enabling those counts and the Host handling managed cancellation there but allowing this socket error to escape. The exact canceled subrequest remains unverified. The two recent Dropbox transfer cards on This phone matched the accepted jobs. One item was skipped at 15:48:56 under the no-replace policy, and one was copied to the phone's Downloads folder at 15:49:20. Both reported zero failures. This was read-only diagnosis. No account contents or raw diagnostics were retained.
@@ -20,7 +26,7 @@ The paired 0.0.9 test build captured the required C3 upload/download summary and
 
 The verified arm64 package and update manifest are in `artifacts/android-app/arm64-rc-20261120-153057/staged/`. The release APK hash is `73068b96c74493e310598add0f3adcd1c314177a6f4fb9d588d146bb77088747`. It and the isolated x64 probe `009c38e89bf4e63cdce3562fce789c9e860ff88faa0b70fa082873780a6d1e2a` share application patch `98524b270454f2a2868106e46406a8ea0c5a6b79a6dea65da70b7395681ffed2` against `6616111c`. Mobile 567 and Android harness 66 passed. A5 verified both category indicators and exact hashes in the automatic and overridden folders. Astra High passed source, native visuals and flows for all four parity batches on the exact candidate and retained comparisons. No owner decision remains open within that scope. C6 keyboard input was exercised with emulator key events. The owner's C3 real browse passed, with a separate automated repeat timeout.
 
-## Android workflow correction, 2026-11-20
+## Historical Android workflow correction, 2026-11-20
 
 The owner paused implementation at `af7ec829` after the enabled C2 queue notification check stopped. The [handoff](docs/plans/android-parity-handoff.md) records the interrupted check, evidence locations and source of the repeated reviews. The [matrix](docs/plans/android-mockup-acceptance.md#remaining-work) maps outstanding work to four shared flows for a single candidate audit. Existing scoped verdicts carry forward. ANDROID.8 and the 0.0.9 candidate gate are open. Entries below record earlier work.
 

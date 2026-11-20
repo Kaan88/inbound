@@ -7,7 +7,7 @@ increment.
 
 ## Android work on this branch
 
-Read the [parity handoff](docs/plans/android-parity-handoff.md) and the [remaining flow batches](docs/plans/android-mockup-acceptance.md#remaining-work). This is the `android-remote-files-parity` worktree. It holds the owner-paused UI milestone. The dated Codex handoff, session progress and original build sequence describe earlier work. Keep `main` on its branch. The separate `android-app` working copy contains unfinished ANDROID.9 changes.
+Read the [parity handoff](docs/plans/android-parity-handoff.md) and the [remaining flow batches](docs/plans/android-mockup-acceptance.md#remaining-work). This is the `android-remote-files-parity` worktree. It holds completed Android 0.0.9 parity and the committed 0.0.10 phone browse hotfix. Read the current handoff before continuing ANDROID.9; the dated Codex handoff, session progress and original build sequence describe earlier work. Keep `main` on its branch. The separate `android-app` working copy contains unfinished ANDROID.9 changes and must be inventoried before reuse.
 
 For Android, the meaningful checkpoint for project tracking is a flow batch, owner decision or milestone transition. Put each case result in the matrix once. Link it from PROGRESS at batch completion. GOAL holds the objective and ROADMAP holds milestone state. The milestone code and visual audit and the owner's separate later review queue have different scopes.
 
@@ -62,7 +62,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-14, release 0.8.0 (in preparation), extension 0.6.4)
+## Historical desktop status (2026-11-14, release 0.8.0 (in preparation), extension 0.6.4)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and

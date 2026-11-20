@@ -15,6 +15,24 @@ its completed reviews remain in docs/plans/android-fable-review-queue.md.
 This queue covers implementations after the Codex takeover. Existing Astra
 milestone PASS results do not close the later independent review queue.
 
+## Changes since the last Claude commit
+
+Prepared for Claude continuation on 2026-11-20. **Implementer: Codex. Later independent reviewer: Astra; status OPEN.** The legacy Fables filename and entry IDs are retained. Claude's last attributed ancestor is `49f5663c` (Claude Opus 5.5 coauthor); review the complete committed range `49f5663c..5c12a1af`. Attribution comes from Git history and the existing takeover record, not author-name inference. No new independent review occurred during this documentation pass.
+
+| Work since baseline | Commit checkpoints | Evidence and review focus |
+| --- | --- | --- |
+| Permanent signing and Android updater, 0.0.2 | `d2e06d27`, `178fdb41` | FABLE-CODEX-1/-2 below: signer identity, fresh build provenance, secret handling, signed feed and user-approved installation. |
+| Link catching and authenticated refresh, 0.0.3 | `d0816724`, `50df32b8` | FABLE-CODEX-3: credential boundaries, durable refresh, consent, Host isolation and intake. |
+| Queues, schedules, settings and execution, 0.0.4–0.0.6 | `b6c2f666`, `87555b99`, `edd073b0` | FABLE-CODEX-4 and [Codex history](ANDROID-CODEX-PROGRESS.md): shared Runtime safeguards, execution leases, signed changelog, decimal speed limits. Review native and Host behavior together. |
+| Core screens, HTTPS pairing, phone/background acceptance and 0.0.7 | `c694d0fa`, `d82cd893`, `00d26b52`, `563fad73`, `92defa31` | [PROGRESS](PROGRESS.md) records S24 hashes, reconnect/pause/resume, public in-place update and visual acceptance. ANDROID.4/.7/.10 closures retain their scope; remaining real-account capture and natural Doze moved to ANDROID.14. Interrupted/optional soaks are not full acceptance. |
+| Bundled rclone and Remote Files, 0.0.8 | `15123d61`, `c446b39d`, `f4bbd735`, `60ed93ce`, `6f6a0279`, `577c4422`, `66270193` | Review executable packaging/pinning, 16 KiB alignment/device evidence, process and loopback lifecycle, provider credentials, trust, browse and transfer scope. [Matrix](docs/plans/android-mockup-acceptance.md) and PROGRESS retain evidence. Production phone-originated upload remains separate. |
+| Mockup parity across implemented screens, 0.0.9 | `f3707bc4..d053242e`; publication `03572c06` | [Matrix](docs/plans/android-mockup-acceptance.md) is the per-case record. Includes download/intake/bulk/notification flows, queue editor and live limits, pairing/consent, cloud recovery, C3 tracked mixed transfers, C4 controls and Settings/update prompt. Final Mobile 567 and harness 66 passed. Astra High passed source, native visuals and all four flow batches on the recorded candidate. This completed milestone audit does not close this independent review. |
+| Phone browse hotfix, 0.0.10 | `5c12a1af` | Managed HTTP for Android rclone loopback cancellation; explain skipped downloads under no-replace. See next entry for exact validation and remaining limits. |
+
+For a complete file inventory use `git diff --stat 49f5663c..5c12a1af`; for individual decisions use `git log --reverse 49f5663c..5c12a1af`. The table groups review work rather than replacing the full diff. Give the independent reviewer code and requirements before historical verdicts. Review shared Runtime, Contracts and Sites changes for desktop/server impact as well as Android behavior.
+
+Continuation state and unverified local status are in the [handoff](docs/plans/android-parity-handoff.md). Unfinished ANDROID.9 work in the separate archived `android-app` checkout is outside this committed range and needs its own inventory. Existing local modified-file markers and untracked tool state are not claimed as reviewed implementation.
+
 ## Review procedure
 
 For each new entry identify **Implementer: Codex**, scope and exact commit (or
@@ -28,12 +46,12 @@ important implementation changes and decisions as work proceeds.
 
 ## Remote Files 0.0.10 phone hotfix, 2026-11-20
 
-Implementer: Codex. Later independent review remains open. The Android bundled-rclone control client uses managed HTTP for its loopback connection. The Android Transfers UI explains a download skip due to an existing destination item. A delegated UI edit was checked by the lead and verified on the phone. See the [diagnosis, signed APK fingerprint and phone results](PROGRESS.md#remote-files-on-the-owners-galaxy-s24-fe-2026-11-20). Live verification covered provider browsing and retained transfer results.
+Implementer: Codex. Commit: `5c12a1af`. Later independent review remains open. The Android bundled-rclone control client uses managed HTTP for its loopback connection. The Android Transfers UI explains a download skip due to an existing destination item. A delegated UI edit was checked by the lead and verified on the phone. See the [diagnosis, signed APK fingerprint and phone results](PROGRESS.md#remote-files-on-the-owners-galaxy-s24-fe-2026-11-20). Live verification covered provider browsing and retained transfer results. Sites tests: 214 passed, 32 platform/fixture skips; Mobile: 567 passed. Permanent signature, arm64 packaging, pinned rclone and 16 KiB alignment passed; installed APK hash matched. Drive, OneDrive and Dropbox opened, with two canceled list requests and zero propagated browse failures. No new transfer was made in that pass. Direct installation is recorded; public 0.0.10 publication and an independent hotfix audit are not recorded. Review cancellation propagation and skipped-transfer wording without treating the leading diagnosis as proof of the exact canceled subrequest.
 
-## Codex review handoff (2026-11-19)
+## Historical Codex review handoff (2026-11-19)
 
 - Implementer/coordinator: Codex. Later independent reviewer: Astra.
-- Current source: android-app implementation commit d0816724208a0ae543cf2d84a02e4ee32f218de2;
+- Source at that checkpoint: android-app implementation commit d0816724208a0ae543cf2d84a02e4ee32f218de2;
   delivery/evidence documentation checkpoint 50df32b8cd5a51079d054f6fe3d0bc6b14f05fe1.
 - Scope queued below: permanent Android signing, GitHub updater and ANDROID.5
   link catching, including shared Runtime refresh/durability and queue-race fixes.
@@ -45,7 +63,7 @@ Implementer: Codex. Later independent review remains open. The Android bundled-r
 - Implementer: Codex. Base `6616111c0b865cf6ba3330a6fd5f67abafe95cca` with the local application patch recorded alongside the candidate builds.
 - Scope includes the C1 queue destination decisions, C2 stop-time and conflict review, C7 Theme draft, and A7 waiting-notice coexistence. The owner's required C3 mixed-transfer state is exercised with real paired-Host uploads and downloads.
 - [Acceptance and flow evidence](docs/plans/android-mockup-acceptance.md) records exact probe outcomes. Candidate artifacts, fingerprints, and their common source patch are indexed in `artifacts/android-app/pairs/parity-probe-20261120-140909/review-evidence.md`.
-- Mobile 563 and Android harness 66 passed. The milestone's consolidated code and visual verdict is open. This later independent review entry remains open separately.
+- Initial resumption checks were Mobile 563 and harness 66. Final candidate `d053242e` passed Mobile 567 and harness 66, and Astra High passed consolidated source, native visuals and flows across all four batches. Publication was recorded at `03572c06`. This later independent review entry remains OPEN separately.
 
 ## FABLE-CODEX-1 — Permanent Android release signing
 
