@@ -58,9 +58,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.handle_request(True)
 
+    def do_POST(self):
+        self.handle_request(False)
+
     def handle_request(self, body):
         fixture = self.server
         path = urlsplit(self.path).path
+        protected = "/auth-resume/" + fixture.filename
+        if self.command == "POST" and path != protected:
+            self.respond(405)
+            self.close_connection = True
+            return
         if path == "/page":
             self.respond(200, b'<!doctype html><title>Inbound sign-in fixture</title><a href="/signin">Sign in</a>',
                          (("Content-Type", "text/html; charset=utf-8"),))
@@ -75,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
                     quote(fixture.filename).encode("ascii") + b'">Authenticated archive</a>')
             self.respond(200, page, (("Content-Type", "text/html; charset=utf-8"),))
             return
-        if path != "/auth-resume/" + fixture.filename:
+        if path != protected:
             self.respond(404)
             return
         auth = any(x.strip() == "inbound_test=yes" for x in self.headers.get("Cookie", "").split(";"))
@@ -92,6 +100,10 @@ class Handler(BaseHTTPRequestHandler):
                    "range_valid": valid, "body_bytes": 0}
         with fixture.lock:
             fixture.requests.append(request)
+        if self.command == "POST":
+            self.respond(405)
+            self.close_connection = True
+            return
         if not auth:
             self.respond(403)
             return

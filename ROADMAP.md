@@ -29,6 +29,8 @@ can approve departures from the designs.
   state, C6's mixed remote Downloads and Pause actions, and B6's real
   same-job recovery through the browser with a matching final hash.
   Astra approved B2's centered timing checkmarks and native queue chooser.
+  The paired B3 synthetic flow kept one authenticated job across Pause
+  and Resume and matched the exact completed file hash.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

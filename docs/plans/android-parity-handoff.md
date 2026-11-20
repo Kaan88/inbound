@@ -158,7 +158,12 @@ download summary depends on tracked upload support.
   In `b3-auth-resume-final-20261120-082402`, Astra approved local authenticated
   Resume. After a settled Pause, the same job requested an authenticated
   range at byte 2,097,152 and received the entire remaining suffix.
-  The 16 MiB file matched SHA-256. Paired-Host authenticated resume remains open.
+  The 16 MiB file matched SHA-256. In `b3-paired-resume-live-20261120-085743`, Astra
+  approved the corresponding paired-Host Resume. Cancel left the Host
+  empty. The one-connection job kept its identity and held at 2,097,152
+  bytes for three seconds after Pause. Resume fetched the remaining
+  14 MiB with synthetic sign-in on the same Host. The final 16 MiB
+  matched SHA-256 in the disposable Host folder. Real-account coverage remains open.
 
 ### Native first-run permission returns (2026-11-20)
 

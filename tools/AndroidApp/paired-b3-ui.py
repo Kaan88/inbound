@@ -22,7 +22,20 @@ def require(ok, message):
         raise RuntimeError(message)
 
 
-def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cancel, before_submit):
+def save_state(smoke, name, tree):
+    for n in tree.iter("node"):
+        require(n.get("password") != "true", "Refusing evidence from a credentials form")
+        value = n.get("text", "") + " " + n.get("content-desc", "")
+        require("inbound_test" not in value.lower(), "Refusing evidence containing fixture session data")
+        addresses = re.findall(r"""https?://[^\s<>()"']+""", value, re.I)
+        require(all(not urlsplit(address).query and not urlsplit(address).fragment for address in addresses),
+                "Refusing evidence containing an address query or fragment")
+    (smoke.evidence / (name + ".png")).write_bytes(smoke.adb("exec-out", "screencap", "-p", raw=True))
+    ET.ElementTree(tree).write(smoke.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
+
+
+def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cancel, before_submit,
+        file_name="report-q3-2026.xlsx", paced=False):
     origin = urlsplit(report_origin)
     require(origin.scheme == "http" and origin.hostname == "127.0.0.1" and origin.port
             and not origin.username and not origin.password and origin.path in ("", "/")
@@ -67,16 +80,6 @@ def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cance
         tap("Browser options")
         tap("Go")
 
-    def save_state(name, tree):
-        for n in tree.iter("node"):
-            require(n.get("password") != "true", "Refusing evidence from a credentials form")
-            value = n.get("text", "") + " " + n.get("content-desc", "")
-            require("inbound_test" not in value.lower(), "Refusing evidence containing fixture session data")
-            addresses = re.findall(r"""https?://[^\s<>()"']+""", value, re.I)
-            require(all(not urlsplit(address).query and not urlsplit(address).fragment for address in addresses),
-                    "Refusing evidence containing an address query or fragment")
-        (smoke.evidence / (name + ".png")).write_bytes(smoke.adb("exec-out", "screencap", "-p", raw=True))
-        ET.ElementTree(tree).write(smoke.evidence / (name + ".xml"), encoding="utf-8", xml_declaration=True)
 
     smoke.wait_content_description(lambda d: d == f"Downloads shown from {host_name}. Change host",
                                    "selected synthetic Host")
@@ -88,14 +91,18 @@ def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cance
     tap("Browser options")
     tap("Go")
     web_link("Sign in")
+    ready = "Authenticated archive" if paced else "Inbound link fixture"
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        if smoke.matches(smoke.tree(), "Inbound link fixture"):
+        if smoke.matches(smoke.tree(), ready):
             break  # WebView may expose both page title and heading.
         time.sleep(.3)
     else:
         raise RuntimeError("Synthetic sign-in page did not return to its fixture")
-    navigate("/reports")
+    if not paced:
+        navigate("/reports")
+    link = "Authenticated archive" if paced else file_name
+
     def confirm_recipient():
         _, tree = smoke.wait_node("Send sign-in to this server?")
         expected = f"Send sign-in cookies for 1 selected download(s) to {host_name} ({host_origin})?"
@@ -104,10 +111,10 @@ def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cance
         require(messages == [expected], "Consent did not identify the exact HTTPS Host and single file")
         return tree
 
-    web_link("report-q3-2026.xlsx")
+    web_link(link)
     tree = confirm_recipient()
     baseline = on_consent()
-    save_state("b3-paired-consent", tree)
+    save_state(smoke, "b3-paired-consent", tree)
     tap("Cancel")
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -119,12 +126,12 @@ def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cance
         raise RuntimeError("Consent dialog remained open after Cancel")
     smoke.wait_node("Browser options")
     after_cancel(baseline)
-    web_link("report-q3-2026.xlsx")
+    web_link(link)
     tree = confirm_recipient()
     on_consent()  # The Host has received no report request immediately before either consent action.
-    save_state("b3-paired-send-consent", tree)
+    save_state(smoke, "b3-paired-send-consent", tree)
     tap("Send for these files")
-    _, tree = smoke.wait_node("report-q3-2026.xlsx", resource="caught_name")
+    _, tree = smoke.wait_node(file_name, resource="caught_name")
     nodes = list(tree.iter("node"))
     privacy = [n.get("text", "") for n in nodes if n.get("resource-id", "").endswith(":id/caught_privacy")]
     destination = [n.get("text", "") for n in nodes if n.get("resource-id", "").endswith(":id/caught_destination")]
@@ -132,7 +139,26 @@ def run(smoke, *, host_name, host_origin, report_origin, on_consent, after_cance
             "Expected remote sign-in wording")
     require(len(destination) == 1 and destination[0].startswith(host_name + " · ")
             and "This phone" not in destination[0], "Expected the selected Host destination")
-    save_state("b3-paired-caught", tree)
+    if paced:
+        tap("More options", "caught_more")
+        tap("Connections", "caught_connections")
+        option, _ = smoke.wait_node("1", resource="text1")
+        require(option.get("package") == "app.inbound.android.rcloneprobe"
+                and option.get("enabled") == "true", "Expected an enabled spinner value of one")
+        smoke.tap(option)
+        detail = lambda d: d.endswith(" 1 connection")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            tree = smoke.tree()
+            if any(node.get("resource-id", "").endswith(":id/caught_detail")
+                   and detail(node.get("text", "")) for node in tree.iter("node")):
+                break
+            time.sleep(.3)
+        else:
+            raise RuntimeError("The caught sheet did not show one connection")
+        tap("Fewer options", "caught_more")
+        _, tree = smoke.wait_node(file_name, resource="caught_name")
+    save_state(smoke, "b3-paired-caught", tree)
     before_submit()
     tap("Download", "caught_submit")  # Exactly one submission; caller checks admission and hash.
     deadline = time.monotonic() + 25
