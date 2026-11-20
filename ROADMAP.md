@@ -44,7 +44,8 @@ can approve departures from the designs.
   callout and Web interface section with phone and paired Host evidence.
   B5 Change category updated only the selected queued job on the
   disposable paired Host. Cancel preserved the original categories and
-  the update snackbar left Add visible.
+  the update snackbar left Add visible. B5 list-only removal preserved
+  the finished file and removed only the selected Host entries.
   Astra approved the updater dialog and Settings card. The isolated
   signed offer showed verified notes and Later kept version 0.0.8 installed.
   A5 paired Rename, Overwrite and Fail matched their expected Host

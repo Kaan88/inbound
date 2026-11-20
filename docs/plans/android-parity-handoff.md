@@ -150,6 +150,13 @@ download summary depends on tracked upload support.
   Video updated only the selected queued job's category and switched it
   from automatic to manual on the paired Host. No fixture request or
   Host output occurred. The update snackbar stayed below the Add button.
+  Astra approved the paired B5 list-only removal in `b5-paired-remove-20261120-114346`.
+  Selecting the file deletion option and cancelling preserved both
+  selected rows, all three Host jobs and the finished file hash. The
+  reopened dialog reset to list-only. Confirming that choice removed
+  exactly the two selected entries and kept the completed file intact.
+  The unselected job stayed queued and both deferred sources saw zero
+  requests. File deletion confirmation remains a separate case.
 - Astra approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real
