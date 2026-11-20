@@ -43,7 +43,7 @@
           <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="4dp" android:text="Connections" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
           <TextView android:id="@+id/connections_value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginRight="4dp" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurface" />
         </LinearLayout>
-        <com.google.android.material.slider.Slider android:id="@+id/connections_slider" android:layout_width="match_parent" android:layout_height="wrap_content" android:stepSize="1" android:valueFrom="1" android:valueTo="8" app:tickVisible="false" android:contentDescription="Connections" />
+        <com.google.android.material.slider.Slider android:id="@+id/connections_slider" android:layout_width="match_parent" android:layout_height="48dp" android:minHeight="48dp" android:stepSize="1" android:valueFrom="1" android:valueTo="8" app:trackHeight="8dp" app:thumbWidth="4dp" app:thumbHeight="24dp" app:tickVisible="false" android:contentDescription="Connections" />
       </LinearLayout>
 
       <LinearLayout android:id="@+id/more_header" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="64dp"
@@ -74,7 +74,7 @@
     </LinearLayout>
   </ScrollView>
   <LinearLayout android:id="@+id/new_bottom" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:background="?attr/colorSurfaceContainer" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="16dp" android:paddingBottom="16dp">
-    <com.google.android.material.button.MaterialButton android:id="@+id/new_cancel" style="?attr/materialButtonOutlinedStyle" android:layout_width="wrap_content" android:layout_height="56dp" android:text="Cancel" app:cornerRadius="28dp" android:minWidth="96dp" />
-    <com.google.android.material.button.MaterialButton android:id="@+id/new_download_btn" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:layout_marginLeft="12dp" android:text="Download" app:icon="@drawable/ic_remote_download" app:iconGravity="textStart" app:iconSize="18dp" app:cornerRadius="28dp" />
+    <com.google.android.material.button.MaterialButton android:id="@+id/new_cancel" style="?attr/materialButtonOutlinedStyle" android:layout_width="wrap_content" android:layout_height="56dp" android:insetTop="0dp" android:insetBottom="0dp" android:text="Cancel" app:cornerRadius="28dp" android:minWidth="96dp" />
+    <com.google.android.material.button.MaterialButton android:id="@+id/new_download_btn" android:layout_width="0dp" android:layout_height="56dp" android:insetTop="0dp" android:insetBottom="0dp" android:layout_weight="1" android:layout_marginLeft="12dp" android:text="Download" app:icon="@drawable/ic_remote_download" app:iconGravity="textStart" app:iconSize="18dp" app:cornerRadius="28dp" />
   </LinearLayout>
 </LinearLayout>

@@ -122,6 +122,8 @@ internal sealed partial class RemoteFilesScreen
             CornerRadius = Motion.Dp(_activity, 18)
         };
         add.SetAllCaps(false);
+        add.InsetTop = 0;
+        add.InsetBottom = 0;
         add.SetMinimumHeight(Motion.Dp(_activity, 56));
         add.SetIconResource(Resource.Drawable.ic_add);
         add.BackgroundTintList = ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorPrimary)));
@@ -371,8 +373,8 @@ internal sealed partial class RemoteFilesScreen
     {
         "webdav" or "ftp" or "ftps" or "http" => Resource.Drawable.ic_flow_globe,
         "drive" or "onedrive" or "dropbox" => Resource.Drawable.ic_remote_files,
-        "s3" or "b2" or "swift" => Resource.Drawable.ic_archive,
-        _ => Resource.Drawable.ic_host_server
+        "s3" or "b2" or "swift" => Resource.Drawable.ic_site_object_storage,
+        _ => Resource.Drawable.ic_flow_host
     };
 
     private string LocationDescription(SiteDto site)

@@ -9,8 +9,8 @@
   Settings search narrowed to Catching links and the Site logins row was visible.
 - The same run populated A5 from a loopback metadata response with a 6.1 GB
   size, byte-range support, exact fixture filename and eight requested
-  connections. The capture submitted no download. Astra requested slimmer
-  slider styling and taller visible footer buttons.
+  connections. Astra passed the slimmer slider and 56dp button fills in
+  `a5-controls-final-20261120-050123`. The capture submitted no download.
 - `b5-mixed-retry-20261120-045121` verified three selected real jobs in active,
   paused and queued states, alongside an unselected active and finished job.
   The finished file matched its hash and the probe cleaned up. Some owned
@@ -26,9 +26,9 @@
   1,638,400 to 1,900,544. The trusted SFTP browse in
   `c3-sftp-capacity-20261120-044216` showed 205 GB free from the fixture's
   204,800,000,000-byte response. Astra also passed all three browsable
-  protocols together in `c3-three-protocols-20261120-045409`. Remaining C3
-  work includes icon and button polish, expired cloud sign-in, and concurrent
-  upload/download.
+  protocols together, then the outlined icons and full-height Add location in
+  `c3-icons-rerun-20261120-050646`. Expired cloud sign-in and concurrent
+  upload/download remain open.
 - Astra passed the C4 nested WebDAV list in `c3-c4-active-20261120-043917`.
   Order and 12/48 folder counts matched, both selected FLAC hashes passed in
   Downloads/Inbound/Music, and delete Cancel preserved the fixture while
