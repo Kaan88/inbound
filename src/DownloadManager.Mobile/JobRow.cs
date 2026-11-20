@@ -73,6 +73,7 @@ public sealed class JobRow : INotifyPropertyChanged
 
     public void ApplyFrom(JobDto j, DateTimeOffset? now = null)
     {
+        bool queueChanged = Job.IsQueued != j.IsQueued || Job.QueueId != j.QueueId;
         Job = j;
         FileName = j.FileName ?? "";
         Name = string.IsNullOrEmpty(j.FileName) ? j.Url : j.FileName;
@@ -119,5 +120,6 @@ public sealed class JobRow : INotifyPropertyChanged
                 Subtitle = "Queued" + (total is > 0 ? " · " + Fmt.Bytes(total.Value) : "");
                 break;
         }
+        if (queueChanged) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Job)));
     }
 }

@@ -7,6 +7,10 @@ namespace DownloadManager.Mobile;
 /// <summary>Queue and schedule commands against the selected Host. The screen owns presentation and applies LastResult on its UI thread.</summary>
 public sealed class QueueSettingsModel(DownloadsModel downloads, IHostConnection connection, bool requireCapabilities = false)
 {
+    /// <summary>The selected Host's next reported timed window, while it is still in the future.</summary>
+    public static DateTimeOffset? ReportedUpcomingStart(QueueDto queue, bool hasEnabledSchedule, DateTimeOffset now) =>
+        !queue.IsRunning && hasEnabledSchedule && queue.NextTimedStartAt is { } start && start > now ? start : null;
+
     public SettingsDto Settings => downloads.Settings;
     public bool CanWriteSafely => !requireCapabilities || downloads.Hello?.Capabilities.Contains("settingsCompareAndSwap") == true;
     public bool CanEditQueuesSafely => CanWriteSafely && (!requireCapabilities || downloads.Hello?.Capabilities.Contains("queueIdentity") == true);

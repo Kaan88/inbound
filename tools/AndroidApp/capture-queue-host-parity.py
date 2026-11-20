@@ -691,6 +691,18 @@ class Capture:
                 lambda desc: desc == "Downloads shown from This phone. Change host", "unchanged phone graph Host")
             self.smoke.wait_content_description(
                 lambda desc: desc == "Pause all downloads", "live speed summary")
+            if self.args.verify_scheduled_row:
+                night_row, _ = self.smoke.wait_content_description(
+                    lambda desc: desc.startswith(names["night"] + ". Queued for Night · scheduled ")
+                                 and self.c1_start in desc, "actual scheduled Night download")
+                mobile_row, _ = self.smoke.wait_content_description(
+                    lambda desc: desc.startswith(names["mobile"] + ". Queued") and "scheduled" not in desc,
+                    "generic stopped Mobile download")
+                (self.evidence / "scheduled-row-proof.json").write_text(json.dumps({
+                    "night": night_row.get("content-desc"), "mobile": mobile_row.get("content-desc"),
+                    "expected_host_start": self.c1_start,
+                }, indent=2) + "\n", encoding="utf-8")
+                self.log("PASS A2: the queued Night download announced its real Host schedule, while Mobile stayed generic.")
             (self.evidence / "c1-chart-destination.png").write_bytes(
                 self.adb("exec-out", "screencap", "-p", raw=True))
             self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified.")
@@ -1075,6 +1087,8 @@ def main():
                         help="Exact disposable paired-host label to enter manually")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
+    parser.add_argument("--verify-scheduled-row", action="store_true",
+                        help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
     parser.add_argument("--mixed-hosts", action="store_true",
@@ -1091,6 +1105,8 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_scheduled_row and not args.unattended_c1_workload:
+        parser.error("--verify-scheduled-row requires --unattended-c1-workload")
     if args.verify_scheduled_start and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-start requires --unattended-c1-workload")
     if args.verify_remote_layout and not args.mixed_hosts:

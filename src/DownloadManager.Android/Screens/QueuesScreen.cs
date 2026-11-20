@@ -188,8 +188,7 @@ internal sealed class QueuesScreen : IDisposable
             var rate = jobs.Sum(r => r.Job.BytesPerSecond ?? 0);
             var schedules = _settings.Settings.Schedules.Where(x => x.QueueId == queue.Id).ToArray();
             bool scheduled = schedules.Any(x => x.Enabled);
-            var upcoming = !queue.IsRunning && scheduled && queue.NextTimedStartAt is { } startsAt && startsAt > now
-                ? startsAt : (DateTimeOffset?)null;
+            var upcoming = QueueSettingsModel.ReportedUpcomingStart(queue, scheduled, now);
             string state = queue.IsRunning
                 ? queue.ConditionWaitReason ?? (active > 0 ? "Running \u00b7 " + Fmt.Rate(rate) : "Ready for downloads")
                 : upcoming is { } at ? "Scheduled for " + at.ToString("d MMM, HH:mm", CultureInfo.CurrentCulture)

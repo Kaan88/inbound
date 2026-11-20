@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
 using Android.Animation;
 using Android.Content;
 using Android.OS;
@@ -31,6 +32,9 @@ internal sealed partial class DownloadsScreen
     private readonly TextView _selTitle;
     private readonly ImageButton _selResume, _selPause;
     private readonly Dictionary<DownloadFilter, Chip> _chipFor = new();
+    private readonly Handler _queueTimingUi = new(Looper.MainLooper!);
+    private readonly Java.Lang.Runnable _queueTimingExpiry;
+    private readonly Dictionary<int, (string Name, DateTimeOffset Start)> _queueStarts = new();
     private double _shownRate;
     private bool _toggleIsPause = true;
     private bool _remoteFiltersExpanded;
@@ -66,6 +70,9 @@ internal sealed partial class DownloadsScreen
         _adapter = new RowAdapter(this);
         _recycler.SetLayoutManager(new LinearLayoutManager(activity));
         _recycler.SetAdapter(_adapter);
+        _queueTimingExpiry = new Java.Lang.Runnable(RefreshScheduledRows);
+        _model.SettingsChanged += RefreshScheduledRows;
+        RefreshScheduledRows();
         // Lists: 200 ms fade and move. Rows never reorder: a row only comes in at the top or leaves.
         _recycler.SetItemAnimator(new DefaultItemAnimator { AddDuration = 200, MoveDuration = 200, RemoveDuration = 200, ChangeDuration = 0, SupportsChangeAnimations = false });
 
@@ -144,7 +151,48 @@ internal sealed partial class DownloadsScreen
         return i < 0 ? null : (_recycler.FindViewHolderForAdapterPosition(i) as Holder)?.Card;
     }
 
-    public void Dispose() => _list.Dispose();
+    public void Dispose()
+    {
+        _model.SettingsChanged -= RefreshScheduledRows;
+        _queueTimingUi.RemoveCallbacks(_queueTimingExpiry);
+        _queueTimingExpiry.Dispose();
+        _queueTimingUi.Dispose();
+        _list.Dispose();
+    }
+
+    internal void RefreshScheduledRows()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var settings = _model.Settings;
+        var enabled = settings.Schedules.Where(schedule => schedule.Enabled).Select(schedule => schedule.QueueId).ToHashSet();
+        var hadScheduledRows = _queueStarts.Count != 0;
+        _queueStarts.Clear();
+        DateTimeOffset? firstExpiry = null;
+        foreach (var queue in settings.Queues)
+        {
+            if (QueueSettingsModel.ReportedUpcomingStart(queue, enabled.Contains(queue.Id), now) is not { } start)
+                continue;
+            _queueStarts[queue.Id] = (queue.Name, start);
+            if (firstExpiry is null || start < firstExpiry) firstExpiry = start;
+        }
+        if (hadScheduledRows || firstExpiry is not null) _adapter.RefreshAll();
+        _queueTimingUi.RemoveCallbacks(_queueTimingExpiry);
+        if (firstExpiry is { } expiry)
+            _queueTimingUi.PostDelayed(_queueTimingExpiry, Math.Max(1L, (long)Math.Ceiling((expiry - now).TotalMilliseconds)));
+    }
+
+    private string SubtitleFor(JobRow row)
+    {
+        if (!row.Job.IsQueued ||
+            !string.Equals(row.Job.State, "queued", StringComparison.OrdinalIgnoreCase) ||
+            !_queueStarts.TryGetValue(row.Job.QueueId, out var queue))
+            return row.Subtitle;
+        var now = DateTimeOffset.UtcNow;
+        if (queue.Start <= now) return row.Subtitle;
+        var pattern = queue.Start.Date == now.ToOffset(queue.Start.Offset).Date ? "HH:mm" : "d MMM, HH:mm";
+        var size = row.Job.TotalBytes is > 0 and var bytes ? " · " + Fmt.Bytes(bytes) : "";
+        return $"Queued for {queue.Name} · scheduled {queue.Start.ToString(pattern, CultureInfo.CurrentCulture)}" + size;
+    }
 
     private void HideKeyboard()
     {
@@ -399,7 +447,8 @@ internal sealed partial class DownloadsScreen
 
             var ctx = ItemView.Context!;
             _name.Text = row.Name;
-            _subtitle.Text = row.Subtitle;
+            var subtitle = _s.SubtitleFor(row);
+            _subtitle.Text = subtitle;
             var color = row.Kind switch
             {
                 StatusKind.Done => ctx.GetColor(Resource.Color.state_done),
@@ -426,7 +475,7 @@ internal sealed partial class DownloadsScreen
             }
 
             Card.Selected = selected;
-            Card.ContentDescription = row.Name + ". " + row.Subtitle;
+            Card.ContentDescription = row.Name + ". " + subtitle;
             BindAction(row, ctx);
 
             _bar.Visibility = row.ShowBar ? ViewStates.Visible : ViewStates.Gone;

@@ -9,8 +9,11 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals
-  were 97.8 and 98.2 KB/s. The named scheduled row and broader file
-  types remain open.
+  were 97.8 and 98.2 KB/s. In `a2-reported-scheduled-row-20261120-055710`,
+  Astra approved the named Night row matching the Host's reported 07:00
+  and the unscheduled Mobile row showing Queued. Queue reassignment,
+  disabled and running schedules, and expiry are covered by mobile tests.
+  The broader file types remain open.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.

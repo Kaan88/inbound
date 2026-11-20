@@ -303,6 +303,7 @@ public sealed partial class MainActivity : AppCompatActivity
     {
         base.OnResume();
         _firstRun?.Refresh(); // back from the battery dialog
+        _downloads?.RefreshScheduledRows();
         Updates.AndroidUpdates.OnResumed(this);
         _browser?.Resume();
     }
@@ -342,6 +343,7 @@ public sealed partial class MainActivity : AppCompatActivity
         _onSettings = settings; _onQueues = queues;
         _onRemoteFiles = remoteFiles;
         _queues?.SetVisible(queues);
+        if (to == downloads) _downloads?.RefreshScheduledRows();
         if (Motion.Reduced(this)) Motion.CrossFade(from, to, 150, () => from.Visibility = ViewStates.Gone);
         else
         {
