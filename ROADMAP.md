@@ -28,9 +28,8 @@ can approve departures from the designs.
   0.0.9 visual gate. Astra approved C5's three Host choices and real queued
   state, C6's mixed remote Downloads and Pause actions, and B6's real
   same-job recovery through the browser with a matching final hash.
-  Reviewed B2 timing and network controls have a small checkmark spacing
-  difference from the reference. The acceptance matrix tracks that difference
-  and the remaining screen variants.
+  Astra approved B2's centered timing checkmarks and native queue chooser.
+  The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
   recheck findings before accepting a final-quality candidate.

@@ -49,7 +49,11 @@ download summary depends on tracked upload support.
   selected exclusively, all three labels fit with 48 dp targets, and the
   phone showed Any network with the rule off. The paired headless Host
   omitted that control in both sheet sizes. Both Hosts stayed at zero jobs.
-  The checkmark sits farther from its label than in the reference.
+  In `b2-centered-popup-settled-20261120-085047`, Astra approved the
+  centered checkmark and label on Start now, Main queue and Later.
+  All three remained native radio controls with 48 dp targets. The actual
+  queue popup preserved the previous selection when canceled and
+  selected Main when chosen. The phone and paired Host stayed at zero jobs.
 - Astra approved B4 submission in `b4-real-submission-20261120-061608`.
   The actual page selected two of four links and Downloads showed exactly
   two finished jobs. The two output hashes matched distinct payloads, and
