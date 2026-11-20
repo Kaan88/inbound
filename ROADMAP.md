@@ -39,6 +39,8 @@ can approve departures from the designs.
   removed exactly the named fixture file on confirmation.
   The local C2 completion preference survived Save and reopen, and
   Cancel and Discard preserved the saved choice.
+  C7 Hosts and web UI now matches the reviewed switch icon, scope
+  callout and Web interface section with phone and paired Host evidence.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

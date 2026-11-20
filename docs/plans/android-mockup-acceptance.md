@@ -89,7 +89,7 @@ context and do not treat the board's approval as acceptance.
 | `PairingSheet` and host switcher subflows | C5/C6 | Capture normal and certificate-warning/trust paths against approved host flows; only disposable endpoint, no actual credentials. |
 | Remote Files location add/edit/fix dialogs and actions | C3/C4 and approved ANDROID.8 flow/reference states | Capture location types and validation/errors only where implemented and fixture-supported; compare local vs remote boundaries. Existing functional WebDAV evidence is not a complete screen inventory. |
 | `AppUpdatesScreen` / update-ready dialog | `android-update-prompt-review.html`, approved compact update design; C7 Settings location | Historical render review and updater tests exist; capture installed app's offer, notes, cancel/install handoff and Settings changelog on emulator. HTML render QA is not device parity. |
-| `HostSettingsScreen` / remote host details | C5/C6 and Android app flow plan | Capture selected-host identity, connection state and local/remote settings distinction. No specific pair located. |
+| `HostSettingsScreen` / remote host details | C5/C6 and Android app flow plan | Astra passed paired and phone Hosts detail against the approved flow board in `c7-paired-settings-corrected-20261120-094720`. Both identified the selected Host and destination. The paired Settings root omitted phone-only controls, Back restored the root, and the paired settings snapshot stayed unchanged. Other Settings detail variants remain open. |
 
 ## Known inventory limits / next pass
 

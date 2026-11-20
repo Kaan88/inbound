@@ -144,6 +144,12 @@
   and one centre-key activation. The Host's paused transfer held at
   3,276,800 received bytes for four seconds. A physical keyboard remains
   outside this emulator proof.
+- Astra approved the C7 Hosts and web UI corrections in `c7-paired-settings-corrected-20261120-094720`.
+  The Settings roots reflected the selected Host. Paired Settings omitted
+  the three phone-only rows and the paired settings snapshot was unchanged.
+  Both detail pages showed the correct destination, switch icon, scope
+  callout and Web interface section. Filtered hierarchy checks showed only
+  the detail while open and restored the root on Back.
 - Astra approved the C7 Settings search and Back route in
   `c7-settings-insets-20261120-063758`. Catching links showed its
   guidance and browser entry with the keyboard dismissed. Site logins

@@ -1806,6 +1806,119 @@ class Capture:
                 self.smoke.tap(connect)
                 self.smoke.wait_node("Files are saved on Parity Host", timeout=30)
                 self.current_checkpoint = "c6-paired"
+                if self.args.verify_paired_c7:
+                    request = fixture.fixture_session(owned)
+                    def host_settings():
+                        reply = request("settings.get", {})
+                        payload = reply.get("payload") or {}
+                        require(reply.get("type") == "settings.result" and payload.get("ok") is True
+                                and isinstance(payload.get("settings"), dict), "Owned Host settings unavailable")
+                        return payload["settings"]
+                    before = host_settings()
+                    def save(key, tree, pair=False):
+                        require(not any(n.get("password") == "true" for n in tree.iter("node")), "Refusing sensitive screen capture")
+                        image = self.evidence / (key + "-capture.png")
+                        image.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                        ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+                        if pair:
+                            self.pairer.make_pair(MOCKUPS / "c7-settings.png", image, self.evidence / (key + "-pair.png"), key.upper())
+                    def filtered_tree():
+                        dump_path = self.smoke.xml_path
+                        result = self.shell("uiautomator", "dump", "--compressed", dump_path)
+                        require(f"dumped to: {dump_path}" in result, "Android did not export a filtered hierarchy")
+                        return ET.fromstring(self.adb("exec-out", "cat", dump_path, raw=True))
+
+                    def root_and_hosts(remote):
+                        host = "Parity Host" if remote else "This phone"
+                        self.smoke.wait_content_description(lambda d: d == f"Downloads shown from {host}. Change host", "selected Host before Settings")
+                        tap("Settings", "nav_settings")
+                        _, initial = self.smoke.wait_node("Settings", resource="settings_title")
+                        save("c7-" + ("paired" if remote else "phone") + "-root", initial, pair=not remote)
+                        seen = set()
+                        def scroll_root(tree, towards_bottom):
+                            scroll = self._unique_resource(tree, "settings_root")
+                            bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", scroll.get("bounds", ""))
+                            require(bounds, "Settings scroll bounds unavailable")
+                            left, top, right, bottom = map(int, bounds.groups())
+                            x = (left + right) // 2
+                            upper = top + (bottom - top) // 3
+                            lower = top + (bottom - top) * 4 // 5
+                            start, end = (lower, upper) if towards_bottom else (upper, lower)
+                            self.shell("input", "swipe", str(x), str(start), str(x), str(end), "350")
+
+                        for _ in range(7):
+                            tree = self.smoke.tree()
+                            seen.update(n.get("content-desc", "") for n in tree.iter("node"))
+                            if any(n.get("text") == "Check now" for n in tree.iter("node")):
+                                break
+                            scroll_root(tree, towards_bottom=True)
+                        tree = self.smoke.tree()
+                        seen.update(n.get("content-desc", "") for n in tree.iter("node"))
+                        expected = ("Background and battery. Resume and sleep prevention", "Notifications and sounds",
+                                    "Site logins. Manage sign-ins in Remote Files")
+                        require({"Downloads. Folder and connections", "Network. Network rule and speed limit",
+                                 "Catching links. Share, browser and clipboard", "Hosts and web UI. Select or pair a Host"}
+                                .issubset(seen), "Shared settings rows were not observed")
+                        require(all((item not in seen) if remote else (item in seen) for item in expected),
+                                "Phone-only settings rows differ from selected Host")
+                        save("c7-" + ("paired" if remote else "phone") + "-root-rows", tree)
+                        # Reacquire from a fresh tree, scrolling back if the last swipe passed it.
+                        row = None
+                        for _ in range(7):
+                            tree = self.smoke.tree()
+                            found = [n for n in tree.iter("node") if n.get("content-desc") == "Hosts and web UI. Select or pair a Host"
+                                     and n.get("clickable") == "true" and n.get("enabled") == "true"]
+                            require(len(found) <= 1, "Hosts settings row ambiguous")
+                            if found:
+                                row = found[0]
+                                break
+                            scroll_root(tree, towards_bottom=False)
+                        require(row is not None, "Hosts settings row unavailable")
+                        self.smoke.tap(row)
+                        _, detail = self.smoke.wait_node("Selected Host")
+                        texts = [n.get("text", "") for n in detail.iter("node")]
+                        status = "Downloads saved on the selected Host" if remote else "Downloads saved on this device"
+                        require(texts.count(host) == 1 and texts.count(status) == 1 and "Switch Host" in texts and "Pair another Host" in texts,
+                                "Hosts detail does not identify expected Host and status")
+                        require(texts.count("Web interface") == 1, "Hosts detail web interface section is missing")
+                        key = "c7-" + ("paired" if remote else "phone") + "-hosts"
+                        save(key, detail)
+                        filtered = filtered_tree()
+                        require(not self._nodes(filtered, "settings_root")
+                                and any(n.get("text") == "Selected Host" for n in filtered.iter("node"))
+                                and not any(n.get("content-desc", "") in seen - {""} for n in filtered.iter("node")),
+                                "Parent Settings nodes remained in the filtered Hosts detail hierarchy")
+                        ET.ElementTree(filtered).write(self.evidence / (key + "-filtered-ui.xml"),
+                                                       encoding="utf-8", xml_declaration=True)
+                        back, _ = self.smoke.wait_content_description(lambda d: d == "Back", "settings detail Back")
+                        self.smoke.tap(back)
+                        deadline = time.monotonic() + 20
+                        while time.monotonic() < deadline:
+                            tree = self.smoke.tree()
+                            if len(self._nodes(tree, "settings_root")) == 1 and not any(n.get("text") == "Selected Host" for n in tree.iter("node")):
+                                break
+                            time.sleep(.2)
+                        else:
+                            raise RuntimeError("Back did not return to Settings root")
+                        restored = filtered_tree()
+                        require(any(n.get("content-desc") in seen - {""} for n in restored.iter("node"))
+                                and not any(n.get("text") == "Selected Host" for n in restored.iter("node")),
+                                "Settings nodes did not return to the filtered hierarchy after Back")
+                        ET.ElementTree(restored).write(self.evidence / (key + "-back-filtered-ui.xml"),
+                                                       encoding="utf-8", xml_declaration=True)
+                        tap("Downloads", "nav_downloads")
+                        self.smoke.wait_content_description(lambda d: d == f"Downloads shown from {host}. Change host", "unchanged selected Host")
+                    root_and_hosts(True)
+                    require(host_settings() == before, "Viewing paired Settings changed Host settings")
+                    host_chip("Parity Host")
+                    phone, _ = self.smoke.wait_content_description(lambda d: d.startswith("This phone, ") and ", shown now" not in d, "phone Host choice")
+                    self.smoke.tap(phone)
+                    root_and_hosts(False)
+                    require(host_settings() == before, "Switching/viewing Settings changed paired Host settings")
+                    (self.evidence / "c7-paired-settings-proof.json").write_text(json.dumps({"paired_host": "Parity Host", "phone_host": "This phone", "paired_settings_unchanged": True,
+                                                                                              "filtered_detail_and_back": True}, indent=2) + "\n", encoding="utf-8")
+                    self.log("PASS C7: paired and phone Settings boundaries and Hosts detail; paired settings unchanged.")
+                    return self.evidence
                 if self.args.verify_paired_c2:
                     request = fixture.fixture_session(owned)
 
@@ -1925,6 +2038,7 @@ def main():
                         help="Exact disposable queue name to enter manually")
     parser.add_argument("--host-name", default="Parity Host",
                         help="Exact disposable paired-host label to enter manually")
+    parser.add_argument("--verify-paired-c7", action="store_true", help="Verify paired and phone Settings boundaries")
     parser.add_argument("--verify-paired-c2", action="store_true",
                         help="With non-mixed --paired-server-dll capture remote Main editor without saving")
     parser.add_argument("--verify-paired-c2-save", action="store_true",
@@ -1967,6 +2081,8 @@ def main():
     args = parser.parse_args()
     if args.verify_host_b_queued and (not args.mixed_hosts or not args.paired_server_dll):
         parser.error("--verify-host-b-queued requires --mixed-hosts --paired-server-dll")
+    if args.verify_paired_c7 and (not args.paired_server_dll or args.mixed_hosts or args.verify_paired_c2):
+        parser.error("--verify-paired-c7 requires a separate non-mixed --paired-server-dll lane")
     if args.verify_paired_c2_save and not args.verify_paired_c2:
         parser.error("--verify-paired-c2-save requires --verify-paired-c2")
     if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):

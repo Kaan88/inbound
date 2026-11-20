@@ -163,13 +163,14 @@ internal sealed class HostSettingsScreen : IDisposable
     }
     private LinearLayout DetailCard(LinearLayout body, string caption)
     {
-        if (caption.Length != 0)
-        {
-            var label = Label(caption, 14, Resource.Attribute.colorPrimary);
-            body.AddView(label, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(16), BottomMargin = Dp(8) });
-        }
+        if (caption.Length != 0) SectionCaption(body, caption);
         var card = Card(); var list = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         list.SetPadding(0, Dp(4), 0, Dp(4)); card.AddView(list); body.AddView(card, new LinearLayout.LayoutParams(-1, -2)); return list;
+    }
+    private void SectionCaption(LinearLayout body, string caption)
+    {
+        var label = Label(caption, 14, Resource.Attribute.colorPrimary);
+        body.AddView(label, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(16), BottomMargin = Dp(8) });
     }
     private void Note(LinearLayout body, string text)
     {
@@ -268,10 +269,17 @@ internal sealed class HostSettingsScreen : IDisposable
     {
         var list = DetailCard(body, "Selected Host");
         var host = ValueRow(list, _activity.HostName, Resource.Drawable.ic_flow_host, null); host.Text = _activity.Capabilities.IsRemote ? "Downloads saved on the selected Host" : "Downloads saved on this device";
-        var choose = ValueRow(list, "Switch Host", Resource.Drawable.ic_flow_host, () => HostSwitcherSheet.Show(_activity)); choose.Text = "Phone and paired computers";
+        var choose = ValueRow(list, "Switch Host", Resource.Drawable.ic_switch_host, () => HostSwitcherSheet.Show(_activity)); choose.Text = "Phone and paired computers";
         var pair = ValueRow(list, "Pair another Host", Resource.Drawable.ic_add, () => PairingSheet.Show(_activity)); pair.Text = "Enter a Host address and pair";
-        Note(body, "Queue, schedule and download settings follow the selected Host. Appearance, phone battery and Android notifications stay local.");
-        Note(body, "Manage a web interface on the computer or server that provides it. This phone does not start a web server.");
+        var scope = Card();
+        var scopeText = Label("Queue, schedule and download settings follow the selected Host. Appearance, phone battery and Android notifications stay local.",
+            14, Resource.Attribute.colorOnSurfaceVariant);
+        scopeText.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
+        scope.AddView(scopeText);
+        body.AddView(scope, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(16) });
+        SectionCaption(body, "Web interface");
+        body.AddView(Label("Manage a web interface on the computer or server that provides it. This phone does not start a web server.",
+            14, Resource.Attribute.colorOnSurfaceVariant));
     }
 
     /// <summary>Capture the open numeric draft before activity recreation; it is never applied by restoring.</summary>
