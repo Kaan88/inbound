@@ -144,7 +144,7 @@ class Smoke:
         self.tap(node)
         self.shell("input", "text", value.replace(" ", "%s"))
 
-    def preflight(self):
+    def preflight(self, *, include_remote_files_payload=True):
         require(self.args.serial.startswith("emulator-"), "Refusing a non-emulator serial")
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD, f"Expected dedicated AVD {AVD}")
         require(self.shell("getprop", "ro.build.version.sdk").strip() == API, f"Expected API {API}")
@@ -159,13 +159,17 @@ class Smoke:
                 f"Refusing an APK that is not {PACKAGE}")
         packages = self.shell("pm", "list", "packages", PACKAGE)
         require(f"package:{PACKAGE}" not in packages, "Probe app is already installed; refusing non-fresh run")
-        require(self.shell("test", "!", "-e", f"/sdcard/Download/{FILE}").strip() == "",
-                f"Refusing because /sdcard/Download/{FILE} already exists")
-        inventory = self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f")
-        self.baseline_files = {line.rsplit("/", 1)[-1] for line in inventory.splitlines()}
+        if include_remote_files_payload:
+            require(self.shell("test", "!", "-e", f"/sdcard/Download/{FILE}").strip() == "",
+                    f"Refusing because /sdcard/Download/{FILE} already exists")
+            inventory = self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f")
+            self.baseline_files = {line.rsplit("/", 1)[-1] for line in inventory.splitlines()}
         (self.evidence / "apk.sha256").write_text(
             hashlib.sha256(Path(self.args.apk).read_bytes()).hexdigest() + "\n", encoding="ascii")
-        self.log(f"Preflight PASS: {AVD}, API {API}; probe absent; Download files={len(self.baseline_files)}")
+        summary = f"Preflight PASS: {AVD}, API {API}; probe absent"
+        if include_remote_files_payload:
+            summary += f"; Download files={len(self.baseline_files)}"
+        self.log(summary)
 
     def run(self):
         self.preflight()
@@ -315,7 +319,7 @@ class Smoke:
             server.shutdown()
             thread.join()
 
-    def clean(self):
+    def clean(self, *, include_remote_files_payload=True):
         errors = []
         try:
             if self.installed:
@@ -325,22 +329,23 @@ class Smoke:
                             "Probe package remains installed after cleanup")
                 except Exception as exc:
                     errors.append(f"uninstall: {exc}")
-            target = f"/sdcard/Download/{FILE}"
-            try:
-                if self.started and self.target_exists(target):
-                    digest = self.shell("sha256sum", target)
-                    require(digest.split()[0] in (SHA256, getattr(self, "competing_hash", None),
-                                                  getattr(self, "interrupted_hash", None)),
-                            "Refusing to delete unexpected file at fixture output path")
-                    self.shell("rm", "-f", target)
-                if hasattr(self, "baseline_files"):
-                    current = {line.rsplit("/", 1)[-1] for line in
-                               self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()}
-                    require(current == self.baseline_files,
-                            f"Download directory differs after cleanup: {len(current - self.baseline_files)} added, "
-                            f"{len(self.baseline_files - current)} removed")
-            except Exception as exc:
-                errors.append(f"payload cleanup: {exc}")
+            if include_remote_files_payload:
+                target = f"/sdcard/Download/{FILE}"
+                try:
+                    if self.started and self.target_exists(target):
+                        digest = self.shell("sha256sum", target)
+                        require(digest.split()[0] in (SHA256, getattr(self, "competing_hash", None),
+                                                      getattr(self, "interrupted_hash", None)),
+                                "Refusing to delete unexpected file at fixture output path")
+                        self.shell("rm", "-f", target)
+                    if hasattr(self, "baseline_files"):
+                        current = {line.rsplit("/", 1)[-1] for line in
+                                   self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()}
+                        require(current == self.baseline_files,
+                                f"Download directory differs after cleanup: {len(current - self.baseline_files)} added, "
+                                f"{len(self.baseline_files - current)} removed")
+                except Exception as exc:
+                    errors.append(f"payload cleanup: {exc}")
             if self.reversed:
                 try:
                     self.adb("reverse", "--remove", f"tcp:{self.port}")

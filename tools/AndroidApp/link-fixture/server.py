@@ -14,6 +14,7 @@ PARTIAL_PAYLOAD = bytes(range(256)) * 65536
 ETAG = '"inbound-fixture-v1"'
 PARTIAL_ETAG = '"inbound-partial-v1"'
 PARTIAL_STATE = {"expired": False, "ranges": [], "lock": threading.Lock()}
+REPORT_STATE = {"authenticated_gets": 0, "lock": threading.Lock()}
 HTML = Path(__file__).with_name('page.html').read_bytes()
 MIMES = {'report-q3-2026.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'a.zip': 'application/zip', 'b.pdf': 'application/pdf', 'c.jpg': 'image/jpeg',
          'auth.zip': 'application/zip', 'expired.zip': 'application/zip', 'slow.zip': 'application/zip', 'post.zip': 'application/zip'}
@@ -98,6 +99,9 @@ class Handler(BaseHTTPRequestHandler):
             self.empty(403)
             return
         if route == 'report':
+            if self.command == 'GET' and present:
+                with REPORT_STATE["lock"]:
+                    REPORT_STATE["authenticated_gets"] += 1
             report = Path(__file__).with_name(name).read_bytes()
             self.serve_payload(report, requested, '"quarterly-report-v1"', name, body)
             return

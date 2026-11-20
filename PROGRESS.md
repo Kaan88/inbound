@@ -12,6 +12,14 @@
   and the unscheduled Mobile row showing Queued. Queue reassignment,
   disabled and running schedules, and expiry are covered by mobile tests.
   The broader file types remain open.
+- Astra approved the mixed A3 completion in `a3-mixed-formal-20261120-060116`.
+  The exact completion snackbar and Open were visible alongside one active,
+  one paused, one queued and two finished jobs. The newly finished file
+  matched its SHA-256 and was removed after the probe was uninstalled.
+- Astra approved the system chooser and probe dialog in
+  `b1-native-share-final-20261120-060519`. Chrome shared the exact
+  fixture Archive link to Inbound Probe. Cancel left the Downloads count
+  at zero and created no new fixture-named file.
 - Astra approved the final A6 Details in
   `a6-details-pause-final-20261120-054830`. Two independent active ranges
   advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
@@ -62,7 +70,7 @@ probe, and the regular build resolves Inbound and app.inbound.android.
 
 - Astra passed the direct A3 snackbar Open in `a3-snackbar-open-20261120-044317`.
   Photos displayed the expected synthetic PNG, the completed SHA-256 matched,
-  and scoped cleanup passed. The mixed A3 list remains open.
+  and scoped cleanup passed. See the mixed-workload checkpoint above.
 - Astra passed the C3 active WebDAV view in `c3-c4-active-20261120-043917`.
   It showed two downloads at 57.3 KB/s and fixture bytes advanced from
   1,638,400 to 1,900,544. The trusted SFTP browse in

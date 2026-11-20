@@ -87,6 +87,7 @@ class Capture:
         self.xml_path = f"/data/local/tmp/download-states-{self.nonce}.xml"
         self.smoke.xml_path = self.xml_path
         self.capture_gate = threading.Event()
+        self.a3_output_owned = False
 
     def adb(self, *args, raw=False):
         return self.smoke.adb(*args, raw=raw)
@@ -118,6 +119,10 @@ class Capture:
                 f"APK package must be exactly {PACKAGE}")
         require(f"package:{PACKAGE}" not in self.shell("pm", "list", "packages", PACKAGE),
                 "Probe package is already installed; refusing to replace or clear it")
+        if self.args.capture_mixed_a3:
+            target = "/sdcard/Download/" + self.names["other-active"]
+            require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                    "A3 exact fixture destination already exists")
         initial_files = self.shell(
             "find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()
         (self.evidence / "apk.sha256").write_text(
@@ -201,7 +206,7 @@ class Capture:
         self.fixture = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         self.fixture_thread = threading.Thread(target=self.fixture.serve_forever, daemon=True)
         self.fixture_thread.start()
-        self.adb("reverse", f"tcp:{self.port}", f"tcp:{self.port}")
+        self.adb("reverse", "--no-rebind", f"tcp:{self.port}", f"tcp:{self.port}")
         self.reversed = True
         self.log("Fixture ready. Add only the printed http://127.0.0.1 URLs in the probe.")
         keys = ("active", "queued", "paused", "finished") if self.args.mixed_a2 else ("active", "queued")
@@ -462,7 +467,7 @@ class Capture:
             input("\nArrange three selected real rows with the bulk overflow menu open, then press Enter: ")
             self.capture("b5-select", "b5-select.png", "Downloads", prompt=False)
 
-    def select_light_theme(self):
+    def select_theme(self, theme):
         """Use only the probe UI; settings changes may recreate the activity."""
         settings, _ = self.smoke.wait_node("Settings", resource="nav_settings")
         self.smoke.tap(settings)
@@ -473,37 +478,41 @@ class Capture:
             require(len(nodes) == 1, "Expected exactly one Theme setting")
             return nodes[0]
         self.smoke.tap(theme_row())
-        choice, _ = self.smoke.wait_node("Light")
+        choice, _ = self.smoke.wait_node(theme)
         self.smoke.tap(choice)
         # AppCompat can recreate the activity; wait for the restored Settings tab.
-        self.smoke.wait_node("Light", resource="theme_text", timeout=30)
+        self.smoke.wait_node(theme, resource="theme_text", timeout=30)
         switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
         if switch.get("checked") == "true":
             require(switch.get("enabled") == "true", "Dynamic colour cannot be turned off")
             self.smoke.tap(switch)
-            self.smoke.wait_node("Light", resource="theme_text", timeout=30)
+            self.smoke.wait_node(theme, resource="theme_text", timeout=30)
         switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch", timeout=30)
         require(switch.get("checked") == "false", "Dynamic colour remained enabled")
         # Reopen the real dialog to verify the stored choice after any recreation.
         self.smoke.tap(theme_row())
-        choice, tree = self.smoke.wait_node("Light")
-        require(choice.get("checked") == "true", "Theme dialog did not confirm Light selected")
-        ET.ElementTree(tree).write(self.evidence / "c8-theme-confirmation.xml", encoding="utf-8", xml_declaration=True)
+        choice, tree = self.smoke.wait_node(theme)
+        require(choice.get("checked") == "true", f"Theme dialog did not confirm {theme} selected")
+        stem = "c8" if theme == "Light" else "a1-a2-dark"
+        ET.ElementTree(tree).write(self.evidence / f"{stem}-theme-confirmation.xml", encoding="utf-8", xml_declaration=True)
         self.smoke.tap(self.smoke.wait_node("Cancel")[0])
         downloads, _ = self.smoke.wait_node("Downloads", resource="nav_downloads")
         self.smoke.tap(downloads)
         self.smoke.wait_node("Search downloads", timeout=30)
-        self.log("PASS C8 setup: Light selected and dynamic colour off in the probe UI")
+        label = "C8" if theme == "Light" else "A1/A2 dark"
+        self.log(f"PASS {label} setup: {theme} selected and dynamic colour off in the probe UI")
 
     def capture_b5_unattended(self):
         keys = B5_KEYS
         setup, _ = self.smoke.wait_node("Start downloading", resource="fr_start")
         self.smoke.tap(setup)
         if self.args.capture_c8_light:
-            self.select_light_theme()
+            self.select_theme("Light")
+        elif self.args.capture_dark_mixed:
+            self.select_theme("Dark")
         self.log("B5: complete the real finished fixture first; then stage active rows one at a time and admit the queued row with New download, then Later.")
         expected = [self.names[key] for key in keys]
-        def wait_tree(predicate, description):
+        def wait_tree(predicate, description, *, return_tree=False):
             deadline = time.monotonic() + 60
             tree = None
             while time.monotonic() < deadline:
@@ -514,7 +523,7 @@ class Capture:
                     time.sleep(.25)
                     continue  # Active progress can interrupt uiautomator.
                 if predicate(nodes):
-                    return nodes
+                    return tree if return_tree else nodes
                 time.sleep(.25)
             if tree is not None:
                 ET.ElementTree(tree).write(self.evidence / "b5-unmatched-ui.xml", encoding="utf-8")
@@ -596,6 +605,29 @@ class Capture:
             require(not any(n.get("resource-id", "").endswith(":id/sel_title") for n in captured),
                     "C8 capture unexpectedly entered selection mode")
             self.log("PASS representative C8: real active, paused, queued and finished fixture rows; Light verified in Settings")
+        if self.args.capture_dark_mixed:
+            active_keys = ("selected-active", "other-active")
+            def valid_mixed(nodes):
+                rate = [n.get("text", "") for n in nodes if n.get("resource-id", "").endswith(":id/summary_rate")]
+                if len(rate) != 1: return False
+                match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?) (?:B|KB|MB|GB|TB)/s", rate[0])
+                return bool(match and float(match.group(1)) > 0 and
+                            all(has_state(nodes, self.names[key], state) for key, state in desired.items()) and
+                            not any(n.get("resource-id", "").endswith(":id/sel_title") for n in nodes))
+            for key, reference in (("a1-dark-mixed", "a1-downloads.png"),
+                                   ("a2-dark-mixed", "a2-downloads-later.png")):
+                before = {name: self.sent[name] for name in active_keys}
+                wait_tree(lambda ns: all(0 < before[name] < self.sent[name] < FILE_SIZE for name in active_keys)
+                          and valid_mixed(ns), "both real transfers advancing and nonzero Host summary rate")
+                self.capture(key, reference, "Search downloads", prompt=False)
+                captured = list(ET.parse(self.evidence / f"{key}-ui.xml").getroot().iter("node"))
+                require(valid_mixed(captured), f"{key} no longer shows the mixed jobs and a nonzero summary rate")
+                after = {name: self.sent[name] for name in active_keys}
+                require(all(0 < before[name] < after[name] < FILE_SIZE for name in active_keys),
+                        f"{key} did not retain both advancing fixture transfers")
+                self.log(f"PASS {key}: representative dark mixed list; fixture byte samples {before} -> {after}")
+            nodes = wait_tree(lambda ns: all(has_state(ns, self.names[key], state)
+                                             for key, state in desired.items()), "mixed jobs before B5 selection")
         # Select precisely the active, paused and queued rows by their visible,
         # uniquely identified cards. The new selection anchor is state-checked
         # below before the overflow menu is opened.
@@ -634,6 +666,37 @@ class Capture:
         require(len(again) == 1 and again[0].get("enabled") == "false",
                 "Download again must be disabled while all selected rows are unfinished")
         self.capture("b5-unattended", "b5-select.png", "Move to queue", prompt=False)
+        if self.args.capture_mixed_a3:
+            self.shell("input", "keyevent", "4")  # Close the actual overflow popup.
+            wait_tree(lambda ns: selected(ns, 3) and not menu_entry(ns, "Move to queue"), "popup dismissed")
+            self.shell("input", "keyevent", "4")  # Close the actual selection mode.
+            wait_tree(lambda ns: not selected(ns, 3) and all(
+                has_state(ns, self.names[key], state) for key, state in desired.items()),
+                "the five unselected owned rows")
+            target = "/sdcard/Download/" + self.names["other-active"]
+            require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                    "A3 exact fixture destination appeared before release")
+            self.a3_output_owned = True
+            self.b5_release["other-active"].set()
+            completed = dict(desired, **{"other-active": "finished"})
+            filename = self.names["other-active"]
+            def completion_visible(ns):
+                return (all(has_state(ns, self.names[key], state) for key, state in completed.items()) and
+                        any(n.get("text") == filename + " finished" for n in ns) and
+                        any(n.get("resource-id", "").endswith(":id/snackbar_action") and
+                            n.get("text") == "Open" and n.get("enabled") == "true" for n in ns))
+            tree = wait_tree(completion_visible, "the exact completed fixture snackbar and mixed rows", return_tree=True)
+            image = self.evidence / "a3-dark-mixed-capture.png"
+            image.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / "a3-dark-mixed-ui.xml", encoding="utf-8", xml_declaration=True)
+            pairer = load_module("a3_mixed_pair", PAIR_HELPER_PATH)
+            pairer.make_pair(MOCKUPS / "a3-downloads-finished.png", image,
+                             self.evidence / "a3-dark-mixed-pair.png", "A3 mixed")
+            expected_hash = hashlib.sha256(fixture_bytes("other-active")).hexdigest()
+            digest = self.shell(f"if [ -f '{target}' ]; then sha256sum '{target}'; fi").split()
+            require(digest[:1] == [expected_hash], "A3 exact completed fixture payload hash mismatch")
+            (self.evidence / "a3-mixed-sha256.txt").write_text(expected_hash + "\n", encoding="ascii")
+            self.log("PASS representative A3: exact completed fixture snackbar and mixed rows, matching payload hash")
 
     def add_b5_later_job(self, key):
         """Admit the selected queued row through the real New download form."""
@@ -704,36 +767,71 @@ class Capture:
                 "Exact B5 finished fixture payload remained after cleanup")
 
     def clean(self):
+        errors = []
+        writer_stopped = True
+        if self.args.capture_mixed_a3 and self.installed:
+            # Stop the writer before fixture release or exact-file cleanup.
+            try:
+                self.shell("am", "force-stop", PACKAGE)
+                require(self.shell(f"if pidof {PACKAGE} >/dev/null; then echo running; else echo stopped; fi").strip() == "stopped",
+                        "Probe writer did not stop; preserving all outputs")
+            except Exception as exc:
+                writer_stopped = False
+                errors.append(str(exc))
         if self.started and getattr(self.args, "details_flow", False):
             self.shell("cmd", "statusbar", "collapse")
-        for event in self.b5_release.values():
-            event.set()
+        if writer_stopped:
+            for event in self.b5_release.values():
+                event.set()
         if self.fixture is not None:
-            self.fixture.shutdown()
-            self.fixture.server_close()
-            self.fixture_thread.join(timeout=5)
-            self.fixture = None
+            try:
+                if self.fixture_thread is not None and self.fixture_thread.is_alive():
+                    self.fixture.shutdown()
+                    self.fixture_thread.join(timeout=5)
+                self.fixture.server_close()
+                self.fixture = None
+            except Exception as exc:
+                errors.append(f"fixture cleanup: {exc}")
         if self.reversed:
-            self.adb("reverse", "--remove", f"tcp:{self.port}")
-            self.reversed = False
-            self.log("Cleanup PASS: removed only this runner's ADB reverse mapping and stopped its fixture.")
+            try:
+                self.adb("reverse", "--remove", f"tcp:{self.port}")
+                self.reversed = False
+                self.log("Cleanup PASS: removed only this runner's ADB reverse mapping and stopped its fixture.")
+            except Exception as exc:
+                errors.append(f"reverse cleanup: {exc}")
         if self.installed:
             self.adb("uninstall", PACKAGE)
             require(f"package:{PACKAGE}" not in self.shell("pm", "list", "packages", PACKAGE),
                     "Probe package remains installed after scoped cleanup")
             self.log("Cleanup PASS: uninstalled only the probe package; shared Download files were not deleted.")
-        if self.installed and getattr(self.args, "unattended_b5", False):
+            if not writer_stopped:
+                for event in self.b5_release.values():
+                    event.set()
+        if self.installed and writer_stopped and getattr(self.args, "unattended_b5", False):
             try:
                 self.cleanup_b5_finished_payload()
             except Exception as exc:
                 # Never replace the original capture failure or delete an
                 # unexpected/mismatched file. Keep the cleanup diagnostic visible.
                 self.log(f"Cleanup WARNING: {exc}")
+        if self.args.capture_mixed_a3 and self.a3_output_owned and self.installed and writer_stopped:
+            target = "/sdcard/Download/" + self.names["other-active"]
+            if self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() == "present":
+                expected = hashlib.sha256(fixture_bytes("other-active")).hexdigest()
+                digest = self.shell(f"if [ -f '{target}' ] && [ ! -L '{target}' ]; then sha256sum '{target}'; fi").split()
+                require(digest[:1] == [expected], "A3 output changed or is incomplete; preserving it")
+                self.shell("rm", "--", target)
+                require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                        "Exact A3 fixture output remains after cleanup")
+                self.log("PASS A3 cleanup: exact hash-matched output removed after probe uninstall")
         if self.started:
             try:
                 self.shell("rm", "-f", self.xml_path)
             except Exception:
                 pass
+
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
 
 def main():
@@ -752,10 +850,16 @@ def main():
                         help="Opt in to four real uniquely named A2 fixture downloads and guided mixed-state/graph captures")
     parser.add_argument("--capture-b5", action="store_true",
                         help="With --mixed-a2, capture B5 using three real fixture rows selected in Downloads")
+    parser.add_argument("--capture-mixed-a3", action="store_true", help="After B5 capture one real completion snackbar among the dark mixed jobs")
+    parser.add_argument("--capture-dark-mixed", action="store_true", help="With --unattended-b5 capture representative dark A1/A2 real mixed states")
     parser.add_argument("--capture-c8-light", action="store_true", help="With --unattended-b5 capture the real mixed list in Light mode before selection")
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
+    if args.capture_mixed_a3 and not (args.unattended_b5 and args.capture_dark_mixed):
+        parser.error("--capture-mixed-a3 requires --unattended-b5 --capture-dark-mixed")
+    if args.capture_dark_mixed and (not args.unattended_b5 or args.capture_c8_light):
+        parser.error("--capture-dark-mixed requires --unattended-b5 and cannot be combined with --capture-c8-light")
     if args.capture_c8_light and not args.unattended_b5:
         parser.error("--capture-c8-light requires --unattended-b5")
     if args.details_flow and (not args.active_only or args.mixed_a2 or args.unattended_a7_navigation):
@@ -765,6 +869,8 @@ def main():
     if args.unattended_b5 and (args.mixed_a2 or args.capture_b5 or args.active_only or args.unattended_a7_navigation):
         parser.error("--unattended-b5 is a standalone lane and cannot be combined with other lane flags")
     args.instructions = {
+        "a1-dark-mixed": "Representative dark Downloads with five real mixed jobs and a live rate.",
+        "a2-dark-mixed": "Representative dark Downloads with five real mixed jobs and a live rate.",
         "c8-populated": "Light Downloads with five real fixture jobs in mixed states before selection.",
         "b5-unattended": "Three uniquely identified B5 fixture rows are selected and the bulk overflow menu is open.",
         "a2-progress": "Keep the active fixture download showing nonzero, changing progress.",

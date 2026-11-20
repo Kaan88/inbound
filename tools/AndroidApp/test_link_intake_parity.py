@@ -39,7 +39,7 @@ class LinkIntakeParityTests(unittest.TestCase):
         for route in ("/page", "/signin", "/auth.zip", "/expired.zip"):
             with self.subTest(route=route):
                 self.assertIn(route, fixture_source)
-        self.assertIn("Sharing link", CAPTURE.CAPTURES[0][2])
+        self.assertEqual(CAPTURE.CAPTURES[0][2], "http://127.0.0.1:PORT/")
 
     def test_unattended_does_not_pair_page_selection_with_b5(self):
         import inspect

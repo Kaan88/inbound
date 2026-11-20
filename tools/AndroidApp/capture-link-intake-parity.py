@@ -1,12 +1,12 @@
 """Guided B1-B6 Android link-intake captures using the disposable link fixture."""
 
 import argparse
-import subprocess
 import hashlib
+import subprocess
+import sys
 import importlib.machinery
 import uuid
 from http.server import ThreadingHTTPServer
-import socket
 import re
 import threading
 import time
@@ -26,7 +26,7 @@ API = "33"
 # The actual Android chooser is B1. Its post-share decision is additional
 # functional evidence; the distinct caught-download confirmation is B2.
 CAPTURES = (
-    ("b1-chooser", "b1-share.png", "Sharing link"),
+    ("b1-chooser", "b1-share.png", "http://127.0.0.1:PORT/"),
     ("b1-caught", None, "Shared link"),
     ("b2", "b2-caught.png", "Download with Inbound"),
     ("b3", "b3-signed-in.png", "Cookies stay on this phone"),
@@ -64,18 +64,25 @@ class Capture:
         self.smoke.log(text)
 
     def preflight(self):
-        self.smoke.preflight()
+        self.smoke.preflight(include_remote_files_payload=False)
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD,
                 f"Refusing anything other than {AVD}")
         require(self.shell("getprop", "ro.build.version.sdk").strip() == API,
                 f"Refusing anything other than API {API}")
         baseline = self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f")
-        (self.evidence / "device-baseline.txt").write_text(baseline, encoding="utf-8")
+        (self.evidence / "device-baseline-count.txt").write_text(str(len(baseline.splitlines())) + "\n", encoding="ascii")
         module = load_module("link_intake_fixture", FIXTURE)
         self.fixture_module = module
         with module.PARTIAL_STATE["lock"]:
             module.PARTIAL_STATE["expired"] = False
             module.PARTIAL_STATE["ranges"].clear()
+        if self.args.verify_b3_completion:
+            self.b3_target = "/sdcard/Download/report-q3-2026.xlsx"
+            require(self.shell(f"if [ -e '{self.b3_target}' ] || [ -L '{self.b3_target}' ]; then echo present; fi").strip() != "present",
+                    "B3 exact output already exists; refusing to replace it")
+            with module.REPORT_STATE["lock"]:
+                module.REPORT_STATE["authenticated_gets"] = 0
+            self.b3_hash = hashlib.sha256((FIXTURE.parent / "report-q3-2026.xlsx").read_bytes()).hexdigest()
         self.fixture_hash = hashlib.sha256(module.PAYLOAD).hexdigest()
         (self.evidence / "fixture.txt").write_text(
             f"Loopback fixture only; payload bytes={len(module.PAYLOAD)}; "
@@ -85,19 +92,16 @@ class Capture:
             encoding="ascii")
 
     def start_fixture(self):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            self.port = sock.getsockname()[1]
-
         module = self.fixture_module
 
         class QuietHandler(module.Handler):
             pass
 
-        self.fixture = ThreadingHTTPServer(("127.0.0.1", self.port), QuietHandler)
+        self.fixture = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+        self.port = self.fixture.server_port
         self.fixture_thread = threading.Thread(target=self.fixture.serve_forever, daemon=True)
         self.fixture_thread.start()
-        self.adb("reverse", f"tcp:{self.port}", f"tcp:{self.port}")
+        self.adb("reverse", "--no-rebind", f"tcp:{self.port}", f"tcp:{self.port}")
         self.reversed = True
         self.log(f"Disposable link fixture listening only on loopback; emulator URL uses port {self.port}.")
 
@@ -109,6 +113,7 @@ class Capture:
         self.log("Probe launched normally. Open Chrome manually for B1; do not synthesize a share intent.")
 
     def capture(self, key, reference, anchor, *, prompt=True):
+        anchor = anchor.replace("PORT", str(self.port))
         instruction = self.args.instructions[key].replace("PORT", str(self.port))
         self.log(f"Checkpoint {key}: {instruction}")
         if prompt:
@@ -137,6 +142,59 @@ class Capture:
             size = helper.make_pair(MOCKUPS / reference, image,
                                     self.evidence / f"{stem}-pair.png", key.upper())
             self.log(f"Captured {key}: {image.name}, {stem}-ui.xml, pair {size[0]}x{size[1]}.")
+
+    def guided_b1_only(self):
+        """Operator drives Chrome and the real Android chooser; no share intent is injected."""
+        setup, _ = self.smoke.wait_node("Start downloading", resource="fr_start")
+        self.smoke.tap(setup)
+        self.smoke.wait_node("Search downloads", timeout=30)
+
+        def download_count():
+            tree = self.smoke.tree()
+            counts = []
+            for node in tree.iter("node"):
+                match = re.fullmatch(r"All (\d+)", node.get("text", ""))
+                if match:
+                    require(node.get("checked") == "true", "Downloads All filter is not selected")
+                    counts.append(int(match.group(1)))
+            require(len(counts) == 1, "Expected exactly one selected All downloads count")
+            return counts[0]
+
+        def fixture_outputs():
+            # Compare only fixture-specific names; do not serialize unrelated filenames.
+            paths = self.shell("find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()
+            return {path.rsplit("/", 1)[-1] for path in paths
+                    if re.fullmatch(r"(?:a(?: \(\d+\))?\.zip|page(?: \(\d+\))?(?:\.html)?)", path.rsplit("/", 1)[-1])}
+
+        baseline = download_count()
+        outputs = fixture_outputs()
+        self.log(f"B1 probe baseline: selected All count {baseline}; fixture-name baseline recorded in memory only.")
+        refs = {key: (reference, anchor) for key, reference, anchor in CAPTURES}
+        self.capture("b1-chooser", *refs["b1-chooser"])
+        chooser = ET.parse(self.evidence / "b1-chooser-ui.xml").getroot()
+        system_packages = {"android", "com.android.intentresolver", "com.google.android.intentresolver"}
+        origin = f"http://127.0.0.1:{self.port}"
+        system_nodes = [node for node in chooser.iter("node") if node.get("package") in system_packages]
+        expected_link = origin + "/files/a.zip#section"
+        require(any(node.get("resource-id", "").endswith(":id/content_preview_text")
+                    and node.get("text") == expected_link for node in system_nodes),
+                "Android chooser did not preview an exact URL from the owned fixture")
+        require(any("Inbound Probe" in (node.get("text"), node.get("content-desc"))
+                    for node in system_nodes), "Android chooser did not expose the distinct Inbound Probe target")
+        self.capture("b1-caught", *refs["b1-caught"])
+        dialog = ET.parse(self.evidence / "b1-caught-ui.xml").getroot()
+        probe_nodes = [node for node in dialog.iter("node") if node.get("package") == PACKAGE]
+        labels = {node.get("text") for node in probe_nodes}
+        require({"Shared link", "Open page", "Add file", "Cancel"}.issubset(labels)
+                and any(node.get("resource-id") == "android:id/message"
+                        and node.get("text", "").partition("\n")[0] == "127.0.0.1" for node in probe_nodes),
+                "Expected the probe Shared link dialog with the exact fixture host and all three actions")
+        input("\nIn the probe tap Cancel, return to its Downloads list, then press Enter: ")
+        self.smoke.wait_node("Search downloads", timeout=30)
+        require(download_count() == baseline, "Downloads count changed after cancelling the shared link")
+        require(fixture_outputs() == outputs, "The fixture-named shared Download inventory changed")
+        self.log(f"PASS B1 cancellation: probe All count remained {baseline}; no new fixture-named output observed.")
+        self.log("B2–B6 were not captured in this B1-only run.")
 
     def unattended_sequence(self):
         def tap(label, resource=None):
@@ -649,6 +707,49 @@ class Capture:
             if not self.shell("ls", "-A", directory).strip():
                 self.shell("rmdir", directory)
 
+    def verify_b3_completion(self):
+        """Submit the real local signed-in sheet; remove only the owned exact hash after stopping its writer."""
+        target = self.b3_target
+        require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                "B3 output appeared before submission; preserving it")
+        with self.fixture_module.REPORT_STATE["lock"]:
+            before = self.fixture_module.REPORT_STATE["authenticated_gets"]
+        submitted = False
+        try:
+            submit, _ = self.smoke.wait_node("Download", resource="caught_submit")
+            submitted = True  # A lost tap reply cannot prove the job was not admitted.
+            self.smoke.tap(submit)
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                with self.fixture_module.REPORT_STATE["lock"]:
+                    count = self.fixture_module.REPORT_STATE["authenticated_gets"]
+                digest = self.shell(f"if [ -f '{target}' ] && [ ! -L '{target}' ]; then sha256sum '{target}'; fi").split()
+                if count > before and digest[:1] == [self.b3_hash]:
+                    break
+                time.sleep(.4)
+            else:
+                raise RuntimeError("B3 did not produce both an authenticated report GET and matching output hash")
+            (self.evidence / "b3-auth-completion.txt").write_text(
+                f"Protected report GETs after submission: {count - before}\nSHA-256: {self.b3_hash}\n",
+                encoding="ascii")
+            self.log("PASS B3 completion: the protected fixture report was fetched after Download and matched SHA-256")
+        finally:
+            pending = sys.exc_info()[0] is not None
+            try:
+                if submitted:
+                    self.shell("am", "force-stop", PACKAGE)
+                    require(self.shell(f"if pidof {PACKAGE} >/dev/null; then echo running; else echo stopped; fi").strip() == "stopped",
+                            "Probe writer did not stop; preserving B3 output")
+                    if self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() == "present":
+                        result = self.shell(f"if [ -f '{target}' ] && [ ! -L '{target}' ]; then sha256sum '{target}'; fi").split()
+                        require(result[:1] == [self.b3_hash], "B3 output changed or is incomplete; preserving it")
+                        self.shell("rm", "--", target)
+                        require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
+                                "B3 owned file remains after cleanup")
+            except Exception as exc:
+                if not pending: raise
+                self.log(f"B3 cleanup warning; preserving original failure and unexpected file: {exc}")
+
     def capture_fixture_catches(self):
         def tap_web_link(label):
             for _ in range(12):
@@ -686,15 +787,20 @@ class Capture:
         tap_web_link("report-q3-2026.xlsx")
         self.smoke.wait_node("report-q3-2026.xlsx", resource="caught_name")
         self.capture("b3", "b3-signed-in.png", "Cookies stay on this phone", prompt=False)
+        if self.args.verify_b3_completion:
+            self.verify_b3_completion()
+            return
         self.smoke.shell("input", "keyevent", "4")
         self.log("PASS B2/B3: fixture filenames and local cookie notice before signed-in submission.")
 
     def run(self):
         self.preflight()
-        self.start_fixture()
         try:
+            self.start_fixture()
             self.launch()
-            if self.args.unattended:
+            if self.args.b1_only:
+                self.guided_b1_only()
+            elif self.args.unattended:
                 self.unattended_sequence()
             else:
                 for key, reference, anchor in CAPTURES:
@@ -710,15 +816,31 @@ class Capture:
                     pass
             raise
         finally:
-            if self.fixture is not None:
-                self.fixture.shutdown()
-                self.fixture.server_close()
-            if self.fixture_thread is not None:
-                self.fixture_thread.join()
+            pending = sys.exc_info()[0] is not None
+            errors = []
+            try:
+                if self.fixture_thread is not None and self.fixture_thread.is_alive():
+                    self.fixture.shutdown()
+                    self.fixture_thread.join(timeout=5)
+                if self.fixture is not None:
+                    self.fixture.server_close()
+            except Exception as exc:
+                errors.append(f"fixture shutdown: {exc}")
             if self.reversed:
-                self.adb("reverse", "--remove", f"tcp:{self.port}")
-                self.log("Removed only this run's ADB reverse.")
-            self.smoke.clean()
+                try:
+                    self.adb("reverse", "--remove", f"tcp:{self.port}")
+                    self.log("Removed only this run's ADB reverse.")
+                except Exception as exc:
+                    errors.append(f"reverse removal: {exc}")
+            try:
+                self.smoke.clean(include_remote_files_payload=False)
+            except Exception as exc:
+                errors.append(f"probe cleanup: {exc}")
+            if errors:
+                message = "Link fixture cleanup failed: " + "; ".join(errors)
+                if not pending:
+                    raise RuntimeError(message)
+                self.log(message)
         return self.evidence
 
 
@@ -730,11 +852,13 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated rcloneprobe APK")
     parser.add_argument("--evidence", type=Path, required=True,
                         help="New, previously absent evidence directory")
+    parser.add_argument("--b1-only", action="store_true", help="Guided real Chrome share chooser and cancel check only")
     parser.add_argument("--unattended", action="store_true",
                          help="Capture B4 and its selected state in the built-in browser without prompting")
     parser.add_argument("--verify-search", action="store_true", help="Verify the B4 header search toggle")
     parser.add_argument("--verify-phone-folder", action="store_true", help="Choose a unique phone Downloads child and verify the archive SHA-256")
     parser.add_argument("--capture-archives", action="store_true", help="Verify six real archives and their selected byte total")
+    parser.add_argument("--verify-b3-completion", action="store_true", help="Complete the isolated authenticated B3 fixture report and verify its hash")
     parser.add_argument("--capture-caught", action="store_true", help="Also capture B2 and B3 against the loopback fixture")
     parser.add_argument("--capture-b6", action="store_true",
                         help="Opt in to the loopback expired-link → refresh → hash/cleanup B6 flow")
@@ -745,6 +869,14 @@ def main():
     parser.add_argument("--verify-details-stop", action="store_true",
                         help="In the partial B6 flow verify active Details Stop retains progress and hides restart from zero")
     args = parser.parse_args()
+    if args.verify_b3_completion and (not args.unattended or not args.capture_caught or args.b1_only
+                                       or args.verify_search or args.verify_phone_folder or args.capture_archives
+                                       or args.capture_b6 or args.capture_b6_partial or args.capture_b6_browser or args.verify_details_stop):
+        parser.error("--verify-b3-completion requires only --unattended --capture-caught")
+    if args.b1_only and (args.unattended or args.verify_search or args.verify_phone_folder or args.capture_archives
+                         or args.capture_caught or args.capture_b6 or args.capture_b6_partial
+                         or args.capture_b6_browser or args.verify_details_stop):
+        parser.error("--b1-only is a standalone guided lane")
     if args.capture_b6_browser and not (args.unattended and args.capture_b6_partial):
         parser.error("--capture-b6-browser requires --unattended --capture-b6-partial")
     if args.verify_details_stop and not (args.unattended and args.capture_b6_partial):
@@ -762,7 +894,7 @@ def main():
     args.instructions = {
         "b4-archives": "Capture six checked archives and the combined size.",
         "b1-chooser": "In Chrome open http://127.0.0.1:PORT/page; Share link → Android chooser. Capture chooser itself.",
-        "b1-caught": "Choose Inbound in the real chooser; capture Shared link sheet before choosing an action.",
+        "b1-caught": "Choose Inbound Probe in the Android chooser; capture Shared link before choosing an action.",
         "b2": "Open the fixture in Inbound's browser and tap Archive. Capture Download with Inbound before submitting; verify one job/hash separately.",
         "b3": "Select This phone. In Inbound's browser, visit the fixture /signin then tap Authenticated archive. Capture the cookie-use notice before submitting.",
         "b4": "On the fixture page open Links on page; capture the eight-link list/filter state.",
