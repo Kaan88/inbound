@@ -115,7 +115,7 @@ internal sealed partial class DownloadsScreen
         page.FindViewById<View>(Resource.Id.sel_more)!.Click += (v, _) => ShowSelectionMenu((View)v!);
     }
 
-    private int PauseIcon => _activity.Capabilities.IsRemote ? Resource.Drawable.ic_pause_remote : Resource.Drawable.ic_pause;
+    private const int PauseIcon = Resource.Drawable.ic_pause_thin;
 
     public bool Selecting => _list.Selecting;
 
@@ -442,8 +442,8 @@ internal sealed partial class DownloadsScreen
         {
             var (icon, text) = row.Action switch
             {
-                RowAction.Pause => (_s.PauseIcon, "Pause"),
-                RowAction.Resume => (Resource.Drawable.ic_play, "Resume"),
+                RowAction.Pause => (PauseIcon, "Pause"),
+                RowAction.Resume => (Resource.Drawable.ic_play_outline, "Resume"),
                 RowAction.Retry => (Resource.Drawable.ic_refresh, "Retry"),
                 RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_flow_folder, "Show in folder"),
                 _ => (0, ""),
@@ -452,9 +452,9 @@ internal sealed partial class DownloadsScreen
             if (icon == 0) return;
             _action.SetImageResource(icon);
             _action.ContentDescription = text + " " + row.Name;
-            var folder = row.Action == RowAction.ShowInFolder;
-            var background = folder ? Resource.Attribute.colorSurfaceContainerHighest : Resource.Attribute.colorSecondaryContainer;
-            var foreground = folder ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorOnSecondaryContainer;
+            var neutral = row.Action is RowAction.Resume or RowAction.ShowInFolder;
+            var background = neutral ? Resource.Attribute.colorSurfaceContainerHighest : Resource.Attribute.colorSecondaryContainer;
+            var foreground = neutral ? Resource.Attribute.colorOnSurfaceVariant : Resource.Attribute.colorOnSecondaryContainer;
             _action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, background)));
             _action.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, foreground)));
         }

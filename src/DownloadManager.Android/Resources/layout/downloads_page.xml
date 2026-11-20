@@ -18,7 +18,7 @@
         <TextView android:id="@+id/sel_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp"
             android:textAppearance="?attr/textAppearanceTitleLarge" android:textColor="?attr/colorOnSurface" android:accessibilityLiveRegion="polite" />
         <ImageButton android:id="@+id/sel_resume" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_play_outline" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Resume selected" />
-        <ImageButton android:id="@+id/sel_pause" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_pause" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Pause selected" />
+        <ImageButton android:id="@+id/sel_pause" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_pause_thin" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Pause selected" />
         <ImageButton android:id="@+id/sel_delete" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_remote_trash" android:tint="?attr/colorControlNormal" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Delete selected" />
         <ImageButton android:id="@+id/sel_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
       </LinearLayout>
@@ -34,7 +34,7 @@
             <TextView android:id="@+id/summary_rate" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="34sp" android:textStyle="bold" android:textColor="?attr/colorOnSecondaryContainer" android:singleLine="true" />
             <TextView android:id="@+id/summary_details" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textSize="13sp" android:textColor="?attr/colorOnSecondaryContainer" android:maxLines="2" />
           </LinearLayout>
-          <ImageButton android:id="@+id/summary_toggle" android:layout_width="52dp" android:layout_height="52dp" android:background="@drawable/bg_circle_primary" android:src="@drawable/ic_pause" app:tint="?attr/colorOnPrimary" android:contentDescription="Pause all downloads" />
+          <ImageButton android:id="@+id/summary_toggle" android:layout_width="52dp" android:layout_height="52dp" android:background="@drawable/bg_circle_primary" android:src="@drawable/ic_pause_thin" app:tint="?attr/colorOnPrimary" android:contentDescription="Pause all downloads" />
         </LinearLayout>
         <FrameLayout android:id="@+id/summary_graph" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="8dp" android:importantForAccessibility="no" />
       </LinearLayout>

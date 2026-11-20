@@ -462,10 +462,45 @@ class Capture:
             input("\nArrange three selected real rows with the bulk overflow menu open, then press Enter: ")
             self.capture("b5-select", "b5-select.png", "Downloads", prompt=False)
 
+    def select_light_theme(self):
+        """Use only the probe UI; settings changes may recreate the activity."""
+        settings, _ = self.smoke.wait_node("Settings", resource="nav_settings")
+        self.smoke.tap(settings)
+        self.smoke.wait_node("Theme")
+        def theme_row():
+            nodes = [n for n in self.smoke.tree().iter("node")
+                     if n.get("resource-id", "").endswith(":id/setting_theme")]
+            require(len(nodes) == 1, "Expected exactly one Theme setting")
+            return nodes[0]
+        self.smoke.tap(theme_row())
+        choice, _ = self.smoke.wait_node("Light")
+        self.smoke.tap(choice)
+        # AppCompat can recreate the activity; wait for the restored Settings tab.
+        self.smoke.wait_node("Light", resource="theme_text", timeout=30)
+        switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch")
+        if switch.get("checked") == "true":
+            require(switch.get("enabled") == "true", "Dynamic colour cannot be turned off")
+            self.smoke.tap(switch)
+            self.smoke.wait_node("Light", resource="theme_text", timeout=30)
+        switch, _ = self.smoke.wait_node("Dynamic colour", resource="dynamic_switch", timeout=30)
+        require(switch.get("checked") == "false", "Dynamic colour remained enabled")
+        # Reopen the real dialog to verify the stored choice after any recreation.
+        self.smoke.tap(theme_row())
+        choice, tree = self.smoke.wait_node("Light")
+        require(choice.get("checked") == "true", "Theme dialog did not confirm Light selected")
+        ET.ElementTree(tree).write(self.evidence / "c8-theme-confirmation.xml", encoding="utf-8", xml_declaration=True)
+        self.smoke.tap(self.smoke.wait_node("Cancel")[0])
+        downloads, _ = self.smoke.wait_node("Downloads", resource="nav_downloads")
+        self.smoke.tap(downloads)
+        self.smoke.wait_node("Search downloads", timeout=30)
+        self.log("PASS C8 setup: Light selected and dynamic colour off in the probe UI")
+
     def capture_b5_unattended(self):
         keys = B5_KEYS
         setup, _ = self.smoke.wait_node("Start downloading", resource="fr_start")
         self.smoke.tap(setup)
+        if self.args.capture_c8_light:
+            self.select_light_theme()
         self.log("B5: complete the real finished fixture first; then stage active rows one at a time and admit the queued row with New download, then Later.")
         expected = [self.names[key] for key in keys]
         def wait_tree(predicate, description):
@@ -553,6 +588,14 @@ class Capture:
         nodes = wait_tree(lambda ns: all(
             has_state(ns, self.names[key], token) for key, token in desired.items()),
                           "the requested active/paused/queued/active/finished state mix")
+        if self.args.capture_c8_light:
+            self.capture("c8-populated", "c8-light.png", "Search downloads", prompt=False)
+            captured = list(ET.parse(self.evidence / "c8-populated-ui.xml").getroot().iter("node"))
+            require(all(has_state(captured, self.names[key], token) for key, token in desired.items()),
+                    "C8 capture no longer shows the five real mixed-state jobs")
+            require(not any(n.get("resource-id", "").endswith(":id/sel_title") for n in captured),
+                    "C8 capture unexpectedly entered selection mode")
+            self.log("PASS representative C8: real active, paused, queued and finished fixture rows; Light verified in Settings")
         # Select precisely the active, paused and queued rows by their visible,
         # uniquely identified cards. The new selection anchor is state-checked
         # below before the overflow menu is opened.
@@ -709,9 +752,12 @@ def main():
                         help="Opt in to four real uniquely named A2 fixture downloads and guided mixed-state/graph captures")
     parser.add_argument("--capture-b5", action="store_true",
                         help="With --mixed-a2, capture B5 using three real fixture rows selected in Downloads")
+    parser.add_argument("--capture-c8-light", action="store_true", help="With --unattended-b5 capture the real mixed list in Light mode before selection")
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
+    if args.capture_c8_light and not args.unattended_b5:
+        parser.error("--capture-c8-light requires --unattended-b5")
     if args.details_flow and (not args.active_only or args.mixed_a2 or args.unattended_a7_navigation):
         parser.error("--details-flow requires --active-only and owns navigation")
     if args.capture_b5 and not args.mixed_a2:
@@ -719,6 +765,7 @@ def main():
     if args.unattended_b5 and (args.mixed_a2 or args.capture_b5 or args.active_only or args.unattended_a7_navigation):
         parser.error("--unattended-b5 is a standalone lane and cannot be combined with other lane flags")
     args.instructions = {
+        "c8-populated": "Light Downloads with five real fixture jobs in mixed states before selection.",
         "b5-unattended": "Three uniquely identified B5 fixture rows are selected and the bulk overflow menu is open.",
         "a2-progress": "Keep the active fixture download showing nonzero, changing progress.",
         "a2-queued": "Leave the first transfer active and show the second fixture job Queued.",

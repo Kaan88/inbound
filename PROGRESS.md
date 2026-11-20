@@ -13,8 +13,11 @@
   `a5-controls-final-20261120-050123`. The capture submitted no download.
 - `b5-mixed-retry-20261120-045121` verified three selected real jobs in active,
   paused and queued states, alongside an unselected active and finished job.
-  The finished file matched its hash and the probe cleaned up. Some owned
-  fixture partials remain on the emulator.
+  The finished file matched its hash. Astra passed the revised B5 icons and
+  C8's five-job Light view in `c8-actions-final-20261120-051650`. The probe
+  verified Light with Dynamic colour off, slim Pause and neutral outlined
+  Resume. The named schedule, varied file types and longer chart history
+  remain open. Some owned fixture partials remain on the emulator.
 
 ### Verified Remote Files and completion actions (2026-11-20)
 

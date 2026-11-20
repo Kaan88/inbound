@@ -134,7 +134,7 @@ internal sealed partial class DownloadsScreen
 
         Add("Move to queue", Resource.Drawable.ic_queue, ChooseSelectionQueue,
             !_activity.Capabilities.IsRemote || _model.Hello?.Capabilities.Contains("queueIdentity") == true);
-        Add("Change category", Resource.Drawable.ic_folder, ChooseSelectionCategory);
+        Add("Change category", Resource.Drawable.ic_flow_folder, ChooseSelectionCategory);
         var again = Add("Download again", Resource.Drawable.ic_refresh,
             () => RunOnSelection(r => _model.RedownloadAsync(r.Id), CanDownloadAgain));
         var copy = Add("Copy address", Resource.Drawable.ic_copy, () =>
