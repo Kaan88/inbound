@@ -127,6 +127,11 @@ download summary depends on tracked upload support.
   listing, cleared the selection and disabled download. Refresh issued
   zero payload GETs. After reselecting and confirming, one request saved
   the hash-matched 1 MiB payload only in the selected Host folder.
+  In `c4-paired-transfers-final-20261120-092350`, Astra reviewed the native folder
+  menu, empty Transfers view and return to the same selected folder.
+  The paired Host showed no transfer before confirmation. Refresh
+  transfers showed one completed copy with the same batch ID as the
+  Host, and the 1 MiB file matched its hash in the chosen Host child.
 - Astra approved C6 touch Pause in `c6-touch-pause-final-20261120-064414`.
   The selected paired Host reported 2,228,224 received bytes four seconds
   apart after one tap. The Android row offered Resume and the finished

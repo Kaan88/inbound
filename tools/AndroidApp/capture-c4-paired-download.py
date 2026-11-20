@@ -262,7 +262,7 @@ def run(args):
                                         owned_root=root, destination=destination,
                                         capabilities=capabilities, get_count=get_count,
                                         verify_refresh=args.verify_folder_refresh,
-                                        get_listing_count=listing_count)
+                                        get_listing_count=listing_count, verify_transfers=args.verify_folder_transfers)
                         file_name = result["file"]
                         output = destination / file_name
                         expected = dav.HASHES[file_name]
@@ -280,6 +280,23 @@ def run(args):
                         require(set(destination.iterdir()) == {output} and not any(decoy.iterdir())
                                 and phone_count() == baseline and phone_target_absent(),
                                 "The payload was not isolated to the selected Server child")
+                        transfer_proof = None
+                        if args.verify_folder_transfers:
+                            reply = site_request("sites.transfer.list", {})
+                            transfers = (reply.get("payload") or {}).get("transfers", [])
+                            require(reply.get("type") == "sites.transfer.listResult" and len(transfers) == 1,
+                                    "Expected exactly one paired Host transfer")
+                            transfer = transfers[0]
+                            require(transfer.get("id") and transfer.get("siteName") == ui.LOCATION
+                                    and transfer.get("direction") == "download" and transfer.get("state") == "done"
+                                    and transfer.get("files") == transfer.get("filesDone") == 1
+                                    and transfer.get("filesSkipped") == transfer.get("filesFailed") == 0
+                                    and transfer.get("localFolder") == str(destination),
+                                    "Paired Host transfer snapshot did not match the completed copy")
+                            completed_tree = ET.parse(smoke.evidence / "c4-paired-transfers-completed.xml").getroot()
+                            require(any("ID " + transfer["id"] in (n.get("text", "") + n.get("content-desc", ""))
+                                        for n in completed_tree.iter("node")), "Transfers UI did not show the Host batch ID")
+                            transfer_proof = {"id": transfer["id"], "state": "done", "files_copied": 1}
                         status = site_request("sites.get", {})
                         data = status.get("payload") or {}
                         require(status.get("type") == "sites.status" and data.get("enabled") is True
@@ -291,6 +308,8 @@ def run(args):
                             "payload_gets": observed, "decoy_empty": True, "phone_count_unchanged": True,
                             "phone_target_absent": True, "rclone_updates_disabled": True,
                         }
+                        if transfer_proof is not None:
+                            proof["folder_transfers"] = transfer_proof
                         if "refresh" in result:
                             proof["refresh"] = result["refresh"]
                         (smoke.evidence / "c4-paired-proof.json").write_text(
@@ -351,6 +370,8 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-folder-transfers", action="store_true",
+                        help="Verify folder Transfers empty and completed paired Host states")
     parser.add_argument("--verify-folder-refresh", action="store_true",
                         help="Verify the selected paired WebDAV folder reloads and clears selection")
     run(parser.parse_args())

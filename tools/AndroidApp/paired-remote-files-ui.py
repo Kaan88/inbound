@@ -25,7 +25,7 @@ def require(ok, message):
 
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
-        capabilities, get_count, verify_refresh=False, get_listing_count=None):
+        capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False):
     """Use the actual paired-Host UI through one confirmed safe download request."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -130,6 +130,33 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
               and n.get("enabled") == "true" and n.get("clickable") == "true"]
     require(len(action) == 1, "Expected the enabled targeted Host download action")
     save_state("c4-paired-selection", tree)
+    if verify_transfers:
+        require(get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Transfers precondition changed fixture output")
+        tap_description(lambda d: d == "More options", "folder options")
+        transfer_item, menu = smoke.wait_node("Transfers", resource="title")
+        lists = [node for node in menu.iter("node") if node.get("class") == "android.widget.ListView"
+                 and any(item is transfer_item for item in node.iter("node"))
+                 and any(item.get("text") == "Refresh folder" for item in node.iter("node"))]
+        require(len(lists) == 1 and transfer_item.get("class") == "android.widget.TextView"
+                and transfer_item.get("enabled") == "true", "Expected enabled native Transfers menu item")
+        save_state("c4-paired-transfers-menu", menu)
+        smoke.tap(transfer_item)
+        _, empty = smoke.wait_node("No transfers on this Host.")
+        labels = [n.get("text", "") for n in empty.iter("node")]
+        require(labels.count("Transfers") == 1 and labels.count("Host: " + host_name + " · State as of last refresh") == 1
+                and labels.count("No transfers on this Host.") == 1, "Unexpected empty Transfers screen or Host")
+        save_state("c4-paired-transfers-empty", empty)
+        tap("‹  Back")
+        _, returned = smoke.wait_content_description(lambda d: d.startswith("Selected " + FILE + ", "), "same folder selection after Transfers")
+        require(any(n.get("text") == "2026" for n in returned.iter("node")) and
+                sum(n.get("content-desc", "").startswith("Selected ") for n in returned.iter("node")) == 1
+                and get_count(FILE) == 0 and not output.exists() and not output.is_symlink(),
+                "Transfers navigation changed folder, selection or fixture output")
+        save_state("c4-paired-transfers-return", returned)
+        action = [n for n in returned.iter("node") if n.get("text") == "To " + host_name
+                  and n.get("enabled") == "true" and n.get("clickable") == "true"]
+        require(len(action) == 1, "Missing Host download after returning from Transfers")
     refresh_proof = None
     if verify_refresh:
         require(callable(get_listing_count), "Refresh proof requires a scoped listing counter")
@@ -205,6 +232,22 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
     tap("Download")
     _, tree = smoke.wait_node("Transfers", timeout=35)
     save_state("c4-paired-submitted", tree)
+    if verify_transfers:
+        deadline = time.monotonic() + 45
+        completed = None
+        while time.monotonic() < deadline:
+            tap("Refresh transfers")
+            _, candidate = smoke.wait_node("Refresh transfers", timeout=20)
+            texts = [n.get("text", "") for n in candidate.iter("node")]
+            descriptions = [n.get("content-desc", "") for n in candidate.iter("node")]
+            combined = "\n".join(texts + descriptions)
+            if ("Host: " + host_name + " · State as of last refresh" in texts and
+                    "download · " + LOCATION in combined and "done · 1 copied, 0 skipped, 0 failed of 1" in combined):
+                completed = candidate
+                break
+            time.sleep(.4)
+        require(completed is not None, "Explicit refresh did not show one completed paired transfer")
+        save_state("c4-paired-transfers-completed", completed)
     result = {"file": FILE, "destination": destination_text, "get_count_before": before}
     if refresh_proof is not None:
         result["refresh"] = refresh_proof
