@@ -60,7 +60,11 @@ public sealed class PairingSheet : BottomSheetDialogFragment
             var valid = HostDirectory.CheckAddress(text, out _, out var problem, out var needsConfirmation);
             addressLayout.Error = text.Length > 0 && !valid ? problem : null;
             plainHttp.Visibility = valid && needsConfirmation ? ViewStates.Visible : ViewStates.Gone;
-            if (certificate is not null && certificateFor != text) ShowCertificate(null, null);
+            if (certificate is not null && certificateFor != text)
+            {
+                ShowCertificate(null, null);
+                ShowError(null);
+            }
             connect.Enabled = !busy && valid && !string.IsNullOrEmpty(password.Text) && (!needsConfirmation || plainHttp.Checked)
                 && (certificate is null || trustCert.Checked);
         }

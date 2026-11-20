@@ -56,6 +56,8 @@ can approve departures from the designs.
   to one link.
   C7 Light, Dark and Dynamic colour choices survived Back and reopen.
   The navigation highlight matched all four selected tabs.
+  C5 HTTPS pairing now shows the warning before its fingerprint.
+  Cancel kept This phone selected. An address edit cleared prior consent.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

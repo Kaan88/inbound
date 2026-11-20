@@ -64,6 +64,13 @@
   Open page from the native chooser. The probe rendered the exact fixture
   page. Closing its browser returned to unobscured Downloads with zero jobs
   and an unchanged shared file inventory.
+- Astra approved C5 HTTPS pairing in `c5-tls-pairing-final-20261120-114028`.
+  The warning appeared above the actual disposable certificate and its
+  matching SHA-256 fingerprint. Cancel left only This phone. Editing
+  the address after checking Trust cleared the old warning and consent.
+  Reconnecting showed a fresh, unchecked warning. Explicit trust selected
+  the disposable Host, and the resulting switcher was compared with C5.
+  The fixture and probe were removed.
 - Astra approved C5's queued Host B in `c5-queued-host-20261120-074518`.
   The switcher displayed 1 queued for B while idle Host A was selected.
   Switching to B showed its save banner and the exact queued file. The
