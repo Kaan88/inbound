@@ -154,7 +154,7 @@ class Capture:
             self.navigate_c1_c2(key)
         elif self.args.unattended_local_hosts:
             self.navigate_local_hosts(key)
-        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active"):
+        elif self.args.paired_server_dll and key in ("c6-paired", "c5-paired-selected", "c5-phone-selected", "c6-mixed", "c5-phone-mixed", "c5-host-a", "c5-host-b", "c5-host-a-active", "c2-paired-editor", "c2-paired-footer"):
             pass  # run_paired already navigated and verified the expected state.
         else:
             self.log(f"Prepare {key}: {self.args.instructions[key]}")
@@ -199,7 +199,7 @@ class Capture:
         screenshot.write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
         ET.ElementTree(tree).write(
             self.evidence / f"{key}-ui.xml", encoding="utf-8", xml_declaration=True)
-        if not key.startswith(("c5-", "c6-")):
+        if not key.startswith(("c5-", "c6-", "c2-paired-")):
             logs = self.adb("logcat", "-d", "-s", "Inbound", "InboundRemoteFilesProbe")
             (self.evidence / f"{key}-logcat.txt").write_text(logs, encoding="utf-8")
         if reference is None:
@@ -1201,7 +1201,7 @@ class Capture:
             endpoint = f"tcp:{port}"
             require(not any(endpoint in line.split() for line in self.adb("reverse", "--list").splitlines()),
                     "The disposable fixture port already has a reverse mapping")
-            self.adb("reverse", endpoint, endpoint)
+            self.adb("reverse", "--no-rebind", endpoint, endpoint)
             try:
                 self.launch()
                 self.current_checkpoint = "c6-pairing-form"  # Never retain pairing-field UI or logs on failure.
@@ -1219,6 +1219,53 @@ class Capture:
                 self.smoke.tap(connect)
                 self.smoke.wait_node("Files are saved on Parity Host", timeout=30)
                 self.current_checkpoint = "c6-paired"
+                if self.args.verify_paired_c2:
+                    request = fixture.fixture_session(owned)
+
+                    def queue_state():
+                        reply = request("settings.get", {})
+                        payload = reply.get("payload") or {}
+                        settings = payload.get("settings") or {}
+                        require(reply.get("type") == "settings.result" and payload.get("ok") is True
+                                and isinstance(settings.get("queues"), list)
+                                and isinstance(settings.get("schedules"), list),
+                                "Fixture queue and schedule snapshot unavailable")
+                        return settings["queues"], settings["schedules"]
+
+                    before = queue_state()
+                    require(sum(q.get("name") == "Main" for q in before[0]) == 1,
+                            "Fixture must have exactly one Main queue")
+                    tap("Queues", "nav_queues")
+                    self.smoke.wait_node("Host: Parity Host")
+                    main, _ = self.smoke.wait_content_description(
+                        lambda d: d.startswith("Main, ") and "Double tap to edit" in d,
+                        "fixture Main queue")
+                    self.smoke.tap(main)
+                    _, editor_tree = self.smoke.wait_node("Main queue", resource="queue_editor_title")
+                    save = self._unique_resource(editor_tree, "queue_editor_save")
+                    require(save.get("enabled") == "true", "Fixture Host did not expose the editable Main queue")
+                    self.capture_checkpoint("c2-paired-editor", "c2-schedule.png", "Main queue")
+                    self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+                    self.smoke.wait_node("HTTP speed limit")
+                    self.smoke.wait_node("Downloads at once")
+                    footer, tree = self.smoke.wait_node("Host: Parity Host. Times use this Host's local time.")
+                    texts = {n.get("text", "") for view in (editor_tree, tree) for n in view.iter("node")}
+                    require(not any(x in texts for x in ("Only when", "Unmetered network", "Charging",
+                                                         "Battery saver is off", "When the queue finishes")),
+                            "Unexpected condition or completion control for headless Server capabilities")
+                    self.capture_checkpoint("c2-paired-footer", "c2-schedule.png", "Times use this Host")
+                    self._tap_resource("queue_editor_back")
+                    self.smoke.wait_node("Host: Parity Host")
+                    require(queue_state() == before, "Queue or schedule changed while viewing editor")
+                    tap("Downloads", "nav_downloads")
+                    self.smoke.wait_node("Files are saved on Parity Host")
+                    (self.evidence / "c2-paired-proof.json").write_text(json.dumps({
+                        "host": "Parity Host", "queue": "Main", "editable": True,
+                        "queue_count": len(before[0]), "schedule_count": len(before[1]),
+                        "snapshots_equal": True,
+                    }, indent=2) + "\n", encoding="utf-8")
+                    self.log("PASS paired C2: remote Main viewed without saving; queue and schedule snapshot unchanged.")
+                    return self.evidence
                 fixture.seed_download(owned)
                 path = Path(owned["download_root"]) / "c5-c6.bin"
                 deadline = time.monotonic() + 30
@@ -1264,6 +1311,8 @@ def main():
                         help="Exact disposable queue name to enter manually")
     parser.add_argument("--host-name", default="Parity Host",
                         help="Exact disposable paired-host label to enter manually")
+    parser.add_argument("--verify-paired-c2", action="store_true",
+                        help="With non-mixed --paired-server-dll capture remote Main editor without saving")
     parser.add_argument("--verify-remote-layout", action="store_true",
                         help="With --mixed-hosts verify live Host row and remote search/filter visibility")
     parser.add_argument("--verify-remote-touch-pause", action="store_true",
@@ -1290,6 +1339,8 @@ def main():
     mode.add_argument("--paired-server-dll", type=Path,
                       help="Capture C5/C6 with the explicit built Server DLL and an owned loopback fixture")
     args = parser.parse_args()
+    if args.verify_paired_c2 and (not args.paired_server_dll or args.mixed_hosts):
+        parser.error("--verify-paired-c2 requires non-mixed --paired-server-dll")
     if args.verify_remote_touch_pause and not args.mixed_hosts:
         parser.error("--verify-remote-touch-pause requires --mixed-hosts")
     if args.verify_remote_touch_pause and args.verify_remote_layout:
