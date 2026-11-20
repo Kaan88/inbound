@@ -2,6 +2,28 @@
 
 **Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
 
+### Live Downloads, Details, and notification controls (2026-11-20)
+
+- Astra approved the representative five-job Dark A1/A2 workload in
+  `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
+  the graph and native controls showed actual state, and live totals
+  were 97.8 and 98.2 KB/s. The named scheduled row and broader file
+  types remain open.
+- Astra approved the final A6 Details in
+  `a6-details-pause-final-20261120-054830`. Two independent active ranges
+  advanced from 262,144 to 3,014,656 bytes each, and the final hash matched.
+  The nested Downloads path and queue-specific unmetered rule were shown
+  with the global rule off. The owned file and directories were cleaned up.
+  Metered-network waiting remains open.
+- Astra approved the real ongoing notification actions in
+  `a7-owned-record-actions-20261120-054749`. Open returned to Downloads
+  and Pause all left the sole job paused with 2,097,152 bytes unchanged
+  for four seconds. The isolated app and mapping were removed. The owned
+  incomplete fixture was retained. Finished and waiting notices remain open.
+- B3 completed the protected fixture report after local consent and matched
+  its SHA-256 in `b3-real-auth-20261120-053929`. The exact output was
+  removed after stopping its writer. Paired-Host consent remains open.
+
 ### Native first-run permission returns (2026-11-20)
 
 Astra approved the notification Allow and Deny returns. The isolated probe

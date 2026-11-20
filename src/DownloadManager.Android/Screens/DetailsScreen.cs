@@ -137,7 +137,7 @@ internal sealed class DetailsScreen
         // The main button is what you most likely want now.
         var (text, icon) = _row.Group switch
         {
-            RowGroup.Active => ("Pause", Resource.Drawable.ic_pause),
+            RowGroup.Active => ("Pause", Resource.Drawable.ic_pause_thin),
             RowGroup.Finished => ("Open", Resource.Drawable.ic_open),
             RowGroup.Failed => ("Retry", Resource.Drawable.ic_refresh),
             _ => ("Resume", Resource.Drawable.ic_play),
