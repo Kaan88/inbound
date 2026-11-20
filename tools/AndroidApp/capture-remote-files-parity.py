@@ -633,6 +633,65 @@ class Capture:
             finally:
                 fixture.close()
 
+    def verify_c3_location_search(self, expected):
+        """Exercise native C3 search with the three independently verified locations."""
+        label = "Search remote locations"
+        no_matches = "No locations match your search."
+
+        def search_control(tree, kind):
+            controls = [node for node in tree.iter("node")
+                        if node.get("package") == PACKAGE
+                        and node.get("class") == "android.widget." + kind
+                        and node.get("content-desc") == label
+                        and node.get("enabled") == "true" and node.get("clickable") == "true"]
+            require(len(controls) == 1, f"Expected exactly one native search {kind}")
+            return controls[0]
+
+        def verify_state(query, visible):
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline:
+                tree = self.tree()
+                nodes = [node for node in tree.iter("node") if node.get("package") == PACKAGE]
+                cards = [node.get("content-desc", "") for node in nodes
+                         if node.get("content-desc", "").endswith(". Open location.")]
+                fields = [node.get("text", "") for node in nodes
+                          if node.get("class") == "android.widget.EditText"
+                          and node.get("content-desc") == label]
+                empty = sum(node.get("text") == no_matches for node in nodes)
+                if (sorted(cards) == sorted(visible) and fields == ([query] if query is not None else [])
+                        and empty == int(not visible)):
+                    return tree
+                time.sleep(.35)
+            raise RuntimeError("Remote Files search did not expose the exact expected cards and empty state")
+
+        def capture_state(key, tree):
+            image = self.capture_screen(key + "-capture")
+            (self.evidence / (key + "-ui.xml")).write_bytes(ET.tostring(tree, encoding="utf-8"))
+            make_pair(MOCKUPS / "c3-sites.png", image, self.evidence / (key + "-pair.png"), key.upper())
+
+        def enter(query):
+            self.smoke.tap(search_control(self.tree(), "EditText"))
+            self.shell("input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+            self.shell("input", "text", query)
+            shown = re.findall(r"\bmInputShown\s*[=:]\s*(true|false)\b",
+                               self.shell("dumpsys", "input_method"), re.I)
+            if shown == ["true"]:
+                self.shell("input", "keyevent", "KEYCODE_BACK")
+
+        start = verify_state(None, expected)
+        self.smoke.tap(search_control(start, "ImageButton"))
+        enter("wEbDaV")
+        capture_state("c3-search-webdav", verify_state("wEbDaV", (expected[0],)))
+        enter("sFtP")
+        capture_state("c3-search-sftp", verify_state("sFtP", (expected[2],)))
+        enter("NoFixtureMatch")
+        empty = verify_state("NoFixtureMatch", ())
+        capture_state("c3-search-empty", empty)
+        self.smoke.tap(search_control(empty, "ImageButton"))
+        capture_state("c3-search-restored", verify_state(None, expected))
+        require(not self.fixture.parity_gets, "Searching locations unexpectedly downloaded a fixture file")
+        self.smoke.log("PASS C3 search: case-insensitive protocol matches, no matches, and closing restored all locations.")
+
     def capture_c3_mixed(self):
         """Three independently owned, real loopback protocols; no downloads or cloud account."""
         import threading
@@ -684,6 +743,8 @@ class Capture:
                 (self.evidence / "c3-mixed-ui.xml").write_bytes(ET.tostring(tree, encoding="utf-8"))
                 make_pair(MOCKUPS / "c3-sites.png", capture, self.evidence / "c3-mixed-pair.png", "C3 mixed")
                 self.smoke.log("PASS mixed C3: three live fixture protocols, with SFTP-reported capacity")
+                if getattr(self.args, "verify_c3_search", False):
+                    self.verify_c3_location_search(expected)
 
             # The callback runs before SFTP's own finally tears down its reverse/listener.
             self.verify_sftp(capacity=True, after_browse=capture_mixed)
@@ -818,6 +879,7 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit app.inbound.android.rcloneprobe APK")
     parser.add_argument("--evidence", type=Path, required=True, help="New evidence directory")
     parser.add_argument("--c3-mixed", action="store_true", help="Capture three live loopback WebDAV, S3 and capacity SFTP locations")
+    parser.add_argument("--verify-c3-search", action="store_true", help="With --c3-mixed verify actual location search and clear")
     parser.add_argument("--verify-c3-active", action="store_true", help="Verify the active location summary during pulsed WebDAV downloads")
     parser.add_argument("--verify-sftp", action="store_true", help="Additionally verify first-use SFTP trust with a loopback fixture (requires Paramiko)")
     parser.add_argument("--sftp-only", action="store_true", help="Run only first-use SFTP trust (requires Paramiko)")
@@ -832,6 +894,8 @@ def main():
     parser.add_argument("--upload-source-only", action="store_true", help="Verify isolated MediaStore source creation and exact cleanup, not UI")
     parser.add_argument("--s3-upload-ui", action="store_true", help="Verify C4 UI using only the loopback atomic S3 fixture")
     args = parser.parse_args()
+    if args.verify_c3_search and not args.c3_mixed:
+        parser.error("--verify-c3-search requires --c3-mixed")
     if args.c3_mixed and (args.verify_c3_active or args.verify_sftp or args.sftp_only or args.sftp_capacity
                           or args.s3_only or args.upload_host_only or args.s3_upload_host_only
                           or args.upload_source_only or args.s3_upload_ui or args.nested_destination):

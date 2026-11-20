@@ -10,6 +10,12 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved native C3 location search in
+  `c3-location-search-20261120-082854`. Mixed-case WebDAV and SFTP queries
+  each returned only their exact location, including the SFTP capacity.
+  An unmatched query showed the empty message. Closing search restored all
+  three locations in their original order. The WebDAV fixture saw no
+  file payload request, and the probe was removed.
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals
