@@ -2,6 +2,8 @@
 
 ## Android 0.0.9 parity resumed, 2026-11-20
 
+Published [Android 0.0.9](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.9) from `d053242e177f95c7536ca0c9b32cbab9bb928e58`. The public APK, signed manifest and SHA256SUMS matched the staged files. The public `android-latest` manifest matched the release manifest SHA-256 `65fed75c7d89a28a8f00426c468790d13c7248336ea68936209887e36b2d56d9`. The desktop Latest marker remained `v0.9.0`. ANDROID.9 is next in the roadmap.
+
 The owner requires the C3 tracked mixed-transfer state for 0.0.9 and authorized synthetic emulator clipboard coverage for A4/B5. The [acceptance matrix](docs/plans/android-mockup-acceptance.md#remaining-work) records which cases were exercised and which remain open. TorBox follows parity sign-off.
 
 The paired 0.0.9 test build captured the required C3 upload/download summary and verified both hashes. The owner completed real Drive recovery and confirmed browsing. The queue notification, queue operations, stop time, conflict review, first-run battery exemption, folder selection and expired-link recovery have scoped evidence in the matrix. The final release probe verified all three concurrent A7 notices and recovered the held file through Use data. C6 resumed the same paired job from byte 720,896 after the row opened B6, without retrying the expired URL. The resulting hash matched.

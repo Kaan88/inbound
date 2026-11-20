@@ -5,8 +5,8 @@
 | Milestone | State and next outcome |
 | --- | --- |
 | ANDROID.0–4, .7, .10 | Existing design, engine, phone Host, core screens, pairing and release milestones have recorded evidence. Android 0.0.8 shipped on the Android release line. |
-| ANDROID.8 and all implemented screens for 0.0.9 | Astra High passed source, native visuals and flows across the four [acceptance batches](docs/plans/android-mockup-acceptance.md#remaining-work) on 2026-11-20. C3 showed a concurrent tracked upload and download, and the owner confirmed browsing after real-account recovery. The signed 0.0.9 package is ready for publication. |
-| ANDROID.9 | TorBox, torrents and archives follow parity. Preserve the unfinished paired-Host work in the release checkout. |
+| ANDROID.8 and all implemented screens for 0.0.9 | Astra High passed source, native visuals and flows across the four [acceptance batches](docs/plans/android-mockup-acceptance.md#remaining-work) on 2026-11-20. C3 showed a concurrent tracked upload and download, and the owner confirmed browsing after real-account recovery. The signed [0.0.9 release](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.9) and the Android update feed were published and verified. |
+| ANDROID.9 | Next. Inventory the unfinished paired-Host work in the `android-app` checkout for TorBox, torrents and archives. |
 | ANDROID.5/.6 and .14 | The owner deferred the remaining real-account capture and natural deep Doze acceptance to ANDROID.14. Both original milestones remain partial. |
 | Later | .11 web UI app recommendation, .12 Edge for Android, optional .13 accessibility polish. Production Remote Files upload is separate from C4's accepted fixture flow. |
 

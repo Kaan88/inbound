@@ -1,11 +1,11 @@
 # Android delivery handoff
 
-**Resumed on 2026-11-20.** Work in the existing `android-remote-files-parity` checkout. The `android-app` checkout has the published 0.0.8 baseline (`66270193`) and separate unfinished ANDROID.9 work. Preserve those edits for after parity. The owner authorized publishing Android 0.0.9 once parity is signed off.
+**Parity signed off and Android 0.0.9 published on 2026-11-20.** The [release](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.9) comes from `d053242e` in `android-remote-files-parity`. The `android-app` checkout has the 0.0.8 baseline (`66270193`) and unfinished ANDROID.9 work. Inventory those edits when ANDROID.9 begins.
 
 | Delivery order | Current state | Exit |
 | --- | --- | --- |
-| ANDROID.8 and the 0.0.9 candidate | Remote Files shipped in 0.0.8. Its C3/C4 comparison was reopened. All implemented Android UI and linked flows are in the candidate review. | The lead resolves the [screen and flow matrix](android-mockup-acceptance.md). Astra signs the source and native comparisons for the identified candidate. Design exceptions need an explicit owner decision. |
-| ANDROID.9 | TorBox, torrents and archives are waiting behind parity. Initial paired-Host work is in the `android-app` checkout. | After parity sign-off, inventory that working copy before building on it. Reuse its implementation and tests where they meet the plan. |
+| ANDROID.8 and Android 0.0.9 | Astra High passed source, visuals and flows for the four parity batches. The release package and Android feed were verified after publication. | Closed for the scope in the [screen and flow matrix](android-mockup-acceptance.md). |
+| ANDROID.9 | TorBox, torrents and archives are next. Initial paired-Host work is in the `android-app` checkout. | Inventory that working copy before building on it. Reuse its implementation and tests where they meet the plan. |
 | Separate acceptance | The owner moved remaining ANDROID.5/.6 real-account capture and natural deep Doze work to ANDROID.14. Expanded accessibility is optional (.13). Production Remote Files upload is separate. | Keep their existing scope and evidence. Only the owner can accept a departure from the pictured C3 mixed-transfer state. |
 
 ## On resumption
