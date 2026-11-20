@@ -10,6 +10,15 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved the paired C3 cloud expiry and recovery in `c3-expired-cloud-card-action-20261120-103005`.
+  A synthetic expired Drive grant without a refresh token was stored through
+  the normal Host API. The real rclone browse returned SignInNeeded and the
+  row changed from Signed in to Sign-in has run out. The folder showed an
+  Android Sign in action. It opened an empty masked field for the pinned Host.
+  The expired card announced Sign in and opened the same recovery dialog.
+  Cancel preserved the expired state from both entry points. The fixture recorded zero provider
+  requests, jobs, transfers and output. A successful real-account sign-in
+  remains outside this check.
 - Astra approved native C3 location search in
   `c3-location-search-20261120-082854`. Mixed-case WebDAV and SFTP queries
   each returned only their exact location, including the SFTP capacity.

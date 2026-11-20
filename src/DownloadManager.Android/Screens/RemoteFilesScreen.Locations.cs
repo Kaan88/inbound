@@ -297,7 +297,9 @@ internal sealed partial class RemoteFilesScreen
             row.AddView(arrow, new LinearLayout.LayoutParams(Motion.Dp(_activity, 22), Motion.Dp(_activity, 22)));
 
         card.AddView(row);
-        card.ContentDescription = site.Name + ". " + LocationDescription(site) + ". Open location.";
+        string actionDescription = " Open location.";
+        if (NeedsCloudSignIn(site)) actionDescription = CanSignIn(site) ? " Sign in." : "";
+        card.ContentDescription = site.Name + ". " + LocationDescription(site) + "." + actionDescription;
         card.Click += (_, _) =>
         {
             if (!SameHost() || _busy) return;
@@ -306,7 +308,7 @@ internal sealed partial class RemoteFilesScreen
                 if (_secureHostConnection && _confirm is null) _ = ReviewSftpKeyAsync(site);
                 return;
             }
-            if (SiteKindCatalog.SignsIn(site.Kind) && (!site.SignedIn || _expiredCloudSites.Contains(site.Id)))
+            if (NeedsCloudSignIn(site))
             {
                 BeginCloudSignIn(site);
                 return;

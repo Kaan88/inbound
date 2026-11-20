@@ -147,7 +147,7 @@ internal sealed partial class RemoteFilesScreen
             return;
         }
 
-        if (_site is null)
+        if (_site is not { } site)
         {
             AddFolderMessage("Choose a remote location to browse its files.");
             return;
@@ -157,7 +157,14 @@ internal sealed partial class RemoteFilesScreen
         if (_error is not null)
         {
             AddFolderMessage(_error);
-            if (!_busy) AddFolderAction("Try again", () => _ = BrowseAsync(_path, false, true));
+            if (!_busy && _browseRequiresSignIn)
+            {
+                if (CanSignIn(site)) AddFolderAction("Sign in", () =>
+                {
+                    if (ReferenceEquals(_site, site)) BeginCloudSignIn(site);
+                });
+            }
+            else if (!_busy) AddFolderAction("Try again", () => _ = BrowseAsync(_path, false, true));
         }
 
         foreach (var crumb in Breadcrumbs())

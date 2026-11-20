@@ -26,9 +26,11 @@ internal sealed partial class RemoteFilesScreen
     private AndroidX.AppCompat.App.AlertDialog? _signInDialog;
     private AndroidX.AppCompat.App.AlertDialog? _phoneWaitDialog;
 
+    private bool NeedsCloudSignIn(SiteDto site) =>
+        IsSignInKind(site.Kind) && (!site.SignedIn || _expiredCloudSites.Contains(site.Id));
+
     private bool CanSignIn(SiteDto site) =>
-        SameHost() && !_busy && _secureHostConnection && IsSignInKind(site.Kind) && !site.SigningIn
-        && (!site.SignedIn || _expiredCloudSites.Contains(site.Id));
+        SameHost() && !_busy && _secureHostConnection && !site.SigningIn && NeedsCloudSignIn(site);
 
     private static bool IsSignInKind(string? kind) =>
         string.Equals(kind, SignInKindDrive, StringComparison.OrdinalIgnoreCase)
@@ -40,7 +42,7 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!IsSignInKind(site.Kind) || site.SignedIn && !site.SigningIn && !_expiredCloudSites.Contains(site.Id)) return null;
 
-        var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonStyle)
+        var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonTonalStyle)
         {
             Text = site.SigningIn ? "Waiting" : "Sign in",
             Enabled = CanSignIn(site)
@@ -181,15 +183,38 @@ internal sealed partial class RemoteFilesScreen
                 _phoneWaitDialog?.Dismiss();
                 _phoneWaitDialog = null;
                 if (latest is { SignedIn: true })
-                {
-                    // A stored token alone does not distinguish an old rejected grant from the new one.
-                    // Allow another browse to re-check the provider and mark it expired again if necessary.
-                    _expiredCloudSites.Remove(site.Id);
-                }
-                _ = LoadLocationsAsync();
+                    await VerifyPhoneCloudSignInAsync(site.Id, cancellationToken);
+                else if (ViewingCloudLocations) _ = LoadLocationsAsync();
                 return;
             }
         }
+    }
+
+    private bool ViewingCloudLocations => _site is null && !_adding && !_showTransfers;
+
+    private bool ViewingCloudFolder(string siteId) =>
+        _site?.Id == siteId && !_adding && !_showTransfers && !_showPhoneFiles;
+
+    private async Task VerifyPhoneCloudSignInAsync(string siteId, CancellationToken cancellationToken)
+    {
+        if (ViewingCloudFolder(siteId))
+        {
+            await BrowseAsync(_path, false, true);
+            return;
+        }
+        if (!ViewingCloudLocations) return;
+        if (_expiredCloudSites.Contains(siteId))
+        {
+            // OAuth ending is ambiguous when the old rejected token is still stored.
+            int generation = _generation;
+            var verification = await _client.BrowseAsync(new SiteBrowseRequest
+            {
+                Id = siteId, Limit = 1, Refresh = true
+            }, cancellationToken);
+            if (!SameHost() || cancellationToken.IsCancellationRequested || generation != _generation || !ViewingCloudLocations) return;
+            if (verification.Ok) _expiredCloudSites.Remove(siteId);
+        }
+        await LoadLocationsAsync();
     }
 
     private void ShowPasteTokenDialog(SiteDto site, string command)
@@ -209,10 +234,10 @@ internal sealed partial class RemoteFilesScreen
         var token = _signInToken = new EditText(_activity)
         {
             Hint = "Paste authorization token",
-            SaveEnabled = false,
-            InputType = InputTypes.ClassText | InputTypes.TextVariationPassword
+            SaveEnabled = false
         };
         token.SetSingleLine(true);
+        token.InputType = InputTypes.ClassText | InputTypes.TextVariationPassword;
         token.ImportantForAutofill = Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O
             ? ImportantForAutofill.No : token.ImportantForAutofill;
         body.AddView(token);
@@ -245,8 +270,7 @@ internal sealed partial class RemoteFilesScreen
                 ShowCloudSignInError("The token was not accepted. Check it and try again.");
                 return;
             }
-            _expiredCloudSites.Remove(site.Id);
-            _ = LoadLocationsAsync();
+            RefreshAfterCloudSignIn(site.Id);
         }
         catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
         catch (Exception)
@@ -254,6 +278,13 @@ internal sealed partial class RemoteFilesScreen
             if (SameHost()) ShowCloudSignInError("Could not confirm sign-in. Refresh the location list before trying again.");
         }
         finally { token = ""; FinishSignInWait(site.Id); }
+    }
+
+    private void RefreshAfterCloudSignIn(string siteId)
+    {
+        _expiredCloudSites.Remove(siteId);
+        if (ViewingCloudFolder(siteId)) _ = BrowseAsync(_path, false, true);
+        else if (ViewingCloudLocations) _ = LoadLocationsAsync();
     }
 
     private void CancelCloudSignIn(string siteId)

@@ -34,6 +34,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private readonly Action<bool> _showBottomNavigation;
     private bool _folderFullScreen;
     private CancellationTokenSource? _browseRequest;
+    private bool _browseRequiresSignIn;
     private readonly LinearLayout _content;
     private readonly FrameLayout _surface;
     private readonly ScrollView _scroll;
@@ -183,6 +184,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private void CancelCurrent()
     {
         _browseRequest?.Cancel();
+        _browseRequiresSignIn = false;
         _generation++;
         _busy = false;
     }
@@ -218,6 +220,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         string siteId = _site.Id;
         int offset = append ? _items.Count : 0;
         string? listing = append ? _listing : null;
+        _browseRequiresSignIn = false;
         _busy = true; _error = null;
         if (!append)
         {
@@ -242,7 +245,13 @@ internal sealed partial class RemoteFilesScreen : IDisposable
             }
             if (!result.Ok)
             {
-                if (result.Problem == SiteProblems.SignInNeeded) _expiredCloudSites.Add(siteId);
+                if (result.Problem == SiteProblems.SignInNeeded && IsSignInKind(_site?.Kind))
+                {
+                    _expiredCloudSites.Add(siteId);
+                    _browseRequiresSignIn = true;
+                    _error = "Sign-in has run out. Sign in again to browse this location.";
+                    return;
+                }
                 if (result.Problem is SiteProblems.HostKeyNotAccepted or SiteProblems.HostKeyChanged)
                     _changedSftpKeys.Add(siteId);
                 _error = string.IsNullOrWhiteSpace(result.Message) ? "Could not browse this location." : result.Message;
@@ -255,6 +264,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 _listing = null; _total = _items.Count;
                 return;
             }
+            _expiredCloudSites.Remove(siteId);
             if (!append && _site is not null) _site.FreeBytes = result.FreeBytes;
             _path = result.Path;
             _listing = result.Listing;

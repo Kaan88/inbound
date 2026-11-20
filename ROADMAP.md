@@ -7,7 +7,8 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
 Astra approved the A7 ongoing and completed notifications and their
 actions. The network-wait notice remains open. C3 review covers SFTP
 capacity and unavailable space, plus three browsable protocol types.
-Cloud sign-in expiry and mixed upload and download coverage remain open.
+Astra approved the synthetic cloud-expiry response and Android recovery.
+Real-account sign-in and mixed upload and download coverage remain open.
 
 On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
 
