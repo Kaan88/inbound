@@ -10,6 +10,11 @@
   An unmatched query showed the empty message. Closing search restored all
   three locations in their original order. The WebDAV fixture saw no
   file payload request, and the probe was removed.
+- Astra approved the paired A5 destination picker in
+  `a5-paired-folder-png-20261120-091257`. The Add link route opened New Download.
+  Folder Cancel returned the original destination, and Up returned the
+  parent. Save here updated only the draft and preserved its address
+  and filename. Form Cancel left zero Host jobs and files.
 - Astra approved the representative five-job Dark A1/A2 workload in
   `a1-a2-dark-mixed-20261120-054308`. Both active transfers advanced,
   the graph and native controls showed actual state, and live totals

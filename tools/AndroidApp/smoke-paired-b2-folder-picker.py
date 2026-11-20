@@ -3,9 +3,11 @@
 import argparse
 import hashlib
 import importlib.machinery
+import json
 import socket
 import threading
 import time
+import xml.etree.ElementTree as ET
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -78,7 +80,7 @@ class PairedB2:
             raise
 
     def preflight(self):
-        self.smoke.preflight()
+        self.smoke.preflight(include_remote_files_payload=not getattr(self.args, "verify_a5_folder", False))
         require(self.adb("emu", "avd", "name").splitlines()[0] == AVD,
                 "Refusing anything other than inbound33")
         require(self.shell("getprop", "ro.build.version.sdk").strip() == API,
@@ -103,7 +105,7 @@ class PairedB2:
         endpoint = f"tcp:{port}"
         require(not any(endpoint in line.split() for line in self.adb("reverse", "--list").splitlines()),
                 "Disposable fixture port already has a reverse mapping")
-        self.adb("reverse", endpoint, endpoint)
+        self.adb("reverse", "--no-rebind", endpoint, endpoint)
         self.reverse_ports.append(port)
 
     def pair(self, fixture):
@@ -133,6 +135,106 @@ class PairedB2:
             path.mkdir()
             self.child_paths.append(path)
 
+    def verify_a5_folder(self, paired, fixture):
+        """Exercise the real New Download destination picker without admitting a job."""
+        root = Path(fixture["download_root"]).resolve(strict=True)
+        decoy, chosen = self.child_paths
+        request = paired.fixture_session(fixture)
+        url = f"http://127.0.0.1:{self.port}/files/{FILENAME}"
+
+        def no_mutation():
+            state = request("jobs.snapshot", {})
+            require(state.get("type") == "jobs.snapshot" and (state.get("payload") or {}).get("jobs") == [],
+                    "The paired Host admitted a job while browsing destinations")
+            require(set(root.iterdir()) == set(self.child_paths)
+                    and all(not any(path.iterdir()) for path in self.child_paths),
+                    "Browsing destinations changed the disposable Host folder tree")
+
+        def one(tree, resource):
+            matches = [node for node in tree.iter("node") if node.get("package") == PACKAGE
+                       and node.get("resource-id", "").endswith(":id/" + resource)]
+            require(len(matches) == 1, "Expected a unique New Download field: " + resource)
+            return matches[0]
+
+        def picker_path(folder):
+            _, tree = self.smoke.wait_content_description(lambda d: d == "Folder " + str(folder), "exact displayed Host folder")
+            return tree
+
+        def draft(folder):
+            expected = "Save to " + str(folder) + " on " + HOST_NAME
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline:
+                tree = self.tree()
+                if not any(self.smoke.matches(tree, label) for label in ("Save to, on " + HOST_NAME, "Save here")):
+                    if (self.smoke.matches(tree, "New download")
+                            and one(tree, "address").get("text") == url
+                            and one(tree, "file_name").get("text") == FILENAME
+                            and one(tree, "save_to").get("content-desc") == expected):
+                        return tree
+                time.sleep(.35)
+            raise RuntimeError("New Download did not return with the expected unchanged fields and destination")
+
+        def evidence(key, tree):
+            require(not self.pairing_fields_may_be_visible
+                    and all(node.get("password") != "true" for node in tree.iter("node")),
+                    "Refusing to save a credentials form")
+            (self.evidence / (key + ".png")).write_bytes(self.smoke.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
+
+        no_mutation()
+        self.tap("Add", "fab")
+        self.tap("Link or several links")
+        self.node("New download")
+        self.smoke.tap(one(self.tree(), "address"))
+        self.shell("input", "text", url)
+        self.shell("input", "keyevent", "KEYCODE_BACK")
+        self.node(FILENAME, "file_name")
+        draft(root)
+
+        choose = "Choose a folder on " + HOST_NAME
+        opener, _ = self.smoke.wait_content_description(lambda d: d == choose, "native remote folder icon")
+        require(opener.get("clickable") == "true" and opener.get("enabled") == "true",
+                "Folder icon was not actionable")
+        self.smoke.tap(opener)
+        picker_path(root)
+        self.tap_clickable_label(decoy.name)
+        evidence("a5-paired-picker-cancel-choice", picker_path(decoy))
+        self.tap_clickable_label("Cancel")
+        evidence("a5-paired-picker-cancel-return", draft(root))
+        no_mutation()
+
+        field = one(draft(root), "save_to")
+        require(field.get("clickable") == "true" and field.get("enabled") == "true",
+                "The A5 destination field was not actionable")
+        self.smoke.tap(field)
+        picker_path(root)
+        self.tap_clickable_label(decoy.name)
+        picker_path(decoy)
+        up, _ = self.smoke.wait_content_description(lambda d: d == "Up one folder", "native parent-folder action")
+        require(up.get("clickable") == "true" and up.get("enabled") == "true",
+                "The parent-folder action was not enabled")
+        self.smoke.tap(up)
+        evidence("a5-paired-picker-parent", picker_path(root))
+        self.tap_clickable_label(chosen.name)
+        evidence("a5-paired-picker-chosen", picker_path(chosen))
+        self.tap_clickable_label("Save here")
+        evidence("a5-paired-picker-draft-selected", draft(chosen))
+        no_mutation()
+        self.tap("Cancel", "new_cancel")
+        self.node("Files are saved on " + HOST_NAME)
+        tree = self.tree()
+        require(not any(node.get("resource-id", "").endswith((":id/new_download_btn", ":id/save_to"))
+                        for node in tree.iter("node")) and not self.smoke.matches(tree, "New download"),
+                "Cancel left the New Download draft open")
+        no_mutation()
+        evidence("a5-paired-picker-form-dismissed", tree)
+        (self.evidence / "a5-paired-picker-proof.json").write_text(json.dumps({
+            "initial_destination": "host root", "cancelled_child": decoy.name, "saved_draft_child": chosen.name,
+            "address_and_name_preserved": True, "form_dismissed": True,
+            "host_jobs": 0, "host_created_files": 0,
+        }, indent=2) + "\n", encoding="utf-8")
+        self.smoke.log("PASS A5: paired folder Cancel retained the original destination; Save here updated the draft. Form Cancel left zero jobs.")
+
     def run(self):
         self.preflight()
         paired = load("b2_pair_fixture", HERE / "paired-host-parity-fixture.py")
@@ -145,6 +247,9 @@ class PairedB2:
                 self.smoke.started = True
                 self.tap("Start downloading", "fr_start")
                 self.pair(fixture)
+                if getattr(self.args, "verify_a5_folder", False):
+                    self.verify_a5_folder(paired, fixture)
+                    return self.evidence
                 self.tap("Add", "fab")
                 self.tap("More download sources", "entry_browser")
                 self.tap("Browse and catch a download")
@@ -198,6 +303,8 @@ class PairedB2:
         try:
             if self.smoke.installed:
                 self.adb("uninstall", PACKAGE)
+                require(f"package:{PACKAGE}" not in self.shell("pm", "list", "packages", PACKAGE),
+                        "The isolated probe remains installed")
         except Exception:
             errors.append("probe uninstall failed")
         for port in reversed(self.reverse_ports):
@@ -227,6 +334,8 @@ def main():
     parser.add_argument("--apk", required=True, help="Explicit isolated probe APK")
     parser.add_argument("--server-dll", required=True, help="Explicit built DownloadManager.Server.dll")
     parser.add_argument("--dotnet", default="dotnet")
+    parser.add_argument("--verify-a5-folder", action="store_true",
+                        help="Verify the paired New Download picker selection and Cancel without submitting")
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
     run = PairedB2(args)

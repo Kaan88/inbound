@@ -5,8 +5,8 @@
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
 Astra approved scoped Android checks for real completion notifications,
-active Details, expired-link recovery, queue editing and a real timed
-stop. Remote Files checks cover local protocol browsing and a pinned
+active Details, expired-link recovery, paired destination browsing,
+queue editing and a real timed stop. Remote Files checks cover local protocol browsing and a pinned
 paired-Host download. The [acceptance matrix](docs/plans/android-mockup-acceptance.md)
 records the verified states and open variants.
 
