@@ -1,6 +1,8 @@
 # Progress — session handoff
 
-**Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
+## Android workflow correction, 2026-11-20
+
+The owner paused implementation at `af7ec829` after the enabled C2 queue notification check stopped. The [handoff](docs/plans/android-parity-handoff.md) records the interrupted check, evidence locations and source of the repeated reviews. The [matrix](docs/plans/android-mockup-acceptance.md#remaining-work) maps outstanding work to four shared flows for a single candidate audit. Existing scoped verdicts carry forward. ANDROID.8 and the 0.0.9 candidate gate are open. Entries below record earlier work.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 

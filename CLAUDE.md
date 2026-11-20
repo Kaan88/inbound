@@ -5,18 +5,11 @@ Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`.
 treat them as authoritative tracking. Update them after every meaningful
 increment.
 
-## Android ownership handoff (2026-11-18)
+## Android work on this branch
 
-Codex (OpenAI/GPT) has taken over the Android work on the owner's instruction.
-Latest continuation handoff: [ANDROID-CODEX-HANDOFF.md](ANDROID-CODEX-HANDOFF.md) (2026-11-19).
-Read [ANDROID-CODEX-PROGRESS.md](ANDROID-CODEX-PROGRESS.md) for its current
-checkpoint, checks, limitations and next actions. This is a separate session
-report; `GOAL.md`, `ROADMAP.md` and `PROGRESS.md` remain authoritative project
-tracking, and meaningful increments must still be recorded there.
-Work on `android-app` in `C:\Users\kaank\Downloads\idm-android-trial`;
-never switch the main checkout or merge Android into main without the owner's request.
-The basic app is already usable; continue from the existing implementation and
-review evidence rather than restarting the trial or screen work.
+Read the [parity handoff](docs/plans/android-parity-handoff.md) and the [remaining flow batches](docs/plans/android-mockup-acceptance.md#remaining-work). This is the `android-remote-files-parity` worktree. It holds the owner-paused UI milestone. The dated Codex handoff, session progress and original build sequence describe earlier work. Keep `main` on its branch. The separate `android-app` working copy contains unfinished ANDROID.9 changes.
+
+For Android, the meaningful checkpoint for project tracking is a flow batch, owner decision or milestone transition. Put each case result in the matrix once. Link it from PROGRESS at batch completion. GOAL holds the objective and ROADMAP holds milestone state. The milestone code and visual audit and the owner's separate later review queue have different scopes.
 
 Run independent Android verification checks in parallel when practical, but keep
 UI actions on any one emulator sequential so checks cannot interfere with each other.
@@ -243,9 +236,7 @@ not as acceptance evidence.
 
 Owner's Android continuation authorization (2026-11-19): proactively delegate
 simple bounded work to GPT-6 Luna at high reasoning, and scoped implementation,
-debugging or visual work to GPT-6.1 Terra at high reasoning. The current host
-catalog exposes exact Luna ID `gpt-6-luna`, successfully spawned in this session;
-the older Android handoff availability note is outdated. The main Sol agent owns
+debugging or visual work to GPT-6.1 Terra at high reasoning. Discover available model IDs for the current session. Use the documented cheaper fallback when Luna is unavailable. The main Sol agent owns
 architecture, cross-cutting work and final integration; it must read and check all
 subagent code and verify requirements and checks before integrating it. Record
 the requested model configuration separately from a worker's self-report.

@@ -1,90 +1,18 @@
 # Roadmap and executable work
 
-**Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
-
-The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
-
-Astra approved the A7 ongoing and completed notifications and their
-actions. The network-wait notice remains open. C3 review covers SFTP
-capacity and unavailable space, plus three browsable protocol types.
-Astra approved the synthetic cloud-expiry response and Android recovery.
-Real-account sign-in and mixed upload and download coverage remain open.
-
-On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
-
-Android parity resumed on 2026-11-20. C2 retains the owner-approved unmetered network condition. B5 source review passed for selection changes while the menu is open. Full-screen acceptance remains open.
-
 ## Current Android roadmap
 
-**UI acceptance gate:** Every UI milestone must match its approved mockups.
-Astra must sign off on the code and side-by-side comparisons; only the owner
-can approve departures from the designs.
+| Milestone | State and next outcome |
+| --- | --- |
+| ANDROID.0–4, .7, .10 | Existing design, engine, phone Host, core screens, pairing and release milestones have recorded evidence. Android 0.0.8 shipped on the Android release line. |
+| ANDROID.8 and all implemented screens for 0.0.9 | Reopened and owner-paused. After resumption, complete the four flow batches in the [acceptance matrix](docs/plans/android-mockup-acceptance.md#remaining-work). Astra's consolidated code and visual sign-off is required. |
+| ANDROID.9 | TorBox, torrents and archives follow parity. Preserve the unfinished paired-Host work in the release checkout. |
+| ANDROID.5/.6 and .14 | The owner deferred the remaining real-account capture and natural deep Doze acceptance to ANDROID.14. Both original milestones remain partial. |
+| Later | .11 web UI app recommendation, .12 Edge for Android, optional .13 accessibility polish. Production Remote Files upload is separate from C4's accepted fixture flow. |
 
-- **Current release:** [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8)
-  ships Remote Files with bundled rclone. The public APK and Android update
-  feed were verified; desktop latest remains v0.9.0.
-- **Completed milestones** include ANDROID.0–4 (design, engine, phone host
-  and core screens), .7 (Host pairing), and .10 (signing and updates).
-- **Current work** covers the reopened ANDROID.8 C3/C4 parity and all-screen
-  0.0.9 visual gate. Astra approved C5's three Host choices and real queued
-  state, C6's mixed remote Downloads and Pause actions, and B6's real
-  same-job recovery through the browser with a matching final hash.
-  Astra approved B2's centered timing checkmarks and native queue chooser.
-  The paired B3 synthetic flow kept one authenticated job across Pause
-  and Resume and matched the exact completed file hash.
-  The B5 bulk move placed one selected Mobile file in the real Night
-  schedule and kept its start visible during reselection.
-  The C4 folder Transfers action returned to the same selection and
-  showed a hash-verified completed WebDAV copy on the paired Host.
-  Paired C4 deletion preserved the selected file on Cancel and
-  removed exactly the named fixture file on confirmation.
-  The local C2 completion preference survived Save and reopen, and
-  Cancel and Discard preserved the saved choice.
-  C7 Hosts and web UI now matches the reviewed switch icon, scope
-  callout and Web interface section with phone and paired Host evidence.
-  B5 Change category updated only the selected queued job on the
-  disposable paired Host. Cancel preserved the original categories and
-  the update snackbar left Add visible. B5 list-only removal preserved
-  the finished file and removed only the selected Host entries. The
-  explicit file-delete choice removed only the selected file and entries.
-  Astra approved the updater dialog and Settings card. The isolated
-  signed offer showed verified notes and Later kept version 0.0.8 installed.
-  A5 paired Rename, Overwrite and Fail matched their expected Host
-  file outcomes in the selected disposable folder. The inline refusal
-  kept both actions visible and cleared when the policy changed.
-  A5 paired single-link referrer, description and checksum validation
-  passed alongside real checksum success and mismatch. A checksum on
-  a range gets an explanation and stays in the draft if the user returns
-  to one link.
-  C7 Light, Dark and Dynamic colour choices survived Back and reopen.
-  The navigation highlight matched all four selected tabs.
-  C5 HTTPS pairing now shows the warning before its fingerprint.
-  Cancel kept This phone selected. An address edit cleared prior consent.
-  C3 paired location removal kept the sibling location and its WebDAV
-  files available. Cancel preserved both locations.
-  C3 Add location now resets HTTP consent after address edits, and
-  paired WebDAV validation and save passed.
-  C3 S3 key and endpoint errors clear when corrected. The paired
-  provider picker and disposable loopback save passed.
-  C3 SFTP now shows distinct server, port and username errors. Paired
-  validation and local fingerprint trust and browse passed.
-  C3 keeps the draft name when switching location types. Google Drive,
-  OneDrive and Dropbox setup passed through the unsigned card state.
-  C2 paired queue limits passed invalid-input, Cancel, Discard and Save.
-  The speed dialog keeps its KB/s label visible with a cap entered.
-  Three paired C2 transfers verified the saved limits with a fast loopback
-  source. Two progressed together and the third waited for a slot.
-  The acceptance matrix tracks the remaining screen variants.
-- **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
-  against the approved mockups and reviews the associated code; fix and
-  recheck findings before accepting a final-quality candidate.
-- **Paused:** ANDROID.9 (TorBox, torrents and archives) until the parity pass.
-- **Later:** ANDROID.11 (web UI app recommendation) and .12 (Edge for Android).
-  ANDROID.13 accessibility polish is optional. ANDROID.5/.6 are partial;
-  remaining acceptance is deferred under ANDROID.14 and is not a release gate.
+The [handoff](docs/plans/android-parity-handoff.md) identifies the working copy, first unresolved check and review procedure. The matrix holds per-case evidence. Update this table for a change in milestone state, dependency or owner direction.
 
-The dated checkpoints below are historical. See the Android milestone section
-for acceptance details and `PROGRESS.md` for verification evidence.
+The dated checkpoints below preserve earlier decisions and acceptance evidence.
 
 S24 background/reboot batch complete; owner pause boundary (2026-11-19, Codex). Production signed0.0.6/API37 completed a naturally scheduled ordinary queue4100 transfer over direct LAN while locked/noninteractive AOD (8MiB, SHA-256 `f4337909e2c0473eb563c4a8010233439d96d01b668ab9c209ed4bb19cb8fd20`). Separate owner-approved single reboot of a user-started UIDT job1 recovered after unlock without an automated app launch: boot ID changed, fresh job1 start logged, timestamped postboot HTTP Range resumed at byte1,114,112, and final16MiB hash matched `db5e9447f0246a6102d25fb34b353db82a355866a4890ef77c9262cbff257c13`. Optional request tracing added only to AndroidTrialServer; main reviewed Terra code, built0errors/0warnings and passed live HEAD/GET/Range/correlation checks. Both task jobs/files/parts and task queue/schedule removed; baseline Main/empty downloads and display timeout/adaptive mode restored, owned LAN fixture stopped. App source/APK/feed unchanged. Owner said "pause after the step is done, not in the middle"; this batch is finished and cleaned: stop here before another step until resumed. Full ANDROID.6/.7, remaining phone Doze/network/power, long-duration and complete visual/accessibility/remote acceptance, and later independent review remain OPEN. Raw evidence: `artifacts/android-app/android6-s24-background/`.
 
@@ -740,7 +668,9 @@ Open for the owner (also in the plan): whether site transfers count against "dow
 session may add and edit sites; "this device" transfers in the first web UI release; the extension popup line;
 whether rclone is a Setup component that can be unticked.
 
-## Android app (owner, 2026-11-15: design asked for; design done, nothing built)
+## Android milestone history
+
+The following entries preserve dated decisions and acceptance evidence. Use the [current roadmap](#current-android-roadmap) for today's milestone state.
 
 - [x] ANDROID.0 Design in Figma: Material You, default colours from the web UI tokens, a downloader in its own right
   that can also manage another Inbound host, with prototype flows and a "How it works" board.

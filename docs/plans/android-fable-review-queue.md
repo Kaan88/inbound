@@ -1,5 +1,7 @@
 # Android app: reviews for Fable to check
 
+Historical Android checkpoint. The current [parity handoff](android-parity-handoff.md) governs worktree selection, review timing and resumption for 0.0.9. The original technical decisions and attributed review records below retain their scope.
+
 Owner, 2026-11-16: "when, not if, fable hits a limit - use opus, but write notes for fable so that it can check when my
 limit resets."
 

@@ -1,5 +1,7 @@
 # Android handoff — Codex, 2026-11-19
 
+Historical Android checkpoint. The current [parity handoff](docs/plans/android-parity-handoff.md) governs worktree selection, review timing and resumption for 0.0.9. The original technical decisions and attributed review records below retain their scope.
+
 ## Stop state and workspace
 
 The owner requested a pause after the current step, then cleared the thread goal.

@@ -1,80 +1,8 @@
 # Goal — Build a private Windows download manager
 
-**Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
+## Current Android objective
 
-The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
-
-Astra approved scoped Android checks for real completion notifications,
-active Details, expired-link recovery, paired destination browsing,
-queue editing and a real timed stop. Remote Files checks cover local protocol browsing and a pinned
-paired-Host download. The [acceptance matrix](docs/plans/android-mockup-acceptance.md)
-records the verified states and open variants.
-
-On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
-
-Android mockup parity resumed on 2026-11-20. The acceptance gate is independent Astra source and visual sign-off. ANDROID.9 stays paused.
-
-Previous checkpoint (2026-11-20): the owner had paused Android mockup and flow parity.
-ANDROID.9 feature implementation is also paused. The API 33 probe
-verified S3 onboarding and the C4 phone-to-site interaction against synthetic
-loopback fixtures. Production upload remains disabled. A4 source order,
-populated and invalid A5, B2/B3 fixture catches, B4 search, and C7
-search passed targeted API 33 checks. Astra passed the isolated C4 upload
-recheck only. C5 switched between This phone and a disposable Host; C6
-showed one hash-verified completed remote file, not the reference workload.
-Astra passed the paired B2 folder-picker source recheck. The fresh API 33
-probe verified the selected destination and matching payload hash on the
-disposable Host. B2 visual parity and the all-screen Astra gate remain open.
-B5 mixed-state coverage and C2 footer evidence remain open. C2’s configured
-Night schedule was verified after saving and reopening it.
-See the
-[mockup acceptance matrix](docs/plans/android-mockup-acceptance.md).
-The link-intake capture runner also has a separately opt-in, host-tested B6
-partial-expiry lane; live API 33 execution and UI acceptance remain unverified.
-Fresh Release Mobile 528/528 and ANDROID.7 loopback Server 5/5 passed. On the
-API 33 emulator, ANDROID.4 filtered selection and ongoing/grouped completion
-notification Open passed. ANDROID.5 Chrome → Android chooser → Inbound download
-passed with matching SHA-256; the shared-page picker downloaded only two selected links
-out of eight. Declining remote cookie consent sent no authenticated-file request
-and created no job; accepting created one remote job with a hash-matched payload.
-Edge for Android extension support is future work (ANDROID.12).
-API 33 TalkBack focus and speech were sampled on Downloads, Details and multiselect.
-Further accessibility work is optional (ANDROID.13), not a milestone gate.
-API 33 paired self-signed HTTPS remote download passed with a matching server-side hash.
-Throttled pause/resume over the same setup preserved the job ID and resumed saved ranges; the final hash matched.
-API 33 automatically reconnected after a relay-only outage and showed the same finished job.
-Fresh-boot API 33 also reconnected mid-transfer, showed advancing progress on the same job, and finished with a matching hash.
-ANDROID.7 is complete: the S24 FE paired over publicly trusted HTTPS and switched back to local Downloads after cleanup.
-ANDROID.10 is complete: the public in-place upgrade from 0.0.6 to 0.0.7 passed on the S24 FE, with independent Astra PASS.
-ANDROID.4 is complete: S24 FE Light and Dynamic colour acceptance passed, with independent Astra PASS.
-ANDROID.5 remains partial: the S24 verified the system share chooser and HTTP 410
-refresh from zero bytes; the owner-run real-account attempt was refused by the
-built-in browser. A successful real-account capture has not been established.
-ANDROID.6 remains partial: the S24 passed foreground metered Wi-Fi, Battery Saver
-and charging-only holds and the 30-minute screen-off check (34:06, 128 MiB, matching
-hash). The selected remote host passed the 64 KB/s limit, disabled schedule
-persistence and manual queue start. A disposable remote host's enabled timer
-also started a stopped queue via host-side scheduling, verified through IPC.
-Natural deep Doze of a scheduled queue is unverified. The separate one-hour soak is not
-the 30-minute acceptance gate.
-See PROGRESS “Android milestone continuation”.
-
-Owner decision (2026-11-19): defer the remaining ANDROID.5/.6 acceptance
-tests to ANDROID.14 rather than gating further work on them. ANDROID.8 —
-**Remote Files** — completed with Astra sign-off. The owner approved bundling rclone in
-the standard Android APK after the isolated arm64 probe passed on both 4 KiB
-and 16 KiB devices. The standard arm64 build now packages the verified binary
-and MIT notice. Host wiring and the Remote Files UI are implemented for
-This phone and capable paired hosts. On the API 33 emulator, a WebDAV
-download matched the fixture hash and a competing file was left unchanged.
-The process-kill recovery replay and signed arm64 APK checks passed. Remote
-Files shipped in the [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8);
-the public update feed was verified. The owner reopened ANDROID.8 for visual
-and flow parity with C3/C4 and paused ANDROID.9. Astra must review code and
-side-by-side mockup captures before ANDROID.8 is closed again. Before the
-0.0.9 release candidate is accepted, Astra must review **all implemented
-Android screens** against their approved mockups, not only C3/C4. Keep the
-ANDROID.9 feature work paused. No known unapproved design gaps may remain.
+Deliver the phone downloader and paired-Host client to the approved Android designs. Android 0.0.8 shipped Remote Files on the `android-app` release line. The owner subsequently reopened ANDROID.8 for C3/C4 parity and required source and visual sign-off across the implemented UI before accepting 0.0.9. Implementation is paused. The [Android roadmap](ROADMAP.md#current-android-roadmap) records the delivery order.
 
 The dated checkpoints below are historical; their release versions and open
 items reflect what was known at the time.

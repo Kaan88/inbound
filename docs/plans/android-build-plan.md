@@ -1,5 +1,7 @@
 # Inbound for Android: build plan (for the agent that builds it)
 
+Historical Android checkpoint. The current [parity handoff](android-parity-handoff.md) governs worktree selection, review timing and resumption for 0.0.9. The original technical decisions and attributed review records below retain their scope.
+
 Written 2026-11-16 after the first trial (ANDROID.2). It is for an Opus-led session to follow from top to bottom.
 `docs/plans/android-app.md` stays the description of what the app is (decisions, mockup, feature map, Android
 unknowns, motion). This file says in what order to build it, what "done" means at each step, and what must not be

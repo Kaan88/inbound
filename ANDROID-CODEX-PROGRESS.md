@@ -1,5 +1,7 @@
 # Android progress — Codex
 
+Historical Android checkpoint. The current [parity handoff](docs/plans/android-parity-handoff.md) governs worktree selection, review timing and resumption for 0.0.9. The original technical decisions and attributed review records below retain their scope.
+
 ## 2026-11-19 — Milestones resumed at `25f1ff19`
 
 The prior fixture setup failure did not recur: fresh Release Mobile 528/528 and
