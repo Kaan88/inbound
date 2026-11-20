@@ -37,6 +37,8 @@ can approve departures from the designs.
   showed a hash-verified completed WebDAV copy on the paired Host.
   Paired C4 deletion preserved the selected file on Cancel and
   removed exactly the named fixture file on confirmation.
+  The local C2 completion preference survived Save and reopen, and
+  Cancel and Discard preserved the saved choice.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and

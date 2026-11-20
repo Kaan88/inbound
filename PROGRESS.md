@@ -86,6 +86,11 @@
   showed the specific error. Discard retained the original weekdays.
   Selecting Monday allowed Save, and reopening showed Monday only,
   the original 01:00 to 07:00 times and the disabled switch.
+- Astra approved the local C2 completion preference in `c2-completion-preference-final-20261120-093329`.
+  Cancel and editor Discard preserved Notify when the queue finishes.
+  Apply updated the draft, and Save and reopen retained Do nothing.
+  The disabled Weekdays schedule, its 01:00 to 07:00 times, and both
+  conditions were preserved. The disposable Night queue had zero jobs.
 - Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
   The action closed the selected active fixture's connection. Its fixture
   count held at 2,899,968 bytes for six seconds while the unselected

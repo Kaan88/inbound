@@ -470,6 +470,98 @@ class Capture:
                 "The saved Host schedule did not match the reopened editor")
         return expected
 
+    def verify_c2_completion_preference(self):
+        """Exercise the local Night completion preference without running a queue."""
+        require(self.args.queue_name == "Night", "Completion proof requires the disposable Night queue")
+
+        def top():
+            self.shell("input", "swipe", "530", "550", "530", "1500", "350")
+            self.smoke.wait_node("Night queue", resource="queue_editor_title")
+
+        def check_schedule():
+            top()
+            tree = self.smoke.tree()
+            for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
+                require(self._unique_resource(tree, "queue_editor_day_" + day).get("checked") ==
+                        ("false" if day in ("sat", "sun") else "true"), "Weekdays day changed: " + day)
+            for resource in ("queue_editor_charging", "queue_editor_unmetered"):
+                require(self._unique_resource(tree, resource).get("checked") == "true",
+                        "Weekdays condition changed: " + resource)
+            for prefix, value in (("Start time", "01:00"), ("Stop time", "07:00")):
+                require(self._unique_description_prefix(tree, prefix).get("content-desc") == f"{prefix}, {value}",
+                        "Weekdays time changed: " + prefix)
+            self._open_schedule_list()
+            toggle, tree = self.smoke.wait_content_description(lambda d: d == "Enable Weekdays", "Weekdays switch")
+            require(toggle.get("checked") == "false" and
+                    sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                    "Expected one disabled Weekdays schedule")
+            self._tap_exact_text("Done")
+
+        def open_choice():
+            self.shell("input", "swipe", "530", "1500", "530", "550", "350")
+            prefix = "When the queue finishes, "
+            row, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith(prefix), "queue finish preference")
+            value = row.get("content-desc", "").removeprefix(prefix)
+            require(value in ("Notify when the queue finishes", "Do nothing"),
+                    "Queue completion value is missing or ambiguous")
+            current = "Notify and finish" if value == "Notify when the queue finishes" else "Do nothing"
+            self.smoke.tap(row)
+            self.smoke.wait_node("When the queue finishes")
+            tree = self.smoke.tree()
+            for label in ("Notify and finish", "Do nothing"):
+                matches = [n for n in tree.iter("node") if n.get("text") == label and n.get("checkable") == "true"]
+                require(len(matches) == 1 and matches[0].get("checked") == str(label == current).lower(),
+                        "Queue finish dialog did not reflect its current value")
+            return current
+
+        def choose(label):
+            node, _ = self.smoke.wait_node(label)
+            require(node.get("checkable") == "true", "Expected a real single-choice control")
+            self.smoke.tap(node)
+            node, _ = self.smoke.wait_node(label)
+            require(node.get("checked") == "true", "Queue finish choice was not selected")
+
+        def reopen():
+            card, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith("Night, ") and ". 0 files." in d and "Off:" in d
+                and "01:00" in d and "07:00" in d and "Double tap to edit" in d,
+                "empty Night queue with disabled Weekdays")
+            self.smoke.tap(card)
+            self.smoke.wait_node("Night queue", resource="queue_editor_title")
+            check_schedule()
+
+        check_schedule()
+        self.capture_checkpoint("c2-finish-baseline-editor", "c2-schedule.png", "Notify when the queue finishes")
+        baseline = open_choice()
+        require(baseline == "Notify and finish", "New Night queue did not default to notifying")
+        alternate = "Do nothing"
+        self.capture_checkpoint("c2-finish-choice", None, "When the queue finishes")
+        choose(alternate)
+        self._tap_exact_text("Cancel")
+        require(open_choice() == baseline, "Cancel changed the finish preference")
+        self.capture_checkpoint("c2-finish-cancelled", None, "When the queue finishes")
+        choose(alternate)
+        self._tap_exact_text("Apply")
+        require(open_choice() == alternate, "Apply did not update the draft")
+        self.capture_checkpoint("c2-finish-draft", None, "When the queue finishes")
+        self._tap_exact_text("Cancel")
+        self._tap_resource("queue_editor_back")
+        self.smoke.wait_node("Discard changes?")
+        self._tap_exact_text("Discard")
+        reopen()
+        require(open_choice() == baseline, "Discard did not restore the saved finish preference")
+        self.capture_checkpoint("c2-finish-discarded", None, "When the queue finishes")
+        choose(alternate)
+        self._tap_exact_text("Apply")
+        self._tap_resource("queue_editor_save")
+        reopen()
+        require(open_choice() == alternate, "Saved finish preference did not persist")
+        self.capture_checkpoint("c2-finish-saved", None, "When the queue finishes")
+        self._tap_exact_text("Cancel")
+        self.capture_checkpoint("c2-finish-saved-editor", "c2-schedule.png", "Do nothing")
+        self.log("PASS C2: Cancel and Discard preserved the finish preference; Apply and Save persisted Do nothing with Weekdays unchanged.")
+
     def verify_c2_no_days(self):
         """Reject an empty day draft, prove saved state, then recover and save."""
         weekdays = ("mon", "tue", "wed", "thu", "fri")
@@ -766,6 +858,8 @@ class Capture:
                 self.log("UNVERIFIED in unattended local-host mode: paired C6 and both C5 switcher states.")
             for key, reference, anchor in checkpoints:
                 self.capture_checkpoint(key, reference, anchor)
+            if self.args.unattended_configured_c2 and self.args.verify_c2_completion_preference:
+                self.verify_c2_completion_preference()
             if self.args.unattended_configured_c2 and self.args.verify_c2_no_days:
                 self.verify_c2_no_days()
             if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_cancel:
@@ -1851,6 +1945,7 @@ def main():
                         help="With --unattended-c1-workload prove a real five-minute Night window and timed stop")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
+    parser.add_argument("--verify-c2-completion-preference", action="store_true", help="Prove Cancel, Discard and saved queue completion preference")
     parser.add_argument("--verify-c2-no-days", action="store_true", help="Reject an empty day draft, then recover and save")
     parser.add_argument("--verify-schedule-delete-confirm", action="store_true",
                         help="With --unattended-configured-c2 prove draft discard and saved schedule deletion")
@@ -1880,6 +1975,8 @@ def main():
         parser.error("remote Pause verification requires --mixed-hosts")
     if sum((args.verify_remote_touch_pause, args.verify_remote_keyboard_pause, args.verify_remote_layout)) > 1:
         parser.error("run remote keyboard Pause, touch Pause and layout verification separately")
+    if args.verify_c2_completion_preference and (not args.unattended_configured_c2 or args.verify_c2_no_days or args.verify_schedule_delete_cancel or args.verify_schedule_delete_confirm):
+        parser.error("--verify-c2-completion-preference requires --unattended-configured-c2 and excludes other C2 checks")
     if args.verify_c2_no_days and (not args.unattended_configured_c2 or args.verify_schedule_delete_cancel or args.verify_schedule_delete_confirm):
         parser.error("--verify-c2-no-days requires --unattended-configured-c2 and excludes delete checks")
     if args.verify_schedule_delete_confirm and not args.unattended_configured_c2:
