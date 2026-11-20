@@ -93,7 +93,7 @@ class Capture:
             "apk_version_name": version.group(2) if version else None,
             "display_size": self.shell("wm", "size").strip(),
             "display_density": self.shell("wm", "density").strip(),
-            "initial_download_files": self.initial_downloads,
+            "initial_download_count": len(self.initial_downloads),
         }, indent=2) + "\n", encoding="utf-8")
         self.log("Preflight PASS: inbound33/API 33; exact isolated probe APK; package absent")
 
@@ -263,17 +263,93 @@ class Capture:
         """Capture an already reached state; report unsupported transitions honestly."""
         return self.await_checkpoint(key, reference, anchor)
 
+    def verify_a0_permissions(self):
+        """Use the probe's actual first-run buttons and safe native dialog actions."""
+        def tree_until(predicate, description, timeout=30):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                tree = self.smoke.tree()
+                if predicate(tree): return tree
+                time.sleep(.3)
+            raise RuntimeError("Could not verify " + description)
+        def by_id(tree, suffix):
+            return [n for n in tree.iter("node") if n.get("resource-id", "").endswith(":id/" + suffix)]
+        def save(key, tree):
+            (self.evidence / (key + "-capture.png")).write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+            ET.ElementTree(tree).write(self.evidence / (key + "-ui.xml"), encoding="utf-8", xml_declaration=True)
+        def permission_granted():
+            # Read only the probe's permission state; never persist the package dump.
+            package = self.shell("dumpsys", "package", PACKAGE)
+            matches = re.findall(r"android\.permission\.POST_NOTIFICATIONS:\s*granted=(true|false)", package)
+            require(len(matches) == 1, "Probe notification permission state is unavailable or ambiguous")
+            return matches[0] == "true"
+        def battery_entries():
+            lines = self.shell("cmd", "deviceidle", "whitelist").splitlines()
+            require(any(line.startswith(("system,", "user,")) for line in lines),
+                    "Could not read the device-idle whitelist")
+            return tuple(sorted(line.strip() for line in lines
+                                if re.search(r"(?:^|[,\s])" + re.escape(PACKAGE) + r"(?:$|[,\s])", line)))
+
+        initial = tree_until(lambda t: len(by_id(t, "fr_notif_allow")) == 1 and
+                             len(by_id(t, "fr_batt_allow")) == 1, "first-run permission controls")
+        require(not permission_granted(), "Probe notification permission is already granted")
+        before_battery = battery_entries()
+        save("a0-permissions-before", initial)
+        self.click_resource(APP_ID + "fr_notif_allow")
+        button_id = ("permission_allow_button" if self.args.a0_permissions == "allow"
+                     else "permission_deny_button")
+        def notification_dialog(tree):
+            buttons = by_id(tree, button_id)
+            return len(buttons) == 1 and buttons[0].get("package") in (
+                "com.android.permissioncontroller", "com.google.android.permissioncontroller") and \
+                buttons[0].get("enabled") == "true" and buttons[0].get("clickable") == "true"
+        dialog = tree_until(notification_dialog, "native notification permission dialog")
+        labels = " ".join(n.get("text", "") for n in dialog.iter("node"))
+        require("Inbound" in labels and "notification" in labels.casefold(),
+                "Notification dialog does not identify the probe and permission")
+        save("a0-notification-prompt", dialog)
+        self.smoke.tap(by_id(dialog, button_id)[0])
+        granted = self.args.a0_permissions == "allow"
+        returned = tree_until(lambda t: bool(by_id(t, "fr_start")) and
+                              (not by_id(t, "fr_notif_allow") if granted else bool(by_id(t, "fr_notif_allow"))),
+                              "notification return to first-run setup")
+        require(permission_granted() == granted, "Probe notification permission did not match the chosen action")
+        save("a0-notification-return", returned)
+        require(len(by_id(returned, "fr_batt_allow")) == 1, "Battery permission is already unrestricted")
+        self.click_resource(APP_ID + "fr_batt_allow")
+        def cancel_dialog(tree):
+            buttons = [n for n in tree.iter("node") if n.get("resource-id") == "android:id/button2"
+                       and n.get("text", "").casefold() in ("cancel", "deny", "no") and n.get("clickable") == "true"
+                       and n.get("enabled") == "true" and n.get("package") == "com.android.settings"]
+            return len(buttons) == 1
+        dialog = tree_until(cancel_dialog, "native battery prompt with an explicit negative action")
+        text = " ".join(n.get("text", "") for n in dialog.iter("node"))
+        require("Inbound" in text and ("battery" in text.casefold() or "background" in text.casefold()),
+                "Battery dialog does not identify the probe and the requested permission")
+        save("a0-battery-prompt", dialog)
+        cancel = next(n for n in dialog.iter("node") if n.get("resource-id") == "android:id/button2"
+                      and n.get("text", "").casefold() in ("cancel", "deny", "no"))
+        self.smoke.tap(cancel)
+        returned = tree_until(lambda t: len(by_id(t, "fr_batt_allow")) == 1 and bool(by_id(t, "fr_start")),
+                              "battery prompt dismissal returned to first-run setup")
+        require(battery_entries() == before_battery, "Probe battery whitelist changed after Cancel")
+        save("a0-battery-cancel-return", returned)
+        self.log(f"PASS A0: notification {self.args.a0_permissions} and battery {cancel.get('text')} returned to setup; probe whitelist unchanged")
+
     def run(self):
         self.check()
         try:
             self.launch()
-            if self.args.unattended:
+            if self.args.a0_permissions:
+                self.verify_a0_permissions()
+            elif self.args.unattended:
                 self.unattended_sequence()
             else:
                 for key, reference, anchor in CAPTURES:
                     self.await_checkpoint(key, reference, anchor)
         except Exception:
-            self.collect_failure()
+            if not self.args.a0_permissions:
+                self.collect_failure()
             raise
         finally:
             self.clean()
@@ -310,12 +386,15 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--apk", required=True, help="Explicit probe APK with the rcloneprobe application ID")
     parser.add_argument("--evidence", type=Path, required=True, help="New, previously absent evidence directory")
+    parser.add_argument("--a0-permissions", choices=("deny", "allow"), help="Standalone native first-run permission check; battery prompt is cancelled")
     parser.add_argument("--verify-a4-c7", action="store_true", help="Assert updated A4 rows and C7 search in an unattended run")
     parser.add_argument("--a5-metadata", action="store_true", help="Populate A5 from a loopback metadata fixture without submitting")
     parser.add_argument("--a5-validation", action="store_true", help="Check the A5 invalid URL state without submitting")
     parser.add_argument("--unattended", action="store_true",
                         help="Opt in to hands-off capture of safely observable, already reached states")
     args = parser.parse_args()
+    if args.a0_permissions and (args.unattended or args.verify_a4_c7 or args.a5_metadata or args.a5_validation):
+        parser.error("--a0-permissions is a standalone lane")
     if args.a5_metadata and not args.unattended:
         parser.error("--a5-metadata requires --unattended")
     if args.a5_validation and (not args.unattended or args.a5_metadata):

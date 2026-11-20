@@ -18,11 +18,16 @@ namespace Inbound.App;
 /// The app's one activity: Downloads and Settings behind a bottom bar, with Details and New download opening over them, the Add sheet,
 /// and the first-run screen. Talks to the Host only through <see cref="DownloadsModel"/> and its connection.
 /// </summary>
-[Activity(Name = "app.inbound.android.MainActivity", Label = "Inbound", MainLauncher = true, Exported = true,
+[Activity(Name = "app.inbound.android.MainActivity", Label = MainActivity.ActivityLabel, MainLauncher = true, Exported = true,
     LaunchMode = Android.Content.PM.LaunchMode.SingleTop, WindowSoftInputMode = SoftInput.AdjustResize)]
 [IntentFilter([Intent.ActionSend], Categories = [Intent.CategoryDefault], DataMimeType = "text/*")]
 public sealed partial class MainActivity : AppCompatActivity
 {
+#if INBOUND_RCLONE_PROBE
+    internal const string ActivityLabel = "Inbound Probe";
+#else
+    internal const string ActivityLabel = "Inbound";
+#endif
     private const string FirstRunKey = "first_run_done";
 
     private DownloadsModel? _model;

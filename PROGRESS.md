@@ -2,6 +2,20 @@
 
 **Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
 
+### Native first-run permission returns (2026-11-20)
+
+Astra approved the notification Allow and Deny returns. The isolated probe
+matched Android's permission state in `a0-permissions-allow-20261120-051604`
+and `a0-permissions-deny-20261120-051518`. The final
+`a0-native-deny-20261120-053443` run chose Deny in the battery prompt,
+returned to first-run setup, and verified that the probe's battery exemption
+stayed unchanged. The exact probe package was uninstalled after each run.
+Battery exemption grant and persistence remain open.
+
+The emulator APK is labeled Inbound Probe so Android's chooser can distinguish
+it from the installed Inbound app. Both labels were verified in the packaged
+probe, and the regular build resolves Inbound and app.inbound.android.
+
 ### Core screens and Downloads selection (2026-11-20)
 
 - Astra passed first launch before the permission prompts, the idle Add sheet
