@@ -31,8 +31,11 @@
   `c2-named-delete-20261120-061717`, the confirmation named Weekdays,
   distinguished Delete in the theme's error colour and explained deferred
   save. Cancel preserved the one disabled schedule, its weekdays, times and
-  conditions after saving and reopening. Confirmed deletion and the remote
-  editor remain open.
+  conditions after saving and reopening. In
+  `c2-positive-delete-20261120-064925`, Astra approved the real Delete
+  action. Discard restored Weekdays. Repeating Delete and saving removed
+  the schedule while the empty Night queue remained. The remote editor
+  remains open.
 - Astra approved B5 bulk Pause in `b5-bulk-pause-quiescent-20261120-063258`.
   The action closed the selected active fixture's connection. Its fixture
   count held at 2,899,968 bytes for six seconds while the unselected

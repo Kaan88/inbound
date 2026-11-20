@@ -443,6 +443,67 @@ class Capture:
         self.capture_checkpoint("c2-delete-cancel", None, "Schedule")
         self.log("PASS C2: deletion cancelled and one disabled Weekdays schedule preserved after save/reopen.")
 
+    def verify_schedule_delete_confirm(self):
+        """Delete only the fixture schedule; prove discard keeps it and Save removes it."""
+        require(self.args.queue_name == "Night", "Deletion proof is restricted to the Night fixture")
+
+        def open_night(expected):
+            row, _ = self.smoke.wait_content_description(
+                lambda d: d.startswith("Night, ") and ". 0 files." in d and expected in d
+                and "Double tap to edit" in d, "the exact empty Night fixture queue")
+            self.smoke.tap(row)
+            self.smoke.wait_node("Save", resource="queue_editor_save")
+
+        def delete_draft(capture):
+            self._open_schedule_list()
+            option, tree = self.smoke.wait_content_description(
+                lambda d: d == "Options for Weekdays", "the fixture schedule options")
+            require(sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1
+                    and sum(n.get("content-desc", "") == "Options for Weekdays" for n in tree.iter("node")) == 1,
+                    "Expected exactly one Weekdays schedule")
+            self.smoke.tap(option)
+            self._tap_exact_text("Delete schedule")
+            self.smoke.wait_node("Delete Weekdays?")
+            self.smoke.wait_node("Only this schedule will be removed when you save. The queue and downloads stay.")
+            if capture:
+                self.capture_checkpoint("c2-delete-positive-confirm", None, "Delete Weekdays?")
+            self._tap_exact_text("Delete")
+            self.smoke.wait_node("Choose or add a schedule")
+            self.verify_no_schedule(self.smoke.tree())
+            if capture:
+                self.capture_checkpoint("c2-delete-draft", None, "Choose or add a schedule")
+
+        # First discard the changed draft to prove Delete did not yet persist.
+        delete_draft(True)
+        self.shell("input", "keyevent", "4")
+        self.smoke.wait_node("Discard changes?")
+        self._tap_exact_text("Discard")
+        open_night("Off:")
+        self._open_schedule_list()
+        toggle, tree = self.smoke.wait_content_description(
+            lambda d: d == "Enable Weekdays", "Weekdays after discarding the draft")
+        require(toggle.get("checked") == "false" and
+                sum(n.get("content-desc", "").startswith("Weekdays, ") for n in tree.iter("node")) == 1,
+                "Discard did not preserve the original disabled Weekdays schedule")
+        self._tap_exact_text("Done")
+        self.capture_checkpoint("c2-delete-discarded", None, "Schedule")
+
+        # Repeat the same exact deletion and commit it through the ordinary Save.
+        delete_draft(False)
+        self._tap_resource("queue_editor_save")
+        open_night("No schedule")
+        tree = self.smoke.tree()
+        self.verify_no_schedule(tree)
+        self.capture_checkpoint("c2-delete-saved", None, "Choose or add a schedule")
+        self._open_schedule_list()
+        tree = self.smoke.tree()
+        require(not any(n.get("content-desc", "").startswith("Weekdays, ") or
+                        n.get("content-desc", "") == "Options for Weekdays" for n in tree.iter("node")),
+                "Weekdays remained in the saved schedule list")
+        self.smoke.wait_node("+  Add schedule")
+        self._tap_exact_text("Done")
+        self.log("PASS C2: discarded deletion preserved Weekdays; saved deletion left the empty Night queue without a schedule.")
+
     def _tap_exact_text(self, text):
         tree = self.smoke.tree()
         found = [n for n in tree.iter("node") if n.get("text") == text and n.get("enabled") != "false"]
@@ -565,6 +626,8 @@ class Capture:
                 self.capture_checkpoint(key, reference, anchor)
             if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_cancel:
                 self.verify_schedule_delete_cancel()
+            if self.args.unattended_configured_c2 and self.args.verify_schedule_delete_confirm:
+                self.verify_schedule_delete_confirm()
         except Exception:
             self.collect_failure()
             raise
@@ -1209,6 +1272,8 @@ def main():
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
+    parser.add_argument("--verify-schedule-delete-confirm", action="store_true",
+                        help="With --unattended-configured-c2 prove draft discard and saved schedule deletion")
     parser.add_argument("--verify-schedule-delete-cancel", action="store_true",
                         help="With --unattended-configured-c2 cancel schedule deletion and verify persistence")
     parser.add_argument("--mixed-hosts", action="store_true",
@@ -1229,6 +1294,8 @@ def main():
         parser.error("--verify-remote-touch-pause requires --mixed-hosts")
     if args.verify_remote_touch_pause and args.verify_remote_layout:
         parser.error("run remote touch Pause separately from layout verification")
+    if args.verify_schedule_delete_confirm and not args.unattended_configured_c2:
+        parser.error("--verify-schedule-delete-confirm requires --unattended-configured-c2")
     if args.verify_schedule_delete_cancel and not args.unattended_configured_c2:
         parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
     if args.verify_scheduled_row and not args.unattended_c1_workload:
