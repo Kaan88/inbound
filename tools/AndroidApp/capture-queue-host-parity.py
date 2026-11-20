@@ -639,36 +639,53 @@ class Capture:
         """Use a fresh probe, ordinary UI and a bounded local HTTP workload."""
         states = load_module("c1_state_fixture", Path(__file__).with_name("capture-download-states-parity.py"))
         body = states.fixture_bytes()
+        verify_stop = self.args.verify_scheduled_stop
+        verify_start = self.args.verify_scheduled_start or verify_stop
+        night_body = body * 2 if verify_stop else body
         nonce = uuid.uuid4().hex[:10]
         names = {key: f"inbound-c1-{key}-{nonce}.bin" for key in ("main", "night", "mobile")}
         sent = {key: 0 for key in names}
         first_byte_at = {}
+        in_flight = dict.fromkeys(names, 0)
+        fixture_lock = threading.Lock()
         stop = threading.Event()
+
+        def night_progress():
+            with fixture_lock:
+                return sent["night"], sent["mobile"], in_flight["night"]
+
         class Handler(BaseHTTPRequestHandler):
             def respond(self, include_body):
                 key = self.path.strip("/")
                 if key not in names:
                     self.send_error(404); return
+                payload = night_body if key == "night" else body
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Length", str(len(payload)))
                 self.send_header("Content-Disposition", f'attachment; filename="{names[key]}"')
                 self.end_headers()
                 if not include_body: return
+                with fixture_lock:
+                    in_flight[key] += 1
                 try:
                     chunk_size = 128 * 1024
-                    for offset in range(0, len(body), chunk_size):
+                    for offset in range(0, len(payload), chunk_size):
                         if stop.is_set():
                             return
-                        chunk = body[offset:offset + chunk_size]
+                        chunk = payload[offset:offset + chunk_size]
                         self.wfile.write(chunk)
                         self.wfile.flush()
-                        first_byte_at.setdefault(key, time.time())
-                        sent[key] = offset + len(chunk)
+                        with fixture_lock:
+                            first_byte_at.setdefault(key, time.time())
+                            sent[key] = offset + len(chunk)
                         if stop.wait(1.7):
                             return
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
+                finally:
+                    with fixture_lock:
+                        in_flight[key] -= 1
             def do_HEAD(self): self.respond(False)
             def do_GET(self): self.respond(True)
             def log_message(self, *_): pass
@@ -676,24 +693,30 @@ class Capture:
         reverse = False
         server_started = False
         try:
-            # Window begins at least one hour ahead and ends an hour later.
-            # Local device time is read only; never change it.
+            # Choose a future window from the actual device clock. The native
+            # picker lane uses five-minute marks; the longer Night fixture lives
+            # beyond the five-minute stop test window.
             clock = self.shell("date", "+%H%M").strip()
             require(re.fullmatch(r"(?:[01][0-9]|2[0-3])[0-5][0-9]", clock), "Cannot establish emulator local time")
-            start_hour, minute = (int(clock[:2]) + 2) % 24, 0
-            if self.args.verify_scheduled_start:
-                now = 60 * int(clock[:2]) + int(clock[2:])
-                start_hour, minute = divmod((5 * ((now + 12) // 5)) % 1440, 60)
-            stop_hour = (start_hour + 1) % 24
-            self.c1_start, self.c1_stop = f"{start_hour:02}:{minute:02}", f"{stop_hour:02}:{minute:02}"
-            def set_hour(hour):
+            now = 60 * int(clock[:2]) + int(clock[2:])
+            start_slot = (int(clock[:2]) + 2) * 60 % 1440
+            if verify_start:
+                start_slot = (5 * ((now + (10 if verify_stop else 12)) // 5)) % 1440
+            stop_slot = (start_slot + (5 if verify_stop else 60)) % 1440
+            start_hour, start_minute = divmod(start_slot, 60)
+            stop_hour, stop_minute = divmod(stop_slot, 60)
+            self.c1_start = f"{start_hour:02}:{start_minute:02}"
+            self.c1_stop = f"{stop_hour:02}:{stop_minute:02}"
+
+            def set_time(hour, minute):
                 self._time_picker(hour % 12 or 12, "PM" if hour >= 12 else "AM", minute)
+
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             port = server.server_address[1]
             require(not re.search(rf"\btcp:{port}\b", self.adb("reverse", "--list")), "Reverse port already in use")
             threading.Thread(target=server.serve_forever, daemon=True).start()
             server_started = True
-            self.adb("reverse", f"tcp:{port}", f"tcp:{port}"); reverse = True
+            self.adb("reverse", "--no-rebind", f"tcp:{port}", f"tcp:{port}"); reverse = True
             self.launch()
             self.smoke.wait_node("Search downloads")
             self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
@@ -717,9 +740,9 @@ class Capture:
             self.smoke.tap(self.smoke.wait_node("+  Add schedule")[0])
             self.smoke.tap(self.smoke.wait_node("Schedule name")[0]); self.shell("input", "text", "Daily")
             self.smoke.tap(self.smoke.wait_node("Continue")[0])
-            self._tap_description_prefix("Start time"); set_hour(start_hour)
+            self._tap_description_prefix("Start time"); set_time(start_hour, start_minute)
             self._tap_description_prefix("Stop time")
-            self.smoke.tap(self.smoke.wait_node("Choose time")[0]); set_hour(stop_hour)
+            self.smoke.tap(self.smoke.wait_node("Choose time")[0]); set_time(stop_hour, stop_minute)
             self._open_schedule_list()
             toggle, _ = self.smoke.wait_content_description(lambda d: d == "Enable Daily", "enabled Daily schedule")
             require(toggle.get("checked") == "true", "Night schedule is not enabled")
@@ -826,7 +849,7 @@ class Capture:
             (self.evidence / "c1-chart-destination.png").write_bytes(
                 self.adb("exec-out", "screencap", "-p", raw=True))
             self.log("C1 workload: real queue cards and chart navigation to the same Host's live Downloads graph verified.")
-            if self.args.verify_scheduled_start:
+            if verify_start:
                 require(sent["night"] == sent["mobile"] == 0, "A stopped fixture transferred before the scheduled check")
                 self.log(f"Waiting for the real Night schedule at {self.c1_start}; device time is unchanged.")
                 deadline = time.monotonic() + 13 * 60
@@ -836,7 +859,7 @@ class Capture:
                 require(re.fullmatch(r"(?:[01][0-9]|2[0-3])[0-5][0-9][0-5][0-9]", observed),
                         "Cannot establish observed schedule time")
                 observed_minute = 60 * int(observed[:2]) + int(observed[2:4])
-                require((observed_minute - (60 * start_hour + minute)) % 1440 < 60 and sent["night"] > 0,
+                require((observed_minute - start_slot) % 1440 < 60 and sent["night"] > 0,
                         "Night did not begin within its scheduled window")
                 first = sent["night"]
                 self.smoke.wait_content_description(
@@ -844,7 +867,7 @@ class Capture:
                 deadline = time.monotonic() + 6
                 while time.monotonic() < deadline and sent["night"] <= first:
                     time.sleep(.25)
-                require(first < sent["night"] < len(body) and sent["mobile"] == 0,
+                require(first < sent["night"] < len(night_body) and sent["mobile"] == 0,
                         "Night bytes did not advance, or the stopped control transferred")
                 (self.evidence / "c1-schedule-start.json").write_text(json.dumps({
                     "planned_local_start": self.c1_start, "observed_device_clock_hhmmss": observed,
@@ -854,6 +877,60 @@ class Capture:
                 (self.evidence / "c1-schedule-start.png").write_bytes(
                     self.adb("exec-out", "screencap", "-p", raw=True))
                 self.log("PASS C1 scheduled execution: Night started in its live window and Mobile stayed stopped.")
+
+            if verify_stop:
+                at_start, _, active = night_progress()
+                require(active > 0, "Night response was already closed just after the real start")
+                observed_seconds = observed_minute * 60 + int(observed[4:])
+                seconds_to_stop = (stop_slot * 60 - observed_seconds) % 86400
+                require(0 < seconds_to_stop <= 5 * 60, "Scheduled end is outside the fresh test window")
+                self.log(f"Waiting for actual Night stop at {self.c1_stop}; no manual Pause or clock adjustment.")
+                cutoff = time.monotonic() + seconds_to_stop
+                deadline = cutoff + 55
+                while time.monotonic() < deadline:
+                    if time.monotonic() >= cutoff - 2 and night_progress()[2] == 0:
+                        break
+                    time.sleep(.5)
+                else:
+                    raise RuntimeError("Night fixture socket stayed open past its scheduled stop")
+                pause_row, tree = self.smoke.wait_content_description(
+                    lambda d: d.startswith(names["night"] + ". Paused"), "Night row paused by the window end")
+                end_clock = self.shell("date", "+%H%M%S").strip()
+                require(re.fullmatch(r"(?:[01][0-9]|2[0-3])[0-5][0-9][0-5][0-9]", end_clock),
+                        "Cannot establish observed stop time")
+                end_seconds = (60 * int(end_clock[:2]) + int(end_clock[2:4])) * 60 + int(end_clock[4:])
+                require((end_seconds - stop_slot * 60) % 86400 < 85, "Night stopped outside the expected boundary")
+                held, mobile, active = night_progress()
+                require(at_start < held < len(night_body) and mobile == 0 and active == 0,
+                        "Night did not keep an incomplete payload or Mobile unexpectedly ran")
+                (self.evidence / "c1-schedule-stop-downloads.png").write_bytes(
+                    self.adb("exec-out", "screencap", "-p", raw=True))
+                ET.ElementTree(tree).write(self.evidence / "c1-schedule-stop-downloads.xml",
+                                           encoding="utf-8", xml_declaration=True)
+                time.sleep(4)
+                require(night_progress() == (held, 0, 0),
+                        "The settled fixture responses or byte counters changed after the scheduled stop")
+                proof = {
+                    "planned_local_stop": self.c1_stop, "observed_device_clock_hhmmss": end_clock,
+                    "night_sent_at_start": at_start, "night_sent_after_stop": [held, night_progress()[0]],
+                    "night_total_payload": len(night_body), "stopped_mobile_bytes": mobile,
+                    "open_night_responses_after_stop": active, "paused_row": pause_row.get("content-desc"),
+                }
+                proof_file = self.evidence / "c1-schedule-stop.json"
+                proof_file.write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+                self.smoke.tap(self.smoke.wait_node("Queues", resource="nav_queues")[0])
+                queue, tree = self.smoke.wait_content_description(
+                    lambda d: (d.startswith("Night, Stopped.") or d.startswith("Night, Scheduled for "))
+                              and (". 1 file." in d or ". 1 file · " in d),
+                    "Night queue stopped with one fixture file")
+                (self.evidence / "c1-schedule-stop-queue.png").write_bytes(
+                    self.adb("exec-out", "screencap", "-p", raw=True))
+                ET.ElementTree(tree).write(self.evidence / "c1-schedule-stop-queue.xml",
+                                           encoding="utf-8", xml_declaration=True)
+                proof["stopped_queue"] = queue.get("content-desc")
+                proof_file.write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+                self.log("PASS C1 scheduled end: Night stopped at its real boundary and held its partial bytes.")
+
         except Exception:
             self.collect_failure(); raise
         finally:
@@ -1491,6 +1568,8 @@ def main():
                         help="With --mixed-hosts touch Pause and verify the owned active Host job")
     parser.add_argument("--verify-scheduled-row", action="store_true",
                         help="With --unattended-c1-workload verify the real Host schedule on a queued Downloads row")
+    parser.add_argument("--verify-scheduled-stop", action="store_true",
+                        help="With --unattended-c1-workload prove a real five-minute Night window and timed stop")
     parser.add_argument("--verify-scheduled-start", action="store_true",
                         help="With --unattended-c1-workload wait for a real near-future Night queue start")
     parser.add_argument("--verify-schedule-delete-confirm", action="store_true",
@@ -1525,6 +1604,8 @@ def main():
         parser.error("--verify-schedule-delete-cancel requires --unattended-configured-c2")
     if args.verify_scheduled_row and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-row requires --unattended-c1-workload")
+    if args.verify_scheduled_stop and not args.unattended_c1_workload:
+        parser.error("--verify-scheduled-stop requires --unattended-c1-workload")
     if args.verify_scheduled_start and not args.unattended_c1_workload:
         parser.error("--verify-scheduled-start requires --unattended-c1-workload")
     if args.verify_remote_layout and not args.mixed_hosts:

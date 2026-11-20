@@ -43,6 +43,12 @@
   two finished jobs. The two output hashes matched distinct payloads, and
   neither unselected file was requested. Cleanup removed the two exact
   hash-matched outputs after the probe was uninstalled.
+- Astra approved C1's real timed stop in
+  `c1-timed-stop-final-20261120-075414`. Night started at 08:00 and
+  paused at 08:05 without manual input. All Night responses closed and
+  its partial count held at 23,330,816 bytes for four seconds.
+  Mobile received zero bytes. Queues reported the next Night start the
+  following day at 08:00. The isolated probe and fixture mapping were removed.
 - Astra approved the empty C2 schedule editor in
   `c2-no-schedule-final-20261120-060648`. The empty times and seven
   disabled day controls matched the disposable queue's state. In
