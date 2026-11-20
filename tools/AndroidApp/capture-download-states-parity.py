@@ -80,8 +80,18 @@ class Capture:
                           "paused": f"inbound-a2-paused-{self.nonce}.bin",
                           "finished": f"inbound-a2-finished-{self.nonce}.bin",
                       })
+        if getattr(args, "c8_typed_a1_failed", False):
+            self.names = {
+                "selected-active": f"Disc-{self.nonce}.iso",
+                "selected-paused": f"Archive-{self.nonce}.zip",
+                "selected-queued": f"Clip-{self.nonce}.mp4",
+                "other-active": f"Photo-{self.nonce}.png",
+                "other-finished": f"Notes-{self.nonce}.pdf",
+                "owned-failed": f"Missing-{self.nonce}.bin",
+            }
         self.requests = []
         self.sent = {key: 0 for key in self.names}
+        self.b5_total_sent = {key: 0 for key in self.names}
         self.b5_release = {}
         self.b5_arrived = {}
         self.b5_disconnects = {}
@@ -124,6 +134,11 @@ class Capture:
             target = "/sdcard/Download/" + self.names["other-active"]
             require(self.shell(f"if [ -e '{target}' ] || [ -L '{target}' ]; then echo present; fi").strip() != "present",
                     "A3 exact fixture destination already exists")
+        if getattr(self.args, "c8_typed_a1_failed", False):
+            for name in self.names.values():
+                path = "/sdcard/Download/" + name
+                require(self.shell(f"if [ -e '{path}' ] || [ -L '{path}' ]; then echo present; fi").strip() != "present",
+                        "An exact fixture destination already exists")
         initial_files = self.shell(
             "find", "/sdcard/Download", "-maxdepth", "1", "-type", "f").splitlines()
         (self.evidence / "apk.sha256").write_text(
@@ -161,6 +176,8 @@ class Capture:
                 if key not in capture.names:
                     self.send_error(404)
                     return
+                if key == "owned-failed":
+                    capture.requests.append({"file": key, "method": "HEAD", "at": time.time()})
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(FILE_SIZE))
@@ -174,6 +191,9 @@ class Capture:
                     self.send_error(404)
                     return
                 capture.requests.append({"file": key, "method": "GET", "at": time.time()})
+                if key == "owned-failed":
+                    self.send_error(404)
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(FILE_SIZE))
@@ -187,6 +207,7 @@ class Capture:
                         self.wfile.write(body[offset:offset + CHUNK_SIZE])
                         self.wfile.flush()
                         capture.sent[key] = offset + CHUNK_SIZE
+                        capture.b5_total_sent[key] += CHUNK_SIZE
                         if capture.args.active_only and key == "active" and capture.sent[key] == 512 * 1024:
                             if not capture.capture_gate.wait(150 if capture.args.details_flow else 40):
                                 return
@@ -197,7 +218,9 @@ class Capture:
                                 capture.b5_release[key].wait(3)
                         elif capture.args.details_flow:
                             capture.capture_gate.wait(0.25)
-                        elif not (getattr(capture.args, "verify_b5_bulk_pause", False) and key == "other-finished"):
+                        elif not (key == "other-finished" and
+                                  (getattr(capture.args, "verify_b5_bulk_pause", False)
+                                   or getattr(capture.args, "c8_typed_a1_failed", False))):
                             time.sleep(CHUNK_DELAY_SECONDS)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     if key in capture.b5_disconnects:
@@ -593,6 +616,7 @@ class Capture:
         except RuntimeError as exc:
             raise RuntimeError("B5 could not establish an active selected-paused job to pause") from exc
         x, y = center(pause.get("bounds"))
+        individual_disconnects_before = self.b5_disconnects["selected-paused"]
         self.adb("shell", "input", "tap", str(x), str(y))
 
         desired = {"selected-active": "downloading", "selected-paused": "paused",
@@ -609,6 +633,38 @@ class Capture:
             require(not any(n.get("resource-id", "").endswith(":id/sel_title") for n in captured),
                     "C8 capture unexpectedly entered selection mode")
             self.log("PASS representative C8: real active, paused, queued and finished fixture rows; Light verified in Settings")
+            if self.args.c8_typed_a1_failed:
+                require(all(len(matching(captured, self.names[k])) == 1 for k in B5_KEYS),
+                        "Typed C8 capture must show all five exact nonce names")
+                require(has_state(captured, self.names["selected-queued"], "queued") and
+                        not any(r["file"] == "selected-queued" and r["method"] == "GET" for r in self.requests),
+                        "Locally admitted Later job is not still queued without a request")
+                # Free both active slots using each exact row action; no global pause.
+                for key in ("selected-active", "other-active"):
+                    ns = wait_tree(lambda ns: has_state(ns, self.names[key], "downloading"),
+                                   "owned active row before pause")
+                    self.smoke.tap(action_for(ns, self.names[key], "Pause"))
+                    wait_tree(lambda ns: has_state(ns, self.names[key], "paused"), "owned row paused")
+                failed_path = "/sdcard/Download/" + self.names["owned-failed"]
+                add_hook_job("owned-failed")
+                # Search isolates the sixth row without relying on list ordering or viewport height.
+                self.smoke.enter("Search downloads", self.names["owned-failed"])
+                self.shell("input", "keyevent", "KEYCODE_BACK")  # Hide only the search keyboard.
+                def failed_visible(ns):
+                    return (len(matching(ns, self.names["owned-failed"])) == 1 and
+                            has_state(ns, self.names["owned-failed"], "failed") and
+                            len([n for n in ns if n.get("resource-id", "").endswith(":id/action") and
+                                 n.get("content-desc") == "Retry " + self.names["owned-failed"] and
+                                 n.get("enabled") == "true"]) == 1 and
+                            all(any(r["file"] == "owned-failed" and r["method"] == method for r in self.requests)
+                                for method in ("HEAD", "GET")))
+                tree = wait_tree(failed_visible, "real 404 fixture failure and Retry", return_tree=True)
+                require(self.shell(f"if [ -e '{failed_path}' ] || [ -L '{failed_path}' ]; then echo present; fi").strip() != "present",
+                        "Failed fixture unexpectedly produced a completed output")
+                (self.evidence / "a1-real-failed-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                ET.ElementTree(tree).write(self.evidence / "a1-real-failed-ui.xml", encoding="utf-8", xml_declaration=True)
+                self.log("PASS typed C8 and A1: exact mixed file names, Later row, and real fixture 404 failure with Retry.")
+                return
         if self.args.capture_dark_mixed:
             active_keys = ("selected-active", "other-active")
             def valid_mixed(nodes):
@@ -710,6 +766,77 @@ class Capture:
             (self.evidence / "b5-bulk-pause-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
             ET.ElementTree(tree).write(self.evidence / "b5-bulk-pause-ui.xml", encoding="utf-8", xml_declaration=True)
             self.log("PASS B5 bulk Pause: the active selection paused at fixed bytes; the unselected transfer advanced.")
+            if self.args.verify_b5_bulk_resume:
+                # The separately paused row must remain untouched throughout the
+                # resume proof. Wait for the old socket to close and quiesce.
+                untouched = "selected-paused"
+
+                def fixture_gets(key):
+                    return sum(r["file"] == key and r["method"] == "GET" for r in self.requests)
+
+                wait_tree(lambda ns: pause_states(ns)
+                          and self.b5_disconnects[untouched] > individual_disconnects_before,
+                          "independent paused fixture socket closed")
+                untouched_before = self.b5_total_sent[untouched]
+                untouched_gets = fixture_gets(untouched)
+                quiet_start = time.monotonic()
+                nodes = wait_tree(lambda ns: time.monotonic() - quiet_start >= 4 and pause_states(ns),
+                                  "independent paused row quiescent before Resume")
+                require(0 < untouched_before == self.b5_total_sent[untouched]
+                        and untouched_gets == fixture_gets(untouched),
+                        "Independent paused fixture did not remain quiescent")
+
+                # Pause clears selection. Select precisely the newly paused row;
+                # never select the independently paused row or queued row.
+                target = matching(nodes, self.names["selected-active"])
+                require(len(target) == 1 and has_state(nodes, self.names["selected-active"], "paused"),
+                        "Resume target is not uniquely paused")
+                x, y = center(target[0].get("bounds"), quarter=True)
+                self.adb("shell", "input", "swipe", str(x), str(y), str(x), str(y), "900")
+                def selected_target(ns):
+                    return (selected(ns, 1) and
+                            all(len(matching(ns, self.names[k])) == 1 and
+                                matching(ns, self.names[k])[0].get("selected") ==
+                                ("true" if k == "selected-active" else "false")
+                                for k in keys))
+                selection_tree = wait_tree(selected_target, "only the paused target selected", return_tree=True)
+                resume = [n for n in selection_tree.iter("node") if n.get("resource-id", "").endswith(":id/sel_resume")
+                          and n.get("content-desc") == "Resume selected" and n.get("enabled") == "true"
+                          and n.get("clickable") == "true"]
+                require(len(resume) == 1, "Expected exactly one enabled bulk Resume control")
+                (self.evidence / "b5-bulk-resume-selection.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                ET.ElementTree(selection_tree).write(self.evidence / "b5-bulk-resume-selection.xml",
+                                                      encoding="utf-8", xml_declaration=True)
+                get_count = fixture_gets("selected-active")
+                total_before = self.b5_total_sent["selected-active"]
+                self.smoke.tap(resume[0])
+                # The fixture does not implement Range: a resumed GET starts at
+                # zero, so sample only after the new request has been observed.
+                resumed = dict(paused, **{"selected-active": "downloading"})
+                def resumed_states(ns):
+                    return all(has_state(ns, self.names[k], state) for k, state in resumed.items())
+                wait_tree(lambda ns: resumed_states(ns) and
+                          fixture_gets("selected-active") > get_count and
+                          self.b5_total_sent["selected-active"] > total_before and
+                          0 < self.sent["selected-active"] < FILE_SIZE,
+                          "resumed job and its new fixture request")
+                sample = self.b5_total_sent["selected-active"]
+                started_resume = time.monotonic()
+                tree = wait_tree(lambda ns: time.monotonic() - started_resume >= 4 and resumed_states(ns)
+                                 and sample < self.b5_total_sent["selected-active"] and self.sent["selected-active"] < FILE_SIZE,
+                                 "resumed fixture advances while other job remains paused", return_tree=True)
+                untouched_after = self.b5_total_sent[untouched]
+                untouched_gets_after = fixture_gets(untouched)
+                require(untouched_before == untouched_after and untouched_gets == untouched_gets_after,
+                        "Unselected paused fixture changed during Resume")
+                (self.evidence / "b5-bulk-resume-proof.json").write_text(
+                    json.dumps({"selected_fixture_bytes": [sample, self.b5_total_sent["selected-active"]],
+                                "unselected_paused_fixture_bytes": [untouched_before, untouched_after],
+                                "unselected_paused_fixture_gets": [untouched_gets, untouched_gets_after],
+                                "seconds": time.monotonic() - started_resume}, indent=2) + "\n", encoding="utf-8")
+                (self.evidence / "b5-bulk-resume-capture.png").write_bytes(self.adb("exec-out", "screencap", "-p", raw=True))
+                ET.ElementTree(tree).write(self.evidence / "b5-bulk-resume-ui.xml", encoding="utf-8", xml_declaration=True)
+                self.log("PASS B5 bulk Resume: only the selected paused fixture resumed; the independent paused fixture stayed unchanged.")
         if self.args.capture_mixed_a3:
             self.shell("input", "keyevent", "4")  # Close the actual overflow popup.
             wait_tree(lambda ns: selected(ns, 3) and not menu_entry(ns, "Move to queue"), "popup dismissed")
@@ -895,18 +1022,25 @@ def main():
     parser.add_argument("--capture-b5", action="store_true",
                         help="With --mixed-a2, capture B5 using three real fixture rows selected in Downloads")
     parser.add_argument("--verify-b5-bulk-pause", action="store_true", help="With --unattended-b5 apply bulk Pause and verify transfer isolation")
+    parser.add_argument("--verify-b5-bulk-resume", action="store_true", help="After bulk Pause resume only its paused target and verify another paused job remains unchanged")
     parser.add_argument("--capture-mixed-a3", action="store_true", help="After B5 capture one real completion snackbar among the dark mixed jobs")
     parser.add_argument("--capture-dark-mixed", action="store_true", help="With --unattended-b5 capture representative dark A1/A2 real mixed states")
     parser.add_argument("--capture-c8-light", action="store_true", help="With --unattended-b5 capture the real mixed list in Light mode before selection")
+    parser.add_argument("--c8-typed-a1-failed", action="store_true", help="Capture typed C8 rows and a separate real 404 failure; ends before B5 selection")
     parser.add_argument("--unattended-b5", action="store_true",
                         help="Standalone opt-in B5 mixed-state lane: select active, paused and queued rows; leave active and finished rows unselected")
     args = parser.parse_args()
+    if args.verify_b5_bulk_resume and not args.verify_b5_bulk_pause:
+        parser.error("--verify-b5-bulk-resume requires --verify-b5-bulk-pause")
     if args.verify_b5_bulk_pause and (not args.unattended_b5 or args.capture_mixed_a3):
         parser.error("--verify-b5-bulk-pause requires --unattended-b5 without the mixed A3 lane")
     if args.capture_mixed_a3 and not (args.unattended_b5 and args.capture_dark_mixed):
         parser.error("--capture-mixed-a3 requires --unattended-b5 --capture-dark-mixed")
     if args.capture_dark_mixed and (not args.unattended_b5 or args.capture_c8_light):
         parser.error("--capture-dark-mixed requires --unattended-b5 and cannot be combined with --capture-c8-light")
+    if args.c8_typed_a1_failed and (not args.capture_c8_light or not args.unattended_b5 or
+                                    args.verify_b5_bulk_pause or args.verify_b5_bulk_resume):
+        parser.error("--c8-typed-a1-failed requires --unattended-b5 --capture-c8-light and excludes bulk actions")
     if args.capture_c8_light and not args.unattended_b5:
         parser.error("--capture-c8-light requires --unattended-b5")
     if args.details_flow and (not args.active_only or args.mixed_a2 or args.unattended_a7_navigation):

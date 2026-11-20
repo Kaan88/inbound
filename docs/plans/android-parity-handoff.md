@@ -73,7 +73,16 @@ The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. Th
   count held at 2,899,968 bytes for six seconds while the unselected
   active transfer advanced by 262,144 bytes. The actual rows showed two
   paused, one advancing, one queued and one finished. The probe and
-  fixture mapping were removed. Unmatched partials stayed in place.
+  fixture mapping were removed. Unmatched partials stayed in place. In
+  `b5-bulk-resume-live-20261120-080941`, Astra approved Resume selected.
+  One selected paused job made a new GET and the fixture sent another
+  278,528 bytes. The unselected paused job stayed at 1,474,560 cumulative
+  bytes and two GETs. This fixture restarts from byte zero because it
+  lacks Range support.
+- Astra approved five file-type icons in the real C8 Light workload in
+  `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
+  without a file GET. A separate searched Downloads view showed a real
+  404 failure and enabled Retry with no completed output.
 - Astra approved a real paired C4 WebDAV download in
   `c4-paired-pinned-final-20261120-064240`. The probe matched and pinned
   the disposable Host's HTTPS certificate. Cancel retained the selection
