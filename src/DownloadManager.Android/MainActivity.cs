@@ -394,18 +394,18 @@ public sealed partial class MainActivity : AppCompatActivity
     }
 
     /// <summary>A message for the person; from any thread. Sits above the bottom bar when that is showing.</summary>
-    internal void ShowMessage(string text, string? action = null, Action? onAction = null, bool completion = false)
+    internal void ShowMessage(string text, string? action = null, Action? onAction = null, bool downloadsFeedback = false)
     {
         RunOnUiThread(() =>
         {
             if (IsFinishing || IsDestroyed) return;
             // Downloads already ends above the visible navigation bar and its system insets.
             var navigation = FindViewById<View>(Resource.Id.nav);
-            bool downloadsCompletion = completion && navigation?.Visibility == ViewStates.Visible &&
+            bool withinDownloads = downloadsFeedback && navigation?.Visibility == ViewStates.Visible &&
                 !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true;
-            var parent = FindViewById<View>(downloadsCompletion ? Resource.Id.downloads_root : Resource.Id.root)!;
+            var parent = FindViewById<View>(withinDownloads ? Resource.Id.downloads_root : Resource.Id.root)!;
             var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
-            if (downloadsCompletion)
+            if (withinDownloads)
             {
                 var view = bar.View;
                 bar.SetGestureInsetBottomIgnored(true);
@@ -448,11 +448,11 @@ public sealed partial class MainActivity : AppCompatActivity
             if (row.Group != RowGroup.Finished || before == RowGroup.Finished) return;
             var path = row.Job.FinalFilePath;
             // A server's file is on the server: nothing on this phone to open.
-            if (!Capabilities.CanOpenFiles) { ShowMessage(row.Name + " finished", completion: true); return; }
+            if (!Capabilities.CanOpenFiles) { ShowMessage(row.Name + " finished", downloadsFeedback: true); return; }
             ShowMessage(row.Name + " finished", "Open", () =>
             {
                 if (!Outside.OpenFile(this, path)) ShowMessage("The file could not be opened.");
-            }, completion: true);
+            }, downloadsFeedback: true);
         };
     }
 

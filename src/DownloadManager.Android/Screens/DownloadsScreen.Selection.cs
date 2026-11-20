@@ -213,7 +213,7 @@ internal sealed partial class DownloadsScreen
                 if (_activity.IsFinishing || _activity.IsDestroyed) return;
                 if (_list.SelectedRows.Count != rows.Length || rows.Any(row => !_list.IsSelected(row)))
                 {
-                    _activity.ShowMessage("The selection changed. Choose the downloads again.");
+                    _activity.ShowMessage("The selection changed. Choose the downloads again.", downloadsFeedback: true);
                     return;
                 }
 
@@ -225,12 +225,13 @@ internal sealed partial class DownloadsScreen
                     var result = await apply(count, choice);
                     if (!result.Ok)
                     {
-                        _activity.ShowMessage($"{count} of {rows.Length} updated. {row.Name}: {result.Error ?? "The Host refused."}");
+                        _activity.ShowMessage($"{count} of {rows.Length} updated. {row.Name}: {result.Error ?? "The Host refused."}",
+                            downloadsFeedback: true);
                         return;
                     }
                     count++;
                 }
-                _activity.ShowMessage($"{count} {(count == 1 ? "download" : "downloads")} updated.");
+                _activity.ShowMessage($"{count} {(count == 1 ? "download" : "downloads")} updated.", downloadsFeedback: true);
             })!
             .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!.Create()!;
         ShowSelectionDialog(dialog, kind);

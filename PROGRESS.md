@@ -106,6 +106,11 @@
   scheduled Night. Night showed two files and Mobile showed zero.
   Reselecting the moved row preserved its reported Night start. The
   moved file remained queued and produced zero fixture GETs or output.
+  Astra approved Change category in `b5-paired-category-feedback-20261120-095124`.
+  Cancel kept the same single selection and five categories. Selecting
+  Video updated only the selected queued job's category and switched it
+  from automatic to manual on the paired Host. No fixture request or
+  Host output occurred. The update snackbar stayed below the Add button.
 - Astra approved five file-type icons in the real C8 Light workload in
   `c8-typed-a1-failed-live-20261120-081102`. The Later video stayed queued
   without a file GET. A separate searched Downloads view showed a real

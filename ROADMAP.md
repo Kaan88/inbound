@@ -41,6 +41,9 @@ can approve departures from the designs.
   Cancel and Discard preserved the saved choice.
   C7 Hosts and web UI now matches the reviewed switch icon, scope
   callout and Web interface section with phone and paired Host evidence.
+  B5 Change category updated only the selected queued job on the
+  disposable paired Host. Cancel preserved the original categories and
+  the update snackbar left Add visible.
   The acceptance matrix tracks the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
