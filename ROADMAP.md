@@ -4,10 +4,10 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
-A7 ongoing notification and C3 SFTP unavailable-space passed scoped review.
-The expanded A7 completion/network notices, full C3 location and transfer
-states, and other Android parity work remain open. See PROGRESS “Scoped API 33
-checks”.
+Astra approved the A7 ongoing and completed notifications and their
+actions. The network-wait notice remains open. C3 review covers SFTP
+capacity and unavailable space, plus three browsable protocol types.
+Cloud sign-in expiry and mixed upload and download coverage remain open.
 
 On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
 
@@ -22,18 +22,15 @@ can approve departures from the designs.
 - **Current release:** [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8)
   ships Remote Files with bundled rclone. The public APK and Android update
   feed were verified; desktop latest remains v0.9.0.
-- **Done:** ANDROID.0–4 (design, engine, phone host and core screens), .7
-  (host pairing), .8 (Remote Files), and .10 (signing and updates).
-- **Current work:** ANDROID.8 C3/C4 parity and the all-screen 0.0.9 visual gate.
-  API 33 captures now include both C5 Host selections, a one-row C6 remote
-  Downloads screen, and B6 refresh from a fixture HTTP 410 through a
-  hash-matched completion. These are scoped flow checks, not visual
-  sign-off. The 0.0.8 release did not match the approved screens; require
-  Astra review of code and side-by-side captures for every implemented screen.
-  B2 paired folder selection passed scoped source review and the API 33
-  payload/decoy check. B2 visual acceptance remains open.
-  The separate B6 partial-expiry capture lane is host-tested only; its
-  API 33 run and visual review remain open.
+- **Completed milestones** include ANDROID.0–4 (design, engine, phone host
+  and core screens), .7 (Host pairing), and .10 (signing and updates).
+- **Current work** covers the reopened ANDROID.8 C3/C4 parity and all-screen
+  0.0.9 visual gate. Astra approved C5's three Host choices and real queued
+  state, C6's mixed remote Downloads and Pause actions, and B6's real
+  same-job recovery through the browser with a matching final hash.
+  Reviewed B2 timing and network controls have a small checkmark spacing
+  difference from the reference. The acceptance matrix tracks that difference
+  and the remaining screen variants.
 - **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
   against the approved mockups and reviews the associated code; fix and
   recheck findings before accepting a final-quality candidate.

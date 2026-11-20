@@ -106,7 +106,13 @@
   uninstall. The network-wait notice remains open.
 - B3 completed the protected fixture report after local consent and matched
   its SHA-256 in `b3-real-auth-20261120-053929`. The exact output was
-  removed after stopping its writer. Paired-Host consent remains open.
+  removed after stopping its writer. In `b3-paired-hash-final-20261120-080530`,
+  Astra approved the exact pinned HTTPS recipient and consent actions.
+  The paired Host saw zero report requests before consent and after
+  Cancel. Send allowed one authenticated metadata request. Download
+  created one Host job and its exact 1,379-byte report matched SHA-256
+  inside the owned category folder. The phone received no output.
+  Authenticated resume remains open.
 
 ### Native first-run permission returns (2026-11-20)
 

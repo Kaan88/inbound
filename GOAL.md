@@ -4,9 +4,11 @@
 
 The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
 
-Astra passed scoped A7 ongoing notification and C3 SFTP unavailable-space
-source and visual checks. The A3 completion, A6 Details and B6/C2 visual
-follow-ups remain under verification. See PROGRESS “Scoped API 33 checks”.
+Astra approved scoped Android checks for real completion notifications,
+active Details, expired-link recovery, queue editing and a real timed
+stop. Remote Files checks cover local protocol browsing and a pinned
+paired-Host download. The [acceptance matrix](docs/plans/android-mockup-acceptance.md)
+records the verified states and open variants.
 
 On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
 

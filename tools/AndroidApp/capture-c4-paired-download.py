@@ -127,7 +127,7 @@ def host_capabilities(origin, password, tls, opener):
     return (hello.get("payload") or {}).get("capabilities", [])
 
 
-def pair_probe(smoke, origin, password, expected_fingerprint):
+def pair_probe(smoke, origin, password, expected_fingerprint, *, host_name=HOST_NAME):
     chip, _ = smoke.wait_content_description(
         lambda desc: desc == "Downloads shown from This phone. Change host", "fresh local Host")
     smoke.tap(chip)
@@ -166,8 +166,8 @@ def pair_probe(smoke, origin, password, expected_fingerprint):
     button, _ = smoke.wait_node("Connect", resource="pair_btn")
     require(button.get("enabled") == "true", "Verified certificate acknowledgement did not enable Connect")
     smoke.tap(button)
-    smoke.wait_node("Files are saved on " + HOST_NAME, timeout=40)
-    smoke.log("PASS C4 pairing: Android matched and pinned the exact disposable HTTPS certificate.")
+    smoke.wait_node("Files are saved on " + host_name, timeout=40)
+    smoke.log("PASS pairing: Android matched and pinned the exact disposable HTTPS certificate.")
 
 
 def run(args):
