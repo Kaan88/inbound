@@ -1,0 +1,200 @@
+# Android mockup acceptance matrix — draft
+
+Owner decisions (2026-11-20): B2 shows the selected Host's current unmetered rule. The user changes it in Settings. In A6, Stop keeps partial bytes and restart-from-zero is omitted for active downloads. C2 uses “Notify when the queue finishes” for the local completion setting.
+
+On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
+
+Owner approval, 2026-11-20: C2 uses “Unmetered network” and enforces the existing unmetered rule. This approval covers that condition only.
+
+**Status: no screen has passed the new visual acceptance gate.**
+
+Scope is the implemented Android UI in `src/DownloadManager.Android/Screens/`
+and its linked flows, compared with the approved screen exports in
+[`android-app.md`](android-app.md) / `android-mockups/`. The owner requires
+mockups to be treated as acceptance criteria, with side-by-side device captures
+and flow checks; functional tests, source review, or a release do not establish
+visual acceptance. ANDROID.9 remains paused and is excluded.
+
+## Evidence notation and capture protocol
+
+- **Precedent** records evidence mentioned in project notes, not fresh review.
+  Paths are historical references and may be outside this checkout; availability
+  was not established here. A named test or functional smoke is not a visual pass.
+- For each row, capture the named mockup and the matching app state at the same
+  device resolution/orientation and comparable system-bar state. Save original
+  app captures under `artifacts/android-app/pairs/` beside the reference (do not
+  edit either source image). Include device/API, APK/version, selected host,
+  theme/dynamic-colour state, exact setup/steps, and any fixture/test ID.
+- Recreate on the API 33 `inbound33` emulator only after rediscovering its live
+  state and following the relevant runbook/script. Prefer disposable local
+  fixtures (`tools/AndroidTrialServer`); use the loopback/ADB-reverse setup only
+  where needed, and clean up only task-owned jobs, files, pairings and listeners.
+  Do not install, wipe, or alter a device as part of this draft. For actual
+  acceptance, inspect each pair at native size and record differences, flow
+  outcomes, and Astra's independent code-plus-comparison verdict.
+- Mockup filenames are relative to `docs/plans/android-mockups/`. `A`, `B`, and
+  `C` refer to the sections in `docs/plans/android-app.md`. `C8` is the one
+  light-theme reference, not a full light-theme screen inventory.
+- A0/A1/A4/A5/C7/C8 have a [guided capture runner](../../tools/AndroidApp/CORE-SCREEN-PARITY.md);
+  C1/C2/C5/C6 have a separate [queue/host capture runner](../../tools/AndroidApp/QUEUE-HOST-SCREEN-PARITY.md).
+  Their presence and host-only tests do not establish device coverage.
+- B1–B6 have a separate [link-intake capture procedure](../../tools/AndroidApp/LINK-INTAKE-PARITY.md)
+  and guided runner. B1 requires Chrome's real Android Share chooser; the
+  existing disposable link fixture supports the other documented local flows.
+  Host-only validation is not device coverage or visual acceptance.
+- A2/A3/A6/A7 have a separate [download-state capture procedure](../../tools/AndroidApp/DOWNLOAD-STATES-PARITY.md)
+  and timed fixture runner. Its existence and host-only validation are not
+  device coverage or visual acceptance.
+
+## Approved screen inventory
+
+| ID / implemented screen | Approved reference and state to compare | Precedent evidence / fixture or test known from records | Emulator recreation and current gap |
+| --- | --- | --- | --- |
+| A0 — `FirstRunScreen` | `a0-first-run.png`; first launch, permissions/status and destination | ANDROID.4 first-run was exercised on emulator (GOAL); no matching side-by-side capture/test identified in the available notes | Clear only a disposable emulator's app data if authorized; launch fresh and capture before/after Start downloading. Compare both permission states. No evidence claimed here. |
+| A1 — `DownloadsScreen`, empty/populated, search/filter, selection | `a1-downloads.png`; also `a2-downloads-later.png`, `a3-downloads-finished.png`; C8 for light | API 33 completion/selection, multi-select, notification and hash-matched fixture precedents in `PROGRESS.md`; phone/mockup precedent `artifacts/android-app/pairs/a1-downloads-s24-dark-0.0.6.png` is empty state only. API33 evidence under `android6-acceptance-0.0.5`, `inbound-talkback-20261119`, `inbound-notice-smoke-5` and `idm-android-resume-20261119-134123` | On disposable `inbound33`, prepare empty, active, queued, finished, failed and selected states with the owned fixture/scripts; capture each independently. Existing evidence is partial and does not cover full parity or state colours. |
+| A2 — Downloads later/in-progress | `a2-downloads-later.png` | In a3-a6-a7-reviewed-20261120-032339, a real active fixture advanced from 32,768 to 98,304 bytes and finished with the expected hash. | The mixed Downloads list, queued timing and graph comparison remain open. |
+| A3 — finished item/snackbar | `a3-downloads-finished.png` | a3-a6-a7-reviewed-20261120-032339 captured the real finished row and snackbar. Astra passed source verification of the Open binding. | Astra requested that the snackbar leave Add visible. The revised build needs recapture and review, including a mixed workload. |
+| A4 — `AddSheet` | `a4-add.png`; Add actions and clipboard offer | S24 signed 0.0.7 Add walkthrough in `inbound-s24-core-007`; clipboard offer is source-covered, no paired visual artifact named | Put a harmless fixture URL on emulator clipboard, open Add, capture with/without offer, exercise each visible action. Compare exact sheet layout and dismiss/navigation behavior. |
+| A5 — `NewDownloadScreen` | `a5-new-download.png`; empty/filled URL form and submission | S24 Add → New download opened and cancelled (`inbound-s24-core-007`); ANDROID.5 loopback downloads and share flows provide functional fixtures, not a named A5 pair | Open from Add and share; enter fixture URL, inspect metadata and queue/destination controls, cancel and submit a disposable transfer. Capture blank, populated and validation states. |
+| A6 — Details | `a6-details.png` | a3-a6-a7-reviewed-20261120-032339 captured active and finished Details, enabled active Stop, no finished Stop, and hash-matched completion. Astra passed the revised layout and metadata source. | Recapture the revised layout with nested destination, network rule and multiple connections. Complete the separate Stop/Retry data-retention check. |
+| A7 — background notification | `a7-background.png` | Astra passed the expanded ongoing notice in a3-a6-a7-reviewed-20261120-032339. Its count, rate, name, ETA, progress, Pause all and Open were visible during a real transfer. | Verify the action interactions and separate finished and network-wait notices. Android controls the surrounding notification shade. |
+| B1 — share target / `CaughtDownloadSheet` | `b1-share.png`; Android share chooser followed by caught sheet | S24 actual Chrome share chooser and API33 Chrome chooser precedents; `inbound-chrome-share-20261119`, S24 `inbound-s24-links-007`; no named comparison pair | Open fixture page in Chrome, use Share link → Android chooser → Inbound; capture chooser and each caught-sheet state; Cancel must admit no job. |
+| B2 — caught link | `b2-caught.png`; anonymous shared link | API33 actual chooser produced matching-hash fixture download; see `inbound-chrome-share-20261119` | Repeat B1 using disposable anonymous fixture. Capture before admission and after completion; verify exactly one job and hash. |
+| B3 — `BrowserScreen`, signed-in download | `b3-signed-in.png`; browser tab, sign-in and consent/captured request | `android-b3-compact-20261120-012541`: compact local sheet with cookie notice; no submission. Earlier fake-cookie consent accept/decline and S24 fixture sign-in precedents remain in `PROGRESS.md`. | Astra passed static consent/Host binding; exact visual parity remains open. Exercise the updated sheet against a disposable loopback fixture, not a real account. |
+| B4 — page links (`PageLinksScreen`) | `b4-all-links.png`; link list/filter | API33 eight-link fixture precedent `inbound-all-links-20261119`; S24 seven-link fixture precedent `inbound-s24-links-007` | Load owned fixture page, open Links on page, capture full list and filters. Mockup has known inconsistency: Archives filter shown with image/PDF; treat this as a reference defect, not permission to silently alter other design. |
+| B5 — Downloads multiselect | `b5-select.png`; existing Downloads rows selected with bulk overflow open | B4 page-link selection is a separate flow and does not verify B5 | Seed real disposable jobs with mixed states, select three existing rows and open bulk overflow. Verify the menu and bulk controls separately. Owner approved keeping Download again disabled when the selection contains only unfinished downloads (2026-11-20). |
+| B6 — expired link | b6-expired-link.png | Astra passed the expired-link sheet and pasted-address recovery in b6-stop-retry-20261120-034215. Both retries started at byte 1,327,104 and the final file matched SHA-256. | Browser re-catch, confirmation and cancellation remain open. |
+| C1 — `QueuesScreen` | `c1-queues.png`; empty/ready queue and queue actions | S24 dark empty queue comparison precedent `artifacts/android-app/pairs/c1-queues-s24-dark-0.0.6.png`; API33 queue tests/background acceptance; no populated C1 comparison named | Separate guided runner documents empty Main, named disposable queue stopped/ready, and non-destructive queue-actions states. No live capture has been run; existing phone pair covers empty ready state only. |
+| C2 — queue and schedule editor | c2-schedule.png and the approved flow board | c2-clean-boot-20261120-035129 shows saved and reopened Mon–Fri 01:00–07:00 with charging and unmetered, a disabled schedule, and the visible Host footer. Astra passed the configured local state. | Review the no-schedule and remote editor, added dialogs and validation, plus save, cancellation and deletion paths. |
+| C3 — Remote Files locations | `c3-sites.png` | Astra passed the SFTP unavailable-space state in c3-sftp-space-20261120-032528. Trust and browse succeeded and the post-browse location card showed its endpoint without a capacity value. | Capture supported capacity, the mixed locations and expired cloud sign-in states, and the active transfer summary. |
+| C4 — `RemoteFilesScreen.Folder` browser | `c4-site-browser.png` (reference says “Sites”); remote folder listing and file actions | API33 WebDAV browse/download, matching hash, conflict skip and force-stop recovery UI evidence under `%LOCALAPPDATA%\\Temp\\opencode\\rclone-arm64-source\\emu-ui-safe-20261119-221253`, `emu-ui-kill-20261119-221807`; Astra inspected recovery UI evidence. The new parity runner is specified in `tools/AndroidApp/C3-C4-REMOTE-FILES-PARITY.md`; no output from that runner was inspected for this draft. | Use the same dedicated API33 emulator and isolated probe procedure. Runner creates nested `media/recordings/2026`, captures selection/breadcrumb state and emits `c4-pair.png`; verify exactly the two selected fixture GETs and their hashes. Compare all controls/navigation, not just recovery warning. This C3/C4 parity gap is explicitly reopened. |
+| C5 — host switcher (`HostSwitcherSheet`) | `c5-switch-host.png`; This phone and paired host choices | `android-c5-handle-20261120-014440`: both selections, handle and highlight placement reviewed by Astra | Two idle Hosts do not cover the reference's three hosts or active workload. No full visual sign-off. |
+| C6 — Downloads on a remote Host | `c6-remote-host.png`; selected Host, destination banner, graph and populated remote rows | Same bundle: destination banner and one finished remote row; fixture hash verified on the Host | Capture the mixed list and live graph. The one-row fixture is functional evidence; unpaired Settings and blank form remain supplemental. |
+| C7 — `SettingsScreen` | `c7-settings.png`; root settings, appearance and relevant navigation | S24 dark root pair `c7-settings-s24-dark-0.0.6.png`; API33 Light/Dynamic colour checks; settings/queue features have test evidence, but complete settings coverage is not shown | Compare root with reference, then open every implemented settings subsection/dialog as its own row below. Verify Light/Dark/System and dynamic-colour checked/unchecked states; pair only covers dark root. |
+| C8 — light Downloads theme | `c8-light.png`; light-theme populated downloads | S24 Light/Dynamic Downloads and populated comparison precedents `inbound-s24-core-007`; recorded populated pair differed from reference | Recreate a representative populated list in Light mode and capture same content/state as C8. Compare typography, colors, rows, status and toolbar; do not mark based on appearance toggle alone. |
+
+## Implemented secondary screens and dialogs
+
+These are implemented UI surfaces linked from the approved screens. Where no
+dedicated approved export exists, the approved Android flow-review board is the
+reference for the relevant C1/C2/C7 addition; retain the original screens as
+context and do not treat the board's approval as acceptance.
+
+| Surface | Reference / predecessor evidence | Recreate and unresolved acceptance |
+| --- | --- | --- |
+| `QueueEditorScreen` (queue create/edit, conditions, caps, completion) | C1 plus approved C1/C2 flows in `android6-flow-review.html`; queue persistence/tests and S24 schedule/queue walkthroughs exist | Capture create, edit, populated conditions/caps, save/cancel and queue actions. Verify phone-only versus selected-Host fields. No complete comparison set identified. |
+| Schedule editor/dialogs and schedule deletion confirmation | C2 plus approved flow board; S24 save/reopen, cancel deletion and selective deletion precedent | Capture new/edit/disabled/configured schedule, validation, cancel and confirm-delete. Compare dialog bounds and scroll/footer. Existing evidence is functional, not all visual states. |
+| `FolderSheet` / destination picker | A4/A5; Android system folder UI where applicable | Use an emulator-owned disposable destination; capture Inbound sheet and system picker separately. Verify returned destination and cancel path. No specific visual pair located. |
+| `RefreshLinkSheet` / refresh-address confirmation | B6 | Covered by B6 flow; separately capture confirmation/cancel and refreshed-job state. |
+| `PairingSheet` and host switcher subflows | C5/C6 | Capture normal and certificate-warning/trust paths against approved host flows; only disposable endpoint, no actual credentials. |
+| Remote Files location add/edit/fix dialogs and actions | C3/C4 and approved ANDROID.8 flow/reference states | Capture location types and validation/errors only where implemented and fixture-supported; compare local vs remote boundaries. Existing functional WebDAV evidence is not a complete screen inventory. |
+| `AppUpdatesScreen` / update-ready dialog | `android-update-prompt-review.html`, approved compact update design; C7 Settings location | Historical render review and updater tests exist; capture installed app's offer, notes, cancel/install handoff and Settings changelog on emulator. HTML render QA is not device parity. |
+| `HostSettingsScreen` / remote host details | C5/C6 and Android app flow plan | Capture selected-host identity, connection state and local/remote settings distinction. No specific pair located. |
+
+## Known inventory limits / next pass
+
+API 33 captures `android-c1-c2-20261120-005257` cover the empty Main
+queue and its no-schedule editor, without creating or changing a queue.
+`android-a2-active-20261120-005316` captures live A2 progress (fixture
+16,384 → 180,224 bytes before capture); the completed 16 MiB file
+matched SHA-256 `341aacac661ccb210720bedaa9ead5d668fe5ea41a73532fc147c71e34040df1`
+and was removed by exact path after hash verification. Configured C2,
+running/scheduled C1, queued A2, A3, A6 and A7 still need matching
+captures. `android-c1-disposable-20261120-011021` adds a stopped
+Night queue and its no-schedule editor. `android-b4-search-20261120-011210`
+exercises header search and link selection without submitting; B5 is
+still open. `android-host-local-20261120-011334` captures the unpaired
+Host screen and disabled blank form without attempting a connection;
+neither screenshot is the C6 remote Downloads reference.
+
+The API 33 core run `android-core-a4-c7-v2-20261120-002905` produced A4 and
+C7 pairs and passed the source-order, unavailable-action, Site logins row,
+and Settings-search checks. A4 was captured without a clipboard offer or
+active downloads; C7's Site logins row leads to Remote Files rather than
+an independent browser-credential store. Neither pair has Astra approval.
+The rebuilt probe produced another set in
+`android-core-refined-20261120-003857`, with the A4/C7 functional checks
+still passing. Its A5 pair verifies that the rounded outlines and
+destination icon render, but the form is blank with the keyboard open;
+it does not compare the populated mockup state.
+The follow-up `android-a5-metadata-20261120-004228/a5-populated-pair.png`
+shows the populated form with the keyboard dismissed. The disposable
+fixture returned 200 to HEAD and the probe showed the expected filename
+and successful metadata state without submitting a download. This is
+not yet a visual approval.
+
+`android-c4-upload-ui-20261120-003402` captures This phone selection,
+confirmation and the resulting remote listing. Cancel sent no request;
+Confirm sent exactly one conditional PUT with the MediaStore source bytes.
+This is API 33 loopback evidence from the isolated probe, not production
+upload availability or visual acceptance.
+
+First C3/C4 captures: `remote-files-parity-20261119-230316` under
+`%LOCALAPPDATA%\Temp\opencode`. Both selected files matched their fixture
+SHA-256, but the three idle WebDAV cards and root Downloads destination do
+not reproduce all reference states. Astra reviewed the initial pairs and
+held sign-off; see `PROGRESS.md` for the fixes and evidence.
+The later `remote-files-delete-20261119-231933` pairs show the compact
+amber transfer bar and cloud navigation icon, but still do not show the
+active upload/download, expired grant, or SFTP/S3 reference states.
+The same run verified that cancelling delete did nothing and confirming
+it removed only the fixture's `notes.pdf`. This is flow evidence, not a
+parity approval.
+The `remote-files-nested-20261119-232442` C4 pair shows the selected
+`Downloads/Inbound/Music` destination. Both files hash-matched there.
+The newer `remote-files-c4-match-20261119-233226` pair also matches row
+ordering, dates, and direct child counts. The fixture file sizes are
+smaller than the reference data; icon and spacing differences remain.
+The separate `remote-files-sftp-only-20261119-233503` API 33 run verifies
+first-use SFTP: the displayed fingerprint matched, Cancel sent no login,
+and Trust led to an authenticated listing. This does not establish the SFTP
+card's visual parity or cover changed keys and paired Hosts.
+The `remote-files-c4-outline-20261119-233816/c4-pair.png` comparison shows
+the outlined audio, document, archive and download glyphs and the revised
+breadcrumb and header. The same run passed listing, nested download hashes,
+delete and cleanup. It still showed compressed vertical spacing down the
+rows and a lower footer action. The follow-up
+`remote-files-c4-spacing-20261119-234214/c4-pair.png` has the adjusted
+row heights and footer; order, child counts, nested downloads, delete and
+cleanup passed again. Neither pair covers phone-to-site upload or has
+Astra approval.
+
+The first fresh A0 pair is `android-core-parity-20261119-234502/a0-pair.png`.
+It captured real setup before granting either permission. The icon artwork
+and top spacing differed; a follow-up changes those without changing the
+permission flow or download destination. The reference's illustrative
+`Downloads/Inbound` location is not the app default: the owner selected
+the shared `Download/` folder directly (see `android-build-plan.md`).
+The unattended run did not cover A1, A4, A5, C7 or C8.
+The updated A0 pair, `android-core-parity-v11-20261119-234824/a0-pair.png`,
+shows the outline icons and aligned top section; card spacing and the
+post-permission state still need review. C3 S3 fixture onboarding passed
+in `remote-files-s3-only-20261119-234721` (Backups card and `pub/readme.txt`);
+it is not the combined C3 mockup state or an Astra verdict.
+The extended unattended run, `android-core-more-20261119-235310`, produced
+fresh API 33 pairs for A0, **empty** A1, A4 **without** a clipboard offer,
+**blank** A5 and the C7 Settings root. It cleaned up only the probe.
+These captures are ready for comparison, not visual approvals; populated
+A1, the A4 clipboard offer, filled A5 and light C8 remain open.
+
+1. Source file names and historical notes establish implemented surfaces; they do
+   not prove every possible state or control was inspected. The Android app source
+   and historical capture directories are not all present in this worktree, so
+   cited evidence availability and pixel-level details must be rechecked by the
+   milestone owner before relying on them.
+2. Existing evidence is strongest for functional fixtures and four dark/empty
+   phone pairs (C1/C2/C7/A1), plus selected A/B flow checks. It does not establish
+   populated C1/C2/C7, all dialogs, all A/B states, or C3/C4 visual parity.
+3. C3/C4 acceptance was reopened despite ANDROID.8 functional/release checks and
+   its earlier Astra implementation PASS. Capture both against the approved
+   references, walk all relevant controls and flows, then obtain a new Astra
+   review of source and side-by-side comparisons before closing.
+4. Resolve the full inventory against current `src/DownloadManager.Android`
+    source and add any implemented surface missing above before claiming coverage.
+    Any proposed deviation requires explicit owner approval; a renamed reference
+    label (“Sites” → “Remote Files”) is not itself a layout approval.
+5. The current C3/C4 runner's three WebDAV cards are a functional fixture,
+   not a substitute for C3's active summary, NAS, cloud sign-in and S3
+   states. C4 also needs independent evidence for the This phone tab,
+   deletion confirmation, and the selected-Host destination. Record these
+   separately from the two-file hash check.

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/downloads_root" android:layout_width="match_parent" android:layout_height="match_parent">
   <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-    <FrameLayout android:id="@+id/top_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="16dp" android:layout_marginRight="16dp" android:layout_marginTop="8dp">
-      <LinearLayout android:id="@+id/search_bar" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_pill_search">
+    <FrameLayout android:id="@+id/top_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+      <LinearLayout android:id="@+id/search_bar" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginLeft="16dp" android:layout_marginRight="16dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_pill_search">
         <ImageView android:layout_width="24dp" android:layout_height="24dp" android:layout_marginLeft="16dp" android:src="@drawable/ic_search" android:importantForAccessibility="no" />
         <EditText android:id="@+id/search_input" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginLeft="12dp"
             android:background="@null" android:hint="Search downloads" android:singleLine="true" android:inputType="text" android:imeOptions="actionSearch"
@@ -13,13 +13,13 @@
         <!-- The host chip ("This phone", A1; C6), at the right end of the search bar (HostBar.Place). -->
         <FrameLayout android:id="@+id/host_chip_slot" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginRight="4dp" />
       </LinearLayout>
-      <LinearLayout android:id="@+id/selection_bar" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+      <LinearLayout android:id="@+id/selection_bar" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="?attr/colorSurfaceContainer" android:visibility="gone">
         <ImageButton android:id="@+id/sel_close" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_close" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Cancel selection" />
         <TextView android:id="@+id/sel_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="8dp"
             android:textAppearance="?attr/textAppearanceTitleLarge" android:textColor="?attr/colorOnSurface" android:accessibilityLiveRegion="polite" />
-        <ImageButton android:id="@+id/sel_resume" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_play" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Resume selected" />
+        <ImageButton android:id="@+id/sel_resume" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_play_outline" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Resume selected" />
         <ImageButton android:id="@+id/sel_pause" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_pause" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Pause selected" />
-        <ImageButton android:id="@+id/sel_delete" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_delete" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Delete selected" />
+        <ImageButton android:id="@+id/sel_delete" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_remote_trash" android:tint="?attr/colorControlNormal" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="Delete selected" />
         <ImageButton android:id="@+id/sel_more" android:layout_width="48dp" android:layout_height="48dp" android:src="@drawable/ic_more" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="More actions" />
       </LinearLayout>
     </FrameLayout>
@@ -40,13 +40,13 @@
       </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <HorizontalScrollView android:id="@+id/chips_scroll" android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="12dp" android:clipToPadding="false" android:paddingLeft="16dp" android:paddingRight="16dp">
-      <com.google.android.material.chip.ChipGroup android:id="@+id/chips" android:layout_width="wrap_content" android:layout_height="wrap_content" app:singleLine="true" app:singleSelection="true" app:selectionRequired="true" app:chipSpacingHorizontal="8dp" />
+    <HorizontalScrollView android:id="@+id/chips_scroll" android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="8dp" android:clipToPadding="false" android:paddingLeft="16dp" android:paddingRight="16dp">
+      <com.google.android.material.chip.ChipGroup android:id="@+id/chips" android:layout_width="wrap_content" android:layout_height="wrap_content" app:singleLine="true" app:singleSelection="true" app:selectionRequired="true" app:chipSpacingHorizontal="6dp" />
     </HorizontalScrollView>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/list" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
         android:clipToPadding="false" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingTop="4dp" android:paddingBottom="96dp" />
   </LinearLayout>
   <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton android:id="@+id/fab" android:layout_width="wrap_content" android:layout_height="wrap_content"
-      android:layout_gravity="bottom|end" android:layout_marginEnd="16dp" android:layout_marginBottom="16dp" android:text="Add" app:icon="@drawable/ic_add" app:backgroundTint="?attr/colorPrimary" app:iconTint="?attr/colorOnPrimary" android:textColor="?attr/colorOnPrimary" />
-</FrameLayout>
+      android:layout_gravity="bottom|end" app:layout_dodgeInsetEdges="bottom" android:layout_marginEnd="16dp" android:layout_marginBottom="16dp" android:paddingLeft="12dp" android:paddingRight="12dp" android:text="Add" app:icon="@drawable/ic_add" app:backgroundTint="?attr/colorPrimary" app:iconTint="?attr/colorOnPrimary" android:textColor="?attr/colorOnPrimary" />
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -36,6 +36,7 @@ public static class SitesMessageTypes
 
     /// <summary><see cref="SiteTrustRequest"/>: the host keys the user accepted for a site; answered with <see cref="Result"/>.</summary>
     public const string Trust = "sites.trust";
+    public const string TrustSftpEndpoint = "sites.trustSftpEndpoint";
 
     /// <summary><see cref="SiteIdRequest"/>: connects through rclone and lists the start folder; answered with <see cref="Result"/>.</summary>
     public const string Test = "sites.test";
@@ -69,6 +70,7 @@ public static class SitesMessageTypes
 
     /// <summary>SITES.7, "from this device": <see cref="SiteDeviceOpenRequest"/> with <c>folder</c>, <c>name</c> and <c>size</c>.</summary>
     public const string DeviceWriteOpen = "sites.device.writeOpen";
+    public const string DeviceCreateOpen = "sites.device.createOpen";
 
     /// <summary><see cref="SiteDeviceChunkRequest"/>: the next piece of a read stream, answered with <see cref="DeviceChunk"/>.</summary>
     public const string DeviceRead = "sites.device.read";
@@ -157,16 +159,17 @@ public static class SitesMessageTypes
 
     /// <summary>SITES.5: <see cref="SiteChangeRequest"/>; replies <see cref="ChangeResult"/>, a result per item.</summary>
     public const string Delete = "sites.delete";
+    public const string DeleteFiles = "sites.deleteFiles";
 
     public const string CountResult = "sites.countResult";
     public const string ChangeResult = "sites.changeResult";
 
     /// <summary>The requests (not the replies or the push).</summary>
     public static bool IsRequest(string? type) =>
-        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or Test or RcloneInstall or RcloneCheck or Browse or Star
+        type is Get or SetEnabled or ListRequest or Save or Remove or KindsRequest or Probe or Trust or TrustSftpEndpoint or Test or RcloneInstall or RcloneCheck or Browse or Star
             or TransferStart or SafeDownloadStart or TransferPause or TransferResume or TransferCancel or TransferRetry or TransferClear or TransferList or TransferGet
-            or MakeFolder or Rename or Count or Delete or Certificate or SignIn or SignInCancel
-            or DeviceReadOpen or DeviceWriteOpen or DeviceRead or DeviceWrite or DeviceClose;
+            or MakeFolder or Rename or Count or Delete or DeleteFiles or Certificate or SignIn or SignInCancel
+            or DeviceReadOpen or DeviceWriteOpen or DeviceCreateOpen or DeviceRead or DeviceWrite or DeviceClose;
 }
 
 /// <summary>The values of <see cref="SitesStatusDto.Rclone"/>.</summary>
@@ -272,6 +275,7 @@ public sealed class SitesSetEnabledRequest
 /// <summary>A saved site as clients see it: never a secret, only whether one is stored.</summary>
 public sealed class SiteDto
 {
+    public long? FreeBytes { get; set; }
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string Kind { get; set; } = "";
@@ -418,6 +422,8 @@ public sealed class SiteDeviceOpenRequest
 
     /// <summary>Write: replaces a file of that name; otherwise the answer is <see cref="SiteProblems.Exists"/>.</summary>
     public bool Replace { get; set; }
+    /// <summary>Required by conditional create: the token from browsing the confirmed destination.</summary>
+    public string? Listing { get; set; }
 }
 
 public sealed class SiteDeviceStreamDto
@@ -501,6 +507,8 @@ public sealed class SiteProbeResultDto
 public sealed class SiteTrustRequest
 {
     public string Id { get; set; } = "";
+    public string? ExpectedHost { get; set; }
+    public int? ExpectedPort { get; set; }
 
     /// <summary>The <see cref="SiteHostKeyDto.Entry"/> values the user accepted. Replaces the stored list.</summary>
     public List<string> Entries { get; set; } = [];
@@ -648,8 +656,13 @@ public sealed class SitesChangedDto
 /// </summary>
 public sealed class SiteBrowseRequest
 {
+    public bool IncludeFreeSpace { get; set; }
     public string Id { get; set; } = "";
     public string? Path { get; set; }
+    /// <summary>Folders by name, then files oldest first; unknown dates come last.</summary>
+    public bool ChronologicalFiles { get; set; }
+    /// <summary>Ask for bounded, best-effort direct child counts on this page.</summary>
+    public bool IncludeFolderCounts { get; set; }
 
     /// <summary>The first item to return, in the sorted order.</summary>
     public int Offset { get; set; }
@@ -671,6 +684,7 @@ public sealed class SiteItemDto
 {
     public string Name { get; set; } = "";
     public bool IsFolder { get; set; }
+    public int? ChildCount { get; set; }
 
     /// <summary>Bytes; -1 when the server does not say (and for folders).</summary>
     public long Size { get; set; } = -1;
@@ -708,6 +722,7 @@ public static class SiteHereStates
 
 public sealed class SiteBrowseResultDto
 {
+    public long? FreeBytes { get; set; }
     public bool Ok { get; set; }
     public string? Message { get; set; }
 
@@ -751,6 +766,10 @@ public sealed class SiteRenameRequest
 /// <summary><c>sites.count</c> and <c>sites.delete</c>: items of one folder by name.</summary>
 public sealed class SiteChangeRequest
 {
+    public const string DeleteFilesCapability = "sitesDeleteFiles";
+    /// <summary>Files-only deletion requires the token of the folder that was shown to the user.</summary>
+    public string? Listing { get; set; }
+
     public string Id { get; set; } = "";
     public string Path { get; set; } = "/";
     public List<SiteChangeItemDto> Items { get; set; } = [];

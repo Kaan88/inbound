@@ -36,18 +36,35 @@ public static class DetailsInfo
     }
 
     /// <summary>The list under the connections: where it comes from, where it goes, which queue, when it was added, the network rule.</summary>
-    public static IReadOnlyList<InfoLine> Lines(JobDto j, SettingsDto settings, DateTimeOffset now)
+    public static IReadOnlyList<InfoLine> Lines(JobDto j, SettingsDto settings, DateTimeOffset now, string? sharedDownloadFolder = null)
     {
         var lines = new List<InfoLine>
         {
             new("From", HostOf(j)),
-            new("Saved to", FolderName(j.DestinationDirectory)),
+            new("Saved to", DestinationLabel(j.DestinationDirectory, sharedDownloadFolder)),
         };
-        if (j.IsQueued && settings.Queues.FirstOrDefault(q => q.Id == j.QueueId) is { } queue && !string.IsNullOrWhiteSpace(queue.Name))
+        var queue = j.IsQueued ? settings.Queues.FirstOrDefault(q => q.Id == j.QueueId) : null;
+        if (queue is not null && !string.IsNullOrWhiteSpace(queue.Name))
             lines.Add(new("Queue", queue.Name));
         lines.Add(new("Added", AddedText(j, now)));
-        if (settings.DownloadOnlyOnUnmeteredNetwork) lines.Add(new("Network", "Wi-Fi only"));
+        if (settings.DownloadOnlyOnUnmeteredNetwork || queue?.RequireUnmeteredNetwork == true)
+            lines.Add(new("Network", "Unmetered network only"));
         return lines;
+    }
+
+    private static string DestinationLabel(string? path, string? sharedDownloadFolder)
+    {
+        if (path is null || string.IsNullOrEmpty(sharedDownloadFolder)) return FolderName(path);
+        var root = sharedDownloadFolder.TrimEnd('/');
+        var destination = path.TrimEnd('/');
+        if (destination == root) return "Downloads";
+
+        var prefix = root + "/";
+        if (!destination.StartsWith(prefix, StringComparison.Ordinal)) return FolderName(path);
+
+        var parts = destination[prefix.Length..].Split('/');
+        if (parts.Any(part => part is "" or "." or "..")) return FolderName(path);
+        return "Downloads / " + string.Join(" / ", parts);
     }
 
     /// <summary>The site of the address (never the whole address: it may hold a secret); the Host's masked address gives its site too.</summary>

@@ -98,7 +98,10 @@ public sealed partial class HostCommandDispatcher
     {
         var capabilities = CapabilitiesOf(rights);
         if (Sites is DownloadManager.Runtime.Sites.SitesCommands && SitesAnswered(rights))
+        {
             capabilities.Add(SiteTransferStartRequest.SafeSingleDownloadCapability);
+            capabilities.Add(SiteChangeRequest.DeleteFilesCapability);
+        }
         if (Sites is not null && SitesAnswered(rights)) capabilities.Add("sites");
         capabilities.Add("browserRefresh");
         capabilities.Add("queueSpeedLimit");
@@ -106,6 +109,8 @@ public sealed partial class HostCommandDispatcher
         capabilities.Add("queueDeleteSchedules");
         capabilities.Add("queueConditionalMove");
         capabilities.Add("queueIdentity");
+        capabilities.Add(JobQueueRequest.UnqueuedPreconditionCapability);
+        capabilities.Add(JobActionRequest.StopUnfinishedCapability);
         return capabilities;
     }
 
@@ -189,12 +194,14 @@ public sealed partial class HostCommandDispatcher
         || type is SitesMessageTypes.Probe or SitesMessageTypes.Test or SitesMessageTypes.Browse or SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck
         || type is SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart
         // SITES.6b: both read a server's certificate first.
-        || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust
+        || type is SitesMessageTypes.Certificate or SitesMessageTypes.Trust or SitesMessageTypes.TrustSftpEndpoint
         // SITES.6c: waits for rclone to print the sign-in address, or for OneDrive to name the drive.
         || type is SitesMessageTypes.SignIn
         // SITES.7: each waits on rclone and the server for the next piece.
-        || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
-        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete;
+        || type is SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen or SitesMessageTypes.DeviceCreateOpen
+            or SitesMessageTypes.DeviceRead or SitesMessageTypes.DeviceWrite
+        || type is SitesMessageTypes.MakeFolder or SitesMessageTypes.Rename or SitesMessageTypes.Count or SitesMessageTypes.Delete
+            or SitesMessageTypes.DeleteFiles;
 
     /// <summary>
     /// Registers the session and sends it the hello and the snapshot, directly. Registered first, so nothing that
@@ -485,8 +492,8 @@ public sealed partial class HostCommandDispatcher
                     }
 
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration) :
-                            _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration, moveToQueue.ExpectedDestinationQueueGeneration))
+                        await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration, moveToQueue.ExpectedUnqueued) :
+                            _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken, moveToQueue.ExpectedQueueId, moveToQueue.ExpectedSourceQueueGeneration, moveToQueue.ExpectedDestinationQueueGeneration, moveToQueue.ExpectedUnqueued))
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;

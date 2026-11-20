@@ -159,6 +159,9 @@ public sealed class QueueDto
     public Guid? Generation { get; set; }
     /// <summary>Host-owned transient wait reason; never accepted as policy.</summary>
     public string? ConditionWaitReason { get; set; }
+    /// <summary>The next configured time in this Host's time zone. Host-owned display data, subject to queue conditions.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? NextTimedStartAt { get; set; }
     /// <summary>Queue-level conditions reported by the platform; old clients omit these and preserve the saved policy.</summary>
     public bool? RequireUnmeteredNetwork { get; set; }
     public bool? RequireCharging { get; set; }
@@ -567,6 +570,7 @@ public sealed class FileMetadataRequest
 
 public sealed class FileMetadataResult
 {
+    public bool? AdvertisesByteRanges { get; set; }
     public bool Ok { get; set; }
     public string? FileName { get; set; }
     public long? TotalBytes { get; set; }
@@ -630,6 +634,7 @@ public sealed class AddJobResponse
 
 public sealed class JobActionRequest
 {
+    public const string StopUnfinishedCapability = "stopUnfinished";
     public Guid JobId { get; set; }
     public bool DeleteFile { get; set; }
     public bool OnlyIfUnfinished { get; set; }
@@ -696,6 +701,11 @@ public sealed class QueueActionRequest
 
 public sealed class JobQueueRequest
 {
+    public const string UnqueuedPreconditionCapability = "queueUnqueuedPrecondition";
+
+    /// <summary>Reject if another client queued the download. Requires queueUnqueuedPrecondition.</summary>
+    public bool ExpectedUnqueued { get; set; }
+
     /// <summary>Optional source membership precondition. Requires queueConditionalMove.</summary>
     public int? ExpectedQueueId { get; set; }
     public Guid? ExpectedSourceQueueGeneration { get; set; }

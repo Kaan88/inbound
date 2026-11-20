@@ -211,7 +211,11 @@ public static class HostWords
             parts.Add($"{figures.Active} active");
             if (figures.BytesPerSecond > 0) parts.Add(Fmt.Rate(figures.BytesPerSecond));
         }
-        if (figures.Queued > 0) parts.Add($"{figures.Queued} queued");
+        if (figures.Queued > 0)
+        {
+            parts.Add($"{figures.Queued} queued");
+            if (!host.IsPhone && figures.Active == 0) parts.Add("last seen now");
+        }
         if (figures.Active == 0 && figures.Queued == 0) parts.Add("nothing running");
         return string.Join(" · ", parts);
     }

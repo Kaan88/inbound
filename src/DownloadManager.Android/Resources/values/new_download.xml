@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <dimen name="new_download_field_radius">12dp</dimen>
+  <style name="Widget.Inbound.NewDownload.Field" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+    <item name="boxCornerRadiusTopStart">@dimen/new_download_field_radius</item>
+    <item name="boxCornerRadiusTopEnd">@dimen/new_download_field_radius</item>
+    <item name="boxCornerRadiusBottomStart">@dimen/new_download_field_radius</item>
+    <item name="boxCornerRadiusBottomEnd">@dimen/new_download_field_radius</item>
+  </style>
+</resources>

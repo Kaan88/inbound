@@ -556,7 +556,7 @@ public sealed class DetailsInfoTests
         Assert.DoesNotContain("secret", string.Join(" ", lines.Select(l => l.Value)));
         Assert.Equal("Download", lines.Single(l => l.Label == "Saved to").Value);
         Assert.Equal("Night", lines.Single(l => l.Label == "Queue").Value);
-        Assert.Equal("Wi-Fi only", lines.Single(l => l.Label == "Network").Value);
+        Assert.Equal("Unmetered network only", lines.Single(l => l.Label == "Network").Value);
         Assert.EndsWith(", from Chrome", lines.Single(l => l.Label == "Added").Value);
     }
 
@@ -565,6 +565,22 @@ public sealed class DetailsInfoTests
     {
         var lines = DetailsInfo.Lines(Jobs.Make("queued"), new SettingsDto(), Now);
         Assert.Equal(["From", "Saved to", "Added"], lines.Select(l => l.Label));
+    }
+
+    [Theory]
+    [InlineData("/storage/emulated/0/Download/", "Downloads")]
+    [InlineData("/storage/emulated/0/Download/Inbound/Disc images/", "Downloads / Inbound / Disc images")]
+    [InlineData("/storage/emulated/0/Downloads-old/Inbound", "Inbound")]
+    public void Details_shows_nested_phone_destinations_and_the_selected_queue_network_rule(string destination, string expected)
+    {
+        var job = Jobs.Make("downloading");
+        job.DestinationDirectory = destination;
+        job.QueueId = 2;
+        var settings = new SettingsDto { Queues = [new QueueDto { Id = 2, RequireUnmeteredNetwork = true }] };
+        var lines = DetailsInfo.Lines(job, settings, Now, "/storage/emulated/0/Download");
+
+        Assert.Equal(expected, lines.Single(line => line.Label == "Saved to").Value);
+        Assert.Equal("Unmetered network only", lines.Single(line => line.Label == "Network").Value);
     }
 
     [Fact]

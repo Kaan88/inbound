@@ -44,6 +44,50 @@ public sealed class PageLinksTests
         Assert.Equal(3, model.SelectedCount); Assert.Equal(new[] { "Archive", "Clip", "Paper" }, model.Selected.Select(x => x.Name));
         model.SetVisibleSelected(false); Assert.Single(model.Selected); Assert.Equal("Clip", model.Selected[0].Name);
     }
+    [Fact] public void ACategoryGroupsItsLinksFirstAndSelectsOnlyThoseLinks()
+    {
+        var links = new PageLinks([new("https://example.com/cover.jpg", "Cover"),
+            new("https://example.com/a.zip", "Archive"), new("https://example.com/readme.txt", "Readme")]);
+        links.Kind = PageLinkKind.Archives;
+        links.SetVisibleSelected(true);
+        Assert.Equal(new[] { "Archive", "Cover", "Readme" }, links.DisplayRows.Select(link => link.Name));
+        Assert.Equal("Archive", Assert.Single(links.Selected).Name);
+        links.Query = "missing";
+        Assert.Empty(links.DisplayRows);
+    }
+
+    [Fact] public void ByteTotalsRequireKnownSizesForEverySelectedLinkAndSafeAddition()
+    {
+        var links = new PageLinks([new("https://example.com/a.zip", "A", long.MaxValue),
+            new("https://example.com/b.zip", "B", 1), new("https://example.com/c.zip", "C")]);
+        links.Toggle(links.Visible[0].Url);
+        Assert.Equal(long.MaxValue, links.SelectedBytes);
+        links.Toggle(links.Visible[1].Url);
+        Assert.Null(links.SelectedBytes);
+        links.Toggle(links.Visible[0].Url);
+        Assert.Equal(1L, links.SelectedBytes);
+        links.Toggle(links.Visible[2].Url);
+        Assert.Null(links.SelectedBytes);
+    }
+
+    [Fact] public void VisibleCategoryTotalExcludesOtherSelectedLinksAndRequiresSafeKnownSizes()
+    {
+        var links = new PageLinks([new("https://example.com/a.zip", "A", 10),
+            new("https://example.com/b.zip", "B", 20), new("https://example.com/cover.jpg", "Cover", 7)]);
+        links.Toggle(links.Visible[2].Url);
+        links.Kind = PageLinkKind.Archives;
+        links.SetVisibleSelected(true);
+        Assert.Equal(30, links.VisibleBytes);
+        Assert.Equal(37, links.SelectedBytes);
+        links.Query = "missing";
+        Assert.Null(links.VisibleBytes);
+        var overflow = new PageLinks([new("https://example.com/a.zip", "A", long.MaxValue),
+            new("https://example.com/b.zip", "B", 1)]);
+        Assert.Null(overflow.VisibleBytes);
+        var unknown = new PageLinks([new("https://example.com/a.zip", "A")]);
+        Assert.Null(unknown.VisibleBytes);
+    }
+
     [Fact] public void InputCapCountsOnlyDistinctValidLinks()
     {
         var input = new[] { new PageLink("javascript:bad", "bad"), new PageLink("https://example.com/0#duplicate", "first") }

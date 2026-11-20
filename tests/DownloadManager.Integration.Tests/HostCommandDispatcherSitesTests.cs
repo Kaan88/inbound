@@ -81,6 +81,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.KindsRequest, new { }),
         (SitesMessageTypes.Probe, new SiteProbeRequest { Host = "srv.example", Port = 22 }),
         (SitesMessageTypes.Trust, new SiteTrustRequest { Id = SiteId, Entries = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA"] }),
+        (SitesMessageTypes.TrustSftpEndpoint, new SiteTrustRequest { Id = SiteId, ExpectedHost = "nas.local", ExpectedPort = 22 }),
         (SitesMessageTypes.Test, new SiteIdRequest { Id = SiteId }),
         (SitesMessageTypes.RcloneInstall, new SitesRcloneInstallRequest()),
         (SitesMessageTypes.RcloneCheck, new { }),
@@ -98,11 +99,15 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         (SitesMessageTypes.Rename, new SiteRenameRequest { Id = SiteId, Path = "/pub", Name = "a.txt", NewName = "b.txt" }),
         (SitesMessageTypes.Count, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
         (SitesMessageTypes.Delete, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.DeleteFiles, new SiteChangeRequest { Id = SiteId, Path = "/pub", Items = [new SiteChangeItemDto { Name = "a.txt" }] }),
+        (SitesMessageTypes.SafeDownloadStart, new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = "/srv/in",
+            Names = [new SiteTransferNameDto { Name = "a.txt" }], SafeSingleDownload = true }),
         (SitesMessageTypes.Certificate, new SiteIdRequest { Id = SiteId }),
         (SitesMessageTypes.SignIn, new SiteSignInRequest { Id = SiteId }),
         (SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = SiteId }),
         (SitesMessageTypes.DeviceReadOpen, new SiteDeviceOpenRequest { Id = SiteId, Path = "/pub/a.txt" }),
         (SitesMessageTypes.DeviceWriteOpen, new SiteDeviceOpenRequest { Id = SiteId, Folder = "/pub", Name = "a.txt" }),
+        (SitesMessageTypes.DeviceCreateOpen, new SiteDeviceOpenRequest { Id = SiteId, Folder = "/pub", Name = "a.txt", Listing = "confirmed" }),
         (SitesMessageTypes.DeviceRead, new SiteDeviceChunkRequest { StreamId = "x" }),
         (SitesMessageTypes.DeviceWrite, new SiteDeviceChunkRequest { StreamId = "x" }),
         (SitesMessageTypes.DeviceClose, new SiteDeviceChunkRequest { StreamId = "x" }),
@@ -153,7 +158,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
 
         List<string> Offered(MemorySession session) => session.Frames.First(f => f.Type == MessageTypes.ServerHello).GetPayload<HostHelloDto>().Capabilities;
         Assert.Contains("sites", Offered(pipe));
-        Assert.Equal(["sites", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"], Offered(pipe).TakeLast(7));
+        Assert.Equal(["sites", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", JobQueueRequest.UnqueuedPreconditionCapability, JobActionRequest.StopUnfinishedCapability], Offered(pipe).TakeLast(9));
         Assert.Contains("sites", Offered(web));
         Assert.DoesNotContain("sites", Offered(plain));
         Assert.Contains("sites", with.Capabilities);
@@ -179,7 +184,7 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
         foreach (var (type, payload) in SitesRequests)
         {
             var reply = await AskAsync(dispatcher, web, type, payload);
-            if (type is SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)
+            if (type is SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart)
             {
                 // Use my own rclone names a program to run; /srv/in is outside the app's folders.
                 Assert.Equal(MessageTypes.HostActionResult, reply.Type);
@@ -188,13 +193,17 @@ public sealed class HostCommandDispatcherSitesTests : IAsyncLifetime
             else Assert.Equal(SitesMessageTypes.Status, reply.Type);
         }
 
-        Assert.Equal(SitesRequests.Select(request => request.Type).Where(t => t is not (SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart)), sites.Seen);
+        Assert.Equal(SitesRequests.Select(request => request.Type).Where(t => t is not
+            (SitesMessageTypes.SetEnabled or SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart)), sites.Seen);
 
         // The switch itself, and a folder inside the app's folders, go on; the folder as the Host resolved it.
         var inside = Path.Combine(profile.Roots.Roots[0], "from-site");
         Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true })).Type);
         Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.TransferStart,
             new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = inside, Names = [new SiteTransferNameDto { Name = "a.txt" }] })).Type);
+        Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.SafeDownloadStart,
+            new SiteTransferStartRequest { SiteId = SiteId, LocalFolder = inside, SafeSingleDownload = true,
+                Names = [new SiteTransferNameDto { Name = "a.txt" }] })).Type);
         Assert.Equal(SitesMessageTypes.Status, (await AskAsync(dispatcher, web, SitesMessageTypes.Save,
             new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = inside })).Type);
         var outside = await AskAsync(dispatcher, web, SitesMessageTypes.Save, new SiteSaveRequest { Name = "Box", Host = "srv.example", LocalFolder = "/srv/in" });

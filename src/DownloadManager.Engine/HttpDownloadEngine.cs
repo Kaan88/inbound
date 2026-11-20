@@ -893,7 +893,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 ? response.Content.Headers.ContentRange?.Length : response.Content.Headers.ContentLength;
             return new FileMetadata(FileNameResolver.Resolve(disposition, finalUri), size,
                 response.Content.Headers.ContentType?.MediaType, finalUri.AbsoluteUri,
-                response.Headers.ETag?.ToString(), response.Content.Headers.LastModified?.ToString("R"));
+                response.Headers.ETag?.ToString(), response.Content.Headers.LastModified?.ToString("R"),
+                response.StatusCode == HttpStatusCode.PartialContent || response.Headers.AcceptRanges.Contains("bytes", StringComparer.OrdinalIgnoreCase)
+                    ? true : response.Headers.AcceptRanges.Contains("none", StringComparer.OrdinalIgnoreCase) ? false : null);
         }
         finally { response.Dispose(); }
     }

@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using Android.Util;
 using DownloadManager.Contracts;
+using DownloadManager.Mobile;
 using Inbound.App.Host;
 
 namespace Inbound.App;
@@ -10,6 +11,45 @@ namespace Inbound.App;
 internal static class RemoteFilesHostProbe
 {
     private const string Tag = "InboundRemoteFilesProbe";
+
+    public static void RunConditionalUpload(int port, bool s3 = false) => _ = Task.Run(async () =>
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+        var ct = deadline.Token;
+        try
+        {
+            var host = await InboundApplication.GetHostAsync(Android.App.Application.Context).ConfigureAwait(false);
+            await using var connection = new InProcessHostConnection(host.Dispatcher);
+            await connection.OpenAsync(_ => { }, ct).ConfigureAwait(false);
+            var client = new RemoteFilesClient(connection);
+            if (!(await client.SetEnabledAsync(true, ct).ConfigureAwait(false)).Enabled)
+                throw new InvalidOperationException("Could not enable Remote Files.");
+            var saved = await client.SaveAsync(s3 ? new SiteSaveRequest
+            {
+                Name = "Conditional S3 fixture", Kind = SiteKindCatalog.S3, Provider = "Other",
+                Endpoint = $"http://127.0.0.1:{port}", Region = "us-east-1", User = "SYNTHETIC", Password = "synthetic-only"
+            } : new SiteSaveRequest
+            { Name = "Conditional upload fixture", Kind = SiteKindCatalog.WebDav, Url = $"http://127.0.0.1:{port}/" }, ct).ConfigureAwait(false);
+            var site = saved.Site ?? throw new InvalidOperationException("Could not save upload fixture: " + saved.Message);
+            string folder = s3 ? "/bucket" : "/media/recordings/2026";
+            async Task<SiteResultDto> Write(string name)
+            {
+                var listing = await client.BrowseAsync(new SiteBrowseRequest { Id = site.Id, Path = folder, Refresh = true }, ct).ConfigureAwait(false);
+                if (!listing.Ok) throw new InvalidOperationException("Could not browse upload fixture: " + listing.Message);
+                using var bytes = new MemoryStream([97, 98, 99]);
+                return await client.WriteDeviceFileAsync(new SiteDeviceOpenRequest
+                { Id = site.Id, Folder = folder, Name = name, Listing = listing.Listing, Size = bytes.Length }, bytes, ct).ConfigureAwait(false);
+            }
+            var created = await Write("inbound-upload-proof.bin").ConfigureAwait(false);
+            if (!created.Ok) throw new InvalidOperationException("Conditional create failed: " + created.Message);
+            var conflict = await Write(s3 ? "race.bin" : "artwork.zip").ConfigureAwait(false);
+            if (conflict.Ok || conflict.Message?.Contains("not replaced", StringComparison.Ordinal) != true)
+                throw new InvalidOperationException("Conditional create did not report the expected conflict.");
+            await client.SetEnabledAsync(false, ct).ConfigureAwait(false);
+            Log.Info(Tag, "PASS: conditional upload committed; competing file refused");
+        }
+        catch (Exception e) { Log.Error(Tag, e.ToString()); }
+    });
 
     public static void Run(int port) => _ = Task.Run(async () =>
     {

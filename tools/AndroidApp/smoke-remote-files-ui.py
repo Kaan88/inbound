@@ -67,7 +67,7 @@ class Smoke:
 
     def adb(self, *args, raw=False):
         result = subprocess.run([self.args.adb, "-s", self.args.serial, *map(str, args)],
-                                capture_output=True, timeout=25, check=True)
+                                capture_output=True, timeout=120 if args and args[0] == "install" else 25, check=True)
         return result.stdout if raw else result.stdout.decode("utf-8", errors="replace")
 
     def shell(self, *args):
@@ -95,6 +95,40 @@ class Smoke:
                 return found[0], latest
             time.sleep(0.4)
         raise RuntimeError(f"Timed out waiting for {label!r}")
+
+    def wait_content_description(self, predicate, description, timeout=25):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            latest = self.tree()
+            found = [node for node in latest.iter("node")
+                     if predicate(node.get("content-desc", ""))]
+            if found:
+                require(len(found) == 1,
+                        f"Expected one UI control {description!r}, got {len(found)}")
+                return found[0], latest
+            time.sleep(0.4)
+        raise RuntimeError(f"Timed out waiting for {description!r}")
+
+    def wait_content_description_prefix(self, prefix, timeout=25):
+        return self.wait_content_description(
+            lambda value: value.startswith(prefix), prefix + "*", timeout)
+
+    def wait_content_description_suffix(self, suffix, timeout=25):
+        return self.wait_content_description(
+            lambda value: value.endswith(suffix), "*" + suffix, timeout)
+
+    def download_selected_files(self):
+        selected = [node for node in self.tree().iter("node")
+                    if node.get("content-desc", "").startswith("Selected " + FILE + ",")]
+        if not selected:
+            file_card, _ = self.wait_content_description_prefix("Select " + FILE + ",")
+            self.tap(file_card)
+        else:
+            require(len(selected) == 1, "Expected one selected fixture file card")
+        transfer, _ = self.wait_node("↓  To this phone")
+        self.tap(transfer)
+        confirm, _ = self.wait_node("Download")
+        self.tap(confirm)
 
     def target_exists(self, target):
         return self.shell(f"if [ -f '{target}' ]; then echo yes; fi").strip() == "yes"
@@ -170,8 +204,8 @@ class Smoke:
             self.started = True
             nav, tree = self.wait_node("Remote Files", resource="nav_remote_files")
             self.tap(nav)
-            enable, _ = self.wait_node("Enable Remote Files", timeout=35)
-            self.tap(enable)
+            setup, _ = self.wait_node("Enable Remote Files", timeout=35)
+            self.tap(setup)
             self.wait_node("Add location", timeout=50)
             add, _ = self.wait_node("Add location")
             self.tap(add)
@@ -185,10 +219,7 @@ class Smoke:
             self.tap(save)
             card, _ = self.wait_node(self.location, timeout=40)
             self.tap(card)
-            download, _ = self.wait_node("Download " + FILE, timeout=35)
-            self.tap(download)
-            confirm, _ = self.wait_node("Download")
-            self.tap(confirm)
+            self.download_selected_files()
 
             target = f"/sdcard/Download/{FILE}"
             deadline = time.monotonic() + 75
@@ -212,10 +243,7 @@ class Smoke:
             server.hold_get = True
             back, _ = self.wait_node("‹  Back")
             self.tap(back)
-            download, _ = self.wait_node("Download " + FILE)
-            self.tap(download)
-            confirm, _ = self.wait_node("Download")
-            self.tap(confirm)
+            self.download_selected_files()
             require(server.get_arrived.wait(20), "Second download did not reach the fixture")
             competing = b"keep the existing file\n"
             self.shell(f"set -C; echo 'keep the existing file' > '{target}'")
@@ -239,10 +267,7 @@ class Smoke:
             require(pid.isdigit(), "Could not identify the isolated probe process")
             back, _ = self.wait_node("‹  Back")
             self.tap(back)
-            download, _ = self.wait_node("Download " + FILE)
-            self.tap(download)
-            confirm, _ = self.wait_node("Download")
-            self.tap(confirm)
+            self.download_selected_files()
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 logs = self.adb("logcat", "-d", f"--pid={pid}", "-s", "InboundTest")
@@ -265,6 +290,8 @@ class Smoke:
             self.tap(nav)
             card, _ = self.wait_node(self.location)
             self.tap(card)
+            transfer_summary, _ = self.wait_content_description_suffix(". Open transfers.")
+            self.tap(transfer_summary)
             transfers, _ = self.wait_node("Transfers")
             self.tap(transfers)
             deadline = time.monotonic() + 35

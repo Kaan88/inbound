@@ -40,7 +40,9 @@ public sealed class FolderPicker(DownloadsModel host)
     public async Task OpenAsync(string? path, CancellationToken cancellationToken = default)
     {
         var r = await host.BrowseFoldersAsync(path, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!r.Ok && !string.IsNullOrEmpty(path)) r = await host.BrowseFoldersAsync(null, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         Apply(r);
     }
 

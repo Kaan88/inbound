@@ -290,11 +290,11 @@ public sealed class DownloadsModel : IDisposable
         return result.Ok ? CommandResult.Success : CommandResult.Fail(result.Error ?? "The Host refused the refresh.");
     }
 
-    private async Task<CommandResult> ActionAsync(string type, Guid id, bool deleteFile = false, CancellationToken cancellationToken = default)
+    private async Task<CommandResult> ActionAsync(string type, Guid id, bool deleteFile = false, CancellationToken cancellationToken = default, bool onlyIfUnfinished = false)
     {
         try
         {
-            var reply = await _host.RequestAsync(IpcMessage.Create(type, new JobActionRequest { JobId = id, DeleteFile = deleteFile }), cancellationToken).ConfigureAwait(false);
+            var reply = await _host.RequestAsync(IpcMessage.Create(type, new JobActionRequest { JobId = id, DeleteFile = deleteFile, OnlyIfUnfinished = onlyIfUnfinished }), cancellationToken).ConfigureAwait(false);
             if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host answered with " + reply.Type + ".");
             var r = reply.GetPayload<JobActionResponse>();
             return r.Ok ? CommandResult.Success : CommandResult.Fail(r.Error ?? "The Host refused.");
@@ -302,6 +302,11 @@ public sealed class DownloadsModel : IDisposable
         catch (OperationCanceledException) { throw; }
         catch (Exception e) { return CommandResult.Fail(e.Message); }
     }
+
+    public Task<CommandResult> StopAsync(Guid id) =>
+        Hello?.Capabilities.Contains(JobActionRequest.StopUnfinishedCapability) == true
+            ? ActionAsync(MessageTypes.JobCancel, id, deleteFile: false, onlyIfUnfinished: true)
+            : Task.FromResult(CommandResult.Fail("The Host does not offer Stop."));
 
     public Task<CommandResult> PauseAsync(Guid id) => ActionAsync(MessageTypes.JobPause, id);
 
@@ -340,13 +345,28 @@ public sealed class DownloadsModel : IDisposable
         catch (Exception e) { return CommandResult.Fail(e.Message); }
     }
 
-    /// <summary>Changes queue membership on the selected Host; null detaches the download from queues.</summary>
-    public async Task<CommandResult> MoveToQueueAsync(Guid id, int? queueId, CancellationToken cancellationToken = default, int? expectedQueueId = null, Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null)
+    public async Task<CommandResult> ChangeCategoryAsync(Guid id, string categoryId)
     {
         try
         {
+            var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobUpdate,
+                new JobUpdateRequest { JobId = id, CategoryId = categoryId }), CancellationToken.None).ConfigureAwait(false);
+            if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host did not confirm the category change.");
+            var result = reply.GetPayload<JobActionResponse>();
+            return result.Ok ? CommandResult.Success : CommandResult.Fail(result.Error ?? "The category could not be changed.");
+        }
+        catch (Exception ex) { return CommandResult.Fail(ex.Message); }
+    }
+
+    /// <summary>Changes queue membership on the selected Host; null detaches the download from queues.</summary>
+    public async Task<CommandResult> MoveToQueueAsync(Guid id, int? queueId, CancellationToken cancellationToken = default, int? expectedQueueId = null, Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null, bool expectedUnqueued = false)
+    {
+        if (expectedUnqueued && Hello?.Capabilities.Contains(JobQueueRequest.UnqueuedPreconditionCapability) != true)
+            return CommandResult.Fail("Update the Host before moving a download that has no queue.");
+        try
+        {
             var reply = await _host.RequestAsync(IpcMessage.Create(MessageTypes.JobMoveToQueue,
-                new JobQueueRequest { JobId = id, QueueId = queueId ?? 0, Detach = queueId is null, ExpectedQueueId = expectedQueueId, ExpectedSourceQueueGeneration = expectedSourceQueueGeneration, ExpectedDestinationQueueGeneration = expectedDestinationQueueGeneration }), cancellationToken).ConfigureAwait(false);
+                new JobQueueRequest { JobId = id, QueueId = queueId ?? 0, Detach = queueId is null, ExpectedQueueId = expectedQueueId, ExpectedUnqueued = expectedUnqueued, ExpectedSourceQueueGeneration = expectedSourceQueueGeneration, ExpectedDestinationQueueGeneration = expectedDestinationQueueGeneration }), cancellationToken).ConfigureAwait(false);
             if (reply.Type != MessageTypes.JobActionResult) return CommandResult.Fail("The Host did not confirm the queue change.");
             var result = reply.GetPayload<JobActionResponse>();
             return result.Ok ? CommandResult.Success : CommandResult.Fail(result.Error ?? "The queue could not be changed.");

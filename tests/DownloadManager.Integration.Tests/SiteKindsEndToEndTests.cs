@@ -55,6 +55,78 @@ public sealed partial class SiteTransfersEndToEndTests
     }
 
     [SiteTransfersFact]
+    public async Task ConditionalDeviceCreateFailsClosedOnProductionHost()
+    {
+        var commands = Open();
+        var status = await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled,
+            new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone });
+        Assert.True(status.Enabled);
+        var result = await Call<SiteDeviceStreamDto>(commands, SitesMessageTypes.DeviceCreateOpen,
+            new SiteDeviceOpenRequest { Listing = "confirmed", Size = 3 });
+        Assert.False(result.Ok);
+        Assert.Null(result.StreamId);
+        Assert.Contains("does not support", result.Message);
+    }
+
+    [SiteTransfersFact]
+    public async Task ConditionalDeviceCreatePreservesCompetingFileAndRejectsEditedSite()
+    {
+        int port = StartServer(slow: false, "webdav", []);
+        string url = $"http://127.0.0.1:{port}/";
+        var (commands, site) = await SaveKindAsync(new SiteSaveRequest { Name = "DAV", Kind = SiteKinds.WebDav, Url = url }, uploadProbe: true);
+        var browse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = site.Id, Path = "/pub" });
+        Assert.True(browse.Ok, browse.Message);
+
+        Task<SiteDeviceStreamDto> OpenUpload(string name, string? listing) =>
+            Call<SiteDeviceStreamDto>(commands, SitesMessageTypes.DeviceCreateOpen, new SiteDeviceOpenRequest
+            { Id = site.Id, Folder = "/pub", Name = name, Size = 3, Listing = listing });
+        Task<SiteDeviceChunkDto> Publish(string? id) =>
+            Call<SiteDeviceChunkDto>(commands, SitesMessageTypes.DeviceWrite,
+                new SiteDeviceChunkRequest { StreamId = id!, Last = true, Data = [97, 98, 99] });
+        string FolderFile(string name) => Path.Combine(Served, "pub", name);
+
+        var refused = await OpenUpload("no-confirmation.txt", "unissued");
+        Assert.Equal(SiteProblems.ListingChanged, refused.Problem);
+        var fresh = await OpenUpload("fresh.txt", browse.Listing);
+        Assert.True(fresh.Ok, fresh.Message);
+        var published = await Publish(fresh.StreamId);
+        Assert.True(published.Done, published.Message);
+        Assert.Equal("abc", await File.ReadAllTextAsync(FolderFile("fresh.txt")));
+
+        browse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = site.Id, Path = "/pub" });
+        var racing = await OpenUpload("competing.txt", browse.Listing);
+        Assert.True(racing.Ok, racing.Message);
+        await File.WriteAllTextAsync(FolderFile("competing.txt"), "someone else");
+        var conflict = await Publish(racing.StreamId);
+        Assert.False(conflict.Ok);
+        Assert.Contains("not replaced", conflict.Message);
+        Assert.Equal("someone else", await File.ReadAllTextAsync(FolderFile("competing.txt")));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(Served, "pub"), ".inbound-upload-*"));
+
+        browse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = site.Id, Path = "/pub" });
+        var stale = await OpenUpload("stale.txt", browse.Listing);
+        Assert.True(stale.Ok, stale.Message);
+        var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save,
+            new SiteSaveRequest { Id = site.Id, Name = "Edited DAV", Kind = SiteKinds.WebDav, Url = url + "pub/" });
+        Assert.True(edited.Ok, edited.Message);
+        var blocked = await Publish(stale.StreamId);
+        Assert.False(blocked.Ok);
+        Assert.Contains("destination changed", blocked.Message);
+        Assert.False(File.Exists(FolderFile("stale.txt")));
+        Assert.False(File.Exists(Path.Combine(Served, "pub", "pub", "stale.txt")));
+
+        browse = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, new SiteBrowseRequest { Id = site.Id, Path = "/" });
+        Assert.True(browse.Ok, browse.Message);
+        var oldSession = await Call<SiteDeviceStreamDto>(commands, SitesMessageTypes.DeviceCreateOpen, new SiteDeviceOpenRequest
+        { Id = site.Id, Folder = "/", Name = "old-session.txt", Size = 3, Listing = browse.Listing });
+        Assert.True(oldSession.Ok, oldSession.Message);
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = false });
+        await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true });
+        Assert.False((await Publish(oldSession.StreamId)).Ok);
+        Assert.False(File.Exists(FolderFile("old-session.txt")));
+    }
+
+    [SiteTransfersFact]
     public async Task AnS3SiteWorksWithoutEmptyFolders()
     {
         var port = StartServer(slow: false, "s3", ["--auth-key", $"{AccessKey},{SecretKey}"]);
@@ -117,9 +189,9 @@ public sealed partial class SiteTransfersEndToEndTests
         Assert.False(changed.Ok);
     }
 
-    private async Task<(SitesCommands Commands, SiteDto Site)> SaveKindAsync(SiteSaveRequest request)
+    private async Task<(SitesCommands Commands, SiteDto Site)> SaveKindAsync(SiteSaveRequest request, bool uploadProbe = false)
     {
-        var commands = Open(null);
+        var commands = Open(uploadProbe: uploadProbe);
         var status = await Call<SitesStatusDto>(commands, SitesMessageTypes.SetEnabled, new SitesSetEnabledRequest { Enabled = true, OwnRclonePath = Rclone });
         Assert.True(status.Enabled);
         var saved = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, request);

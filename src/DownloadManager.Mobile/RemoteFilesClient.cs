@@ -51,6 +51,92 @@ public sealed class RemoteFilesClient
         return RequestAsync<SiteTransferResultDto>(IpcMessage.Create(command, request), SitesMessageTypes.TransferResult, cancellationToken);
     }
 
+    public Task<SiteChangeResultDto> DeleteFilesAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RequestAsync<SiteChangeResultDto>(IpcMessage.Create(SitesMessageTypes.DeleteFiles, request), SitesMessageTypes.ChangeResult, cancellationToken);
+    }
+
+    /// <summary>
+    /// Streams a device-owned file on the caller's selected Host. The caller owns the source and must
+    /// establish the Host's destination and conflict guarantees before exposing this operation.
+    /// An uncertain result is never retried here.
+    /// </summary>
+    public async Task<SiteResultDto> WriteDeviceFileAsync(
+        SiteDeviceOpenRequest destination, Stream source, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfNegative(destination.Size);
+        if (!source.CanRead) throw new ArgumentException("A readable file is required.", nameof(source));
+
+        long remaining = destination.Size;
+        if (destination.Replace || string.IsNullOrWhiteSpace(destination.Listing))
+            throw new ArgumentException("A confirmed no-replace destination listing is required.", nameof(destination));
+        var opened = await RequestAsync<SiteDeviceStreamDto>(IpcMessage.Create(SitesMessageTypes.DeviceCreateOpen, destination),
+            SitesMessageTypes.DeviceStream, cancellationToken).ConfigureAwait(false);
+        if (!opened.Ok)
+            return new SiteResultDto { Message = opened.Message, Problem = opened.Problem };
+        if (opened.StreamId is not { Length: > 0 } id)
+            throw new InvalidDataException("The Host did not identify the opened upload.");
+
+        bool completed = false;
+        try
+        {
+            var buffer = new byte[(int)Math.Min(remaining, SiteDeviceLimits.ChunkBytes)];
+            var extra = new byte[1];
+            do
+            {
+                var length = (int)Math.Min(remaining, buffer.Length);
+                await source.ReadExactlyAsync(buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
+                remaining -= length;
+                if (remaining == 0 && await source.ReadAsync(extra.AsMemory(), cancellationToken).ConfigureAwait(false) != 0)
+                    throw new InvalidDataException("The file grew after it was selected.");
+
+                var request = new SiteDeviceChunkRequest
+                {
+                    StreamId = id, Data = length == buffer.Length ? buffer : buffer[..length], Last = remaining == 0
+                };
+                var piece = await RequestAsync<SiteDeviceChunkDto>(IpcMessage.Create(SitesMessageTypes.DeviceWrite, request),
+                    SitesMessageTypes.DeviceChunk, cancellationToken).ConfigureAwait(false);
+                if (!piece.Ok) return new SiteResultDto { Message = piece.Message };
+                if (piece.Done != request.Last) throw new InvalidDataException("The Host did not confirm the upload at the expected byte count.");
+            } while (remaining > 0);
+            completed = true;
+            return new SiteResultDto { Ok = true };
+        }
+        finally
+        {
+            if (!completed)
+            {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try
+                {
+                    await RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.DeviceClose,
+                        new SiteDeviceChunkRequest { StreamId = id }), SitesMessageTypes.Result, cleanup.Token).ConfigureAwait(false);
+                }
+                catch { /* Preserve the original refusal or error. The Host also sweeps abandoned streams. */ }
+            }
+        }
+    }
+
+    public Task<SiteSignInResultDto> SignInSiteAsync(string id, string? token = null, CancellationToken cancellationToken = default) =>
+        RequestAsync<SiteSignInResultDto>(IpcMessage.Create(SitesMessageTypes.SignIn, new SiteSignInRequest { Id = id, Token = token }),
+            SitesMessageTypes.SignInResult, cancellationToken);
+
+    public Task<SiteResultDto> CancelSiteSignInAsync(string id, CancellationToken cancellationToken = default) =>
+        RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.SignInCancel, new SiteIdRequest { Id = id }),
+            SitesMessageTypes.Result, cancellationToken);
+
+    public Task<SiteProbeResultDto> ProbeSftpAsync(string host, int port, CancellationToken cancellationToken = default) =>
+        RequestAsync<SiteProbeResultDto>(IpcMessage.Create(SitesMessageTypes.Probe, new SiteProbeRequest { Host = host, Port = port }),
+            SitesMessageTypes.ProbeResult, cancellationToken);
+
+    public Task<SiteResultDto> TrustSftpEndpointAsync(string id, string host, int port, string entry, CancellationToken cancellationToken = default) =>
+        RequestAsync<SiteResultDto>(IpcMessage.Create(SitesMessageTypes.TrustSftpEndpoint,
+            new SiteTrustRequest { Id = id, ExpectedHost = host, ExpectedPort = port, Entries = [entry] }),
+            SitesMessageTypes.Result, cancellationToken);
+
     public Task<SiteTransfersDto> ListTransfersAsync(CancellationToken cancellationToken = default) =>
         RequestAsync<SiteTransfersDto>(IpcMessage.Create(SitesMessageTypes.TransferList, new EmptyPayload()), SitesMessageTypes.TransferListResult, cancellationToken);
 

@@ -20,3 +20,10 @@ The payload SHA-256 is
 `fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83`.
 Invalid ranges return 416. Logs show only method, route category, invented-cookie
 presence and validated Range or NONE/INVALID; no raw headers or query strings.
+
+The opt-in partial-B6 lane uses `/partial/old.zip` and `/partial/new.zip`.
+Both serve the same deterministic 16 MiB body and ETag with byte ranges; the
+old route is switched to HTTP 410 in-process only after the operator pauses the
+real app job. The capture runner configures the app's visible connection count
+to one. The new route remains valid and the fixture records sanitized
+Range values for host evidence. This state is reset for each runner invocation.

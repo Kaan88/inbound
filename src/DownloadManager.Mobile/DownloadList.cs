@@ -250,6 +250,16 @@ public sealed class DownloadList : IDisposable
         SelectionChanged?.Invoke();
     }
 
+    /// <summary>Reinstates an exact selection only if all requested downloads are still visible.</summary>
+    public bool RestoreSelection(IReadOnlySet<Guid> ids)
+    {
+        if (ids.Count == 0 || Visible.Count(row => ids.Contains(row.Id)) != ids.Count) return false;
+        _selected.Clear();
+        _selected.UnionWith(ids);
+        SelectionChanged?.Invoke();
+        return true;
+    }
+
     public void ClearSelection()
     {
         if (_selected.Count == 0) return;

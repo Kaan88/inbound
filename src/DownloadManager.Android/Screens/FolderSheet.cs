@@ -14,11 +14,15 @@ namespace Inbound.App.Screens;
 /// </summary>
 internal static class FolderSheet
 {
-    public static void Show(MainActivity activity, DownloadsModel host, string? start, Action<string> chosen)
+    public static BottomSheetDialog Show(MainActivity activity, DownloadsModel host, string? start, Action<string> chosen,
+        CancellationToken routeLifetime = default)
     {
         var picker = new FolderPicker(host);
         var dialog = new BottomSheetDialog(activity);
-        var ui = new Android.OS.Handler(Android.OS.Looper.MainLooper!);
+        var lifetime = CancellationTokenSource.CreateLinkedTokenSource(routeLifetime);
+        var token = lifetime.Token;
+        bool loading = false;
+        string? displayedChoice = null;
         var dp = (int d) => Motion.Dp(activity, d);
         int Attr(int a) => Motion.Attr(activity, a);
 
@@ -97,16 +101,17 @@ internal static class FolderSheet
             FitPath();
             path.Post(FitPath);
             path.ContentDescription = shown is null ? "Folders you can use" : "Folder " + shown;
-            save.Enabled = picker.CanChoose;
+            displayedChoice = picker.Error is null && picker.CanChoose ? shown : null;
+            save.Enabled = displayedChoice is not null;
             note.Visibility = picker.Error is null ? ViewStates.Gone : ViewStates.Visible;
             note.Text = picker.Error;
             if (picker.Path is not null)
-                rows.AddView(Row("Up", Resource.Drawable.ic_arrow_back, () => Go(() => picker.UpAsync()), "Up one folder"));
+                rows.AddView(Row("Up", Resource.Drawable.ic_arrow_back, () => Go(picker.UpAsync), "Up one folder"));
             var list = picker.Path is null ? picker.Roots.Select(r => new DownloadManager.Contracts.FolderEntryDto { Name = r, Path = r }).ToList() : picker.Folders.ToList();
             foreach (var f in list)
             {
                 var p = f.Path;
-                rows.AddView(Row(f.Name, Resource.Drawable.ic_folder, () => Go(() => picker.OpenAsync(p))));
+                rows.AddView(Row(f.Name, Resource.Drawable.ic_folder, () => Go(ct => picker.OpenAsync(p, ct))));
             }
 
             if (list.Count == 0 && picker.Error is null)
@@ -126,24 +131,47 @@ internal static class FolderSheet
             }
         }
 
-        void Go(Func<Task> step)
+        async void Go(Func<CancellationToken, Task> step)
         {
-            _ = Task.Run(async () =>
+            if (loading || token.IsCancellationRequested || !dialog.IsShowing) return;
+            loading = true;
+            displayedChoice = null;
+            save.Enabled = false;
+            rows.RemoveAllViews();
+            note.Text = "Reading folders…";
+            note.Visibility = ViewStates.Visible;
+            try
             {
-                try { await step().ConfigureAwait(false); }
-                catch (System.OperationCanceledException) { }
-                ui.Post(() => { if (dialog.IsShowing) Render(); });
-            });
+                await step(token);
+                if (!token.IsCancellationRequested && dialog.IsShowing) Render();
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception)
+            {
+                if (!token.IsCancellationRequested && dialog.IsShowing)
+                {
+                    note.Text = "Could not read folders. Close and try again.";
+                    note.Visibility = ViewStates.Visible;
+                }
+            }
+            finally { loading = false; }
         }
 
+        dialog.DismissEvent += (_, _) =>
+        {
+            lifetime.Cancel();
+            lifetime.Dispose();
+        };
         cancel.Click += (_, _) => dialog.Dismiss();
         save.Click += (_, _) =>
         {
-            if (picker.Path is { } p) chosen(p);
+            if (loading || token.IsCancellationRequested || displayedChoice is not { } p) return;
+            chosen(p);
             dialog.Dismiss();
         };
         dialog.Show();
-        Go(() => picker.OpenAsync(start));
+        Go(ct => picker.OpenAsync(start, ct));
+        return dialog;
     }
 
     private sealed class TypedValueHolder(Context ctx)

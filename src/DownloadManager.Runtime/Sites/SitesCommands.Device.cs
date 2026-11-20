@@ -21,13 +21,18 @@ public sealed partial class SitesCommands
     internal static TimeSpan PieceTime { get; set; } = TimeSpan.FromMinutes(2);
 
     private readonly ConcurrentDictionary<string, DeviceStream> _streams = new(StringComparer.Ordinal);
+    private readonly bool _allowWebDavUploadProbe;
+    private const long MaxUploadProbeBytes = 64 * 1024;
     private Timer? _streamSweep;
     private volatile bool _disposing;
 
-    private sealed class DeviceStream(string siteId, RcloneLease lease) : IAsyncDisposable
+    private sealed record ConditionalCreate(SiteRecord Site, Uri? DavTarget, string Folder, string Name, MemoryStream Stage, int Session);
+    private int _uploadProbeSession;
+
+    private sealed class DeviceStream(string siteId, RcloneLease? lease = null) : IAsyncDisposable
     {
         public string SiteId { get; } = siteId;
-        public RcloneLease Lease { get; } = lease;
+        public ConditionalCreate? Create { get; init; }
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public long LastUsed = Environment.TickCount64;
 
@@ -67,9 +72,40 @@ public sealed partial class SitesCommands
 
             if (Body is not null) await Body.DisposeAsync().ConfigureAwait(false);
             Response?.Dispose();
-            Lease.Dispose();
+            if (Create is not null) await Create.Stage.DisposeAsync().ConfigureAwait(false);
+            lease?.Dispose();
             Stop.Dispose();
         }
+    }
+
+    private async Task<SiteDeviceStreamDto> DeviceCreateOpenAsync(SiteDeviceOpenRequest request, CancellationToken cancellationToken)
+    {
+        if (!_allowWebDavUploadProbe)
+            return new SiteDeviceStreamDto { Message = "This Host does not support uploads that guarantee no replacement." };
+        int session = Volatile.Read(ref _uploadProbeSession);
+        if (_disposing || !_config.Enabled || request.Replace || request.Size < 0 || request.Size > MaxUploadProbeBytes
+            || !SiteStore.IsId(request.Id) || SitePaths.Normalize(request.Folder) is not { } folder
+            || request.Name is not { } name || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
+            return new SiteDeviceStreamDto { Message = "The upload destination or file size cannot be used." };
+        if (CachedListing(site.Id, folder, request.Listing) is not { } listing || listing.SiteRevision != site.Revision)
+            return new SiteDeviceStreamDto { Problem = SiteProblems.ListingChanged, Message = "Refresh the destination folder and confirm it again." };
+        bool s3Fixture = site.Kind == SiteKinds.S3 && site.Provider == "Other" && folder != "/"
+            && SitePaths.NameProblem(name) is null && !name.Contains('\\')
+            && Uri.TryCreate(site.Endpoint, UriKind.Absolute, out var endpoint)
+            && endpoint.Scheme == Uri.UriSchemeHttp && endpoint.Host == "127.0.0.1";
+        if (!WebDavConditionalUpload.TryTarget(site, folder, name, out var target) && !s3Fixture)
+            return new SiteDeviceStreamDto { Message = "This location does not support uploads without replacing an existing file." };
+
+        var id = Guid.NewGuid().ToString("N");
+        var stage = new MemoryStream((int)request.Size);
+        _streams[id] = new DeviceStream(site.Id) { Create = new ConditionalCreate(site, target, folder, name, stage, session), Expected = request.Size };
+        if (_streams.Count > SiteDeviceLimits.MostStreams || _disposing || !_config.Enabled)
+        {
+            await CloseStreamAsync(id).ConfigureAwait(false);
+            return new SiteDeviceStreamDto { Message = "No upload slot is available." };
+        }
+        StartStreamSweep();
+        return new SiteDeviceStreamDto { Ok = true, StreamId = id, Name = name, Size = request.Size };
     }
 
     private async Task<SiteDeviceStreamDto> DeviceOpenAsync(SiteDeviceOpenRequest request, bool write, CancellationToken cancellationToken)
@@ -220,7 +256,7 @@ public sealed partial class SitesCommands
 
     private async Task<SiteDeviceChunkDto> DeviceWriteAsync(SiteDeviceChunkRequest request, CancellationToken cancellationToken)
     {
-        if (!_streams.TryGetValue(request.StreamId, out var stream) || stream.Pipe is null)
+        if (!_streams.TryGetValue(request.StreamId, out var stream) || (stream.Pipe is null && stream.Create is null))
             return new SiteDeviceChunkDto { Message = "That transfer is no longer open." };
         await stream.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var finished = false;
@@ -235,6 +271,56 @@ public sealed partial class SitesCommands
                 await CloseStreamAsync(request.StreamId).ConfigureAwait(false);
                 return new SiteDeviceChunkDto { Message = "The file is larger than it said, so the upload was stopped." };
             }
+            if (stream.Create is { } create)
+            {
+                try
+                {
+                    await create.Stage.WriteAsync(data.AsMemory(), piece.Token).ConfigureAwait(false);
+                    stream.Written += data.Length;
+                    if (!request.Last)
+                    {
+                        finished = true;
+                        return new SiteDeviceChunkDto { Ok = true };
+                    }
+                    if (stream.Written != stream.Expected)
+                        return new SiteDeviceChunkDto { Message = "The file ended before its declared size." };
+                    if (!_config.Enabled || create.Session != Volatile.Read(ref _uploadProbeSession))
+                        return new SiteDeviceChunkDto { Message = "The destination changed. Refresh the folder and confirm it again." };
+                    using var s3Lease = create.DavTarget is null ? await AcquireAsync(piece.Token).ConfigureAwait(false) : null;
+                    await _gate.WaitAsync(piece.Token).ConfigureAwait(false);
+                    try
+                    {
+                        if (!_config.Enabled || create.Session != _uploadProbeSession
+                            || await _sites.GetAsync(stream.SiteId, piece.Token).ConfigureAwait(false) is not { } current
+                            || current.Revision != create.Site.Revision)
+                            return new SiteDeviceChunkDto { Message = "The destination changed. Refresh the folder and confirm it again." };
+                        create.Stage.Position = 0;
+                        try
+                        {
+                            if (create.DavTarget is { } dav)
+                                await WebDavConditionalUpload.SendAsync(create.Site, dav, create.Stage, stream.Expected, piece.Token).ConfigureAwait(false);
+                            else
+                                await SiteRemote.CreateS3FileAsync(create.Site, s3Lease!.Client, create.Folder, create.Name, create.Stage, piece.Token).ConfigureAwait(false);
+                        }
+                        finally { ForgetListings(stream.SiteId); } // The endpoint may have accepted a PUT whose response was lost.
+                    }
+                    finally { _gate.Release(); }
+                    return new SiteDeviceChunkDto { Ok = true, Done = true };
+                }
+                catch (IOException e) when (e is WebDavConditionalUpload.PublicationException)
+                {
+                    return new SiteDeviceChunkDto { Message = e.Message };
+                }
+                catch (RcloneCallException e) when (e.Message.Contains("StatusCode: 412", StringComparison.Ordinal)
+                    && e.Message.Contains("PreconditionFailed", StringComparison.Ordinal))
+                {
+                    return new SiteDeviceChunkDto { Message = "A file already exists at the destination. It was not replaced." };
+                }
+                catch (Exception e) when (e is IOException or HttpRequestException or SiteStoreException or RcloneCallException or RcloneUnavailableException)
+                {
+                    return new SiteDeviceChunkDto { Message = "The Host could not confirm that the upload created a new file." };
+                }
+            }
 
             if (stream.Upload is { IsCompleted: true } ended)
             {
@@ -244,7 +330,7 @@ public sealed partial class SitesCommands
 
             if (data.Length > 0)
             {
-                var flushed = await stream.Pipe.Writer.WriteAsync(data, piece.Token).ConfigureAwait(false);
+                var flushed = await stream.Pipe!.Writer.WriteAsync(data, piece.Token).ConfigureAwait(false);
                 stream.Written += data.Length;
                 if (flushed.IsCompleted)
                 {
@@ -268,7 +354,7 @@ public sealed partial class SitesCommands
                 return new SiteDeviceChunkDto { Message = "The file ended before its size, so the upload was stopped." };
             }
 
-            await stream.Pipe.Writer.CompleteAsync().ConfigureAwait(false);
+            await stream.Pipe!.Writer.CompleteAsync().ConfigureAwait(false);
             string? failure = null;
             try
             {

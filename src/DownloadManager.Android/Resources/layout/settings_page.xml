@@ -3,29 +3,38 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/settings_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
     android:background="?android:colorBackground" android:paddingLeft="16dp" android:paddingRight="16dp">
-  <TextView android:id="@+id/settings_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:layout_marginLeft="4dp" android:text="Settings"
-      android:textSize="32sp" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
-  <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="horizontal" android:gravity="center_vertical">
+    <TextView android:id="@+id/settings_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Settings"
+        android:textSize="32sp" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+    <ImageButton android:id="@+id/settings_search" android:layout_width="48dp" android:layout_height="48dp" android:padding="12dp" android:scaleType="fitCenter"
+        android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_search" android:contentDescription="Search settings" android:tint="?attr/colorOnSurface" />
+  </LinearLayout>
+  <EditText android:id="@+id/settings_search_input" android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:hint="Search settings" android:inputType="text" android:singleLine="true" android:visibility="gone" />
+  <com.google.android.material.card.MaterialCardView android:id="@+id/settings_appearance_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
       app:cardCornerRadius="28dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="8dp" android:paddingBottom="8dp">
-      <LinearLayout android:id="@+id/setting_theme" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:orientation="horizontal" android:gravity="center_vertical"
+      <LinearLayout android:id="@+id/setting_theme" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="66dp" android:orientation="horizontal" android:gravity="center_vertical"
           android:paddingLeft="16dp" android:paddingRight="16dp" android:background="?attr/selectableItemBackground" android:clickable="true" android:focusable="true">
-        <FrameLayout android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:src="@drawable/ic_brightness" android:importantForAccessibility="no" /></FrameLayout>
+        <FrameLayout android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:src="@drawable/ic_settings_sun" android:importantForAccessibility="no" app:tint="?attr/colorOnSurface" /></FrameLayout>
         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:orientation="vertical">
-          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Theme" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Theme" android:textSize="16sp" android:fontFamily="sans-serif" android:textColor="?attr/colorOnSurface" />
           <TextView android:id="@+id/theme_text" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
         <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_chevron_right" android:importantForAccessibility="no" />
       </LinearLayout>
-      <LinearLayout android:id="@+id/setting_dynamic" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:orientation="horizontal" android:gravity="center_vertical"
+      <LinearLayout android:id="@+id/setting_dynamic" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="66dp" android:orientation="horizontal" android:gravity="center_vertical"
           android:paddingLeft="16dp" android:paddingRight="16dp">
-        <FrameLayout android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:src="@drawable/ic_palette" android:importantForAccessibility="no" /></FrameLayout>
+        <FrameLayout android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:src="@drawable/ic_settings_wallpaper" android:importantForAccessibility="no" app:tint="?attr/colorOnSurface" /></FrameLayout>
         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:orientation="vertical">
-          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Dynamic colour" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
+          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Dynamic colour" android:textSize="16sp" android:fontFamily="sans-serif" android:textColor="?attr/colorOnSurface" />
           <TextView android:id="@+id/dynamic_text" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
         <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/dynamic_switch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:contentDescription="Dynamic colour" />
       </LinearLayout>
+      <LinearLayout android:id="@+id/colour_preview" android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:layout_marginStart="72dp" android:paddingTop="4dp" android:paddingBottom="12dp"
+          android:orientation="horizontal" android:importantForAccessibility="noHideDescendants" />
     </LinearLayout>
   </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

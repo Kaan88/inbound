@@ -10,6 +10,92 @@ namespace DownloadManager.Integration.Tests;
 public sealed partial class SiteTransfersEndToEndTests
 {
     [SiteTransfersFact]
+    public async Task ChronologicalBrowsePagesGloballyAndCountsOnlyDirectChildren()
+    {
+        var dir = Path.Combine(Served, "pub", "counts");
+        Directory.CreateDirectory(Path.Combine(dir, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "direct.txt"), "direct");
+        await File.WriteAllTextAsync(Path.Combine(dir, "nested", "not-direct.txt"), "not direct");
+        var root = Path.Combine(Served, "pub");
+        var early = Path.Combine(root, "z-old.txt");
+        var late = Path.Combine(root, "a-new.txt");
+        await File.WriteAllTextAsync(early, "old");
+        await File.WriteAllTextAsync(late, "new");
+        File.SetLastWriteTimeUtc(early, new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(late, new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        var request = new SiteBrowseRequest
+        {
+            Id = siteId, Path = "/pub", Limit = 2, ChronologicalFiles = true, IncludeFolderCounts = true
+        };
+        var first = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, request);
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal(2, Assert.Single(first.Items, item => item.Name == "counts").ChildCount);
+        Assert.All(first.Items, item => Assert.True(item.IsFolder));
+        request.Offset = first.Items.Count;
+        request.Limit = 500;
+        request.Listing = first.Listing;
+        var rest = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, request);
+        Assert.True(rest.Ok, rest.Message);
+        Assert.Equal("z-old.txt", rest.Items.First(item => !item.IsFolder).Name);
+        Assert.Equal("a-new.txt", rest.Items.Last().Name);
+        request.ChronologicalFiles = false;
+        var mismatched = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse, request);
+        Assert.Equal(SiteProblems.ListingChanged, mismatched.Problem);
+    }
+
+    [SiteTransfersFact]
+    public async Task FileOnlyDeleteLeavesAFolderAndItsContentsAlone()
+    {
+        var (commands, siteId) = await OpenSiteAsync(StartServer(slow: false));
+        string docs = Path.Combine(Served, "pub", "docs");
+        string moved = Path.Combine(Served, "saved-docs");
+        Directory.Move(docs, moved);
+        await File.WriteAllTextAsync(docs, "initially a file");
+        var listed = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub" });
+        Assert.True(listed.Ok, listed.Message);
+        Assert.False(Assert.Single(listed.Items, item => item.Name == "docs").IsFolder);
+        File.Delete(docs);
+        Directory.Move(moved, docs);
+        var result = await Call<SiteChangeResultDto>(commands, SitesMessageTypes.DeleteFiles, new SiteChangeRequest
+        {
+            Id = siteId, Path = "/pub", Listing = listed.Listing,
+            Items = [new() { Name = "docs" }, new() { Name = "readme.txt" }]
+        });
+        Assert.False(result.Ok);
+        Assert.False(Assert.Single(result.Items, item => item.Name == "docs").Ok);
+        Assert.True(Assert.Single(result.Items, item => item.Name == "readme.txt").Ok);
+        Assert.True(File.Exists(Path.Combine(Served, "pub", "docs", "deep", "b.txt")));
+        Assert.False(File.Exists(Path.Combine(Served, "pub", "readme.txt")));
+    }
+
+    [SiteTransfersFact]
+    public async Task FileOnlyDeleteRejectsAStaleListingAfterAnEndpointEdit()
+    {
+        int port = StartServer(slow: false);
+        var (commands, siteId) = await OpenSiteAsync(port);
+        var listed = await Call<SiteBrowseResultDto>(commands, SitesMessageTypes.Browse,
+            new SiteBrowseRequest { Id = siteId, Path = "/pub" });
+        Assert.True(listed.Ok, listed.Message);
+        var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, new SiteSaveRequest
+        {
+            Id = siteId, Name = "Edited location", Kind = SiteKinds.Sftp, Host = "localhost", Port = port,
+            User = User, RemoteFolder = "/pub"
+        });
+        Assert.True(edited.Ok, edited.Message);
+        Assert.False(edited.Site!.HasPassword);
+        var result = await Call<SiteChangeResultDto>(commands, SitesMessageTypes.DeleteFiles, new SiteChangeRequest
+        {
+            Id = siteId, Path = "/pub", Listing = listed.Listing,
+            Items = [new() { Name = "readme.txt" }]
+        });
+        Assert.False(result.Ok);
+        Assert.Equal(SiteProblems.ListingChanged, result.Problem);
+        Assert.True(File.Exists(Path.Combine(Served, "pub", "readme.txt")));
+    }
+
+    [SiteTransfersFact]
     public async Task NewFolderRenameCountAndDeleteChangeTheServer()
     {
         var port = StartServer(slow: false);

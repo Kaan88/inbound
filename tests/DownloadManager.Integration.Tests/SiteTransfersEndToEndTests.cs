@@ -494,10 +494,10 @@ public sealed partial class SiteTransfersEndToEndTests : IAsyncLifetime
         public void Dispose() { }
     }
 
-    private SitesCommands Open(DownloadManager.Core.ISleepPrevention? sleep = null)
+    private SitesCommands Open(DownloadManager.Core.ISleepPrevention? sleep = null, bool uploadProbe = false)
     {
         var commands = new SitesCommands(State, line => { lock (_log) _log.Add(line); }, findRclone: _ => Rclone,
-            transferRetryDelay: TimeSpan.FromMilliseconds(100), sleepPrevention: sleep);
+            transferRetryDelay: TimeSpan.FromMilliseconds(100), sleepPrevention: sleep, allowWebDavUploadProbe: uploadProbe);
         _commands.Add(commands);
         return commands;
     }

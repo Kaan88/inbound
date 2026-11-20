@@ -124,6 +124,26 @@ public sealed class FolderPickerTests
     }
 
     [Fact]
+    public async Task A_dismissed_picker_neither_falls_back_nor_applies_a_listing()
+    {
+        var (host, model) = Setup(true);
+        using var dismissed = new CancellationTokenSource();
+        var requests = 0;
+        host.Reply = m =>
+        {
+            ++requests;
+            dismissed.Cancel();
+            return IpcMessage.Create(MessageTypes.FoldersBrowseResult,
+                new FolderBrowseResult { Error = "Outside the folders." }, m.Id);
+        };
+        var picker = new FolderPicker(model);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => picker.OpenAsync("/gone", dismissed.Token));
+        Assert.Equal(1, requests);
+        Assert.False(picker.CanChoose);
+        Assert.Null(picker.Error);
+    }
+
+    [Fact]
     public async Task A_refusal_is_said_in_words()
     {
         var (host, model) = Setup(true);

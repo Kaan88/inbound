@@ -105,6 +105,7 @@ public sealed class NewDownloadModel
                 _checkVersion++;
                 Check = CheckState.Idle;
                 CheckText = null;
+                AdvertisesByteRanges = null;
                 Urls = Expand(_address, out var err);
                 AddressError = err;
                 // A name the Host found belongs to the address it was found for; only the user's own name stays (finding 9).
@@ -123,6 +124,7 @@ public sealed class NewDownloadModel
 
     /// <summary>"6.1 GB" or the reason the check failed; null while idle.</summary>
     public string? CheckText { get; private set; }
+    public bool? AdvertisesByteRanges { get; private set; }
 
     public bool IsMany => Urls.Count > 1;
 
@@ -207,6 +209,7 @@ public sealed class NewDownloadModel
             if (result.AddRefused) { Check = CheckState.Refused; CheckText = result.Error ?? "This address can't be added."; return; }
             if (!result.Ok) { Check = CheckState.Failed; CheckText = Readable(result.Error); return; }
             Check = CheckState.Ready;
+            AdvertisesByteRanges = result.AdvertisesByteRanges;
             CheckText = result.TotalBytes is > 0 ? Fmt.Bytes(result.TotalBytes.Value) : "Size not given by the server";
             if (!_fileNameEdited) _fileName = string.IsNullOrWhiteSpace(result.FileName) ? "" : result.FileName;
         }

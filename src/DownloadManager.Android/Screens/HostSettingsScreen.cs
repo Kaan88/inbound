@@ -25,6 +25,8 @@ internal sealed class HostSettingsScreen : IDisposable
     private readonly CancellationTokenSource _life = new();
     private readonly List<Action> _render = new();
     private readonly List<View> _controls = new();
+    private readonly List<View> _categoryRows = new();
+    private readonly View _categoryCard;
     private View? _page;
     private TextView? _error;
     private Android.App.Dialog? _dialog;
@@ -40,6 +42,7 @@ internal sealed class HostSettingsScreen : IDisposable
         _activity = activity; _downloads = downloads; _model = model;
         var container = parent as LinearLayout ?? throw new ArgumentException("Settings content must be a LinearLayout", nameof(parent));
         var card = Card();
+        _categoryCard = card;
         var rows = new LinearLayout(activity) { Orientation = Orientation.Vertical };
         rows.SetPadding(0, Dp(8), 0, Dp(8)); card.AddView(rows);
         container.AddView(card, new LinearLayout.LayoutParams(-1, -2) { TopMargin = Dp(16), BottomMargin = Dp(16) });
@@ -48,9 +51,12 @@ internal sealed class HostSettingsScreen : IDisposable
         if (!activity.Capabilities.IsRemote)
         {
             NavigationRow(rows, "Background and battery", "Resume and sleep prevention", Resource.Drawable.ic_flow_battery, () => OpenDetail("background"));
-            NavigationRow(rows, "Notifications and sounds", "Completion alerts and Android settings", Resource.Drawable.ic_flow_bell, () => OpenDetail("notifications"));
+            NavigationRow(rows, "Notifications and sounds", "", Resource.Drawable.ic_flow_bell, () => OpenDetail("notifications"));
         }
         NavigationRow(rows, "Catching links", "Share, browser and clipboard", Resource.Drawable.ic_flow_globe, () => OpenDetail("links"));
+        if (!activity.Capabilities.IsRemote)
+            NavigationRow(rows, "Site logins", "Manage sign-ins in Remote Files", Resource.Drawable.ic_settings_site_key,
+                activity.OpenRemoteFilesSource);
         NavigationRow(rows, "Hosts and web UI", "Select or pair a Host", Resource.Drawable.ic_flow_host, () => OpenDetail("hosts"));
         downloads.SettingsChanged += Refresh;
     }
@@ -72,7 +78,7 @@ internal sealed class HostSettingsScreen : IDisposable
     private void NavigationRow(LinearLayout parent, string title, string subtitle, int icon, Action action)
     {
         var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Clickable = true, Focusable = true };
-        row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Dp(76)); row.SetPadding(Dp(16), Dp(8), Dp(16), Dp(8));
+        row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Dp(68)); row.SetPadding(Dp(16), Dp(6), Dp(16), Dp(6));
         row.Background = new TypedValueHolder(_activity).SelectableBackground();
         var well = new FrameLayout(_activity); well.SetBackgroundResource(Resource.Drawable.bg_circle_dark);
         var image = new ImageView(_activity); image.SetImageResource(icon); image.ImportantForAccessibility = ImportantForAccessibility.No;
@@ -80,13 +86,26 @@ internal sealed class HostSettingsScreen : IDisposable
         well.AddView(image, new FrameLayout.LayoutParams(Dp(22), Dp(22), GravityFlags.Center));
         row.AddView(well, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { MarginEnd = Dp(16) });
         var text = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        text.AddView(Label(title, 18, Resource.Attribute.colorOnSurface));
+        text.AddView(Label(title, 17, Resource.Attribute.colorOnSurface));
         if (subtitle.Length != 0) text.AddView(Label(subtitle, 14, Resource.Attribute.colorOnSurfaceVariant));
         row.AddView(text, new LinearLayout.LayoutParams(0, -2, 1));
         var chevron = new ImageView(_activity); chevron.SetImageResource(Resource.Drawable.ic_chevron_right); chevron.ImportantForAccessibility = ImportantForAccessibility.No;
         row.AddView(chevron, new LinearLayout.LayoutParams(Dp(24), Dp(24)));
         row.ContentDescription = title + (subtitle.Length > 0 ? ". " + subtitle : "");
         row.Click += (_, _) => { if (!_disposed) action(); }; parent.AddView(row);
+        _categoryRows.Add(row);
+    }
+
+    public void FilterCategories(string query)
+    {
+        bool any = false;
+        foreach (var row in _categoryRows)
+        {
+            bool matches = row.ContentDescription?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+            row.Visibility = matches ? ViewStates.Visible : ViewStates.Gone;
+            any |= matches;
+        }
+        _categoryCard.Visibility = any ? ViewStates.Visible : ViewStates.Gone;
     }
 
     /// <summary>Called by the activity when restoring a detail page for the same Host.</summary>

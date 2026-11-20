@@ -65,7 +65,8 @@ public sealed class RemoteHostConnection : IHostConnection, IRemoteStatus
         MessageTypes.RemoteItemGet, MessageTypes.RemoteFiles, MessageTypes.RemoteDeleteRemote, MessageTypes.RemoteStartQueued,
         MessageTypes.RemoteContainerPreview, MessageTypes.RemoteContainerAdd, MessageTypes.RemoteContainerSendToJd,
         MessageTypes.JobRefreshUrl,
-        SitesMessageTypes.Browse, SitesMessageTypes.TransferStart, SitesMessageTypes.SafeDownloadStart,
+        SitesMessageTypes.Browse, SitesMessageTypes.TransferStart, SitesMessageTypes.SafeDownloadStart, SitesMessageTypes.DeleteFiles,
+        SitesMessageTypes.SignIn, SitesMessageTypes.SignInCancel, SitesMessageTypes.Probe, SitesMessageTypes.TrustSftpEndpoint,
     };
 
     /// <summary>Opens the socket with the hello sent (<see cref="ServerConnector.ConnectAsync"/>).</summary>

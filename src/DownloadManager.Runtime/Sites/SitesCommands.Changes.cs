@@ -124,11 +124,15 @@ public sealed partial class SitesCommands
     }
 
     /// <summary>Deletes on the server: a file with <c>deletefile</c>, a folder and all inside it with <c>purge</c>. One result per item.</summary>
-    private async Task<SiteChangeResultDto> DeleteAsync(SiteChangeRequest request, CancellationToken cancellationToken)
+    private async Task<SiteChangeResultDto> DeleteAsync(SiteChangeRequest request, CancellationToken cancellationToken, bool filesOnly)
     {
         if (await SiteOfAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site) return ChangeFail("That site no longer exists.");
         if (SitePaths.Normalize(request.Path) is not { } folder) return ChangeFail("That is not a folder path on the server.");
         if (ItemsProblem(request.Items) is { } problem) return ChangeFail(problem);
+        if (filesOnly && (CachedListing(site.Id, folder, request.Listing) is not { } listing
+            || listing.SiteRevision != site.Revision
+            || request.Items.Any(item => !listing.Items.Any(entry => !entry.IsFolder && entry.Name == item.Name))))
+            return ChangeFail("The location or folder listing changed. Refresh the folder and select the files again.", SiteProblems.ListingChanged);
         var busy = request.Items.Where(i => _transfers.Uses(site.Id, SiteTransferPaths.Remote(folder, i.Name))).Select(i => i.Name).ToList();
         if (busy.Count > 0) return ChangeFail(BusyMessage);
 
@@ -149,8 +153,15 @@ public sealed partial class SitesCommands
                     }
                     else if (item["IsDir"] is JsonValue dir && dir.TryGetValue<bool>(out var isDir) && isDir)
                     {
-                        await client.CallAsync("operations/purge", new JsonObject { ["fs"] = fs.DeepClone(), ["remote"] = SitePaths.ToRemote(path) },
-                            cancellationToken).ConfigureAwait(false);
+                        if (filesOnly)
+                        {
+                            line.Ok = false;
+                            line.Message = "This name now refers to a folder. Nothing at this path was deleted.";
+                            result.Ok = false;
+                        }
+                        else
+                            await client.CallAsync("operations/purge", new JsonObject { ["fs"] = fs.DeepClone(), ["remote"] = SitePaths.ToRemote(path) },
+                                cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {

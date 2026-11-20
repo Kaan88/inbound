@@ -49,9 +49,7 @@ public sealed partial class DownloadManagerService
                     if (queue is null || !TryParseScheduleTime(schedule.StartTime, out var start)) continue;
                     var hasStop = TryParseScheduleTime(schedule.StopTime, out var stop);
                     var overnight = schedule.TimedStartEnabled && hasStop && stop <= start;
-                    DateOnly? window = null;
-                    if (time >= start && (!hasStop || overnight || time < stop) && Eligible(schedule, today)) window = today;
-                    else if (overnight && time < stop && Eligible(schedule, today.AddDays(-1))) window = today.AddDays(-1);
+                    var window = ScheduleWindow(schedule, localNow, start, hasStop ? stop : null);
                     plans.Add((schedule, queue, start, hasStop, stop, overnight, window));
                 }
                 foreach (var (schedule, queue, start, hasStop, stop, overnight, window) in plans)
@@ -365,28 +363,16 @@ public sealed partial class DownloadManagerService
         }
         // A margin, so the evaluation reads a time at or past the one it waits for.
         DateTimeOffset At(DateOnly date, TimeOnly time) => Instant(date, time).AddMilliseconds(500);
-        // Once the time itself has come (the evaluation acts on it), the next is a later day's, even within the margin:
-        // a timer can fire a little early by the wall clock. Review 2 L9: only on a day the schedule runs (for a stop
-        // after midnight, the day after one), so a one-time schedule whose date has passed keeps no wake.
-        DateTimeOffset? NextAt(ScheduleRule schedule, TimeOnly time, int daysAfterRunDay)
-        {
-            if (schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase))
-                return schedule.StartDate?.AddDays(daysAfterRunDay) is { } date && Instant(date, time) > localNow ? At(date, time) : null;
-            for (var add = 0; add <= 7; add++)
-            {
-                var date = today.AddDays(add);
-                if (Instant(date, time) > localNow && Eligible(schedule, date.AddDays(-daysAfterRunDay))) return At(date, time);
-            }
-            return null;
-        }
-
         foreach (var schedule in _settings.Schedules.Where(schedule => schedule.Enabled))
         {
             // As the evaluation: a schedule whose start time can't be read does nothing.
             if (!_settings.Queues.Any(queue => queue.Id == schedule.QueueId) || !TryParseScheduleTime(schedule.StartTime, out var start)) continue;
             var hasStop = TryParseScheduleTime(schedule.StopTime, out var stop);
-            if (schedule.TimedStartEnabled && NextAt(schedule, start, 0) is { } nextStart) Consider(nextStart);
-            if (hasStop && NextAt(schedule, stop, schedule.TimedStartEnabled && stop <= start ? 1 : 0) is { } nextStop) Consider(nextStop);
+            if (schedule.TimedStartEnabled && NextScheduleOccurrence(schedule, start, localNow, zone, 0) is { } nextStart)
+                Consider(nextStart.AddMilliseconds(500));
+            var stopDayOffset = schedule.TimedStartEnabled && stop <= start ? 1 : 0;
+            if (hasStop && NextScheduleOccurrence(schedule, stop, localNow, zone, stopDayOffset) is { } nextStop)
+                Consider(nextStop.AddMilliseconds(500));
             if (schedule.RepeatEveryMinutes is { } interval && schedule.LastRunAt is { } lastRun &&
                 lastRun + TimeSpan.FromMinutes(interval) is var repeat && repeat > localNow)
                 Consider(repeat);
@@ -403,6 +389,88 @@ public sealed partial class DownloadManagerService
         }
 
         return best;
+    }
+
+    private static DateOnly? ScheduleWindow(ScheduleRule schedule, DateTimeOffset now, TimeOnly start, TimeOnly? stop)
+    {
+        var today = DateOnly.FromDateTime(now.DateTime);
+        var time = TimeOnly.FromDateTime(now.DateTime);
+        bool overnight = schedule.TimedStartEnabled && stop is { } end && end <= start;
+        if (time >= start && (stop is null || overnight || time < stop.Value) && Eligible(schedule, today))
+            return today;
+        if (overnight && time < stop!.Value && Eligible(schedule, today.AddDays(-1)))
+            return today.AddDays(-1);
+        return null;
+    }
+
+    // Once the configured time has come, that day's occurrence is no longer in the future.
+    private static DateTimeOffset? NextScheduleOccurrence(ScheduleRule schedule, TimeOnly time,
+        DateTimeOffset localNow, TimeZoneInfo zone, int daysAfterRunDay, DateOnly? alreadyStartedDay = null)
+    {
+        DateTimeOffset Instant(DateOnly date)
+        {
+            var local = date.ToDateTime(time);
+            return new DateTimeOffset(local, zone.GetUtcOffset(local));
+        }
+
+        if (schedule.Kind.Equals("oneTime", StringComparison.OrdinalIgnoreCase))
+        {
+            if (schedule.StartDate is not { } runDate || runDate == alreadyStartedDay) return null;
+            var instant = Instant(runDate.AddDays(daysAfterRunDay));
+            return instant > localNow ? instant : null;
+        }
+
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        for (var add = 0; add <= 7; add++)
+        {
+            var date = today.AddDays(add);
+            var runDate = date.AddDays(-daysAfterRunDay);
+            if (runDate == alreadyStartedDay || !Eligible(schedule, runDate)) continue;
+            var instant = Instant(date);
+            if (instant > localNow) return instant;
+        }
+        return null;
+    }
+
+    internal static Dictionary<int, DateTimeOffset> NextTimedQueueStarts(AppSettings settings, TimeProvider clock)
+    {
+        var zone = clock.LocalTimeZone;
+        var localNow = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone);
+        var stoppedIds = settings.Queues.Where(queue => !queue.IsRunning).Select(queue => queue.Id).ToHashSet();
+        var starts = new Dictionary<int, DateTimeOffset>();
+        var uncertain = new HashSet<int>();
+        foreach (var schedule in settings.Schedules)
+        {
+            var queueId = schedule.QueueId;
+            if (!schedule.Enabled || !schedule.TimedStartEnabled || !stoppedIds.Contains(queueId) ||
+                uncertain.Contains(queueId) || !TryParseScheduleTime(schedule.StartTime, out var start))
+                continue;
+
+            TimeOnly? stop = TryParseScheduleTime(schedule.StopTime, out var end) ? end : null;
+            var window = ScheduleWindow(schedule, localNow, start, stop);
+            DateTimeOffset? repeat = schedule.RepeatEveryMinutes is { } interval
+                ? schedule.LastRunAt?.AddMinutes(interval) : null;
+            bool due = window is not null && (schedule.LastStartDate != window ||
+                (schedule.RepeatEveryMinutes is not null && (repeat is null || repeat <= localNow)));
+            var next = NextScheduleOccurrence(schedule, start, localNow, zone, 0, schedule.LastStartDate);
+            if (due || (next is { } time && (zone.IsInvalidTime(time.DateTime) || zone.IsAmbiguousTime(time.DateTime))))
+            {
+                // An eligible rule may act now, or a clock change may alter the nominal time.
+                starts.Remove(queueId);
+                uncertain.Add(queueId);
+                continue;
+            }
+
+            if (window is not null && repeat is { } repeatAt)
+            {
+                var localRepeat = TimeZoneInfo.ConvertTime(repeatAt, zone);
+                if (ScheduleWindow(schedule, localRepeat, start, stop) == window && (next is null || localRepeat < next))
+                    next = localRepeat;
+            }
+            if (next is { } candidate && (!starts.TryGetValue(queueId, out var previous) || candidate < previous))
+                starts[queueId] = candidate;
+        }
+        return starts;
     }
 
     private async Task ProcessQueueRetriesAsync(DateTimeOffset now, CancellationToken cancellationToken)

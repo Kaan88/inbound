@@ -22,7 +22,9 @@ public static class PageLinkResults
                 if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("url", out var url)
                     || url.ValueKind != JsonValueKind.String || LinkRules.Normalize(url.GetString()) is not { } valid) continue;
                 var name = item.TryGetProperty("name", out var label) && label.ValueKind == JsonValueKind.String ? label.GetString() : "";
-                links.Add(new PageLink(valid, LinkRules.Name(name)));
+                long? size = item.TryGetProperty("bytes", out var bytes) && bytes.ValueKind == JsonValueKind.Number &&
+                    bytes.TryGetInt64(out var value) && value >= 0 ? value : null;
+                links.Add(new PageLink(valid, LinkRules.Name(name), size));
             }
         }
         catch (JsonException) { }

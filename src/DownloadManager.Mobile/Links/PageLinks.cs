@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace DownloadManager.Mobile.Links;
 
 public enum PageLinkKind { All, Archives, Audio, Video, Images, Documents, Other }
-public sealed record PageLink(string Url, string Name);
+public sealed record PageLink(string Url, string Name, long? SizeBytes = null);
 
 internal static class LinkRules
 {
@@ -85,14 +85,29 @@ public sealed class PageLinks
             if (link is null) continue;
             var url = LinkRules.Normalize(link.Url);
             if (url is null || !seen.Add(url)) continue;
-            _links.Add(new PageLink(url, LinkRules.Name(link.Name)));
+            _links.Add(new PageLink(url, LinkRules.Name(link.Name), link.SizeBytes is >= 0 ? link.SizeBytes : null));
             if (_links.Count == 2000) break;
         }
     }
     public string Query { get; set; } = "";
     public PageLinkKind Kind { get; set; } = PageLinkKind.All;
     public IReadOnlyList<PageLink> Visible => _links.Where(Matches).ToArray();
+    public IReadOnlyList<PageLink> DisplayRows => Kind == PageLinkKind.All || !string.IsNullOrWhiteSpace(Query)
+        ? Visible : _links.OrderByDescending(link => Classify(new Uri(link.Url).AbsolutePath) == Kind).ToArray();
+
     public IReadOnlyList<PageLink> Selected => _links.Where(link => _selected.Contains(link.Url)).ToArray();
+    public long? SelectedBytes => TotalBytes(_links.Where(link => _selected.Contains(link.Url)));
+    public long? VisibleBytes => TotalBytes(Visible);
+    private static long? TotalBytes(IEnumerable<PageLink> links)
+    {
+        long? total = null;
+        foreach (var link in links)
+        {
+            if (link.SizeBytes is not long size || size > long.MaxValue - total.GetValueOrDefault()) return null;
+            total = total.GetValueOrDefault() + size;
+        }
+        return total;
+    }
     public int SelectedCount => _selected.Count;
     public int TotalCount => _links.Count;
     public int Count(PageLinkKind kind) => kind == PageLinkKind.All ? _links.Count : _links.Count(link => Classify(new Uri(link.Url).AbsolutePath) == kind);

@@ -49,6 +49,16 @@ as work proceeds. Completed milestone audits do not close this later review queu
 
 Owner clarification (2026-11-18): "use astra a bit less, on major milestones. this seems too much back and forth." The main agent finishes implementation and consolidated checks before a major-milestone Astra audit. Follow up only to verify confirmed fixes until PASS; do not request Astra reviews for small increments. The existing major-milestone audit requirement remains.
 
+**Mandatory mockup adherence at every UI milestone (owner, 2026-11-19).** The
+approved mockups are acceptance criteria, not inspiration. Implement the
+approved layout, visual states, controls, navigation and interactions in full.
+A rename, a functional smoke test, or a code/release review does not waive
+any design requirement. Obtain explicit owner approval for any deviation or
+omission before treating it as accepted; do not silently narrow the scope.
+Capture the implemented states side by side with the approved references and
+verify their flows. Astra must review both the code and the mockup comparisons
+and sign off on both before closing, merging or releasing the UI milestone.
+
 ## What this project is
 
 A private-use Windows download manager, **Inbound Download Manager**. It is a

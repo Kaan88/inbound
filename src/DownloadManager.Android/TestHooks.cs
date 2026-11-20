@@ -54,11 +54,34 @@ internal static class TestHooks
             intent.RemoveExtra("rclone_probe");
             RcloneProbe.Run();
         }
+        if (intent.GetBooleanExtra("media_upload_create", false))
+        {
+            intent.RemoveExtra("media_upload_create");
+            MediaStoreUploadProbe.Create(Android.App.Application.Context, intent.GetBooleanExtra("media_upload_nested", false));
+            intent.RemoveExtra("media_upload_nested");
+        }
+        if (intent.GetBooleanExtra("media_upload_cleanup", false))
+        {
+            intent.RemoveExtra("media_upload_cleanup");
+            MediaStoreUploadProbe.Cleanup(Android.App.Application.Context);
+        }
         if (intent.GetIntExtra("remote_files_fixture_port", 0) is > 0 and <= 65535)
         {
             var port = intent.GetIntExtra("remote_files_fixture_port", 0);
             intent.RemoveExtra("remote_files_fixture_port");
             RemoteFilesHostProbe.Run(port);
+        }
+        if (intent.GetIntExtra("remote_files_upload_port", 0) is > 0 and <= 65535)
+        {
+            var uploadPort = intent.GetIntExtra("remote_files_upload_port", 0);
+            intent.RemoveExtra("remote_files_upload_port");
+            RemoteFilesHostProbe.RunConditionalUpload(uploadPort);
+        }
+        if (intent.GetIntExtra("remote_files_s3_upload_port", 0) is > 0 and <= 65535)
+        {
+            var uploadPort = intent.GetIntExtra("remote_files_s3_upload_port", 0);
+            intent.RemoveExtra("remote_files_s3_upload_port");
+            RemoteFilesHostProbe.RunConditionalUpload(uploadPort, s3: true);
         }
 #endif
         if (intent.HasExtra("metered_override"))

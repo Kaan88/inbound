@@ -22,6 +22,7 @@ public sealed class FileMetadataTests
         var metadata = await engine.ReadMetadataAsync(new DownloadJob { Url = "https://example.com/opaque" }, default);
         Assert.Equal("report ü.zip", metadata.FileName);
         Assert.Equal(123456, metadata.TotalBytes);
+        Assert.Null(metadata.AdvertisesByteRanges);
         Assert.Equal("application/zip", metadata.ContentType);
         Assert.True(content.Disposed);
         Assert.False(content.Read);
@@ -50,6 +51,7 @@ public sealed class FileMetadataTests
         var metadata = await engine.ReadMetadataAsync(new DownloadJob { Url = "https://example.com/file.bin" }, default);
         Assert.Equal(2, calls);
         Assert.Equal(expected, metadata.TotalBytes);
+        Assert.Equal(status == HttpStatusCode.PartialContent ? true : (bool?)null, metadata.AdvertisesByteRanges);
         Assert.False(content.Read);
         Assert.True(content.Disposed);
     }

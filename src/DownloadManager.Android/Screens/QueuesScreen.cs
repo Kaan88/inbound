@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using Android.Content;
 using Android.OS;
@@ -28,6 +29,8 @@ internal sealed class QueuesScreen : IDisposable
     private readonly TextView _notice;
     private readonly CancellationTokenSource _life = new();
     private readonly Handler _ui = new(Looper.MainLooper!);
+    private readonly Java.Lang.Runnable _startLabelExpiry;
+    private DateTimeOffset? _startLabelExpiresAt;
     private readonly HashSet<JobRow> _rows = new();
     private readonly Dictionary<int, Card> _byId = new();
     private bool _closed, _queued, _busy, _visible;
@@ -103,9 +106,16 @@ internal sealed class QueuesScreen : IDisposable
     public QueuesScreen(MainActivity activity, View page, DownloadsModel downloads, QueueSettingsModel settings, Action<QueueDto?> openEditor)
     {
         _activity = activity; _downloads = downloads; _settings = settings; _open = openEditor;
+        _startLabelExpiry = new Java.Lang.Runnable(() =>
+        {
+            _startLabelExpiresAt = null;
+            if (_visible && !_closed) Render();
+        });
         InsetsListener.Pad(page, top: true, bottom: false);
         _cards = page.FindViewById<LinearLayout>(Resource.Id.queue_cards)!;
-        page.FindViewById<TextView>(Resource.Id.queues_host)!.Text = "Host: " + activity.HostName;
+        var host = page.FindViewById<TextView>(Resource.Id.queues_host)!;
+        host.Visibility = activity.Capabilities.IsRemote ? ViewStates.Visible : ViewStates.Gone;
+        if (activity.Capabilities.IsRemote) host.Text = "Host: " + activity.HostName;
         _new = page.FindViewById<View>(Resource.Id.queue_new)!;
         _new.Enabled = downloads.SnapshotShown;
         _new.Click += (_, _) => { if (!_busy && downloads.SnapshotShown) ShowCreateQueue(_createDraftAvailable ? _createDraft : ""); };
@@ -117,7 +127,21 @@ internal sealed class QueuesScreen : IDisposable
         downloads.Rows.CollectionChanged += OnRows;
         TrackRows();
     }
-    public void SetVisible(bool visible) { _visible = visible; if (visible) Render(); }
+    public void SetVisible(bool visible)
+    {
+        _visible = visible;
+        if (visible) Render();
+        else ArmStartLabelExpiry(null);
+    }
+
+    private void ArmStartLabelExpiry(DateTimeOffset? at)
+    {
+        if (_startLabelExpiresAt == at) return;
+        _ui.RemoveCallbacks(_startLabelExpiry);
+        _startLabelExpiresAt = at;
+        if (at is { } expiry)
+            _ui.PostDelayed(_startLabelExpiry, Math.Max(1L, (long)Math.Ceiling((expiry - DateTimeOffset.UtcNow).TotalMilliseconds)));
+    }
     private void OnRows(object? sender, NotifyCollectionChangedEventArgs e) { TrackRows(); ScheduleRender(); }
     private void OnRow(object? sender, PropertyChangedEventArgs e) => ScheduleRender();
     private void TrackRows()
@@ -149,6 +173,8 @@ internal sealed class QueuesScreen : IDisposable
         var queues = _settings.Settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToArray();
         var ids = queues.Select(q => q.Id).ToHashSet();
         foreach (var id in _byId.Keys.Where(id => !ids.Contains(id)).ToArray()) { _cards.RemoveView(_byId[id].Root); _byId.Remove(id); }
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? firstExpiry = null;
         foreach (var queue in queues)
         {
             if (!_byId.TryGetValue(queue.Id, out var card)) { card = MakeCard(queue.Id); _byId.Add(queue.Id, card); }
@@ -161,9 +187,14 @@ internal sealed class QueuesScreen : IDisposable
             var rate = jobs.Sum(r => r.Job.BytesPerSecond ?? 0);
             var schedules = _settings.Settings.Schedules.Where(x => x.QueueId == queue.Id).ToArray();
             bool scheduled = schedules.Any(x => x.Enabled);
+            var upcoming = !queue.IsRunning && scheduled && queue.NextTimedStartAt is { } startsAt && startsAt > now
+                ? startsAt : (DateTimeOffset?)null;
             string state = queue.IsRunning
                 ? queue.ConditionWaitReason ?? (active > 0 ? "Running \u00b7 " + Fmt.Rate(rate) : "Ready for downloads")
-                : scheduled ? "Scheduled" : "Stopped";
+                : upcoming is { } at ? "Scheduled for " + at.ToString("d MMM, HH:mm", CultureInfo.CurrentCulture)
+                : scheduled ? "Schedule enabled" : "Stopped";
+            if (upcoming is { } expiry && (firstExpiry is null || expiry < firstExpiry))
+                firstExpiry = expiry;
             Text(card.Name, queue.Name); Text(card.State, state);
             card.State.SetTextColor(new Android.Graphics.Color(queue.IsRunning && queue.ConditionWaitReason is null
                 ? _activity.GetColor(Resource.Color.state_done)
@@ -195,9 +226,14 @@ internal sealed class QueuesScreen : IDisposable
             if (queue.SpeedLimitBytesPerSecond is > 0) detail += " \u00b7 limit " + Fmt.Rate(queue.SpeedLimitBytesPerSecond.Value);
             Text(card.Schedule, detail);
             var known = unfinished.Where(r => r.Job.TotalBytes is > 0).ToArray();
-            long remaining = known.Sum(r => Math.Max(0L, r.Job.TotalBytes!.Value - Math.Clamp(r.Job.ReceivedBytes, 0L, r.Job.TotalBytes.Value)));
-            string files = active > 0 ? $"{active} running \u00b7 {waiting} waiting" : $"{unfinished.Length} {(unfinished.Length == 1 ? "file" : "files")}";
-            if (known.Length > 0) files += " \u00b7 " + Fmt.Bytes(remaining) + (known.Length == unfinished.Length ? " left" : " known left");
+            long bytes = queue.IsRunning
+                ? known.Sum(r => r.Job.TotalBytes!.Value - Math.Clamp(r.Job.ReceivedBytes, 0L, r.Job.TotalBytes.Value))
+                : known.Sum(r => r.Job.TotalBytes!.Value);
+            string files = active > 0
+                ? $"{active} of {unfinished.Length} running \u00b7 {waiting} waiting"
+                : $"{unfinished.Length} {(unfinished.Length == 1 ? "file" : "files")}";
+            if (known.Length > 0)
+                files += " \u00b7 " + Fmt.Bytes(bytes) + (known.Length < unfinished.Length ? " known" : "") + (queue.IsRunning ? " left" : "");
             Text(card.Files, files);
             card.Root.ContentDescription = queue.Name + ", " + state + ". " + detail + ". " + files + ". Double tap to edit. Long press for queue actions.";
             double total = known.Sum(r => (double)r.Job.TotalBytes!.Value);
@@ -206,6 +242,7 @@ internal sealed class QueuesScreen : IDisposable
             card.Progress.Visibility = showProgress ? ViewStates.Visible : ViewStates.Gone;
             if (showProgress) card.Progress.Progress = (int)Math.Clamp(1000 * received / total, 0, 1000);
         }
+        ArmStartLabelExpiry(_visible ? firstExpiry : null);
     }
     private Card MakeCard(int id)
     {
@@ -611,7 +648,7 @@ internal sealed class QueuesScreen : IDisposable
     public void Dispose()
     {
         if (_closed) return; _closed = true; _dialog?.Dismiss(); _dialog = null; _life.Cancel(); _life.Dispose();
-        _ui.RemoveCallbacksAndMessages(null); _downloads.SettingsChanged -= ScheduleRender; _downloads.Rows.CollectionChanged -= OnRows;
+        _ui.RemoveCallbacksAndMessages(null); _startLabelExpiry.Dispose(); _downloads.SettingsChanged -= ScheduleRender; _downloads.Rows.CollectionChanged -= OnRows;
         foreach (var row in _rows) row.PropertyChanged -= OnRow; _rows.Clear(); _ui.Dispose();
     }
     private sealed record Card(MaterialCardView Root, TextView Name, TextView State, TextView Schedule, TextView Files, MaterialButton Action, LinearProgressIndicator Progress);

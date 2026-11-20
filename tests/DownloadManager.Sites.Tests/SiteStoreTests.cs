@@ -106,6 +106,19 @@ public sealed class SiteStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SavesAtTheSameWallClockTimeReceiveDifferentRevisions()
+    {
+        var site = Site();
+        await _store.SaveAsync(site);
+        var original = (await _store.GetAsync(site.Id))!;
+        await _store.SaveAsync(original with { Name = "Edited at the same time" });
+        var edited = (await _store.GetAsync(site.Id))!;
+        Assert.Equal(original.ModifiedAt, edited.ModifiedAt);
+        Assert.NotEqual(Guid.Empty, original.Revision);
+        Assert.NotEqual(original.Revision, edited.Revision);
+    }
+
+    [Fact]
     public async Task Save_then_Get_returns_an_equal_record()
     {
         var site = Site();

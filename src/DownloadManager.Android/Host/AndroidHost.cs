@@ -19,7 +19,7 @@ internal sealed class AndroidPlatform : IHostPlatform
         SupportsShutdown = false,
         SupportsUpdater = false,
         SupportsProgramSettings = false,
-        SupportsFolderBrowse = false,
+        SupportsFolderBrowse = true,
         SupportsCompletionActions = false,
         SupportsReveal = false,
         SupportsMeteredNetworkRule = true,
@@ -190,12 +190,13 @@ internal sealed class AndroidHost : IAsyncDisposable
                     sleepPrevention: siteSleep, preventSleep: () => service.GetSettings().PreventSleepWhileDownloading,
                     transferExecutionAllowed: false
 #if INBOUND_TEST_BUILD && INBOUND_RCLONE_PROBE
-                    , afterTransferExclusiveOpen: TestHooks.HoldRemoteFilesPublicationAsync
+                    , afterTransferExclusiveOpen: TestHooks.HoldRemoteFilesPublicationAsync, allowWebDavUploadProbe: true
 #endif
                     );
             }
             var dispatcher = new HostCommandDispatcher(service, new AndroidPlatform(), log)
             {
+                Folders = new FolderBrowser(new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" }),
                 Sites = sites,
                 SitesRoots = sites is null ? null : new PathRoots([SharedDownloadFolder]) { Called = "this phone's Download folder" },
             };

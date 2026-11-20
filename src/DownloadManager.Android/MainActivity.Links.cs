@@ -34,6 +34,17 @@ public sealed partial class MainActivity
 
     internal string LinkDestination => Capabilities.IsRemote ? HostName + " · " + _model?.DefaultDownloadDirectory : "This phone · Download/";
 
+    internal bool HasRemoteFilesSource =>
+        FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)
+            ?.Menu?.FindItem(Resource.Id.nav_remote_files)?.IsVisible == true;
+
+    internal void OpenRemoteFilesSource()
+    {
+        if (HasRemoteFilesSource)
+            FindViewById<Google.Android.Material.BottomNavigation.BottomNavigationView>(Resource.Id.nav)!
+                .SelectedItemId = Resource.Id.nav_remote_files;
+    }
+
     internal void OpenBrowser(string? url = null)
     {
         if (_nav is null || _model is null || _nav.PageOpen) return;
@@ -120,15 +131,34 @@ public sealed partial class MainActivity
             if (!metadata.Ok) detail += " · File check unavailable";
             var privacy = capture.HasCookies ? Capabilities.IsRemote
                 ? "Sign-in cookies will be sent to " + HostName + " for this download."
-                : "The phone’s Host will use sign-in cookies for this download and its resume requests."
+                : "Cookies stay on this phone for this file and resume."
                 : "No sign-in cookies captured. Form POST and browser-only downloads may need your regular browser.";
             var max = Math.Max(1, _model.Settings.MaxConnectionsPerHost);
             var defaultConnections = Math.Clamp(_model.Settings.DefaultConnections, 1, max);
-            CaughtDownloadSheet.Show(this, new CaughtSheetSpec(name, detail, LinkDestination, privacy, defaultConnections, max),
-                async (connections, later) =>
+            if ((!capture.HasCookies || Capabilities.IsRemote) && metadata.AdvertisesByteRanges == true) detail += " · Supports byte ranges";
+            CaughtFolderChoice? folder = null;
+            if (DownloadManager.Mobile.FolderPicker.Offered(_model))
+            {
+                var host = _model;
+                folder = new(host.DefaultDownloadDirectory, () => SameLinkPage(stamp, generation),
+                    (start, chosen) => FolderSheet.Show(this, host, start, chosen, cancellationToken));
+            }
+            CaughtDownloadSheet.Show(this, _model, new CaughtSheetSpec(name, detail, LinkDestination, privacy, defaultConnections, max,
+                LocalSignedIn: capture.HasCookies && !Capabilities.IsRemote, HasCookies: capture.HasCookies,
+                Queues: _model.Hello?.Capabilities.Contains("queueIdentity") == true
+                    ? _model.Settings.Queues.Where(q => q.Generation.GetValueOrDefault() != Guid.Empty)
+                        .OrderByDescending(q => q.Id == _model.Settings.DefaultQueueId).ThenBy(q => q.Order).ToArray() : []), folder,
+                async (connections, later, destination, queue) =>
                 {
                     if (!SameLinkPage(stamp, generation)) { ShowMessage("The selected Host changed. Catch this download again."); return false; }
-                    var request = capture.Add(Capabilities.IsRemote, true, null, Math.Clamp(connections, 1, Math.Max(1, _model.Settings.MaxConnectionsPerHost)), later);
+                    var request = capture.Add(Capabilities.IsRemote, true, destination, Math.Clamp(connections, 1, Math.Max(1, _model.Settings.MaxConnectionsPerHost)), later);
+                    if (queue is not null)
+                    {
+                        request.StartMode = DownloadManager.Contracts.StartModes.Queue;
+                        request.QueueId = queue.Id;
+                        request.RequireQueue = true;
+                        request.ExpectedQueueGeneration = queue.Generation;
+                    }
                     if (request.FileName is null) request.FileName = name == "File" ? null : name;
                     var result = await _model.AddAsync(request, cancellationToken);
                     if (!SameLinkPage(stamp, generation)) return false;

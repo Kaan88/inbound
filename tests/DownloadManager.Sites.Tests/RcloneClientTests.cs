@@ -14,6 +14,25 @@ public sealed class RcloneClientTests
     private static readonly Uri Base = new("http://127.0.0.1:9/");
 
     [Fact]
+    public async Task ConditionalS3UploadHasRequestLocalPreconditionAndNoUnconditionalFallback()
+    {
+        var handler = new FakeHandler(_ => Reply(HttpStatusCode.InternalServerError,
+            """{"error":"S3 PutObject StatusCode: 412 api error PreconditionFailed"}"""));
+        using var client = new RcloneClient(Base, User, RcPassword, handler: handler);
+        using var content = new MemoryStream("abc"u8.ToArray());
+        var refusal = await Assert.ThrowsAsync<RcloneCallException>(() =>
+            client.CreateS3FileAsync("test-remote", "/bucket", "proof.bin", content));
+
+        Assert.Contains("PreconditionFailed", refusal.Message);
+        var sent = Assert.Single(handler.Requests);
+        var query = Uri.UnescapeDataString(sent.Path);
+        Assert.Contains("/operations/uploadfile?fs=test-remote:/&remote=bucket", query);
+        Assert.Contains("""{"Key":"If-None-Match","Value":"*"}""", query);
+        Assert.Contains("proof.bin", sent.Body);
+        Assert.Contains("abc", sent.Body);
+    }
+
+    [Fact]
     public async Task A_json_object_answer_is_returned_and_the_request_is_a_basic_auth_json_post()
     {
         var handler = new FakeHandler(_ => Reply(HttpStatusCode.OK, """{"ok":true}"""));
@@ -211,7 +230,7 @@ public sealed class RcloneClientTests
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
             Requests.Add(new Sent(
                 request.Method.Method,
-                request.RequestUri!.AbsolutePath,
+                request.RequestUri!.PathAndQuery,
                 request.Content?.Headers.ContentType?.MediaType,
                 request.Headers.Authorization,
                 body));

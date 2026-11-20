@@ -149,6 +149,52 @@ public sealed class SitesCommandsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EndpointBoundTrustRejectsAnEditedSiteAndUnknownKeys()
+    {
+        var commands = Open(probe: Probe());
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var request = new SiteTrustRequest
+        {
+            Id = saved.Id, ExpectedHost = Host, ExpectedPort = 22, Entries = ["unknown key"]
+        };
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.TrustSftpEndpoint, request)).Ok);
+        request.Entries = [_keys[0].HostKeysEntry];
+        Assert.True((await Call<SiteResultDto>(commands, SitesMessageTypes.TrustSftpEndpoint, request)).Ok);
+        var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site(id: saved.Id, host: "other.example"));
+        Assert.True(edited.Ok);
+        Assert.Empty(edited.Site!.HostKeys);
+        Assert.False((await Call<SiteResultDto>(commands, SitesMessageTypes.TrustSftpEndpoint, request)).Ok);
+    }
+
+    [Fact]
+    public async Task EndpointBoundTrustRechecksTheSiteAfterTheProbe()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commands = Open(probe: async (_, _, token) =>
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(token);
+            return _keys;
+        });
+        await On(commands);
+        var saved = (await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site())).Site!;
+        var trust = Call<SiteResultDto>(commands, SitesMessageTypes.TrustSftpEndpoint, new SiteTrustRequest
+        {
+            Id = saved.Id, ExpectedHost = Host, ExpectedPort = 22, Entries = [_keys[0].HostKeysEntry]
+        });
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var edited = await Call<SiteResultDto>(commands, SitesMessageTypes.Save, Site(id: saved.Id, host: "elsewhere.example"));
+            Assert.True(edited.Ok);
+        }
+        finally { release.TrySetResult(); }
+        Assert.False((await trust.WaitAsync(TimeSpan.FromSeconds(5))).Ok);
+    }
+
+    [Fact]
     public async Task AChangedHostForgetsTheKeysButARenameKeepsThem()
     {
         var commands = Open(probe: Probe());

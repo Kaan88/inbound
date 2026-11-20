@@ -2,6 +2,7 @@ using Android.Content.Res;
 using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Runtime;
+using Android.Util;
 using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
@@ -36,6 +37,7 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
     // Owner, 2026-11-17, "one-shot figures": each host is asked once when the sheet opens (a short deadline, no retry);
     // nothing is asked again, and nothing runs after the sheet closes.
     private readonly Dictionary<string, HostFigures?> _figures = new();
+    private long? _phoneFreeBytes;
     private readonly Dictionary<string, (TextView Detail, View Row, HostEntry Host, bool Shown)> _rows = new();
     private CancellationTokenSource? _asking;
 
@@ -65,12 +67,17 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
             var row = inflater.Inflate(Resource.Layout.host_row, rows, false)!;
             var shown = host.Id == current;
             row.FindViewById<TextView>(Resource.Id.host_name)!.Text = host.Name;
-            var detail = _figures.TryGetValue(host.Id, out var known) ? HostWords.WithFigures(host, known, now) : HostWords.Subtitle(host, now);
+            var detail = _figures.TryGetValue(host.Id, out var known) ? SubtitleWithPhoneSpace(ctx, host, known, now) : HostWords.Subtitle(host, now);
             var detailView = row.FindViewById<TextView>(Resource.Id.host_detail)!;
             detailView.Text = detail;
             _rows[host.Id] = (detailView, row, host, shown);
             row.FindViewById<View>(Resource.Id.host_tick)!.Visibility = shown ? ViewStates.Visible : ViewStates.Invisible;
-            row.Background = Rounded(ctx, Attr(ctx, shown ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurfaceContainerHigh), 16);
+            var surface = Attr(ctx, Resource.Attribute.colorSurface);
+            row.Background = Rounded(ctx, shown
+                ? Blend(Attr(ctx, Resource.Attribute.colorSecondaryContainer), surface, .38f)
+                : Blend(Attr(ctx, Resource.Attribute.colorSurfaceContainerHigh), surface, .62f), 12);
+            row.Foreground = RowForeground(ctx);
+            row.Alpha = shown ? 1f : .82f;
             var iconBg = row.FindViewById<View>(Resource.Id.host_icon_bg)!;
             iconBg.Background = Rounded(ctx, Attr(ctx, shown ? Resource.Attribute.colorPrimary : Resource.Attribute.colorSurfaceVariant), 20);
             var icon = row.FindViewById<ImageView>(Resource.Id.host_icon)!;
@@ -119,6 +126,7 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
     {
         _asking?.Cancel();
         var cancel = _asking = new CancellationTokenSource();
+        _phoneFreeBytes = null;
         var hosts = Hosts;
         var app = RequireContext().ApplicationContext!;
         var ui = new Handler(Looper.MainLooper!);
@@ -126,13 +134,25 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
         {
             _ = Task.Run(async () =>
             {
-                var figures = host.IsPhone ? await PhoneFiguresAsync(app, cancel.Token).ConfigureAwait(false) : await hosts.FiguresAsync(host, cancel.Token).ConfigureAwait(false);
+                HostFigures? figures;
+                long? phoneFreeBytes = null;
+                if (host.IsPhone)
+                {
+                    var phone = await PhoneFiguresAsync(app, cancel.Token).ConfigureAwait(false);
+                    figures = phone.Figures;
+                    phoneFreeBytes = phone.FreeBytes;
+                }
+                else
+                {
+                    figures = await hosts.FiguresAsync(host, cancel.Token).ConfigureAwait(false);
+                }
                 ui.Post(() =>
                 {
                     if (cancel.IsCancellationRequested || !IsAdded) return;
                     _figures[host.Id] = figures;
+                    if (host.IsPhone) _phoneFreeBytes = phoneFreeBytes;
                     if (!_rows.TryGetValue(host.Id, out var row)) return;
-                    var text = HostWords.WithFigures(row.Host, figures, DateTimeOffset.UtcNow);
+                    var text = SubtitleWithPhoneSpace(row.Row.Context!, row.Host, figures, DateTimeOffset.UtcNow);
                     row.Detail.Text = text;
                     row.Row.ContentDescription = $"{row.Host.Name}, {text}" + (row.Shown ? ", shown now" : "") + (row.Host.IsPhone ? "" : ". Touch and hold to remove");
                 });
@@ -141,8 +161,27 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
     }
 
     /// <summary>This phone's figures: the in-process Host's snapshot, read once on a session that is closed right after.</summary>
-    private static async Task<HostFigures?> PhoneFiguresAsync(Android.Content.Context app, CancellationToken cancellationToken)
+    private string SubtitleWithPhoneSpace(Android.Content.Context ctx, HostEntry host, HostFigures? figures, DateTimeOffset now)
     {
+        var text = HostWords.WithFigures(host, figures, now);
+        if (!host.IsPhone || _phoneFreeBytes is not { } bytes) return text;
+        return $"{text} · {Android.Text.Format.Formatter.FormatFileSize(ctx, bytes)} free";
+    }
+
+    private static async Task<(HostFigures? Figures, long? FreeBytes)> PhoneFiguresAsync(Android.Content.Context app, CancellationToken cancellationToken)
+    {
+        long? freeBytes = null;
+        try
+        {
+            var downloads = Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath;
+            if (!string.IsNullOrWhiteSpace(downloads))
+            {
+                var stats = new StatFs(downloads);
+                if (stats.AvailableBytes >= 0) freeBytes = stats.AvailableBytes;
+            }
+        }
+        catch (Exception e) when (e is not OutOfMemoryException) { }
+
         try
         {
             var host = await InboundApplication.GetHostAsync(app).WaitAsync(HostDirectory.FiguresTimeout, cancellationToken).ConfigureAwait(false);
@@ -153,11 +192,11 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
                 if (m.Type == DownloadManager.Contracts.MessageTypes.JobsSnapshot)
                     figures = HostFigures.From(m.GetPayload<DownloadManager.Contracts.SnapshotDto>());
             }, cancellationToken).ConfigureAwait(false);
-            return figures;
+            return (figures, freeBytes);
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            return null;
+            return (null, freeBytes);
         }
     }
 
@@ -176,6 +215,34 @@ public sealed class HostSwitcherSheet : BottomSheetDialogFragment
         d.SetColor(color);
         return d;
     }
+
+    private static StateListDrawable RowForeground(Android.Content.Context ctx)
+    {
+        var states = new StateListDrawable();
+        var focus = new GradientDrawable();
+        focus.SetColor(Android.Graphics.Color.Transparent);
+        focus.SetCornerRadius(HostBar.Dp(ctx, 12));
+        focus.SetStroke((int)HostBar.Dp(ctx, 2), ColorStateList.ValueOf(ToColor(Attr(ctx, Resource.Attribute.colorPrimary))));
+        states.AddState(new[] { Android.Resource.Attribute.StateFocused }, focus);
+
+        var mask = Rounded(ctx, Android.Graphics.Color.White, 12);
+        var rippleColor = unchecked((int)0x20000000) | (Attr(ctx, Resource.Attribute.colorOnSurface) & 0x00ffffff);
+        var ripple = new RippleDrawable(ColorStateList.ValueOf(ToColor(rippleColor)), null, mask);
+        states.AddState(Array.Empty<int>(), ripple);
+        return states;
+    }
+
+    private static int Blend(int foreground, int background, float amount)
+    {
+        static int Channel(int a, int b, float t) => (int)(a * t + b * (1 - t));
+        var red = Channel((foreground >> 16) & 0xff, (background >> 16) & 0xff, amount);
+        var green = Channel((foreground >> 8) & 0xff, (background >> 8) & 0xff, amount);
+        var blue = Channel(foreground & 0xff, background & 0xff, amount);
+        return unchecked((int)0xff000000) | (red << 16) | (green << 8) | blue;
+    }
+
+    private static Android.Graphics.Color ToColor(int value) =>
+        Android.Graphics.Color.Argb((value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
 
     private static int Attr(Android.Content.Context ctx, int attr)
     {

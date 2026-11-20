@@ -1,0 +1,11 @@
+<resources>
+  <item name="queue_editor_unmetered" type="id" />
+  <item name="queue_editor_charging" type="id" />
+  <item name="queue_editor_day_mon" type="id" />
+  <item name="queue_editor_day_tue" type="id" />
+  <item name="queue_editor_day_wed" type="id" />
+  <item name="queue_editor_day_thu" type="id" />
+  <item name="queue_editor_day_fri" type="id" />
+  <item name="queue_editor_day_sat" type="id" />
+  <item name="queue_editor_day_sun" type="id" />
+</resources>

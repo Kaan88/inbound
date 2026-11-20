@@ -36,6 +36,93 @@ public sealed partial class RuntimeServiceTests
         }
     }
 
+    [Fact]
+    public async Task QueueSettingsReportTheNextConfiguredStartInTheHostsTimeZone()
+    {
+        var date = new DateTime(2026, 11, 20);
+        var (service, root, _) = await ClockedServiceAsync(date.AddHours(20), timer: false);
+        DateTimeOffset HostAt(DateTime wallTime) => new(wallTime, TimeZoneInfo.Local.GetUtcOffset(wallTime));
+        try
+        {
+            var settings = service.GetSettings();
+            settings.Queues.Add(new QueueDto { Id = 1, Name = "Night", IsRunning = false, Order = 1 });
+            settings.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Tonight", QueueId = 1,
+                Kind = "oneTime", StartDate = DateOnly.FromDateTime(date.AddDays(1)), StartTime = "01:00", StopTime = "07:00" });
+            settings.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Disabled", QueueId = 1,
+                Enabled = false, StartTime = "21:00" });
+            settings.Schedules.Add(new ScheduleDto { Id = Guid.NewGuid(), Name = "Later", QueueId = 1, StartTime = "02:00", StopTime = "03:00" });
+
+            var saved = await service.UpdateSettingsAsync(settings);
+            Assert.True(saved.Ok, saved.Error);
+            Assert.NotNull(saved.Settings);
+            var next = Assert.IsType<DateTimeOffset>(saved.Settings.Queues.Single(q => q.Id == 1).NextTimedStartAt);
+            Assert.True(HostAt(date.AddHours(25)).EqualsExact(next));
+            Assert.Equal(next, service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).NextTimedStartAt);
+            Assert.Null(service.GetSettings().Queues.Single(q => q.Id == 0).NextTimedStartAt);
+
+            settings = service.GetSettings();
+            settings.Schedules.Single(schedule => schedule.Name == "Tonight").Enabled = false;
+            Assert.True((await service.UpdateSettingsAsync(settings)).Ok);
+            Assert.Equal(HostAt(date.AddHours(26)), service.GetSettings().Queues.Single(q => q.Id == 1).NextTimedStartAt);
+        }
+        finally
+        {
+            await service.ShutdownAsync();
+            await DeleteWhenReleasedAsync(root);
+        }
+    }
+
+    [Fact]
+    public void QueueTimingUsesAnInWindowRepeatAndDoesNotPredictPastADueRun()
+    {
+        var lastRun = new DateTimeOffset(2026, 11, 20, 1, 0, 0, TimeSpan.Zero);
+        var settings = new AppSettings
+        {
+            Queues = [new DownloadQueue { Id = 1, Name = "Night", IsRunning = false }],
+            Schedules = [new ScheduleRule
+            {
+                QueueId = 1, StartTime = "01:00", StopTime = "07:00", RepeatEveryMinutes = 30,
+                LastStartDate = DateOnly.FromDateTime(lastRun.DateTime), LastRunAt = lastRun,
+            }],
+        };
+
+        var beforeRepeat = new QueueTimingClock(lastRun.AddMinutes(10), TimeZoneInfo.Utc);
+        Assert.Equal(lastRun.AddMinutes(30), DownloadManagerService.NextTimedQueueStarts(settings, beforeRepeat)[1]);
+
+        var afterRepeat = new QueueTimingClock(lastRun.AddMinutes(31), TimeZoneInfo.Utc);
+        Assert.Empty(DownloadManagerService.NextTimedQueueStarts(settings, afterRepeat));
+    }
+
+    [Fact]
+    public void QueueTimingOmitsALocalTimeThatFallsInADaylightSavingGap()
+    {
+        var transitionTime = new DateTime(1, 1, 1, 2, 0, 0);
+        var spring = TimeZoneInfo.TransitionTime.CreateFloatingDateRule(transitionTime, 3, 2, DayOfWeek.Sunday);
+        var autumn = TimeZoneInfo.TransitionTime.CreateFloatingDateRule(transitionTime, 11, 1, DayOfWeek.Sunday);
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(new DateTime(2026, 1, 1),
+            new DateTime(2026, 12, 31), TimeSpan.FromHours(1), spring, autumn);
+        var zone = TimeZoneInfo.CreateCustomTimeZone("Queue test zone", TimeSpan.FromHours(-5), "Queue test zone",
+            "Standard", "Daylight", [rule]);
+        var now = new DateTimeOffset(2026, 3, 7, 18, 0, 0, TimeSpan.Zero);
+        var settings = new AppSettings
+        {
+            Queues = [new DownloadQueue { Id = 1, Name = "Night", IsRunning = false }],
+            Schedules = [new ScheduleRule
+            {
+                QueueId = 1, Kind = "oneTime", StartDate = new DateOnly(2026, 3, 8), StartTime = "02:30", StopTime = "07:00",
+            }],
+        };
+
+        Assert.True(zone.IsInvalidTime(new DateTime(2026, 3, 8, 2, 30, 0)));
+        Assert.Empty(DownloadManagerService.NextTimedQueueStarts(settings, new QueueTimingClock(now, zone)));
+    }
+
+    private sealed class QueueTimingClock(DateTimeOffset now, TimeZoneInfo zone) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+        public override TimeZoneInfo LocalTimeZone => zone;
+    }
+
     // ----- review 2 M2: a missed stop of one schedule doesn't end another schedule's run on the same queue -----
 
     [Fact]

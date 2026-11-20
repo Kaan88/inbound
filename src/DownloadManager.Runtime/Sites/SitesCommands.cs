@@ -56,7 +56,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <summary>A folder with more items than this is refused rather than held in the Host's memory.</summary>
     public const int MaxListingItems = 100_000;
 
-    private sealed record Listing(string Token, string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At);
+    private sealed record Listing(string Token, string Path, IReadOnlyList<SiteItemDto> Items, DateTimeOffset At,
+        Guid SiteRevision, bool ChronologicalFiles, long? FreeBytes = null);
 
     // The last folder listed per site, dropped after a minute unread: enough for paging, and nothing grows with browsing.
     private readonly Dictionary<string, Listing> _listings = new(StringComparer.Ordinal);
@@ -82,14 +83,17 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
     /// <param name="transferRetryDelay">The wait before a failed file's second try (tests); 2 s by default.</param>
     /// <param name="sleepPrevention">Keeps the PC awake while a transfer runs: a share of the Host's power request.</param>
     /// <param name="preventSleep">Options › "Prevent sleep while downloading".</param>
+    /// <param name="allowWebDavUploadProbe">Test-only WebDAV experiment. Production has no proven atomic create backend.</param>
     public SitesCommands(string stateDirectory, Action<string> log, Func<string?, string?>? findRclone = null,
         Func<string, string, RcloneSupervisor>? createSupervisor = null,
         Func<string, int, CancellationToken, Task<IReadOnlyList<SshHostKey>>>? probe = null,
         RcloneUpdater? updater = null, TimeProvider? time = null, TimeSpan? firstCheckDelay = null, TimeSpan? updateTick = null,
         TimeSpan? transferRetryDelay = null, DownloadManager.Core.ISleepPrevention? sleepPrevention = null, Func<bool>? preventSleep = null,
-        bool transferExecutionAllowed = true, Func<CancellationToken, Task>? afterTransferExclusiveOpen = null)
+        bool transferExecutionAllowed = true, Func<CancellationToken, Task>? afterTransferExclusiveOpen = null,
+        bool allowWebDavUploadProbe = false)
     {
         _stateDirectory = stateDirectory;
+        _allowWebDavUploadProbe = allowWebDavUploadProbe;
         _configStore = new SitesConfigStore(stateDirectory);
         _sites = new SiteStore(stateDirectory, log);
         _log = log;
@@ -163,7 +167,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 SitesMessageTypes.RcloneInstall or SitesMessageTypes.RcloneCheck => IpcMessage.Create(SitesMessageTypes.Status, WithError(Status(), OffMessage), request.Id),
                 SitesMessageTypes.Count => IpcMessage.Create(SitesMessageTypes.CountResult,
                     new SiteCountResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
-                SitesMessageTypes.Delete => IpcMessage.Create(SitesMessageTypes.ChangeResult,
+                SitesMessageTypes.Delete or SitesMessageTypes.DeleteFiles => IpcMessage.Create(SitesMessageTypes.ChangeResult,
                     new SiteChangeResultDto { Ok = false, Message = OffMessage, Problem = SiteProblems.Off }, request.Id),
                 SitesMessageTypes.TransferStart or SitesMessageTypes.SafeDownloadStart or SitesMessageTypes.TransferPause or SitesMessageTypes.TransferResume or SitesMessageTypes.TransferCancel
                     or SitesMessageTypes.TransferRetry or SitesMessageTypes.TransferClear => IpcMessage.Create(SitesMessageTypes.TransferResult,
@@ -187,12 +191,18 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     await ProbeAsync(request.GetPayload<SiteProbeRequest>() ?? new SiteProbeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.Trust:
                 return Result(request, await TrustAsync(request.GetPayload<SiteTrustRequest>() ?? new SiteTrustRequest(), cancellationToken).ConfigureAwait(false));
+            case SitesMessageTypes.TrustSftpEndpoint:
+                return Result(request, await TrustAsync(request.GetPayload<SiteTrustRequest>() ?? new SiteTrustRequest(),
+                    cancellationToken, requireEndpoint: true).ConfigureAwait(false));
             case SitesMessageTypes.Certificate:
                 return IpcMessage.Create(SitesMessageTypes.CertificateResult,
                     await CertificateAsync(request.GetPayload<SiteIdRequest>()?.Id ?? "", cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.DeviceReadOpen or SitesMessageTypes.DeviceWriteOpen:
                 return IpcMessage.Create(SitesMessageTypes.DeviceStream, await DeviceOpenAsync(request.GetPayload<SiteDeviceOpenRequest>() ?? new SiteDeviceOpenRequest(),
                     request.Type == SitesMessageTypes.DeviceWriteOpen, cancellationToken).ConfigureAwait(false), request.Id);
+            case SitesMessageTypes.DeviceCreateOpen:
+                return IpcMessage.Create(SitesMessageTypes.DeviceStream, await DeviceCreateOpenAsync(
+                    request.GetPayload<SiteDeviceOpenRequest>() ?? new SiteDeviceOpenRequest(), cancellationToken).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.DeviceRead:
                 return IpcMessage.Create(SitesMessageTypes.DeviceChunk,
                     await DeviceReadAsync(request.GetPayload<SiteDeviceChunkRequest>() ?? new SiteDeviceChunkRequest(), cancellationToken).ConfigureAwait(false), request.Id);
@@ -220,9 +230,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             case SitesMessageTypes.Count:
                 return IpcMessage.Create(SitesMessageTypes.CountResult,
                     await CountAsync(request.GetPayload<SiteChangeRequest>() ?? new SiteChangeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
-            case SitesMessageTypes.Delete:
+            case SitesMessageTypes.Delete or SitesMessageTypes.DeleteFiles:
                 return IpcMessage.Create(SitesMessageTypes.ChangeResult,
-                    await DeleteAsync(request.GetPayload<SiteChangeRequest>() ?? new SiteChangeRequest(), cancellationToken).ConfigureAwait(false), request.Id);
+                    await DeleteAsync(request.GetPayload<SiteChangeRequest>() ?? new SiteChangeRequest(), cancellationToken,
+                        filesOnly: request.Type == SitesMessageTypes.DeleteFiles).ConfigureAwait(false), request.Id);
             case SitesMessageTypes.RcloneInstall:
                 return IpcMessage.Create(SitesMessageTypes.Status,
                     await InstallRcloneAsync(request.GetPayload<SitesRcloneInstallRequest>()?.Version, cancellationToken).ConfigureAwait(false), request.Id);
@@ -336,6 +347,7 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 await _configStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
                 var rcloneChanged = next.OwnRclonePath != _config.OwnRclonePath;
                 _config = next;
+                if (!next.Enabled) Interlocked.Increment(ref _uploadProbeSession);
                 _configProblem = null;
                 if (!next.Enabled)
                 {
@@ -588,6 +600,12 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             var sameServer = existing is not null && string.Equals(existing.Host, host, StringComparison.OrdinalIgnoreCase) && existing.Port == port
                 && string.Equals(existing.Url, Trimmed(request.Url), StringComparison.Ordinal)
                 && string.Equals(existing.Endpoint, Trimmed(request.Endpoint), StringComparison.Ordinal);
+            bool sameCredentials = sameServer && existing!.User == request.User.Trim()
+                && existing.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
+                && existing.Vendor == (request.Kind == SiteKinds.WebDav ? request.Vendor ?? "other" : null)
+                && existing.Provider == (request.Kind == SiteKinds.S3 ? request.Provider : null)
+                && existing.Region == (request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null)
+                && existing.AuthMethod == request.AuthMethod;
             try
             {
                 saved = new SiteRecord
@@ -605,9 +623,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                     Endpoint = request.Kind == SiteKinds.S3 ? Trimmed(request.Endpoint) : null,
                     Region = request.Kind == SiteKinds.S3 ? Trimmed(request.Region) : null,
                     AuthMethod = request.AuthMethod,
-                    SealedPassword = Seal(request.Password, existing?.SealedPassword),
-                    SealedPrivateKey = Seal(request.PrivateKey, existing?.SealedPrivateKey),
-                    SealedKeyPassphrase = Seal(request.KeyPassphrase, existing?.SealedKeyPassphrase),
+                    SealedPassword = Seal(request.Password, sameCredentials ? existing!.SealedPassword : null),
+                    SealedPrivateKey = Seal(request.PrivateKey, sameCredentials ? existing!.SealedPrivateKey : null),
+                    SealedKeyPassphrase = Seal(request.KeyPassphrase,
+                        sameCredentials && request.PrivateKey is null ? existing!.SealedKeyPassphrase : null),
                     HostKeys = sameServer ? existing!.HostKeys : [],
                     // SITES.6b: a trusted certificate belongs to one server and one kind of encryption.
                     TrustedCertificates = sameServer && existing!.Tls == (request.Kind == SiteKinds.Ftp ? request.Tls : null)
@@ -704,10 +723,24 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         }
     }
 
-    private async Task<SiteResultDto> TrustAsync(SiteTrustRequest request, CancellationToken cancellationToken)
+    private async Task<SiteResultDto> TrustAsync(SiteTrustRequest request, CancellationToken cancellationToken, bool requireEndpoint = false)
     {
+        SiteRecord? verified = null;
+        if (requireEndpoint)
+        {
+            if (request.Entries.Count is 0 or > 16 || !SiteStore.IsId(request.Id)
+                || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { Kind: SiteKinds.Sftp } site
+                || site.Host != request.ExpectedHost || site.Port != request.ExpectedPort)
+                return Fail("The SFTP location changed. Open it and review the keys again.");
+            var offered = await ProbeAsync(new SiteProbeRequest { Host = site.Host, Port = site.Port }, cancellationToken).ConfigureAwait(false);
+            if (!offered.Ok) return Fail(offered.Message ?? "Could not verify the server keys.");
+            if (request.Entries.Any(entry => !offered.Keys.Any(key => key.Entry == entry)))
+                return Fail("The server keys changed. Review the keys again.");
+            verified = site;
+        }
+
         // SITES.6b: other kinds trust a certificate, read outside the gate (a handshake can take seconds).
-        if (SiteStore.IsId(request.Id) && await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is { Kind: not SiteKinds.Sftp } tlsSite)
+        if (!requireEndpoint && SiteStore.IsId(request.Id) && await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is { Kind: not SiteKinds.Sftp } tlsSite)
             return await TrustCertificateAsync(tlsSite, request, cancellationToken).ConfigureAwait(false);
 
         SiteRecord saved;
@@ -717,6 +750,9 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             if (!SiteStore.IsId(request.Id) || await _sites.GetAsync(request.Id, cancellationToken).ConfigureAwait(false) is not { } site)
                 return Fail("That site no longer exists.");
             if (site.Kind != SiteKinds.Sftp) return Fail("The site changed while it was trusted. Try again.");
+            if (requireEndpoint && (!_config.Enabled || verified is null || site.Host != verified.Host || site.Port != verified.Port
+                || site.ModifiedAt != verified.ModifiedAt))
+                return Fail("The SFTP location changed. Open it and review the keys again.");
             if (request.Entries.Count is 0 or > 16) return Fail("Accept between 1 and 16 of the server's keys.");
             saved = site with { HostKeys = [.. request.Entries.Distinct(StringComparer.Ordinal)], ModifiedAt = DateTimeOffset.UtcNow };
             try
@@ -778,7 +814,8 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         {
             // A later page comes from the first page's listing or not at all: a fresh listing sliced at the old offset could
             // repeat or skip items.
-            if (CachedListing(site.Id, path, request.Listing) is not { } cached)
+            if (CachedListing(site.Id, path, request.Listing) is not { } cached
+                || cached.ChronologicalFiles != request.ChronologicalFiles || cached.SiteRevision != site.Revision)
                 return new SiteBrowseResultDto { Ok = false, Problem = SiteProblems.ListingChanged, Path = path, Message = "The folder is read again." };
             listing = cached;
         }
@@ -799,10 +836,20 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
                 };
             }
 
-            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow());
+            // Order the full snapshot before slicing, retaining the name order for tied dates.
+            if (request.ChronologicalFiles)
+                listed = listed!.OrderByDescending(item => item.IsFolder)
+                    .ThenBy(item => item.IsFolder ? DateTimeOffset.MinValue : item.Modified ?? DateTimeOffset.MaxValue).ToArray();
+            var space = request.IncludeFreeSpace && site.Kind == SiteKindCatalog.Sftp
+                ? await TryReadSftpFreeBytesAsync(site, cancellationToken).ConfigureAwait(false) : null;
+            listing = new Listing(Guid.NewGuid().ToString("N"), path, listed!, _time.GetUtcNow(), site.Revision,
+                request.ChronologicalFiles, space);
             StoreListing(site.Id, generation, listing);
         }
 
+        var page = listing.Items.Skip(offset).Take(limit).Select(item => WithHere(item, site, path)).ToList();
+        if (request.IncludeFolderCounts)
+            await AddFolderCountsAsync(site, path, page, cancellationToken).ConfigureAwait(false);
         return new SiteBrowseResultDto
         {
             Ok = true,
@@ -810,9 +857,63 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
             Total = listing.Items.Count,
             Offset = offset,
             Listing = listing.Token,
+            FreeBytes = listing.FreeBytes,
             // "On this PC" is read for the page only, so a long folder costs one look per item shown.
-            Items = [.. listing.Items.Skip(offset).Take(limit).Select(item => WithHere(item, site, path))],
+            Items = page,
         };
+    }
+
+    private async Task<long?> TryReadSftpFreeBytesAsync(SiteRecord site, CancellationToken cancellationToken)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            using var lease = await AcquireAsync(budget.Token).ConfigureAwait(false);
+            var fs = await SiteRemote.BuildAsync(site, lease.Client, budget.Token).ConfigureAwait(false);
+            var usage = await lease.Client.CallAsync("operations/about", new JsonObject { ["fs"] = fs }, budget.Token).ConfigureAwait(false);
+            return usage["free"] is JsonValue value && value.TryGetValue<long>(out var free) && free >= 0 ? free : null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return null; }
+        catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException) { return null; }
+    }
+
+    private long? RecentFreeBytes(SiteRecord site)
+    {
+        lock (_listings)
+        {
+            return _listings.TryGetValue(site.Id, out var listing) && listing.SiteRevision == site.Revision &&
+                _time.GetUtcNow() - listing.At <= ListingLifetime ? listing.FreeBytes : null;
+        }
+    }
+
+    private async Task AddFolderCountsAsync(SiteRecord site, string path, List<SiteItemDto> page, CancellationToken cancellationToken)
+    {
+        var folders = page.Where(item => item.IsFolder && SitePaths.NameProblem(item.Name) is null).Take(8).ToArray();
+        if (folders.Length == 0) return;
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            using var lease = await AcquireAsync(budget.Token).ConfigureAwait(false);
+            var fs = await SiteRemote.BuildAsync(site, lease.Client, budget.Token).ConfigureAwait(false);
+            foreach (var folder in folders)
+            {
+                try
+                {
+                    var reply = await lease.Client.CallAsync("operations/list", new JsonObject
+                    {
+                        ["fs"] = fs.DeepClone(),
+                        ["remote"] = SitePaths.ToRemote(SiteTransferPaths.Remote(path, folder.Name)),
+                        ["opt"] = new JsonObject { ["noMimeType"] = true, ["noModTime"] = true },
+                    }, budget.Token).ConfigureAwait(false);
+                    if (reply["list"] is JsonArray items) folder.ChildCount = items.Count;
+                }
+                catch (RcloneCallException) { /* Count is optional; keep the folder browsable. */ }
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or SiteStoreException) { }
     }
 
     /// <summary>A copy of the cached item with its "On this PC" state as it is now.</summary>
@@ -1180,9 +1281,10 @@ public sealed partial class SitesCommands : ISitesCommands, IAsyncDisposable
         return (uri.Host, uri.Port, null);
     }
 
-    private static SiteDto ToDto(SiteRecord site) => new()
+    private SiteDto ToDto(SiteRecord site) => new()
     {
         Id = site.Id,
+        FreeBytes = RecentFreeBytes(site),
         Name = site.Name,
         Kind = site.Kind,
         Host = site.Host,

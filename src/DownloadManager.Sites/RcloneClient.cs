@@ -201,13 +201,36 @@ public sealed class RcloneClient : IDisposable
     /// <paramref name="content"/> as rclone takes them (nothing is buffered here).
     /// </summary>
     /// The remote's root is "/", as in the fs objects: absolute paths on SFTP and FTP servers.
-    public async Task UploadFileAsync(string remoteName, string folder, string name, Stream content, CancellationToken cancellationToken = default)
+    public Task UploadFileAsync(string remoteName, string folder, string name, Stream content, CancellationToken cancellationToken = default) =>
+        UploadFileCoreAsync(remoteName, folder, name, content, false, cancellationToken);
+
+    // Keep Rcat on the buffered single-PUT path. This limit also bounds per-stream memory in the Host.
+    public const int MaxConditionalS3UploadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// Sends rclone 1.76's request-local conditional header to a previously validated S3 remote.
+    /// The caller must verify the remote's backend and endpoint; non-S3 backends may silently ignore it.
+    /// No fallback to an unconditional upload is allowed.
+    /// </summary>
+    internal Task CreateS3FileAsync(string remoteName, string folder, string name, Stream content, CancellationToken cancellationToken = default)
+    {
+        if (!content.CanSeek || content.Length - content.Position > MaxConditionalS3UploadBytes)
+            throw new ArgumentException("A bounded, seekable S3 upload is required.", nameof(content));
+        return UploadFileCoreAsync(remoteName, folder, name, content, true, cancellationToken);
+    }
+
+    private async Task UploadFileCoreAsync(string remoteName, string folder, string name, Stream content, bool conditionalS3,
+        CancellationToken cancellationToken)
     {
         using var form = new MultipartFormDataContent();
         var file = new StreamContent(content, 256 * 1024);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(file, "file0", name);
         var query = "operations/uploadfile?fs=" + Uri.EscapeDataString(remoteName + ":/") + "&remote=" + Uri.EscapeDataString(folder.Trim('/'));
+        if (conditionalS3)
+            query += "&_config=" + Uri.EscapeDataString("""
+                {"UploadHeaders":[{"Key":"If-None-Match","Value":"*"}],"LowLevelRetries":1,"StreamingUploadCutoff":2097152}
+                """);
         HttpResponseMessage response;
         try
         {

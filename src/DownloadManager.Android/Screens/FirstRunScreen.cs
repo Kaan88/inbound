@@ -53,8 +53,8 @@ internal sealed class FirstRunScreen
     {
         var state = new FirstRunState(_folder, NotificationState(), BatteryUnrestricted());
         Root.FindViewById<TextView>(Resource.Id.fr_folder)!.Text = state.FolderLine;
-        Mark(_notif, _notifTile, _notifIcon, state.NotificationsOn, Resource.Drawable.ic_notifications);
-        Mark(_batt, _battTile, _battIcon, state.BatteryUnrestricted, Resource.Drawable.ic_battery);
+        Mark(_notif, _notifTile, _notifIcon, state.NotificationsOn, Resource.Drawable.ic_setup_bell);
+        Mark(_batt, _battTile, _battIcon, state.BatteryUnrestricted, Resource.Drawable.ic_setup_battery);
     }
 
     // A permission that is on has no button: the line is ticked instead.
@@ -63,7 +63,7 @@ internal sealed class FirstRunScreen
         button.Visibility = on ? ViewStates.Gone : ViewStates.Visible;
         tile.SetBackgroundResource(on ? Resource.Drawable.bg_circle_done : Resource.Drawable.bg_circle_dark);
         icon.SetImageResource(on ? Resource.Drawable.ic_check : normalIcon);
-        icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(on ? _activity.GetColor(Resource.Color.state_done) : Motion.Attr(_activity, Resource.Attribute.colorOnSurfaceVariant)));
+        icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(on ? _activity.GetColor(Resource.Color.state_done) : Motion.Attr(_activity, Resource.Attribute.colorOnSurface)));
     }
 
     private const string AskedKey = "notifications_asked";

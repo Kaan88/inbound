@@ -16,7 +16,7 @@ public sealed partial class MainActivity
     {
         if (_model is null || _linkHostStamp is not { } stamp || !SameLinkHost(stamp)) return;
         if (row.Job.IsRemote) { ShowMessage("This download’s provider refreshes its address."); return; }
-        RefreshLinkSheet.Show(this, row.Name, row.Job.ReceivedBytes,
+        RefreshLinkSheet.Show(this, row.Name, row.Job.ReceivedBytes, row.Job.TotalBytes,
             row.Job.Failure?.Kind.Equals("expiredUrl", StringComparison.OrdinalIgnoreCase) == true,
             () =>
             {

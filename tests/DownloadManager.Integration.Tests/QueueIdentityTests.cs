@@ -93,6 +93,39 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExpectedUnqueuedRefusesMoveOrDetachAfterAnotherClientQueuesTheJob(bool detach)
+    {
+        var service = await ServiceAsync();
+        var current = await IdentityCreateAsync(service, "Current");
+        var destination = await IdentityCreateAsync(service, "Destination");
+        var job = await IdentityAddAsync(service, current, "newly-queued.bin");
+        Assert.True((await service.DetachFromQueueAsync(job.Id)).Ok);
+        Assert.False(service.GetJob(job.Id)!.IsQueued);
+
+        var request = new JobQueueRequest
+        {
+            JobId = job.Id, QueueId = destination.Id, Detach = detach,
+            ExpectedUnqueued = true, ExpectedDestinationQueueGeneration = detach ? null : destination.Generation,
+        };
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+        var applicable = (await AskAsync(dispatcher, session, MessageTypes.JobMoveToQueue, request)).GetPayload<JobActionResponse>();
+        Assert.True(applicable.Ok, applicable.Error);
+
+        Assert.True((await service.MoveToQueueAsync(job.Id, current.Id)).Ok);
+        var before = service.GetJob(job.Id)!;
+        var stale = (await AskAsync(dispatcher, session, MessageTypes.JobMoveToQueue, request)).GetPayload<JobActionResponse>();
+        Assert.False(stale.Ok);
+        Assert.Contains("added to a queue", stale.Error);
+        var unchanged = service.GetJob(job.Id)!;
+        Assert.True(unchanged.IsQueued);
+        Assert.Equal(current.Id, unchanged.QueueId);
+        Assert.Equal(before.UpdatedAt, unchanged.UpdatedAt);
+    }
+
+    [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]
     [InlineData(true, true)]

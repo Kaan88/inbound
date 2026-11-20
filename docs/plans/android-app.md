@@ -56,6 +56,10 @@ full (`how-it-works.png`, 2x).
 
 ### C. Queues, sites, hosts and settings
 
+The approved screens and flows are mandatory at every milestone. Only explicit
+owner approval permits a deviation. For Android 0.0.9, Astra must review the
+code and side-by-side captures of every implemented screen before release.
+
 | C1 Queues | C2 Schedule | C3 Remote Files | C4 Browse a remote location |
 | --- | --- | --- | --- |
 | <img src="android-mockups/c1-queues.png" width="200"> | <img src="android-mockups/c2-schedule.png" width="200"> | <img src="android-mockups/c3-sites.png" width="200"> | <img src="android-mockups/c4-site-browser.png" width="200"> |

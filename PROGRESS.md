@@ -1,6 +1,482 @@
 # Progress — session handoff
 
+**Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
+
+### Android parity continuation (2026-11-20)
+
+- Delivered the owner a private ARM64 APK built from the current parity checkout through the SFTP free-space change. Its embedded version is 0.0.8. The existing release certificate, pinned rclone, and 16 KiB alignment verified. No public release or device install of the private APK.
+- The expanded Host run passed 352 with four skipped, with one stale golden snapshot test failing. The two hello frames now reflect the actual Windows capability sequence. The focused rerun passed and Astra approved the source correction.
+- B6 and C2 passed scoped functional source review. Astra requested visual changes. The revised probe includes the badge, scrim and action sizing for B6, and the C2 day buttons, time typography and copy. The owner approved “Notify when the queue finishes” for C2.
+- All 39 host-only parity capture tests passed after updating assertions for the live B6 connections control. An A7 capture stopped at an ADB install timeout. The installed APK matched the owned probe byte for byte and was removed. The install deadline was extended without changing other command deadlines.
+
+### C1 workload and A3/A6 recapture (2026-11-20)
+
+- The C1 probe showed Main running, Night scheduled for its actual Host
+  time, and Mobile stopped with one job apiece. The live Main transfer
+  advanced from 262,144 to 393,216 bytes. The real queue dropdown admitted
+  each fixture to its intended queue, and long press opened the Mobile
+  queue actions. Astra passed those states. Chart navigation, Stop styling,
+  progress track and action-sheet presentation still need visual work.
+  Evidence: c1-dropdown-20261120-035933.
+- The revised A3 completion message kept Add visible in the API 33 capture.
+  Astra asked for less space above navigation and a neutral outlined folder
+  action. A6 passed the revised active controls and captured finished state.
+  The connection note still needs consistent public-folder wording. The
+  transfer hash matched. Evidence: a3-a6-recapture-20261120-040258.
+- The checkpoint is on android-remote-files-parity. It records scoped passes
+  while the remaining states and all-screen review stay open.
+
+### Configured C2 approval and link-intake follow-ups (2026-11-20)
+
+- Astra passed the configured local Night queue editor and its Host footer.
+  API 33 saved and reopened the disabled Weekdays schedule with Mon–Fri,
+  01:00–07:00, charging and unmetered. The weekday gaps and battery row align.
+  The footer fits in that viewport. Evidence: c2-clean-boot-20261120-035129.
+  Other editor states and dialogs still need review.
+- B4 now calculates the checked category's size independently of all selected
+  files. The capture verifies the archive names, sizes and check states, the
+  unchecked image and PDF, and both totals. B6 gained a real browser
+  confirmation and cancellation fixture. These lanes are pending on-device
+  verification. Host-only suites passed 555 mobile and 40 capture tests.
+
+### B6 recovery and C1 scheduler checkpoint (2026-11-20)
+
+- Astra approved the B6 expired-link sheet and recovery by pasted replacement.
+  The emulator also verified A6 Stop on the same job. Retry and the replacement
+  both requested byte 1,327,104, and the finished file matched SHA-256. The
+  owned file, probe and reverse mapping were removed. Evidence in the Codex
+  chat's local visualizations directory: b6-stop-retry-20261120-034215.
+  Browser re-catch, confirmation and cancellation remain open.
+- C1 cards now display the next timed start from the selected Host, including
+  applicable repeats. The screen removes elapsed times and uses “Schedule
+  enabled” when an exact start is unavailable. Astra passed source review.
+  47 scheduler and Host regression checks passed. The isolated workload
+  runner and C1 visual comparison remain to be exercised.
+
+### Scoped API 33 checks (2026-11-20)
+
+Evidence bundles below are in this Codex chat's local visualizations directory.
+
+- Astra passed source and visual review for the expanded **A7 ongoing
+  notification**. A real transfer populated its rate, progress, ETA, Pause all
+  and Open. The run verified the finished payload hash. It did not tap these
+  actions or cover the finished and network-wait notices.
+  Evidence: a3-a6-a7-reviewed-20261120-032339.
+- The same run captured **A3** completion and **A6** active and finished
+  Details. The new completion snackbar uses the Downloads coordinator so Add
+  stays accessible. A6 now preserves the local nested destination, uses the
+  actual unmetered Host or queue rule, and adjusts the active action and bar
+  layout. Astra passed the A6 source updates. The revised A3/A6 probe built.
+  Fresh visual review is open.
+- Astra passed the **C3** SFTP unavailable-space state. The isolated fixture
+  proved no login before trust, authenticated browse afterward, and an accurate
+  location card without a capacity value on return. C3 positive capacity and
+  mixed and active states remain open. Evidence: c3-sftp-space-20261120-032528.
+- **B6** retried the original address at byte 1,458,176, resumed the same job
+  from its replacement at that byte, and matched the final hash. Astra passed
+  that flow and the updated badge, actions and scrim. The follow-up reduced
+  the action gap and bottom padding and matched the dark surface color.
+  The separate A6 Stop attempt showed Cancelled at 8% and preserved a partial
+  file. The runner now verifies that state and presses Retry. The new
+  B6/Stop lane has not yet completed. Evidence: b6-reviewed-20261120-032108
+  and b6-stop-final-20261120-032832.
+- **C2** saved and reopened the revised local Weekdays schedule. The owner
+  approved the completion wording, and Astra verified the times, selected
+  weekdays, conditions, day size, limits and footer. The equal-gap and
+  section-alignment follow-up built. The device-command timeout prevented
+  a new C2 comparison. Evidence: c2-reviewed-20261120-031734.
+- The mobile suite passed 554 tests and the host capture suite passed 40.
+  The signed private snapshot delivered earlier predates these visual changes.
+
+
+Owner decisions (2026-11-20): B2 shows the selected Host's current unmetered rule. The user changes it in Settings. In A6, Stop keeps partial bytes and restart-from-zero is omitted for active downloads.
+
+On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
+
+### Android parity evidence, 2026-11-20
+
+- The C2 editor saved and reopened the disabled Weekdays schedule for Night. The Host timing footer was visible without scrolling on inbound33. Both pairs are in `c2-owner-20261120-023106`. The owner approved “Unmetered network” and its existing meaning.
+- In `b5-verified-20261120-023412`, the real five-job fixture selected the active, paused and queued rows, left the other two unselected, and verified that Download again was disabled. Astra passed the selection styling and overflow. Measurable progress, a scheduled start and outline toolbar icons remain open for the full screen.
+- In `b234-owner-20261120-024107`, B2 showed range metadata and the phone Change action. The B3 protected report and its HEAD request both used the synthetic session. Astra passed B3 controls/disclosure and B2 metadata/destination visibility. The next build addresses the signed-in scrim, disclosure length and B2 timing and queue actions.
+- The focused Host suite passed 324 tests (4 skipped), the mobile suite passed 550 and 39 capture checks passed. B6 partial recovery, phone-folder payload verification, full-screen visual approval and feature resumption remain open.
+
+### Android parity resumed (2026-11-20)
+
+The queue/dispatcher suite passed 324 tests with four skipped. Astra passed the B5 stale-menu fix on source review. Fresh signed emulator build: parity-owner-resume-20261120-022458. The owner approved the existing unmetered schedule condition and its accurate label.
+
+### Android link-intake partial-expiry capture lane (2026-11-20)
+
+- Added `--capture-b6-partial` alongside the unchanged zero-byte `--capture-b6`
+  path. The new opt-in uses the real app Add/Details/Pause/Refresh workflow,
+  stable-ETag deterministic loopback endpoints, fixture-only old-URL 410
+  switching after the operator pauses, visible nonzero saved-byte assertions,
+  nonzero Range verification on the replacement, final SHA-256, and exact
+  unique-output cleanup. Browser options selectors were left unchanged. After
+  hash verification the disposable job is removed through Details → Delete
+  with “Remove from the list only” selected, then the exact output is
+  hash-checked and removed;
+  no app hook or shared-storage cleanup is used.
+- Added focused fixture contract coverage and documented the opt-in and cleanup
+  boundary. Host checks passed 6/6; Python compilation and scoped
+  `git diff --check` passed. No build, emulator/device run, live capture, or
+  visual acceptance was performed. API 33 execution remains unverified.
+
+### Android mockup parity pause (2026-11-20)
+
+- The owner paused the work before all-screen Astra sign-off. B2's functional
+  check and scoped source review passed. API 33 saved and reopened the disabled
+  Night schedule with Mon–Fri 01:00–07:00, charging and unmetered. The configured
+  pair is in `c2-configured-resumed-20261120-021759`; the footer scroll assertion
+  failed and scoped probe cleanup passed.
+- B5's revised selection UI, recreation restoration and queue precondition
+  built in `parity-b5-resumed-20261120-021617`. The first mixed-state run failed;
+  the repaired runner passed eight host tests and has not been rerun on API 33.
+  The owner approved disabling Download again for unfinished-only selections.
+- Astra withheld visual approval for B3, B6 and C5. Their follow-up edits still
+  need a clean build and recapture. See the
+  [parity handoff](docs/plans/android-parity-handoff.md).
+
+### Android mockup parity resumed (2026-11-20)
+
+- The owner asked to continue until Astra signs off. B2's fresh signed API 33
+  probe completed the paired folder-picker flow on the disposable Server.
+  The fixture SHA-256 matched in the visibly selected child and the decoy
+  directory stayed empty. Luna fixed the Archive selector. The runner also
+  uses an enabled clickable selector for the duplicate folder label and
+  matches the submit button's resource and current label. Focused runner
+  tests passed 4/4. Evidence: `artifacts/android-app/pairs/paired-b2-resumed-20261120-020635/`.
+- Astra gave B2 a scoped SOURCE PASS for the render/save race, modal submit
+  guard, cancellation and Host binding. The side-by-side visual gate is open.
+  Astra's review of B5's earlier three-finished-row comparison found selection
+  badge, bar, surrounding navigation and overflow differences. Mixed-state
+  evidence and re-review are pending.
+
+### Android milestone continuation (2026-11-20)
+
+- Added a separate opt-in paired B2 folder-picker smoke and operator runbook.
+  It requires the explicit isolated probe APK and Server DLL on `inbound33`,
+  reuses the guarded paired-Host fixture and synthetic browser link fixture,
+  and confines the disposable Host to two temporary child folders. The guided
+  flow catches the synthetic archive, changes to a visibly listed child,
+  verifies the displayed destination and the Host-side payload hash, and
+  hash-gates exact-file cleanup. It does not persist pairing-form UI/logcat or
+  credentials. Host-only tests passed 3/3, Python compilation and
+  `git diff --check` passed. No device/build/live run was performed. Fixture
+  plumbing limitation: the paired fixture exposes its controlled download
+  root, but does not provide browser navigation; the operator must open the
+  runner's loopback link inside the app browser and tap Archive. If the B2
+  form is absent, the runner reports it and submits no job.
+
 ### Android milestone continuation (2026-11-19)
+
+- Added standalone `--unattended-b5` to the download-state capture runner,
+  separate from existing `--mixed-a2 --capture-b5`. It seeds three
+  uniquely named loopback fixture jobs through the isolated probe's guarded
+  test hook, waits for exact accessibility-row identity, selects them by
+  long-press/taps, asserts the visible `3 selected` count, and opens a uniquely
+  identified enabled overflow control for the B5 reference pair. It invokes no
+  destructive job action; outputs remain for exact name+SHA-256 verified
+  cleanup only. Added host-only scope coverage and operator documentation.
+  Focused host tests passed 6/6, Python compilation and `git diff --check`
+  passed. No device/build or visual acceptance.
+
+- Extended the opt-in queue/host capture lane to create and save only the
+  explicitly named disposable queue in the fresh isolated probe, then capture
+  its stopped card and open its no-schedule editor. Selectors are backed by
+  `queues_page.xml`, `QueuesScreen.cs` and `queue_editor.xml`; the probe is
+  uninstalled for scoped cleanup. Updated the C2 fixture reference to Mon–Fri
+  01:00–07:00 with unmetered and charging requirements enabled where supported.
+  Configuring that schedule remains guided/manual: platform time-picker controls
+  and generated day/condition controls lack stable source resource IDs, so the
+  runner reports configured C2, running/action C1, C5 and C6 unverified rather
+  than guessing. Host-only tests passed 3/3, Python compilation and
+  `git diff --check` passed. No emulator/build/device use or visual acceptance.
+
+- Added an explicit opt-in `--unattended` capture-only mode to
+  `capture-link-intake-parity.py`, bounded to real-browser B4/B5 states. The
+  operator still opens Chrome and navigates/selects through the actual page UI;
+  no synthetic B1 share, download submission, or browser automation is used.
+  Untaken B1 chooser/share, B2, B3 and B6 are reported unverified. Updated its
+  procedure and host-only scope test. Scoped checks pending; no emulator/build
+  or app edit.
+
+- Added explicit `--unattended-a7-navigation` to the A2/A3/A6/A7 capture runner.
+  It automates only HOME plus Android notification-shade expansion for A7;
+  notification presence/permission and all app-state setup remain operator
+  controlled. Existing dedicated AVD/API/package checks and owned-state cleanup
+  are unchanged. Focused host-only tests passed 4/4, Python compilation and
+  `git diff --check` passed. No build, emulator/device run, screenshot or visual
+  acceptance was performed; A7 and all screenshot states remain unverified.
+
+- Extended `tools/AndroidApp/capture-core-parity.py` unattended mode to capture
+  A1 empty Downloads, A4 blank Add, A5 blank New Download and C7 Settings root
+  after fresh-install A0. Transitions use unique, visible, enabled app resource
+  IDs tied to source; A1 requires the `All 0` chip. No clipboard, URL, transfer,
+  appearance or populated state is synthesized; C8 remains explicitly
+  unverified. Host-only parity tests passed 3/3, Python compilation and
+  `git diff --check` passed. No device use or app source edits; emulator capture
+  remains for the owner to run.
+
+- Extended `tools/AndroidApp/capture-remote-files-parity.py` with a separate
+  `--s3-only` walkthrough that requires the installed Windows rclone executable
+  through `--rclone`, starts `rclone serve s3` on loopback with synthetic
+  integration-test keys, and owns its ADB reverse and temporary fixture. It
+  checks the S3/provider/HTTP-consent setup, the `Backups / S3 · eu-central`
+  card, and `pub/readme.txt`. Added the operator procedure and host-only
+  coverage. Python compilation and parity tests passed 10/10. No ADB/device
+  action, app source edit, visual acceptance, or commit.
+
+- Added a separate timed fixture runner and guided procedure for A2/A3/A6/A7.
+  It uses a deterministic, throttled loopback payload for active progress plus
+  queued state, transient completion snackbar, active/finished Details, and an
+  ongoing notification. It reuses existing ADB/UI-tree and compositor helpers
+  without modifying them, records original screenshots and provenance, and
+  documents hash/evidence/cleanup boundaries. Host-only reference/fixture tests
+  and Python compilation passed; no build, emulator/device action, live capture,
+  or visual acceptance is claimed. See
+  `tools/AndroidApp/DOWNLOAD-STATES-PARITY.md`.
+
+- Added a separate operator-guided runner and procedure for C1/C2/C5/C6:
+  disposable queue labels and a disabled schedule fixture, unpaired/pairing/
+  paired Host states, deliberate `inbound33`/API 33 probe-only isolation,
+  original-resolution captures and unchanged-reference side-by-side pairs.
+  It reuses existing smoke ADB/UI-tree primitives and the existing compositor
+  without editing either shared runner. Host-only reference/compositor tests
+  passed 2/2 and Python compilation passed; no build, emulator/device
+  action, live capture, or screen acceptance is claimed. See
+  `tools/AndroidApp/QUEUE-HOST-SCREEN-PARITY.md`.
+
+- Added a separate guided B1–B6 link-intake capture procedure and
+  `tools/AndroidApp/capture-link-intake-parity.py`. It reuses the disposable
+  loopback link fixture, requires the real Chrome → Android Share chooser for
+  B1, records side-by-side captures against the approved B references, and
+  documents supported versus unverified flows. Host-only fixture/inventory
+  checks passed 7/7 and Python compilation passed. No device use, build,
+  credentials, or visual acceptance was performed.
+
+- Added `tools/AndroidApp/capture-remote-files-parity.py` and a nested
+  WebDAV fixture for a future isolated C3/C4 UI run. It populates and captures
+  three saved location cards and the nested `media/recordings/2026` breadcrumb
+  with two selected files, pairs each emulator screenshot with the unchanged
+  C3/C4 original via Pillow, then verifies both downloaded file hashes. It
+  reuses the existing isolated probe/smoke helper; its publication-conflict
+  and process-kill coverage remains, with selectors aligned to the current
+  Remote Files setup and selection cards. Host-only parity
+  fixture/Pillow/selector tests passed 4/4, existing
+  fixture regressions passed 5/5, and Python compilation passed. This tooling
+  check did not establish visual or UI acceptance.
+
+- ANDROID.8 visual and flow acceptance reopened at the owner's request.
+  C3/C4 still apply after the Sites → Remote Files rename. The 0.0.8 checks
+  covered function and release packaging, not mockup parity. ANDROID.9 is
+  paused; its drafts remain in the original checkout. Parity work starts
+  from `66270193` in a separate worktree, with Astra code and visual review
+  required before sign-off.
+- The owner extended the 0.0.9 release gate to **all implemented Android
+  screens**. The C3/C4 corrections remain the first slice; every other
+  implemented screen must also be captured against its approved reference
+  and reviewed by Astra. ANDROID.9 feature work remains paused.
+  `docs/plans/android-mockup-acceptance.md` is the working screen/state
+  inventory; historical evidence is not new acceptance. The first C3/C4
+  NativeAOT emulator candidates built. The focused Host suite passed 10/10,
+  including real-rclone file-only deletion and safe download publication;
+  Mobile tests passed 545/545.
+  The API 33 run at `%LOCALAPPDATA%\Temp\opencode\remote-files-parity-20261119-230316`
+  captured both pairs, exercised the ancestor breadcrumb and two-file
+  selection, and verified only the two chosen files arrived, both with
+  their expected SHA-256. It removed the probe and reverse. Astra reviewed
+  the prior comparison from the same APK and returned **HOLD** on design,
+  destination, sign-in and safety gaps. The first safety corrections now
+  require a current listing for delete and prevent credentials carrying over
+  to a changed endpoint or principal. A fresh focused suite passed 10/10,
+  including stale endpoint edit and file-to-folder replacement regressions.
+  Current fixes still require new captures and review. No release accepted.
+  A later rebuilt API 33 probe reproduced both matching hashes and cleanup
+  (`remote-files-parity-20261119-230932`). SFTP onboarding now has a password
+  form and an endpoint-bound key review: the Host re-probes without login
+  and refuses mismatched keys or a concurrent site edit. The focused suite
+  passed 11/11, including that guard; SFTP device onboarding and comparison
+  evidence are still pending. Phone-to-site upload remains open; the existing
+  device stream only checks destination existence before upload and cannot
+  yet guarantee preservation of a competing file.
+  The fresh v6 probe run (`remote-files-parity-20261119-231709`) exercised
+  the This phone destination picker at the Downloads root, preserved both
+  selections when tapping the already-active Site tab, and again verified
+  both file hashes and cleanup. This is not the nested-destination or SFTP
+  walk. The two endpoint-bound trust regressions separately passed, including
+  an edit during the key probe. The disposable SFTP fixture passed 4/4
+  host-only tests. The v6 delete walkthrough (`remote-files-delete-20261119-231933`)
+  verified that Cancel left the fixture unchanged and Confirm deleted only
+  `notes.pdf`; probe cleanup passed. SFTP and the actual nested destination
+  still need emulator evidence. The first SFTP walkthrough stopped at C3
+  navigation before opening the trust prompt; cleanup passed. It is not a
+  protocol failure or a sign-in result. The v7 emulator run
+  (`remote-files-nested-20261119-232442`) selected the empty
+  `Downloads/Inbound/Music` folder in the UI, checked the C4 footer,
+  verified both hashes in that folder with no root Downloads changes,
+  and cleaned up the probe, reverse and disposable files/folders.
+  No new Astra approval.
+  C4 now orders folders by name and files by modification time before
+  pagination. Direct child counts are best-effort (at most eight folders
+  per page within two seconds); an unread count is never shown as zero.
+  The focused real-rclone suite passed 13/13, Mobile 545/545 and
+  parity-tool tests 18/18. A separate real-rclone read of the WebDAV fixture
+  returned counts 12 and 48 and the exact date-ordered file list. The v8 API 33 probe was built; the new
+  capture runner checks exact row order and verifies each count against
+  the corresponding row, rather than checking for text anywhere onscreen.
+  On API 33, `remote-files-c4-match-20261119-233226/c4-pair.png` confirms
+  the matching row order, dates and counts (masters 12, stems 48).
+  Both selected files still hash-match in `Downloads/Inbound/Music`,
+  delete cancel/confirm and scoped cleanup passed. The visual comparison
+  still has icon and spacing differences; this is not Astra sign-off.
+  Separate API 33 SFTP walkthrough (`remote-files-sftp-only-20261119-233503`)
+  matched the fixture fingerprint, verified Cancel sent no login, and
+  authenticated only after Trust, then browsed the fixture. Cleanup passed.
+  Changed-key and paired-Host walkthroughs were not part of this run.
+  C4's next probe replaces the filled audio, document, archive and
+  download icons with outlines and adjusts header, breadcrumb, row and
+  footer spacing against the approved comparison. Android resource
+  compilation passed for all four vectors. The v9 API 33 comparison
+  (`remote-files-c4-outline-20261119-233816/c4-pair.png`) confirms the icons
+  render and the listing, hashes and delete still pass. A follow-up adjusts
+  vertical row spacing and the footer against the visible remaining deltas.
+  The v10 API 33 comparison (`remote-files-c4-spacing-20261119-234214`)
+  shows the adjusted rows and footer. Listing checks, both download hashes,
+  delete cancel/confirm and scoped cleanup passed. S3 provider/endpoint
+  controls built in v10. API 33 S3 retry
+  (`remote-files-s3-only-20261119-234721`) saved `Backups / S3 · eu-central`,
+  opened fixture bucket `pub/readme.txt`, and removed the probe and reverse.
+  It used synthetic credentials and does not verify a real cloud account.
+  Updated A0 side-by-side (`android-core-parity-v11-20261119-234824`)
+  verifies the revised icons and hero placement; card spacing is still
+  slightly different, and only the pre-permission state was captured.
+  Mobile upload transport passed in the 548/548 suite, including chunk
+  boundaries and abort without a final chunk when source size changes.
+  The distinct `sites.device.createOpen` command is fail-closed in
+  production. A bounded WebDAV experiment exists only in the probe:
+  Astra found that even `MOVE Overwrite: F` on rclone's WebDAV server
+  can race another writer between its check and rename. A pre-existing
+  conflict test does not exercise that boundary. Before enabling Android
+  upload, use a backend with an atomic create-only commit and verify a
+  competing write at that boundary; never fall back to legacy uploads.
+  Astra's core comparison also found open A4 sheet and C7 Settings
+  differences (source rows/height and search/swatches/Site logins).
+  API 33 probe `android-conditional-upload-20261120-000434` received
+  `abc`, preserved the already-present `artwork.zip`, left staging
+  empty, and removed only the probe and its reverse. This is transport
+  evidence, not proof of atomicity or a C4 UI pass.
+  The fresh-intermediates rebuild repeated that probe successfully
+  (`android-conditional-upload-20261120-000904`). A separate Windows
+  rclone 1.76.0 wire experiment passed `_config.UploadHeaders` in the
+  multipart RC request's query: the fixture saw one `PutObject` to the
+  final key with `If-None-Match: *`, inserted a competing object before
+  commit, preserved its bytes, and returned 412 (reported by RC as
+  `PreconditionFailed`). This verifies header delivery and the conflict
+  path against a mock endpoint, not conformance of `rclone serve s3`,
+  arbitrary S3-compatible endpoints, or the Android upload UI.
+  Follow-up: the bounded S3 path is now wired into the isolated Host
+  probe, with a per-upload in-memory rclone remote and request-local
+  precondition, no bucket creation, and no legacy fallback. Fixture
+  tests 4/4 and Sites 213 passed (32 skipped); Host regression 10/10.
+  `--s3-upload-host-only` checks the competing writer at the fixture's
+  commit boundary. Default Hosts still refuse the command; no real
+  endpoint or C4 upload UI is approved yet.
+  The isolated API 33 run `android-s3-commit-race-20261120-001448`
+  passed: the new object contained `abc`, the independent writer won at
+  commit and kept its bytes, and the fixture observed exactly two
+  conditional PUTs (one per test file, no retry or staging object).
+  The probe and owned ADB reverse were removed. This is Host IPC plus
+  bundled rclone against the loopback S3 fixture, not C4 UI acceptance.
+  The API 33 source-only run (`android-c4-media-source-20261120-002301`)
+  published an exact MediaStore Downloads row and independently matched
+  its 34-byte file's SHA-256 (`858525f55a90bdc7325cbcb7a5cc6c03bd7c1440f32f100305a0bc25ac9d6ec1`).
+  It removed the exact row and probe. This does not verify upload UI.
+  A4's five source rows now render in order; exact UI hierarchy confirmed
+  unfinished torrent, TorBox and list import are disabled, From a site is
+  available, and the existing browser catcher remains in overflow. The
+  `android-core-a4-c7-20261120-002555` A4 pair is the no-clipboard/idle state,
+  not the populated reference state. C7 adds real category search, four
+  preview swatches, a compact notification row, and a Site logins link
+  to Remote Files (not a separate browser-credential store). Final C7
+  interaction checks passed in
+  `android-core-a4-c7-v2-20261120-002905` (`--verify-a4-c7`), including
+  filtering to Catching links and resetting the installed probe after
+  capture. The pairs show A4 without clipboard or active downloads and
+  reveal remaining C7 spacing/icon/copy differences; not visual approval.
+  The probe-only C4 MediaStore flow passed `--s3-upload-ui` on API 33
+  (`android-c4-upload-ui-20261120-003402`): selected the synthetic file from
+  This phone, Cancel issued no PUT, Confirm sent one conditional PUT with
+  the exact 34 source bytes, and the remote listing showed the new file.
+  The exact MediaStore row, probe package and owned ADB reverse were removed.
+  This verifies the loopback interaction, not production upload or visual
+  sign-off. The separate Host test covers the competing-writer race.
+  Astra's follow-up held all-screen visual acceptance. C4 fixes share one
+  phone-folder navigation path that clears selection, use a checked blue
+  selected row, show the full filename in confirmation, and serialize the
+  synthetic MediaStore operations. The API 33 rerun
+  `android-c4-review-fix-20261120-005839` verified both Back actions
+  clear the nested selection, duplicate create is refused, the full
+  filename is present in confirmation, Cancel sends no PUT, Confirm
+  uploads the exact bytes, and the owned row and probe are removed.
+  New API 33 evidence: `android-c1-c2-20261120-005257` (empty Main queue
+  and no-schedule editor) and `android-a2-active-20261120-005316` (live
+  progress and hash-matched download, exact file removed afterward).
+  `android-a5-validation-20261120-010044` verifies an invalid address remains
+  in A5 and cannot be submitted; A4 source order and C7 search also passed
+  on that run. These are functional checks, not visual sign-off.
+  `android-b4-b5-20261120-010345` verified the built-in browser's
+  eight-link fixture list and two selected rows without submitting a job.
+  Its `b5-pair.png` was mislabeled: it shows selected page links (B4),
+  whereas the approved B5 is Downloads-list multiselect with overflow.
+  Astra rechecked the C4 code and captures and passed the isolated upload
+  probe only; C1, C2 and A2 remain partial, and global acceptance is open.
+  `android-c1-disposable-20261120-011021` adds a stopped Night queue beside
+  Main and opens that disposable queue's no-schedule editor. Running C1,
+  configured C2, C5 and C6 were not exercised.
+  `android-b4-search-20261120-011210` verifies B4's header search narrows
+  eight fixture links to one and restores all eight on close. The selected
+  page-link screenshot is deliberately unpaired; B5 remains open.
+  `android-host-local-20261120-011334` captures unpaired Host settings
+  and the blank pairing form with Connect disabled; no connection
+  was attempted. These are supplemental to C6's remote Downloads reference.
+  `android-b2-b3-caught-20261120-011424` captures the caught fixture file
+  with and without a synthetic sign-in cookie. No download was submitted.
+  The comparison exposed a taller B2 sheet and the missing compact B3
+  variant. `android-b2-b4-refined-20261120-011939` recaptured the B2
+  icon/destination chrome and B4 rounded list; B2/B3 caught checks and
+  B4 search passed again. Visual acceptance is still open.
+  `android-b3-compact-20261120-012541` shows the compact local signed-in
+  sheet with an inline Download button and the cookie-use/resume notice;
+  no job was submitted. Astra passed the B2/B3 dispatch and consent code
+  review but held B2 visual parity (destination, queue, Wi-Fi, More options)
+  and noted B3 button width and sheet height still differ. Paired consent
+  and the full form were not changed.
+  `android-c5-c6-paired-20261120-013001` paired a disposable loopback
+  Inbound Server, verified the remote payload SHA-256 in Host storage,
+  captured the remote destination banner and row, and captured both C5
+  selections. C6 still needs the mixed list and live graph for visual review.
+  `android-b6-only-20261120-013529` captured the failed row, Details and
+  expired-link sheet after a fixture HTTP 410. Refreshing the existing task
+  with the replacement URL completed with the expected SHA-256; only the
+  exact verified output was removed. This was a zero-byte failure, not
+  partial-resume evidence. Astra visual review remains open.
+  `android-b2-options-20261120-013706` verifies that More options reveals
+  and hides the existing connection/timing controls without submitting.
+  It also recaptured compact B3 with the shorter cookie notice and B4 with
+  file-type icons. B2's destination and conditional queue choices remain open.
+  On resume, the interrupted B6 probe and reverse were removed after APK
+  hash and shared Download baseline checks. The revised UI then passed:
+  `android-b6-styled-20261120-014313` verified same-job refresh and hash
+  match; `android-c5-handle-20261120-014440` captured both Host selections,
+  reverified the one-row remote download, and removed its owned reverse.
+  These are not Astra visual sign-off.
+  Astra passed the C5 handle/selection and B6 layout/action-order checks only.
+  B2's remote destination picker is limited to a Host that offers folder
+  browsing. Astra found a stale-folder race and a dismissal lifetime gap;
+  navigation now serializes, Save uses the displayed completed listing,
+  and cancellation prevents fallback or applying a late result. Mobile
+  549/549 including the cancellation regression; parity tooling 36/36.
+  Device walkthrough and Astra recheck of the picker remain open.
 
 - Android 0.0.8 (version code 8) published as an Android-only prerelease from
   `577c442245b2dd37a09cdb53aff37fe5a63971dd`, with Remote Files and bundled rclone.

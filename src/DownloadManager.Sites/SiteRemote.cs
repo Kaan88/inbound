@@ -138,6 +138,42 @@ public static class SiteRemote
     public static string RemoteName(SiteRecord site) => "site-" + site.Id;
 
     /// <summary>
+    /// Uses an operation-scoped remote so another session cannot reconfigure an upload's destination
+    /// while its body is in flight. The caller is responsible for confirming endpoint compatibility.
+    /// </summary>
+    public static async Task CreateS3FileAsync(SiteRecord site, RcloneClient client, string folder, string name,
+        Stream content, CancellationToken cancellationToken)
+    {
+        if (site.Kind != SiteKinds.S3 || folder is "" or "/" || SitePaths.Normalize(folder) != folder
+            || SitePaths.NameProblem(name) is not null || name.Contains('\\'))
+            throw new ArgumentException("An S3 bucket and valid object name are required.");
+        var isolated = site with { Id = Guid.NewGuid().ToString("N") };
+        var remote = RemoteName(isolated);
+        var fs = S3(isolated, client);
+        fs.Remove("type");
+        fs.Remove("_root");
+        fs["no_check_bucket"] = "true"; // Never create a bucket as a side effect of a confirmed object upload.
+        try
+        {
+            await client.CallAsync("config/create", new JsonObject
+            {
+                ["name"] = remote, ["type"] = "s3", ["parameters"] = fs,
+                ["opt"] = new JsonObject { ["nonInteractive"] = true, ["noObscure"] = true }
+            }, cancellationToken).ConfigureAwait(false);
+            await client.CreateS3FileAsync(remote, folder, name, content, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try
+            {
+                await client.CallAsync("config/delete", new JsonObject { ["name"] = remote }, cleanup.Token).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is RcloneCallException or RcloneUnavailableException or OperationCanceledException) { }
+        }
+    }
+
+    /// <summary>
     /// SITES.7: the site as a named in-memory remote (<c>config/create</c>), which rclone's file serving and
     /// <c>operations/uploadfile</c> need. A sign-in site already is one; another kind is made (again) from its fs object,
     /// whose secrets are already obscured or registered. Returns the remote's name.

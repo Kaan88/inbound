@@ -10,7 +10,7 @@ namespace Inbound.App;
 
 /// <summary>
 /// The Add sheet (A4): a modal bottom sheet. It offers the link on the clipboard (only offered, never added by itself) and the way to add
-/// one or several links. Torrents, sites, TorBox and list import are not built, so they are not listed. Motion: 400 ms emphasized (theme).
+/// one or several links. Unavailable sources stay visible in the approved order without opening unfinished flows.
 /// </summary>
 [Register("app.inbound.android.AddSheet")]
 public sealed class AddSheet : BottomSheetDialogFragment
@@ -29,11 +29,48 @@ public sealed class AddSheet : BottomSheetDialogFragment
         _card = v.FindViewById<View>(Resource.Id.clip_card);
         _text = v.FindViewById<TextView>(Resource.Id.clip_text);
         v.FindViewById<View>(Resource.Id.entry_link)!.Click += (_, _) => Go(null);
-        v.FindViewById<View>(Resource.Id.entry_browser)!.Click += (_, _) => { var activity = Activity as MainActivity; Dismiss(); activity?.OpenBrowser(); };
+        v.FindViewById<View>(Resource.Id.entry_browser)!.Click += (_, _) =>
+        {
+            if (Activity is not MainActivity activity) return;
+            var menu = new PopupMenu(activity, v.FindViewById<View>(Resource.Id.entry_browser)!);
+            menu.Menu!.Add("Browse and catch a download");
+            menu.MenuItemClick += (_, _) => { Dismiss(); activity.OpenBrowser(); };
+            menu.Show();
+        };
+        var rows = v.FindViewById<LinearLayout>(Resource.Id.add_source_rows)!;
+        Source(Resource.Drawable.ic_add_source_torrent, "Torrent file or magnet", "Choose which files to fetch");
+        Source(Resource.Drawable.ic_add_source_cloud, "From a site", "Browse SFTP, WebDAV or cloud storage",
+            Activity is MainActivity host && host.HasRemoteFilesSource ? () => { Dismiss(); host.OpenRemoteFilesSource(); } : null);
+        Source(Resource.Drawable.ic_flow_bolt, "TorBox", "Send a link or torrent to your TorBox account");
+        Source(Resource.Drawable.ic_add_source_import, "Import a list", "A list exported from any Inbound");
         v.FindViewById<View>(Resource.Id.clip_use)!.Click += (_, _) => Go(_link);
         // The clipboard can only be read while this window has the focus (Android 10 and later), so it is read when the focus arrives.
         v.ViewTreeObserver!.WindowFocusChange += (_, e) => { if (e.HasFocus) ReadClipboard(); };
         return v;
+
+        void Source(int icon, string label, string summary, Action? open = null)
+        {
+            var row = inflater.Inflate(Resource.Layout.add_source_row, rows, false)!;
+            row.FindViewById<ImageView>(Resource.Id.add_source_icon)!.SetImageResource(icon);
+            row.FindViewById<TextView>(Resource.Id.add_source_title)!.Text = label;
+            row.FindViewById<TextView>(Resource.Id.add_source_summary)!.Text = summary;
+            row.ContentDescription = open is null ? $"{label}. {summary}. Not available." : $"{label}. {summary}.";
+            row.Enabled = open is not null;
+            row.Focusable = open is not null;
+            if (open is not null) row.Click += (_, _) => open();
+            else
+            {
+                row.FindViewById<View>(Resource.Id.add_source_chevron)!.Visibility = ViewStates.Gone;
+                row.FindViewById<View>(Resource.Id.add_source_unavailable)!.Visibility = ViewStates.Visible;
+            }
+            rows.AddView(row);
+        }
+    }
+
+    public override void OnStart()
+    {
+        base.OnStart();
+        Dialog?.Window?.SetDimAmount(0.62f);
     }
 
     private void ReadClipboard()

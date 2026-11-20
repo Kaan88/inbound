@@ -209,7 +209,7 @@ public sealed class HostFiguresTests
         var desktop = new HostEntry { Id = "d", Name = "Desktop PC", Address = "http://desk:8080/", HostKind = HostKinds.Windows };
         Assert.Equal("Windows · 5 active · 32.0 MB/s", HostWords.WithFigures(desktop, new HostFigures(5, 0, 32_000_000), now));
         var server = new HostEntry { Id = "s", Name = "Home server", Address = "http://home:8080/", HostKind = HostKinds.Server, LastSeenAt = now };
-        Assert.Equal("Server · 12 queued", HostWords.WithFigures(server, new HostFigures(0, 12, 0), now));
+        Assert.Equal("Server · 12 queued · last seen now", HostWords.WithFigures(server, new HostFigures(0, 12, 0), now));
         Assert.Equal("Server · last seen now · not reached now", HostWords.WithFigures(server, null, now));
         Assert.Equal("2 active · 14.6 MB/s", HostWords.WithFigures(new HostEntry(), new HostFigures(2, 0, 14_600_000), now));
     }

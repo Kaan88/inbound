@@ -14,7 +14,7 @@ using Google.Android.Material.ProgressIndicator;
 namespace Inbound.App.Screens;
 
 /// <summary>The Downloads screen (A1 to A3, and the selection of B5): search, summary card, state chips, the list and the selection bar.</summary>
-internal sealed class DownloadsScreen
+internal sealed partial class DownloadsScreen
 {
     private readonly MainActivity _activity;
     private readonly DownloadsModel _model;
@@ -35,10 +35,11 @@ internal sealed class DownloadsScreen
     private bool _toggleIsPause = true;
     private long _rateShownAt;
 
-    public DownloadsScreen(MainActivity activity, View page, DownloadsModel model)
+    public DownloadsScreen(MainActivity activity, View page, DownloadsModel model, Bundle? selectionDraft)
     {
         _activity = activity;
         _model = model;
+        _selectionRestore = selectionDraft;
         _page = page;
         _list = new DownloadList(model, a => activity.RunOnUiThread(a));
         _recycler = page.FindViewById<RecyclerView>(Resource.Id.list)!;
@@ -65,7 +66,12 @@ internal sealed class DownloadsScreen
         _list.SummaryChanged += OnSummary;
         _list.SelectionChanged += OnSelection;
         _list.SelectedRowsChanged += OnSelectedRowsChanged;
-        _model.FirstSnapshotShown += () => { _adapter.Live(); OnSummary(); };
+        _model.FirstSnapshotShown += () =>
+        {
+            _adapter.Live();
+            OnSummary();
+            _page.Post(RestoreSelection);
+        };
         OnSummary();
         OnSelection();
 
@@ -96,7 +102,11 @@ internal sealed class DownloadsScreen
 
     public bool Searching => (_search.Text?.Length ?? 0) > 0 || _search.HasFocus;
 
-    public void EndSelection() => _list.ClearSelection();
+    public void EndSelection()
+    {
+        _selectionRestore = null;
+        _list.ClearSelection();
+    }
 
     public void CloseSearch()
     {
@@ -159,8 +169,11 @@ internal sealed class DownloadsScreen
         var sel = _list.Selecting;
         _searchBar.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
         _selectionBar.Visibility = sel ? ViewStates.Visible : ViewStates.Gone;
+        _activity.SetDownloadsSelectionChrome(sel);
+        if (!sel) CloseSelectionWindows();
         _page.FindViewById<View>(Resource.Id.summary)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
         _page.FindViewById<View>(Resource.Id.chips_scroll)!.Visibility = sel ? ViewStates.Gone : ViewStates.Visible;
+        _refreshMenuItems?.Invoke();
         _selTitle.Text = _list.SelectionTitle;
         _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
@@ -171,6 +184,7 @@ internal sealed class DownloadsScreen
     // A selected row changed state: the bar's Pause and Resume follow (finding 14). The rows redraw themselves.
     private void OnSelectedRowsChanged()
     {
+        _refreshMenuItems?.Invoke();
         _selResume.Visibility = _list.CanResumeSelection ? ViewStates.Visible : ViewStates.Gone;
         _selPause.Visibility = _list.CanPauseSelection ? ViewStates.Visible : ViewStates.Gone;
     }
@@ -184,6 +198,7 @@ internal sealed class DownloadsScreen
     private void RunOnSelection(Func<JobRow, Task<CommandResult>> command, Func<JobRow, bool> applies)
     {
         var rows = _list.SelectedRows.Where(applies).ToList();
+        if (rows.Count == 0) return;
         _list.ClearSelection();
         _ = Task.Run(async () =>
         {
@@ -208,28 +223,6 @@ internal sealed class DownloadsScreen
                 if (!r.Ok) _activity.ShowMessage(r.Error ?? "The download was not removed.");
             });
         });
-    }
-
-    private void ShowSelectionMenu(View anchor)
-    {
-        var menu = new PopupMenu(_activity, anchor);
-        var items = menu.Menu!;
-        items.Add(0, 1, 0, "Select all");
-        items.Add(0, 2, 1, "Download again");
-        items.Add(0, 3, 2, "Copy address");
-        menu.MenuItemClick += (_, e) =>
-        {
-            switch (e.Item!.ItemId)
-            {
-                case 1: _list.SelectAll(); break;
-                case 2: RunOnSelection(r => _model.RedownloadAsync(r.Id), r => r.Group is RowGroup.Finished or RowGroup.Failed); break;
-                case 3:
-                    var text = string.Join("\n", _list.SelectedRows.Where(r => !r.Job.AddressHidden).Select(r => r.Job.Url));
-                    if (text.Length > 0) Outside.CopyText(_activity, "Address", text); else _activity.ShowMessage("These downloads keep their address private.");
-                    break;
-            }
-        };
-        menu.Show();
     }
 
     private void OnRowAction(JobRow row)
@@ -392,10 +385,11 @@ internal sealed class DownloadsScreen
             var selected = _s._list.IsSelected(row);
             var card = (Google.Android.Material.Card.MaterialCardView)Card;
             card.SetCardBackgroundColor(Motion.Attr(ctx, selected ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurfaceContainer));
+            _tile.SetBackgroundResource(selected ? Resource.Drawable.bg_circle_primary : Resource.Drawable.bg_tile);
             if (selected)
             {
                 _icon.SetImageResource(Resource.Drawable.ic_check);
-                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorPrimary)));
+                _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnPrimary)));
             }
             else
             {
@@ -404,7 +398,7 @@ internal sealed class DownloadsScreen
                 _icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(FileIcons.Color(ctx, info)));
             }
 
-            ViewCompat.SetStateDescription(Card, selected ? "Selected" : null);
+            Card.Selected = selected;
             Card.ContentDescription = row.Name + ". " + row.Subtitle;
             BindAction(row, ctx);
 
@@ -427,11 +421,11 @@ internal sealed class DownloadsScreen
                 RowAction.ShowInFolder when _s._activity.Capabilities.CanShowInFolder => (Resource.Drawable.ic_folder, "Show in folder"),
                 _ => (0, ""),
             };
-            _action.Visibility = icon == 0 ? ViewStates.Invisible : ViewStates.Visible;
+            _action.Visibility = _s.Selecting ? ViewStates.Gone : icon == 0 ? ViewStates.Invisible : ViewStates.Visible;
             if (icon == 0) return;
             _action.SetImageResource(icon);
             _action.ContentDescription = text + " " + row.Name;
-            _action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, _s._list.IsSelected(row) ? Resource.Attribute.colorSurfaceContainerHighest : Resource.Attribute.colorSecondaryContainer)));
+            _action.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorSecondaryContainer)));
             _action.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(Motion.Attr(ctx, Resource.Attribute.colorOnSecondaryContainer)));
         }
     }

@@ -1,14 +1,43 @@
 # Roadmap and executable work
 
+**Android parity resumed (2026-11-20).** The existing worktree is on branch `android-remote-files-parity` based on `66270193`. The owner requested Luna or Terra for routine work and Astra for independent source and visual approval. Terra handled the first visual fixes because Luna was unavailable in this session. ANDROID.9 and production Remote Files upload are separate feature work. See the [parity handoff](docs/plans/android-parity-handoff.md) for open states.
+
+The owner approved “Notify when the queue finishes” for C2 on 2026-11-20. The private signed snapshot has been delivered. Full Android parity approval is open.
+
+A7 ongoing notification and C3 SFTP unavailable-space passed scoped review.
+The expanded A7 completion/network notices, full C3 location and transfer
+states, and other Android parity work remain open. See PROGRESS “Scoped API 33
+checks”.
+
+On 2026-11-20 the owner accepted the verified isolated S3 upload flow for C4 screen parity. Production upload remains a separate feature. This closes the upload-flow scope decision; the remaining C4 screen comparisons still require Astra review.
+
+Android parity resumed on 2026-11-20. C2 retains the owner-approved unmetered network condition. B5 source review passed for selection changes while the menu is open. Full-screen acceptance remains open.
+
 ## Current Android roadmap
+
+**UI acceptance gate:** Every UI milestone must match its approved mockups.
+Astra must sign off on the code and side-by-side comparisons; only the owner
+can approve departures from the designs.
 
 - **Current release:** [Android 0.0.8 prerelease](https://github.com/Kaan88/inbound/releases/tag/android-v0.0.8)
   ships Remote Files with bundled rclone. The public APK and Android update
   feed were verified; desktop latest remains v0.9.0.
 - **Done:** ANDROID.0–4 (design, engine, phone host and core screens), .7
   (host pairing), .8 (Remote Files), and .10 (signing and updates).
-- **Next:** ANDROID.9 — design the Android flows for TorBox, torrents and
-  archives. Start by scoping the cached TorBox magnet flow.
+- **Current work:** ANDROID.8 C3/C4 parity and the all-screen 0.0.9 visual gate.
+  API 33 captures now include both C5 Host selections, a one-row C6 remote
+  Downloads screen, and B6 refresh from a fixture HTTP 410 through a
+  hash-matched completion. These are scoped flow checks, not visual
+  sign-off. The 0.0.8 release did not match the approved screens; require
+  Astra review of code and side-by-side captures for every implemented screen.
+  B2 paired folder selection passed scoped source review and the API 33
+  payload/decoy check. B2 visual acceptance remains open.
+  The separate B6 partial-expiry capture lane is host-tested only; its
+  API 33 run and visual review remain open.
+- **0.0.9 release gate:** [Astra reviews every implemented Android screen](docs/plans/android-mockup-acceptance.md)
+  against the approved mockups and reviews the associated code; fix and
+  recheck findings before accepting a final-quality candidate.
+- **Paused:** ANDROID.9 (TorBox, torrents and archives) until the parity pass.
 - **Later:** ANDROID.11 (web UI app recommendation) and .12 (Edge for Android).
   ANDROID.13 accessibility polish is optional. ANDROID.5/.6 are partial;
   remaining acceptance is deferred under ANDROID.14 and is not a release gate.
@@ -775,7 +804,7 @@ whether rclone is a Setup component that can be unticked.
   connection failed"): the TLS JNI callback was not exported; fixed in the csproj, checked on the S24. Owner's answers (2026-11-17): pairing: "keep it as password, make a general note about this. not sure pair has any
   use at all." Self-signed HTTPS: "Pin at pairing". Plain http: "Keep the tick". Host switcher: "One-shot figures" (each host
   asked once when the sheet opens). Kind label: "Server" (the lead's call; the server reports only `server`).
-- [x] ANDROID.8 Remote Files. Bundle rclone in the standard Android APK
+- [ ] ANDROID.8 Remote Files. Bundle rclone in the standard Android APK
   (owner approved); expose the feature as **Remote Files** for This phone and
   for capable paired hosts. Keep internal `Sites` identifiers and `sites.*`
   protocol names unchanged.

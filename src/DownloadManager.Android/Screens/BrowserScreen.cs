@@ -4,7 +4,6 @@ using Android.Views;
 using Android.Webkit;
 using Android.Widget;
 using DownloadManager.Mobile.Links;
-using Google.Android.Material.Button;
 
 namespace Inbound.App.Screens;
 
@@ -16,6 +15,9 @@ internal sealed class BrowserScreen : IDisposable
     private readonly WebView _web;
     private readonly EditText _address;
     private readonly FrameLayout _body;
+    private readonly bool _refresh;
+    private string? _verifiedSecurePage;
+    private PopupMenu? _options;
     private readonly BrowserRequests _requests = new();
     private CancellationTokenSource? _selectionLifetime;
     private readonly List<View> _chrome = [];
@@ -27,7 +29,7 @@ internal sealed class BrowserScreen : IDisposable
 
     public BrowserScreen(MainActivity activity, string? initial, Action<CapturedDownload> caught, bool refresh = false)
     {
-        _activity = activity; _caught = caught;
+        _activity = activity; _caught = caught; _refresh = refresh;
         var root = new LinearLayout(activity) { Orientation = Orientation.Vertical };
         root.SetBackgroundColor(new Color(Motion.Attr(activity, Resource.Attribute.colorSurface)));
         Root = root;
@@ -54,14 +56,26 @@ internal sealed class BrowserScreen : IDisposable
         _address.SetSingleLine(true);
         _address.SetSelectAllOnFocus(true);
         top.AddView(_address, new LinearLayout.LayoutParams(0, Motion.Dp(activity, 48), 1));
-        top.AddView(Button("Go", Navigate));
+        var more = new ImageButton(activity) { ContentDescription = "Browser options" };
+        more.SetImageResource(Resource.Drawable.ic_more);
+        more.SetBackgroundColor(Color.Transparent);
+        more.ImageTintList = close.ImageTintList;
+        more.Click += (_, _) => ShowOptions(more);
+        top.AddView(more, new LinearLayout.LayoutParams(Motion.Dp(activity, 48), Motion.Dp(activity, 48)));
+        _address.TextChanged += (_, _) => DrawAddressLock();
         _address.EditorAction += (_, e) => { if (e.ActionId == Android.Views.InputMethods.ImeAction.Go) { Navigate(); e.Handled = true; } };
         root.AddView(top); _chrome.Add(top);
         InsetsListener.Pad(top, top: true, bottom: false);
-        var note = new TextView(activity) { Text = "Sign in here to catch a file. Some sites require your regular browser.", TextSize = 12 };
-        if (refresh) note.Text = "Catch a replacement link for the existing download. The Host checks whether it can resume.";
-        note.SetPadding(Motion.Dp(activity, 16), 0, Motion.Dp(activity, 16), Motion.Dp(activity, 8));
-        root.AddView(note); _chrome.Add(note);
+        if (refresh)
+        {
+            var note = new TextView(activity)
+            {
+                Text = "Catch a replacement link for the existing download. The Host checks whether it can resume.",
+                TextSize = 12
+            };
+            note.SetPadding(Motion.Dp(activity, 16), 0, Motion.Dp(activity, 16), Motion.Dp(activity, 8));
+            root.AddView(note); _chrome.Add(note);
+        }
         _body = new FrameLayout(activity);
         root.AddView(_body, new LinearLayout.LayoutParams(-1, 0, 1));
         _web = new WebView(activity) { SaveEnabled = false };
@@ -79,21 +93,10 @@ internal sealed class BrowserScreen : IDisposable
         _web.SetWebViewClient(new Client(this));
         _web.SetWebChromeClient(new WebChromeClient()); // default denies web permission/geolocation requests
         _web.SetDownloadListener(new CatchListener(this));
-        _body.AddView(_web, new FrameLayout.LayoutParams(-1, -1));
-        var bottom = new LinearLayout(activity) { Orientation = Orientation.Horizontal };
-        bottom.AddView(Button("Back", () => { if (!Back()) activity.CloseRowPage(Root); }));
-        if (!refresh) bottom.AddView(Button("Links on page", Collect));
-        bottom.AddView(Button("Open outside", OpenOutside));
-        for (var i = 0; i < bottom.ChildCount; i++)
-        {
-            var button = (MaterialButton)bottom.GetChildAt(i)!;
-            button.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-            button.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Color.Transparent);
-            button.SetTextColor(new Color(Motion.Attr(activity, Resource.Attribute.colorPrimary)));
-            button.SetPadding(0, 0, 0, 0);
-        }
-        root.AddView(bottom); _chrome.Add(bottom);
-        InsetsListener.Pad(bottom, top: false, bottom: true);
+        var viewport = new FrameLayout(activity);
+        viewport.AddView(_web, new FrameLayout.LayoutParams(-1, -1));
+        _body.AddView(viewport, new FrameLayout.LayoutParams(-1, -1));
+        InsetsListener.Pad(viewport, top: false, bottom: true);
         _address.Text = initial ?? "";
         if (initial is not null) Navigate();
     }
@@ -110,11 +113,39 @@ internal sealed class BrowserScreen : IDisposable
     public void Pause() => _web.OnPause();
     public void Resume() => _web.OnResume();
 
-    private MaterialButton Button(string text, Action action)
+    private void ShowOptions(View anchor)
     {
-        var button = new MaterialButton(_activity) { Text = text };
-        button.Click += (_, _) => { if (!_disposed) action(); };
-        return button;
+        if (_disposed || _options is not null) return;
+        var menu = new PopupMenu(_activity, anchor);
+        _options = menu;
+        menu.Menu!.Add(0, 1, 0, "Go");
+        if (!_refresh) menu.Menu.Add(0, 2, 1, "Links on page");
+        menu.Menu.Add(0, 3, 2, "Open outside");
+        menu.MenuItemClick += (_, e) =>
+        {
+            if (_disposed) return;
+            switch (e.Item?.ItemId)
+            {
+                case 1: Navigate(); break;
+                case 2: Collect(); break;
+                case 3: OpenOutside(); break;
+            }
+        };
+        menu.DismissEvent += (_, _) => { if (ReferenceEquals(_options, menu)) _options = null; };
+        menu.Show();
+    }
+
+    private void DrawAddressLock()
+    {
+        var secure = _verifiedSecurePage is not null && _address.Text == _verifiedSecurePage;
+        _address.SetCompoundDrawablesRelativeWithIntrinsicBounds(secure ? Resource.Drawable.ic_browser_lock : 0, 0, 0, 0);
+        _address.CompoundDrawablePadding = Motion.Dp(_activity, 10);
+    }
+
+    private void ClearAddressLock()
+    {
+        _verifiedSecurePage = null;
+        DrawAddressLock();
     }
     internal static string? Address(string? value)
     {
@@ -124,6 +155,7 @@ internal sealed class BrowserScreen : IDisposable
     private void Navigate()
     {
         if (Address(_address.Text?.Trim()) is not { } url) { _activity.ShowMessage("Enter a complete HTTP or HTTPS address."); return; }
+        ClearAddressLock();
         CloseLinks(); _web.LoadUrl(url);
         ((Android.Views.InputMethods.InputMethodManager)_activity.GetSystemService(Context.InputMethodService)!).HideSoftInputFromWindow(_address.WindowToken, 0);
         _web.RequestFocus();
@@ -137,6 +169,7 @@ internal sealed class BrowserScreen : IDisposable
     private void Started(string? url)
     {
         _navigation++; CloseLinks();
+        ClearAddressLock();
         if (Address(url) is { } valid) _address.Text = valid;
     }
     private void Committed(string? url)
@@ -144,7 +177,10 @@ internal sealed class BrowserScreen : IDisposable
         _navigation++; CloseLinks();
         _page = Address(url);
         _requests.CommitPage(_page);
+        _verifiedSecurePage = Uri.TryCreate(_page, UriKind.Absolute, out var uri) &&
+            uri.Scheme == Uri.UriSchemeHttps && _web.Url == _page && _web.Certificate is not null ? _page : null;
         if (_page is not null) _address.Text = _page;
+        DrawAddressLock();
     }
     private CapturedDownload Capture(string url, string? name = null, string? type = null, long? size = null, string? ua = null, bool fromDom = false, string? sourcePage = null)
     {
@@ -213,6 +249,7 @@ internal sealed class BrowserScreen : IDisposable
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
+        _options?.Dismiss();
         CloseLinks(); _batchCaptures.Clear(); _requests.CommitPage(null);
         _web.StopLoading(); _web.SetDownloadListener(null); _web.SetWebViewClient(new WebViewClient());
         _body.RemoveView(_web); _web.Destroy(); _web.Dispose();
@@ -227,7 +264,7 @@ internal sealed class BrowserScreen : IDisposable
         public override void OnPageStarted(WebView? view, string? url, Bitmap? favicon) => owner.Started(url);
         public override void OnPageCommitVisible(WebView? view, string? url) => owner.Committed(url);
         public override void OnReceivedSslError(WebView? view, SslErrorHandler? handler, Android.Net.Http.SslError? error)
-        { handler?.Cancel(); owner._activity.ShowMessage("The site’s secure connection could not be verified."); }
+        { handler?.Cancel(); owner.ClearAddressLock(); owner._activity.ShowMessage("The site’s secure connection could not be verified."); }
         public override WebResourceResponse? ShouldInterceptRequest(WebView? view, IWebResourceRequest? request)
         {
             if (Address(request?.Url?.ToString()) is not { } url)
@@ -252,6 +289,9 @@ internal sealed class BrowserScreen : IDisposable
         (() => { const out=[]; let n=0; for(const a of document.querySelectorAll('a[href]')) {
           if(out.length>=1000) break; const u=a.href; if(!/^https?:\/\//i.test(u)||u.length>8192) continue;
           const name=(a.textContent||'').trim().slice(0,200); n+=u.length+name.length;
-          if(n>262144) break; out.push({url:u,name:name}); } return JSON.stringify(out); })()
+          if(n>262144) break;
+          const raw=a.getAttribute('data-size-bytes');
+          const size=raw && /^\d{1,16}$/.test(raw) ? Number(raw) : null;
+          out.push({url:u,name:name,bytes:Number.isSafeInteger(size) ? size : null}); } return JSON.stringify(out); })()
         """;
 }

@@ -1,5 +1,7 @@
 using Android.Text;
+using Android.Content;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using AndroidX.RecyclerView.Widget;
 using DownloadManager.Mobile.Links;
@@ -15,6 +17,7 @@ internal sealed class PageLinksScreen : IDisposable
     private readonly Func<IReadOnlyList<PageLink>, Task<bool>> _download;
     private readonly Action _close;
     private readonly EditText _search;
+    private readonly View _searchToggle;
     private readonly CheckBox _shown;
     private readonly TextView _summary;
     private readonly MaterialButton _submit;
@@ -31,6 +34,8 @@ internal sealed class PageLinksScreen : IDisposable
         InsetsListener.Pad(Root.FindViewById<View>(Resource.Id.page_links_top)!, top: true, bottom: false);
         InsetsListener.Pad(Root.FindViewById<View>(Resource.Id.page_links_bottom)!, top: false, bottom: true);
         _search = Root.FindViewById<EditText>(Resource.Id.page_links_search)!;
+        _searchToggle = Root.FindViewById<View>(Resource.Id.page_links_search_toggle)!;
+        _searchToggle.Click += ToggleSearch;
         _shown = Root.FindViewById<CheckBox>(Resource.Id.page_links_select_shown)!;
         _summary = Root.FindViewById<TextView>(Resource.Id.page_links_summary)!;
         _submit = Root.FindViewById<MaterialButton>(Resource.Id.page_links_download)!;
@@ -55,6 +60,26 @@ internal sealed class PageLinksScreen : IDisposable
         Refresh();
     }
     public View Root { get; }
+    private void ToggleSearch(object? sender, EventArgs e)
+    {
+        if (_disposed || _busy) return;
+        var keyboard = _activity.GetSystemService(Context.InputMethodService) as InputMethodManager;
+        if (_search.Visibility == ViewStates.Visible)
+        {
+            keyboard?.HideSoftInputFromWindow(_search.WindowToken, 0);
+            _search.Text = "";
+            _search.ClearFocus();
+            _search.Visibility = ViewStates.Gone;
+            _searchToggle.ContentDescription = "Search links";
+            return;
+        }
+        _search.Visibility = ViewStates.Visible;
+        _searchToggle.ContentDescription = "Close link search";
+        if (_search.RequestFocus()) _search.Post(() =>
+        {
+            if (!_disposed && _search.HasFocus) keyboard?.ShowSoftInput(_search, 0);
+        });
+    }
     private void OnClose(object? sender, EventArgs e) { if (!_busy && !_disposed) _close(); }
     private void OnSearch(object? sender, TextChangedEventArgs e) { if (!_disposed && !_busy) { _model.Query = _search.Text ?? ""; Refresh(); } }
     private void OnSelectShown(object? sender, CompoundButton.CheckedChangeEventArgs e)
@@ -77,17 +102,25 @@ internal sealed class PageLinksScreen : IDisposable
         var visible = _model.Visible; var selected = _model.Selected.Select(x => x.Url).ToHashSet(StringComparer.Ordinal);
         _shown.Enabled = !_busy && visible.Count > 0;
         _shown.Checked = visible.Count > 0 && visible.All(x => selected.Contains(x.Url));
-        _shown.Text = $"Select shown ({visible.Count})";
+        var groupSelected = _model.Kind != PageLinkKind.All && string.IsNullOrWhiteSpace(_model.Query);
+        _shown.Text = groupSelected ? $"All {visible.Count} {_model.Kind.ToString().ToLowerInvariant()}" : $"Select shown ({visible.Count})";
+        var groupSize = Root.FindViewById<TextView>(Resource.Id.page_links_group_size)!;
+        groupSize.Text = groupSelected && _shown.Checked && _model.VisibleBytes is long groupBytes
+            ? DownloadManager.Mobile.Fmt.Bytes(groupBytes) : "";
         _search.Enabled = !_busy;
         foreach (var pair in _chips) { pair.Value.Checked = pair.Key == _model.Kind; pair.Value.Enabled = !_busy; }
-        _summary.Text = $"{_model.SelectedCount} files";
+        _summary.Text = $"{_model.SelectedCount} {(_model.SelectedCount == 1 ? "file" : "files")}";
+        var selectedBytes = _model.SelectedBytes;
+        if (selectedBytes is long bytes) _summary.Text += " \u00b7 " + DownloadManager.Mobile.Fmt.Bytes(bytes);
+        _summary.ContentDescription = selectedBytes.HasValue ? _summary.Text + ", size reported by the page" : _summary.Text;
         _submit.Text = $"Download {_model.SelectedCount}"; _submit.Enabled = !_busy && _model.SelectedCount > 0; _submit.Alpha = _submit.Enabled ? 1f : .38f;
         Root.FindViewById<View>(Resource.Id.page_links_close)!.Enabled = !_busy;
-        _rows.Update(visible, selected); _rendering = false;
+        _rows.Update(_model.DisplayRows, selected); _rendering = false;
     }
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
+        _searchToggle.Click -= ToggleSearch;
         _search.TextChanged -= OnSearch; _shown.CheckedChange -= OnSelectShown; _submit.Click -= OnDownload;
         Root.FindViewById<View>(Resource.Id.page_links_close)!.Click -= OnClose;
         _list.SetAdapter(null); _rows.Detach(); _rows.Dispose();
@@ -122,8 +155,37 @@ internal sealed class PageLinksScreen : IDisposable
         private sealed class Holder : RecyclerView.ViewHolder
         {
             private readonly Rows _rows; private readonly CheckBox _check; private string? _url;
-            public Holder(View view, Rows rows) : base(view) { _rows = rows; _check = view.FindViewById<CheckBox>(Resource.Id.page_link_check)!; _check.Click += OnClick; }
-            public void Bind(PageLink link, bool selected, bool enabled) { _url = link.Url; _check.Text = Label(link); _check.Checked = selected; _check.Enabled = enabled; }
+            public Holder(View view, Rows rows) : base(view)
+            {
+                _rows = rows;
+                _check = view.FindViewById<CheckBox>(Resource.Id.page_link_check)!;
+                _check.Click += OnClick;
+            }
+            public void Bind(PageLink link, bool selected, bool enabled)
+            {
+                _url = link.Url;
+                var label = Label(link);
+                if (link.SizeBytes is long size)
+                {
+                    var text = new SpannableString(label + "\n" + DownloadManager.Mobile.Fmt.Bytes(size));
+                    text.SetSpan(new Android.Text.Style.RelativeSizeSpan(.8f), label.Length + 1, text.Length(), SpanTypes.ExclusiveExclusive);
+                    text.SetSpan(new Android.Text.Style.ForegroundColorSpan(new Android.Graphics.Color(
+                        Motion.Attr(ItemView.Context!, Resource.Attribute.colorOnSurfaceVariant))), label.Length + 1, text.Length(), SpanTypes.ExclusiveExclusive);
+                    _check.TextFormatted = text;
+                    _check.ContentDescription = text + ", size reported by the page";
+                }
+                else
+                {
+                    _check.Text = label;
+                    _check.ContentDescription = null;
+                }
+                _check.Checked = selected;
+                _check.Enabled = enabled;
+                var icon = FileIcons.For(DownloadManager.Mobile.FileKinds.Of(new Uri(link.Url).AbsolutePath));
+                var drawable = ItemView.Context!.GetDrawable(icon.Drawable)?.Mutate();
+                drawable?.SetTint(FileIcons.Color(ItemView.Context!, icon));
+                _check.SetCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null);
+            }
             public void Detach() => _check.Click -= OnClick;
             private void OnClick(object? sender, EventArgs e) { var owner = _rows._owner; if (owner._disposed || owner._busy || _url is null) return; owner._model.Toggle(_url); owner.Refresh(); }
         }

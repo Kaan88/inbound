@@ -80,17 +80,35 @@ internal sealed class QueueEditorScreen : IDisposable
         _content.AddView(_scheduleLabel);
         _times = new LinearLayout(activity) { Orientation = Orientation.Horizontal }; _content.AddView(_times, Margin(16));
         _startText = TimeTile("Start", false); _stopText = TimeTile("Stop", true);
-        _daysRow = new LinearLayout(activity) { Orientation = Orientation.Horizontal }; _content.AddView(_daysRow, Margin(16));
+        _daysRow = new LinearLayout(activity) { Orientation = Orientation.Horizontal };
+        _daysRow.SetGravity(GravityFlags.CenterVertical);
+        _daysRow.SetMinimumHeight(Motion.Dp(activity, 48));
+        _content.AddView(_daysRow, Margin(12));
         _days = DayNames.Select((day, i) =>
         {
-            var b = new MaterialButton(activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = day[..1], Checkable = true, ContentDescription = day, CornerRadius = Motion.Dp(activity, 24) };
+            var b = new MaterialButton(activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = day[..1], Checkable = true, ContentDescription = day, Id = DayResourceId(Array.IndexOf(DayNames, day)), CornerRadius = Motion.Dp(activity, 24) };
+            b.InsetTop = 0; b.InsetBottom = 0;
             b.SetMinWidth(0); b.SetMinimumWidth(0); b.SetPadding(0, 0, 0, 0);
             b.Click += (_, _) => { if (!_refreshing && !_busy && Selected is { } s && Supported(s)) { var set = Days(s); if (b.Checked) set.Add(day); else set.Remove(day); s.Days = ScheduleDays.Serialize(set); PaintDays(); } };
-            _daysRow.AddView(b, new LinearLayout.LayoutParams(0, Motion.Dp(activity, 48), 1) { MarginEnd = Motion.Dp(activity, 2) }); return b;
+            if (i > 0) _daysRow.AddView(new Space(activity), new LinearLayout.LayoutParams(0, 1, 1));
+            var diameter = Motion.Dp(activity, 44);
+            _daysRow.AddView(b, new LinearLayout.LayoutParams(diameter, diameter));
+            return b;
         }).ToArray();
+        _daysRow.LayoutChange += (_, _) =>
+        {
+            // Keep equal gaps and fit all seven buttons, even on a narrow screen.
+            int size = Math.Min(Motion.Dp(activity, 44), _daysRow.Width / _days.Length);
+            if (size <= 0) return;
+            foreach (var day in _days)
+                if (day.LayoutParameters?.Width != size)
+                    day.LayoutParameters = new LinearLayout.LayoutParams(size, size);
+        };
         Section("Only when").Visibility = _conditions ? ViewStates.Visible : ViewStates.Gone;
         _unmetered = Condition("Unmetered network", "Wait on metered connections", Resource.Drawable.ic_flow_wifi, _draft.RequireUnmeteredNetwork == true, v => _draft.RequireUnmeteredNetwork = v);
-        _charging = Condition("Charging", "Wait until plugged in", Resource.Drawable.ic_flow_battery, _draft.RequireCharging == true, v => _draft.RequireCharging = v);
+        _unmetered.Id = Resource.Id.queue_editor_unmetered;
+        _charging = Condition("Charging", activity.Capabilities.IsRemote ? "Wait until plugged in" : "Waits until the phone is plugged in", Resource.Drawable.ic_flow_battery, _draft.RequireCharging == true, v => _draft.RequireCharging = v);
+        _charging.Id = Resource.Id.queue_editor_charging;
         _battery = Condition("Battery saver is off", "", Resource.Drawable.ic_flow_bolt, _draft.RequireBatterySaverOff == true, v => _draft.RequireBatterySaverOff = v);
         if (!_conditions) { ((View)_unmetered.Parent!.Parent!).Visibility = ViewStates.Gone; ((View)_charging.Parent!.Parent!).Visibility = ViewStates.Gone; ((View)_battery.Parent!.Parent!).Visibility = ViewStates.Gone; }
         Section("Limits");
@@ -155,7 +173,7 @@ internal sealed class QueueEditorScreen : IDisposable
     }
     private TextView Section(string text)
     {
-        var v = Text(text, 14, Resource.Attribute.colorPrimary); _content.AddView(v, Margin(20)); return v;
+        var v = Text(text, 14, Resource.Attribute.colorPrimary); _content.AddView(v, Margin(14)); return v;
     }
     private TextView TimeTile(string label, bool stop)
     {
@@ -163,7 +181,7 @@ internal sealed class QueueEditorScreen : IDisposable
         card.SetCardBackgroundColor(new Android.Graphics.Color(Motion.Attr(_activity, Resource.Attribute.colorSurfaceContainer)));
         var column = new LinearLayout(_activity) { Orientation = Orientation.Vertical }; var pad = Motion.Dp(_activity, 16); column.SetPadding(pad, pad, pad, pad);
         column.AddView(Text(label, 14, Resource.Attribute.colorOnSurfaceVariant));
-        var value = Text("", 36, Resource.Attribute.colorOnSurface); column.AddView(value); card.AddView(column);
+        var value = Text("", 46, Resource.Attribute.colorOnSurface); column.AddView(value); card.AddView(column);
         card.ContentDescription = label + " time"; card.Click += (_, _) => PickTime(stop);
         _times.AddView(card, new LinearLayout.LayoutParams(0, Motion.Dp(_activity, 110), 1) { MarginEnd = Motion.Dp(_activity, stop ? 0 : 12) });
         _valueRows.Add((value, card, label + " time"));
@@ -171,12 +189,23 @@ internal sealed class QueueEditorScreen : IDisposable
     }
     private MaterialSwitch Condition(string title, string subtitle, int icon, bool value, Action<bool> changed)
     {
-        var row = RowShell(title, subtitle, icon, out _, out var tail);
+        var row = RowShell(title, subtitle, icon, out var subtitleView, out var tail);
+        if (subtitle.Length == 0) subtitleView.Visibility = ViewStates.Gone;
         var control = new MaterialSwitch(_activity) { Checked = value, ContentDescription = title };
         control.CheckedChange += (_, e) => { if (!_refreshing && !_busy && CanEditSafely) changed(e.IsChecked); };
         control.ContentDescription = title + (subtitle.Length == 0 ? "" : ". " + subtitle);
         tail.AddView(control); _content.AddView(row); return control;
     }
+    private static int DayResourceId(int index) => index switch
+    {
+        0 => Resource.Id.queue_editor_day_mon,
+        1 => Resource.Id.queue_editor_day_tue,
+        2 => Resource.Id.queue_editor_day_wed,
+        3 => Resource.Id.queue_editor_day_thu,
+        4 => Resource.Id.queue_editor_day_fri,
+        5 => Resource.Id.queue_editor_day_sat,
+        _ => Resource.Id.queue_editor_day_sun
+    };
     private TextView Row(string title, int icon, Action click)
     {
         var row = RowShell(title, "", icon, out var value, out var tail);
@@ -185,7 +214,7 @@ internal sealed class QueueEditorScreen : IDisposable
     }
     private LinearLayout RowShell(string title, string subtitle, int icon, out TextView value, out LinearLayout tail)
     {
-        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal }; row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Motion.Dp(_activity, 72));
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal }; row.SetGravity(GravityFlags.CenterVertical); row.SetMinimumHeight(Motion.Dp(_activity, 68));
         var well = new FrameLayout(_activity); well.SetBackgroundResource(Resource.Drawable.bg_circle_dark);
         var image = new ImageView(_activity); image.SetImageResource(icon); var ip = new FrameLayout.LayoutParams(Motion.Dp(_activity, 22), Motion.Dp(_activity, 22), GravityFlags.Center); well.AddView(image, ip);
         row.AddView(well, new LinearLayout.LayoutParams(Motion.Dp(_activity, 40), Motion.Dp(_activity, 40)));
@@ -209,7 +238,8 @@ internal sealed class QueueEditorScreen : IDisposable
     private void Refresh()
     {
         if (_closed) return; _refreshing = true;
-        _title.Text = string.IsNullOrWhiteSpace(_draft.Name) ? "New queue" : _draft.Name;
+        _title.Text = string.IsNullOrWhiteSpace(_draft.Name) ? "New queue" :
+            _draft.Name.EndsWith(" queue", StringComparison.OrdinalIgnoreCase) || string.Equals(_draft.Name, "queue", StringComparison.OrdinalIgnoreCase) ? _draft.Name : _draft.Name + " queue";
         var s = Selected; _scheduleLabel.Text = s is null ? "Choose or add a schedule" : s.Name + (s.Enabled ? "" : " \u00b7 off");
         _error.Visibility = string.IsNullOrEmpty(_error.Text) ? ViewStates.Gone : ViewStates.Visible;
         _scheduleLabel.Visibility = _draftSchedules.Count == 1 && s is not null ? ViewStates.Gone : ViewStates.Visible;
@@ -218,7 +248,9 @@ internal sealed class QueueEditorScreen : IDisposable
         for (int i = 0; i < _days.Length; i++) { _days[i].Checked = days.Contains(DayNames[i]); _days[i].Enabled = !_busy && CanEditSafely && s is not null && Supported(s); }
         _concurrencyText.Text = _draft.MaxConcurrentDownloads.ToString(CultureInfo.InvariantCulture);
         _speedText.Text = _draft.SpeedLimitBytesPerSecond is > 0 ? Fmt.Rate(_draft.SpeedLimitBytesPerSecond.Value) : "None";
-        if (_completionText is not null) _completionText.Text = _draft.NotifyWhenFinished == true ? "Notify and finish" : "Do nothing";
+        if (_completionText is not null) _completionText.Text = _draft.NotifyWhenFinished == true
+            ? (_activity.Capabilities.IsRemote ? "Notify and finish" : "Notify when the queue finishes")
+            : "Do nothing";
         foreach (var (value, row, title) in _valueRows) row.ContentDescription = title + ", " + value.Text;
         PaintDays();
         _save.Enabled = !_busy && !_uncertain && CanEditSafely; _scheduleLabel.Enabled = !_busy && CanEditSafely;

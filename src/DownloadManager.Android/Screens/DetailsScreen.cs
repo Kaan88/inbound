@@ -8,6 +8,7 @@ using DownloadManager.Mobile;
 using Google.Android.Material.Button;
 using Google.Android.Material.Dialog;
 using Google.Android.Material.ProgressIndicator;
+using Inbound.App.Host;
 
 namespace Inbound.App.Screens;
 
@@ -21,7 +22,7 @@ internal sealed class DetailsScreen
     private readonly TextView _percent, _rate, _progress, _connTitle, _connNote;
     private readonly LinearProgressIndicator _bar;
     private readonly MaterialButton _main;
-    private readonly View _again, _connCard;
+    private readonly View _again, _stop, _connCard;
     private readonly LinearLayout _segments, _info;
     private readonly Func<bool> _canAsk;
     private readonly List<(string Label, TextView Value, View Row)> _lines = new();
@@ -46,6 +47,8 @@ internal sealed class DetailsScreen
         _progress = Root.FindViewById<TextView>(Resource.Id.hero_progress)!;
         _bar = Root.FindViewById<LinearProgressIndicator>(Resource.Id.hero_bar)!;
         _main = Root.FindViewById<MaterialButton>(Resource.Id.hero_main)!;
+        _stop = Root.FindViewById<View>(Resource.Id.hero_stop)!;
+        _stop.Click += (_, _) => { if (_row.Group == RowGroup.Active) Fire(_model.StopAsync(_row.Id), "Download stopped"); };
         _again = Root.FindViewById<View>(Resource.Id.hero_again)!;
         _connCard = Root.FindViewById<View>(Resource.Id.connections_card)!;
         _connTitle = Root.FindViewById<TextView>(Resource.Id.connections_title)!;
@@ -144,6 +147,7 @@ internal sealed class DetailsScreen
         _main.SetIconResource(icon);
         // A finished file on another Inbound is on that machine: no Open here (ANDROID.7).
         _main.Visibility = finished && (_row.Action == RowAction.None || !_activity.Capabilities.CanOpenFiles) ? ViewStates.Gone : ViewStates.Visible;
+        _stop.Visibility = _row.Group == RowGroup.Active && _model.Hello?.Capabilities.Contains(JobActionRequest.StopUnfinishedCapability) == true ? ViewStates.Visible : ViewStates.Gone;
         _again.Visibility = _row.Group is RowGroup.Finished or RowGroup.Failed ? ViewStates.Visible : ViewStates.Gone;
 
         var running = _row.Group is RowGroup.Active or RowGroup.Paused;
@@ -152,7 +156,8 @@ internal sealed class DetailsScreen
         _connNote.Text = running ? "Part file in " + DetailsInfo.FolderName(j.DestinationDirectory) : "";
         BindSegments();
 
-        var lines = DetailsInfo.Lines(j, _model.Settings, DateTimeOffset.Now).ToList();
+        var sharedDownloadFolder = _activity.Capabilities.IsRemote ? null : AndroidHost.SharedDownloadFolder;
+        var lines = DetailsInfo.Lines(j, _model.Settings, DateTimeOffset.Now, sharedDownloadFolder).ToList();
         if (lines.Count == _lines.Count && lines.Select(l => l.Label).SequenceEqual(_lines.Select(l => l.Label)))
         {
             for (var i = 0; i < lines.Count; i++)

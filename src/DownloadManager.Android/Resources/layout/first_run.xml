@@ -2,12 +2,12 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/first_run_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="?android:colorBackground" android:paddingLeft="24dp" android:paddingRight="24dp">
   <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="40dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="20dp">
       <FrameLayout android:layout_width="64dp" android:layout_height="64dp" android:background="@drawable/bg_tile_primary">
-        <ImageView android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center" android:src="@drawable/ic_download" android:importantForAccessibility="no" app:tint="?attr/colorOnPrimaryContainer" />
+        <ImageView android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="center" android:src="@drawable/ic_remote_download" android:importantForAccessibility="no" app:tint="?attr/colorOnPrimaryContainer" />
       </FrameLayout>
-      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Set up Inbound" android:textSize="32sp" android:textStyle="bold" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
-      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Downloads run on this phone. You can also manage another Inbound host later." android:textAppearance="?attr/textAppearanceBodyLarge" android:textColor="?attr/colorOnSurfaceVariant" />
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Set up Inbound" android:textSize="32sp" android:textStyle="bold" android:textColor="?attr/colorOnSurface" android:accessibilityHeading="true" />
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Downloads run on this phone. You can also manage another Inbound host later." android:textAppearance="?attr/textAppearanceBodyLarge" android:letterSpacing="0" android:textColor="?attr/colorOnSurfaceVariant" />
 
       <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" app:cardCornerRadius="24dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:minHeight="72dp">
@@ -21,7 +21,7 @@
 
       <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" app:cardCornerRadius="24dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:minHeight="72dp">
-          <FrameLayout android:id="@+id/fr_notif_tile" android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:id="@+id/fr_notif_icon" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_notifications" android:importantForAccessibility="no" /></FrameLayout>
+          <FrameLayout android:id="@+id/fr_notif_tile" android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:id="@+id/fr_notif_icon" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_setup_bell" android:importantForAccessibility="no" /></FrameLayout>
           <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:layout_marginRight="8dp" android:orientation="vertical">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Notifications" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Shows progress and keeps downloads running in the background" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
@@ -32,7 +32,7 @@
 
       <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" app:cardCornerRadius="24dp" app:cardElevation="0dp" app:strokeWidth="0dp" app:cardBackgroundColor="?attr/colorSurfaceContainer">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:minHeight="72dp">
-          <FrameLayout android:id="@+id/fr_batt_tile" android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:id="@+id/fr_batt_icon" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_battery" android:importantForAccessibility="no" /></FrameLayout>
+          <FrameLayout android:id="@+id/fr_batt_tile" android:layout_width="40dp" android:layout_height="40dp" android:background="@drawable/bg_circle_dark"><ImageView android:id="@+id/fr_batt_icon" android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:src="@drawable/ic_setup_battery" android:importantForAccessibility="no" /></FrameLayout>
           <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginLeft="16dp" android:layout_marginRight="8dp" android:orientation="vertical">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Battery" android:textAppearance="?attr/textAppearanceTitleMedium" android:textColor="?attr/colorOnSurface" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Unrestricted, so long downloads are not stopped" android:textAppearance="?attr/textAppearanceBodyMedium" android:textColor="?attr/colorOnSurfaceVariant" />
@@ -42,8 +42,8 @@
       </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
   </ScrollView>
-  <com.google.android.material.button.MaterialButton android:id="@+id/fr_start" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="16dp" android:text="Start downloading" app:cornerRadius="32dp" android:textSize="16sp" />
+  <com.google.android.material.button.MaterialButton android:id="@+id/fr_start" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="16dp" android:text="Start downloading" app:cornerRadius="32dp" android:textSize="14sp" />
   <!-- A0: pair with another Inbound instead (step 6, PairingSheet). -->
   <com.google.android.material.button.MaterialButton android:id="@+id/fr_connect" style="@style/Widget.Material3.Button.TextButton.Icon" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="16dp"
-      android:text="Connect to another Inbound" android:textSize="16sp" app:icon="@drawable/ic_host_server" />
+      android:text="Connect to another Inbound" android:textSize="14sp" app:icon="@drawable/ic_setup_host" />
 </LinearLayout>

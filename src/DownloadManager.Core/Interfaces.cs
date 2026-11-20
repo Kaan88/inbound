@@ -48,7 +48,7 @@ public interface ISettingsStore
     Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
 
-public sealed record FileMetadata(string FileName, long? TotalBytes, string? ContentType, string FinalUrl, string? ETag = null, string? LastModified = null);
+public sealed record FileMetadata(string FileName, long? TotalBytes, string? ContentType, string FinalUrl, string? ETag = null, string? LastModified = null, bool? AdvertisesByteRanges = null);
 
 public interface IFileMetadataReader
 {

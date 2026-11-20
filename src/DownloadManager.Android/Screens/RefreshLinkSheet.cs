@@ -14,6 +14,7 @@ internal sealed class RefreshLinkSheet : BottomSheetDialogFragment
     private const string SheetTag = "refresh_link";
     private string? _fileName;
     private long _savedBytes;
+    private long? _totalBytes;
     private bool _knownExpired, _alive, _busy;
     private Action? _openPage;
     private Func<string, Task<bool>>? _paste;
@@ -25,11 +26,11 @@ internal sealed class RefreshLinkSheet : BottomSheetDialogFragment
     public RefreshLinkSheet() { }
     private RefreshLinkSheet(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer) { }
 
-    public static void Show(MainActivity activity, string fileName, long savedBytes, bool knownExpired,
+    public static void Show(MainActivity activity, string fileName, long savedBytes, long? totalBytes, bool knownExpired,
         Action openPage, Func<string, Task<bool>> paste)
     {
         if (activity.SupportFragmentManager.FindFragmentByTag(SheetTag) is not null) return;
-        new RefreshLinkSheet { _fileName = fileName, _savedBytes = savedBytes, _knownExpired = knownExpired,
+        new RefreshLinkSheet { _fileName = fileName, _savedBytes = savedBytes, _totalBytes = totalBytes, _knownExpired = knownExpired,
             _openPage = openPage, _paste = paste }.Show(activity.SupportFragmentManager, SheetTag);
     }
 
@@ -40,9 +41,12 @@ internal sealed class RefreshLinkSheet : BottomSheetDialogFragment
         view.SaveEnabled = false;
         _alive = true;
         view.FindViewById<TextView>(Resource.Id.refresh_title)!.Text = _knownExpired ? "This link has expired" : "Try a fresh link";
-        view.FindViewById<TextView>(Resource.Id.refresh_file)!.Text = _fileName;
-        view.FindViewById<TextView>(Resource.Id.refresh_description)!.Text =
-            $"{Math.Max(0, _savedBytes):N0} bytes saved. The Host will check whether the new address points to the same file and whether it can resume.";
+        var saved = DownloadManager.Mobile.Fmt.Bytes(Math.Max(0, _savedBytes));
+        var description = _totalBytes is > 0
+            ? $"{saved} of {DownloadManager.Mobile.Fmt.Bytes(_totalBytes.Value)} is saved."
+            : $"{saved} saved.";
+        view.FindViewById<TextView>(Resource.Id.refresh_description)!.Text = description
+            + $" Open the page again and start the download there; Inbound uses the new address and continues from {saved}.";
         _open = view.FindViewById<View>(Resource.Id.refresh_open_page)!;
         _reveal = view.FindViewById<View>(Resource.Id.refresh_reveal)!;
         _entry = view.FindViewById<View>(Resource.Id.refresh_entry)!;
@@ -53,6 +57,14 @@ internal sealed class RefreshLinkSheet : BottomSheetDialogFragment
         _error = view.FindViewById<TextView>(Resource.Id.refresh_error)!;
         _open.Click += OnOpen; _reveal.Click += OnReveal; _clipboard.Click += OnClipboard; _refresh.Click += OnRefresh;
         return view;
+    }
+
+    public override void OnStart()
+    {
+        base.OnStart();
+        var window = Dialog?.Window;
+        window?.AddFlags(WindowManagerFlags.DimBehind);
+        window?.SetDimAmount(0.6f);
     }
 
     private void OnOpen(object? sender, EventArgs e)
@@ -100,7 +112,7 @@ internal sealed class RefreshLinkSheet : BottomSheetDialogFragment
         if (_clipboard is not null) _clipboard.Click -= OnClipboard;
         if (_refresh is not null) _refresh.Click -= OnRefresh;
         _open = _reveal = _entry = _clipboard = null; _address = null; _refresh = null; _error = null;
-        _openPage = null; _paste = null; _fileName = null;
+        _openPage = null; _paste = null; _fileName = null; _totalBytes = null;
         base.OnDestroyView();
     }
 }

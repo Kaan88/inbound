@@ -17,7 +17,7 @@ internal sealed class SettingsScreen
     private readonly bool _dynamicAvailable;
     private bool _setting;
 
-    public SettingsScreen(MainActivity activity, View page, Appearance appearance)
+    public SettingsScreen(MainActivity activity, View page, Appearance appearance, Action<string> searchCategories)
     {
         _activity = activity;
         _appearance = appearance;
@@ -28,6 +28,55 @@ internal sealed class SettingsScreen
         _switch = page.FindViewById<MaterialSwitch>(Resource.Id.dynamic_switch)!;
         page.FindViewById<View>(Resource.Id.setting_theme)!.Click += (_, _) => PickTheme();
         var row = page.FindViewById<View>(Resource.Id.setting_dynamic)!;
+        var theme = page.FindViewById<View>(Resource.Id.setting_theme)!;
+        var card = page.FindViewById<View>(Resource.Id.settings_appearance_card)!;
+        var preview = page.FindViewById<LinearLayout>(Resource.Id.colour_preview)!;
+        foreach (var colour in new[]
+        {
+            Motion.Attr(activity, Resource.Attribute.colorPrimary),
+            Motion.Attr(activity, Resource.Attribute.colorSecondaryContainer),
+            unchecked((int)0xFFF0A458),
+            unchecked((int)0xFF383838)
+        })
+        {
+            var circle = new Android.Graphics.Drawables.GradientDrawable();
+            circle.SetShape(Android.Graphics.Drawables.ShapeType.Oval);
+            circle.SetColor(new Android.Graphics.Color(colour));
+            preview.AddView(new View(activity) { Background = circle }, new LinearLayout.LayoutParams(Motion.Dp(activity, 27), Motion.Dp(activity, 27))
+            { MarginEnd = Motion.Dp(activity, 9) });
+        }
+        var search = page.FindViewById<EditText>(Resource.Id.settings_search_input)!;
+        page.FindViewById<View>(Resource.Id.settings_search)!.Click += (_, _) =>
+        {
+            bool opening = search.Visibility != ViewStates.Visible;
+            var keyboard = (Android.Views.InputMethods.InputMethodManager?)activity.GetSystemService(Context.InputMethodService);
+            if (opening)
+            {
+                search.Visibility = ViewStates.Visible;
+                if (search.RequestFocus()) search.Post(() =>
+                {
+                    if (search.HasFocus && search.Visibility == ViewStates.Visible)
+                        keyboard?.ShowSoftInput(search, 0);
+                });
+            }
+            else
+            {
+                keyboard?.HideSoftInputFromWindow(search.WindowToken, 0);
+                search.Text = "";
+                search.ClearFocus();
+                search.Visibility = ViewStates.Gone;
+            }
+        };
+        search.TextChanged += (_, _) =>
+        {
+            string query = search.Text?.Trim() ?? "";
+            bool showTheme = $"Theme {_themeText.Text}".Contains(query, StringComparison.OrdinalIgnoreCase);
+            bool showDynamic = $"Dynamic colour {_dynamicText.Text}".Contains(query, StringComparison.OrdinalIgnoreCase);
+            theme.Visibility = showTheme ? ViewStates.Visible : ViewStates.Gone;
+            row.Visibility = preview.Visibility = showDynamic ? ViewStates.Visible : ViewStates.Gone;
+            card.Visibility = showTheme || showDynamic ? ViewStates.Visible : ViewStates.Gone;
+            searchCategories(query);
+        };
         _switch.Enabled = _dynamicAvailable;
         row.Click += (_, _) => { if (_dynamicAvailable) _switch.Toggle(); };
         _switch.CheckedChange += (_, e) =>

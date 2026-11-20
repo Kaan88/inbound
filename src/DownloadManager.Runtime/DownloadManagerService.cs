@@ -357,7 +357,7 @@ public sealed partial class DownloadManagerService
             {
                 UpdateProgress = _updateProgress,
                 Jobs = jobs,
-                Settings = MapSettings(_settings),
+                Settings = MapLiveSettings(_settings),
                 Status = BuildStatusLocked(),
             };
         }
@@ -374,7 +374,7 @@ public sealed partial class DownloadManagerService
     {
         lock (_sync)
         {
-            return MapSettings(_settings);
+            return MapLiveSettings(_settings);
         }
     }
 
@@ -512,7 +512,7 @@ public sealed partial class DownloadManagerService
             var metadata = await reader.ReadMetadataAsync(new DownloadJob { Url = uri.AbsoluteUri, RequestHeaders = headers,
                 UserAgent = request.UserAgent, Referrer = request.Referrer, PublicNetworkOnly = caller is not null }, timeout.Token).ConfigureAwait(false);
             return new FileMetadataResult { Ok = true, FileName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl), TotalBytes = metadata.TotalBytes,
-                ContentType = metadata.ContentType, FinalUrl = MaskIfProviderLink(metadata.FinalUrl) };
+                ContentType = metadata.ContentType, FinalUrl = MaskIfProviderLink(metadata.FinalUrl), AdvertisesByteRanges = metadata.AdvertisesByteRanges };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { return new FileMetadataResult { Error = "File information request timed out. You can still start the download." }; }
@@ -1580,7 +1580,7 @@ public sealed partial class DownloadManagerService
         {
             lock (_sync)
                 if (expectedRevision is { } revision && revision != _settings.Revision)
-                    return new SettingsResult { Error = "Settings changed on the Host. Reopen the editor and try again.", Settings = MapSettings(_settings) };
+                    return new SettingsResult { Error = "Settings changed on the Host. Reopen the editor and try again.", Settings = MapLiveSettings(_settings) };
             var result = await UpdateSettingsCoreAsync(settings, cancellationToken, caller).ConfigureAwait(false);
             // UI.R37: another channel or manifest, or updates turned off, leaves no latest version known.
             if (result.Ok) AnnounceLatestVersion();
@@ -1594,7 +1594,7 @@ public sealed partial class DownloadManagerService
         lock (_sync)
             if ((settings.Queues ?? []).Any(q => q.Generation is { } generation &&
                 _settings.Queues.FirstOrDefault(current => current.Id == q.Id) is { } current && current.Generation != generation))
-                return new SettingsResult { Error = "A queue was replaced. Refresh settings before saving.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Error = "A queue was replaced. Refresh settings before saving.", Settings = MapLiveSettings(_settings) };
         // T14: a client from before the torrent folders sends neither, and keeps the Host's.
         KeepUnsentTorrentFolders(settings, _settings);
         if (!string.IsNullOrWhiteSpace(settings.TorrentCategoryFoldersRoot))
@@ -1606,7 +1606,7 @@ public sealed partial class DownloadManagerService
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
             {
-                return new SettingsResult { Ok = false, Error = "The torrent folder must be a full path, or empty for the same folders as other downloads.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "The torrent folder must be a full path, or empty for the same folders as other downloads.", Settings = MapLiveSettings(_settings) };
             }
         }
 
@@ -1616,36 +1616,36 @@ public sealed partial class DownloadManagerService
             if (key is not ("completed" or "failed" or "queueFinished") || value is null ||
                 (value.Length > 0 && value != "@system" &&
                  (!Path.IsPathFullyQualified(value) || !string.Equals(Path.GetExtension(value), ".wav", StringComparison.OrdinalIgnoreCase))))
-                return new SettingsResult { Ok = false, Error = "Event sounds must be disabled, system sounds, or absolute WAV file paths.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "Event sounds must be disabled, system sounds, or absolute WAV file paths.", Settings = MapLiveSettings(_settings) };
         }
         // The same rule as a download's own completion program. Only a changed command is refused, so a save of other
         // settings still goes through with one kept from before (it is refused when it would run).
         if (!string.IsNullOrWhiteSpace(settings.PostDownloadCommand) &&
             !string.Equals(settings.PostDownloadCommand.Trim(), _settings.PostDownloadCommand?.Trim(), StringComparison.Ordinal) &&
             !PostDownloadCommandLine.IsAllowedProgram(settings.PostDownloadCommand.Trim()))
-            return new SettingsResult { Ok = false, Error = PostDownloadCommandLine.ProgramRefused, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = PostDownloadCommandLine.ProgramRefused, Settings = MapLiveSettings(_settings) };
         if ((settings.Queues ?? new()).Any(queue => queue.RetryLimit is < 0 or > 100) ||
             (settings.Schedules ?? new()).Any(schedule => schedule.RepeatEveryMinutes is < 1 or > 1440 ||
                 schedule.RepeatEveryMinutes is not null && !schedule.TimedStartEnabled ||
                 !schedule.StartOnHostStartup && !schedule.TimedStartEnabled))
-            return new SettingsResult { Error = "Select a startup or timed trigger, synchronization interval 1–1440 minutes, and retry limit 0–100 or unlimited.", Settings = MapSettings(_settings) };
+            return new SettingsResult { Error = "Select a startup or timed trigger, synchronization interval 1–1440 minutes, and retry limit 0–100 or unlimited.", Settings = MapLiveSettings(_settings) };
         // Audit L12: a time the scheduler can't read would be kept and never act. Only a new or changed one is refused,
         // so a save of other settings still goes through with one kept from before.
         if ((settings.Schedules ?? new()).Any(schedule => schedule is not null &&
                 (!TryParseScheduleTime(schedule.StartTime, out _) && !ScheduleTimeKept(schedule.Id, schedule.StartTime, stop: false) ||
                  !string.IsNullOrWhiteSpace(schedule.StopTime) && !TryParseScheduleTime(schedule.StopTime, out _) &&
                  !ScheduleTimeKept(schedule.Id, schedule.StopTime, stop: true))))
-            return new SettingsResult { Error = "Enter schedule times as hours and minutes, such as 09:00.", Settings = MapSettings(_settings) };
+            return new SettingsResult { Error = "Enter schedule times as hours and minutes, such as 09:00.", Settings = MapLiveSettings(_settings) };
         var categories = settings.CustomCategories ?? new();
         var categoryIds = new HashSet<string>(StringComparer.Ordinal);
         var categoryNames = new HashSet<string>(FileCategories.Names.Append("other"), StringComparer.OrdinalIgnoreCase);
         var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if ((settings.Queues ?? new()).Any(q => q.SpeedLimitBytesPerSecond is < 0))
             return new SettingsResult { Error = "A queue speed limit must be zero or positive.", Settings = GetSettings() };
-        if (categories.Count > 100) return new SettingsResult { Ok = false, Error = "At most 100 custom categories are supported.", Settings = MapSettings(_settings) };
+        if (categories.Count > 100) return new SettingsResult { Ok = false, Error = "At most 100 custom categories are supported.", Settings = MapLiveSettings(_settings) };
         foreach (var category in categories)
         {
-            if (category is null) return new SettingsResult { Ok = false, Error = "Invalid category.", Settings = MapSettings(_settings) };
+            if (category is null) return new SettingsResult { Ok = false, Error = "Invalid category.", Settings = MapLiveSettings(_settings) };
             category.Name = category.Name?.Trim() ?? string.Empty;
             if (Guid.TryParseExact(category.Id, "N", out var categoryGuid)) category.Id = categoryGuid.ToString("N");
             category.Extensions = (category.Extensions ?? new()).Select(extension => (extension ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant()).Distinct().ToList();
@@ -1653,32 +1653,32 @@ public sealed partial class DownloadManagerService
                 category.Name.Length is < 1 or > 64 || category.Name.Any(char.IsControl) || !categoryNames.Add(category.Name) ||
                 category.Extensions.Count > 64 || category.Extensions.Any(extension => extension.Length is < 1 or > 32 ||
                     extension.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')) || !extensions.Add(extension)))
-                return new SettingsResult { Ok = false, Error = "Categories need unique IDs/names and unambiguous file extensions.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "Categories need unique IDs/names and unambiguous file extensions.", Settings = MapLiveSettings(_settings) };
             try
             {
                 if (!string.IsNullOrWhiteSpace(category.DestinationDirectory)) category.DestinationDirectory = Path.GetFullPath(category.DestinationDirectory);
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
-            { return new SettingsResult { Ok = false, Error = "Invalid category folder.", Settings = MapSettings(_settings) }; }
+            { return new SettingsResult { Ok = false, Error = "Invalid category folder.", Settings = MapLiveSettings(_settings) }; }
         }
         lock (_sync)
         {
             var deleting = (settings.DeleteCategoryIds ?? new()).ToHashSet(StringComparer.Ordinal);
             if (deleting.Any(id => !_settings.CustomCategories.Any(category => category.Id == id) || categoryIds.Contains(id)))
-                return new SettingsResult { Ok = false, Error = "The category list changed. Refresh Options before deleting categories.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "The category list changed. Refresh Options before deleting categories.", Settings = MapLiveSettings(_settings) };
             if (_settings.CustomCategories.Any(category => !categoryIds.Contains(category.Id) && !deleting.Contains(category.Id)))
-                return new SettingsResult { Ok = false, Error = "Existing custom categories must be retained. Refresh settings before saving.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "Existing custom categories must be retained. Refresh settings before saving.", Settings = MapLiveSettings(_settings) };
             if (_jobs.Values.Any(runtime => runtime.Job.CategoryId is { } id && deleting.Contains(id)))
-                return new SettingsResult { Ok = false, Error = "Change the category of this category's downloads before deleting it. No settings or files were changed.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "Change the category of this category's downloads before deleting it. No settings or files were changed.", Settings = MapLiveSettings(_settings) };
         }
         if (string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory))
         {
-            return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapLiveSettings(_settings) };
         }
 
         if (Roots is { } roots && DescribeFolderOutsideRoots(settings, categories, roots) is { } outside)
         {
-            return new SettingsResult { Ok = false, Error = outside, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = outside, Settings = MapLiveSettings(_settings) };
         }
 
         string directory;
@@ -1689,7 +1689,7 @@ public sealed partial class DownloadManagerService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return new SettingsResult { Ok = false, Error = ErrorText(ex, caller), Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = ErrorText(ex, caller), Settings = MapLiveSettings(_settings) };
         }
 
         settings.DefaultDownloadDirectory = directory;
@@ -1701,17 +1701,17 @@ public sealed partial class DownloadManagerService
             settings.GlobalSpeedLimitBytesPerSecond = null;
         }
         if (settings.TorrentListenPort != 0 && !TorrentListenPorts.IsValid(settings.TorrentListenPort))
-            return new SettingsResult { Ok = false, Error = $"The torrent port must be {TorrentListenPorts.Min} to {TorrentListenPorts.Max}.", Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = $"The torrent port must be {TorrentListenPorts.Min} to {TorrentListenPorts.Max}.", Settings = MapLiveSettings(_settings) };
 
         if (TorrentSeedSettingsError(settings) is { } seedError)
         {
-            return new SettingsResult { Ok = false, Error = seedError, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = seedError, Settings = MapLiveSettings(_settings) };
         }
 
         settings.TorrentEncryption = settings.TorrentEncryption?.Trim().ToLowerInvariant() ?? string.Empty;
         if (TorrentPeerSettingsError(settings, MapProxy(settings.Proxy)) is { } peerError)
         {
-            return new SettingsResult { Ok = false, Error = peerError, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = peerError, Settings = MapLiveSettings(_settings) };
         }
 
         var next = new AppSettings
@@ -1835,7 +1835,7 @@ public sealed partial class DownloadManagerService
                 {
                     Ok = false,
                     Error = "Move downloads and schedules before removing their queue. No settings were changed.",
-                    Settings = MapSettings(_settings),
+                    Settings = MapLiveSettings(_settings),
                 };
         }
         // UI.B5: the default queue has its own maximum, and the lower one wins, so a raised overall limit did
@@ -1947,7 +1947,7 @@ public sealed partial class DownloadManagerService
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, next);
         Schedule();
-        return new SettingsResult { Ok = true, Settings = MapSettings(next) };
+        return new SettingsResult { Ok = true, Settings = MapLiveSettings(next) };
     }
 
     public async Task<SettingsResult> QueueActionAsync(
@@ -1960,7 +1960,7 @@ public sealed partial class DownloadManagerService
             lock (_sync)
                 if (request.ExpectedQueueGeneration is { } generation &&
                     _settings.Queues.FirstOrDefault(q => q.Id == request.QueueId)?.Generation != generation)
-                    return new SettingsResult { Error = "The queue was deleted or replaced. Review it again.", Settings = MapSettings(_settings) };
+                    return new SettingsResult { Error = "The queue was deleted or replaced. Review it again.", Settings = MapLiveSettings(_settings) };
             if (request.Action.Equals("create", StringComparison.OrdinalIgnoreCase))
                 return await CreateQueueDurablyAsync(request, cancellationToken).ConfigureAwait(false);
             if (request.Action.Equals("delete", StringComparison.OrdinalIgnoreCase))
@@ -1985,12 +1985,12 @@ public sealed partial class DownloadManagerService
             if (request.Action.Equals("create", StringComparison.OrdinalIgnoreCase))
             {
                 if (!ValidQueuePolicy(request))
-                    return new SettingsResult { Ok = false, Error = "Invalid queue name, concurrency or quota policy.", Settings = MapSettings(_settings) };
+                    return new SettingsResult { Ok = false, Error = "Invalid queue name, concurrency or quota policy.", Settings = MapLiveSettings(_settings) };
                 var usedIds = _settings.Queues.Select(q => q.Id).ToHashSet();
                 var nextId = 0;
                 while (usedIds.Contains(nextId) && nextId < int.MaxValue) nextId++;
                 if (usedIds.Contains(nextId))
-                    return new SettingsResult { Ok = false, Error = "No queue identifiers are available.", Settings = MapSettings(_settings) };
+                    return new SettingsResult { Ok = false, Error = "No queue identifiers are available.", Settings = MapLiveSettings(_settings) };
                 queue = new DownloadQueue
                 {
                     Id = nextId, Name = request.Name!.Trim(), IsRunning = false,
@@ -2011,7 +2011,7 @@ public sealed partial class DownloadManagerService
             }
             if (queue is null)
             {
-                return new SettingsResult { Ok = false, Error = "Queue not found.", Settings = MapSettings(_settings) };
+                return new SettingsResult { Ok = false, Error = "Queue not found.", Settings = MapLiveSettings(_settings) };
             }
 
             switch (request.Action.ToLowerInvariant())
@@ -2175,7 +2175,7 @@ public sealed partial class DownloadManagerService
 
         if (error is not null)
         {
-            return new SettingsResult { Ok = false, Error = error, Settings = MapSettings(_settings) };
+            return new SettingsResult { Ok = false, Error = error, Settings = MapLiveSettings(_settings) };
         }
 
         foreach (var runtime in paused)
@@ -2201,7 +2201,7 @@ public sealed partial class DownloadManagerService
         await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
-        return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
+        return new SettingsResult { Ok = true, Settings = MapLiveSettings(_settings) };
     }
 
     private static bool ValidQueuePolicy(QueueActionRequest request)
@@ -2995,7 +2995,7 @@ public sealed partial class DownloadManagerService
         await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         UpdateDeferred?.Invoke(this, _settings.SkippedUpdateVersion);
-        return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
+        return new SettingsResult { Ok = true, Settings = MapLiveSettings(_settings) };
     }
 
     public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
@@ -3465,18 +3465,20 @@ public sealed partial class DownloadManagerService
         Guid id,
         int queueId,
         CancellationToken cancellationToken = default, int? expectedQueueId = null,
-        Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null)
+        Guid? expectedSourceQueueGeneration = null, Guid? expectedDestinationQueueGeneration = null, bool expectedUnqueued = false)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             lock (_sync)
-                if (expectedQueueId is { } source && (!_jobs.TryGetValue(id, out var current) || !current.Job.IsQueued || current.Job.QueueId != source))
-                    return new JobActionResponse { Error = "The download moved out of the source queue. Refresh before trying again.", Job = _jobs.TryGetValue(id, out var found) ? Map(found.Job) : null };
-            lock (_sync)
             {
+                _jobs.TryGetValue(id, out var current);
+                if (expectedUnqueued && current?.Job.IsQueued == true)
+                    return new JobActionResponse { Error = "The download was added to a queue. Refresh before trying again.", Job = Map(current.Job) };
+                if (expectedQueueId is { } source && (current is null || !current.Job.IsQueued || current.Job.QueueId != source))
+                    return new JobActionResponse { Error = "The download moved out of the source queue. Refresh before trying again.", Job = current is null ? null : Map(current.Job) };
                 if (expectedSourceQueueGeneration is { } sourceGeneration &&
-                    (!_jobs.TryGetValue(id, out var current) || !current.Job.IsQueued ||
+                    (current is null || !current.Job.IsQueued ||
                      _settings.Queues.FirstOrDefault(q => q.Id == current.Job.QueueId)?.Generation != sourceGeneration))
                     return new JobActionResponse { Error = "The source queue was deleted or replaced. Review it again." };
                 if (expectedDestinationQueueGeneration is { } destinationGeneration &&
@@ -6100,8 +6102,13 @@ public sealed partial class DownloadManagerService
         return page.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped) + "/";
     }
 
+    public static SettingsDto MapSettings(AppSettings settings) => MapSettings(settings, null);
+
+    private SettingsDto MapLiveSettings(AppSettings settings)
+        => MapSettings(settings, settings.Schedules.Count == 0 ? null : NextTimedQueueStarts(settings, _timeProvider));
+
     // Every list is a copy (audit 2 M19): a DTO is serialised without the lock, while the store may rewrite the Host's lists.
-    public static SettingsDto MapSettings(AppSettings settings)
+    private static SettingsDto MapSettings(AppSettings settings, IReadOnlyDictionary<int, DateTimeOffset>? starts)
         => new()
         {
             Revision = settings.Revision,
@@ -6193,6 +6200,7 @@ public sealed partial class DownloadManagerService
                 Id = q.Id,
                 Generation = q.Generation,
                 ConditionWaitReason = q.ConditionWaitReason,
+                NextTimedStartAt = starts is not null && starts.TryGetValue(q.Id, out var nextStart) ? nextStart : null,
                 RequireUnmeteredNetwork = q.RequireUnmeteredNetwork,
                 RequireCharging = q.RequireCharging,
                 RequireBatterySaverOff = q.RequireBatterySaverOff,

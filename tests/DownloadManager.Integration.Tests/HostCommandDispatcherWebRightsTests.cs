@@ -91,11 +91,11 @@ public sealed partial class HostCommandDispatcherTests
         var web = await WebAsync();
 
         var webHello = web.Session.Frames[0].GetPayload<HostHelloDto>();
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"], webHello.Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "folders", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", JobQueueRequest.UnqueuedPreconditionCapability, JobActionRequest.StopUnfinishedCapability], webHello.Capabilities);
         Assert.Equal(HostKinds.Windows, webHello.HostKind);
 
         var pipeHello = web.Pipe.Frames[0].GetPayload<HostHelloDto>();
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity"],
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions", "browserRefresh", "queueSpeedLimit", "settingsCompareAndSwap", "queueDeleteSchedules", "queueConditionalMove", "queueIdentity", JobQueueRequest.UnqueuedPreconditionCapability, JobActionRequest.StopUnfinishedCapability],
             pipeHello.Capabilities);
     }
 

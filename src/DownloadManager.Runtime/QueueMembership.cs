@@ -5,7 +5,7 @@ namespace DownloadManager.Runtime;
 
 public sealed partial class DownloadManagerService
 {
-    public async Task<JobActionResponse> DetachFromQueueAsync(Guid id, CancellationToken cancellationToken = default, int? expectedQueueId = null, Guid? expectedSourceQueueGeneration = null)
+    public async Task<JobActionResponse> DetachFromQueueAsync(Guid id, CancellationToken cancellationToken = default, int? expectedQueueId = null, Guid? expectedSourceQueueGeneration = null, bool expectedUnqueued = false)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -18,6 +18,8 @@ public sealed partial class DownloadManagerService
                 lock (_sync)
                 {
                     if (!_jobs.TryGetValue(id, out runtime)) return new JobActionResponse { Error = "Job not found." };
+                    if (expectedUnqueued && runtime.Job.IsQueued)
+                        return new JobActionResponse { Error = "The download was added to a queue. Refresh before trying again.", Job = Map(runtime.Job) };
                     if (expectedQueueId is { } source && (!runtime.Job.IsQueued || runtime.Job.QueueId != source))
                         return new JobActionResponse { Error = "The download moved out of the source queue. Refresh before trying again.", Job = Map(runtime.Job) };
                     if (expectedSourceQueueGeneration is { } generation && (!runtime.Job.IsQueued ||

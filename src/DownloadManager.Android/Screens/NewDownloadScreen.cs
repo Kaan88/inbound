@@ -74,13 +74,23 @@ internal sealed class NewDownloadScreen
         SetUpSaveTo(host);
         SetUpQueue();
         // The slider's label formatter is called whenever the value changes, which is the one hook the generated binding allows (its change listener cannot be implemented in C#).
-        _slider.SetLabelFormatter(new ValueFormatter(v => { _model.Connections = (int)v; _connectionsValue.Text = ((int)v).ToString(); }));
+        _slider.SetLabelFormatter(new ValueFormatter(v => { _model.Connections = (int)v; _connectionsValue.Text = ((int)v).ToString();
+            if (_model.Check == CheckState.Ready) _checkSub.Text = $"{(int)v} {((int)v == 1 ? "connection" : "connections")} requested";
+        }));
         ShowSettings();
         // The Host's settings can come later (a page restored before the snapshot) or change (finding 13).
         _host.SettingsChanged += OnSettings;
-        Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.Check(Resource.Id.when_now);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.Check(Resource.Id.exists_rename);
-        Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) => { if (on) { _model.StartLater = id == Resource.Id.when_later; _model.WaitForQueue = id == _queueWhenId; } }));
+        var whenGroup = Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.when_group)!;
+        whenGroup.AddOnButtonCheckedListener(new ToggleListener((id, on) =>
+        {
+            if (id is Resource.Id.when_now or Resource.Id.when_later)
+                whenGroup.FindViewById<MaterialButton>(id)?.SetIconResource(on ? Resource.Drawable.ic_check : 0);
+            if (!on) return;
+            _model.StartLater = id == Resource.Id.when_later;
+            _model.WaitForQueue = id == _queueWhenId;
+        }));
+        whenGroup.Check(Resource.Id.when_now);
         Root.FindViewById<MaterialButtonToggleGroup>(Resource.Id.exists_group)!.AddOnButtonCheckedListener(new ToggleListener((id, on) =>
         {
             if (!on) return;
@@ -194,8 +204,7 @@ internal sealed class NewDownloadScreen
         _ui.PostDelayed(() => imm.ShowSoftInput(_address, 0), 350);
     }
 
-    // The phone saves into its own folder (the field only shows it). A server's folders are the server's: the field opens a chooser that
-    // browses them through the connection, when the server offers that; otherwise it shows the server's default folder as before.
+    // Browse the selected Host's allowed folders, including shared Downloads on the phone.
     private Action? _showSaveTo;
 
     private void SetUpSaveTo(DownloadsModel host)
@@ -211,7 +220,7 @@ internal sealed class NewDownloadScreen
             // An EditText never cuts its text with an ellipsis, so the field is measured and cut in the middle here; TalkBack reads all of it.
             void Fit()
             {
-                var room = field.Width - field.PaddingLeft - field.PaddingRight - Motion.Dp(_activity, 16);
+                var room = field.Width - field.CompoundPaddingLeft - field.CompoundPaddingRight;
                 if (room <= 0) { field.Text = full; return; }
                 var paint = field.Paint!;
                 var cut = MiddleEllipsis.Cut(full, s => paint.MeasureText(s) <= room);
@@ -223,17 +232,22 @@ internal sealed class NewDownloadScreen
             field.Post(Fit);
         }
 
-        _showSaveTo = Show;
-        Show();
-        if (!remote || !FolderPicker.Offered(host)) return;
-        field.Enabled = true;
-        field.Focusable = false;
-        field.Clickable = true;
-        field.LongClickable = false;
-        layout.EndIconMode = TextInputLayout.EndIconCustom;
-        layout.SetEndIconDrawable(Resource.Drawable.ic_folder);
-        layout.EndIconContentDescription = "Choose a folder on " + _activity.HostName;
-        void Choose() => FolderSheet.Show(_activity, host, _model.SaveTo, folder => { _model.Destination = folder; Show(); });
+        void ShowDestination()
+        {
+            Show();
+            var offered = FolderPicker.Offered(host);
+            field.Enabled = offered;
+            field.Focusable = false;
+            field.Clickable = offered;
+            field.LongClickable = false;
+            layout.EndIconContentDescription = offered ? "Choose a folder on " + _activity.HostName : null;
+        }
+        _showSaveTo = ShowDestination;
+        ShowDestination();
+        void Choose()
+        {
+            if (FolderPicker.Offered(host)) FolderSheet.Show(_activity, host, _model.SaveTo, folder => { _model.Destination = folder; Show(); });
+        }
         field.Click += (_, _) => Choose();
         layout.SetEndIconOnClickListener(new ClickListener(Choose));
     }
@@ -252,6 +266,8 @@ internal sealed class NewDownloadScreen
         var parent = (LinearLayout)group.Parent!;
         var box = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         var queueLayout = _queueLayout = new TextInputLayout(_activity, null, Resource.Attribute.textInputOutlinedStyle) { Hint = "Queue" };
+        var cornerRadius = _activity.Resources!.GetDimension(Resource.Dimension.new_download_field_radius);
+        queueLayout.SetBoxCornerRadii(cornerRadius, cornerRadius, cornerRadius, cornerRadius);
         _queuePicker = new TextInputEditText(queueLayout.Context!) { ContentDescription = "Choose queue", SaveEnabled = false };
         _queuePicker.KeyListener = null;
         _queuePicker.Focusable = true;
@@ -400,8 +416,8 @@ internal sealed class NewDownloadScreen
                 card.SetCardBackgroundColor(ctx.GetColor(Resource.Color.state_done_container));
                 _checkIcon.SetImageResource(Resource.Drawable.ic_check);
                 _checkIcon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Android.Graphics.Color(ctx.GetColor(Resource.Color.state_done)));
-                _checkTitle.Text = _model.CheckText;
-                _checkSub.Text = "The server answered";
+                _checkTitle.Text = _model.CheckText + (_model.AdvertisesByteRanges == true ? " · Supports byte ranges" : "");
+                _checkSub.Text = $"{_model.Connections} {(_model.Connections == 1 ? "connection" : "connections")} requested";
                 ShowName();
                 break;
             case CheckState.Failed:

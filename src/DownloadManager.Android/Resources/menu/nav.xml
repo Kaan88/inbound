@@ -1,6 +1,6 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-  <item android:id="@+id/nav_downloads" android:title="Downloads" android:icon="@drawable/ic_download"/>
+  <item android:id="@+id/nav_downloads" android:title="Downloads" android:icon="@drawable/ic_remote_download"/>
   <item android:id="@+id/nav_queues" android:title="Queues" android:icon="@drawable/ic_queue"/>
   <item android:id="@+id/nav_remote_files" android:title="Remote Files" android:icon="@drawable/ic_remote_files" android:visible="false"/>
-  <item android:id="@+id/nav_settings" android:title="Settings" android:icon="@drawable/ic_settings"/>
+  <item android:id="@+id/nav_settings" android:title="Settings" android:icon="@drawable/ic_nav_settings"/>
 </menu>

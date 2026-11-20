@@ -17,7 +17,7 @@ namespace Inbound.App.Screens;
 /// capable selected Host connection. The activity owns the connection, its capability checks,
 /// and the screen's lifetime; dispose this screen before changing Hosts or removing its view.
 /// </summary>
-internal sealed class RemoteFilesScreen : IDisposable
+internal sealed partial class RemoteFilesScreen : IDisposable
 {
     private const int PageSize = 100;
     private readonly MainActivity _activity;
@@ -30,8 +30,13 @@ internal sealed class RemoteFilesScreen : IDisposable
     private volatile bool _hostChanged;
     private readonly CancellationTokenSource _life = new();
     private readonly Func<bool> _safeDownloads;
+    private readonly Func<bool> _deleteFiles;
+    private readonly Action<bool> _showBottomNavigation;
+    private bool _folderFullScreen;
     private CancellationTokenSource? _browseRequest;
     private readonly LinearLayout _content;
+    private readonly FrameLayout _surface;
+    private readonly ScrollView _scroll;
     private readonly List<string> _parents = [];
     private readonly List<SiteItemDto> _items = [];
     private SiteDto? _site;
@@ -41,7 +46,9 @@ internal sealed class RemoteFilesScreen : IDisposable
     private int _total, _generation;
     private bool _started, _closed, _busy, _listLoaded;
     private bool _adding;
+    private string _addKind = SiteKindCatalog.WebDav;
     private bool _showTransfers, _mutation, _startUncertain, _transfersLoaded;
+    private bool _summaryRequestInFlight;
     private List<SiteTransferDto> _transfers = [];
     private EditText? _password;
     private AndroidX.AppCompat.App.AlertDialog? _confirm;
@@ -49,11 +56,13 @@ internal sealed class RemoteFilesScreen : IDisposable
     public View View { get; }
 
     public RemoteFilesScreen(MainActivity activity, IHostConnection connection, string? connectionStamp, bool secureHostConnection,
-        Func<bool> safeDownloads)
+        Func<bool> safeDownloads, Func<bool> deleteFiles, Action<bool> showBottomNavigation)
     {
         _activity = activity;
         _client = new RemoteFilesClient(connection);
         _safeDownloads = safeDownloads;
+        _deleteFiles = deleteFiles;
+        _showBottomNavigation = showBottomNavigation;
         _hostName = activity.HostName;
         _secureHostConnection = secureHostConnection;
         var current = HostChoice.Hosts(activity).Current;
@@ -63,12 +72,14 @@ internal sealed class RemoteFilesScreen : IDisposable
         if (current.ConnectionStamp != _hostStamp || current.IsPhone != _phoneHost || current.Name != _hostName)
             _hostChanged = true;
         HostChoice.Hosts(activity).Changed += HostChanged;
-        var scroll = new ScrollView(activity) { FillViewport = true };
+        _scroll = new ScrollView(activity) { FillViewport = true };
         _content = new LinearLayout(activity) { Orientation = Orientation.Vertical };
         int padding = Motion.Dp(activity, 16);
         _content.SetPadding(padding, padding, padding, padding);
-        scroll.AddView(_content);
-        View = scroll;
+        _scroll.AddView(_content);
+        _surface = new FrameLayout(activity);
+        ResetChrome();
+        View = _surface;
     }
 
     public void Start()
@@ -76,6 +87,7 @@ internal sealed class RemoteFilesScreen : IDisposable
         if (_closed || _started) return;
         _started = true;
         _ = LoadLocationsAsync();
+        _ = ObserveLocationTransfersAsync(_life.Token);
     }
 
     /// <summary>Returns true when Back was consumed within the screen.</summary>
@@ -100,6 +112,13 @@ internal sealed class RemoteFilesScreen : IDisposable
             return true;
         }
         if (_site is null) return false;
+        if (_showPhoneFiles && !string.IsNullOrEmpty(_phonePath))
+        {
+            int separator = _phonePath.LastIndexOf('/');
+            OpenPhoneFolder(separator < 0 ? null : _phonePath[..separator]);
+            return true;
+        }
+        if (_showPhoneFiles) { SetPhoneTab(false); return true; }
         CancelCurrent();
         if (_parents.Count == 0)
         {
@@ -108,6 +127,7 @@ internal sealed class RemoteFilesScreen : IDisposable
             _error = null;
             _items.Clear();
             Render();
+            _ = RefreshLocationTransfersAsync(_generation);
         }
         else
         {
@@ -122,8 +142,10 @@ internal sealed class RemoteFilesScreen : IDisposable
     {
         if (_closed) return;
         _closed = true;
+        SetFolderFullScreen(false);
         _generation++;
         HostChoice.Hosts(_activity).Changed -= HostChanged;
+        CloseCloudSignInUi();
         ClearPassword();
         _browseRequest?.Cancel();
         _confirm?.Dismiss();
@@ -144,9 +166,12 @@ internal sealed class RemoteFilesScreen : IDisposable
             if (_closed) return;
             CancelCurrent();
             _life.Cancel();
+            CloseCloudSignInUi();
             ClearPassword();
             _confirm?.Dismiss();
             _confirm = null;
+            SetFolderFullScreen(false);
+            ResetChrome();
             _content.RemoveAllViews();
             Heading("Remote Files");
             AddText("The selected Host changed.", 16, Resource.Attribute.colorOnSurfaceVariant);
@@ -172,8 +197,9 @@ internal sealed class RemoteFilesScreen : IDisposable
         {
             var status = await _client.GetStatusAsync(_life.Token);
             var list = status.Enabled ? await _client.ListAsync(_life.Token) : new SitesListDto();
-            if (_closed || generation != _generation) return;
+            if (!SameHost() || generation != _generation) return;
             _status = status; _sites = list.Sites; _listLoaded = true;
+            _ = RefreshLocationTransfersAsync(generation);
         }
         catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
         catch (Exception) { if (!_closed && generation == _generation) _error = "Could not load Remote Files from this Host. Check the connection and try again."; }
@@ -185,7 +211,7 @@ internal sealed class RemoteFilesScreen : IDisposable
 
     private async Task BrowseAsync(string? path, bool append, bool refresh)
     {
-        if (_closed || _busy || _site is null) return;
+        if (!SameHost() || _busy || _site is null) return;
         using var browse = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
         _browseRequest = browse;
         int generation = ++_generation;
@@ -193,14 +219,19 @@ internal sealed class RemoteFilesScreen : IDisposable
         int offset = append ? _items.Count : 0;
         string? listing = append ? _listing : null;
         _busy = true; _error = null;
-        if (!append) { _path = path; _items.Clear(); _total = 0; _listing = null; }
+        if (!append)
+        {
+            _selectedRemoteFiles.Clear();
+            _path = path; _items.Clear(); _total = 0; _listing = null;
+        }
         Render();
         try
         {
             var result = await _client.BrowseAsync(new SiteBrowseRequest
             {
                 Id = siteId, Path = path, Offset = offset, Limit = PageSize,
-                Listing = listing, Refresh = refresh
+                Listing = listing, Refresh = refresh, ChronologicalFiles = true, IncludeFolderCounts = true,
+                IncludeFreeSpace = !append && _site.Kind == SiteKindCatalog.Sftp
             }, browse.Token);
             if (_closed || generation != _generation) return;
             if (append && !result.Ok && result.Problem == SiteProblems.ListingChanged)
@@ -211,6 +242,9 @@ internal sealed class RemoteFilesScreen : IDisposable
             }
             if (!result.Ok)
             {
+                if (result.Problem == SiteProblems.SignInNeeded) _expiredCloudSites.Add(siteId);
+                if (result.Problem is SiteProblems.HostKeyNotAccepted or SiteProblems.HostKeyChanged)
+                    _changedSftpKeys.Add(siteId);
                 _error = string.IsNullOrWhiteSpace(result.Message) ? "Could not browse this location." : result.Message;
                 return;
             }
@@ -221,6 +255,7 @@ internal sealed class RemoteFilesScreen : IDisposable
                 _listing = null; _total = _items.Count;
                 return;
             }
+            if (!append && _site is not null) _site.FreeBytes = result.FreeBytes;
             _path = result.Path;
             _listing = result.Listing;
             _items.AddRange(result.Items);
@@ -243,145 +278,195 @@ internal sealed class RemoteFilesScreen : IDisposable
     private void Render()
     {
         if (_closed) return;
+        bool folder = !_showTransfers && !_adding && _site is not null;
+        SetFolderFullScreen(folder);
+        if (!folder) ResetChrome();
         _content.RemoveAllViews();
         if (_showTransfers) RenderTransfers();
         else if (_adding) RenderAddLocation();
         else if (_site is null) RenderLocations(); else RenderFolder();
     }
 
-    private void RenderLocations()
-    {
-        Heading("Remote Files");
-        AddText("Host: " + _hostName, 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_busy) AddButton("Transfers", () => OpenTransfers());
-        if (_busy) { AddText("Loading Remote Files…", 16, Resource.Attribute.colorOnSurfaceVariant); return; }
-        if (_error is not null)
-        {
-            AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
-            AddButton("Try again", () => _ = LoadLocationsAsync());
-            return;
-        }
-        if (!_listLoaded) return;
-        var state = _status!;
-        var summary = state.Enabled ? "Remote Files enabled" : "Remote Files is off on this Host";
-        summary += "\nrclone: " + state.Rclone;
-        if (!string.IsNullOrWhiteSpace(state.RcloneVersion)) summary += " · " + state.RcloneVersion;
-        if (!string.IsNullOrWhiteSpace(state.Error)) summary += "\n" + state.Error;
-        AddText(summary, 16, Resource.Attribute.colorOnSurfaceVariant);
-        if (!state.Enabled) AddButton("Enable Remote Files", () => _ = SetEnabledAsync(true));
-        else AddButton("Disable Remote Files", () => ConfirmDisable());
-        if (state.Enabled) AddButton("Add location", () => { _adding = true; _error = null; Render(); });
-        AddButton("Refresh", () => _ = LoadLocationsAsync());
-        if (_sites.Count == 0) AddText("No saved remote locations on this Host.", 16, Resource.Attribute.colorOnSurfaceVariant);
-        foreach (var site in _sites)
-        {
-            var card = Card(site.Name, site.Kind + (site.Encrypted ? "" : " · Not encrypted"), true);
-            card.Click += (_, _) =>
-            {
-                if (_busy || _closed) return;
-                _site = site; _parents.Clear();
-                _ = BrowseAsync(null, false, false);
-            };
-            _content.AddView(card);
-            AddButton("Remove " + site.Name, () => ConfirmRemove(site));
-        }
-    }
+    private string? _phoneDestination;
 
-    private void RenderFolder()
-    {
-        AddButton("‹  Back", () => HandleBack());
-        Heading(_site!.Name);
-        AddText("Remote location · " + (_path ?? "Starting folder"), 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_busy) AddButton("Transfers", () => OpenTransfers());
-        string? destination = _phoneHost ? AndroidHost.SharedDownloadFolder : _site.LocalFolder;
-        if (!_safeDownloads())
-            AddText("Update this Host to download files without replacing existing files.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        else if (string.IsNullOrWhiteSpace(destination))
-            AddText("No linked folder is configured on this Host. Configure one for this location before downloading.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        else if (_startUncertain)
-            AddText("The last start could not be confirmed. Check Transfers before starting another download; reopen Remote Files to try again.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_busy) AddButton("Refresh folder", () => _ = BrowseAsync(_path, false, true));
-        if (_busy) AddText("Loading…", 16, Resource.Attribute.colorOnSurfaceVariant);
-        if (_error is not null)
-        {
-            AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
-            if (!_busy) AddButton("Try again", () => _ = BrowseAsync(_path, false, true));
-        }
-        foreach (var item in _items)
-        {
-            string detail = item.IsFolder ? "Folder" : item.Size >= 0 ? Fmt.Bytes(item.Size) : "Size unknown";
-            if (item.Modified is { } modified) detail += " · " + modified.ToLocalTime().ToString("d");
-            bool canOpen = item.IsFolder && !_busy && _path is not null && SafeName(item.Name);
-            var row = Card(item.Name, detail, canOpen);
-            if (canOpen)
-            {
-                var current = _path!;
-                var next = current.TrimEnd('/') + "/" + item.Name;
-                row.Click += (_, _) =>
-                {
-                    if (_closed || _busy) return;
-                    _parents.Add(current);
-                    _ = BrowseAsync(next, false, false);
-                };
-            }
-            _content.AddView(row);
-            if (_safeDownloads() && !item.IsFolder && !_busy && !_startUncertain && _path is not null && SafeName(item.Name)
-                && !string.IsNullOrWhiteSpace(destination))
-                AddButton("Download " + item.Name, () => ConfirmDownload(item.Name, destination!));
-        }
-        if (!_busy && _error is null && _items.Count == 0) AddText("This folder is empty.", 16, Resource.Attribute.colorOnSurfaceVariant);
-        if (!_busy && _items.Count < _total && !string.IsNullOrEmpty(_listing))
-            AddButton("Load more", () => _ = BrowseAsync(_path, true, false));
-    }
+    private string? DownloadDestination => !_phoneHost ? _site?.LocalFolder
+        : _phoneDestination is { Length: > 0 } directory
+            ? System.IO.Path.Combine(AndroidHost.SharedDownloadFolder, directory)
+            : AndroidHost.SharedDownloadFolder;
 
-    private void ConfirmDownload(string name, string destination)
+    private bool CanSelectRemoteFiles() => SameHost() && !_busy && !_startUncertain && _path is not null
+        && _safeDownloads() && !string.IsNullOrWhiteSpace(DownloadDestination);
+
+    private bool CanDeleteRemoteFiles() => SameHost() && !_busy && _path is not null && !string.IsNullOrEmpty(_listing)
+        && _secureHostConnection && _deleteFiles();
+
+    private void ConfirmDeleteFiles(IReadOnlyList<string> names)
     {
-        if (!SameHost() || _busy || _startUncertain || _confirm is not null || _site is null || _path is null) return;
+        if (!CanDeleteRemoteFiles() || _confirm is not null || _site is null || _path is null) return;
+        var selected = names.Distinct(StringComparer.Ordinal).ToArray();
+        if (selected.Length is 0 or > 100 || selected.Any(name =>
+            !SafeName(name) || !_items.Any(item => !item.IsFolder && item.Name == name))) return;
         int generation = _generation;
-        string siteId = _site.Id, remoteFolder = _path;
+        var request = new SiteChangeRequest
+        {
+            Id = _site.Id, Path = _path, Listing = _listing,
+            Items = selected.Select(name => new SiteChangeItemDto { Name = name }).ToList()
+        };
         _confirm = new MaterialAlertDialogBuilder(_activity)
-            .SetTitle("Download file?")!
-            .SetMessage("File: " + name + "\nFrom: " + _site.Name + " · " + remoteFolder
-                + "\nHost: " + _hostDisplay + "\nDestination on this Host: " + destination
-                + "\n\nIf the destination file already exists, it will be skipped, not replaced.")!
+            .SetTitle(selected.Length == 1 ? $"Delete {selected[0]}?" : $"Delete {selected.Length} files?")!
+            .SetMessage($"Permanently delete the selected files from {_site.Name} · {_path}?\nHost: {_hostDisplay}\n\nCopies on this phone are not affected.")!
             .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
-            .SetPositiveButton("Download", (_, _) =>
+            .SetPositiveButton("Delete", (_, _) =>
             {
-                if (SameHost() && generation == _generation && !_busy && !_startUncertain)
-                    _ = StartDownloadAsync(siteId, remoteFolder, name, destination);
+                if (generation == _generation && CanDeleteRemoteFiles()) _ = DeleteFilesAsync(request);
             })!.Create();
         _confirm.DismissEvent += (_, _) => _confirm = null;
         _confirm.Show();
     }
 
-    private async Task StartDownloadAsync(string siteId, string folder, string name, string destination)
+    private async Task DeleteFilesAsync(SiteChangeRequest request)
+    {
+        int generation = ++_generation;
+        _busy = _mutation = true;
+        _error = null;
+        Render();
+        string? message;
+        try
+        {
+            var result = await _client.DeleteFilesAsync(request, _life.Token);
+            if (!SameHost() || generation != _generation) return;
+            message = result.Ok ? "Selected files deleted." : result.Message ?? "The Host did not delete every selected file.";
+        }
+        catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
+        catch (Exception)
+        {
+            if (!SameHost() || generation != _generation) return;
+            message = "The Host's answer was lost. Check the refreshed list before trying again.";
+        }
+        finally
+        {
+            if (!_closed && generation == _generation) _busy = _mutation = false;
+        }
+        Toast.MakeText(_activity, message, ToastLength.Long)?.Show();
+        await BrowseAsync(_path, false, true);
+    }
+
+    private void BrowseBreadcrumb(int index)
+    {
+        if (!SameHost() || _mutation || _site is null || index < -1 || index >= _parents.Count) return;
+        CancelCurrent();
+        string? parent = index == -1 ? null : _parents[index];
+        _parents.RemoveRange(Math.Max(0, index), _parents.Count - Math.Max(0, index));
+        _ = BrowseAsync(parent, false, false);
+    }
+
+    private void ResetChrome()
+    {
+        _surface.RemoveAllViews();
+        if (_scroll.Parent is ViewGroup parent) parent.RemoveView(_scroll);
+        if (_content.Parent != _scroll)
+        {
+            if (_content.Parent is ViewGroup previous) previous.RemoveView(_content);
+            _scroll.AddView(_content);
+        }
+        _surface.AddView(_scroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        _content.SetPadding(Motion.Dp(_activity, 16), Motion.Dp(_activity, 16), Motion.Dp(_activity, 16), Motion.Dp(_activity, 16));
+    }
+
+    private void SetFolderFullScreen(bool fullScreen)
+    {
+        if (_folderFullScreen == fullScreen) return;
+        _folderFullScreen = fullScreen;
+        _showBottomNavigation(!fullScreen);
+        _surface.SetPadding(0, 0, 0, 0);
+        InsetsListener.Pad(_surface, top: true, bottom: fullScreen);
+    }
+
+    private async Task RefreshLocationTransfersAsync(int generation)
+    {
+        if (_status?.Enabled != true || _summaryRequestInFlight || !SameHost()) return;
+        _summaryRequestInFlight = true;
+        try
+        {
+            var result = await _client.ListTransfersAsync(_life.Token);
+            if (!SameHost() || generation != _generation || _site is not null || _adding || _showTransfers) return;
+            _transfers = result.Transfers;
+            _transfersLoaded = true;
+            UpdateTransferSummary();
+        }
+        catch (Exception) { /* A missing summary must not block saved locations. */ }
+        finally { _summaryRequestInFlight = false; }
+    }
+
+    private async Task ObserveLocationTransfersAsync(CancellationToken token)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            while (await timer.WaitForNextTickAsync(token))
+                if (!_busy && _site is null && !_adding && !_showTransfers && _surface.IsShown)
+                    await RefreshLocationTransfersAsync(_generation);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+    }
+
+    private void ConfirmDownloads(IReadOnlyList<string> names, long knownBytes)
+    {
+        if (!CanSelectRemoteFiles() || _confirm is not null || _site is null || _path is null || DownloadDestination is not { } destination) return;
+        var selected = names.Distinct(StringComparer.Ordinal).ToArray();
+        if (selected.Length is 0 or > 100 ||
+            selected.Any(name => !SafeName(name) || !_items.Any(item => !item.IsFolder && item.Name == name))) return;
+        int generation = _generation;
+        string siteId = _site.Id, remoteFolder = _path;
+        _confirm = new MaterialAlertDialogBuilder(_activity)
+            .SetTitle(selected.Length == 1 ? "Download file?" : $"Download {selected.Length} files?")!
+            .SetMessage((selected.Length == 1 ? "File: " + selected[0] : $"{selected.Length} selected files" +
+                (knownBytes > 0 ? " · " + Fmt.Bytes(knownBytes) : ""))
+                + "\nFrom: " + _site.Name + " · " + remoteFolder
+                + "\nHost: " + _hostDisplay + "\nDestination on this Host: " + destination
+                + "\n\nExisting files are skipped, not replaced. Each file starts as its own transfer.")!
+            .SetNegativeButton("Cancel", (Android.Content.IDialogInterfaceOnClickListener?)null)!
+            .SetPositiveButton("Download", (_, _) =>
+            {
+                if (generation == _generation && CanSelectRemoteFiles())
+                    _ = StartDownloadsAsync(siteId, remoteFolder, selected, destination);
+            })!.Create();
+        _confirm.DismissEvent += (_, _) => _confirm = null;
+        _confirm.Show();
+    }
+
+    private async Task StartDownloadsAsync(string siteId, string folder, string[] names, string destination)
     {
         if (!SameHost() || !_safeDownloads() || _busy || _startUncertain) return;
         int generation = ++_generation;
         _busy = _mutation = true; _error = null;
         Render();
+        int accepted = 0;
         try
         {
-            var result = await _client.StartTransferAsync(new SiteTransferStartRequest
+            foreach (var name in names)
             {
-                SiteId = siteId, Direction = "download", RemoteFolder = folder, LocalFolder = destination, SafeSingleDownload = true,
-                Conflict = "skip", Names = [new SiteTransferNameDto { Name = name, IsFolder = false }]
-            }, _life.Token);
-            if (!SameHost() || generation != _generation) return;
-            if (!result.Ok)
-                _error = result.Message ?? "The Host did not start this transfer.";
-            else if (result.Transfer is null)
-            {
-                _startUncertain = true;
-                _error = "The Host accepted the request but did not identify a transfer. Check Transfers before trying again.";
+                if (!SameHost() || !_safeDownloads() || generation != _generation) return;
+                var result = await _client.StartTransferAsync(new SiteTransferStartRequest
+                {
+                    SiteId = siteId, Direction = "download", RemoteFolder = folder, LocalFolder = destination, SafeSingleDownload = true,
+                    Conflict = "skip", Names = [new SiteTransferNameDto { Name = name, IsFolder = false }]
+                }, _life.Token);
+                if (!SameHost() || generation != _generation) return;
+                if (!result.Ok || result.Transfer is null)
+                {
+                    _startUncertain = accepted > 0 || result.Ok;
+                    var error = result.Ok ? "The Host did not identify a transfer. Check Transfers before trying again."
+                        : result.Message ?? "The Host did not start this transfer.";
+                    _error = $"{accepted} of {names.Length} transfers confirmed. {error}";
+                    return;
+                }
+                accepted++;
             }
-            else
-            {
-                _showTransfers = true;
-                _transfersLoaded = false;
-                _busy = _mutation = false;
-                _ = LoadTransfersAsync();
-            }
+            _showTransfers = true;
+            _transfersLoaded = false;
+            _busy = _mutation = false;
+            _ = LoadTransfersAsync();
         }
         catch (OperationCanceledException) when (_life.IsCancellationRequested) { }
         catch (Exception)
@@ -389,7 +474,7 @@ internal sealed class RemoteFilesScreen : IDisposable
             if (SameHost() && generation == _generation)
             {
                 _startUncertain = true;
-                _error = "The Host's answer was lost. The transfer may have started; check Transfers before trying again.";
+                _error = $"{accepted} of {names.Length} transfers confirmed. The last answer was lost; check Transfers before trying again.";
             }
         }
         finally
@@ -440,6 +525,18 @@ internal sealed class RemoteFilesScreen : IDisposable
         if (_busy) AddText("Loading or sending…", 16, Resource.Attribute.colorOnSurfaceVariant);
         if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
         if (!_transfersLoaded) return;
+        if (_startUncertain && !_busy)
+        {
+            AddText("Some downloads may already have started. Review this list before making a new selection.",
+                14, Resource.Attribute.colorOnSurfaceVariant);
+            AddButton("I reviewed these transfers", () =>
+            {
+                if (!SameHost() || _busy || !_transfersLoaded) return;
+                _startUncertain = false;
+                _selectedRemoteFiles.Clear();
+                Render();
+            });
+        }
         if (_transfers.Count == 0) AddText("No transfers on this Host.", 16, Resource.Attribute.colorOnSurfaceVariant);
         foreach (var transfer in _transfers.OrderByDescending(t => t.CreatedAt))
         {
@@ -509,10 +606,32 @@ internal sealed class RemoteFilesScreen : IDisposable
 
     private void RenderAddLocation()
     {
-        Heading("Add WebDAV location");
+        Heading("Add location");
         AddText("Credentials will be sent to " + _hostName + " and stored by that Host.", 14, Resource.Attribute.colorOnSurfaceVariant);
         if (_busy) { AddText("Saving…", 16, Resource.Attribute.colorOnSurfaceVariant); return; }
         if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
+        string kind = _addKind;
+        bool cloud = SiteKindCatalog.SignsIn(kind);
+        bool s3 = kind == SiteKindCatalog.S3;
+        bool sftp = kind == SiteKindCatalog.Sftp;
+        var kinds = new[] { (SiteKindCatalog.WebDav, "WebDAV"), (SiteKindCatalog.Drive, "Google Drive"),
+            (SiteKindCatalog.OneDrive, "OneDrive"), (SiteKindCatalog.Dropbox, "Dropbox"), (SiteKindCatalog.S3, "S3"),
+            (SiteKindCatalog.Sftp, "SFTP") };
+        AddButton("Location type: " + kinds.First(item => item.Item1 == kind).Item2, () =>
+        {
+            if (!SameHost() || _busy || _confirm is not null) return;
+            _confirm = new MaterialAlertDialogBuilder(_activity).SetTitle("Location type")!
+                .SetItems(kinds.Select(item => item.Item2).ToArray(), (_, e) =>
+                {
+                    if (!SameHost()) return;
+                    ClearPassword();
+                    _addKind = kinds[e.Which].Item1;
+                    _error = null;
+                    Render();
+                })!.Create();
+            _confirm.DismissEvent += (_, _) => _confirm = null;
+            _confirm.Show();
+        });
 
         EditText Field(string hint, InputTypes inputType)
         {
@@ -525,21 +644,41 @@ internal sealed class RemoteFilesScreen : IDisposable
         }
 
         var name = Field("Location name", InputTypes.ClassText);
-        var address = Field("WebDAV address (https://…)", InputTypes.ClassText | InputTypes.TextVariationUri);
+        Spinner? providerPicker = null;
+        var providers = SiteKindCatalog.Find(SiteKindCatalog.S3)!.Choices[SiteFields.Provider];
+        if (s3)
+        {
+            _content.AddView(Label("S3 provider", 14, Resource.Attribute.colorOnSurfaceVariant));
+            providerPicker = new Spinner(_activity) { ContentDescription = "S3 provider", SaveEnabled = false };
+            var adapter = new ArrayAdapter<string>(_activity, Android.Resource.Layout.SimpleSpinnerItem,
+                providers.Select(provider => provider.Title).ToArray());
+            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+            providerPicker.Adapter = adapter;
+            _content.AddView(providerPicker, new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 48)));
+        }
+        var address = cloud || sftp ? null : Field(s3 ? "S3 endpoint (optional for Amazon S3)" : "WebDAV address (https://…)",
+            InputTypes.ClassText | InputTypes.TextVariationUri);
+        var server = sftp ? Field("SFTP server name or address", InputTypes.ClassText) : null;
+        var portField = sftp ? Field("Port", InputTypes.ClassNumber) : null;
+        if (portField is not null) portField.Text = "22";
+        var remoteFolder = sftp || s3 ? Field("Starting folder (optional)", InputTypes.ClassText) : null;
+        var region = s3 ? Field("Region (optional)", InputTypes.ClassText) : null;
         var localFolder = _phoneHost ? null : Field("Download folder on the selected Host (optional)", InputTypes.ClassText);
-        var user = Field("User name (optional)", InputTypes.ClassText);
-        var password = _password = Field("Password (optional)", InputTypes.ClassText | InputTypes.TextVariationPassword);
-        password.Enabled = _secureHostConnection;
+        var user = cloud ? null : Field(s3 ? "Access key ID" : "User name (optional)", InputTypes.ClassText);
+        var password = _password = cloud ? null : Field(s3 ? "Secret access key" : "Password (optional)",
+            InputTypes.ClassText | InputTypes.TextVariationPassword);
+        if (password is not null) password.Enabled = _secureHostConnection;
         if (!_secureHostConnection)
             AddText("Locations cannot be added over an unencrypted or unverified Host connection. Connect to this Host with HTTPS first.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
+        if (password is not null && Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
             password.ImportantForAutofill = ImportantForAutofill.No;
         var allowHttp = new CheckBox(_activity)
         {
             Text = "Allow HTTP: not encrypted. Credentials and files can be read or changed in transit.",
             SaveEnabled = false
         };
-        _content.AddView(allowHttp);
+        if (address is not null) _content.AddView(allowHttp);
+        if (cloud) AddText("Save the location, then choose Sign in from Remote Files.", 14, Resource.Attribute.colorOnSurfaceVariant);
         var validation = Label("", 14, Resource.Attribute.colorOnSurfaceVariant);
         _content.AddView(validation);
         AddButton("Save location", () =>
@@ -547,21 +686,38 @@ internal sealed class RemoteFilesScreen : IDisposable
             if (!SameHost() || _busy) return;
             if (!_secureHostConnection)
             { validation.Text = "Adding a location requires a secure Host connection."; return; }
-            var text = address.Text?.Trim() ?? "";
+            var text = address?.Text?.Trim() ?? "";
+            var provider = providerPicker is { SelectedItemPosition: >= 0 } picker
+                ? providers[picker.SelectedItemPosition].Value : SiteKindCatalog.AwsProvider;
             if (string.IsNullOrWhiteSpace(name.Text))
             { validation.Text = "Enter a location name."; return; }
-            if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
-                (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) ||
-                string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) ||
-                !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-            { validation.Text = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment."; return; }
-            if (uri.Scheme == Uri.UriSchemeHttp && !allowHttp.Checked)
-            { validation.Text = "HTTP is not encrypted. Tick the warning to allow it."; return; }
+            if (s3 && (string.IsNullOrWhiteSpace(user?.Text) || string.IsNullOrWhiteSpace(password?.Text)))
+            { validation.Text = "Enter the access key ID and secret access key."; return; }
+            if (s3 && provider != SiteKindCatalog.AwsProvider && text.Length == 0)
+            { validation.Text = "Enter the S3 endpoint for this provider."; return; }
+            int port = 22;
+            if (sftp && (string.IsNullOrWhiteSpace(server?.Text) || string.IsNullOrWhiteSpace(user?.Text)
+                || !int.TryParse(portField?.Text, out port) || port is < 1 or > 65535))
+            { validation.Text = "Enter the SFTP server, port and user name."; return; }
+            if (address is not null && (!s3 || text.Length > 0))
+            {
+                if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) ||
+                    (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) ||
+                    string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) ||
+                    !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+                { validation.Text = "Enter an HTTP or HTTPS address without credentials, a query, or a fragment."; return; }
+                if (uri.Scheme == Uri.UriSchemeHttp && !allowHttp.Checked)
+                { validation.Text = "HTTP is not encrypted. Tick the warning to allow it."; return; }
+            }
             var request = new SiteSaveRequest
             {
-                Name = name.Text!.Trim(), Kind = "webdav", Url = text, Vendor = "other",
+                Name = name.Text!.Trim(), Kind = kind, Url = !s3 && address is not null ? text : null,
+                Vendor = !s3 && address is not null ? "other" : null,
+                Provider = s3 ? provider : null, Endpoint = s3 && text.Length > 0 ? text : null,
+                Region = string.IsNullOrWhiteSpace(region?.Text) ? null : region.Text.Trim(),
+                Host = server?.Text?.Trim() ?? "", Port = port, RemoteFolder = remoteFolder?.Text?.Trim() ?? "",
                 LocalFolder = string.IsNullOrWhiteSpace(localFolder?.Text) ? null : localFolder.Text.Trim(),
-                User = user.Text?.Trim() ?? "", Password = string.IsNullOrEmpty(password.Text) ? null : password.Text
+                User = user?.Text?.Trim() ?? "", Password = string.IsNullOrEmpty(password?.Text) ? null : password.Text
             };
             ClearPassword();
             _ = SaveLocationAsync(request);

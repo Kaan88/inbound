@@ -74,8 +74,10 @@ public sealed partial class MainActivity : AppCompatActivity
         var root = FindViewById<ViewGroup>(Resource.Id.root)!;
         var downloadsRoot = FindViewById<View>(Resource.Id.downloads_root)!;
         InsetsListener.Pad(downloadsRoot, top: true, bottom: false);
-        _downloads = new DownloadsScreen(this, downloadsRoot, _model);
-        _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance);
+        var selectionDraft = savedInstanceState?.GetBundle("downloads_selection");
+        _downloads = new DownloadsScreen(this, downloadsRoot, _model,
+            selectionDraft?.GetString("host_stamp") == _linkHostStamp ? selectionDraft : null);
+        _ = new SettingsScreen(this, FindViewById<View>(Resource.Id.settings_root)!, appearance, query => _hostSettings?.FilterCategories(query));
         _queues = new QueuesScreen(this, FindViewById<View>(Resource.Id.queues_root)!, _model,
             new QueueSettingsModel(_model, _connection, requireCapabilities: Capabilities.IsRemote), OpenQueueEditor);
         _hostSettings = new HostSettingsScreen(this, FindViewById<View>(Resource.Id.settings_content)!, _model,
@@ -157,7 +159,15 @@ public sealed partial class MainActivity : AppCompatActivity
         var queueActions = new Bundle(); _queues?.Save(queueActions);
         queueActions.PutString("host_stamp", _linkHostStamp); outState.PutBundle("queue_actions", queueActions);
         // The open page comes back after a rotation or a process death, with what was typed into it (finding 16).
-        if (_nav?.PageOpen != true) return;
+        if (_nav?.PageOpen != true)
+        {
+            if (!_onSettings && !_onQueues && !_onRemoteFiles && _downloads?.SaveSelection() is { } selection)
+            {
+                selection.PutString("host_stamp", _linkHostStamp);
+                outState.PutBundle("downloads_selection", selection);
+            }
+            return;
+        }
         if (_hostSettings?.OpenDetailId is { } detail)
         {
             outState.PutString("host_settings_detail", detail);
@@ -298,6 +308,7 @@ public sealed partial class MainActivity : AppCompatActivity
         var remoteFilesPage = FindViewById<FrameLayout>(Resource.Id.remote_files_root)!;
         var from = _onSettings ? settingsPage : _onQueues ? queuesPage : _onRemoteFiles ? remoteFilesPage : downloads;
         var to = settings ? settingsPage : queues ? queuesPage : remoteFiles ? remoteFilesPage : downloads;
+        if (from == downloads) _downloads?.EndSelection();
         if (_onRemoteFiles)
         {
             _remoteFiles?.Dispose();
@@ -310,7 +321,9 @@ public sealed partial class MainActivity : AppCompatActivity
             bool secureHostConnection = current?.ConnectionStamp == _linkHostStamp &&
                 (current?.IsPhone == true || current?.AddressUri?.Scheme == Uri.UriSchemeHttps);
             _remoteFiles = new RemoteFilesScreen(this, _connection, _linkHostStamp, secureHostConnection,
-                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.SafeSingleDownloadCapability) == true);
+                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.SafeSingleDownloadCapability) == true,
+                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteChangeRequest.DeleteFilesCapability) == true,
+                visible => FindViewById<View>(Resource.Id.nav)!.Visibility = visible ? ViewStates.Visible : ViewStates.Gone);
             InsetsListener.Pad(_remoteFiles.View, top: true, bottom: false);
             remoteFilesPage.AddView(_remoteFiles.View);
             _remoteFiles.Start();
@@ -358,14 +371,41 @@ public sealed partial class MainActivity : AppCompatActivity
 
     internal void UpdateBack() => _nav?.UpdateBack();
 
+    internal void SetDownloadsSelectionChrome(bool selecting)
+    {
+        var visibility = selecting ? ViewStates.Gone : ViewStates.Visible;
+        FindViewById<View>(Resource.Id.fab)!.Visibility = visibility;
+        if (!_onSettings && !_onQueues && !_onRemoteFiles)
+            FindViewById<View>(Resource.Id.nav)!.Visibility = visibility;
+    }
+
     /// <summary>A message for the person; from any thread. Sits above the bottom bar when that is showing.</summary>
-    internal void ShowMessage(string text, string? action = null, Action? onAction = null)
+    internal void ShowMessage(string text, string? action = null, Action? onAction = null, bool completion = false)
     {
         RunOnUiThread(() =>
         {
             if (IsFinishing || IsDestroyed) return;
-            var bar = Google.Android.Material.Snackbar.Snackbar.Make(FindViewById<View>(Resource.Id.root)!, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
-            if (_nav?.PageOpen != true) bar.SetAnchorView(FindViewById<View>(Resource.Id.nav));
+            // The Downloads coordinator lets the completion bar dodge the Add button while it is attached.
+            bool downloadsCompletion = completion && !_onSettings && !_onQueues && !_onRemoteFiles && _nav?.PageOpen != true;
+            var parent = FindViewById<View>(downloadsCompletion ? Resource.Id.downloads_root : Resource.Id.root)!;
+            var bar = Google.Android.Material.Snackbar.Snackbar.Make(parent, text, Google.Android.Material.Snackbar.Snackbar.LengthLong)!;
+            if (downloadsCompletion)
+            {
+                var view = bar.View;
+                if (view.LayoutParameters is ViewGroup.MarginLayoutParams margins)
+                {
+                    margins.LeftMargin = margins.RightMargin = Motion.Dp(this, 16);
+                    margins.BottomMargin = Motion.Dp(this, 12);
+                    view.LayoutParameters = margins;
+                }
+                // Change only the existing themed drawable's shape; retain its color and tint.
+                var background = view.Background?.Mutate();
+                if (background is Google.Android.Material.Shape.MaterialShapeDrawable shape)
+                    shape.ShapeAppearanceModel = shape.ShapeAppearanceModel.ToBuilder().SetAllCornerSizes(Motion.Dp(this, 16)).Build();
+                else if (background is Android.Graphics.Drawables.GradientDrawable gradient)
+                    gradient.SetCornerRadius(Motion.Dp(this, 16));
+            }
+            else if (_nav?.PageOpen != true) bar.SetAnchorView(FindViewById<View>(Resource.Id.nav));
             if (action is not null && onAction is not null) bar.SetAction(action, _ => onAction());
             bar.Show();
         });
@@ -390,11 +430,11 @@ public sealed partial class MainActivity : AppCompatActivity
             if (row.Group != RowGroup.Finished || before == RowGroup.Finished) return;
             var path = row.Job.FinalFilePath;
             // A server's file is on the server: nothing on this phone to open.
-            if (!Capabilities.CanOpenFiles) { ShowMessage(row.Name + " finished"); return; }
+            if (!Capabilities.CanOpenFiles) { ShowMessage(row.Name + " finished", completion: true); return; }
             ShowMessage(row.Name + " finished", "Open", () =>
             {
                 if (!Outside.OpenFile(this, path)) ShowMessage("The file could not be opened.");
-            });
+            }, completion: true);
         };
     }
 
@@ -551,6 +591,7 @@ public sealed partial class MainActivity : AppCompatActivity
 
     protected override void OnDestroy()
     {
+        _downloads?.CloseSelectionWindows();
         _linkLifetime.Cancel();
         _linkPageLifetime?.Cancel();
         if (_linkHosts is not null) _linkHosts.Changed -= OnLinkHostsChanged;

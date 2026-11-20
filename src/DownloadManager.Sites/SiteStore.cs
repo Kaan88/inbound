@@ -109,6 +109,8 @@ public sealed record SiteRecord
 
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ModifiedAt { get; init; }
+    /// <summary>Opaque content revision assigned on every write, independent of wall-clock precision.</summary>
+    public Guid Revision { get; init; }
 }
 
 /// <summary>SITES.6b: one server certificate a site trusts. Public data: the certificate and its SHA-256 fingerprint.</summary>
@@ -202,7 +204,7 @@ public sealed class SiteStore
     public async Task SaveAsync(SiteRecord site, CancellationToken cancellationToken = default)
     {
         Validate(site);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(site, SitesJsonContext.Default.SiteRecord);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(site with { Revision = Guid.NewGuid() }, SitesJsonContext.Default.SiteRecord);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
