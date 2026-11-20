@@ -10,6 +10,16 @@ download summary depends on tracked upload support.
 
 ### Live Downloads, Details, and notification controls (2026-11-20)
 
+- Astra approved paired C3 cloud location setup in `c3-paired-cloud-final-20261120-123633`.
+  The form preserved the draft name when switching types and cleared it
+  after Cancel and Save. Choosing the same type kept the entered address.
+  The disposable Host stored three distinct Google Drive, OneDrive and
+  Dropbox locations, each ready for separate sign-in. The cloud form
+  names the Host that will store the authorization when the user signs in.
+  The optional folder hint fits with the full accessible label retained.
+  Setup made zero
+  provider proxy requests and left zero jobs, transfers or output.
+  WebDAV validation also passed on the same APK.
 - Astra approved paired C3 SFTP form validation in `c3-paired-sftp-validation-20261120-122245`.
   The required username is labeled as such. The form defaults to port 22,
   rejects a missing server, port 65536 and a missing username separately,

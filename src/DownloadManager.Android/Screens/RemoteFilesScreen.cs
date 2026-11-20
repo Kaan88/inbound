@@ -48,6 +48,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private bool _started, _closed, _busy, _listLoaded;
     private bool _adding;
     private string _addKind = SiteKindCatalog.WebDav;
+    private string _addName = "";
     private bool _showTransfers, _mutation, _startUncertain, _transfersLoaded;
     private bool _summaryRequestInFlight;
     private List<SiteTransferDto> _transfers = [];
@@ -108,6 +109,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         {
             ClearPassword();
             _adding = false;
+            _addName = "";
             CancelCurrent();
             Render();
             return true;
@@ -617,11 +619,13 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private void RenderAddLocation()
     {
         Heading("Add location");
-        AddText("Credentials will be sent to " + _hostName + " and stored by that Host.", 14, Resource.Attribute.colorOnSurfaceVariant);
-        if (_busy) { AddText("Saving…", 16, Resource.Attribute.colorOnSurfaceVariant); return; }
-        if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
         string kind = _addKind;
         bool cloud = SiteKindCatalog.SignsIn(kind);
+        AddText(cloud
+            ? "When you sign in, " + _hostName + " will store the authorization."
+            : "Credentials will be sent to " + _hostName + " and stored by that Host.", 14, Resource.Attribute.colorOnSurfaceVariant);
+        if (_busy) { AddText("Saving…", 16, Resource.Attribute.colorOnSurfaceVariant); return; }
+        if (_error is not null) AddText(_error, 16, Resource.Attribute.colorOnSurfaceVariant);
         bool s3 = kind == SiteKindCatalog.S3;
         bool sftp = kind == SiteKindCatalog.Sftp;
         var kinds = new[] { (SiteKindCatalog.WebDav, "WebDAV"), (SiteKindCatalog.Drive, "Google Drive"),
@@ -634,8 +638,10 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 .SetItems(kinds.Select(item => item.Item2).ToArray(), (_, e) =>
                 {
                     if (!SameHost()) return;
+                    string selectedKind = kinds[e.Which].Item1;
+                    if (_addKind == selectedKind) return;
                     ClearPassword();
-                    _addKind = kinds[e.Which].Item1;
+                    _addKind = selectedKind;
                     _error = null;
                     Render();
                 })!.Create();
@@ -654,6 +660,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         }
 
         var name = Field("Location name", InputTypes.ClassText);
+        name.Text = _addName;
         Spinner? providerPicker = null;
         var providers = SiteKindCatalog.Find(SiteKindCatalog.S3)!.Choices[SiteFields.Provider];
         if (s3)
@@ -673,7 +680,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         if (portField is not null) portField.Text = "22";
         var remoteFolder = sftp || s3 ? Field("Starting folder (optional)", InputTypes.ClassText) : null;
         var region = s3 ? Field("Region (optional)", InputTypes.ClassText) : null;
-        var localFolder = _phoneHost ? null : Field("Download folder on the selected Host (optional)", InputTypes.ClassText);
+        var localFolder = _phoneHost ? null : Field("Host download folder (optional)", InputTypes.ClassText);
+        if (localFolder is not null) localFolder.ContentDescription = "Download folder on the selected Host (optional)";
         var user = cloud ? null : Field(sftp ? "SFTP user name" : s3 ? "Access key ID" : "User name (optional)", InputTypes.ClassText);
         var password = _password = cloud ? null : Field(s3 ? "Secret access key" : "Password (optional)",
             InputTypes.ClassText | InputTypes.TextVariationPassword);
@@ -702,7 +710,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         _content.AddView(validation);
         name.TextChanged += (_, _) =>
         {
-            if (!string.IsNullOrWhiteSpace(name.Text) && validation.Text == nameRequired) validation.Text = "";
+            _addName = name.Text ?? "";
+            if (!string.IsNullOrWhiteSpace(_addName) && validation.Text == nameRequired) validation.Text = "";
         };
         if (address is not null)
         {
@@ -816,6 +825,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                 return;
             }
             _adding = false;
+            _addName = "";
             _busy = false;
             _ = LoadLocationsAsync();
         }

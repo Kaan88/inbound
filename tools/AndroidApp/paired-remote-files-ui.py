@@ -26,7 +26,7 @@ def require(ok, message):
 
 def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
         capabilities, get_count, verify_refresh=False, get_listing_count=None, verify_transfers=False,
-        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None, verify_s3_validation=None, verify_sftp_validation=None):
+        verify_delete=False, delete_state=None, require_no_transfers=None, verify_location_remove=None, verify_add_validation=None, verify_s3_validation=None, verify_sftp_validation=None, verify_cloud_validation=None):
     """Use actual paired-Host UI for an owned download or location removal."""
     host = urlsplit(host_origin)
     dav = urlsplit(webdav_url)
@@ -131,6 +131,63 @@ def run(smoke, *, host_name, host_origin, webdav_url, owned_root, destination,
             image.crop((l,t,r,b)).save(evidence / (key + ".png"))
         ET.ElementTree(ET.Element("validation", {"text":label})).write(evidence / (key + ".xml"), encoding="utf-8", xml_declaration=True)
 
+    if verify_cloud_validation is not None:
+        types = (("Google Drive", "drive", "Owned Drive"), ("OneDrive", "onedrive", "Owned OneDrive"), ("Dropbox", "dropbox", "Owned Dropbox"))
+        expected = {}
+        previous = "WebDAV"
+        verify_cloud_validation(expected)
+        enter("Location name", "Cancel Draft")
+        tap("Cancel")
+        add, _ = smoke.wait_content_description(lambda d: d == "Add remote location", "Add remote location")
+        smoke.tap(add); smoke.wait_node("Add location")
+        field, _ = smoke.wait_content_description(lambda d: d == "Location name", "Location name")
+        require(field.get("text", "") in ("", "Location name"), "Cancelled location name survived reopening")
+        verify_cloud_validation(expected)
+        for index, (title, kind, name) in enumerate(types):
+            if index:
+                add, _ = smoke.wait_content_description(lambda d: d == "Add remote location", "Add remote location")
+                smoke.tap(add); smoke.wait_node("Add location")
+                if previous != "WebDAV":
+                    tap("Location type: " + previous)
+                    smoke.tap(smoke.wait_node("WebDAV")[0])
+                    smoke.wait_node("Location type: WebDAV")
+            field, _ = smoke.wait_content_description(lambda d: d == "Location name", "Location name")
+            require(field.get("text", "") in ("", "Location name"), "New location form did not start with a blank name")
+            enter("Location name", name)
+            if index == 0:
+                address = "WebDAV address (https://…)"
+                enter(address, webdav_url)
+                tap("Location type: WebDAV")
+                smoke.tap(smoke.wait_node("WebDAV")[0])
+                field, _ = smoke.wait_content_description(lambda d: d == address, address)
+                require(field.get("text") == webdav_url, "Selecting the current type changed the draft address")
+            tap("Location type: WebDAV")
+            smoke.tap(smoke.wait_node(title)[0])
+            smoke.wait_node("Location type: " + title)
+            field, tree = smoke.wait_content_description(lambda d: d == "Location name", "Location name")
+            require(field.get("text") == name, "Location name was not preserved across type change")
+            nodes = list(tree.iter("node"))
+            require(any(n.get("text") == "Save the location, then choose Sign in from Remote Files." for n in nodes), "Cloud sign-in guidance missing")
+            disclosure = "When you sign in, " + host_name + " will store the authorization."
+            require(any(n.get("text") == disclosure for n in nodes), "Missing disclosure for the later sign-in step")
+            folder = [n for n in nodes if n.get("content-desc") == "Download folder on the selected Host (optional)"]
+            require(len(folder) == 1 and folder[0].get("text") == "Host download folder (optional)",
+                    "The shorter folder hint or its full accessible label is missing")
+            fields = [n for n in nodes if n.get("class", "").endswith("EditText")]
+            require(all(n.get("content-desc") in ("Location name", "Download folder on the selected Host (optional)") and n.get("password") != "true" for n in fields),
+                    "Cloud setup unexpectedly requests credentials")
+            save_state("c3-cloud-" + kind + "-form", tree)
+            verify_cloud_validation(expected)
+            tap("Save location")
+            _, tree = smoke.wait_content_description(lambda d: d == name + ". Sign-in required. Sign in.", "unsigned cloud location", timeout=45)
+            expected[name] = kind
+            verify_cloud_validation(expected)
+            for existing in expected:
+                require(any(n.get("content-desc") == existing + ". Sign-in required. Sign in." for n in tree.iter("node")),
+                        "Unsigned cloud card disappeared or changed")
+            save_state("c3-cloud-" + kind + "-saved", tree)
+            previous = title
+        return {"cloud_validation": True}
     if verify_sftp_validation is not None:
         tap("Location type: WebDAV")
         smoke.tap(smoke.wait_node("SFTP")[0])

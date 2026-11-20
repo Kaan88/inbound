@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import ipaddress
+import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import re
@@ -176,6 +178,45 @@ def pair_probe(smoke, origin, password, expected_fingerprint, *, host_name=HOST_
     smoke.log("PASS pairing: Android matched and pinned the exact disposable HTTPS certificate.")
 
 
+@contextmanager
+def cloud_proxy(enabled):
+    if not enabled:
+        yield lambda: None
+        return
+    counts = {"attempts": 0}
+    guard = threading.Lock()
+    class RejectProxy(BaseHTTPRequestHandler):
+        def deny(self):
+            self.send_error(403)
+        do_CONNECT = do_GET = do_POST = do_PUT = do_DELETE = deny
+        def log_message(self, *_): pass
+    class TrackedProxy(ThreadingHTTPServer):
+        def get_request(self):
+            request = super().get_request()
+            with guard:
+                counts["attempts"] += 1
+            return request
+
+    proxy = TrackedProxy(("127.0.0.1", 0), RejectProxy)
+    proxy.daemon_threads = True
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    names = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy")
+    prior = {key: os.environ.get(key) for key in names}
+    address = f"http://127.0.0.1:{proxy.server_port}"
+    os.environ.update({key: ("127.0.0.1,localhost" if key.lower() == "no_proxy" else address) for key in names})
+    def check():
+        with guard: require(counts["attempts"] == 0, "Unexpected provider/proxy request")
+    try:
+        yield check
+        check()
+    finally:
+        for key, value in prior.items():
+            if value is None: os.environ.pop(key, None)
+            else: os.environ[key] = value
+        proxy.shutdown(); thread.join(timeout=5); proxy.server_close()
+
+
 def run(args):
     states = load("c4_states", "capture-download-states-parity.py")
     paired = load("c4_host", "paired-host-parity-fixture.py")
@@ -248,7 +289,7 @@ def run(args):
 
     require(phone_target_absent(), "Exact paired fixture filename already exists on the emulator")
     baseline = phone_count()
-    with report_cleanup(smoke), tempfile.TemporaryDirectory(prefix="inbound-c4-relay-") as scratch:
+    with report_cleanup(smoke), cloud_proxy(args.verify_cloud_validation) as no_external, tempfile.TemporaryDirectory(prefix="inbound-c4-relay-") as scratch:
         temp = Path(scratch).resolve()
         rclone = extract_rclone(args.rclone_zip, temp)
         with paired.running_fixture(args.server_dll, name=HOST_NAME, rclone=rclone) as fixture:
@@ -394,6 +435,27 @@ def run(args):
                                         and not site.get("remoteFolder"), "Saved SFTP configuration differs from owned input")
                             verify_validation_idle()
 
+                        known_cloud_ids = {}
+                        def verify_cloud_validation(expected):
+                            reply = site_request("sites.list", {})
+                            sites = (reply.get("payload") or {}).get("sites")
+                            require(reply.get("type") == "sites.listResult" and isinstance(sites, list)
+                                    and len(sites) == len(expected), "Unexpected cloud Host location count")
+                            actual = {item.get("name"): item for item in sites}
+                            require(set(actual) == set(expected), "Unexpected cloud location names")
+                            for name, kind in expected.items():
+                                site = actual[name]
+                                require(site.get("id") and site.get("kind") == kind and site.get("authMethod") == "signIn"
+                                        and site.get("signedIn") is False and site.get("signingIn") is False
+                                        and not site.get("hasPassword") and not site.get("hasPrivateKey")
+                                        and not site.get("hasClientSecret") and not site.get("user"), "Unexpected cloud Host state")
+                                if name in known_cloud_ids:
+                                    require(known_cloud_ids[name] == site.get("id"), "Cloud location identity changed")
+                                known_cloud_ids[name] = site.get("id")
+                            require(len(set(known_cloud_ids.values())) == len(known_cloud_ids), "Cloud location identities are not unique")
+                            no_external()
+                            verify_validation_idle()
+
                         def verify_validation_idle():
                             jobs = site_request("jobs.snapshot", {})
                             require(jobs.get("type") == "jobs.snapshot" and (jobs.get("payload") or {}).get("jobs") == [], "Unexpected Host jobs")
@@ -421,7 +483,16 @@ def run(args):
                                         verify_location_remove=verify_location_remove if args.verify_location_remove else None,
                                         verify_add_validation=verify_add_validation if args.verify_add_validation else None,
                                         verify_s3_validation=verify_s3_validation if args.verify_s3_validation else None,
-                                        verify_sftp_validation=verify_sftp_validation if args.verify_sftp_validation else None)
+                                        verify_sftp_validation=verify_sftp_validation if args.verify_sftp_validation else None,
+                                        verify_cloud_validation=verify_cloud_validation if args.verify_cloud_validation else None)
+                        if args.verify_cloud_validation:
+                            require(result == {"cloud_validation": True}, "Cloud validation proof did not complete")
+                            (smoke.evidence / "c3-cloud-proof.json").write_text(json.dumps({
+                                "three_unsigned_cloud_kinds": True, "draft_preserved_on_type_change": True,
+                                "draft_cleared_on_cancel_and_save": True, "same_type_kept_fields": True, "no_provider_sign_in": True,
+                                "proxy_attempts": 0, "fixture_connections": 0, "jobs": 0, "transfers": 0, "outputs": 0}, indent=2) + "\n", encoding="utf-8")
+                            smoke.log("PASS C3 unsigned cloud location setup and draft handling.")
+                            return
                         if args.verify_sftp_validation:
                             require(result == {"sftp_validation": True}, "SFTP validation proof did not complete")
                             (smoke.evidence / "c3-sftp-proof.json").write_text(json.dumps({
@@ -509,7 +580,7 @@ def run(args):
                             json.dumps(proof, indent=2) + "\n", encoding="utf-8")
                         smoke.log("PASS C4: one pinned paired-Host WebDAV download matched the exact chosen child and hash.")
                     except Exception:
-                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation and not args.verify_s3_validation and not args.verify_sftp_validation:
+                        if paired_ready and not args.verify_location_remove and not args.verify_add_validation and not args.verify_s3_validation and not args.verify_sftp_validation and not args.verify_cloud_validation:
                             try:
                                 tree = smoke.tree()
                                 for node in tree.iter("node"):
@@ -562,6 +633,7 @@ def main():
     parser.add_argument("--server-dll", type=Path, required=True)
     parser.add_argument("--rclone-zip", type=Path, required=True)
     parser.add_argument("--node", default="node")
+    parser.add_argument("--verify-cloud-validation", action="store_true", help="Verify unsigned cloud setup and draft name")
     parser.add_argument("--verify-sftp-validation", action="store_true", help="Verify SFTP form validation and owned Host save")
     parser.add_argument("--verify-s3-validation", action="store_true", help="Verify S3 provider validation and owned Host save")
     parser.add_argument("--verify-add-validation", action="store_true", help="Verify WebDAV address and HTTP consent validation")
@@ -581,6 +653,8 @@ def main():
         parser.error("--verify-s3-validation is a standalone lane")
     if args.verify_sftp_validation and (args.verify_s3_validation or args.verify_add_validation or args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
         parser.error("--verify-sftp-validation is a standalone lane")
+    if args.verify_cloud_validation and (args.verify_sftp_validation or args.verify_s3_validation or args.verify_add_validation or args.verify_location_remove or args.verify_folder_delete or args.verify_folder_transfers or args.verify_folder_refresh):
+        parser.error("--verify-cloud-validation is a standalone lane")
     run(args)
 
 
