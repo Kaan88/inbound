@@ -17,6 +17,7 @@ internal sealed partial class RemoteFilesScreen
     private string _locationSearch = "";
     private bool _locationSearchOpen;
     private readonly List<(SiteDto Site, View Card)> _locationCards = [];
+    private readonly Dictionary<string, TextView> _locationSubtitles = new(StringComparer.Ordinal);
     private TextView? _locationNoMatches;
     private TextView? _locationTransferText;
     private MaterialCardView? _locationTransferCard;
@@ -24,6 +25,7 @@ internal sealed partial class RemoteFilesScreen
     private void RenderLocations()
     {
         _locationCards.Clear();
+        _locationSubtitles.Clear();
         _locationNoMatches = null;
         _locationTransferText = null;
         _locationTransferCard = null;
@@ -249,6 +251,8 @@ internal sealed partial class RemoteFilesScreen
             summary += " · " + Fmt.Rate(rate);
         _locationTransferText.Text = summary;
         _locationTransferCard.ContentDescription = summary + ". Open transfers.";
+        // The banner is for running transfers; with none (or no answer yet) it is not drawn (owner item 1).
+        _locationTransferCard.Visibility = _transfersLoaded && active.Length > 0 ? ViewStates.Visible : ViewStates.Gone;
     }
 
     private void AddLocationCard(SiteDto site)
@@ -277,7 +281,7 @@ internal sealed partial class RemoteFilesScreen
         disc.SetColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorSurfaceContainerHighest)));
         tile.Background = disc;
         var icon = new ImageView(_activity);
-        icon.SetImageResource(LocationIcon(site.Kind));
+        icon.SetImageResource(LocationGlyph(site.Kind));
         icon.ImageTintList = ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurface)));
         icon.SetPadding(Motion.Dp(_activity, 10), Motion.Dp(_activity, 10), Motion.Dp(_activity, 10), Motion.Dp(_activity, 10));
         tile.AddView(icon, new FrameLayout.LayoutParams(-1, -1, GravityFlags.Center));
@@ -285,8 +289,10 @@ internal sealed partial class RemoteFilesScreen
 
         var details = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
         details.SetPadding(Motion.Dp(_activity, 14), 0, Motion.Dp(_activity, 4), 0);
-        details.AddView(Label(site.Name, 17, Resource.Attribute.colorOnSurface));
-        details.AddView(Label(LocationDescription(site), 14, Resource.Attribute.colorOnSurfaceVariant));
+        details.AddView(Label(RemoteLocationText.DisplayName(site), 17, Resource.Attribute.colorOnSurface));
+        var subtitle = Label(LocationDescription(site), 14, Resource.Attribute.colorOnSurfaceVariant);
+        _locationSubtitles[site.Id] = subtitle;
+        details.AddView(subtitle);
         var detailsParams = new LinearLayout.LayoutParams(0, -2, 1);
         row.AddView(details, detailsParams);
 
@@ -301,13 +307,14 @@ internal sealed partial class RemoteFilesScreen
         card.AddView(row);
         string actionDescription = " Open location.";
         if (NeedsCloudSignIn(site)) actionDescription = CanSignIn(site) ? " Sign in." : "";
-        card.ContentDescription = site.Name + ". " + LocationDescription(site) + "." + actionDescription;
+        card.ContentDescription = RemoteLocationText.DisplayName(site) + ". " + LocationDescription(site) + "." + actionDescription;
         card.Click += (_, _) =>
         {
             if (!SameHost() || _busy) return;
             if (site.Kind == SiteKindCatalog.Sftp && (site.HostKeys.Count == 0 || _changedSftpKeys.Contains(site.Id)))
             {
-                if (_secureHostConnection && _confirm is null) _ = ReviewSftpKeyAsync(site);
+                if (_secureHostConnection && _confirm is null)
+                    _ = ReviewSftpKeyAsync(site, () => { if (FreshSite(site.Id) is { } fresh && !_inFolder) OpenFolderView(fresh); });
                 return;
             }
             if (NeedsCloudSignIn(site))
@@ -315,15 +322,37 @@ internal sealed partial class RemoteFilesScreen
                 BeginCloudSignIn(site);
                 return;
             }
-            _site = site;
-            _parents.Clear();
-            _ = BrowseAsync(null, false, false);
+            OpenFolderView(site);
         };
         card.LongClick += (_, _) => ShowLocationMenu(card, site);
         _locationCards.Add((site, card));
         _content.AddView(card);
     }
 
+    /// <summary>
+    /// Free space of a trusted SFTP location, read after the list shows (owner item 3): one small browse that asks for it, so the
+    /// row can say "1.2 TB free" without making the list wait.
+    /// </summary>
+    private async Task FetchSftpFreeSpaceAsync(int generation)
+    {
+        foreach (var site in _sites.Where(site => site.Kind == SiteKindCatalog.Sftp && site.HostKeys.Count > 0
+            && !_changedSftpKeys.Contains(site.Id) && !_freeBytes.ContainsKey(site.Id)).ToArray())
+        {
+            if (!SameHost() || generation != _generation && _inFolder) return;
+            try
+            {
+                var result = await _client.BrowseAsync(new SiteBrowseRequest { Id = site.Id, Limit = 1, IncludeFreeSpace = true }, _life.Token);
+                if (!SameHost()) return;
+                if (result.Ok && result.FreeBytes is { } free)
+                {
+                    _freeBytes[site.Id] = free;
+                    if (_locationSubtitles.TryGetValue(site.Id, out var subtitle) && !_inFolder) subtitle.Text = LocationDescription(site);
+                }
+            }
+            catch (OperationCanceledException) when (_life.IsCancellationRequested) { return; }
+            catch (Exception) { /* The row simply shows no free space. */ }
+        }
+    }
     private void FilterLocationCards()
     {
         var query = _locationSearch.Trim();
@@ -331,7 +360,7 @@ internal sealed partial class RemoteFilesScreen
         foreach (var (site, card) in _locationCards)
         {
             bool match = query.Length == 0
-                || (site.Name + " " + site.Kind + " " + LocationDescription(site))
+                || (RemoteLocationText.DisplayName(site) + " " + site.Name + " " + site.Kind + " " + LocationDescription(site))
                     .Contains(query, StringComparison.CurrentCultureIgnoreCase);
             card.Visibility = match ? ViewStates.Visible : ViewStates.Gone;
             if (match) visible++;
@@ -431,14 +460,6 @@ internal sealed partial class RemoteFilesScreen
         dialog.Show();
     }
 
-    private static int LocationIcon(string kind) => kind.ToLowerInvariant() switch
-    {
-        "webdav" or "ftp" or "ftps" or "http" => Resource.Drawable.ic_flow_globe,
-        "drive" or "onedrive" or "dropbox" => Resource.Drawable.ic_remote_files,
-        "s3" or "b2" or "swift" => Resource.Drawable.ic_site_object_storage,
-        _ => Resource.Drawable.ic_flow_host
-    };
-
     private string LocationDescription(SiteDto site)
     {
         if (SiteKindCatalog.SignsIn(site.Kind))
@@ -455,7 +476,8 @@ internal sealed partial class RemoteFilesScreen
         };
         string detail = kind;
         if (!string.IsNullOrWhiteSpace(address)) detail += " · " + address;
-        if (site.Kind == SiteKindCatalog.Sftp && site.FreeBytes is >= 0) detail += " · " + DownloadManager.Mobile.Fmt.Bytes(site.FreeBytes.Value) + " free";
+        long? free = _freeBytes.TryGetValue(site.Id, out var known) ? known : site.FreeBytes;
+        if (site.Kind == SiteKindCatalog.Sftp && free is >= 0) detail += " · " + DownloadManager.Mobile.Fmt.Bytes(free.Value) + " free";
         if (!site.Encrypted) detail += " · Not encrypted";
         return detail;
     }

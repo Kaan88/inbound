@@ -1,662 +1,487 @@
-using Android.Database;
-using Android.Provider;
+using Android.Graphics;
+using Android.Graphics.Drawables;
 using Android.Views;
 using Android.Widget;
+using AndroidX.RecyclerView.Widget;
 using DownloadManager.Contracts;
 using DownloadManager.Mobile;
-using DownloadManager.Runtime;
-using Inbound.App.Host;
+using Google.Android.Material.Button;
+using Google.Android.Material.ProgressIndicator;
 using Color = Android.Graphics.Color;
+using ColorStateList = Android.Content.Res.ColorStateList;
 
 namespace Inbound.App.Screens;
 
+/// <summary>The folder view of the Remote Files redesign: app bar or selection bar, the two tabs, breadcrumbs, rows, bottom bar.</summary>
 internal sealed partial class RemoteFilesScreen
 {
-    private readonly HashSet<string> _selectedRemoteFiles = new(StringComparer.Ordinal);
-    private bool _showPhoneFiles;
-    private LinearLayout? _folderHeader;
-    private LinearLayout? _folderRows;
-    private LinearLayout? _folderFooter;
-    private string? _selectionSiteId;
-    private string? _selectionPath;
-    private ScrollView? _folderRowsScroll;
+    private LinearLayout? _folderHeader, _folderFooter, _folderMessage;
+    private RecyclerView? _folderList;
+    private FolderAdapter? _folderAdapter;
+    private LinearProgressIndicator? _folderProgress;
+    private string? _listIdentity;
 
-    private sealed record LocalFileEntry(string Name, bool IsFolder, long Size, long ModifiedSeconds, Android.Net.Uri? Uri = null);
-    private sealed record LocalFilesSnapshot(IReadOnlyList<LocalFileEntry> Items, string? Error);
+    private int Dp(int value) => Motion.Dp(_activity, value);
+    private int Attr(int attribute) => Motion.Attr(_activity, attribute);
 
-    /// <summary>
-    /// Reads files only from Android's scoped Downloads MediaStore collection.
-    /// On the phone Host, also enumerate directory names under the allowed root:
-    /// MediaStore cannot enumerate empty folders that are valid download destinations.
-    /// </summary>
-    private LocalFilesSnapshot ReadLocalFiles(string relativePath)
-    {
-        if (!SafeRelativeFolder(relativePath))
-            return new LocalFilesSnapshot(Array.Empty<LocalFileEntry>(), "This folder path is not available.");
-
-        var directFiles = new Dictionary<string, LocalFileEntry>(StringComparer.Ordinal);
-        var folders = new HashSet<string>(StringComparer.Ordinal);
-        var parent = relativePath.Trim('/');
-        var prefix = parent.Length == 0 ? "" : parent + "/";
-        var projection = new[]
-        {
-            MediaStore.IMediaColumns.DisplayName,
-            MediaStore.IMediaColumns.RelativePath,
-            MediaStore.IMediaColumns.Size,
-            MediaStore.IMediaColumns.DateModified,
-            "_id"
-        };
-
-        try
-        {
-            using ICursor? cursor = _activity.ContentResolver?.Query(
-                MediaStore.Downloads.ExternalContentUri, projection, null, null,
-                MediaStore.IMediaColumns.RelativePath + ", " + MediaStore.IMediaColumns.DisplayName);
-            if (cursor is null) return new LocalFilesSnapshot(Array.Empty<LocalFileEntry>(), "Android did not return the Downloads list.");
-
-            int nameColumn = cursor.GetColumnIndex(MediaStore.IMediaColumns.DisplayName);
-            int pathColumn = cursor.GetColumnIndex(MediaStore.IMediaColumns.RelativePath);
-            int sizeColumn = cursor.GetColumnIndex(MediaStore.IMediaColumns.Size);
-            int modifiedColumn = cursor.GetColumnIndex(MediaStore.IMediaColumns.DateModified);
-            int idColumn = cursor.GetColumnIndex("_id");
-            if (nameColumn < 0 || pathColumn < 0)
-                return new LocalFilesSnapshot(Array.Empty<LocalFileEntry>(), "Android did not provide Downloads folder details.");
-
-            while (cursor.MoveToNext())
-            {
-                var displayName = cursor.GetString(nameColumn) ?? "";
-                var mediaPath = cursor.GetString(pathColumn) ?? "";
-                if (!SafeSegment(displayName) || !TryDownloadsRelativePath(mediaPath, out var directoryPath))
-                    continue;
-                var itemPath = directoryPath.Length == 0 ? displayName : directoryPath + "/" + displayName;
-                if (!itemPath.StartsWith(prefix, StringComparison.Ordinal))
-                    continue;
-
-                var remainder = itemPath[prefix.Length..];
-                if (remainder.Length == 0) continue;
-                int slash = remainder.IndexOf('/');
-                if (slash >= 0)
-                {
-                    var childFolder = remainder[..slash];
-                    if (SafeSegment(childFolder)) folders.Add(childFolder);
-                    continue;
-                }
-
-                long size = sizeColumn >= 0 && !cursor.IsNull(sizeColumn) ? cursor.GetLong(sizeColumn) : -1;
-                long modified = modifiedColumn >= 0 && !cursor.IsNull(modifiedColumn) ? cursor.GetLong(modifiedColumn) : 0;
-                var uri = idColumn >= 0 && !cursor.IsNull(idColumn)
-                    ? Android.Content.ContentUris.WithAppendedId(MediaStore.Downloads.ExternalContentUri!, cursor.GetLong(idColumn)) : null;
-                directFiles[displayName] = new LocalFileEntry(displayName, false, Math.Max(-1, size), modified, uri);
-            }
-        }
-        catch (Exception)
-        {
-            return new LocalFilesSnapshot(Array.Empty<LocalFileEntry>(), "Could not read the phone's scoped Downloads list.");
-        }
-
-        if (_phoneHost) AddPhoneDownloadDirectories(parent, folders);
-        var entries = folders.Select(name => new LocalFileEntry(name, true, -1, 0))
-            .Concat(directFiles.Values)
-            .OrderByDescending(item => item.IsFolder)
-            .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray();
-        return new LocalFilesSnapshot(entries, null);
-    }
-
-    private static string? ExistingPhoneDownloadFolder(string relativePath)
-    {
-        if (!SafeRelativeFolder(relativePath)) return null;
-        string root = AndroidHost.SharedDownloadFolder;
-        var roots = new PathRoots([root]);
-        string? resolved = roots.Allowed(Path.Combine(root, relativePath));
-        return resolved is not null && Directory.Exists(resolved) ? resolved : null;
-    }
-
-    private static void AddPhoneDownloadDirectories(string parent, HashSet<string> folders)
-    {
-        try
-        {
-            if (ExistingPhoneDownloadFolder(parent) is not { } allowed) return;
-            foreach (var directory in new DirectoryInfo(allowed).EnumerateDirectories())
-                if (SafeSegment(directory.Name) && (directory.Attributes & FileAttributes.ReparsePoint) == 0)
-                    folders.Add(directory.Name);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            // Scoped-storage differences may hide directory metadata. Keep MediaStore entries.
-        }
-    }
-
-    /// <summary>Replacement folder body, intended to be wired in place of the legacy renderer.</summary>
-    private void RenderFolderC4()
+    private void RenderFolder()
     {
         EnsureFolderChrome();
-        if (!_showPhoneFiles && (_selectionSiteId != _site?.Id || _selectionPath != _path))
-        {
-            _selectedRemoteFiles.Clear();
-            _selectionSiteId = _site?.Id;
-            _selectionPath = _path;
-        }
-        _folderRows!.RemoveAllViews();
-        UpdateFolderHeader();
-        UpdateFolderFooter();
-
-        if (_showPhoneFiles)
-        {
-            RenderPhoneFiles();
-            return;
-        }
-
-        if (_site is not { } site)
-        {
-            AddFolderMessage("Choose a remote location to browse its files.");
-            return;
-        }
-
-        if (_busy) AddFolderMessage("Loading…");
-        if (_error is not null)
-        {
-            AddFolderMessage(_error);
-            if (!_busy && _browseRequiresSignIn)
-            {
-                if (CanSignIn(site)) AddFolderAction("Sign in", () =>
-                {
-                    if (ReferenceEquals(_site, site)) BeginCloudSignIn(site);
-                });
-            }
-            else if (!_busy) AddFolderAction("Try again", () => _ = BrowseAsync(_path, false, true));
-        }
-
-        foreach (var crumb in Breadcrumbs())
-            _folderRows.AddView(crumb);
-
-        foreach (var item in _items)
-        {
-            if (!SafeName(item.Name)) continue;
-            bool selected = !item.IsFolder && _selectedRemoteFiles.Contains(item.Name);
-            _folderRows.AddView(CreateRemoteRow(item, selected));
-        }
-
-        if (!_busy && _error is null && _items.Count == 0)
-            AddFolderMessage("This folder is empty.");
-        if (!_busy && _items.Count < _total && !string.IsNullOrEmpty(_listing))
-            AddFolderAction("Load more", () => _ = BrowseAsync(_path, true, false));
-        if (!_safeDownloads())
-            AddFolderMessage("Update this Host to download files without replacing existing files.");
+        UpdateFolderUi();
     }
-
-    // Keep the existing Render dispatch target while replacing its legacy body.
-    private void RenderFolder() => RenderFolderC4();
 
     private void EnsureFolderChrome()
     {
-        if (_surface.ChildCount == 1 && _folderHeader?.Parent is ViewGroup currentShell
-            && ReferenceEquals(currentShell.Parent, _surface))
-            return;
+        if (_surface.ChildCount == 1 && _folderHeader?.Parent is ViewGroup current && ReferenceEquals(current.Parent, _surface)) return;
 
-        // _surface is the stable root. Keep the app bar and transfer footer in its
-        // vertical shell; keep the legacy _content in _scroll so ResetChrome can
-        // restore all other Remote Files screens without reparenting it.
+        // _surface is the stable root. The legacy _content stays in _scroll so ResetChrome can restore every other screen.
         _surface.RemoveAllViews();
         var shell = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        shell.SetBackgroundColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorSurface)));
+        shell.SetBackgroundColor(new Color(Attr(Resource.Attribute.colorSurface)));
         _folderHeader = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        _folderHeader.SetPadding(Motion.Dp(_activity, 16), Motion.Dp(_activity, 3), Motion.Dp(_activity, 10), 0);
 
-        _folderRowsScroll = new ScrollView(_activity) { FillViewport = false };
-        _folderRows = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        _folderRows.SetPadding(Motion.Dp(_activity, 16), Motion.Dp(_activity, 6), Motion.Dp(_activity, 16), Motion.Dp(_activity, 16));
-        _folderRowsScroll.AddView(_folderRows);
+        var body = new FrameLayout(_activity);
+        _folderList = new RecyclerView(_activity);
+        _folderList.SetLayoutManager(new LinearLayoutManager(_activity));
+        _folderAdapter = new FolderAdapter(this);
+        _folderList.SetAdapter(_folderAdapter);
+        _folderList.SetClipToPadding(false);
+        _folderList.SetPadding(0, Dp(2), 0, Dp(16));
+        body.AddView(_folderList, new FrameLayout.LayoutParams(-1, -1));
+        _folderMessage = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Visibility = ViewStates.Gone };
+        _folderMessage.SetPadding(Dp(24), Dp(16), Dp(24), 0);
+        body.AddView(_folderMessage, new FrameLayout.LayoutParams(-1, -2));
 
-        _folderFooter = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        _folderFooter.SetPadding(Motion.Dp(_activity, 16), Motion.Dp(_activity, 14), Motion.Dp(_activity, 16), Motion.Dp(_activity, 13));
-        _folderFooter.SetBackgroundColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorSurfaceContainer)));
+        _folderFooter = new LinearLayout(_activity) { Orientation = Orientation.Vertical, Visibility = ViewStates.Gone };
+        _folderFooter.SetBackgroundColor(new Color(Attr(Resource.Attribute.colorSurfaceContainer)));
+        _folderFooter.SetPadding(Dp(16), Dp(16), Dp(16), Dp(16));
 
         shell.AddView(_folderHeader, new LinearLayout.LayoutParams(-1, -2));
-        shell.AddView(_folderRowsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        shell.AddView(body, new LinearLayout.LayoutParams(-1, 0, 1));
         shell.AddView(_folderFooter, new LinearLayout.LayoutParams(-1, -2));
         _surface.AddView(shell, new FrameLayout.LayoutParams(-1, -1));
+        _listIdentity = null;
     }
 
-    private void UpdateFolderHeader()
+    private void UpdateFolderUi()
     {
-        _folderHeader!.RemoveAllViews();
-        var top = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        top.SetGravity(GravityFlags.CenterVertical);
-        var back = new ImageButton(_activity) { Background = null, ContentDescription = "Back" };
-        back.SetImageResource(Resource.Drawable.ic_arrow_back);
-        back.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnSurface)));
-        back.Click += (_, _) => HandleBack();
-        var backParams = new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 52))
-            { LeftMargin = -Motion.Dp(_activity, 12), RightMargin = Motion.Dp(_activity, 5) };
-        top.AddView(back, backParams);
-
-        string title = _site?.Name ?? "Remote Files";
-        var titleView = FolderText(title, 22, Resource.Attribute.colorOnSurface);
-        titleView.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
-        titleView.SetSingleLine(true);
-        top.AddView(titleView, new LinearLayout.LayoutParams(0, -2, 1));
-
-        var overflow = FolderText("⋮", 28, Resource.Attribute.colorOnSurface);
-        overflow.Gravity = GravityFlags.Center;
-        overflow.SetMinWidth(Motion.Dp(_activity, 44));
-        overflow.ContentDescription = "More options";
-        overflow.Click += (_, _) => ShowFolderMenu(overflow);
-        top.AddView(overflow, new LinearLayout.LayoutParams(Motion.Dp(_activity, 44), Motion.Dp(_activity, 52)));
-        _folderHeader.AddView(top);
-        _folderHeader.AddView(CreateFolderTabs());
+        if (Android.OS.Looper.MyLooper() != Android.OS.Looper.MainLooper) { _activity.RunOnUiThread(UpdateFolderUi); return; }
+        if (_closed || !_inFolder || _showTransfers || _adding || _folderHeader?.Parent is null) return;
+        var pane = Active;
+        BuildHeader(pane);
+        BuildRows(pane);
+        BuildFooter(pane);
     }
 
-    private View CreateFolderTabs()
-    {
-        var tabs = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        tabs.SetPadding(0, Motion.Dp(_activity, 9), Motion.Dp(_activity, 6), Motion.Dp(_activity, 6));
-        tabs.AddView(CreateTab("Site", !_showPhoneFiles, () => SetPhoneTab(false)), new LinearLayout.LayoutParams(0, Motion.Dp(_activity, 48), 1));
-        tabs.AddView(CreateTab("This phone", _showPhoneFiles, () => SetPhoneTab(true)), new LinearLayout.LayoutParams(0, Motion.Dp(_activity, 48), 1));
-        return tabs;
-    }
-
-    private View CreateTab(string text, bool selected, Action action)
-    {
-        var tab = FolderText(text, 16, selected ? Resource.Attribute.colorPrimary : Resource.Attribute.colorOnSurfaceVariant);
-        tab.Gravity = GravityFlags.Center;
-        tab.Click += (_, _) => action();
-        if (selected)
-        {
-            var column = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-            column.AddView(tab, new LinearLayout.LayoutParams(-1, 0, 1));
-            var underline = new View(_activity);
-            var line = new Android.Graphics.Drawables.GradientDrawable();
-            line.SetColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorPrimary)));
-            line.SetCornerRadius(Motion.Dp(_activity, 2));
-            underline.Background = line;
-            var holder = new FrameLayout(_activity);
-            holder.AddView(underline, new FrameLayout.LayoutParams(Motion.Dp(_activity, 52), Motion.Dp(_activity, 3), GravityFlags.Bottom | GravityFlags.CenterHorizontal));
-            column.AddView(holder, new LinearLayout.LayoutParams(-1, Motion.Dp(_activity, 4)));
-            column.Click += (_, _) => action();
-            return column;
-        }
-        return tab;
-    }
-
-    private IEnumerable<View> Breadcrumbs()
-    {
-        if (string.IsNullOrWhiteSpace(_path)) yield break;
-        var segments = _path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Length == 0) yield break;
-        var strip = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        strip.SetPadding(0, Motion.Dp(_activity, 2), 0, Motion.Dp(_activity, 8));
-        strip.Orientation = Orientation.Horizontal;
-        strip.SetGravity(GravityFlags.CenterVertical);
-        var crumbs = new HorizontalScrollView(_activity) { HorizontalScrollBarEnabled = false };
-        crumbs.AddView(strip);
-        for (int i = 0; i < segments.Length; i++)
-        {
-            string ancestor = "/" + string.Join("/", segments.Take(i + 1));
-            int index = _parents.FindIndex(path => string.Equals(path.TrimEnd('/'), ancestor, StringComparison.Ordinal));
-            var chip = FolderText(segments[i], 14,
-                i == segments.Length - 1 ? Resource.Attribute.colorOnSurface : Resource.Attribute.colorOnSurfaceVariant);
-            chip.SetPadding(Motion.Dp(_activity, 12), Motion.Dp(_activity, 7), Motion.Dp(_activity, 12), Motion.Dp(_activity, 7));
-            var chipBackground = new Android.Graphics.Drawables.GradientDrawable();
-            chipBackground.SetCornerRadius(Motion.Dp(_activity, 8));
-            bool current = i == segments.Length - 1;
-            chipBackground.SetColor(new Color(Motion.Attr(_activity,
-                current ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurface)));
-            if (!current)
-                chipBackground.SetStroke(Motion.Dp(_activity, 1), new Color(Motion.Attr(_activity, Resource.Attribute.colorOutlineVariant)));
-            chip.Background = chipBackground;
-            if (!current)
-                chip.Click += (_, _) =>
-                {
-                    if (index >= 0) BrowseBreadcrumb(index);
-                    else if (SameHost() && !_mutation)
-                    {
-                        CancelCurrent();
-                        _parents.Clear();
-                        _ = BrowseAsync(ancestor, false, false);
-                    }
-                };
-            strip.AddView(chip);
-            if (i < segments.Length - 1)
-            {
-                var separator = FolderText("›", 20, Resource.Attribute.colorOnSurfaceVariant);
-                separator.Gravity = GravityFlags.Center;
-                separator.SetPadding(Motion.Dp(_activity, 9), 0, Motion.Dp(_activity, 9), 0);
-                strip.AddView(separator);
-            }
-        }
-        yield return crumbs;
-    }
-
-    private View CreateRemoteRow(SiteItemDto item, bool selected)
-    {
-        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        row.SetGravity(GravityFlags.CenterVertical);
-        int pad = Motion.Dp(_activity, 8);
-        row.SetPadding(pad, Motion.Dp(_activity, 8), pad, Motion.Dp(_activity, 8));
-        row.SetMinimumHeight(Motion.Dp(_activity, 62));
-        var icon = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
-        var kind = FileKinds.Of(item.Name);
-        var fileIcon = FileIcons.For(kind);
-        int outline = kind switch
-        {
-            FileKind.Audio => Resource.Drawable.ic_remote_audio,
-            FileKind.Document => Resource.Drawable.ic_remote_document,
-            FileKind.Archive => Resource.Drawable.ic_remote_archive,
-            _ => fileIcon.Drawable
-        };
-        icon.SetImageResource(selected ? Resource.Drawable.ic_check : item.IsFolder ? Resource.Drawable.ic_remote_folder : outline);
-        var tint = selected ? Motion.Attr(_activity, Resource.Attribute.colorOnPrimary)
-            : item.IsFolder ? Motion.Attr(_activity, Resource.Attribute.colorPrimary) : FileIcons.Color(_activity, fileIcon);
-        icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Color(tint));
-        var tile = new Android.Graphics.Drawables.GradientDrawable();
-        tile.SetCornerRadius(Motion.Dp(_activity, selected ? 22 : 12));
-        tile.SetColor(new Color(Motion.Attr(_activity, selected ? Resource.Attribute.colorPrimary : Resource.Attribute.colorSurfaceContainerHighest)));
-        icon.Background = tile;
-        int iconPadding = Motion.Dp(_activity, 10);
-        icon.SetPadding(iconPadding, iconPadding, iconPadding, iconPadding);
-        row.AddView(icon, new LinearLayout.LayoutParams(Motion.Dp(_activity, 40), Motion.Dp(_activity, 40)));
-
-        var labels = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        labels.SetPadding(Motion.Dp(_activity, 15), 0, Motion.Dp(_activity, 8), 0);
-        var name = FolderText(item.Name, 16, Resource.Attribute.colorOnSurface);
-        name.SetSingleLine(true);
-        name.Ellipsize = Android.Text.TextUtils.TruncateAt.Middle;
-        labels.AddView(name);
-        var detail = item.IsFolder
-            ? item.ChildCount is int count ? $"Folder · {count:N0} {(count == 1 ? "item" : "items")}" : "Folder"
-            : item.Size >= 0 ? Fmt.Bytes(item.Size) : "Size unknown";
-        if (!item.IsFolder && item.Modified is { } modified) detail += " · " + modified.ToLocalTime().ToString("d MMM");
-        labels.AddView(FolderText(detail, 13, Resource.Attribute.colorOnSurfaceVariant));
-        row.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-
-        if (item.IsFolder)
-        {
-            row.ContentDescription = item.Name + ", folder. Open";
-            row.Click += (_, _) =>
-            {
-                if (_busy || _path is null) return;
-                _selectedRemoteFiles.Clear();
-                _parents.Add(_path);
-                _ = BrowseAsync(_path.TrimEnd('/') + "/" + item.Name, false, false);
-            };
-        }
-        bool selectable = !item.IsFolder && (CanSelectRemoteFiles() || CanDeleteRemoteFiles());
-        var card = new Google.Android.Material.Card.MaterialCardView(_activity)
-        {
-            Radius = Motion.Dp(_activity, 16),
-            CardElevation = 0,
-            StrokeWidth = 0,
-            Clickable = selectable,
-            Focusable = selectable
-        };
-        card.SetCardBackgroundColor(new Color(Motion.Attr(_activity,
-            selected ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurface)));
-        card.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Motion.Dp(_activity, 2) };
-        card.AddView(row);
-        if (selectable)
-        {
-            card.ContentDescription = (selected ? "Selected " : "Select ") + item.Name + ", " + detail;
-            card.Click += (_, _) =>
-            {
-                if (!CanSelectRemoteFiles() && !CanDeleteRemoteFiles()) return;
-                if (selected) _selectedRemoteFiles.Remove(item.Name);
-                else if (_selectedRemoteFiles.Count < 100) _selectedRemoteFiles.Add(item.Name);
-                RenderFolderC4();
-            };
-        }
-        return card;
-    }
-
-    private void UpdateFolderFooter()
-    {
-        _folderFooter!.RemoveAllViews();
-        if (_showPhoneFiles)
-        {
-            RenderPhoneUploadFooter();
-            return;
-        }
-        var actions = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        actions.SetGravity(GravityFlags.CenterVertical);
-        var info = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        info.AddView(FolderText(SelectionSummary(), 16, Resource.Attribute.colorOnSurface));
-        string? destination = DownloadDestination;
-        if (_phoneHost && destination is not null)
-            destination = _phoneDestination is { Length: > 0 } subfolder ? "Downloads/" + subfolder : "Downloads";
-        var target = FolderText(destination is not null ? "To " + destination : "No destination set", 12,
-            Resource.Attribute.colorOnSurfaceVariant);
-        target.SetSingleLine(true);
-        target.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
-        info.AddView(target);
-        actions.AddView(info, new LinearLayout.LayoutParams(0, -2, 1));
-        if (!_showPhoneFiles)
-        {
-            var canDelete = CanDeleteRemoteFiles();
-            var delete = new ImageButton(_activity)
-            {
-                ContentDescription = "Delete selected remote files",
-                Enabled = canDelete && _selectedRemoteFiles.Count > 0,
-                Visibility = canDelete ? ViewStates.Visible : ViewStates.Gone,
-                Background = null
-            };
-            delete.SetImageResource(Resource.Drawable.ic_remote_trash);
-            int deleteInset = Motion.Dp(_activity, 16);
-            delete.SetPadding(deleteInset, deleteInset, deleteInset, deleteInset);
-            delete.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Color(Motion.Attr(
-                _activity, delete.Enabled ? Resource.Attribute.colorOnSurface : Resource.Attribute.colorOnSurfaceVariant)));
-            delete.Click += (_, _) =>
-            {
-                if (!CanDeleteRemoteFiles() || _selectedRemoteFiles.Count == 0) return;
-                var names = _items.Where(item => !item.IsFolder && _selectedRemoteFiles.Contains(item.Name))
-                    .Select(item => item.Name).Distinct(StringComparer.Ordinal).ToArray();
-                if (names.Length > 0) ConfirmDeleteFiles(names);
-            };
-            actions.AddView(delete, new LinearLayout.LayoutParams(Motion.Dp(_activity, 48), Motion.Dp(_activity, 48)));
-        }
-        var transfer = new Google.Android.Material.Button.MaterialButton(_activity, null, Resource.Attribute.materialButtonStyle)
-        {
-            Text = "To " + (_phoneHost ? "this phone" : _hostName),
-            Enabled = CanSelectRemoteFiles() && _selectedRemoteFiles.Count > 0 && !_busy
-                && _safeDownloads() && _site is not null && _path is not null
-        };
-        transfer.SetAllCaps(false);
-        transfer.TextSize = 14;
-        transfer.InsetTop = 0;
-        transfer.InsetBottom = 0;
-        transfer.SetPadding(Motion.Dp(_activity, 18), 0, Motion.Dp(_activity, 18), 0);
-        transfer.SetIconResource(Resource.Drawable.ic_remote_download);
-        transfer.Click += (_, _) =>
-        {
-            if (!transfer.Enabled || _site is null || _path is null) return;
-            var names = _items.Where(item => !item.IsFolder && _selectedRemoteFiles.Contains(item.Name))
-                .Select(item => item.Name).Distinct(StringComparer.Ordinal).ToArray();
-            long knownBytes = _items.Where(item => !item.IsFolder && names.Contains(item.Name, StringComparer.Ordinal) && item.Size >= 0)
-                .Sum(item => item.Size);
-            ConfirmDownloads(names, knownBytes);
-        };
-        actions.AddView(transfer, new LinearLayout.LayoutParams(-2, Motion.Dp(_activity, 56)));
-        _folderFooter.AddView(actions);
-    }
-
-    private string SelectionSummary()
-    {
-        var selected = _items.Where(item => !item.IsFolder && _selectedRemoteFiles.Contains(item.Name)).ToArray();
-        long bytes = selected.Where(item => item.Size >= 0).Sum(item => item.Size);
-        bool unknown = selected.Any(item => item.Size < 0);
-        string total = unknown && bytes == 0 ? "size unknown" : Fmt.Bytes(bytes) + (unknown ? " + unknown" : "");
-        return selected.Length + (selected.Length == 1 ? " file" : " files") + " · " + total;
-    }
-
-    private void RenderPhoneFiles()
-    {
-        var localPath = _phonePath ?? "";
-        AddFolderMessage(localPath.Length == 0 ? "Downloads on this phone" : "Downloads/" + localPath);
-        var snapshot = ReadLocalFiles(localPath);
-        if (snapshot.Error is not null) AddFolderMessage(snapshot.Error);
-        if (_phoneHost && snapshot.Error is null)
-            AddFolderAction("Use this download folder", () =>
-            {
-                if (!SameHost() || _mutation) return;
-                if (ExistingPhoneDownloadFolder(localPath) is null)
-                {
-                    AddFolderMessage("That folder is no longer available.");
-                    return;
-                }
-                _phoneDestination = localPath;
-                SetPhoneTab(false);
-            });
-        else if (!_phoneHost)
-            AddFolderMessage("Files sent from the Site are saved on the selected Host, not on this phone.");
-        foreach (var item in snapshot.Items)
-        {
-            var detail = item.IsFolder ? "Folder · on this phone"
-                : item.Size >= 0 ? Fmt.Bytes(item.Size) + " · on this phone" : "Size unknown · on this phone";
-            _folderRows!.AddView(CreateLocalRow(item, detail));
-        }
-        if (snapshot.Items.Count == 0 && snapshot.Error is null)
-            AddFolderMessage("No items are visible in Android's scoped Downloads list.");
-    }
-
-    private string? _phonePath;
-
-    private void OpenPhoneFolder(string? path)
-    {
-        _phonePath = path;
-        _phoneUploadSource = null;
-        RenderFolderC4();
-    }
-
-    private View CreateLocalRow(LocalFileEntry item, string detail)
-    {
-        var card = new Google.Android.Material.Card.MaterialCardView(_activity)
-        {
-            Radius = Motion.Dp(_activity, 18), CardElevation = 0, StrokeWidth = 0,
-            Clickable = item.IsFolder, Focusable = item.IsFolder
-        };
-        bool selected = !item.IsFolder && CanUseUploadProbe() && IsPhoneUploadSelected(item);
-        card.SetCardBackgroundColor(new Color(Motion.Attr(_activity,
-            selected ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurfaceContainer)));
-        card.LayoutParameters = new LinearLayout.LayoutParams(-1, -2) { BottomMargin = Motion.Dp(_activity, 6) };
-        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
-        row.SetGravity(GravityFlags.CenterVertical);
-        row.SetPadding(Motion.Dp(_activity, 12), Motion.Dp(_activity, 10), Motion.Dp(_activity, 12), Motion.Dp(_activity, 10));
-        var iconParams = new LinearLayout.LayoutParams(Motion.Dp(_activity, 44), Motion.Dp(_activity, 44));
-        if (selected)
-        {
-            var icon = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
-            icon.SetImageResource(Resource.Drawable.ic_check);
-            icon.ImageTintList = Android.Content.Res.ColorStateList.ValueOf(new Color(Motion.Attr(_activity, Resource.Attribute.colorOnPrimary)));
-            var tile = new Android.Graphics.Drawables.GradientDrawable();
-            tile.SetShape(Android.Graphics.Drawables.ShapeType.Oval);
-            tile.SetColor(new Color(Motion.Attr(_activity, Resource.Attribute.colorPrimary)));
-            icon.Background = tile;
-            int padding = Motion.Dp(_activity, 11);
-            icon.SetPadding(padding, padding, padding, padding);
-            row.AddView(icon, iconParams);
-        }
-        else row.AddView(FolderText(item.IsFolder ? "▱" : FileGlyph(item.Name), 22, Resource.Attribute.colorPrimary), iconParams);
-        var labels = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
-        labels.SetPadding(Motion.Dp(_activity, 12), 0, 0, 0);
-        labels.AddView(FolderText(item.Name, 16, Resource.Attribute.colorOnSurface));
-        labels.AddView(FolderText(detail, 14, Resource.Attribute.colorOnSurfaceVariant));
-        row.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-        card.AddView(row);
-        if (item.IsFolder)
-        {
-            card.ContentDescription = item.Name + ", local folder. Open";
-            card.Click += (_, _) =>
-            {
-                if (!SafeSegment(item.Name)) return;
-                OpenPhoneFolder(string.IsNullOrEmpty(_phonePath) ? item.Name : _phonePath.TrimEnd('/') + "/" + item.Name);
-            };
-        }
-        if (!item.IsFolder) BindPhoneUploadRow(card, item);
-        return card;
-    }
-
-    private void SetPhoneTab(bool phone)
-    {
-        if (_showPhoneFiles == phone || _mutation) return;
-        _showPhoneFiles = phone;
-        _phonePath = null;
-        _phoneUploadSource = null;
-        if (phone) _selectedRemoteFiles.Clear();
-        else if (_site is not null && _path is not null) _selectedRemoteFiles.Clear();
-        RenderFolderC4();
-    }
-
-    private void ShowFolderMenu(View anchor)
-    {
-        var menu = new PopupMenu(_activity, anchor);
-        var items = menu.Menu!;
-        items.Add("Refresh folder")!.SetOnMenuItemClickListener(new MenuClickListener(() =>
-        {
-            if (!_showPhoneFiles) _ = BrowseAsync(_path, false, true);
-            else RenderFolderC4();
-        }));
-        items.Add("Transfers")!.SetOnMenuItemClickListener(new MenuClickListener(OpenTransfers));
-        menu.Show();
-    }
-
-    private void AddFolderMessage(string text)
-    {
-        var label = FolderText(text, 14, Resource.Attribute.colorOnSurfaceVariant);
-        label.SetPadding(0, Motion.Dp(_activity, 8), 0, Motion.Dp(_activity, 8));
-        _folderRows!.AddView(label);
-    }
-
-    private void AddFolderAction(string text, Action action)
-    {
-        var button = new Google.Android.Material.Button.MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle)
-        {
-            Text = text
-        };
-        button.SetAllCaps(false);
-        button.Click += (_, _) => action();
-        _folderRows!.AddView(button);
-    }
+    // ---------------------------------------------------------------------------------------------------------------
+    // Header
 
     private TextView FolderText(string text, float size, int color)
     {
         var view = new TextView(_activity) { Text = text, TextSize = size };
-        view.SetTextColor(new Color(Motion.Attr(_activity, color)));
+        view.SetTextColor(new Color(Attr(color)));
         return view;
     }
 
-    private static string FileGlyph(string name) => Path.GetExtension(name).ToLowerInvariant() switch
+    private View IconButton(int drawable, string description, Action click, int tintAttr = 0)
     {
-        ".mp3" or ".flac" or ".wav" or ".m4a" => "♫",
-        ".pdf" or ".txt" or ".doc" or ".docx" => "▤",
-        ".zip" or ".7z" or ".rar" => "▣",
-        _ => "▧"
-    };
-
-    private static bool SafeRelativeFolder(string path) =>
-        !Path.IsPathRooted(path) && !path.Contains('\\')
-        && path.Split('/', StringSplitOptions.RemoveEmptyEntries).All(SafeSegment);
-
-    private static bool SafeSegment(string name) =>
-        !string.IsNullOrWhiteSpace(name) && name is not "." and not ".."
-        && !name.Contains('/') && !name.Contains('\\') && !name.Contains('\0');
-
-    private static bool TryDownloadsRelativePath(string mediaPath, out string relative)
-    {
-        relative = "";
-        var normalized = mediaPath.Replace('\\', '/').Trim('/');
-        const string root = "Download";
-        if (!normalized.Equals(root, StringComparison.OrdinalIgnoreCase)
-            && !normalized.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
-            return false;
-        relative = normalized.Length == root.Length ? "" : normalized[(root.Length + 1)..];
-        return relative.Split('/', StringSplitOptions.RemoveEmptyEntries).All(SafeSegment);
+        var button = new ImageButton(_activity) { ContentDescription = description };
+        button.SetImageResource(drawable);
+        button.ImageTintList = ColorStateList.ValueOf(new Color(Attr(tintAttr == 0 ? Resource.Attribute.colorOnSurface : tintAttr)));
+        button.SetScaleType(ImageView.ScaleType.CenterInside);
+        button.SetPadding(Dp(12), Dp(12), Dp(12), Dp(12));
+        button.Background = new TypedValueHolder(_activity).SelectableBackground();
+        button.Click += (_, _) => click();
+        return button;
     }
 
-    private sealed class MenuClickListener(Action click) : Java.Lang.Object, IMenuItemOnMenuItemClickListener
+    private void BuildHeader(Pane pane)
     {
-        public bool OnMenuItemClick(Android.Views.IMenuItem? item)
+        _folderHeader!.RemoveAllViews();
+        bool selecting = pane.Selected.Count > 0;
+        var bar = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        bar.SetGravity(GravityFlags.CenterVertical);
+        bar.SetPadding(Dp(4), 0, Dp(4), 0);
+        if (selecting) bar.SetBackgroundColor(new Color(Attr(Resource.Attribute.colorSurfaceContainer)));
+        if (selecting)
         {
-            click();
-            return true;
+            bar.AddView(IconButton(Resource.Drawable.ic_close, "Clear selection", () => { pane.Selected.Clear(); UpdateFolderUi(); }),
+                new LinearLayout.LayoutParams(Dp(48), Dp(48)));
+            var count = FolderText(pane.Selected.Count + " selected", 20, Resource.Attribute.colorOnSurface);
+            count.SetPadding(Dp(12), 0, 0, 0);
+            bar.AddView(count, new LinearLayout.LayoutParams(0, -2, 1));
+            bar.AddView(IconButton(Resource.Drawable.ic_remote_selall, "Select all", () => SelectAll(pane)), new LinearLayout.LayoutParams(Dp(48), Dp(48)));
+        }
+        else
+        {
+            bar.AddView(IconButton(Resource.Drawable.ic_arrow_back, "Back", () => HandleBack()), new LinearLayout.LayoutParams(Dp(48), Dp(48)));
+            var title = FolderText(PaneName(_panes[0]), 22, Resource.Attribute.colorOnSurface);
+            title.SetSingleLine(true);
+            title.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+            title.SetPadding(Dp(12), 0, 0, 0);
+            title.Selected = true;
+            bar.AddView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        View more = IconButton(Resource.Drawable.ic_more, "More options", () => { });
+        more.Click += (_, _) => ShowFolderMenu(more);
+        bar.AddView(more, new LinearLayout.LayoutParams(Dp(48), Dp(48)));
+        _folderHeader.AddView(bar, new LinearLayout.LayoutParams(-1, Dp(72)));
+
+        var tabs = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        tabs.AddView(CreateTab(0), new LinearLayout.LayoutParams(0, Dp(46), 1));
+        tabs.AddView(CreateTab(1), new LinearLayout.LayoutParams(0, Dp(46), 1));
+        _folderHeader.AddView(tabs);
+
+        _folderHeader.AddView(CreateCrumbs(pane));
+        var progress = new LinearProgressIndicator(_activity) { Indeterminate = true, TrackThickness = Dp(3) };
+        progress.Visibility = pane.Loading ? ViewStates.Visible : ViewStates.Invisible;
+        progress.ContentDescription = "Loading this folder";
+        _folderProgress = progress;
+        _folderHeader.AddView(progress, new LinearLayout.LayoutParams(-1, Dp(3)));
+    }
+
+    private View CreateTab(int index)
+    {
+        var pane = _panes[index];
+        bool on = index == _active;
+        var tab = new FrameLayout(_activity) { Clickable = true, Focusable = true };
+        tab.Background = new TypedValueHolder(_activity).SelectableBackground();
+        var label = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        label.SetGravity(GravityFlags.Center);
+        var text = FolderText(PaneName(pane), 15, on ? Resource.Attribute.colorPrimary : Resource.Attribute.colorOnSurfaceVariant);
+        text.SetSingleLine(true);
+        text.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        label.AddView(text, new LinearLayout.LayoutParams(-2, -2));
+        if (on)
+        {
+            var caret = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+            caret.SetImageResource(Resource.Drawable.ic_remote_caret);
+            caret.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorPrimary)));
+            label.AddView(caret, new LinearLayout.LayoutParams(Dp(20), Dp(20)) { LeftMargin = Dp(2) });
+        }
+        tab.AddView(label, new FrameLayout.LayoutParams(-2, -2, GravityFlags.Center) { LeftMargin = Dp(8), RightMargin = Dp(8) });
+        if (on)
+        {
+            var line = new GradientDrawable();
+            line.SetColor(new Color(Attr(Resource.Attribute.colorPrimary)));
+            line.SetCornerRadii(new float[] { Dp(3), Dp(3), Dp(3), Dp(3), 0, 0, 0, 0 });
+            var underline = new View(_activity) { Background = line };
+            tab.AddView(underline, new FrameLayout.LayoutParams(Dp(48), Dp(3), GravityFlags.Bottom | GravityFlags.CenterHorizontal));
+        }
+        tab.ContentDescription = PaneName(pane) + (on ? ", selected. Choose what this pane shows" : ". Show this pane");
+        tab.Click += (_, _) =>
+        {
+            if (index == _active) ShowSwitcher();
+            else { _active = index; UpdateFolderUi(); }
+        };
+        return tab;
+    }
+
+    private View CreateCrumbs(Pane pane)
+    {
+        var crumbs = pane.IsPhone ? RemoteCrumbs.BuildPhone(pane.Path)
+            : RemoteCrumbs.Build(RemoteCrumbs.RootLabel(pane.Site!), PaneRoot(pane), pane.Path);
+        var scroll = new HorizontalScrollView(_activity) { HorizontalScrollBarEnabled = false };
+        var strip = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        strip.SetGravity(GravityFlags.CenterVertical);
+        strip.SetPadding(Dp(16), Dp(10), Dp(16), Dp(6));
+        for (int i = 0; i < crumbs.Count; i++)
+        {
+            var crumb = crumbs[i];
+            bool current = i == crumbs.Count - 1;
+            var chip = FolderText(crumb.Label, 14, current ? Resource.Attribute.colorOnSurface : Resource.Attribute.colorOnSurfaceVariant);
+            chip.SetSingleLine(true);
+            chip.Gravity = GravityFlags.CenterVertical;
+            chip.SetPadding(Dp(12), 0, Dp(12), 0);
+            var background = new GradientDrawable();
+            background.SetCornerRadius(Dp(8));
+            background.SetColor(new Color(Attr(current ? Resource.Attribute.colorSecondaryContainer : Resource.Attribute.colorSurface)));
+            if (!current) background.SetStroke(Dp(1), new Color(Attr(Resource.Attribute.colorOutlineVariant)));
+            chip.Background = background;
+            chip.ContentDescription = current ? crumb.Label + ", this folder" : "Open " + crumb.Label;
+            if (!current) chip.Click += (_, _) => { if (!_mutation) _ = BrowsePaneAsync(pane, crumb.Path, false); };
+            strip.AddView(chip, new LinearLayout.LayoutParams(-2, Dp(32)));
+            if (i < crumbs.Count - 1)
+            {
+                var chevron = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+                chevron.SetImageResource(Resource.Drawable.ic_chevron_right);
+                chevron.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnSurfaceVariant)));
+                strip.AddView(chevron, new LinearLayout.LayoutParams(Dp(20), Dp(20)) { LeftMargin = Dp(3), RightMargin = Dp(3) });
+            }
+        }
+        scroll.AddView(strip);
+        scroll.Post(() => scroll.FullScroll(FocusSearchDirection.Right));
+        return scroll;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Rows
+
+    private void BuildRows(Pane pane)
+    {
+        string identity = _active + "|" + (pane.Site?.Id ?? "phone") + "|" + pane.Path + "|" + pane.Generation + "|" + pane.Sort;
+        bool reset = identity != _listIdentity;
+        _listIdentity = identity;
+        _folderAdapter!.NotifyDataSetChanged();
+        if (reset) _folderList!.ScrollToPosition(0);
+
+        _folderMessage!.RemoveAllViews();
+        string? message = pane.Error;
+        if (message is null && !pane.Loading && pane.Rows.Count == 0) message = "This folder is empty.";
+        if (message is null) { _folderMessage.Visibility = ViewStates.Gone; return; }
+        _folderMessage.Visibility = ViewStates.Visible;
+        _folderMessage.AddView(FolderText(message, 14, Resource.Attribute.colorOnSurfaceVariant));
+        if (pane.Error is null) return;
+        if (pane.NeedsSignIn && pane.Site is { } signIn)
+        {
+            if (CanSignIn(signIn)) AddMessageAction("Sign in", () => { _pendingChoice = (_panes.ToList().IndexOf(pane), signIn.Id); BeginCloudSignIn(signIn); });
+        }
+        else if (pane.KeyProblem && pane.Site is { } sftp)
+        {
+            if (_secureHostConnection) AddMessageAction("Review server key", () =>
+                _ = ReviewSftpKeyAsync(FreshSite(sftp.Id) ?? sftp, () => _ = BrowsePaneAsync(pane, null, true)));
+        }
+        else if (!pane.Loading) AddMessageAction("Try again", () => _ = BrowsePaneAsync(pane, pane.Path, true));
+    }
+
+    private void AddMessageAction(string text, Action action)
+    {
+        var button = new MaterialButton(_activity, null, Resource.Attribute.materialButtonOutlinedStyle) { Text = text };
+        button.SetAllCaps(false);
+        button.Click += (_, _) => action();
+        _folderMessage!.AddView(button, new LinearLayout.LayoutParams(-2, -2) { TopMargin = Dp(12) });
+    }
+
+    private sealed class FolderAdapter(RemoteFilesScreen screen) : RecyclerView.Adapter
+    {
+        public override int ItemCount => screen.Active.Rows.Count;
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) => new RowHolder(screen);
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position) =>
+            ((RowHolder)holder).Bind(screen.Active.Rows[position]);
+    }
+
+    private sealed class RowHolder : RecyclerView.ViewHolder
+    {
+        private readonly RemoteFilesScreen _s;
+        private readonly LinearLayout _root;
+        private readonly ImageView _icon;
+        private readonly TextView _name, _detail;
+        private SiteItemDto? _item;
+
+        public RowHolder(RemoteFilesScreen screen) : this(screen, new LinearLayout(screen._activity)) { }
+
+        private RowHolder(RemoteFilesScreen screen, LinearLayout root) : base(root)
+        {
+            _s = screen;
+            _root = root;
+            root.Orientation = Orientation.Horizontal;
+            root.SetGravity(GravityFlags.CenterVertical);
+            root.SetPadding(screen.Dp(8), 0, screen.Dp(8), 0);
+            root.Clickable = true;
+            root.Focusable = true;
+            var layout = new RecyclerView.LayoutParams(-1, screen.Dp(62));
+            layout.SetMargins(screen.Dp(16), 0, screen.Dp(16), 0);
+            root.LayoutParameters = layout;
+            _icon = new ImageView(screen._activity);
+            _icon.SetScaleType(ImageView.ScaleType.CenterInside);
+            _icon.SetPadding(screen.Dp(8), screen.Dp(8), screen.Dp(8), screen.Dp(8));
+            _icon.Clickable = true;
+            root.AddView(_icon, new LinearLayout.LayoutParams(screen.Dp(40), screen.Dp(40)));
+            var labels = new LinearLayout(screen._activity) { Orientation = Orientation.Vertical };
+            labels.SetPadding(screen.Dp(16), 0, screen.Dp(8), 0);
+            _name = screen.FolderText("", 15, Resource.Attribute.colorOnSurface);
+            _name.SetSingleLine(true);
+            _name.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+            _detail = screen.FolderText("", 12.5f, Resource.Attribute.colorOnSurfaceVariant);
+            _detail.SetSingleLine(true);
+            _detail.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+            labels.AddView(_name);
+            labels.AddView(_detail);
+            root.AddView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+            root.Click += (_, _) => { if (_item is { } item) screen.OnRowTapped(item); };
+            root.LongClick += (_, _) =>
+            {
+                if (_item is { } item && SafeName(item.Name) && !screen.Active.Selected.Contains(item.Name)) screen.ToggleSelected(screen.Active, item);
+            };
+            _icon.Click += (_, _) => { if (_item is { } item) screen.ToggleSelected(screen.Active, item); };
+        }
+
+        public void Bind(SiteItemDto item)
+        {
+            _item = item;
+            var pane = _s.Active;
+            bool selected = pane.Selected.Contains(item.Name);
+            var kind = FileKinds.Of(item.Name);
+            var fileIcon = FileIcons.For(kind);
+            int drawable = selected ? Resource.Drawable.ic_remote_check : item.IsFolder ? Resource.Drawable.ic_remote_folder : kind switch
+            {
+                FileKind.Audio => Resource.Drawable.ic_remote_audio,
+                FileKind.Document => Resource.Drawable.ic_remote_document,
+                FileKind.Archive => Resource.Drawable.ic_remote_archive,
+                FileKind.Image => Resource.Drawable.ic_remote_image,
+                FileKind.Video => Resource.Drawable.ic_remote_video,
+                _ => fileIcon.Drawable
+            };
+            _icon.SetImageResource(drawable);
+            int tint = selected ? _s.Attr(Resource.Attribute.colorOnPrimary)
+                : item.IsFolder ? _s.Attr(Resource.Attribute.colorPrimary) : FileIcons.Color(_s._activity, fileIcon);
+            _icon.ImageTintList = ColorStateList.ValueOf(new Color(tint));
+            var tile = new GradientDrawable();
+            tile.SetCornerRadius(_s.Dp(selected ? 20 : 11));
+            tile.SetColor(new Color(_s.Attr(selected ? Resource.Attribute.colorPrimary : Resource.Attribute.colorSurfaceContainerHighest)));
+            _icon.Background = tile;
+            _name.Text = item.Name;
+            string detail = RemoteFileList.Detail(item, DateTimeOffset.Now);
+            _detail.Text = detail;
+            if (selected)
+            {
+                var background = new GradientDrawable();
+                background.SetCornerRadius(_s.Dp(16));
+                background.SetColor(new Color(_s.Attr(Resource.Attribute.colorSecondaryContainer)));
+                _root.Background = background;
+            }
+            else _root.Background = new TypedValueHolder(_s._activity).SelectableBackground();
+            _root.ContentDescription = (selected ? "Selected, " : "") + item.Name + ", " + detail + (item.IsFolder ? ". Open folder" : ". File options");
+            _icon.ContentDescription = (selected ? "Deselect " : "Select ") + item.Name;
         }
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Bottom bar
+
+    private readonly record struct TransferPlan(bool Enabled, string Button, int Icon, string Caption);
+
+    private bool CanDeleteSelection(Pane pane) =>
+        pane.IsPhone ? RemoteTransfers.DownloadRelative(pane.Path) is not null : SameHost() && _secureHostConnection && _deleteFiles();
+
+    /// <summary>What the bottom bar's main button does: the selection in the active pane goes to the other pane's folder.</summary>
+    private TransferPlan PlanFor(Pane source, Pane target)
+    {
+        var selected = SelectedItems(source);
+        bool hasFiles = selected.Any(item => !item.IsFolder);
+        string targetName = PaneName(target);
+        switch (RemoteTransfers.Mode(source.IsPhone, target.IsPhone))
+        {
+            case RemoteTransferMode.Download:
+                if (!_phoneHost)
+                {
+                    string? folder = source.Site?.LocalFolder;
+                    bool ok = !string.IsNullOrWhiteSpace(folder) && SameHost();
+                    return new(ok && (!hasFiles || _safeDownloads()), "To " + _hostName, Resource.Drawable.ic_remote_download,
+                        !ok ? "This Host has no download folder for the location" : hasFiles && !_safeDownloads()
+                            ? "Update this Host to download files without replacing existing files." : "To " + _hostName + ": " + folder);
+                }
+                if (RemoteTransfers.DownloadRelative(target.Path) is null)
+                    return new(false, "To this phone", Resource.Drawable.ic_remote_download, "Open a folder in Download on this phone first");
+                return new(SameHost() && !_mutation && (!hasFiles || _safeDownloads()), "To this phone", Resource.Drawable.ic_remote_download,
+                    hasFiles && !_safeDownloads() ? "Update this Host to download files without replacing existing files."
+                        : "To " + RemoteTransfers.PhoneLabel(target.Path));
+            case RemoteTransferMode.Upload:
+                if (!_phoneHost)
+                    return new(false, "To " + targetName, Resource.Drawable.ic_remote_up, "Uploads from this phone need this phone as the Host");
+                if (RemoteTransfers.DownloadRelative(source.Path) is null)
+                    return new(false, "To " + targetName, Resource.Drawable.ic_remote_up, "Open a folder in Download first");
+                return new(SameHost() && !_mutation && target.Error is null && !target.Loading, "To " + targetName, Resource.Drawable.ic_remote_up,
+                    "To " + RemoteFileList.Destination(targetName, RemoteCrumbs.Normalize(target.Path)));
+            case RemoteTransferMode.LocationToLocation:
+                return new(false, "To " + targetName, Resource.Drawable.ic_remote_arrow,
+                    "Copying between two locations isn't available yet");
+            default:
+                return new(false, "To " + targetName, Resource.Drawable.ic_remote_download, "Pick a location in the other tab to copy to");
+        }
+    }
+
+    private void BuildFooter(Pane pane)
+    {
+        _folderFooter!.RemoveAllViews();
+        if (pane.Selected.Count == 0) { _folderFooter.Visibility = ViewStates.Gone; return; }
+        _folderFooter.Visibility = ViewStates.Visible;
+        var plan = PlanFor(pane, Other);
+        var row = new LinearLayout(_activity) { Orientation = Orientation.Horizontal };
+        row.SetGravity(GravityFlags.CenterVertical);
+        var info = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        var summary = FolderText(RemoteFileList.Summary(SelectedItems(pane)), 16, Resource.Attribute.colorOnSurface);
+        summary.SetTypeface(Typeface.Create("sans-serif-medium", TypefaceStyle.Normal), TypefaceStyle.Normal);
+        info.AddView(summary);
+        var caption = FolderText(plan.Caption, 13, Resource.Attribute.colorOnSurfaceVariant);
+        caption.SetSingleLine(true);
+        caption.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        info.AddView(caption);
+        row.AddView(info, new LinearLayout.LayoutParams(0, -2, 1) { RightMargin = Dp(8) });
+        if (CanDeleteSelection(pane))
+            row.AddView(IconButton(Resource.Drawable.ic_remote_trash, "Delete selected items", () => ConfirmDeleteSelection(pane)),
+                new LinearLayout.LayoutParams(Dp(48), Dp(48)) { RightMargin = Dp(8) });
+        var main = new MaterialButton(_activity) { Text = plan.Button, Enabled = plan.Enabled, CornerRadius = Dp(28) };
+        main.SetAllCaps(false);
+        main.TextSize = 15;
+        main.InsetTop = 0;
+        main.InsetBottom = 0;
+        main.SetPadding(Dp(18), 0, Dp(20), 0);
+        main.SetIconResource(plan.Icon);
+        main.IconGravity = MaterialButton.IconGravityTextStart;
+        main.IconPadding = Dp(10);
+        main.Click += (_, _) => { if (plan.Enabled) _ = StartSelectionTransferAsync(pane, Other); };
+        row.AddView(main, new LinearLayout.LayoutParams(-2, Dp(56)));
+        _folderFooter.AddView(row);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Menu (r5)
+
+    private void ShowFolderMenu(View anchor)
+    {
+        var pane = Active;
+        var card = new LinearLayout(_activity) { Orientation = Orientation.Vertical };
+        var cardBackground = new GradientDrawable();
+        cardBackground.SetCornerRadius(Dp(8));
+        cardBackground.SetColor(new Color(Attr(Resource.Attribute.colorSurfaceContainerHigh)));
+        card.Background = cardBackground;
+        card.SetPadding(0, Dp(8), 0, Dp(8));
+        var popup = new PopupWindow(card, Dp(230), ViewGroup.LayoutParams.WrapContent, true) { OutsideTouchable = true, Elevation = Dp(8) };
+        popup.SetBackgroundDrawable(new ColorDrawable(Color.Transparent));
+
+        void Item(int icon, string text, Action action, string? end = null, bool sub = false, bool on = false)
+        {
+            var item = new LinearLayout(_activity) { Orientation = Orientation.Horizontal, Clickable = true, Focusable = true };
+            item.SetGravity(GravityFlags.CenterVertical);
+            item.Background = new TypedValueHolder(_activity).SelectableBackground();
+            item.SetPadding(sub ? Dp(52) : Dp(16), 0, Dp(16), 0);
+            if (icon != 0 && !sub)
+            {
+                var image = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+                image.SetImageResource(icon);
+                image.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorOnSurface)));
+                item.AddView(image, new LinearLayout.LayoutParams(Dp(24), Dp(24)) { RightMargin = Dp(14) });
+            }
+            var label = FolderText(text, 15, on ? Resource.Attribute.colorPrimary : Resource.Attribute.colorOnSurface);
+            item.AddView(label, new LinearLayout.LayoutParams(0, -2, 1));
+            if (on)
+            {
+                var check = new ImageView(_activity) { ImportantForAccessibility = ImportantForAccessibility.No };
+                check.SetImageResource(Resource.Drawable.ic_remote_check);
+                check.ImageTintList = ColorStateList.ValueOf(new Color(Attr(Resource.Attribute.colorPrimary)));
+                item.AddView(check, new LinearLayout.LayoutParams(Dp(20), Dp(20)));
+            }
+            else if (end is not null) item.AddView(FolderText(end, 13, Resource.Attribute.colorOnSurfaceVariant));
+            item.ContentDescription = text + (end is null ? "" : ", " + end) + (on ? ", selected" : "");
+            item.Click += (_, _) => { popup.Dismiss(); action(); };
+            card.AddView(item, new LinearLayout.LayoutParams(-1, Dp(sub ? 42 : 48)));
+        }
+
+        Item(Resource.Drawable.ic_refresh, "Refresh", () => _ = BrowsePaneAsync(pane, pane.Path, true));
+        Item(Resource.Drawable.ic_remote_sort, "Sort by", () => { });
+        foreach (var (sort, label) in new[] { (RemoteSort.Name, "Name"), (RemoteSort.Newest, "Newest first"), (RemoteSort.Largest, "Largest first") })
+            Item(0, label, () => { pane.Sort = sort; Resort(pane); UpdateFolderUi(); }, sub: true, on: pane.Sort == sort);
+        if (CanMakeFolder(pane)) Item(Resource.Drawable.ic_remote_newfolder, "New folder", () => ShowNewFolderDialog(pane));
+        Item(Resource.Drawable.ic_remote_selall, "Select all", () => SelectAll(pane));
+        int active = _transfers.Count(t => t.State is "queued" or "running" or "paused");
+        Item(Resource.Drawable.ic_remote_transfers, "Transfers", OpenTransfers, active > 0 ? active.ToString() : null);
+        popup.ShowAsDropDown(anchor, 0, -Dp(8), GravityFlags.End);
+    }
+
+    private bool CanMakeFolder(Pane pane) => pane.IsPhone
+        ? RemoteTransfers.DownloadRelative(pane.Path) is not null
+        : SameHost() && _secureHostConnection && pane.Error is null && pane.Site!.Capabilities.Contains(SiteCapabilities.NewFolder);
 }
