@@ -47,7 +47,7 @@ Owner decisions for the redesign (2026-11-21)
 - Mockups approved by the owner (2026-11-21, "great mockups, I approve"): `r1-this-phone` to `r6-server-to-server` in `android-mockups/`, from
   `r-remote-files-redesign.html` (same tokens and sizes as c3/c4).
 
-ANDROID.9 proposed mockups (2026-11-21, not yet agreed): `t1-add-torrent` to `t7-settings` in `android-mockups/`, from
+ANDROID.9 mockups, approved by the owner (2026-11-21, "Approved, build them"): `t1-add-torrent` to `t7-settings` in `android-mockups/`, from
 `t-torrents-torbox-archives.html`. The phone does the work in its own Host; with another host selected the same
 screens act on that host (owner: "Both").
 

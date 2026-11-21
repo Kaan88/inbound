@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+## ANDROID.9 build started, 2026-11-21
+
+The owner approved mockups t1-t7 ("Approved, build them"). Order: TorBox (plain .NET), then archives (needs an arm64
+7-Zip in the APK, as rclone is), then torrents (needs the libtorrent worker built for arm64 with the NDK), then a check
+of each screen against a paired PC or server, then the side-by-side comparison on the phone and a Fable review.
+Step 1 committed (`7d668412`): the phone's Host composes TorBox as the desktop does (provider, remote jobs, commands;
+logcat masks the key and signed links), and the TorBox client no longer serializes by reflection (NativeAOT). TorBox
+tests pass (323). Screens are being built.
+
 ## Owner: redesign mockups approved, redesign moved to last, 2026-11-21
 
 "great mockups, I approve. but leave the redesign for last and just implement remaining missing big features."
