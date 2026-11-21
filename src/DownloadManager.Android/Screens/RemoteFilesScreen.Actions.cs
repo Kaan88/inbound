@@ -467,7 +467,8 @@ internal sealed partial class RemoteFilesScreen
     {
         if (!SameHost() || _mutation || items.Count is 0 or > 100 || items.Any(item => !SafeName(item.Name))) return;
         var mode = RemoteTransfers.Mode(source.IsPhone, target.IsPhone);
-        if (mode is not (RemoteTransferMode.Download or RemoteTransferMode.Upload)) return;
+        if (mode is not (RemoteTransferMode.Download or RemoteTransferMode.Upload or RemoteTransferMode.LocationToLocation)) return;
+        if (mode == RemoteTransferMode.LocationToLocation && !_remoteCopy()) return;
         _mutation = true;
         UpdateFolderUi();
         int batches = 0;
@@ -475,7 +476,15 @@ internal sealed partial class RemoteFilesScreen
         try
         {
             string phoneRoot = AndroidHost.SharedDownloadFolder;
-            if (mode == RemoteTransferMode.Download)
+            if (mode == RemoteTransferMode.LocationToLocation)
+            {
+                // r6: one batch, straight from one location to the other through the Host; nothing comes to this phone.
+                var result = await _client.StartCopyAsync(source.Site!.Id, source.Path, items, target.Site!.Id, target.Path, _life.Token);
+                if (!SameHost()) return;
+                if (!result.Ok || result.Transfer is null) failure = result.Message ?? "The Host did not start this transfer.";
+                else batches++;
+            }
+            else if (mode == RemoteTransferMode.Download)
             {
                 string folder = _phoneHost ? System.IO.Path.Combine(phoneRoot, RemoteTransfers.DownloadRelative(target.Path) ?? "") : source.Site!.LocalFolder ?? "";
                 foreach (var file in items.Where(item => !item.IsFolder))

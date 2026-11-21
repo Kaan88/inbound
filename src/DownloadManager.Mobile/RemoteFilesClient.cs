@@ -51,6 +51,20 @@ public sealed class RemoteFilesClient
         return RequestAsync<SiteTransferResultDto>(IpcMessage.Create(command, request), SitesMessageTypes.TransferResult, cancellationToken);
     }
 
+    /// <summary>
+    /// r6: copies items from one location's folder to another location's folder through the Host's rclone. Only for a Host
+    /// that offers <see cref="SiteTransferStartRequest.RemoteCopyCapability"/>; an older one refuses the direction.
+    /// </summary>
+    public Task<SiteTransferResultDto> StartCopyAsync(string sourceSiteId, string sourceFolder, IReadOnlyCollection<SiteItemDto> items,
+        string targetSiteId, string targetFolder, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceSiteId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetSiteId);
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count == 0) throw new ArgumentException("Choose something to copy.", nameof(items));
+        return StartTransferAsync(RemoteTransfers.Copy(sourceSiteId, sourceFolder, items, targetSiteId, targetFolder), cancellationToken);
+    }
+
     public Task<SiteChangeResultDto> DeleteFilesAsync(SiteChangeRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);

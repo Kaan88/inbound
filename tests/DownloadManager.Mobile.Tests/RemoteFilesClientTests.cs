@@ -55,6 +55,33 @@ public sealed class RemoteFilesClientTests
         Assert.Equal("upload", host.Sent[1].GetPayload<SiteDeviceChunkRequest>().StreamId);
     }
     [Fact]
+    public async Task ACopyBetweenLocationsGoesAsOneTransferStartOnTheConnection()
+    {
+        var host = new FakeHostConnection
+        {
+            Reply = request => IpcMessage.Create(SitesMessageTypes.TransferResult, new SiteTransferResultDto
+            {
+                Ok = true, Transfer = new SiteTransferDto { Id = "batch", Direction = "copy" }
+            }, request.Id)
+        };
+        var client = new RemoteFilesClient(host);
+        var result = await client.StartCopyAsync("drive", "/Photos 2025", [new SiteItemDto { Name = "Wedding", IsFolder = true }], "nas", "/photos");
+
+        Assert.True(result.Ok);
+        Assert.Equal("batch", result.Transfer!.Id);
+        var sent = Assert.Single(host.Sent);
+        Assert.Equal(SitesMessageTypes.TransferStart, sent.Type);
+        var request = sent.GetPayload<SiteTransferStartRequest>();
+        Assert.Equal(("drive", "copy", "/Photos 2025", "nas", "/photos"),
+            (request.SiteId, request.Direction, request.RemoteFolder, request.DestinationSiteId, request.DestinationFolder));
+        Assert.Equal("Wedding", Assert.Single(request.Names).Name);
+        Assert.True(request.Names[0].IsFolder);
+        await Assert.ThrowsAsync<ArgumentException>(() => client.StartCopyAsync("drive", "/", [], "nas", "/"));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.StartCopyAsync("drive", "/", [new SiteItemDto { Name = "a" }], " ", "/"));
+        Assert.Single(host.Sent);
+    }
+
+    [Fact]
     public async Task StatusAndListUseTheProvidedConnectionAndTypedPayloads()
     {
         var host = new FakeHostConnection();

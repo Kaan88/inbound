@@ -37,6 +37,8 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     private readonly Dictionary<string, string> _knownListings = new(StringComparer.Ordinal);
     private static string ListingKey(string siteId, string? path) => siteId + "\n" + (path ?? "");
     private readonly Func<bool> _cachedFirstPage;
+    /// <summary>The Host offers <see cref="SiteTransferStartRequest.RemoteCopyCapability"/> (r6, location to location).</summary>
+    private readonly Func<bool> _remoteCopy;
     private readonly LinearLayout _content;
     private readonly FrameLayout _surface;
     private readonly ScrollView _scroll;
@@ -59,10 +61,11 @@ internal sealed partial class RemoteFilesScreen : IDisposable
     public View View { get; }
 
     public RemoteFilesScreen(MainActivity activity, IHostConnection connection, string? connectionStamp, bool secureHostConnection,
-        Func<bool> safeDownloads, Func<bool> deleteFiles, Func<bool> cachedFirstPage, Action<bool> showBottomNavigation)
+        Func<bool> safeDownloads, Func<bool> deleteFiles, Func<bool> cachedFirstPage, Func<bool> remoteCopy, Action<bool> showBottomNavigation)
     {
         _activity = activity;
         _cachedFirstPage = cachedFirstPage;
+        _remoteCopy = remoteCopy;
         _client = new RemoteFilesClient(connection);
         _safeDownloads = safeDownloads;
         _deleteFiles = deleteFiles;
@@ -304,7 +307,9 @@ internal sealed partial class RemoteFilesScreen : IDisposable
         {
             var detail = transfer.State + " · " + transfer.FilesDone + " copied, " + transfer.FilesSkipped
                 + " skipped, " + transfer.FilesFailed + " failed of " + transfer.Files
-                 + "\n" + transfer.RemoteFolder + " ↔ " + transfer.LocalFolder
+                 + "\n" + (transfer.Direction == "copy"
+                     ? transfer.RemoteFolder + " → " + RemoteFileList.Destination(transfer.DestinationSiteName ?? "", transfer.DestinationFolder ?? "/")
+                     : transfer.RemoteFolder + " ↔ " + transfer.LocalFolder)
                  + "\nStarted: " + transfer.CreatedAt.ToLocalTime().ToString("g") + " · ID " + transfer.Id;
             if (transfer.Direction == "download" && transfer.Conflict == "skip" && transfer.FilesSkipped > 0)
                 detail += transfer.FilesSkipped == 1
@@ -312,7 +317,7 @@ internal sealed partial class RemoteFilesScreen : IDisposable
                     : "\nItems with these names already exist at the destination and were kept.";
             if (!string.IsNullOrWhiteSpace(transfer.Message)) detail += "\n" + transfer.Message;
             if (transfer.State == "paused") detail += "\nUnfinished files restart from the beginning on resume.";
-            _content.AddView(Card(transfer.Direction + " · " + transfer.SiteName, detail, false));
+            _content.AddView(Card(RemoteTransfers.Title(transfer), detail, false));
             if (_busy) continue;
             bool canResume = transfer.State == "paused" || transfer.State == "failed"
                 && (transfer.Files - transfer.FilesDone - transfer.FilesSkipped - transfer.FilesFailed - transfer.FilesRunning > 0

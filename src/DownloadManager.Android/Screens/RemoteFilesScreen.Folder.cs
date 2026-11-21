@@ -386,8 +386,13 @@ internal sealed partial class RemoteFilesScreen
                 return new(SameHost() && !_mutation && target.Error is null && !target.Loading, "To " + targetName, Resource.Drawable.ic_remote_up,
                     "To " + RemoteFileList.Destination(targetName, RemoteCrumbs.Normalize(target.Path)));
             case RemoteTransferMode.LocationToLocation:
-                return new(false, "To " + targetName, Resource.Drawable.ic_remote_arrow,
-                    "Copying between two locations isn't available yet");
+                // r6: the Host's rclone relays the copy from one location to the other; an older Host has no such transfer.
+                if (!_remoteCopy())
+                    return new(false, "To " + targetName, Resource.Drawable.ic_remote_arrow,
+                        "Copying between two locations isn't available yet");
+                return new(SameHost() && !_mutation && target.Error is null && !target.Loading && !target.NeedsSignIn && !target.KeyProblem,
+                    "To " + targetName, Resource.Drawable.ic_remote_arrow,
+                    "To " + RemoteFileList.Destination(targetName, RemoteCrumbs.Normalize(target.Path)));
             default:
                 return new(false, "To " + targetName, Resource.Drawable.ic_remote_download, "Pick a location in the other tab to copy to");
         }

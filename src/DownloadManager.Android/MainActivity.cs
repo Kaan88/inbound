@@ -346,6 +346,7 @@ public sealed partial class MainActivity : AppCompatActivity
                 () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.SafeSingleDownloadCapability) == true,
                 () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteChangeRequest.DeleteFilesCapability) == true,
                 () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteBrowseRequest.CachedFirstPageCapability) == true,
+                () => _model?.Hello?.Capabilities.Contains(DownloadManager.Contracts.SiteTransferStartRequest.RemoteCopyCapability) == true,
                 visible => FindViewById<View>(Resource.Id.nav)!.Visibility = visible ? ViewStates.Visible : ViewStates.Gone);
             InsetsListener.Pad(_remoteFiles.View, top: true, bottom: false);
             remoteFilesPage.AddView(_remoteFiles.View);

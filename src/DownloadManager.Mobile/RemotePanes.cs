@@ -185,7 +185,7 @@ public enum RemoteTransferMode
     /// <summary>This phone to a location.</summary>
     Upload,
 
-    /// <summary>One location to another; the Host has no such transfer yet.</summary>
+    /// <summary>One location to another, relayed by the Host's rclone (r6); an older Host lacks it.</summary>
     LocationToLocation,
 
     /// <summary>The phone on both sides: nothing to copy.</summary>
@@ -208,6 +208,28 @@ public static class RemoteTransfers
         if (segments.Length == 0 || segments[0] != "Download") return null;
         return string.Join("/", segments.Skip(1));
     }
+
+    /// <summary>
+    /// r6: the selection in <paramref name="sourceFolder"/> of one location goes to <paramref name="targetFolder"/> of the
+    /// other, straight from one to the other through the Host (<see cref="SiteTransferStartRequest.RemoteCopyCapability"/>).
+    /// Files already at the target are skipped, as the pane's other transfers do.
+    /// </summary>
+    public static SiteTransferStartRequest Copy(string sourceSiteId, string sourceFolder, IEnumerable<SiteItemDto> items,
+        string targetSiteId, string targetFolder) => new()
+    {
+        SiteId = sourceSiteId,
+        Direction = "copy",
+        RemoteFolder = RemoteCrumbs.Normalize(sourceFolder),
+        DestinationSiteId = targetSiteId,
+        DestinationFolder = RemoteCrumbs.Normalize(targetFolder),
+        Conflict = "skip",
+        Names = [.. items.Select(item => new SiteTransferNameDto { Name = item.Name, IsFolder = item.IsFolder })],
+    };
+
+    /// <summary>A Transfers row's title: "download · NAS", or "copy · Google Drive → Home NAS" for a copy (r6).</summary>
+    public static string Title(SiteTransferDto transfer) =>
+        transfer.Direction + " · " + transfer.SiteName
+        + (transfer.Direction == "copy" && !string.IsNullOrEmpty(transfer.DestinationSiteName) ? " → " + transfer.DestinationSiteName : "");
 
     /// <summary>The caption under a phone destination, "Downloads/Inbound/Music".</summary>
     public static string PhoneLabel(string phonePath)
